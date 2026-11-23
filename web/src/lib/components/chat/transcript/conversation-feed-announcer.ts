@@ -86,13 +86,17 @@ function announcementText(update: ConversationFeedAnnouncementUpdate): string {
 export class ConversationFeedAnnouncementBatcher {
 	#pending: ConversationFeedAnnouncementChunk[] = [];
 	#timer: ReturnType<typeof setTimeout> | null = null;
+	#cleared = false;
 
 	constructor(private readonly publish: (text: string) => void) {}
 
 	enqueue(update: ConversationFeedAnnouncementUpdate): void {
 		if (update.kind === 'clear') {
 			this.#cancelPending();
-			this.publish('');
+			if (!this.#cleared) {
+				this.#cleared = true;
+				this.publish('');
+			}
 			return;
 		}
 
@@ -121,7 +125,10 @@ export class ConversationFeedAnnouncementBatcher {
 		const update = { kind: 'announce' as const, chunks: this.#pending };
 		this.#pending = [];
 		const text = announcementText(update);
-		if (text) this.publish(text);
+		if (text) {
+			this.#cleared = false;
+			this.publish(text);
+		}
 	}
 
 	#cancelPending(): void {
@@ -221,34 +228,10 @@ export class ConversationFeedAnnouncerState {
 			this.#detachedStatusAnnounced = false;
 			this.#isLiveWindow = input.isLiveWindow;
 		}
-		const kinds = conversationFeedMutationKindsSince(input.mutationClock, previousDataRevision);
 		const priorContent = this.#contentByRowId;
 		const priorRowIds = this.#rowIds;
-		const priorTailIndex = this.#tailRowId
-			? tailRows.findIndex((row) => row.id === this.#tailRowId)
-			: -1;
-		const appendedRows =
-			priorTailIndex >= 0
-				? tailRows.slice(priorTailIndex + 1)
-				: (() => {
-						let lastKnownIndex = -1;
-						for (let index = tailRows.length - 1; index >= 0; index -= 1) {
-							if (priorRowIds.has(tailRows[index].id)) {
-								lastKnownIndex = index;
-								break;
-							}
-						}
-						const newRows = tailRows
-							.slice(lastKnownIndex + 1)
-							.filter((row) => !priorRowIds.has(row.id));
-						return lastKnownIndex >= 0 ? newRows : newRows.slice(-1);
-					})();
+		const priorTailRowId = this.#tailRowId;
 		const nextContent = this.#visibleContentByRowId(tailRows);
-		const streamedRows = tailRows.filter((row) => {
-			const prior = priorContent.get(row.id);
-			const next = nextContent.get(row.id);
-			return prior !== undefined && next !== undefined && next !== prior;
-		});
 		const nextFloatingPermissionOccurrences = new Set(input.floatingPermissionOccurrences);
 		const addedFloatingPermissionOccurrences = input.floatingPermissionOccurrences.filter(
 			(occurrence) => !this.#floatingPermissionOccurrences.has(occurrence),
@@ -292,11 +275,20 @@ export class ConversationFeedAnnouncerState {
 				chunks: [{ kind: 'discrete', text: input.detachedStatus }],
 			};
 		}
+		const kinds = conversationFeedMutationKindsSince(input.mutationClock, previousDataRevision);
 		const hasRowAppend = kinds.has('live-append') || kinds.has('presentation-structure');
 		if (!hasRowAppend && addedFloatingPermissionOccurrences.length === 0) {
 			return resumedLiveEnd || clearedDetachedStatus ? { kind: 'clear' } : null;
 		}
 
+		const priorTailIndex = priorTailRowId ? tailRows.findIndex((row) => row.id === priorTailRowId) : -1;
+		const lastKnownIndex = priorTailIndex >= 0 ? priorTailIndex : tailRows.findLastIndex(row => priorRowIds.has(row.id));
+		const appendedRows = lastKnownIndex < 0 ? tailRows.slice(-1) : tailRows.slice(lastKnownIndex + 1);
+		const streamedRows = tailRows.filter((row) => {
+			const prior = priorContent.get(row.id);
+			const next = nextContent.get(row.id);
+			return prior !== undefined && next !== undefined && next !== prior;
+		});
 		const candidatesById = new Map<string, ChatDisplayRow>();
 		for (const row of [...appendedRows, ...streamedRows]) candidatesById.set(row.id, row);
 		const candidates = [...candidatesById.values()];

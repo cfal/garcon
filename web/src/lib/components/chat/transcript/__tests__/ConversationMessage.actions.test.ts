@@ -110,6 +110,23 @@ describe('ConversationMessage actions', () => {
 		expect(row).toBe(container.firstElementChild);
 	});
 
+	it.each([
+		new UserMessage('', 'Synthetic input'),
+		new AssistantMessage('', 'Synthetic response'),
+	])('mounts a $type without writing unopened actions into the document body', async (message) => {
+		const existing = new Set(document.body.childNodes);
+		const { container } = render(ConversationMessageHost, { message });
+		expect(container.querySelector('[data-chat-message-type]')?.textContent).toContain(message.content);
+		const outsideRow = [...document.body.childNodes].filter(node => node !== container && !existing.has(node));
+		expect(outsideRow).toHaveLength(0);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'More message actions' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
+		const dialog = await screen.findByRole('dialog');
+		expect(container.contains(dialog)).toBe(false);
+		expect(dialog.textContent).toContain(message.content);
+	});
+
 	it('renders the assistant message action button as a compact overlay', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),

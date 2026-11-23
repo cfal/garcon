@@ -81,6 +81,56 @@ function expectMatchesFullProjection(
 }
 
 describe('ConversationFeedProjectionState', () => {
+	it.each([false, true])('does not inspect historical messages or rebuild their targets on a text append (combined=%s)', (combined) => {
+		let messageReads = 0;
+		let toolIdReads = 0;
+		const history: ChatDisplayRow[] = Array.from({ length: 128 }, (_, index) => {
+			const tool = new ReadToolUseMessage(TS, `tool-${index}`, '/synthetic');
+			Object.defineProperty(tool, 'toolId', { get() { toolIdReads++; return `tool-${index}`; } });
+			return {
+				kind: 'message', ordinal: index + 1, id: `generation-1:${index + 1}`,
+				get message() { messageReads++; return tool; },
+			};
+		});
+		const projections = new ConversationFeedProjectionState();
+		const config = input({ rows: history, combineToolUseMessages: combined });
+		const previous = projections.reconcile(config);
+		messageReads = toolIdReads = 0;
+
+		const appended: ProjectionInput = {
+			...config,
+			rows: [...history,
+				{ kind: 'message', id: 'generation-1:129', ordinal: 129, message: new UserMessage(TS, 'Synthetic input') },
+				{ kind: 'message', id: 'generation-1:130', ordinal: 130, message: new AssistantMessage(TS, 'Synthetic response') },
+			],
+			mutationClock: clock(2, { 'live-append': 2 }),
+		};
+		const next = projections.reconcile(appended);
+		expect({ messageReads, toolIdReads }).toEqual({ messageReads: 0, toolIdReads: 0 });
+		expect(next.model.targetByDomAnchorId.get('tool-input-tool-0'))
+			.toBe(previous.model.targetByDomAnchorId.get('tool-input-tool-0'));
+		expect(previous.model.indexByRowId.has('generation-1:129')).toBe(false);
+		expectMatchesFullProjection(next, appended);
+	});
+
+	it.each([
+		{ combined: true, duplicate: 'previous' },
+		{ combined: false, duplicate: 'new' },
+	])('rejects a duplicate $duplicate row without changing published targets (combined=$combined)', ({ combined, duplicate }) => {
+		const projections = new ConversationFeedProjectionState();
+		const config = input({
+			combineToolUseMessages: combined,
+			rows: [{ kind: 'message', id: 'previous', message: new ReadToolUseMessage(TS, 'tool', '/synthetic') }],
+		});
+		const previous = projections.reconcile(config);
+		const appended = { kind: 'message' as const, id: 'new', message: new AssistantMessage(TS, 'Synthetic response') };
+		expect(() => projections.reconcile({
+			...config, rows: [...config.rows, appended, { ...appended, id: duplicate }],
+			mutationClock: clock(2, { 'live-append': 2 }),
+		})).toThrow('Duplicate conversation feed key');
+		expect([...previous.model.indexByRowId.keys()]).toEqual(['previous']);
+	});
+
 	it.each(['none', 'all', 'mixed'])('matches full combined projection through generated appends (expanded=%s)', (expanded) => {
 		const projections = new ConversationFeedProjectionState();
 		let config = input({ rows: [], combineToolUseMessages: true, earlierBoundary: 'when-collapsed',

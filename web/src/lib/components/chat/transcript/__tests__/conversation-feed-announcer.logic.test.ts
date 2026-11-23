@@ -1077,4 +1077,39 @@ describe('ConversationFeedAnnouncementBatcher', () => {
 		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
 		expect(publish).toHaveBeenCalledOnce();
 	});
+
+	it('keeps a muted tile quiet across live appends and announces only new output on return', () => {
+		const publish = vi.fn<(text: string) => void>();
+		const batcher = new ConversationFeedAnnouncementBatcher(publish);
+		const announcer = new ConversationFeedAnnouncerState();
+		const rows = [assistantRow('1', 'Initial')];
+		const update = (visible: boolean) => {
+			const result = announcer.reconcileUpdate({
+				...enabled, visible, surfaceIdentity: 'tile', rows: [...rows],
+				mutationClock: clock(rows.length, rows.length),
+			});
+			if (result) batcher.enqueue(result);
+		};
+		update(true);
+		rows.push(assistantRow('2', 'Before switching'));
+		update(true);
+		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+		publish.mockClear();
+
+		rows.push(assistantRow('3', 'Queued before switching'));
+		update(true);
+		update(false);
+		for (let ordinal = 4; ordinal <= 8; ordinal++) {
+			rows.push(assistantRow(String(ordinal), 'Background response'));
+			update(false);
+		}
+		update(true);
+		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+		expect(publish.mock.calls).toEqual([['']]);
+
+		rows.push(assistantRow('9', 'After switching'));
+		update(true);
+		vi.advanceTimersByTime(CHAT_FEED_ANNOUNCEMENT_BATCH_MS);
+		expect(publish.mock.calls).toEqual([[''], ['After switching']]);
+	});
 });

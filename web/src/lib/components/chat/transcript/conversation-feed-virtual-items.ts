@@ -271,14 +271,22 @@ function indexConversationItems(
 	items: ConversationVirtualFeedItem[],
 	transcriptStartIndex: number,
 	transcriptEndIndex: number,
+	tail?: { previous: ConversationVirtualFeedModel; from: number },
 ): ConversationVirtualFeedModel {
-	const indexByKey = new Map<string, number>();
-	const indexByRowId = new Map<string, number>();
-	const targetByDomAnchorId = new Map<string, ConversationVirtualTarget>();
-	const memberRowIdByDomAnchorId = new Map<string, string>();
-	const representativeRowIdByKey = new Map<string, string>();
-	const collapsedGroupByMemberRowId = new Map<string, ToolGroupVirtualFeedItem>();
-	for (const [index, virtualItem] of items.entries()) {
+	// An append retains every member. Only a growing tail group and the suffix need new targets.
+	const indexByKey = new Map(tail?.previous.indexByKey);
+	const indexByRowId = new Map(tail?.previous.indexByRowId);
+	const targetByDomAnchorId = new Map(tail?.previous.targetByDomAnchorId);
+	const memberRowIdByDomAnchorId = new Map(tail?.previous.memberRowIdByDomAnchorId);
+	const representativeRowIdByKey = new Map(tail?.previous.representativeRowIdByKey);
+	const collapsedGroupByMemberRowId = new Map(tail?.previous.collapsedGroupByMemberRowId);
+	if (tail) {
+		for (let index = tail.from; index < tail.previous.items.length; index++) {
+			indexByKey.delete(tail.previous.items[index].key);
+		}
+	}
+	for (let index = tail?.from ?? 0; index < items.length; index++) {
+		const virtualItem = items[index];
 		if (indexByKey.has(virtualItem.key)) {
 			throw new Error(`Duplicate conversation feed key: ${virtualItem.key}`);
 		}
@@ -330,56 +338,37 @@ function indexConversationItems(
 	};
 }
 
+function newTranscriptTail(
+	model: ConversationVirtualFeedModel,
+	surfaceIdentity: string,
+	appendedItems: ConversationFeedRenderItem[],
+): TranscriptVirtualFeedItem[] | null {
+	if (appendedItems.length === 0) return null;
+	const seen = new Set<string>();
+	const tail: TranscriptVirtualFeedItem[] = [];
+	for (const item of appendedItems) {
+		if (model.indexByRowId.has(item.id) || seen.has(item.id)) return null;
+		seen.add(item.id);
+		tail.push({
+			kind: 'transcript',
+			key: namespacedKey(surfaceIdentity, `transcript:${item.id}`),
+			item,
+			spacingAfter: transcriptSpacing(item),
+		});
+	}
+	return tail;
+}
+
 export function appendConversationVirtualTranscriptTail(
 	model: ConversationVirtualFeedModel,
 	surfaceIdentity: string,
 	appendedItems: ConversationFeedRenderItem[],
 ): ConversationVirtualFeedModel | null {
-	if (appendedItems.length === 0) return null;
-	const insertIndex = model.transcriptEndIndex;
-	const appendedVirtualItems = appendedItems.map((item): TranscriptVirtualFeedItem => ({
-		kind: 'transcript',
-		key: namespacedKey(surfaceIdentity, `transcript:${item.id}`),
-		item,
-		spacingAfter: transcriptSpacing(item),
-	}));
-	if (appendedVirtualItems.some((item) => model.indexByKey.has(item.key))) return null;
-
-	const items = model.items.slice(0, insertIndex).concat(appendedVirtualItems, model.items.slice(insertIndex));
-
-	const indexByKey = new Map(model.indexByKey);
-	const indexByRowId = new Map(model.indexByRowId);
-	const targetByDomAnchorId = new Map(model.targetByDomAnchorId);
-	const memberRowIdByDomAnchorId = new Map(model.memberRowIdByDomAnchorId);
-	const representativeRowIdByKey = new Map(model.representativeRowIdByKey);
-	for (let index = insertIndex; index < items.length; index += 1) {
-		indexByKey.set(items[index].key, index);
-	}
-	for (const [offset, virtualItem] of appendedVirtualItems.entries()) {
-		const index = insertIndex + offset;
-		representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
-		indexByRowId.set(virtualItem.item.id, index);
-		targetByDomAnchorId.set(virtualItem.item.id, {
-			index,
-			innerRowId: virtualItem.item.id,
-		});
-		memberRowIdByDomAnchorId.set(virtualItem.item.id, virtualItem.item.id);
-		for (const anchorId of toolAnchorIds(virtualItem.item)) {
-			targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
-			memberRowIdByDomAnchorId.set(anchorId, virtualItem.item.id);
-		}
-	}
-
-	return {
-		...model,
-		items,
-		indexByKey,
-		indexByRowId,
-		targetByDomAnchorId,
-		memberRowIdByDomAnchorId,
-		representativeRowIdByKey,
-		transcriptEndIndex: insertIndex + appendedVirtualItems.length,
-	};
+	const appended = newTranscriptTail(model, surfaceIdentity, appendedItems);
+	if (!appended) return null;
+	const from = model.transcriptEndIndex;
+	const items = model.items.slice(0, from).concat(appended, model.items.slice(from));
+	return indexConversationItems(items, model.transcriptStartIndex, from + appended.length, { previous: model, from });
 }
 
 export function appendCombinedConversationTail(
@@ -390,32 +379,17 @@ export function appendCombinedConversationTail(
 	>,
 	appendedItems: ConversationFeedRenderItem[],
 ): { model: ConversationVirtualFeedModel; changedIndex: number } | null {
+	const appendedVirtualItems = newTranscriptTail(model, input.surfaceIdentity, appendedItems);
+	if (!appendedVirtualItems) return null;
 	let changedIndex = model.transcriptEndIndex;
-	const tail = model.items[changedIndex - 1];
-	if (tail?.kind === 'tool-group') {
-		changedIndex -= 1;
-	} else if (tail && groupableToolInput(tail)) {
-		while (
-			changedIndex > model.transcriptStartIndex &&
-			groupableToolInput(model.items[changedIndex - 1])
-		) {
+	if (groupableToolInput(appendedVirtualItems[0])) {
+		while (changedIndex > model.transcriptStartIndex && groupableToolInput(model.items[changedIndex - 1])) {
 			changedIndex -= 1;
 		}
 		if (model.items[changedIndex - 1]?.kind === 'tool-group') changedIndex -= 1;
 	}
 	const previousGroup = model.items[changedIndex];
 	const members = previousGroup?.kind === 'tool-group' ? previousGroup.members : [];
-	const appendedVirtualItems: TranscriptVirtualFeedItem[] = appendedItems.map((item) => ({
-		kind: 'transcript',
-		key: namespacedKey(input.surfaceIdentity, `transcript:${item.id}`),
-		item,
-		spacingAfter: transcriptSpacing(item),
-	}));
-	const seen = new Set<string>();
-	for (const item of appendedVirtualItems) {
-		if (model.indexByRowId.has(item.item.id) || seen.has(item.item.id)) return null;
-		seen.add(item.item.id);
-	}
 	const grouped = groupToolRuns(
 		[...members, ...appendedVirtualItems],
 		(key) => namespacedKey(input.surfaceIdentity, key),
@@ -437,7 +411,9 @@ export function appendCombinedConversationTail(
 		model.items.slice(model.transcriptEndIndex),
 	);
 	return {
-		model: indexConversationItems(items, model.transcriptStartIndex, changedIndex + grouped.length),
+		model: indexConversationItems(items, model.transcriptStartIndex, changedIndex + grouped.length, {
+			previous: model, from: changedIndex,
+		}),
 		changedIndex,
 	};
 }
