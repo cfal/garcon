@@ -159,6 +159,7 @@
 				type="button"
 				onclick={onSend}
 				disabled={!canSend || prompt.isPromptTransformPending}
+				class:ml-1={actions.length > 0 || settings.length > 0}
 				class="inline-flex size-9 shrink-0 items-center justify-center rounded-full border ring-offset-background transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground {sendButtonClass}"
 				title={sendLabel}
 				aria-label={sendLabel}

@@ -35,6 +35,15 @@ export function composerPromptActions(options: PromptActionOptions): ComposerPro
 	const disabled = Boolean(options.addMenuDisabled || options.isPromptTransformPending);
 	const actions: ComposerPromptAction[] = [];
 	if (options.showAddMenu !== false) {
+		if (options.onOpenSnippetPalette)
+			actions.push({
+				id: 'snippet',
+				label: m.snippets_menu_title(),
+				icon: FileText,
+				description: m.snippets_menu_description(),
+				disabled,
+				run: options.onOpenSnippetPalette,
+			});
 		actions.push({
 			id: 'image',
 			label: m.chat_composer_add_image(),
@@ -45,24 +54,7 @@ export function composerPromptActions(options: PromptActionOptions): ComposerPro
 			disabled: disabled || !options.canAttachImages,
 			run: options.onAddImage,
 		});
-		if (options.onOpenSnippetPalette)
-			actions.push({
-				id: 'snippet',
-				label: m.snippets_menu_title(),
-				icon: FileText,
-				description: m.snippets_menu_description(),
-				disabled,
-				run: options.onOpenSnippetPalette,
-			});
 	}
-	if (options.onOpenExpandedEditor)
-		actions.push({
-			id: 'expand',
-			label: m.chat_composer_open_expanded_editor(),
-			icon: Maximize2,
-			disabled,
-			run: options.onOpenExpandedEditor,
-		});
 	if (options.onRefinePrompt)
 		actions.push({
 			id: 'refine',
@@ -75,6 +67,14 @@ export function composerPromptActions(options: PromptActionOptions): ComposerPro
 				!options.isPromptRefinementPending &&
 				(!options.canRefinePrompt || Boolean(options.isPromptTransformPending)),
 			run: options.onRefinePrompt,
+		});
+	if (options.onOpenExpandedEditor)
+		actions.push({
+			id: 'expand',
+			label: m.chat_composer_open_expanded_editor(),
+			icon: Maximize2,
+			disabled,
+			run: options.onOpenExpandedEditor,
 		});
 	return actions;
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fitComposerToolbar, type ComposerToolbarControls } from '../composer-toolbar-layout';
 
 const chat = {
-	prompt: ['image', 'snippet', 'expand', 'refine'],
+	prompt: ['snippet', 'image', 'refine', 'expand'],
 	settings: ['executor', 'model', 'effort', 'agent:speed', 'permission'],
 	send: true, bypass: false, refining: false,
 } satisfies ComposerToolbarControls;
@@ -36,6 +36,13 @@ describe('composer toolbar fit', () => {
 		const fit = fitComposerToolbar({ ...chat, prompt: [], settings: ['model'], send: false }, 7);
 		expect([...fit.inline]).toEqual(['model']);
 		expect(fit).toMatchObject({ promptMenu: false, settingsMenu: false, fullExecutor: false });
+	});
+
+	it('reserves the wider gap before Send, but not in a composer without Send', () => {
+		const controls = { ...chat, prompt: [], settings: ['model'] } as const;
+		expect(fitComposerToolbar(controls, 9.5).settingsMenu).toBe(true);
+		expect(fitComposerToolbar(controls, 9.75).settingsMenu).toBe(false);
+		expect(fitComposerToolbar({ ...controls, send: false }, 7).settingsMenu).toBe(false);
 	});
 
 	it('does not strand a single fixed-size command behind an equally wide menu trigger', () => {

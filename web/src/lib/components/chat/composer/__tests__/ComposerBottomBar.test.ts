@@ -54,6 +54,11 @@ describe('ComposerBottomBar', () => {
 		const props = controls();
 		const { container } = render(ComposerBottomBar, props);
 		await resize(container, 800);
+		expect(
+			[...container.querySelectorAll<HTMLElement>('[data-composer-group="prompt"] button')].map(
+				(button) => button.dataset.composerControl,
+			),
+		).toEqual(['snippet', 'image', 'refine', 'expand']);
 		const image = screen.getByRole('button', { name: 'Add image' });
 		await fireEvent.click(image);
 		expect(props.onAddImage).toHaveBeenCalledOnce();
@@ -63,6 +68,12 @@ describe('ComposerBottomBar', () => {
 		const plus = screen.getByRole('button', { name: 'More composer actions' });
 		expect(document.activeElement).toBe(plus);
 		await fireEvent.click(plus);
+		expect(screen.getAllByRole('menuitem').map((item) => item.dataset.composerControl)).toEqual([
+			'snippet',
+			'image',
+			'refine',
+			'expand',
+		]);
 		await fireEvent.click(screen.getByRole('menuitem', { name: /Snippets/ }));
 		expect(props.onOpenSnippetPalette).toHaveBeenCalledOnce();
 	});
@@ -86,7 +97,7 @@ describe('ComposerBottomBar', () => {
 		await resize(container, 115);
 		await fireEvent.click(screen.getByRole('button', { name: 'More composer actions' }));
 		screen.getByRole('menuitem', { name: 'Open expanded composer' }).focus();
-		await resize(container, 196);
+		await resize(container, 200);
 		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 		expect(document.activeElement).toBe(
 			screen.getByRole('button', { name: 'Open expanded composer' }),
@@ -105,7 +116,7 @@ describe('ComposerBottomBar', () => {
 		});
 		await resize(container, 800);
 		screen.getByRole('button', { name: 'Thinking effort: High' }).focus();
-		await resize(container, 156);
+		await resize(container, 160);
 		expect(screen.getByRole('button', { name: 'Executor: Worker' })).toBeTruthy();
 		expect(document.activeElement).toBe(
 			screen.getByRole('button', { name: 'More model settings' }),

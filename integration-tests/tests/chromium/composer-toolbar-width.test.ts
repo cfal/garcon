@@ -55,7 +55,9 @@ test('the live composer follows tile width and local group order without changin
       await expect.poll(() => send.evaluate((button) => {
         const row = button.parentElement!.getBoundingClientRect();
         const bounds = button.getBoundingClientRect();
-        return Math.abs(bounds.right - row.right) < 1 && bounds.height === row.height;
+        const adjacent = button.previousElementSibling!.getBoundingClientRect();
+        return Math.abs(bounds.right - row.right) < 1 && bounds.height === row.height &&
+          Math.abs(bounds.left - adjacent.right - 8) < 1;
       })).toBe(true);
     }
     await expect(promptMenu).toBeVisible();

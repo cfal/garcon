@@ -170,14 +170,14 @@ describe('NewChatForm composer actions', () => {
 		expect(screen.getByRole('button', { name: 'Refine prompt' })).toBeTruthy();
 	});
 
-	it('places Refine between expanded composer and Start and enforces draft limits', async () => {
+	it('places Refine before expanded composer and Start and enforces draft limits', async () => {
 		const { messageInput } = await renderReady();
 		const open = screen.getByRole('button', { name: 'Open expanded composer' });
 		const refine = screen.getByRole('button', { name: 'Refine prompt' });
 		const start = screen.getByRole('button', { name: 'Start session' });
 
-		expect(open.compareDocumentPosition(refine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-		expect(refine.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(refine.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(open.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 		expect((refine as HTMLButtonElement).disabled).toBe(true);
 
 		await fireEvent.input(messageInput, { target: { value: 'A draft to improve' } });

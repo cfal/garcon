@@ -37,7 +37,8 @@ export function fitComposerToolbar(controls: ComposerToolbarControls, widthRem: 
 	const hidden = (group: readonly ComposerControlId[]) => group.some((id) => !inline.has(id));
 	function minimumWidth() {
 		const count = inline.size + Number(controls.send) + Number(hidden(controls.prompt)) + Number(hidden(controls.settings));
-		return count * icon + Math.max(0, count - 1) * gap + (inline.has('model') ? readableModel - icon : 0);
+		const sendSeparation = controls.send && count > 1 ? gap : 0;
+		return count * icon + Math.max(0, count - 1) * gap + sendSeparation + (inline.has('model') ? readableModel - icon : 0);
 	}
 
 	if (widthRem > 0) {
