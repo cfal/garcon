@@ -23,10 +23,7 @@
 		applySnippetTriggerReplacement,
 		findSnippetTrigger,
 	} from '$lib/chat/composer/snippet-trigger.js';
-	import {
-		buildPermissionOptions,
-		buildThinkingOptions,
-	} from '$lib/chat/composer/composer-controls.js';
+	import { newChatToolbarSettings } from './new-chat-toolbar-settings';
 	import {
 		promptEditorSelectionFromTextarea,
 		restorePromptEditorSelection,
@@ -65,11 +62,7 @@
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-	} from '$lib/components/model-selector/model-selector-types';
-	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
+	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 	import {
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
@@ -603,25 +596,13 @@
 		onCancel?.();
 	}
 
-	const permissionOptions = $derived(buildPermissionOptions(form.permissionModes));
-	const thinkingOptions = $derived(buildThinkingOptions(form.thinkingModes, form.modelValue));
-	const modelSelectorMode: ModelSelectorMode = {
-		agent: 'select',
-		source: 'select',
-		surface: 'composer',
-	};
-	const modelSelectorValue = $derived({
-		executorId: form.executorId,
-		agentId: form.agentId,
-		model: form.modelValue,
-		...(form.modelSelectionTarget ?? {}),
-	});
-	function getRecents(executorId: string) {
-		return buildModelSelectorRecents(
-			rootModelCatalog.forExecutor(executorId),
-			remoteSettings.snapshot?.recentAgentSettings ?? [],
-		);
-	}
+	const toolbarSettings = $derived(newChatToolbarSettings({
+		form,
+		modelCatalog: rootModelCatalog,
+		remoteSettings,
+		getSelectableAgentIds: selectableAgentsForExecutor,
+		onModelChange: handleModelSelectorChange,
+	}));
 	const displayedFormError = $derived(
 		form.modelSelectionError ??
 			form.agentSelectionError ??
@@ -629,8 +610,6 @@
 			form.attachmentError ??
 			form.error,
 	);
-	const sendButtonClass =
-		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
 		if (!localSettings.allowDirectChats && nonDirectAgentIds([next.agentId]).length === 0) return;
@@ -809,10 +788,13 @@
 				/>
 
 				<ComposerBottomBar
+					{...toolbarSettings}
 					modelControlsLeft={localSettings.modelControlsLeft}
-					canAttachImages={canAttachAttachments}
-					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
-					onAddImage={openImagePicker}
+					image={{
+						supported: canAttachAttachments,
+						unavailableReason: m.chat_composer_image_attachments_unavailable(),
+						onSelect: openImagePicker,
+					}}
 					onOpenSnippetPalette={() => void markdown.openSnippets()}
 					onOpenExpandedEditor={openExpandedEditor}
 					onRefinePrompt={() => {
@@ -823,31 +805,8 @@
 					isPromptRefinementPending={promptRefinement.pending}
 					isPromptTransformPending={promptTransformPending}
 					{promptTransformStatus}
-					{permissionOptions}
-					selectedPermission={form.permissionMode}
-					onPermissionSelect={(mode) => {
-						form.setPermissionMode(mode);
-					}}
-					{thinkingOptions}
-					selectedThinking={form.thinkingMode}
-					onThinkingSelect={(mode) => {
-						form.setThinkingMode(mode);
-					}}
-					canSend={form.canSubmit && !promptTransformPending}
-					onSend={handleSubmit}
-					sendTitle={m.chat_new_chat_start_session()}
-					{sendButtonClass}
+					send={{ enabled: form.canSubmit, title: m.chat_new_chat_start_session(), onSend: handleSubmit }}
 					side="bottom"
-					agentSettings={{
-						descriptors: form.agentSettingDescriptors,
-						envelope: form.agentSettings,
-						defaults: modelCatalog.getDefaultAgentSettings(form.agentId),
-						onChange: (descriptor, value) => form.setAgentSetting(descriptor, value),
-					}}
-					model={{
-						value: modelSelectorValue, mode: modelSelectorMode, onChange: handleModelSelectorChange,
-						getRecents, preferRecentsOnOpen: true, getSelectableAgentIds: selectableAgentsForExecutor,
-					}}
 				/>
 
 				<ComposerSnippetPalette

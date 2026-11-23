@@ -19,12 +19,13 @@
 </script>
 
 <ComposerBottomBar
-	permissionOptions={[]} selectedPermission="default" onPermissionSelect={() => {}}
-	thinkingOptions={[]} selectedThinking="none" onThinkingSelect={() => {}}
-	showSendButton={false} canSend={false} sendTitle="" sendButtonClass="" onSend={() => {}}
-	{canAttachImages}
-	attachImagesTooltip="Images are unavailable"
-	onAddImage={() => (imagePickerOpenCount += 1)}
+	permission={{ options: [], selected: 'default', onSelect: () => {} }}
+	effort={{ options: [], selected: 'none', onSelect: () => {} }}
+	image={{
+		supported: canAttachImages,
+		unavailableReason: 'Images are unavailable',
+		onSelect: () => (imagePickerOpenCount += 1),
+	}}
 	onOpenSnippetPalette={() => (paletteOpenCount += 1)}
 />
 

@@ -1,6 +1,8 @@
 import { tick } from 'svelte';
 import type { fitComposerToolbar } from '$lib/chat/composer/composer-toolbar-layout';
 
+const visibleButton = 'button:not(:disabled):not([hidden]):not([hidden] *)';
+
 function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 	let element: HTMLElement | null = focused;
 	let control: string | undefined;
@@ -26,13 +28,6 @@ function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 	return null;
 }
 
-export function handOffComposerMenuFocus(event: Event, afterClose?: () => void): void {
-	if (!afterClose) return;
-	event.preventDefault();
-	// The parent focus scope resumes after the close-autofocus handler returns.
-	queueMicrotask(afterClose);
-}
-
 export async function retainComposerToolbarFocus(
 	root: HTMLElement,
 	layout: Pick<ReturnType<typeof fitComposerToolbar>, 'inline' | 'promptMenu' | 'settingsMenu'>,
@@ -45,19 +40,15 @@ export async function retainComposerToolbarFocus(
 	const focusReplacement = () => {
 		const group = root.querySelector<HTMLElement>(`[data-composer-group="${origin.group}"]`);
 		if (!root.isConnected || !group) return;
-		const control =
-			origin.control &&
-			group.querySelector<HTMLElement>(`[data-composer-control="${CSS.escape(origin.control)}"]`);
-		const button =
-			control &&
-			!control.closest('[hidden]') &&
-			(control.matches('button:not(:disabled)')
-				? control
-				: control.querySelector<HTMLButtonElement>('button:not(:disabled)'));
+		const control = origin.control
+			? group.querySelector<HTMLButtonElement>(
+					`${visibleButton}[data-composer-control="${CSS.escape(origin.control)}"]`,
+				)
+			: null;
 		(
-			button ||
-			group.querySelector<HTMLElement>('[data-composer-overflow]:not(:disabled)') ||
-			group.querySelector<HTMLElement>('button:not(:disabled):not([hidden]):not([hidden] *)')
+			control ??
+			group.querySelector<HTMLButtonElement>(`${visibleButton}[data-composer-overflow]`) ??
+			group.querySelector<HTMLButtonElement>(visibleButton)
 		)?.focus({ preventScroll: true });
 	};
 	const inline: ReadonlySet<string> = layout.inline;

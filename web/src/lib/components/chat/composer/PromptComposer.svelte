@@ -748,8 +748,6 @@
 	});
 	const canAttachAttachments = $derived(hasChatAttachmentSupport(attachmentSupport));
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
-	const sendButtonClass =
-		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90';
 	const composerShellClass = $derived(
 		cn(
 			CHAT_DOCK_SHELL_BASE_CLASS,
@@ -886,9 +884,11 @@
 
 			<ComposerBottomBar
 				modelControlsLeft={localSettings.modelControlsLeft}
-				canAttachImages={canAttachAttachments}
-				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
-				onAddImage={() => attachmentController.pick()}
+				image={{
+					supported: canAttachAttachments,
+					unavailableReason: m.chat_composer_image_attachments_unavailable(),
+					onSelect: () => attachmentController.pick(),
+				}}
 				onOpenSnippetPalette={() => void markdown.openSnippets()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
 				onRefinePrompt={() => {
@@ -897,29 +897,34 @@
 				}}
 				canRefinePrompt={promptRefinement.canStart}
 				isPromptRefinementPending={promptRefinement.pending}
-				addMenuDisabled={isDisabled}
+				editingDisabled={isDisabled}
 				settingsDisabled={directAdmissionPending}
 				isPromptTransformPending={promptTransformPending}
 				{promptTransformStatus}
-				{permissionOptions}
-				selectedPermission={agentState.permissionMode}
-				onPermissionSelect={(mode) => {
-					agentState.permissionMode = mode;
-					onPermissionModeChange?.(mode);
+				permission={{
+					options: permissionOptions,
+					selected: agentState.permissionMode,
+					onSelect: (mode) => {
+						agentState.permissionMode = mode;
+						onPermissionModeChange?.(mode);
+					},
 				}}
-				{thinkingOptions}
-				selectedThinking={agentState.thinkingMode}
-				onThinkingSelect={(mode) => {
-					agentState.thinkingMode = mode;
-					onThinkingModeChange?.(mode);
+				effort={{
+					options: thinkingOptions,
+					selected: agentState.thinkingMode,
+					onSelect: (mode) => {
+						agentState.thinkingMode = mode;
+						onThinkingModeChange?.(mode);
+					},
 				}}
-				canSend={canSubmit}
-				onSend={() => handleFormSubmit()}
-				{sendTitle}
-				{sendButtonClass}
-				executor={{ executors, executorId: agentState.executorId, onSelect: (id) => {
-					if (id !== agentState.executorId) onExecutorChange?.(id);
-				} }}
+				send={{ enabled: canSubmit, title: sendTitle, onSend: () => handleFormSubmit() }}
+				executor={{
+					executors,
+					executorId: agentState.executorId,
+					onSelect: (id) => {
+						if (id !== agentState.executorId) onExecutorChange?.(id);
+					},
+				}}
 				agentSettings={{
 					descriptors: modelCatalog.getAgentSettingsDescriptors(agentState.agentId),
 					envelope: agentState.agentSettings,

@@ -12,29 +12,27 @@ import ComposerBottomBar from '../ComposerBottomBar.svelte';
 
 function controls() {
 	return {
-		canAttachImages: true,
-		attachImagesTooltip: '',
-		onAddImage: vi.fn(),
+		image: { supported: true, unavailableReason: '', onSelect: vi.fn() },
 		onOpenSnippetPalette: vi.fn(),
 		onOpenExpandedEditor: vi.fn(),
 		onRefinePrompt: vi.fn(),
 		canRefinePrompt: true,
-		permissionOptions: buildPermissionOptions(['default', 'bypassPermissions']),
-		selectedPermission: 'default',
-		onPermissionSelect: vi.fn(),
-		thinkingOptions: buildThinkingOptions(['none', 'high']),
-		selectedThinking: 'high',
-		onThinkingSelect: vi.fn(),
-		canSend: true,
-		onSend: vi.fn(),
-		sendTitle: 'Send',
-		sendButtonClass: '',
+		permission: {
+			options: buildPermissionOptions(['default', 'bypassPermissions']),
+			selected: 'default',
+			onSelect: vi.fn(),
+		},
+		effort: {
+			options: buildThinkingOptions(['none', 'high']),
+			selected: 'high',
+			onSelect: vi.fn(),
+		},
+		send: { enabled: true, title: 'Send', onSend: vi.fn() },
 	} satisfies ComponentProps<typeof ComposerBottomBar>;
 }
 
 async function resize(container: HTMLElement, width: number) {
 	const toolbar = container.querySelector<HTMLElement>('[data-composer-toolbar]')!;
-	Object.defineProperty(toolbar, 'clientWidth', { configurable: true, value: width });
 	ResizeObserverHarness.emit(toolbar, width);
 	await tick();
 	return toolbar;
@@ -63,7 +61,7 @@ describe('ComposerBottomBar', () => {
 		).toEqual(['snippet', 'image', 'refine', 'expand']);
 		const image = screen.getByRole('button', { name: 'Add image' });
 		await fireEvent.click(image);
-		expect(props.onAddImage).toHaveBeenCalledOnce();
+		expect(props.image.onSelect).toHaveBeenCalledOnce();
 		expect(screen.queryByRole('button', { name: 'Add to prompt' })).toBeNull();
 		image.focus();
 		await resize(container, 122);
@@ -158,10 +156,10 @@ describe('ComposerBottomBar', () => {
 		const props = controls();
 		const { container } = render(ComposerBottomBar, {
 			...props,
-			selectedPermission: 'bypassPermissions',
+			permission: { ...props.permission, selected: 'bypassPermissions' },
 			isPromptRefinementPending: true,
 			isPromptTransformPending: true,
-			addMenuDisabled: true,
+			editingDisabled: true,
 		});
 		await resize(container, 115);
 		await fireEvent.click(
@@ -175,47 +173,22 @@ describe('ComposerBottomBar', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'More composer actions' }));
 		await fireEvent.click(screen.getByRole('menuitem', { name: /Cancel/ }));
 		expect(props.onRefinePrompt).toHaveBeenCalledOnce();
-		expect(props.onSend).not.toHaveBeenCalled();
+		expect(props.send.onSend).not.toHaveBeenCalled();
 	});
 
 	it('hides controls the agent cannot configure', () => {
 		render(ComposerBottomBar, {
-			canAttachImages: false,
-			attachImagesTooltip: 'Unavailable',
-			onAddImage: vi.fn(),
-			permissionOptions: [
-				{
-					value: 'bypassPermissions',
-					label: 'Bypass Permissions',
-					description: 'Runs without permission prompts.',
-					iconId: 'permission-bypass',
-					toneClass: '',
-				},
-			],
-			selectedPermission: 'bypassPermissions',
-			onPermissionSelect: vi.fn(),
-			thinkingOptions: [
-				{
-					value: 'none',
-					label: 'Default',
-					description: 'Provider default effort.',
-					iconId: 'thinking-none',
-					toneClass: '',
-				},
-			],
-			selectedThinking: 'none',
-			onThinkingSelect: vi.fn(),
-			canSend: false,
-			onSend: vi.fn(),
-			sendTitle: 'Send',
-			sendButtonClass: '',
-			showAddMenu: false,
-			showSendButton: false,
+			permission: {
+				options: buildPermissionOptions(['bypassPermissions']),
+				selected: 'bypassPermissions',
+				onSelect: vi.fn(),
+			},
+			effort: { options: buildThinkingOptions(['none']), selected: 'none', onSelect: vi.fn() },
 		});
 
 		expect(
 			screen.queryByRole('button', { name: 'Permission mode: Bypass Permissions' }),
 		).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Thinking effort' })).toBeNull();
+		expect(screen.queryByRole('button', { name: /Thinking effort/ })).toBeNull();
 	});
 });

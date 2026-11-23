@@ -12,6 +12,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import ModelSelectorMenuItem from './ModelSelectorMenuItem.svelte';
+	import { OverflowMenuState } from '$lib/components/shared/overflow-menu-state.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -63,34 +64,25 @@
 	);
 
 	let menuTrigger = $state<HTMLElement | null>(null);
-	let menuOpen = $state(false);
-	let afterClose: (() => void) | undefined;
+	const menu = new OverflowMenuState(() => dismissPicker());
 	export function standaloneAnchor(): HTMLElement | null {
 		return toolbarDisplay === undefined && display === 'overflow' ? menuTrigger : null;
-	}
-	function closeMenu(next: () => void): void {
-		afterClose = next;
-		menuOpen = false;
 	}
 	$effect.pre(() => {
 		if (toolbarDisplay !== undefined) return;
 		const folded = display === 'overflow';
-		if (!folded && menuOpen) {
-			closeMenu(() => triggerNode?.focus({ preventScroll: true }));
+		if (!folded && menu.open) {
+			menu.closeThen(() => triggerNode?.focus({ preventScroll: true }));
 			return;
 		}
 		const previous = document.activeElement;
-		const target =
-			folded && previous === triggerNode
-				? menuTrigger
-				: !folded && previous === menuTrigger
-					? triggerNode
-					: null;
-		if (target)
-			void tick().then(() => {
-				if (document.activeElement === previous || document.activeElement === document.body)
-					target.focus({ preventScroll: true });
-			});
+		if (previous !== (folded ? triggerNode : menuTrigger)) return;
+		const target = folded ? menuTrigger : triggerNode;
+		if (!target) return;
+		void tick().then(() => {
+			if (document.activeElement === previous || document.activeElement === document.body)
+				target.focus({ preventScroll: true });
+		});
 	});
 </script>
 
@@ -114,15 +106,7 @@
 	</div>
 	{@render children(display === 'combined' ? combined : modelOnly, display === 'overflow')}
 	{#if toolbarDisplay === undefined}
-		<DropdownMenu
-			bind:open={menuOpen}
-			onOpenChange={(open) => {
-				if (open) {
-					afterClose = undefined;
-					dismissPicker();
-				}
-			}}
-		>
+		<DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
 			<DropdownMenuTrigger
 				bind:ref={menuTrigger}
 				hidden={display !== 'overflow'}
@@ -139,17 +123,12 @@
 				collisionPadding={8}
 				class="w-64 max-w-[calc(100vw-1rem)]"
 				getFocusReturnTarget={() => standaloneAnchor() ?? triggerNode}
-				onCloseAutoFocus={(event) => {
-					if (!afterClose) return;
-					event.preventDefault();
-					queueMicrotask(afterClose);
-					afterClose = undefined;
-				}}
+				onCloseAutoFocus={menu.onCloseAutoFocus}
 			>
 				<ModelSelectorMenuItem
 					{disabled}
 					summary={[agent, model].filter(Boolean).join(' / ')}
-					onSelect={() => closeMenu(openPicker)}
+					onSelect={() => menu.closeThen(openPicker)}
 				/>
 			</DropdownMenuContent>
 		</DropdownMenu>

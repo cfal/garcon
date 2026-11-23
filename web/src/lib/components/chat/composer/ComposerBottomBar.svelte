@@ -1,59 +1,34 @@
 <script lang="ts">
-	import type { ComponentProps } from 'svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Send from '@lucide/svelte/icons/send';
-	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls';
 	import type { ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
 	import {
 		fitComposerToolbar,
 		type ComposerSettingId,
 	} from '$lib/chat/composer/composer-toolbar-layout';
-	import type ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ComposerPromptActions from './ComposerPromptActions.svelte';
 	import ComposerSettingsGroup from './ComposerSettingsGroup.svelte';
 	import { composerPromptActions, type PromptActionOptions } from './composer-prompt-actions';
-	import type { ComposerAgentSettings, ComposerExecutor } from './composer-toolbar-types';
+	import type { ComposerToolbarSettings } from './composer-toolbar-types';
 	import { retainComposerToolbarFocus } from './composer-toolbar-focus';
 	import * as m from '$lib/paraglide/messages.js';
 
-	interface Props extends PromptActionOptions {
-		permissionOptions: ComposerModeOption<PermissionMode>[];
-		selectedPermission: PermissionMode;
-		onPermissionSelect: (mode: PermissionMode) => void;
-		thinkingOptions: ComposerModeOption<ThinkingMode>[];
-		selectedThinking: ThinkingMode;
-		onThinkingSelect: (mode: ThinkingMode) => void;
-		executor?: ComposerExecutor;
-		agentSettings?: ComposerAgentSettings;
-		model?: ComponentProps<typeof ComposerModelSelector>;
-		canSend: boolean;
-		onSend: () => void;
-		sendTitle: string;
-		sendButtonClass: string;
+	interface Props extends PromptActionOptions, ComposerToolbarSettings {
+		send?: { enabled: boolean; title: string; onSend: () => void };
 		modelControlsLeft?: boolean;
 		side?: 'top' | 'bottom';
-		showSendButton?: boolean;
 		settingsDisabled?: boolean;
 		promptTransformStatus?: string;
 	}
 	let {
-		permissionOptions,
-		selectedPermission,
-		onPermissionSelect,
-		thinkingOptions,
-		selectedThinking,
-		onThinkingSelect,
+		permission,
+		effort,
 		executor,
 		agentSettings,
 		model,
-		canSend,
-		onSend,
-		sendTitle,
-		sendButtonClass,
+		send,
 		modelControlsLeft = false,
 		side = 'top',
-		showSendButton = true,
 		settingsDisabled = false,
 		promptTransformStatus = m.snippets_expanding(),
 		...prompt
@@ -66,8 +41,8 @@
 	let rem = $state(16);
 	let modelWidths = $state<ModelTriggerWidths>();
 	$effect(() => {
-		const toolbar = row,
-			ruler = unit;
+		const toolbar = row;
+		const ruler = unit;
 		if (!toolbar || !ruler) return;
 		rowWidth = toolbar.clientWidth;
 		rem = ruler.clientWidth || 16;
@@ -86,19 +61,22 @@
 		const ids: ComposerSettingId[] = [];
 		if (executor?.executors.showComposerExecutor(executor.executorId)) ids.push('executor');
 		if (model) ids.push('model');
-		if (thinkingOptions.length > 1) ids.push('effort');
+		if (effort.options.length > 1) ids.push('effort');
 		for (const descriptor of agentSettings?.descriptors ?? []) ids.push(`agent:${descriptor.key}`);
-		if (permissionOptions.length > 1) ids.push('permission');
+		if (permission.options.length > 1) ids.push('permission');
 		return ids;
 	});
+	const bypass = $derived(
+		permission.selected === 'bypassPermissions' || permission.selected === 'manualBypass',
+	);
 	const layout = $derived(
 		fitComposerToolbar(
 			{
 				prompt: actions.map(({ id }) => id),
 				settings,
-				send: showSendButton,
+				send: Boolean(send),
 				refining: Boolean(prompt.isPromptRefinementPending),
-				bypass: selectedPermission === 'bypassPermissions' || selectedPermission === 'manualBypass',
+				bypass,
 			},
 			rowWidth / rem,
 			modelWidths
@@ -107,7 +85,6 @@
 		),
 	);
 	const groups = $derived(modelControlsLeft ? ['settings', 'prompt'] : ['prompt', 'settings']);
-	const sendLabel = $derived(prompt.isPromptTransformPending ? promptTransformStatus : sendTitle);
 	$effect.pre(() => {
 		const placement = layout;
 		void groups;
@@ -152,12 +129,9 @@
 								modelWidths = widths;
 							}}
 							{agentSettings}
-							{permissionOptions}
-							{selectedPermission}
-							{onPermissionSelect}
-							{thinkingOptions}
-							{selectedThinking}
-							{onThinkingSelect}
+							{permission}
+							{effort}
+							{bypass}
 							align={first ? 'start' : 'end'}
 							{side}
 							disabled={settingsDisabled}
@@ -166,20 +140,22 @@
 				</div>
 			{/if}
 		{/each}
-		{#if showSendButton}
+		{#if send}
+			{@const label = prompt.isPromptTransformPending ? promptTransformStatus : send.title}
 			<button
 				type="button"
-				onclick={onSend}
-				disabled={!canSend || prompt.isPromptTransformPending}
+				onclick={send.onSend}
+				disabled={!send.enabled || prompt.isPromptTransformPending}
 				class:ml-1={actions.length > 0 || settings.length > 0}
-				class="inline-flex size-9 shrink-0 items-center justify-center rounded-full border ring-offset-background transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground {sendButtonClass}"
-				title={sendLabel}
-				aria-label={sendLabel}
+				class="inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary text-primary-foreground ring-offset-background transition-colors outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+				title={label}
+				aria-label={label}
 			>
-				{#if prompt.isPromptTransformPending}<Loader2
-						class="size-4 animate-spin"
-						aria-hidden="true"
-					/>{:else}<Send class="size-4" aria-hidden="true" />{/if}
+				{#if prompt.isPromptTransformPending}
+					<Loader2 class="size-4 animate-spin" aria-hidden="true" />
+				{:else}
+					<Send class="size-4" aria-hidden="true" />
+				{/if}
 			</button>
 		{/if}
 	</div>

@@ -33,15 +33,15 @@
 	const options = $derived(descriptor.type === 'enum' ? descriptor.options : []);
 	const selected = $derived(options.find((option) => option.value === value));
 	const label = $derived(agentSettingLabel(descriptor));
-	const summary = $derived(
-		selected
-			? agentSettingOptionLabel(selected)
-			: descriptor.type === 'boolean'
-				? value
-					? m.chat_composer_agent_setting_enabled()
-					: m.chat_composer_agent_setting_disabled()
-				: String(value ?? ''),
-	);
+	const summary = $derived.by(() => {
+		if (selected) return agentSettingOptionLabel(selected);
+		if (descriptor.type === 'boolean') {
+			return value
+				? m.chat_composer_agent_setting_enabled()
+				: m.chat_composer_agent_setting_disabled();
+		}
+		return String(value ?? '');
+	});
 	const inputId = $props.id();
 	let input = $state<HTMLInputElement>();
 

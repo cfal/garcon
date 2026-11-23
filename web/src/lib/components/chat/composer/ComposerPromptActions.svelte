@@ -8,8 +8,8 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import type { ComposerControlId } from '$lib/chat/composer/composer-toolbar-layout';
 	import type { ComposerPromptAction } from './composer-prompt-actions';
-	import { handOffComposerMenuFocus } from './composer-toolbar-focus';
 	import MenuValueLabel from '$lib/components/shared/MenuValueLabel.svelte';
+	import { OverflowMenuState } from '$lib/components/shared/overflow-menu-state.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -32,17 +32,12 @@
 	const button =
 		'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
 	const ordinary = 'border-border bg-background text-foreground hover:bg-muted';
-	let handoff: (() => void) | undefined;
-	let menuOpen = $state(false);
+	const menu = new OverflowMenuState();
+	export const closeOverflow = menu.closeThen;
 
 	$effect.pre(() => {
-		if (!folded.length) menuOpen = false;
+		if (!folded.length) menu.open = false;
 	});
-
-	export function closeOverflow(afterClose: () => void): void {
-		handoff = afterClose;
-		menuOpen = false;
-	}
 
 	function activate(action: ComposerPromptAction): void {
 		if (action.disabled) return;
@@ -51,12 +46,7 @@
 	}
 </script>
 
-<DropdownMenu
-	bind:open={menuOpen}
-	onOpenChange={(open) => {
-		if (open) handoff = undefined;
-	}}
->
+<DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
 	<DropdownMenuTrigger
 		hidden={!folded.length}
 		disabled={folded.every((action) => action.disabled)}
@@ -71,7 +61,7 @@
 		sideOffset={8}
 		collisionPadding={8}
 		class="w-64 max-w-[calc(100vw-1rem)]"
-		onCloseAutoFocus={(event) => handOffComposerMenuFocus(event, handoff)}
+		onCloseAutoFocus={menu.onCloseAutoFocus}
 	>
 		{#each folded as action (action.id)}
 			<DropdownMenuItem

@@ -1,9 +1,8 @@
 <script lang="ts" generics="T extends string">
-	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls.js';
 	import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '$lib/components/ui/dropdown-menu';
 	import ComposerSettingMenu from './ComposerSettingMenu.svelte';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
-	import type { ComposerControlPlacement } from './composer-toolbar-types';
+	import type { ComposerControlPlacement, ComposerModeSelection } from './composer-toolbar-types';
 
 	let {
 		id,
@@ -15,12 +14,9 @@
 		align,
 		side,
 		disabled,
-	}: {
+	}: ComposerModeSelection<T> & {
 		id: 'permission' | 'effort';
 		label: string;
-		options: ComposerModeOption<T>[];
-		selected: T;
-		onSelect: (value: T) => void;
 		placement: ComposerControlPlacement;
 		align: 'start' | 'end';
 		side: 'top' | 'bottom';

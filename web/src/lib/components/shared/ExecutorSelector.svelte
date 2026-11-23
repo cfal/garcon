@@ -48,13 +48,19 @@
 		if (hidden) open = false;
 	});
 
+	const inComposer = $derived(presentation === 'composer' || presentation === 'composer-menu');
+	const visible = $derived(
+		inComposer ? executors.showComposerExecutor(executorId) : executors.hasRemoteExecutors,
+	);
 	const executorLabel = $derived(
-		!executors.get(executorId) &&
-			executors.hasSnapshot &&
-			(presentation === 'composer' || presentation === 'composer-menu')
+		inComposer && executors.hasSnapshot && !executors.get(executorId)
 			? `${executors.label(executorId)}: ${executorId}`
 			: executors.label(executorId),
 	);
+
+	function refreshOnOpen(open: boolean): void {
+		if (open) void executors.refresh();
+	}
 
 	function available(id: string): boolean {
 		if (service === 'agents') return executors.isReady(id);
@@ -101,12 +107,8 @@
 	</DropdownMenuRadioGroup>
 {/snippet}
 
-{#if presentation === 'composer-menu' && executors.showComposerExecutor(executorId)}
-	<DropdownMenuSub
-		onOpenChange={(open) => {
-			if (open) void executors.refresh();
-		}}
-	>
+{#if visible && presentation === 'composer-menu'}
+	<DropdownMenuSub onOpenChange={refreshOnOpen}>
 		<DropdownMenuSubTrigger
 			{disabled}
 			class="group"
@@ -126,13 +128,8 @@
 			{@render choices()}
 		</DropdownMenuSubContent>
 	</DropdownMenuSub>
-{:else if presentation === 'composer' ? executors.showComposerExecutor(executorId) : executors.hasRemoteExecutors}
-	<DropdownMenu
-		bind:open
-		onOpenChange={(open) => {
-			if (open) void executors.refresh();
-		}}
-	>
+{:else if visible}
+	<DropdownMenu bind:open onOpenChange={refreshOnOpen}>
 		<DropdownMenuTrigger
 			{hidden}
 			class={cn(

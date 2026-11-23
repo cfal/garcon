@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { ComponentProps } from 'svelte';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import type { ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
@@ -8,8 +7,6 @@
 		ComposerSettingId,
 		fitComposerToolbar,
 	} from '$lib/chat/composer/composer-toolbar-layout';
-	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls';
-	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import {
@@ -19,12 +16,8 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import AgentSettingControl from './AgentSettingControl.svelte';
 	import ComposerModeControl from './ComposerModeControl.svelte';
-	import type {
-		ComposerAgentSettings,
-		ComposerControlPlacement,
-		ComposerExecutor,
-	} from './composer-toolbar-types';
-	import { handOffComposerMenuFocus } from './composer-toolbar-focus';
+	import type { ComposerControlPlacement, ComposerToolbarSettings } from './composer-toolbar-types';
+	import { OverflowMenuState } from '$lib/components/shared/overflow-menu-state.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -34,41 +27,29 @@
 		model,
 		onModelMeasure,
 		agentSettings,
-		permissionOptions,
-		selectedPermission,
-		onPermissionSelect,
-		thinkingOptions,
-		selectedThinking,
-		onThinkingSelect,
+		permission,
+		effort,
+		bypass,
 		disabled,
 		align,
 		side,
-	}: {
+	}: ComposerToolbarSettings & {
 		ids: readonly ComposerSettingId[];
 		layout: ReturnType<typeof fitComposerToolbar>;
-		executor?: ComposerExecutor;
-		model?: ComponentProps<typeof ComposerModelSelector>;
 		onModelMeasure: (widths: ModelTriggerWidths) => void;
-		agentSettings?: ComposerAgentSettings;
-		permissionOptions: ComposerModeOption<PermissionMode>[];
-		selectedPermission: PermissionMode;
-		onPermissionSelect: (mode: PermissionMode) => void;
-		thinkingOptions: ComposerModeOption<ThinkingMode>[];
-		selectedThinking: ThinkingMode;
-		onThinkingSelect: (mode: ThinkingMode) => void;
+		bypass: boolean;
 		disabled: boolean;
 		align: 'start' | 'end';
 		side: 'top' | 'bottom';
 	} = $props();
 	let menuTrigger = $state<HTMLElement | null>(null);
 	let picker = $state<ComposerModelSelector>();
-	let menuOpen = $state(false);
-	let handoff: (() => void) | undefined;
+	const menu = new OverflowMenuState(() => picker?.dismissPicker());
+	export const closeOverflow = menu.closeThen;
 	const folded = $derived(ids.filter((id) => !layout.inline.has(id)));
 	const hiddenBypass = $derived(
-		folded.includes('permission') &&
-			(selectedPermission === 'manualBypass' || selectedPermission === 'bypassPermissions')
-			? permissionOptions.find(({ value }) => value === selectedPermission)
+		bypass && folded.includes('permission')
+			? permission.options.find(({ value }) => value === permission.selected)
 			: undefined,
 	);
 	const menuLabel = $derived(
@@ -76,13 +57,8 @@
 	);
 
 	$effect.pre(() => {
-		if (!folded.length) menuOpen = false;
+		if (!folded.length) menu.open = false;
 	});
-
-	export function closeOverflow(afterClose: () => void): void {
-		handoff = afterClose;
-		menuOpen = false;
-	}
 </script>
 
 {#snippet control(id: ComposerSettingId, placement: ComposerControlPlacement)}
@@ -101,9 +77,7 @@
 		<ComposerModeControl
 			{id}
 			label={m.chat_composer_thinking_effort()}
-			options={thinkingOptions}
-			selected={selectedThinking}
-			onSelect={onThinkingSelect}
+			{...effort}
 			{placement}
 			{align}
 			{side}
@@ -113,20 +87,30 @@
 		<ComposerModeControl
 			{id}
 			label={m.chat_composer_permission_mode()}
-			options={permissionOptions}
-			selected={selectedPermission}
-			onSelect={onPermissionSelect}
+			{...permission}
 			{placement}
 			{align}
 			{side}
 			{disabled}
 		/>
-	{:else if id === 'model' && placement === 'menu'}
-		<ModelSelectorMenuItem
-			onSelect={() => closeOverflow(() => picker?.openPicker())}
-			disabled={model?.disabled || disabled}
-			summary={picker?.selectionSummary() ?? ''}
-		/>
+	{:else if id === 'model' && model}
+		{#if placement === 'menu'}
+			<ModelSelectorMenuItem
+				onSelect={() => closeOverflow(() => picker?.openPicker())}
+				disabled={model.disabled || disabled}
+				summary={picker?.selectionSummary() ?? ''}
+			/>
+		{:else}
+			<ComposerModelSelector
+				bind:this={picker}
+				{...model}
+				{align}
+				{side}
+				toolbarDisplay={layout.modelDisplay}
+				onMeasure={onModelMeasure}
+				overflowAnchor={placement === 'hidden' ? menuTrigger : null}
+			/>
+		{/if}
 	{:else if agentSettings}
 		{@const descriptor = agentSettings.descriptors.find((item) => `agent:${item.key}` === id)}
 		{#if descriptor}
@@ -140,29 +124,9 @@
 
 <!-- Hidden triggers remain valid focus anchors for an enclosing dialog during resize. -->
 {#each ids as id (id)}
-	{#if id === 'model' && model}
-		<ComposerModelSelector
-			bind:this={picker}
-			{...model}
-			{align}
-			{side}
-			toolbarDisplay={layout.modelDisplay}
-			onMeasure={onModelMeasure}
-			overflowAnchor={layout.inline.has(id) ? null : menuTrigger}
-		/>
-	{:else}
-		{@render control(id, layout.inline.has(id) ? 'inline' : 'hidden')}
-	{/if}
+	{@render control(id, layout.inline.has(id) ? 'inline' : 'hidden')}
 {/each}
-<DropdownMenu
-	bind:open={menuOpen}
-	onOpenChange={(open) => {
-		if (open) {
-			handoff = undefined;
-			picker?.dismissPicker();
-		}
-	}}
->
+<DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
 	<DropdownMenuTrigger
 		bind:ref={menuTrigger}
 		hidden={!folded.length}
@@ -181,7 +145,7 @@
 		collisionPadding={8}
 		class="w-64 max-w-[calc(100vw-1rem)]"
 		getFocusReturnTarget={() => menuTrigger}
-		onCloseAutoFocus={(event) => handOffComposerMenuFocus(event, handoff)}
+		onCloseAutoFocus={menu.onCloseAutoFocus}
 	>
 		{#each folded as id (id)}{@render control(id, 'menu')}{/each}
 	</DropdownMenuContent>
