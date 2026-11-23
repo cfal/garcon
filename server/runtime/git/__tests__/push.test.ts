@@ -258,12 +258,13 @@ test('does not pair a hook preview row with a skipped destination', async () => 
   expect(await listRefs(preview)).toBe('');
 });
 
-test('an interrupted push reports only fixed reasons from newline-terminated frames, not raw stdout', async () => {
+test.each(['unterminated', 'truncated'])('an interrupted push reports its cancellation and only complete rejection reasons (%s stdout)', async capture => {
   const { git, projectPath, remote } = await pushFixture();
   const row = '!\trefs/heads/main:refs/heads/main\t[rejected]';
   const output = ['private-hook-output', 'To first', row + ' (fetch first)', 'Done',
     'To second', row + ' (non-fast-forward)', 'Done'].join('\n');
-  await installHook(projectPath, 'pre-push', `printf '%s' '${output}'\n: > .git/push-ready\nexec sleep 30`);
+  const overflow = capture === 'truncated' ? "printf '%02000000d' 0" : '';
+  await installHook(projectPath, 'pre-push', `printf '%s' '${output}'\n${overflow}\n: > .git/push-ready\nexec sleep 30`);
   const abort = new AbortController();
   const watcher = watch(path.join(projectPath, '.git'), (_event, name) => {
     if (name === 'push-ready') abort.abort();
@@ -272,6 +273,8 @@ test('an interrupted push reports only fixed reasons from newline-terminated fra
     const failure = await git.push({ projectPath }, { signal: abort.signal, timeoutMs: 5_000 })
       .then(() => null, (error: Error) => error);
     expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+    if (capture === 'truncated') expect(failure?.message).toContain('truncated');
+    expect(failure?.message).toContain('cancelled or timed out');
     expect(failure?.message).toContain('[rejected] (fetch first)');
     expect(failure?.message).not.toContain('non-fast-forward');
     expect(failure?.message).not.toContain('private-hook-output');

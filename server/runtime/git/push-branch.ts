@@ -58,10 +58,11 @@ function readPushReport(stdout: string, refspec: string) {
   return { confirmed, rejections };
 }
 
-function unconfirmedPush(rejections: Set<string>, detail: string, reportHint?: string): GitDomainError {
+function unconfirmedPush(rejections: Set<string>, detail: string, outcome: 'interrupted' | 'failed' | 'exited-zero'): GitDomainError {
   const lines = ['Git did not confirm the push. Inspect the remote before pushing again.'];
+  if (outcome === 'interrupted') lines.push('Git push was cancelled or timed out.');
   if (gitOutputTruncated()) lines.push(`Git output exceeded ${PUSH_REPORT_MAX_BYTES} bytes and was truncated.`);
-  else if (reportHint) lines.push(reportHint);
+  else if (outcome === 'exited-zero') lines.push('Git exited successfully. Check for a skipped destination or pre-push hook output mixed into the report.');
   lines.push(...rejections);
   const notice = lines.join('\n');
 
@@ -92,12 +93,11 @@ export async function pushBranchRef(projectPath: string, remote: string, ref: st
     const stderr = typeof failure?.stderr === 'string' ? failure.stderr : '';
     const completeStderr = !stderrTruncated && !interrupted && stderr.endsWith('\n');
     const detail = redactPushDiagnostic(stderr.trim(), completeStderr ? 'complete-stderr' : 'unverified');
-    const notice = interrupted ? 'Git push was cancelled or timed out.' : undefined;
-    throw unconfirmedPush(rejections, detail, notice);
+    throw unconfirmedPush(rejections, detail, interrupted ? 'interrupted' : 'failed');
   }
   const { confirmed, rejections } = readPushReport(result.stdout, refspec);
   if (!confirmed || gitOutputTruncated()) {
     const detail = redactPushDiagnostic(result.stderr.trim(), 'unverified');
-    throw unconfirmedPush(rejections, detail, 'Git exited successfully. Check for a skipped destination or pre-push hook output mixed into the report.');
+    throw unconfirmedPush(rejections, detail, 'exited-zero');
   }
 }
