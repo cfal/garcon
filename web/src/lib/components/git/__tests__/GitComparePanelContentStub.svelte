@@ -1,8 +1,8 @@
 <script lang="ts">
-	let { onEdit }: { onEdit?: () => void } = $props();
+	let { active, onEdit }: { active?: boolean; onEdit?: () => void } = $props();
 </script>
 
-<div data-testid="git-compare-panel-content"></div>
+<div data-testid="git-compare-panel-content" data-active={active}></div>
 {#if onEdit}
 	<button type="button" onclick={onEdit}>Edit comparison</button>
 {/if}

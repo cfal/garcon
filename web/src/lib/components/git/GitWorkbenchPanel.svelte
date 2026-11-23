@@ -50,6 +50,7 @@
 	);
 	const activeProjectPath = $derived(controller.target.activeProjectPath);
 	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
+	const pushAvailable = $derived(presentationVisible && controller.target.canChangeTarget);
 	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let pushOpenGeneration = 0;
 
@@ -126,18 +127,27 @@
 
 	async function openPush(): Promise<void> {
 		const target = activeTarget;
-		if (!presentationVisible || !target || !controller.target.canChangeTarget) return;
+		if (!pushAvailable || !target) return;
 		const generation = ++pushOpenGeneration;
 		const remotes = await repository.loadPushRemotes(target);
 		if (
 			!remotes.length ||
 			generation !== pushOpenGeneration ||
-			!presentationVisible ||
+			!pushAvailable ||
 			!sameGitProject(target, activeTarget)
 		)
 			return;
 		repository.pushRemotes = remotes;
 		repository.showPushModal = true;
+	}
+
+	function submitPush(remote: string): void {
+		if (!pushAvailable) return;
+		void runMutation(async (project) => {
+			const ok = await repository.handlePush(project, remote);
+			if (ok) await wb.refresh({ reason: 'git-action' });
+			return ok;
+		});
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
@@ -168,8 +178,7 @@
 	/>
 	<GitProjectContent
 		selection={controller.target.projectSelection}
-		ready={!controller.target.projectIdentityPending &&
-			controller.target.identity === controller.target.appliedIdentity}
+		ready={controller.target.projectReady}
 	>
 		{#if controller.target.lastError || repository.lastError || wb.lastError}
 			<div
@@ -204,7 +213,7 @@
 		<GitWorkbench
 			target={activeTarget}
 			{presentation}
-			active={presentationVisible}
+			active={presentationVisible && controller.target.projectReady}
 			{wb}
 			{onAppendToChatDraft}
 			onOpenChat={() => void workspace.focusChat()}
@@ -227,16 +236,11 @@
 
 		{#if repository.showPushModal}
 			<GitPushModal
-				open={presentationVisible}
+				open={pushAvailable}
 				remotes={repository.pushRemotes}
 				currentBranch={repository.currentBranch}
 				isPushing={repository.isPushing}
-				onPush={(remote) =>
-					void runMutation(async (projectPath) => {
-						const ok = await repository.handlePush(projectPath, remote);
-						if (ok) await wb.refresh({ reason: 'git-action' });
-						return ok;
-					})}
+				onPush={submitPush}
 				onClose={() => (repository.showPushModal = false)}
 			/>
 		{/if}

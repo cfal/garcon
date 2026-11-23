@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
@@ -35,20 +36,40 @@ vi.mock('../GitWorkbench.svelte', async () => ({
 	default: (await import('./GitComparePanelContentStub.svelte')).default,
 }));
 
-describe('GitWorkbenchPanel Commit navigation', () => {
+function availableProject(projectPath: string) {
+	return {
+		kind: 'available' as const,
+		project: {
+			target: { kind: 'chat' as const, chatId: 'chat', projectPath },
+			chatId: 'chat',
+			projectPath,
+			effectiveProjectKey: projectPath,
+		},
+	};
+}
+
+async function readyWorkbench() {
+	const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
+	vi.spyOn(controller.target, 'ensureTargets').mockResolvedValue(false);
+	vi.spyOn(controller.workbench, 'refresh').mockResolvedValue();
+	vi.spyOn(controller.workbench, 'checkFreshness').mockResolvedValue();
+	vi.spyOn(controller.repository, 'fetchRemoteStatus').mockResolvedValue();
+	controller.setProjectState(availableProject('/project'));
+	controller.setPresentationVisible(true);
+	await controller.target.activate();
+	return controller;
+}
+
+describe('GitWorkbenchPanel', () => {
 	afterEach(() => {
 		cleanup();
 		vi.clearAllMocks();
 	});
 
-	it.each(['stay', 'hide', 'hide and return', 'unmount'])(
+	it.each(['stay', 'hide', 'hide and return', 'unmount', 'checkout'])(
 		'only opens Push in its original visit: %s',
 		async (change) => {
-			const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
-			controller.presentationVisible = true;
-			controller.target.baseProjectPath = '/project';
-			vi.spyOn(controller.target, 'canChangeTarget', 'get').mockReturnValue(true);
-			vi.spyOn(controller.workbench, 'checkFreshness').mockResolvedValue();
+			const controller = await readyWorkbench();
 			const remotes = Promise.withResolvers<typeof controller.repository.pushRemotes>();
 			const prepare = vi
 				.spyOn(controller.repository, 'loadPushRemotes')
@@ -57,7 +78,9 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 			const view = render(GitWorkbenchPanel, props);
 			await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
 			expect(prepare).toHaveBeenCalledOnce();
-			if (change === 'unmount') {
+			if (change === 'checkout') {
+				controller.target.branchChangePending = true;
+			} else if (change === 'unmount') {
 				view.unmount();
 			} else if (change !== 'stay') {
 				await view.rerender({ ...props, visible: false });
@@ -73,8 +96,7 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 	);
 
 	it('keeps the chosen push remote when the owning tab is hidden and shown', async () => {
-		const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
-		controller.presentationVisible = true;
+		const controller = await readyWorkbench();
 		controller.repository.pushRemotes = ['origin', 'backup'].map((name) => ({
 			name,
 			url: `/repos/${name}`,
@@ -91,6 +113,38 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 		} finally {
 			controller.dispose();
 		}
+	});
+
+	it('does not submit an open Push prompt during checkout', async () => {
+		const controller = await readyWorkbench();
+		controller.repository.pushRemotes = [{ name: 'origin', url: '/repos/origin' }];
+		controller.repository.showPushModal = true;
+		const dispatch = vi.spyOn(controller.repository, 'handlePush').mockResolvedValue(false);
+		render(GitWorkbenchPanel, { controller, presentation: 'window-main' });
+		const dialog = await screen.findByRole('dialog');
+		controller.target.branchChangePending = true;
+		await fireEvent.keyDown(dialog, { key: 'Enter', ctrlKey: true });
+		expect(dispatch).not.toHaveBeenCalled();
+		controller.dispose();
+	});
+
+	it('hides portaled Git actions until the replacement project is applied', async () => {
+		const controller = await readyWorkbench();
+		controller.repository.showPushModal = true;
+		controller.workbench.drafts.openCommentComposer('first.ts', 'after', 1);
+		render(GitWorkbenchPanel, { controller, presentation: 'mobile' });
+		expect(await screen.findByRole('dialog')).toBeTruthy();
+		const replacement = Promise.withResolvers<boolean>();
+		vi.mocked(controller.target.ensureTargets).mockReturnValue(replacement.promise);
+		controller.setProjectState(availableProject('/replacement'));
+		await tick();
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(screen.getByTestId('git-compare-panel-content').dataset.active).toBe('false');
+		replacement.resolve(false);
+		await controller.target.activate();
+		expect(controller.repository.showPushModal).toBe(false);
+		expect(controller.workbench.drafts.commentComposer.open).toBe(false);
+		controller.dispose();
 	});
 
 	it.each([
