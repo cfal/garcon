@@ -3,7 +3,7 @@ import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { measureDialogHeightChange } from '../../support/dialog-resize.js';
+import { measureDialogHeightChange, pauseDialogResize } from '../../support/dialog-resize.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 
@@ -75,6 +75,15 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
 
       phase('worktree selection updates only the draft');
       await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
+      if (executionBackend === 'in-process') {
+        const create = picker.getByRole('button', { name: 'New worktree', exact: true });
+        await browserExpect(create).toBeEnabled();
+        const resize = await create.evaluateHandle(pauseDialogResize);
+        await page.getByRole('dialog', { name: 'New worktree', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
+        await browserExpect.poll(() => resize.evaluate(animation => animation.playState)).toBe('idle');
+        await resize.dispose();
+        await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
+      }
       await picker.getByRole('option', { name: /feature/ }).click();
       await browserExpect(input).toHaveValue(worktree);
       await input.press('Enter');

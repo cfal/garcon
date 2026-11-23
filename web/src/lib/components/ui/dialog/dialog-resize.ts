@@ -1,5 +1,17 @@
 const resizeId = 'dialog-resize';
-const pendingFrames = new WeakSet<HTMLElement>();
+const pendingFrames = new WeakMap<HTMLElement, number>();
+const activeResizes = new WeakMap<HTMLElement, Animation>();
+
+export function cancelResizeOnUnmount(dialog: HTMLElement): () => void {
+	return () => {
+		const frame = pendingFrames.get(dialog);
+		if (frame !== undefined) {
+			cancelAnimationFrame(frame);
+			pendingFrames.delete(dialog);
+		}
+		activeResizes.get(dialog)?.cancel();
+	};
+}
 
 function canResize(dialog: HTMLElement, reducedMotion: MediaQueryList): boolean {
 	const root = document.documentElement;
@@ -19,6 +31,7 @@ function watchResize(
 	reducedMotion: MediaQueryList,
 	viewport: VisualViewport | null,
 ): void {
+	activeResizes.set(dialog, resize);
 	const cancel = () => resize.cancel();
 	const check = () => {
 		if (!canResize(dialog, reducedMotion)) cancel();
@@ -33,6 +46,7 @@ function watchResize(
 	reducedMotion.addEventListener('change', check, { signal: listeners.signal });
 	viewport?.addEventListener('resize', cancel, { signal: listeners.signal });
 	const release = () => {
+		if (activeResizes.get(dialog) === resize) activeResizes.delete(dialog);
 		observer.disconnect();
 		listeners.abort();
 	};
@@ -44,7 +58,6 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 	if (!dialog?.animate || pendingFrames.has(dialog)) return;
 	const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 	if (!canResize(dialog, reducedMotion)) return;
-	pendingFrames.add(dialog);
 	const width = dialog.offsetWidth;
 	const height = dialog.offsetHeight;
 	const viewport = window.visualViewport;
@@ -52,12 +65,9 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 	const viewportHeight = viewport?.height;
 
 	// The next frame includes both Svelte updates and native summary activation.
-	requestAnimationFrame(() => {
+	const frame = requestAnimationFrame(() => {
 		pendingFrames.delete(dialog);
-		dialog
-			.getAnimations()
-			.find((animation) => animation.id === resizeId)
-			?.cancel();
+		activeResizes.get(dialog)?.cancel();
 		if (
 			!canResize(dialog, reducedMotion) ||
 			viewport?.width !== viewportWidth ||
@@ -78,6 +88,7 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 		const resize = dialog.animate(dimensions, { id: resizeId, duration: 200, easing: 'ease' });
 		watchResize(dialog, resize, reducedMotion, viewport);
 	});
+	pendingFrames.set(dialog, frame);
 }
 
 export function resizeDialogOnClick(event: MouseEvent): void {

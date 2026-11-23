@@ -1,3 +1,12 @@
+export async function pauseDialogResize(control: HTMLElement): Promise<Animation> {
+  control.click();
+  await new Promise(requestAnimationFrame);
+  const animation = control.closest('[role="dialog"]')!.getAnimations()
+    .find(candidate => candidate.id === 'dialog-resize')!;
+  animation.pause();
+  return animation;
+}
+
 // Runs inside locator.evaluate so all three measurements see the same dialog and animation.
 export async function measureDialogHeightChange(control: HTMLElement, options?: { focus: boolean }) {
   const dialog = control.closest<HTMLElement>('[role="dialog"]')!;

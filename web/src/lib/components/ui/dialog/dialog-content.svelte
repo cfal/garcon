@@ -9,6 +9,7 @@
 	import type { ComponentProps } from 'svelte';
 	import { getOptionalTransientLayers } from '$lib/context';
 	import { getDialogLayerControl } from './dialog-layer-context';
+	import { cancelResizeOnUnmount } from './dialog-resize.js';
 	import type {
 		TransientLayerKind,
 		TransientLayerModality,
@@ -60,6 +61,7 @@
 <DialogPortal {...portalProps}>
 	<DialogOverlay />
 	<DialogPrimitive.Content
+		{@attach cancelResizeOnUnmount}
 		bind:ref
 		data-slot="dialog-content"
 		class={cn(

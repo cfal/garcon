@@ -7,7 +7,7 @@ import {
 import { parseTicketWriteResult } from "../../../common/ticket-records.js";
 import type { TicketMutationPayload } from "../../../common/ticket-commands.js";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
-import { measureDialogHeightChange } from "../../support/dialog-resize.js";
+import { measureDialogHeightChange, pauseDialogResize } from "../../support/dialog-resize.js";
 import { seedLocalSettings } from "../../support/local-settings-seed.js";
 import {
   clickWorkspaceWindowAddAction,
@@ -41,14 +41,7 @@ describe("Chromium Tickets interaction", () => {
       expect(collapsed.middle).toBeLessThan(collapsed.before);
       expect(collapsed.middle).toBeGreaterThan(collapsed.after);
 
-      const startPausedResize = () => summary.evaluateHandle(async (control: HTMLElement) => {
-        control.click();
-        await new Promise(requestAnimationFrame);
-        const resize = control.closest('[role="dialog"]')!.getAnimations()
-          .find(animation => animation.id === "dialog-resize")!;
-        resize.pause();
-        return resize;
-      });
+      const startPausedResize = () => summary.evaluateHandle(pauseDialogResize);
       const running = await startPausedResize();
       await page.setViewportSize({ width: 1280, height: 800 });
       await browserExpect.poll(() => running.evaluate(animation => animation.playState)).toBe("idle");
@@ -93,13 +86,7 @@ describe("Chromium Tickets interaction", () => {
       for (const dirty of [false, true]) {
         await page.getByRole("button", { name: "New ticket", exact: true }).click();
         if (dirty) await dialog.getByLabel("Title", { exact: true }).fill("Synthetic retained draft");
-        const resize = await dialog.locator("summary", { hasText: "More details" }).evaluateHandle(async (control: HTMLElement) => {
-          control.click();
-          await new Promise(requestAnimationFrame);
-          const animation = control.closest('[role="dialog"]')!.getAnimations().find(animation => animation.id === "dialog-resize")!;
-          animation.pause();
-          return animation;
-        });
+        const resize = await dialog.locator("summary", { hasText: "More details" }).evaluateHandle(pauseDialogResize);
         await page.keyboard.press("Escape");
         if (dirty) {
           await browserExpect.poll(() => resize.evaluate(animation => animation.playState)).toBe("idle");
