@@ -45,10 +45,11 @@ export function newChatToolbarSettings({
 				model: form.modelValue,
 				...form.modelSelectionTarget,
 			},
-			getRecents: (executorId) => buildModelSelectorRecents(
-				modelCatalog.forExecutor(executorId),
-				remoteSettings.snapshot?.recentAgentSettings ?? [],
-			),
+			getRecents: (executorId) =>
+				buildModelSelectorRecents(
+					modelCatalog.forExecutor(executorId),
+					remoteSettings.snapshot?.recentAgentSettings ?? [],
+				),
 			preferRecentsOnOpen: true,
 			getSelectableAgentIds,
 			onChange: onModelChange,
