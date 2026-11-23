@@ -1,4 +1,5 @@
 import { parseChatId } from './chat-id.js';
+import { isNativeChildStatus, type NativeChildStatus } from './chat-observation.js';
 import { parseTicketCommandOutcome, type TicketCommandOutcome } from './garcon-ticket-result.js';
 import { parseAgentStartProgressNotice, type AgentStartProgressNoticeDetail } from './agent-start-progress.js';
 import { parseAgentCommandOutcome, type AgentStartOutcomeNoticeDetail, type AgentResumeOutcomeNoticeDetail, type AgentScheduleOutcomeNoticeDetail } from './garcon-command-results.js';
@@ -90,6 +91,7 @@ export interface InterAgentMessageReceivedNoticeDetail {
 export type ServerControlReceiptDetail = InterAgentMessageReceivedNoticeDetail;
 
 export type TranscriptNoticeDetail =
+  | NativeChildNoticeDetail
   | TicketCommandOutcome
   | AgentStartProgressNoticeDetail
   | AgentStartOutcomeNoticeDetail
@@ -104,6 +106,11 @@ export type TranscriptNoticeDetail =
   | ChatIdDiscoveryFailureNoticeDetail
   | InterAgentMessageOutcomeNoticeDetail
   | InterAgentMessageReceivedNoticeDetail;
+
+export type NativeChildNoticeDetail =
+  | { readonly type: 'native-child-status'; readonly status: NativeChildStatus }
+  | { readonly type: 'native-child-gap' }
+  | { readonly type: 'native-history-snapshot' };
 
 export function isCarryoverMigrationQuarantineNoticeDetail(
   value: unknown,
@@ -234,6 +241,12 @@ function hasType(value: unknown, type: string): boolean {
 }
 
 export function parseTranscriptNoticeDetail(value: unknown): TranscriptNoticeDetail | null {
+  if (hasType(value, 'native-child-status')) {
+    const status = (value as Record<string, unknown>).status;
+    return isNativeChildStatus(status) ? { type: 'native-child-status', status } : null;
+  }
+  if (hasType(value, 'native-child-gap')) return { type: 'native-child-gap' };
+  if (hasType(value, 'native-history-snapshot')) return { type: 'native-history-snapshot' };
   if (isPublicationGapNoticeDetail(value)) return { type: value.type };
   const progress = parseAgentStartProgressNotice(value);
   if (progress) return progress;

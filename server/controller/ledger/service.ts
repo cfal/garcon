@@ -56,6 +56,7 @@ import { PermissionControlEvents, type PermissionActionabilityChange } from './p
 import { inputDetail } from './input-submission.js';
 export type { PermissionActionabilityChange } from './permission-control-events.js';
 import { ProducerLease } from './producer-lease.js';
+import { ObservationLease, type TranscriptObservationLease } from './observation.js';
 import { projectFinalResponse } from './final-response.js';
 import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
@@ -89,6 +90,7 @@ export class TranscriptLedgerService {
   readonly #runAbandonedListeners = new Set<(chatId: string, runId: string) => void | Promise<void>>();
   readonly #permissionEvents: PermissionControlEvents;
   readonly #leases = new Map<string, ProducerLease>();
+  readonly #observations = new Map<string, ObservationLease>();
   readonly #activeRuns = new Map<string, string>();
   readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
   readonly #permissionClaims = new Map<string, PermissionResolutionClaim>();
@@ -164,6 +166,7 @@ export class TranscriptLedgerService {
   }
 
   openProducer(chatId: string, ownerAgentId: string): TranscriptProducerLease {
+    if (this.#observations.has(chatId)) throw new TypeError('Observation writer already owns this chat');
     if (!ownerAgentId) throw new TypeError('Producer owner agent ID is required');
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
@@ -191,6 +194,22 @@ export class TranscriptLedgerService {
 
   closeProducer(chatId: string): void {
     this.#leases.get(chatId)?.close();
+  }
+
+  openObservation(chatId: string): TranscriptObservationLease {
+    if (this.#observations.has(chatId) || this.#leases.has(chatId)) throw new TypeError('Transcript writer is already open');
+    const view = this.#store.existingCurrentView(chatId);
+    if (!view) throw new TypeError('Observation requires an existing transcript view');
+    const lease = new ObservationLease((drafts) => {
+      if (this.#observations.get(chatId) !== lease
+        || this.#store.existingCurrentView(chatId)?.viewId !== view.viewId) throw new TranscriptSinkClosedError();
+      const rows = this.#store.append(chatId, view.viewId, drafts);
+      this.#notify({ type: 'rows', chatId, viewId: view.viewId, rows });
+    }, () => {
+      if (this.#observations.get(chatId) === lease) this.#observations.delete(chatId);
+    }, this.#now);
+    this.#observations.set(chatId, lease);
+    return lease;
   }
 
   beginRun(chatId: string, runId = this.#createRunId()): string {
@@ -703,6 +722,8 @@ export class TranscriptLedgerService {
   }
 
   close(): void {
+    for (const lease of this.#observations.values()) lease.close();
+    this.#observations.clear();
     for (const lease of this.#leases.values()) lease.close();
     this.#leases.clear();
     this.#activeRuns.clear();
@@ -724,6 +745,7 @@ export class TranscriptLedgerService {
   }
 
   #clearChatState(chatId: string): void {
+    this.#observations.get(chatId)?.close();
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
     this.#clearChatPermissions(chatId);
