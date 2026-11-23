@@ -15,7 +15,7 @@ if (cmd === "rev-parse") {
   }
   const last = argv.at(-1) ?? "";
   if (last.includes("@{upstream}")) process.exit(1);
-  console.log(argv.includes("--symbolic-full-name") ? "refs/heads/main" : "main");
+  console.log("main");
   process.exit(0);
 }
 if (cmd === "fetch" || cmd === "pull" || cmd === "push") {
@@ -91,7 +91,7 @@ describe("network git options wiring", () => {
     expect(calls).toEqual([
       { command: "fetch", args: ["origin"], terminalPrompt: "0" },
       { command: "pull", args: ["origin", "main"], terminalPrompt: "0" },
-      { command: "push", args: ["origin", "refs/heads/main:refs/heads/main"], terminalPrompt: "0" },
+      { command: "push", args: ["origin", "main:main"], terminalPrompt: "0" },
     ]);
   });
 

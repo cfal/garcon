@@ -328,18 +328,17 @@ export async function collectCommitMessageDiffContext(
   return diffContext;
 }
 
-async function currentLocalBranch(projectPath: string): Promise<string | null> {
-  const { stdout } = await runGit(projectPath, ['rev-parse', '--symbolic-full-name', 'HEAD'], readOnlyGitOptions());
-  const ref = stdout.trim();
-  return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : null;
-}
-
 // Resolves the display branch and whether the repository has any commits.
 // Detached HEAD falls back to a descriptive label.
 async function resolveStatusBranch(projectPath: string): Promise<{ branch: string; hasCommits: boolean }> {
   try {
-    let branch = await currentLocalBranch(projectPath);
-    if (!branch) {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
+    let branch = stdout.trim();
+    if (branch === 'HEAD') {
       const { stdout: headOutput } = await runGit(
         projectPath,
         ['rev-parse', '--verify', 'HEAD'],
@@ -535,7 +534,12 @@ export function createStatusOperations() {
   async function getRemoteStatus({ projectPath }: ProjectOptions): Promise<GitRemoteStatus> {
     await assertGitRepository(projectPath);
 
-    const branch = (await currentLocalBranch(projectPath)) ?? 'HEAD';
+    const { stdout: currentBranch } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
+    const branch = currentBranch.trim();
 
     let trackingBranch: string;
     let remoteName: string;
@@ -671,9 +675,14 @@ export function createStatusOperations() {
   async function push({ projectPath, remote, remoteBranch }: PushOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
-    const branch = await currentLocalBranch(projectPath);
-    if (!branch) throw new GitDomainError('INVALID_INPUT', 'Check out a local branch before pushing.');
+    const { stdout: headBranch } = await runGit(
+      projectPath,
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      readOnlyGitOptions(),
+    );
+    const branch = headBranch.trim();
     const targetRemote = remote || 'origin';
+    const targetBranch = remoteBranch || branch;
     assertSafeRemoteName(targetRemote);
     if (remoteBranch) {
       await assertSafeBranchName(projectPath, remoteBranch, 'remote branch name');
@@ -682,17 +691,16 @@ export function createStatusOperations() {
       }
     }
 
-    const ref = `refs/heads/${branch}`;
     const { stdout } = await runGit(
       projectPath,
-      ['push', targetRemote, `${ref}:${ref}`],
+      ['push', targetRemote, `${branch}:${targetBranch}`],
       networkGitOptions(),
     );
     return {
       success: true,
       output: stdout || 'Push completed successfully',
       remoteName: targetRemote,
-      remoteBranch: branch,
+      remoteBranch: targetBranch,
     };
   }
 
