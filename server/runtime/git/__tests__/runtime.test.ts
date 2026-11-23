@@ -45,6 +45,26 @@ async function fixture(registry?: GitReviewDocumentRegistry) {
   return { root, projectPath, runtime, git: await adapter.executor.getGitService(), original, configuration };
 }
 
+test('pushes the confirmed branch, not a tag with the same name', async () => {
+  const { root, projectPath, git } = await fixture();
+  const remote = path.join(root, 'remote.git');
+  await runGit(root, ['init', '--bare', remote]);
+  await runGit(projectPath, ['remote', 'add', 'origin', remote]);
+  await runGit(projectPath, ['branch', '-m', 'release']);
+  await runGit(projectPath, ['tag', 'release']);
+  await runGit(projectPath, ['push', 'origin', 'refs/tags/release']);
+  await runGit(projectPath, ['commit', '--allow-empty', '-m', 'advance release']);
+  const oid = async (cwd: string, ref: string) => (await runGit(cwd, ['rev-parse', ref])).stdout.trim();
+  const options = { projectPath, remote: 'origin', remoteBranch: 'release' };
+  await git.push(options);
+  expect(await oid(remote, 'refs/heads/release')).toBe(await oid(projectPath, 'HEAD'));
+  expect(await oid(remote, 'refs/tags/release')).toBe(await oid(projectPath, 'HEAD~'));
+  expect((await git.getStatus({ projectPath })).branch).toBe('release');
+  expect((await git.getRemoteStatus({ projectPath })).branch).toBe('release');
+  await runGit(projectPath, ['checkout', '-b', 'next']);
+  await expect(git.push(options)).rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
+});
+
 async function selection(git: GitRuntime['git'], projectPath: string, file = 'example.txt') {
   const snapshot = await git.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 2 });
   if (snapshot.status !== 'ready') throw new Error('Expected repository');

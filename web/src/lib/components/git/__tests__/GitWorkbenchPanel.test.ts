@@ -120,19 +120,28 @@ describe('GitWorkbenchPanel', () => {
 		}
 	});
 
-	it('does not submit an open Push prompt during checkout', async () => {
-		const controller = await readyWorkbench();
-		controller.repository.currentBranch = 'main';
-		controller.repository.pushRemotes = [{ name: 'origin', url: '/repos/origin' }];
-		controller.repository.showPushModal = true;
-		const dispatch = vi.spyOn(controller.repository, 'handlePush').mockResolvedValue(false);
-		render(GitWorkbenchPanel, { controller, presentation: 'window-main' });
-		const dialog = await screen.findByRole('dialog');
-		controller.target.branchChangePending = true;
-		await fireEvent.keyDown(dialog, { key: 'Enter', ctrlKey: true });
-		expect(dispatch).not.toHaveBeenCalled();
-		controller.dispose();
-	});
+	it.each([false, true])(
+		'submits only the confirmed branch while ready (checkout=%s)',
+		async (checkout) => {
+			const controller = await readyWorkbench();
+			controller.repository.currentBranch = 'main';
+			controller.repository.pushRemotes = [{ name: 'origin', url: '/repos/origin' }];
+			controller.repository.showPushModal = true;
+			const dispatch = vi.spyOn(controller.repository, 'handlePush').mockResolvedValue(false);
+			render(GitWorkbenchPanel, { controller, presentation: 'window-main' });
+			const dialog = await screen.findByRole('dialog');
+			controller.target.branchChangePending = checkout;
+			await fireEvent.keyDown(dialog, { key: 'Enter', ctrlKey: true });
+			if (checkout) expect(dispatch).not.toHaveBeenCalled();
+			else
+				expect(dispatch).toHaveBeenCalledWith(
+					expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
+					'origin',
+					'main',
+				);
+			controller.dispose();
+		},
+	);
 
 	it('hides portaled Git actions until the replacement project is applied', async () => {
 		const controller = await readyWorkbench();
