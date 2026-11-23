@@ -38,6 +38,7 @@ export class SidebarVirtualChatListController {
 	#lastEstimatedLayout: ChatItemLayout | undefined;
 	#lastShowProjectPath = false;
 	#lastChatFontScale = 1;
+	#source: { keys: string[]; estimates: number[] } | undefined;
 
 	constructor() {
 		const getOverscan = () => this.#overscan;
@@ -64,22 +65,36 @@ export class SidebarVirtualChatListController {
 			(this.#lastEstimatedLayout !== input.chatItemLayout ||
 				this.#lastShowProjectPath !== input.showProjectPath ||
 				this.#lastChatFontScale !== input.chatFontScale);
+		const source = this.#source;
+		// Preview and badge updates can replace every row object without moving a single item.
+		if (
+			!sizingOptionsChanged &&
+			this.#overscan === input.overscan &&
+			source?.keys.length === input.rows.length &&
+			input.rows.every((row, i) =>
+				row.key === source.keys[i] && this.#estimateRow(row, input) === source.estimates[i]
+			)
+		) return;
 		this.#lastEstimatedLayout = input.chatItemLayout;
 		this.#lastShowProjectPath = input.showProjectPath;
 		this.#lastChatFontScale = input.chatFontScale;
 		this.#overscan = input.overscan;
 		const normalizedAnchor =
 			sizingOptionsChanged && input.rowHeight === undefined ? this.#normalizedAnchor() : null;
-		const result = this.#virt.apply({
-			kind: 'update',
+		const nextSource = {
 			keys: input.rows.map((row) => row.key),
 			estimates: input.rows.map((row) => this.#estimateRow(row, input)),
+		};
+		const result = this.#virt.apply({
+			kind: 'update',
+			...nextSource,
 			anchor: normalizedAnchor ? { kind: 'none' } : this.#currentAnchor(),
 		});
 		if (result.kind === 'rejected') {
 			console.error(`Sidebar virtualization rejected source geometry: ${result.reason}`);
 			return;
 		}
+		this.#source = nextSource;
 		if (!normalizedAnchor) return;
 		const row = input.rows.find((candidate) => candidate.key === normalizedAnchor.key);
 		if (!row) return;
@@ -117,6 +132,7 @@ export class SidebarVirtualChatListController {
 	}
 
 	destroy(): void {
+		this.#source = undefined;
 		this.#virt.destroy();
 	}
 

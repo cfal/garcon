@@ -82,32 +82,61 @@ export function sidebarStatusSection(
 	return 'caught-up';
 }
 
-export function sidebarProjectKey(path: string, executorId?: string | null): string {
-	return JSON.stringify([effectiveExecutorId(executorId), normalizeProjectPath(path)]);
+function projectKey(executorId: string, normalizedPath: string): string {
+	return JSON.stringify([executorId, normalizedPath]);
 }
 
-function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean): Map<string, string> {
-	const known = new Map<string, string>();
+export function sidebarProjectKey(path: string, executorId?: string | null): string {
+	return projectKey(effectiveExecutorId(executorId), normalizeProjectPath(path));
+}
+
+interface SidebarProject {
+	key: string;
+	executorId: string;
+	normalizedPath: string;
+	displayPath: string;
+}
+
+function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean) {
+	const byKey = new Map<string, SidebarProject>();
+	const byExecutor = new Map<string, Map<string, SidebarProject>>();
 	for (const chat of chats) {
-		const key = sidebarProjectKey(chat.projectPath, chat.executorId);
-		const previous = known.get(key);
-		if (previous === undefined || chat.projectPath < previous) known.set(key, chat.projectPath);
+		const executorId = effectiveExecutorId(chat.executorId);
+		let paths = byExecutor.get(executorId);
+		if (!paths) byExecutor.set(executorId, (paths = new Map()));
+		if (paths.has(chat.projectPath)) continue;
+		const normalizedPath = normalizeProjectPath(chat.projectPath);
+		const key = projectKey(executorId, normalizedPath);
+		const project = { key, executorId, normalizedPath, displayPath: chat.projectPath };
+		paths.set(chat.projectPath, project);
+		const known = byKey.get(key);
+		if (!known || project.displayPath < known.displayPath) byKey.set(key, project);
 	}
-	const groups = new Map<string, string>();
-	for (const chat of chats) {
-		const key = sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId);
-		if (groups.has(key)) continue;
-		let path = normalizeProjectPath(chat.projectPath);
-		let group = known.get(key)!;
-		while (combine && path) {
-			group = known.get(sidebarProjectKey(path, chat.executorId)) ?? group;
-			const separator = path.lastIndexOf('/');
-			if (separator < 0 || path === '/') break;
-			path = separator === 0 ? '/' : path.slice(0, separator);
+	for (const [executorId, paths] of byExecutor) {
+		const groups = new Map<string, SidebarProject | undefined>();
+		for (const [rawPath, project] of paths) {
+			// A trailing slash can expose whitespace: group the normalized spelling, retain the label.
+			const key = sidebarProjectKey(project.normalizedPath, executorId);
+			if (!groups.has(key)) {
+				let group = byKey.get(key);
+				let path = project.normalizedPath;
+				while (combine && path && path !== '/') {
+					const separator = path.lastIndexOf('/');
+					if (separator < 0) break;
+					path = separator === 0 ? '/' : path.slice(0, separator);
+					group = byKey.get(sidebarProjectKey(path, executorId)) ?? group;
+				}
+				groups.set(key, group);
+			}
+			paths.set(rawPath, groups.get(key) ?? project);
 		}
-		groups.set(key, group);
 	}
-	return groups;
+	return {
+		byKey,
+		forChat(chat: ChatSessionRecord) {
+			return byExecutor.get(effectiveExecutorId(chat.executorId))!.get(chat.projectPath)!;
+		},
+	};
 }
 
 export type SidebarGroupPath = readonly (readonly [SidebarGroupingField, string])[];
@@ -148,22 +177,26 @@ function childTreeScope(
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
 	const forest = buildSidebarDelegationForest(input.allChats, input);
-	const matches = input.matchingChatIds ?? new Set(byId.keys());
-	const filtered = input.matchingChatIds !== undefined;
+	const matches = input.matchingChatIds;
+	const filtered = matches !== undefined;
 	const matchCounts = new Map<string, number>();
-	for (let index = forest.preorder.length - 1; index >= 0; index--) {
-		const id = forest.preorder[index];
-		const count = (matchCounts.get(id) ?? 0) + Number(matches.has(id));
-		matchCounts.set(id, count);
-		const parent = forest.branches.get(id)!.parentId;
-		if (parent !== null) matchCounts.set(parent, (matchCounts.get(parent) ?? 0) + count);
+	if (matches) {
+		for (let index = forest.preorder.length - 1; index >= 0; index--) {
+			const id = forest.preorder[index];
+			const count = (matchCounts.get(id) ?? 0) + Number(matches.has(id));
+			matchCounts.set(id, count);
+			const parent = forest.branches.get(id)!.parentId;
+			if (parent !== null) matchCounts.set(parent, (matchCounts.get(parent) ?? 0) + count);
+		}
 	}
-	const hasMatches = (id: string) => (matchCounts.get(id) ?? 0) > 0;
+	const matchingBranches = (ids: string[]) =>
+		filtered ? ids.filter((id) => (matchCounts.get(id) ?? 0) > 0) : ids;
+	const branchCount = (id: string) =>
+		filtered ? (matchCounts.get(id) ?? 0) : forest.branches.get(id)!.descendants + 1;
 	const fields = enabledSidebarGroupingFields(input.groupingFields);
-	const projects = projectGroups(input.allChats, Boolean(input.groupNestedProjectPaths));
-	const projectFor = (chat: ChatSessionRecord) =>
-		projects.get(sidebarProjectKey(normalizeProjectPath(chat.projectPath), chat.executorId)) ??
-		chat.projectPath;
+	const projects = fields.includes('project')
+		? projectGroups(input.allChats, Boolean(input.groupNestedProjectPaths))
+		: undefined;
 	const rank = new Map(
 		PERSISTED_CHAT_ORDER_GROUPS.flatMap((band) =>
 			input.orders[band].map((id, index) => [id, index] as const),
@@ -173,7 +206,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 	const model: SidebarRowModel = {
 		rows: [],
 		visibleChatIds: [],
-		matchingChatIds: [...matches].filter((id) => byId.has(id)),
+		matchingChatIds: matches ? [...matches].filter((id) => byId.has(id)) : [...byId.keys()],
 		actionableChatIds: [],
 	};
 	const valueFor = (field: SidebarGroupingField, chat: ChatSessionRecord): string => {
@@ -181,7 +214,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			case 'executor':
 				return effectiveExecutorId(chat.executorId);
 			case 'project':
-				return sidebarProjectKey(projectFor(chat), chat.executorId);
+				return projects!.forChat(chat).key;
 			case 'activity':
 				return sidebarActivitySection(chat, input.currentTime, input.inactivityDuration);
 			case 'status':
@@ -199,11 +232,13 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		}
 		if (field === 'activity' || field === 'status')
 			return sections.indexOf(a as SidebarChatSection) - sections.indexOf(b as SidebarChatSection);
-		const [executorA, pathA] = JSON.parse(a) as [string, string];
-		const [executorB, pathB] = JSON.parse(b) as [string, string];
+		const left = projects!.byKey.get(a)!;
+		const right = projects!.byKey.get(b)!;
 		return (
-			(pathA || 'Unknown project').localeCompare(pathB || 'Unknown project') ||
-			executorA.localeCompare(executorB)
+			(left.normalizedPath || 'Unknown project').localeCompare(
+				right.normalizedPath || 'Unknown project',
+			) ||
+			left.executorId.localeCompare(right.executorId)
 		);
 	};
 	const compareChats = (a: string, b: string): number => {
@@ -236,7 +271,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		{
 			kind: 'scope',
 			parentId: null,
-			ids: forest.roots.filter(hasMatches),
+			ids: matchingBranches(forest.roots),
 			depth: 0,
 			path: [],
 			inheritedFields: [],
@@ -264,7 +299,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				tasks.push({
 					kind: 'scope',
 					parentId: row.chat.id,
-					ids: children.filter(hasMatches),
+					ids: matchingBranches(children),
 					depth: row.depth + 1,
 					tree: childTreeScope(row.depth, (row.tree?.delegationDepth ?? 0) + 1, row.tree),
 					path: [],
@@ -317,7 +352,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 					key,
 					depth: task.depth,
 					tree: task.tree ? { ...task.tree, isLastChild: index === values.length - 1 } : undefined,
-					count: ids.reduce((sum, id) => sum + (matchCounts.get(id) ?? 0), 0),
+					count: ids.reduce((sum, id) => sum + branchCount(id), 0),
 					containsChat,
 					isCollapsed,
 				};
@@ -330,7 +365,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 						...common,
 						type: 'project-header',
 						projectKey: value,
-						projectPath: projectFor(chat),
+						projectPath: projects!.forChat(chat).displayPath,
 						executorId: effectiveExecutorId(chat.executorId),
 						executorGrouped: task.executorGrouped,
 						collapseKey: key,
@@ -355,16 +390,19 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		const ordered = [...task.ids].sort(compareChats);
 		const scopes = buildSidebarChatOrderMap(
 			ordered
-				.filter((id) => matches.has(id) && !forest.ambiguousIds.has(id))
+				.filter((id) => (!matches || matches.has(id)) && !forest.ambiguousIds.has(id))
 				.map((id) => byId.get(id)!),
 		);
+		const scopeKeys: Partial<Record<keyof SidebarChatOrderMap, string>> = {};
+		const section = task.path.find(([field]) => field === 'activity')?.[1] as
+			SidebarChatSection | undefined;
 		for (let index = ordered.length - 1; index >= 0; index--) {
 			const id = ordered[index];
 			const chat = byId.get(id)!;
 			const branch = forest.branches.get(id)!;
 			const list = chatOrderGroupFor(chat);
 			const collapseKey = DELEGATION_KEY_PREFIX + id;
-			const contextOnly = !matches.has(id);
+			const contextOnly = matches !== undefined && !matches.has(id);
 			const row: SidebarVirtualChatRow = {
 				type: 'chat',
 				key: `chat:${id}`,
@@ -375,7 +413,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				isPinned: list === 'pinned',
 				isArchived: list === 'archived',
 				executorGrouped: task.executorGrouped,
-				reorderScopeKey: JSON.stringify([
+				reorderScopeKey: scopeKeys[list] ??= JSON.stringify([
 					input.nestDelegatedChats,
 					input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
 					task.parentId,
@@ -384,8 +422,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				]),
 				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
 				contextOnly,
-				section: task.path.find(([field]) => field === 'activity')?.[1] as
-					SidebarChatSection | undefined,
+				section,
 				branch: branch.descendants
 					? {
 							collapseKey,

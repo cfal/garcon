@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
 import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
+import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 	EXECUTOR_HEADER_ROW_HEIGHT,
@@ -386,10 +387,13 @@ describe('SidebarVirtualSortableChatList', () => {
 			});
 			const row = view.container.querySelector('[data-sidebar-virtual-row="chat-1"]');
 			expect(screen.getByText('Chat 1')).toBeTruthy();
+			await tick();
+			const applyGeometry = vi.spyOn(VirtualListController.prototype, 'apply');
 
 			await view.rerender({ chats: [{ ...chats[0], title: 'Renamed chat' }, chats[1]] });
 
 			expect(screen.getByText('Renamed chat')).toBeTruthy();
+			expect(applyGeometry).not.toHaveBeenCalled();
 			expect(screen.queryByText('Chat 1')).toBeNull();
 			expect(view.container.querySelector('[data-sidebar-virtual-row="chat-1"]')).toBe(row);
 			const visibleChatIds = Array.from(
