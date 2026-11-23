@@ -224,6 +224,27 @@ describe('ConversationMessage actions', () => {
 		expect(screen.getByText('Body')).toBeTruthy();
 	});
 
+	it('omits the resting shadow only from ordinary user bubbles', async () => {
+		const at = '2026-01-01T00:00:00Z';
+		const ordinary = new UserMessage(at, 'Synthetic input');
+		const { container, rerender } = render(ConversationMessageHost, { message: ordinary });
+		const bubble = () => container.querySelector<HTMLElement>('.user-message-context-target')!;
+		for (const presentation of [
+			{ origin: 'cli', style: 'info' },
+			{ origin: 'cli', style: 'custom', customStyle: { lightAccent: '#123456', darkAccent: '#abcdef' } },
+			{ origin: 'cli', disclosure: 'collapsed' },
+		] as const) {
+			await rerender({ message: new UserMessage(at, 'Synthetic input', undefined, undefined, presentation) });
+			expect(bubble().classList.contains('shadow-sm')).toBe(true);
+		}
+		await rerender({ message: ordinary });
+		expect(bubble().dataset.state).toBe('closed');
+		expect(bubble().classList.contains('shadow-sm')).toBe(false);
+		await fireEvent.contextMenu(bubble());
+		expect(bubble().dataset.state).toBe('open');
+		expect(bubble().classList.contains('data-[state=open]:shadow-sm')).toBe(true);
+	});
+
 	it('gives non-image attachments their own selection surface', () => {
 		render(ConversationMessageHost, {
 			message: new UserMessage('2026-06-27T00:00:00.000Z', 'Attached document', [
