@@ -416,7 +416,7 @@
 	function restoreSingleTabMenuFocus(event: Event): void {
 		event.preventDefault();
 		if (!singleTabMenuShouldRestoreTabFocus) return;
-		// Queues behind the transient layer's Escape restoration so the selected tab wins.
+		// A command that opens a dialog keeps focus instead of returning it to the tab.
 		queueMicrotask(() => {
 			const activeElement = document.activeElement;
 			if (activeElement instanceof Element && activeElement.closest('[data-slot="dialog-content"]')) {

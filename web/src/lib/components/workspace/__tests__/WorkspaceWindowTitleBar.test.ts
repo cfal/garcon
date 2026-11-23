@@ -877,6 +877,31 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(await screen.findByRole('menu')).toBeTruthy();
 	});
 
+	it.each([{ order: [chatSurface.id] }, { order: [chatSurface.id, gitSurface.id] }])(
+		'never refocuses an old control on a repeated context menu ($order)',
+		async ({ order }) => {
+			const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+			runtime.transientLayers = layers;
+			renderTitleBar(workspaceWindow(order));
+			const tab = screen.getByRole('tab', { name: 'Chat A' });
+			const other = screen.getByRole('button', { name: m.workspace_fullscreen() });
+			async function openAndEscape(): Promise<void> {
+				await fireEvent.contextMenu(tab);
+				(await screen.findByRole('menuitem', { name: m.workspace_close_tab() })).focus();
+				expect(layers.handleEscape(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+				await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			}
+			other.focus();
+			await openAndEscape();
+			tab.focus();
+			const staleFocus = vi.fn();
+			other.addEventListener('focus', staleFocus);
+			await openAndEscape();
+			expect(staleFocus).not.toHaveBeenCalled();
+			expect(document.activeElement).toBe(tab);
+		},
+	);
+
 	it('keeps a sole terminal launcher outside tab context menus', async () => {
 		runtime.surfaces = { [terminalLauncherSurface.id]: terminalLauncherSurface };
 		renderTitleBar(workspaceWindow([terminalLauncherSurface.id]));

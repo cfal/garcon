@@ -2,6 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, CommandOutputMessage, CommandResultMessage, UserMessage } from '$shared/chat-types';
+import * as context from '$lib/context';
+import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 const copyToClipboard = vi.hoisted(() => vi.fn().mockResolvedValue(true));
@@ -427,6 +430,40 @@ describe('ConversationMessage actions', () => {
 		await waitFor(() => {
 			expect(trigger.getAttribute('data-state')).toBe('open');
 		});
+	});
+
+	it('returns registry Escape to the current opener on a repeated context menu', async () => {
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+		using layerContext = vi.spyOn(context, 'getOptionalTransientLayers');
+		layerContext.mockReturnValue(layers);
+		render(ConversationMessageHost, {
+			message: new AssistantMessage(
+				'', '[First](https://example.test/a) [Second](https://example.test/b)',
+			),
+		});
+		const first = screen.getByRole('link', { name: 'First' });
+		const second = screen.getByRole('link', { name: 'Second' });
+		const more = screen.getByRole('button', { name: 'More message actions' });
+		async function openAndEscape(link: HTMLElement): Promise<void> {
+			link.focus();
+			await fireEvent.click(more);
+			(await screen.findByRole('menuitem', { name: 'Copy text' })).focus();
+			expect(layers.handleEscape(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		}
+		await openAndEscape(first);
+		expect(document.activeElement).toBe(first);
+		const staleFocus = vi.fn();
+		first.addEventListener('focus', staleFocus);
+		await openAndEscape(second);
+		expect(staleFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(second);
+
+		await fireEvent.click(more);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
+		const dialog = await screen.findByRole('dialog');
+		await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+		expect(staleFocus).not.toHaveBeenCalled();
 	});
 
 	it('closes the message menu on the first outside touch pointerdown', async () => {
