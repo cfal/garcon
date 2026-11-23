@@ -87,17 +87,19 @@
 
 	$effect(() => {
 		if (!selector.open || pane !== 'model') return;
-		requestAnimationFrame(() => inputRef?.focus());
+		const frame = requestAnimationFrame(() => inputRef?.focus());
+		return () => cancelAnimationFrame(frame);
 	});
 
 	$effect(() => {
 		if (!selector.open || pane !== 'effort') return;
-		requestAnimationFrame(() => {
+		const frame = requestAnimationFrame(() => {
 			const selectedOption = effortPaneRef?.querySelector<HTMLButtonElement>(
 				'button[aria-pressed="true"]',
 			);
 			selectedOption?.focus();
 		});
+		return () => cancelAnimationFrame(frame);
 	});
 
 	$effect(() => {

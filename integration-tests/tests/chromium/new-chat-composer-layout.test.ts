@@ -230,9 +230,6 @@ describe("Chromium New Chat composer layout", () => {
           "checking model-selector collision margins at the sm boundary",
         );
         await fixture.page.setViewportSize({ width: 640, height: 900 });
-        await bottomBar
-          .getByRole("button", { name: "Open expanded composer" })
-          .waitFor({ state: "visible" });
         await expectLocator(longModelTrigger).toHaveText(LONG_MODEL_LABEL);
         expect(await longModelTrigger.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
         await longModelTrigger.click();

@@ -27,6 +27,7 @@ async function checkStandaloneModelFit(page: Page, trigger: Locator): Promise<vo
   const picker = page.locator('[data-slot="model-selector-columns"]');
   await browserExpect(picker).toBeVisible();
   await page.keyboard.press('Escape');
+  await browserExpect(picker).toHaveCount(0);
   await browserExpect(more).toBeFocused();
   await constrain(combinedWidth - 1);
   await browserExpect(trigger).toHaveText(model!);
