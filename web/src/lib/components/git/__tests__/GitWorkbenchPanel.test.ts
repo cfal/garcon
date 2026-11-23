@@ -66,7 +66,7 @@ describe('GitWorkbenchPanel', () => {
 		vi.clearAllMocks();
 	});
 
-	it.each(['stay', 'hide', 'hide and return', 'unmount', 'checkout'])(
+	it.each(['stay', 'hide', 'hide and return', 'unmount', 'checkout', 'completed checkout'])(
 		'only opens Push in its original visit: %s',
 		async (change) => {
 			const controller = await readyWorkbench();
@@ -78,8 +78,13 @@ describe('GitWorkbenchPanel', () => {
 			const view = render(GitWorkbenchPanel, props);
 			await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
 			expect(prepare).toHaveBeenCalledOnce();
-			if (change === 'checkout') {
+			if (change === 'checkout' || change === 'completed checkout') {
 				controller.target.branchChangePending = true;
+				if (change === 'completed checkout') {
+					await tick();
+					controller.repository.currentBranch = 'next';
+					controller.target.branchChangePending = false;
+				}
 			} else if (change === 'unmount') {
 				view.unmount();
 			} else if (change !== 'stay') {

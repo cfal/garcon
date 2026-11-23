@@ -55,8 +55,8 @@
 	let pushOpenGeneration = 0;
 
 	$effect(() => {
-		if (!presentationVisible) return;
-		// A remote list from an earlier panel visit cannot open a prompt in its replacement.
+		if (!pushAvailable) return;
+		// A remote list belongs to one uninterrupted visit to a pushable target.
 		return () => {
 			pushOpenGeneration++;
 		};
