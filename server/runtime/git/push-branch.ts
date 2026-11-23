@@ -1,6 +1,5 @@
-import { GIT_ERROR_MESSAGE_LIMIT, GitDomainError } from './git-domain-error.js';
+import { GitDomainError } from './git-domain-error.js';
 import { gitMutationDispatched, gitOutputTruncated, isGitCancellation } from './operation-context.js';
-import { redactPushDiagnostic } from './push-diagnostic.js';
 import { runGit } from './run.js';
 import type { GitCommandOptions, GitCommandResult, GitProcessError } from './types.js';
 
@@ -15,9 +14,10 @@ const rejectionReasons = new Set([
 ]);
 
 function parseRefStatus(line = '') {
-  const [flag = '', pair, summary] = line.split('\t', 3);
+  const [flag = '', pair, summary, extra] = line.split('\t', 4);
   if (!/^[ *+=!-]$/.test(flag) || !pair?.includes(':refs/') || !summary) return;
-  return { flag, pair, summary };
+  const rejection = flag === '!' && extra === undefined && rejectionReasons.has(summary) ? summary : undefined;
+  return { flag, pair, rejection };
 }
 
 function readPushReport(stdout: string, refspec: string) {
@@ -42,7 +42,7 @@ function readPushReport(stdout: string, refspec: string) {
     const blockRejections = new Set<string>();
     let branchAccepted = false;
     while (row) {
-      if (row.flag === '!') blockRejections.add(rejectionReasons.has(row.summary) ? row.summary : 'Git reported a rejected ref.');
+      if (row.rejection) blockRejections.add(row.rejection);
       if (row.pair === refspec) branchAccepted = row.flag === '*' || row.flag === ' ' || row.flag === '=';
       index++;
       row = parseRefStatus(lines[index]);
@@ -58,18 +58,11 @@ function readPushReport(stdout: string, refspec: string) {
   return { confirmed, rejections };
 }
 
-function unconfirmedPush(rejections: Set<string>, detail: string, outcome: 'interrupted' | 'failed' | 'exited-zero'): GitDomainError {
+function unconfirmedPush(rejections: Set<string>, interrupted = false): GitDomainError {
   const lines = ['Git did not confirm the push. Inspect the remote before pushing again.'];
-  if (outcome === 'interrupted') lines.push('Git push was cancelled or timed out.');
-  if (gitOutputTruncated()) lines.push(`Git output exceeded ${PUSH_REPORT_MAX_BYTES} bytes and was truncated.`);
-  else if (outcome === 'exited-zero') lines.push('Git exited successfully. Check for a skipped destination or pre-push hook output mixed into the report.');
-  lines.push(...rejections);
-  const notice = lines.join('\n');
-
-  // Git and the receiver usually explain a failure after local hook output.
-  const room = GIT_ERROR_MESSAGE_LIMIT - notice.length - 1;
-  const excerpt = detail.length <= room ? detail : `...${detail.slice(-(room - 3))}`;
-  return new GitDomainError('MUTATION_OUTCOME_UNKNOWN', excerpt ? `${notice}\n${excerpt}` : notice);
+  if (interrupted) lines.push('Git push was cancelled or timed out.');
+  if (gitOutputTruncated()) lines.push('Git push output was truncated.');
+  return new GitDomainError('MUTATION_OUTCOME_UNKNOWN', [...lines, ...rejections].join('\n'));
 }
 
 export async function pushBranchRef(projectPath: string, remote: string, ref: string, options: GitCommandOptions): Promise<void> {
@@ -78,11 +71,9 @@ export async function pushBranchRef(projectPath: string, remote: string, ref: st
   // in submodules; tags are left to Git's ordinary non-force and follow-tags rules.
   const excludedAliases = ['refs', 'refs/heads', 'refs/remotes'].map(prefix => `^${prefix}/${ref}*`);
   let result: GitCommandResult;
-  let stderrTruncated = false;
   try {
     result = await runGit(projectPath, ['push', '--porcelain', remote, refspec, ...excludedAliases], {
-      ...options, maxStdoutBytes: PUSH_REPORT_MAX_BYTES,
-      onStderrTruncated: () => { stderrTruncated = true; },
+      ...options, maxStdoutBytes: PUSH_REPORT_MAX_BYTES, maxStderrBytes: 0,
     });
   } catch (error) {
     const failure: GitProcessError | undefined = error instanceof Error ? error : undefined;
@@ -90,14 +81,8 @@ export async function pushBranchRef(projectPath: string, remote: string, ref: st
     const interrupted = isGitCancellation(error);
     if (!gitMutationDispatched() && (stdout === undefined || interrupted)) throw error;
     const { rejections } = readPushReport(stdout ?? '', refspec);
-    const stderr = typeof failure?.stderr === 'string' ? failure.stderr : '';
-    const completeStderr = !stderrTruncated && !interrupted && stderr.endsWith('\n');
-    const detail = redactPushDiagnostic(stderr.trim(), completeStderr ? 'complete-stderr' : 'unverified');
-    throw unconfirmedPush(rejections, detail, interrupted ? 'interrupted' : 'failed');
+    throw unconfirmedPush(rejections, interrupted);
   }
   const { confirmed, rejections } = readPushReport(result.stdout, refspec);
-  if (!confirmed || gitOutputTruncated()) {
-    const detail = redactPushDiagnostic(result.stderr.trim(), 'unverified');
-    throw unconfirmedPush(rejections, detail, 'exited-zero');
-  }
+  if (!confirmed || gitOutputTruncated()) throw unconfirmedPush(rejections);
 }

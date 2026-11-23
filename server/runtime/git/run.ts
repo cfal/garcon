@@ -217,11 +217,7 @@ async function runGitProcess(
       captureOutput(diagnosticOutput
         ? readTextStreamPrefix(proc.stdout, stdoutLimit, markGitOutputTruncated)
         : readGitOutput(proc.stdout, 'stdout', stdoutLimit)),
-      captureOutput(readTextStreamPrefix(
-        proc.stderr,
-        options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
-        options.onStderrTruncated,
-      )),
+      captureOutput(readTextStreamPrefix(proc.stderr, options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES)),
       proc.exited,
     ]).finally(async () => {
       abortState.signal?.removeEventListener('abort', abortListener);

@@ -1,5 +1,3 @@
-export const GIT_ERROR_MESSAGE_LIMIT = 2048;
-
 // Domain error type for git operations. Carries a machine-readable
 // code for HTTP status mapping at the route boundary.
 export class GitDomainError extends Error {

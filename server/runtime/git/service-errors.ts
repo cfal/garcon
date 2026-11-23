@@ -1,7 +1,7 @@
 import { GitServiceError, isGitServiceErrorCode } from '../../../common/git-error.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { isProjectBoundaryError } from '../../common/path-boundary.js';
-import { GIT_ERROR_MESSAGE_LIMIT, GitDomainError } from './git-domain-error.js';
+import { GitDomainError } from './git-domain-error.js';
 import { GhDomainError } from '../gh/gh-types.js';
 import { classifyGitError } from './git-error-classifier.js';
 import { classifyGhError } from '../gh/gh-error-classifier.js';
@@ -11,6 +11,7 @@ import { isGitCancellation } from './operation-context.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 
 type Domain = 'git' | 'gh';
+const GIT_ERROR_MESSAGE_LIMIT = 2048;
 
 function boundedServiceError(domain: Domain, { code, message }: { code: string; message: string }): GitServiceError {
   const candidate = code === 'GIT_LOCKED' || code === 'GH_MISSING' ? code : `${domain.toUpperCase()}_${code}`;

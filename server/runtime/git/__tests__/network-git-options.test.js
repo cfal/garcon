@@ -117,7 +117,7 @@ describe("network git options wiring", () => {
         const startedAt = performance.now();
         const call = withGitOperation(projectPath, { timeoutMs: 2000, mutation: op === "push" }, () => operations[op]({ projectPath }));
         await expect(call).rejects.toMatchObject(op === "push"
-          ? { code: "MUTATION_OUTCOME_UNKNOWN", message: expect.stringContaining("Waiting for remote acknowledgment") }
+          ? { code: "MUTATION_OUTCOME_UNKNOWN", message: "Git did not confirm the push. Inspect the remote before pushing again.\nGit push was cancelled or timed out." }
           : { aborted: true });
         return performance.now() - startedAt;
       }));

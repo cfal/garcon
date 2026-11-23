@@ -38,6 +38,13 @@ const listRefs = async (remote: string) =>
 const oid = async (repo: string, ref = 'HEAD') =>
   (await runGit(repo, ['show-ref', '--verify', '--hash', ref])).stdout.trim();
 
+function unconfirmedPush(...reasons: string[]) {
+  return {
+    code: 'GIT_MUTATION_OUTCOME_UNKNOWN',
+    message: ['Git did not confirm the push. Inspect the remote before pushing again.', ...reasons].join('\n'),
+  };
+}
+
 async function installHook(repo: string, name: 'pre-push' | 'update', body: string) {
   const hooks = path.join(path.dirname(repo), `${path.basename(repo)}-hooks`);
   await mkdir(hooks, { recursive: true });
@@ -73,23 +80,19 @@ test('preserves errors that prevent the push process from starting', async () =>
 
 test('keeps a non-fast-forward diagnostic without claiming the whole push was rejected', async () => {
   const { git, root, projectPath, remote } = await pushFixture();
-  const branch = process.platform === 'win32' ? 'release' : Array(10).fill('release-'.repeat(11)).join('/');
+  const branch = 'release';
   await runGit(projectPath, ['branch', branch]);
   await runGit(projectPath, ['commit', '--allow-empty', '-m', 'Remote tip']);
   await runGit(projectPath, ['push', 'origin', `HEAD:refs/heads/${branch}`]);
   const before = await listRefs(remote);
   await runGit(projectPath, ['switch', branch]);
-  await runGit(projectPath, ['config', 'advice.pushUpdateRejected', 'false']);
-  await expect(git.push({ projectPath, remoteBranch: branch })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('non-fast-forward'),
-  });
+  const rejected = unconfirmedPush('[rejected] (non-fast-forward)');
+  await expect(git.push({ projectPath, remoteBranch: branch })).rejects.toMatchObject(rejected);
   expect(await listRefs(remote)).toBe(before);
 
   // One rejection is not a report from an unreachable second push URL.
   await addOriginPushUrls(projectPath, remote, path.join(root, 'missing.git'));
-  await expect(git.push({ projectPath, remoteBranch: branch })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringMatching(/non-fast-forward[\s\S]*missing\.git/),
-  });
+  await expect(git.push({ projectPath, remoteBranch: branch })).rejects.toMatchObject(rejected);
   expect(await listRefs(remote)).toBe(before);
 });
 
@@ -109,9 +112,7 @@ test('creates a branch beside an existing tag using the exact local branch tip',
 
   await runGit(projectPath, ['branch', '-m', 'conflict-resolution']);
   await runGit(projectPath, ['tag', 'refs/heads/conflict-resolution', tag]);
-  await expect(git.push({ projectPath })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('src refspec refs/heads/conflict-resolution matches more than one'),
-  });
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush());
   expect(await listRefs(remote)).toBe(published);
 
   await runGit(projectPath, ['tag', 'detached-label', tag]);
@@ -238,9 +239,7 @@ test.each([
   const { git, projectPath, remote } = await pushFixture();
   await installHook(projectPath, 'pre-push', `printf '%s\\n' '${prefix}'\necho 'Hook completed' >&2`);
   const tip = await oid(projectPath);
-  await expect(git.push({ projectPath })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringMatching(/pre-push hook[\s\S]*Hook completed/),
-  });
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush());
   expect(await listRefs(remote)).toBe(`refs/heads/main ${tip}\n`);
 });
 
@@ -261,7 +260,9 @@ test('does not pair a hook preview row with a skipped destination', async () => 
 test.each(['unterminated', 'truncated'])('an interrupted push reports its cancellation and only complete rejection reasons (%s stdout)', async capture => {
   const { git, projectPath, remote } = await pushFixture();
   const row = '!\trefs/heads/main:refs/heads/main\t[rejected]';
-  const output = ['private-hook-output', 'To first', row + ' (fetch first)', 'Done',
+  const output = ['private-hook-output', 'To first', row + ' (fetch first)',
+    '!\trefs/tags/v1:refs/tags/v1\t[remote rejected] (custom receiver detail)',
+    '!\trefs/tags/v2:refs/tags/v2\t[remote rejected] (hook declined)\textra field', 'Done',
     'To second', row + ' (non-fast-forward)', 'Done'].join('\n');
   const overflow = capture === 'truncated' ? "printf '%02000000d' 0" : '';
   await installHook(projectPath, 'pre-push', `printf '%s' '${output}'\n${overflow}\n: > .git/push-ready\nexec sleep 30`);
@@ -270,15 +271,10 @@ test.each(['unterminated', 'truncated'])('an interrupted push reports its cancel
     if (name === 'push-ready') abort.abort();
   });
   try {
-    const failure = await git.push({ projectPath }, { signal: abort.signal, timeoutMs: 5_000 })
-      .then(() => null, (error: Error) => error);
-    expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-    if (capture === 'truncated') expect(failure?.message).toContain('truncated');
-    else expect(failure?.message).not.toContain('truncated');
-    expect(failure?.message).toContain('cancelled or timed out');
-    expect(failure?.message).toContain('[rejected] (fetch first)');
-    expect(failure?.message).not.toContain('non-fast-forward');
-    expect(failure?.message).not.toContain('private-hook-output');
+    const reasons = ['Git push was cancelled or timed out.'];
+    if (capture === 'truncated') reasons.push('Git push output was truncated.');
+    await expect(git.push({ projectPath }, { signal: abort.signal, timeoutMs: 5_000 }))
+      .rejects.toMatchObject(unconfirmedPush(...reasons, '[rejected] (fetch first)'));
     expect(await listRefs(remote)).toBe('');
   } finally { watcher.close(); }
 }, 15_000);
@@ -287,30 +283,8 @@ test.skipIf(process.platform === 'win32')('does not disclose a status-shaped lin
   const directory = 'published\n!\trefs/heads/main:refs/heads/main\tprivate-path-segment\nend.git';
   const { git, projectPath, remote } = await pushFixture(directory);
   await runGit(projectPath, ['remote', 'set-url', 'origin', decodeURI(pathToFileURL(remote).href)]);
-  const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
-  expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-  expect(failure?.message).not.toContain('private-path-segment');
-  expect(failure?.message).not.toContain('rejected ref');
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush());
   expect(await listRefs(remote)).toBe(`refs/heads/main ${await oid(projectPath)}\n`);
-});
-
-test('does not interpret a clipped destination as a terminal HTTP error', async () => {
-  const { root, projectPath, remote } = await pushFixture();
-  const url = "http://127.0.0.1:1/path': private-destination";
-  await runGit(projectPath, ['remote', 'set-url', 'origin', url + '/more']);
-  const failureAt = (prefix: string) => withGitOperation(root, { mutation: true }, () =>
-    pushBranchRef(projectPath, 'origin', 'refs/heads/main', { maxStderrBytes: Buffer.byteLength(prefix), env: { LC_ALL: 'C' } }),
-  ).then(() => null, gitServiceError);
-  const prefix = "fatal: unable to access '" + url;
-  const native = await failureAt(prefix);
-  expect(native).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-  expect(native?.message).toEndWith('unable to access <remote>');
-
-  // A clipped stream can also end on a newline, just like a complete native diagnostic.
-  await runGit(projectPath, ['remote', 'set-url', 'origin', remote]);
-  await installHook(projectPath, 'pre-push', `printf '%s\\n' "${prefix}" 'remaining output' >&2\nexit 1`);
-  const clippedLine = await failureAt(prefix + '\n');
-  expect(clippedLine?.message).toEndWith('unable to access <remote>');
 });
 
 test('allows ordinary hook logs but does not confirm a truncated push report', async () => {
@@ -322,13 +296,11 @@ test('allows ordinary hook logs but does not confirm a truncated push report', a
 
   await runGit(projectPath, ['commit', '--allow-empty', '-m', 'Not published']);
   await installHook(projectPath, 'pre-push', 'printf "!\\tUnit tests failed\\n"\necho "Checks failed: merge conflict markers found" >&2\nexit 1');
-  await expect(git.push({ projectPath })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('Checks failed: merge conflict markers found'),
-  });
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush());
   expect(await listRefs(remote)).toBe(`refs/heads/main ${tip}\n`);
 
   await installHook(projectPath, 'pre-push', 'printf "\\357\\273\\277%02000000d\\n" 0\nexit 1');
-  await expect(git.push({ projectPath })).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush('Git push output was truncated.'));
   expect(await listRefs(remote)).toBe(`refs/heads/main ${tip}\n`);
 });
 
@@ -344,10 +316,7 @@ test('does not confirm a multi-URL push when only the first complete report fits
   const second = await createBareRemote(root, 'second.git');
   await addOriginPushUrls(projectPath, remote, second);
   const tip = await oid(projectPath);
-  const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
-  expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-  expect(failure?.message).toContain('truncated');
-  expect(failure?.message).not.toContain('skipped destination');
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush('Git push output was truncated.'));
   for (const dest of [remote, second]) expect(await listRefs(dest)).toBe(`refs/heads/main ${tip}\n`);
 });
 
@@ -368,7 +337,7 @@ test.each([
   await runGit(projectPath, ['push', 'origin', 'HEAD:refs/heads/main', `HEAD:${alias}`]);
   await runGit(projectPath, ['commit', '--allow-empty', '-m', 'Advance main']);
   const push = git.push({ projectPath });
-  if (ambiguous) await expect(push).rejects.toThrow('matches more than one');
+  if (ambiguous) await expect(push).rejects.toMatchObject(unconfirmedPush());
   else expect(await push).toMatchObject({ success: true });
   expect(await listRefs(remote)).toBe(`refs/heads/main ${ambiguous ? original : await oid(projectPath)}\n${alias} ${original}\n`);
 });
@@ -385,53 +354,23 @@ test('confirms both push URLs and does not hide a rejected followed tag behind p
 
   await runGit(projectPath, ['commit', '--allow-empty', '-m', 'Advance both branches']);
   await runGit(projectPath, ['tag', '-a', 'v2', '-m', 'Second tag']);
-  await installHook(second, 'update', 'test "$1" != refs/tags/v2');
-  await expect(git.push({ projectPath })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('hook declined'),
-  });
+  await installHook(second, 'update', 'echo "Repository policy detail" >&2\ntest "$1" != refs/tags/v2');
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush('[remote rejected] (hook declined)'));
   const accepted = `refs/heads/main ${await oid(projectPath)}\n${followed}`;
   expect(await listRefs(second)).toBe(accepted);
   expect(await listRefs(remote)).toBe(`${accepted}refs/tags/v2 ${await oid(projectPath, 'refs/tags/v2')}\n`);
 });
 
-test('retains the receiving hook explanation after noisy or sensitive local diagnostics', async () => {
-  const separator = process.platform === 'win32' ? ' ' : "'\n";
-  const { git, projectPath, remote } = await pushFixture(`policy repo\u00a0${separator}private-destination.git`);
-  await runGit(projectPath, ['remote', 'set-url', 'origin', decodeURI(pathToFileURL(remote).href)]);
-  await installHook(remote, 'update', 'echo "Reviewed commits only" >&2\nexit 1');
-  await installHook(projectPath, 'pre-push', 'printf "%03000d\\n" 0 >&2');
-  const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
-  expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-  expect(failure?.message).toContain('Reviewed commits only');
-  expect(failure?.message).toContain('hook declined');
-  expect(failure?.message).toEndWith('<remote>');
-  expect(failure?.message).not.toContain('private-destination');
-  expect(failure?.message.length).toBeLessThanOrEqual(2048);
-
-  await runGit(projectPath, ['remote', 'set-url', 'origin', pathToFileURL(remote).href]);
-  await installHook(projectPath, 'pre-push', 'printf "https://%03000d:private-token@host.invalid/\\n" 0 >&2');
-  const ambiguous = await git.push({ projectPath }).then(() => null, (error: Error) => error);
-  expect(ambiguous).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-  expect(ambiguous?.message).toContain('hook declined');
-  expect(ambiguous?.message).toEndWith('<remote>');
-  expect(ambiguous?.message).not.toContain('private-token');
-  expect(await listRefs(remote)).toBe('');
-});
-
-test('keeps native diagnostics without replaying a push after acknowledgment loss', async () => {
+test('does not replay a push after acknowledgment loss', async () => {
   const { git, projectPath, remote } = await pushFixture();
-  await expect(git.push({ projectPath, remote: 'missing' })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('missing'),
-  });
+  await expect(git.push({ projectPath, remote: 'missing' })).rejects.toMatchObject(unconfirmedPush());
   expect(await listRefs(remote)).toBe('');
 
   // The receiver advertises normally and applies the pack, but its final status never reaches the sender.
-  await installHook(projectPath, 'pre-push', 'echo run >> .git/push-attempts\nprintf "%03000d\\n" 0 >&2\necho "Executable not found: git-lfs; skipping index.lock check" >&2');
+  await installHook(projectPath, 'pre-push', 'echo run >> .git/push-attempts\necho "skipping index.lock check" >&2');
   const receivePack = `sh -c 'git receive-pack --stateless-rpc --advertise-refs "$1" && exec git receive-pack --stateless-rpc "$1" >/dev/null' --`;
   await runGit(projectPath, ['config', 'remote.origin.receivepack', receivePack]);
-  await expect(git.push({ projectPath })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringMatching(/Inspect the remote[\s\S]*git-lfs[\s\S]*(?:disconnect|hung up)/i),
-  });
+  await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush());
   expect(await listRefs(remote)).toBe(`refs/heads/main ${await oid(projectPath)}\n`);
   expect(await readFile(path.join(projectPath, '.git/push-attempts'), 'utf8')).toBe('run\n');
 });
@@ -463,20 +402,16 @@ test('does not infer whether a smart HTTP receiver applied a failed push', async
   try {
     const url = `http://127.0.0.1:${server.port}${endpoint}`;
     await runGit(projectPath, ['remote', 'add', 'http', url + '/unavailable']);
-    await expect(git.push({ projectPath, remote: 'http' })).rejects.toMatchObject({
-      code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('503'),
-    });
+    await expect(git.push({ projectPath, remote: 'http' })).rejects.toMatchObject(unconfirmedPush());
     expect(await listRefs(httpRepo)).toBe('');
     await runGit(projectPath, ['remote', 'set-url', 'http', url]);
-    await expect(git.push({ projectPath, remote: 'http' })).rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+    await expect(git.push({ projectPath, remote: 'http' })).rejects.toMatchObject(unconfirmedPush());
     expect(await listRefs(httpRepo)).toBe(`refs/heads/main ${await oid(projectPath)}\n`);
 
     await runGit(projectPath, ['commit', '--allow-empty', '-m', 'Advance HTTP receiver']);
     await installHook(remote, 'update', 'exit 1');
     await addOriginPushUrls(projectPath, remote, url);
-    await expect(git.push({ projectPath })).rejects.toMatchObject({
-      code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringMatching(/hook declined[\s\S]*(?:protocol error|hung up)/i),
-    });
+    await expect(git.push({ projectPath })).rejects.toMatchObject(unconfirmedPush('[remote rejected] (hook declined)'));
     expect(await listRefs(remote)).toBe('');
     expect(await listRefs(httpRepo)).toBe(`refs/heads/main ${await oid(projectPath)}\n`);
   } finally { await server.stop(true); }

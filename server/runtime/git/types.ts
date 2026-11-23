@@ -25,7 +25,6 @@ export interface GitCommandOptions {
   disableOptionalLocks?: boolean;
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
-  onStderrTruncated?: () => void;
   env?: NodeJS.ProcessEnv;
 }
 

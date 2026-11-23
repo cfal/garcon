@@ -58,15 +58,18 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await runFixtureGit(project, 'push', 'origin', 'HEAD:refs/heads/release');
       await runFixtureGit(project, 'switch', 'release');
       const advanced = await refs();
+      const unconfirmed = 'Git did not confirm the push. Inspect the remote before pushing again.';
       expect(await rejectionOf(push('release'))).toMatchObject({
-        status: 503, body: { errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN', error: expect.stringContaining('non-fast-forward') },
+        status: 503, body: { errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN', error: unconfirmed + '\n[rejected] (non-fast-forward)' },
       });
       expect(await refs()).toBe(advanced);
 
       await runFixtureGit(project, 'switch', '-c', 'candidate');
       await runFixtureGit(project, 'push', 'origin', 'HEAD:refs/heads/refs/heads/candidate');
       const aliased = await refs();
-      expect(await rejectionOf(push('candidate'))).toMatchObject({ status: 503, body: { errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN' } });
+      expect(await rejectionOf(push('candidate'))).toMatchObject({
+        status: 503, body: { errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN', error: unconfirmed },
+      });
       expect(await refs()).toBe(aliased);
     }, { executionBackend, projectRoots: 'separate' });
   }, 60_000);
