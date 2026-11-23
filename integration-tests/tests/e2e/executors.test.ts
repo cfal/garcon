@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { openModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -143,9 +143,8 @@ test('normal app onboarding supports both directions and sends remote chat input
       await openModelSelector(fixture.page);
       await app.waitForButton('Chat Completions', { timeout: 20_000 });
       await app.clickButton('Chat Completions');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
-      await fixture.page.waitForSelector('[role="dialog"] [data-slot="model-selector-trigger"][aria-description^="Direct (Chat Completions) /"]');
+      await selectModelOption(fixture.page, 'Integration Echo');
+      await fixture.page.waitForSelector('[role="dialog"] [data-slot="model-selector-trigger"][title^="Direct (Chat Completions) /"]');
       await app.fill('[role="dialog"] input[aria-label="Project Path"]', inboundDirs.project);
       const browsing = fixture.page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/files/browse' && new URL(response.url()).searchParams.get('executorId') === inbound.id);
       await fixture.page.$eval('input[aria-label="Project Path"]', (element) => (element as HTMLInputElement).focus());
@@ -208,9 +207,9 @@ test('normal app onboarding supports both directions and sends remote chat input
         .some((button) => button.textContent?.trim() === 'Inbound Worker' && button.getAttribute('aria-pressed') === 'true'));
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
+      await selectModelOption(fixture.page, 'Integration Echo');
       await app.clickButton('Default Provider default effort');
+      await fixture.page.waitForSelector(`${commitModel} [data-slot="model-selector-trigger"][title*="Inbound Worker"][title*="Integration Echo"]`);
       const testModel = `${commitModel} button[aria-label="Test model"]:not(:disabled)`;
       await fixture.page.waitForSelector(testModel);
       await fixture.page.$eval(testModel, button => (button as HTMLButtonElement).click());

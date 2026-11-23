@@ -233,7 +233,7 @@ async function startNewOpenAiChat(fixture: ChromiumFixture): Promise<string> {
 
   const modelSelector = dialog.locator('[data-slot="model-selector-trigger"]');
   await modelSelector.waitFor({ state: 'visible' });
-  const selectedModel = (await modelSelector.getAttribute('aria-description')) ?? '';
+  const selectedModel = (await modelSelector.getAttribute('title')) ?? '';
   if (
     !selectedModel.includes('Direct (Chat Completions)') ||
     !selectedModel.includes('Integration Echo')

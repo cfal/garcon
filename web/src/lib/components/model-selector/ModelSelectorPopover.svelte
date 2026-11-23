@@ -233,7 +233,6 @@
 		{disabled}
 		{hidden}
 		title={selector.triggerTitle}
-		aria-description={selector.triggerTitle}
 		data-slot="model-selector-trigger"
 		data-composer-control={toolbarDisplay === undefined ? undefined : 'model'}
 		class="{triggerBaseClass} col-start-1 row-start-1">{label}</Trigger

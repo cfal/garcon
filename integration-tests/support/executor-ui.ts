@@ -18,6 +18,17 @@ export async function openModelSelector(page: Page, scope = '[role="dialog"]'): 
   }
 }
 
+export async function selectModelOption(page: Page, label: string): Promise<void> {
+  const option = await page.waitForFunction(name =>
+    [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"] button[role="option"]')]
+      .find(button => !button.disabled && button.textContent?.trim() === name)!, {}, label);
+  try {
+    await option.evaluate(button => button.click());
+  } finally {
+    await option.dispose();
+  }
+}
+
 export async function selectExecutor(page: Page, trigger: string, label: string): Promise<void> {
   await page.waitForSelector(trigger);
   await page.$eval(trigger, (element) => (element as HTMLButtonElement).click());

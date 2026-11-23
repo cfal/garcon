@@ -39,9 +39,11 @@ async function checkStandaloneModelFit(page: Page, trigger: Locator, align: 'sta
   await browserExpect(trigger).toHaveText(model!);
   await browserExpect(trigger).toBeFocused();
   expect(await trigger.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
-  expect(await trigger.evaluate((node, edge) => {
-    return Math.abs(node.getBoundingClientRect()[edge] - node.parentElement!.getBoundingClientRect()[edge]);
-  }, align === 'start' ? 'left' : 'right')).toBeLessThan(1);
+  expect(await trigger.evaluate((node, side) => {
+    const button = node.getBoundingClientRect();
+    const field = node.parentElement!.getBoundingClientRect();
+    return Math.abs(side === 'start' ? button.left - field.left : button.right - field.right);
+  }, align)).toBeLessThan(1);
   await constrain(null);
   await browserExpect(trigger).toHaveText(combined);
 }

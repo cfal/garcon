@@ -1,5 +1,5 @@
 import type { Page } from 'puppeteer-core';
-import { openModelSelector } from './executor-ui.js';
+import { openModelSelector, selectModelOption } from './executor-ui.js';
 import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
@@ -106,7 +106,7 @@ export class SpaDriver {
   }): Promise<void> {
     const directProviderSelected = await this.#page.evaluate(
       ({ selectedAgentLabel, modelLabel }) => {
-        const details = document.querySelector('[role="dialog"] [data-slot="model-selector-trigger"]')?.getAttribute('aria-description');
+        const details = document.querySelector('[role="dialog"] [data-slot="model-selector-trigger"]')?.getAttribute('title');
         return details?.includes(selectedAgentLabel) && details.includes(modelLabel);
       },
       {
@@ -119,8 +119,7 @@ export class SpaDriver {
     await openModelSelector(this.#page);
     await this.waitForButton(input.optionAgentLabel, { timeout: 30_000 });
     await this.clickButton(input.optionAgentLabel);
-    await this.waitForButton(input.modelLabel, { timeout: 30_000 });
-    await this.clickButton(input.modelLabel);
+    await selectModelOption(this.#page, input.modelLabel);
   }
 
   async #startDirectChat<TRequest>(input: {

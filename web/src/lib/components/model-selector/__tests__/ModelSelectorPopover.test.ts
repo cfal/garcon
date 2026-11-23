@@ -544,7 +544,7 @@ describe('ModelSelectorPopover', () => {
 			expect(document.querySelector('[data-slot="model-selector-executors"]')).toBeNull();
 		});
 		expect(screen.getByPlaceholderText('Filter models...')).toBeTruthy();
-		expect(trigger.getAttribute('aria-description')).toMatch(/Unavailable executor.*Claude.*Model 0/);
+		expect(screen.getByRole('button', { description: /Unavailable executor.*Claude.*Model 0/ })).toBe(trigger);
 		expect(onChange).not.toHaveBeenCalled();
 	});
 
