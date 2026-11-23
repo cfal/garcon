@@ -21,7 +21,7 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.325",
+    "@anthropic-ai/claude-code": "2.1.330",
     "@antithesishq/bombadil": "0.7.10",
     "@earendil-works/pi-coding-agent": "1.5.2",
     "@openai/codex": "0.171.0",
