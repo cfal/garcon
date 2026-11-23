@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import type { fitComposerToolbar } from '$lib/chat/composer/composer-toolbar-layout';
 
 function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 	let element: HTMLElement | null = focused;
@@ -34,7 +35,7 @@ export function handOffComposerMenuFocus(event: Event, afterClose?: () => void):
 
 export async function retainComposerToolbarFocus(
 	root: HTMLElement,
-	inline: ReadonlySet<string>,
+	layout: Pick<ReturnType<typeof fitComposerToolbar>, 'inline' | 'promptMenu' | 'settingsMenu'>,
 	closeOverflow: (group: string, afterClose: () => void) => void,
 ): Promise<void> {
 	const previous = document.activeElement;
@@ -56,10 +57,15 @@ export async function retainComposerToolbarFocus(
 		(
 			button ||
 			group.querySelector<HTMLElement>('[data-composer-overflow]:not(:disabled)') ||
-			group.querySelector<HTMLElement>('button:not(:disabled):not([hidden] button)')
+			group.querySelector<HTMLElement>('button:not(:disabled):not([hidden]):not([hidden] *)')
 		)?.focus({ preventScroll: true });
 	};
-	if (origin.overflow && origin.control && inline.has(origin.control)) {
+	const inline: ReadonlySet<string> = layout.inline;
+	const overflowDisappears = origin.group === 'prompt' ? !layout.promptMenu : !layout.settingsMenu;
+	if (
+		origin.overflow?.getAttribute('aria-expanded') === 'true' &&
+		(overflowDisappears || (origin.control && inline.has(origin.control)))
+	) {
 		closeOverflow(origin.group, focusReplacement);
 		return;
 	}

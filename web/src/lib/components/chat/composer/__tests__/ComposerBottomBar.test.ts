@@ -106,6 +106,23 @@ describe('ComposerBottomBar', () => {
 		);
 	});
 
+	it.each([
+		['More composer actions', 'Snippets'],
+		['More model settings', 'Thinking effort: High'],
+	])(
+		'keeps focus in the group when %s disappears without a highlighted item',
+		async (name, first) => {
+			const { container } = render(ComposerBottomBar, controls());
+			await resize(container, 115);
+			await fireEvent.click(screen.getByRole('button', { name }));
+			screen.getByRole('menu').focus();
+			await resize(container, 800);
+			await waitFor(() =>
+				expect(document.activeElement).toBe(screen.getByRole('button', { name: first })),
+			);
+		},
+	);
+
 	it('uses the same live executor choices in overflow and never refreshes on resize', async () => {
 		const offline = { ...remoteExecutor, availability: 'offline' as const };
 		const read = vi.fn(async () => [localExecutor, offline]);

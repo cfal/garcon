@@ -100,10 +100,10 @@
 	const groups = $derived(modelControlsLeft ? ['settings', 'prompt'] : ['prompt', 'settings']);
 	const sendLabel = $derived(prompt.isPromptTransformPending ? promptTransformStatus : sendTitle);
 	$effect.pre(() => {
-		const { inline } = layout;
+		const placement = layout;
 		void groups;
 		if (row)
-			void retainComposerToolbarFocus(row, inline, (group, afterClose) => {
+			void retainComposerToolbarFocus(row, placement, (group, afterClose) => {
 				(group === 'prompt' ? promptGroup : settingsGroup)?.closeOverflow(afterClose);
 			});
 	});
