@@ -1,5 +1,7 @@
 # What makes Garcon feel slow across browsers?
 
+For the subsequent fixes, paired production-build results and remaining bottlenecks, see the [optimization follow-up](webkit-spa-optimization-results.md).
+
 **We know a cause of switching, a cause of opening popups, and which code path is expensive during scrolling. They are not the same problem.** Warm single-line typing did not get progressively worse from one to twelve quiet panes. At twelve panes it mattered *which chats were receiving output*: in one WebKitGTK comparison, the foreground key-to-frame median was 49 ms quiet, 51 ms with other non-tiled chats receiving turns, and 159 ms when the receiving chats were tiled. A separate test found a full sidebar projection can consume a frame in *either* engine. No measurements here establish iPhone latency or a general JavaScriptCore vs V8 speed ratio.
 
 The useful question is: **how much work does one local interaction make the rest of the app do?** A small editor can replace a document stylesheet, a virtual list can synchronously measure newly mounted rows, and changing one chat preview can rebuild an index of every chat. Counting only visible DOM nodes, timing only event handlers, or measuring page load misses all three.

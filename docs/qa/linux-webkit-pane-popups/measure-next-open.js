@@ -15,9 +15,12 @@
       return;
     }
     const mark = `garcon:${popup}:input`;
-    performance.mark(mark);
+    // A listener installed from Inspector can run after the app has handled this input.
+    const now = performance.now();
+    const startTime = event.timeStamp > 0 && event.timeStamp <= now ? event.timeStamp : now;
+    performance.mark(mark, { startTime });
     listeners.abort();
-    const observer = new MutationObserver(() => {
+    function captureOpen() {
       if (!document.querySelector(selector)) return;
       observer.disconnect();
       clearTimeout(deadline);
@@ -25,9 +28,11 @@
       requestAnimationFrame(() => requestAnimationFrame(() => {
         performance.measure(`garcon:${popup}:two-frames`, mark);
       }));
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    }
+    const observer = new MutationObserver(captureOpen);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state'] });
     const deadline = setTimeout(() => observer.disconnect(), 5000);
+    captureOpen();
   }
   const options = { capture: true, signal: listeners.signal };
   window.addEventListener('pointerdown', onInput, options);
