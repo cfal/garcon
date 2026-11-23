@@ -11,19 +11,19 @@
 	import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
 	import AgentThinkingIcon from './AgentThinkingIcon.svelte';
 	import ComposerSettingMenu from './ComposerSettingMenu.svelte';
-	import type { ComposerAgentSettings } from './composer-toolbar-types';
+	import type { ComposerAgentSettings, ComposerControlPlacement } from './composer-toolbar-types';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
 		descriptor,
 		settings,
-		overflow,
+		placement,
 		align,
 		side,
 	}: {
 		descriptor: AgentSettingDescriptor;
 		settings: ComposerAgentSettings;
-		overflow: boolean;
+		placement: ComposerControlPlacement;
 		align: 'start' | 'end';
 		side: 'top' | 'bottom';
 	} = $props();
@@ -59,7 +59,7 @@
 	id={`agent:${descriptor.key}`}
 	{label}
 	value={summary}
-	{overflow}
+	{placement}
 	{align}
 	{side}
 	disabled={settings.disabled}

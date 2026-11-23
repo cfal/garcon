@@ -20,7 +20,7 @@ describe('AgentSettingsControls', () => {
 		render(AgentSettingControl, {
 			descriptor,
 			settings: { descriptors: [descriptor], defaults, envelope: defaults, onChange },
-			overflow: false,
+			placement: 'inline',
 			align: 'end',
 			side: 'top',
 		});
@@ -68,7 +68,7 @@ describe('AgentSettingsControls', () => {
 			render(AgentSettingControl, {
 				descriptor,
 				settings,
-				overflow: false,
+				placement: 'inline',
 				align: 'end',
 				side: 'top',
 			});

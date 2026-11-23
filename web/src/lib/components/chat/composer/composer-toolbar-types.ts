@@ -2,6 +2,8 @@ import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agen
 import type { JsonValue } from '$shared/json';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 
+export type ComposerControlPlacement = 'inline' | 'hidden' | 'menu';
+
 export interface ComposerAgentSettings {
 	descriptors: readonly AgentSettingDescriptor[];
 	envelope: AgentSettingsEnvelope;

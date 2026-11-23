@@ -10,6 +10,7 @@
 		DropdownMenuSubTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import MenuValueLabel from '$lib/components/shared/MenuValueLabel.svelte';
+	import type { ComposerControlPlacement } from './composer-toolbar-types';
 
 	let {
 		id,
@@ -17,7 +18,7 @@
 		value,
 		icon,
 		children,
-		overflow,
+		placement,
 		align,
 		side,
 		disabled = false,
@@ -31,7 +32,7 @@
 		value: string;
 		icon: Snippet;
 		children: Snippet;
-		overflow: boolean;
+		placement: ComposerControlPlacement;
 		align: 'start' | 'end';
 		side: 'top' | 'bottom';
 		disabled?: boolean;
@@ -42,9 +43,13 @@
 	} = $props();
 	const name = $derived(value ? `${label}: ${value}` : label);
 	const narrowViewport = new MediaQuery('(max-width: 640px)');
+	let open = $state(false);
+	$effect.pre(() => {
+		if (placement === 'hidden') open = false;
+	});
 </script>
 
-{#if overflow}
+{#if placement === 'menu'}
 	<DropdownMenuSub>
 		<DropdownMenuSubTrigger
 			{disabled}
@@ -67,8 +72,9 @@
 		</DropdownMenuSubContent>
 	</DropdownMenuSub>
 {:else}
-	<DropdownMenu>
+	<DropdownMenu bind:open>
 		<DropdownMenuTrigger
+			hidden={placement === 'hidden'}
 			{disabled}
 			aria-label={name}
 			title={name}
@@ -79,7 +85,15 @@
 		>
 			{@render icon()}
 		</DropdownMenuTrigger>
-		<DropdownMenuContent {align} {side} {onOpenAutoFocus} class="w-64 max-w-[calc(100vw-1rem)]">
+		<DropdownMenuContent
+			{align}
+			{side}
+			{onOpenAutoFocus}
+			onCloseAutoFocus={(event) => {
+				if (placement === 'hidden') event.preventDefault();
+			}}
+			class="w-64 max-w-[calc(100vw-1rem)]"
+		>
 			{@render children()}
 		</DropdownMenuContent>
 	</DropdownMenu>

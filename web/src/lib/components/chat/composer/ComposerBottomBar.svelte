@@ -103,8 +103,8 @@
 		const { inline } = layout;
 		void groups;
 		if (row)
-			void retainComposerToolbarFocus(row, inline, (group) => {
-				(group === 'prompt' ? promptGroup : settingsGroup)?.closeOverflow();
+			void retainComposerToolbarFocus(row, inline, (group, afterClose) => {
+				(group === 'prompt' ? promptGroup : settingsGroup)?.closeOverflow(afterClose);
 			});
 	});
 </script>

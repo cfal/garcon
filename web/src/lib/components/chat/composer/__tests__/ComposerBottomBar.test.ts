@@ -55,9 +55,11 @@ describe('ComposerBottomBar', () => {
 		const { container } = render(ComposerBottomBar, props);
 		await resize(container, 800);
 		expect(
-			[...container.querySelectorAll<HTMLElement>('[data-composer-group="prompt"] button')].map(
-				(button) => button.dataset.composerControl,
-			),
+			[
+				...container.querySelectorAll<HTMLElement>(
+					'[data-composer-group="prompt"] button:not([hidden])',
+				),
+			].map((button) => button.dataset.composerControl),
 		).toEqual(['snippet', 'image', 'refine', 'expand']);
 		const image = screen.getByRole('button', { name: 'Add image' });
 		await fireEvent.click(image);

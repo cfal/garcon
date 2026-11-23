@@ -3,6 +3,7 @@
 	import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '$lib/components/ui/dropdown-menu';
 	import ComposerSettingMenu from './ComposerSettingMenu.svelte';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
+	import type { ComposerControlPlacement } from './composer-toolbar-types';
 
 	let {
 		id,
@@ -10,7 +11,7 @@
 		options,
 		selected,
 		onSelect,
-		overflow,
+		placement,
 		align,
 		side,
 		disabled,
@@ -20,7 +21,7 @@
 		options: ComposerModeOption<T>[];
 		selected: T;
 		onSelect: (value: T) => void;
-		overflow: boolean;
+		placement: ComposerControlPlacement;
 		align: 'start' | 'end';
 		side: 'top' | 'bottom';
 		disabled: boolean;
@@ -32,7 +33,7 @@
 	{id}
 	{label}
 	value={active.label}
-	{overflow}
+	{placement}
 	{align}
 	{side}
 	{disabled}

@@ -24,6 +24,7 @@
 		service,
 		onSelect,
 		disabled = false,
+		hidden = false,
 		presentation = 'toolbar',
 		compact = false,
 		align = 'start',
@@ -35,6 +36,7 @@
 		service: 'files' | 'git' | 'agents';
 		onSelect: (executorId: string) => void;
 		disabled?: boolean;
+		hidden?: boolean;
 		presentation?: 'toolbar' | 'composer' | 'composer-menu' | 'field';
 		compact?: boolean;
 		align?: 'start' | 'end';
@@ -42,6 +44,10 @@
 		class?: string;
 	} = $props();
 	const narrowViewport = new MediaQuery('(max-width: 640px)');
+	let open = $state(false);
+	$effect.pre(() => {
+		if (hidden) open = false;
+	});
 
 	const executorLabel = $derived(
 		!executors.get(executorId) &&
@@ -123,11 +129,13 @@
 	</DropdownMenuSub>
 {:else if presentation === 'composer' ? executors.showComposerExecutor(executorId) : executors.hasRemoteExecutors}
 	<DropdownMenu
+		bind:open
 		onOpenChange={(open) => {
 			if (open) void executors.refresh();
 		}}
 	>
 		<DropdownMenuTrigger
+			{hidden}
 			class={cn(
 				'inline-flex h-8 min-w-0 max-w-40 items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',
 				presentation === 'composer' && [
@@ -155,7 +163,14 @@
 				/>
 			{/if}
 		</DropdownMenuTrigger>
-		<DropdownMenuContent {align} {side} class="max-w-[calc(100vw-1rem)]">
+		<DropdownMenuContent
+			{align}
+			{side}
+			onCloseAutoFocus={(event) => {
+				if (hidden) event.preventDefault();
+			}}
+			class="max-w-[calc(100vw-1rem)]"
+		>
 			{@render choices()}
 		</DropdownMenuContent>
 	</DropdownMenu>

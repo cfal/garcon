@@ -116,18 +116,23 @@ describe("Chromium New Chat composer layout", () => {
         expect(menuBox.x).toBeGreaterThanOrEqual(8);
         expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(382);
         await fixture.page.keyboard.press("Escape");
+        await addMenu.waitFor({ state: "detached" });
 
         markPhase("checking permission choices fit on a phone");
         const settingsMenu = bottomBar.getByRole("button", { name: "More model settings" });
         await settingsMenu.click();
-        await fixture.page.getByRole("menuitem", { name: /^Permission mode:/ }).press("ArrowRight");
-        const permissionMenu = fixture.page.getByRole("menu").filter({
-          has: fixture.page.getByRole("menuitemradio", { checked: true }),
-        }).last();
+        const settingsPopup = fixture.page.locator('[data-slot="dropdown-menu-content"]');
+        await waitForAnimations(settingsPopup);
+        await fixture.page.getByRole("menuitem", { name: /^Permission mode:/ }).click();
+        const permissionMenu = fixture.page.locator('[data-slot="dropdown-menu-sub-content"]');
+        await waitForAnimations(permissionMenu);
         const permissionBox = await bounds(permissionMenu);
         expect(permissionBox.x).toBeGreaterThanOrEqual(0);
         expect(permissionBox.x + permissionBox.width).toBeLessThanOrEqual(390);
-        await fixture.page.keyboard.press("ArrowLeft");
+        await permissionMenu.getByRole("menuitemradio", { name: /Plan Mode/ }).click();
+        await settingsPopup.waitFor({ state: "detached" });
+        await settingsMenu.click();
+        await fixture.page.getByRole("menuitem", { name: "Permission mode: Plan Mode" }).waitFor();
 
         markPhase("opening the compact model picker from overflow");
         await fixture.page.getByRole("menuitem", { name: /Agent \/ model.*Claude.*Opus/ }).click();
@@ -192,6 +197,7 @@ describe("Chromium New Chat composer layout", () => {
           exact: true,
         });
         const send = bottomBar.getByRole("button", { name: "Start session" });
+        await expectLocator(longModelTrigger).toBeFocused();
         const [sendBox, longModelTriggerBox] = await Promise.all([bounds(send), bounds(longModelTrigger)]);
         expect(longModelTriggerBox.width).toBeGreaterThanOrEqual(90);
         expect(longModelTriggerBox.y).toBeCloseTo(sendBox.y, 0);
@@ -226,11 +232,8 @@ describe("Chromium New Chat composer layout", () => {
         await bottomBar
           .getByRole("button", { name: "Open expanded composer" })
           .waitFor({ state: "visible" });
-        expect(
-          await bottomBar
-            .getByRole("button", { name: "More composer actions" })
-            .count(),
-        ).toBe(0);
+        await expectLocator(bottomBar.getByRole("button", { name: "Add image" })).toBeVisible();
+        await expectLocator(addTrigger).toHaveCount(0);
         await longModelTrigger.click();
         const modelPopover = fixture.page.locator(
           '[data-slot="popover-content"]',
@@ -260,6 +263,19 @@ describe("Chromium New Chat composer layout", () => {
         await fixture.page.keyboard.press("Escape");
         await modelPopover.waitFor({ state: "detached" });
         await expectLocator(longModelTrigger).toBeFocused();
+        markPhase("folding the focused permission picker without activating Project Path");
+        const permissionTrigger = bottomBar.getByRole("button", { name: /^Permission mode:/ });
+        await permissionTrigger.press("ArrowDown");
+        await fixture.page.getByRole("menuitemradio").first().focus();
+        await bottomBar.evaluate((bar) => { bar.style.width = "196px"; });
+        await expectLocator(settingsMenu).toBeFocused();
+        await expectLocator(fixture.page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
+        markPhase("returning focus to a newly inline editing action");
+        await addTrigger.click();
+        await fixture.page.getByRole("menuitem", { name: "Open expanded composer" }).focus();
+        await bottomBar.evaluate((bar) => { bar.style.width = "350px"; });
+        await expectLocator(bottomBar.getByRole("button", { name: "Open expanded composer" })).toBeFocused();
+        await expectLocator(fixture.page.getByRole("menu")).toHaveCount(0);
         expect(await bottomBar.evaluate((bar) => bar.scrollWidth <= bar.clientWidth)).toBe(true);
         fixture.assertNoBrowserErrors();
       },

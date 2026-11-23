@@ -7,7 +7,13 @@ function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 		control ??= element.closest<HTMLElement>('[data-composer-control]')?.dataset.composerControl;
 		if (root.contains(element)) {
 			const group = element.closest<HTMLElement>('[data-composer-group]')?.dataset.composerGroup;
-			return group ? { group, control, overflow: element.dataset.composerOverflow } : null;
+			return group
+				? {
+						group,
+						control,
+						overflow: element.hasAttribute('data-composer-overflow') ? element : null,
+					}
+				: null;
 		}
 		const menuId: string | undefined = element.closest('[role="menu"]')?.id;
 		const trigger: HTMLElement | null = menuId
@@ -19,17 +25,45 @@ function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 	return null;
 }
 
+export function handOffComposerMenuFocus(event: Event, afterClose?: () => void): void {
+	if (!afterClose) return;
+	event.preventDefault();
+	// The parent focus scope resumes after the close-autofocus handler returns.
+	queueMicrotask(afterClose);
+}
+
 export async function retainComposerToolbarFocus(
 	root: HTMLElement,
 	inline: ReadonlySet<string>,
-	closeOverflow: (group: string) => void,
+	closeOverflow: (group: string, afterClose: () => void) => void,
 ): Promise<void> {
 	const previous = document.activeElement;
 	if (!(previous instanceof HTMLElement)) return;
 	const origin = focusOrigin(root, previous);
 	if (!origin) return;
-	const promoted = origin.overflow && origin.control && inline.has(origin.control);
-	if (promoted) closeOverflow(origin.group);
+	const focusReplacement = () => {
+		const group = root.querySelector<HTMLElement>(`[data-composer-group="${origin.group}"]`);
+		if (!root.isConnected || !group) return;
+		const control =
+			origin.control &&
+			group.querySelector<HTMLElement>(`[data-composer-control="${CSS.escape(origin.control)}"]`);
+		const button =
+			control &&
+			!control.closest('[hidden]') &&
+			(control.matches('button:not(:disabled)')
+				? control
+				: control.querySelector<HTMLButtonElement>('button:not(:disabled)'));
+		(
+			button ||
+			group.querySelector<HTMLElement>('[data-composer-overflow]:not(:disabled)') ||
+			group.querySelector<HTMLElement>('button:not(:disabled):not([hidden] button)')
+		)?.focus({ preventScroll: true });
+	};
+	if (origin.overflow && origin.control && inline.has(origin.control)) {
+		closeOverflow(origin.group, focusReplacement);
+		return;
+	}
+	const folding = !origin.overflow && origin.control && !inline.has(origin.control);
 	await tick();
 	const current = document.activeElement;
 	if (
@@ -37,22 +71,9 @@ export async function retainComposerToolbarFocus(
 		(current !== previous && current !== document.body && current?.isConnected)
 	)
 		return;
-	if (!promoted && previous.isConnected && !previous.closest('[hidden]')) {
+	if (!folding && previous.isConnected && !previous.closest('[hidden]')) {
 		if (current !== previous) previous.focus({ preventScroll: true });
 		return;
 	}
-	const group = root.querySelector<HTMLElement>(`[data-composer-group="${origin.group}"]`);
-	if (!group) return;
-	const control =
-		origin.control &&
-		group.querySelector<HTMLElement>(`[data-composer-control="${CSS.escape(origin.control)}"]`);
-	const target =
-		control &&
-		!control.closest('[hidden]') &&
-		(control.matches('button:enabled') ? control : control.querySelector('button:enabled'));
-	(
-		target ||
-		group.querySelector<HTMLElement>('[data-composer-overflow]:not(:disabled)') ||
-		group.querySelector<HTMLElement>('button:not(:disabled):not([hidden] button)')
-	)?.focus({ preventScroll: true });
+	focusReplacement();
 }

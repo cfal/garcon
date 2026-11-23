@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick, type ComponentProps } from 'svelte';
+	import type { ComponentProps } from 'svelte';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import Bot from '@lucide/svelte/icons/bot';
@@ -20,7 +20,12 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import AgentSettingControl from './AgentSettingControl.svelte';
 	import ComposerModeControl from './ComposerModeControl.svelte';
-	import type { ComposerAgentSettings, ComposerExecutor } from './composer-toolbar-types';
+	import type {
+		ComposerAgentSettings,
+		ComposerControlPlacement,
+		ComposerExecutor,
+	} from './composer-toolbar-types';
+	import { handOffComposerMenuFocus } from './composer-toolbar-focus';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -57,7 +62,7 @@
 	let menuTrigger = $state<HTMLElement | null>(null);
 	let picker = $state<ComposerModelSelector>();
 	let menuOpen = $state(false);
-	let handoff = false;
+	let handoff: (() => void) | undefined;
 	const folded = $derived(ids.filter((id) => !layout.inline.has(id)));
 	const hiddenBypass = $derived(
 		folded.includes('permission') &&
@@ -69,25 +74,24 @@
 		[m.chat_composer_more_settings(), hiddenBypass?.label].filter(Boolean).join(': '),
 	);
 
-	export function closeOverflow(): void {
-		handoff = true;
-		menuOpen = false;
-	}
+	$effect.pre(() => {
+		if (!folded.length) menuOpen = false;
+	});
 
-	async function openModel() {
-		closeOverflow();
-		await tick();
-		picker?.openPicker();
+	export function closeOverflow(afterClose: () => void): void {
+		handoff = afterClose;
+		menuOpen = false;
 	}
 </script>
 
-{#snippet control(id: ComposerSettingId, overflow: boolean)}
+{#snippet control(id: ComposerSettingId, placement: ComposerControlPlacement)}
 	{#if id === 'executor' && executor}
 		<ExecutorSelector
 			{...executor}
 			{disabled}
 			service="agents"
-			presentation={overflow ? 'composer-menu' : 'composer'}
+			presentation={placement === 'menu' ? 'composer-menu' : 'composer'}
+			hidden={placement === 'hidden'}
 			compact={!layout.fullExecutor}
 			{align}
 			{side}
@@ -99,7 +103,7 @@
 			options={thinkingOptions}
 			selected={selectedThinking}
 			onSelect={onThinkingSelect}
-			{overflow}
+			{placement}
 			{align}
 			{side}
 			{disabled}
@@ -111,14 +115,14 @@
 			options={permissionOptions}
 			selected={selectedPermission}
 			onSelect={onPermissionSelect}
-			{overflow}
+			{placement}
 			{align}
 			{side}
 			{disabled}
 		/>
-	{:else if id === 'model' && overflow}
+	{:else if id === 'model' && placement === 'menu'}
 		<DropdownMenuItem
-			onSelect={() => void openModel()}
+			onSelect={() => closeOverflow(() => picker?.openPicker())}
 			disabled={model?.disabled || disabled}
 			textValue={m.chat_composer_model()}
 			data-composer-control="model"
@@ -131,13 +135,14 @@
 		{@const descriptor = agentSettings.descriptors.find((item) => `agent:${item.key}` === id)}
 		{#if descriptor}
 			<svelte:boundary>
-				<AgentSettingControl settings={agentSettings} {descriptor} {overflow} {align} {side} />
+				<AgentSettingControl settings={agentSettings} {descriptor} {placement} {align} {side} />
 				{#snippet failed()}{/snippet}
 			</svelte:boundary>
 		{/if}
 	{/if}
 {/snippet}
 
+<!-- Hidden triggers remain valid focus anchors for an enclosing dialog during resize. -->
 {#each ids as id (id)}
 	{#if id === 'model' && model}
 		<div
@@ -156,42 +161,39 @@
 				overflowAnchor={layout.inline.has(id) ? null : menuTrigger}
 			/>
 		</div>
-	{:else if layout.inline.has(id)}
-		{@render control(id, false)}
+	{:else}
+		{@render control(id, layout.inline.has(id) ? 'inline' : 'hidden')}
 	{/if}
 {/each}
-{#if folded.length}
-	<DropdownMenu
-		bind:open={menuOpen}
-		onOpenChange={(open) => {
-			if (open) {
-				handoff = false;
-				picker?.dismissPicker();
-			}
-		}}
+<DropdownMenu
+	bind:open={menuOpen}
+	onOpenChange={(open) => {
+		if (open) {
+			handoff = undefined;
+			picker?.dismissPicker();
+		}
+	}}
+>
+	<DropdownMenuTrigger
+		bind:ref={menuTrigger}
+		hidden={!folded.length}
+		data-composer-overflow={folded.length ? 'settings' : undefined}
+		title={menuLabel}
+		aria-label={menuLabel}
+		class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border focus-visible:ring-2 focus-visible:ring-ring {hiddenBypass?.toneClass ??
+			'border-border bg-background hover:bg-muted'}"
 	>
-		<DropdownMenuTrigger
-			bind:ref={menuTrigger}
-			data-composer-overflow="settings"
-			title={menuLabel}
-			aria-label={menuLabel}
-			class="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border focus-visible:ring-2 focus-visible:ring-ring {hiddenBypass?.toneClass ??
-				'border-border bg-background hover:bg-muted'}"
-		>
-			{#if hiddenBypass}<ShieldAlert class="size-4" />{:else}<Ellipsis class="size-4" />{/if}
-		</DropdownMenuTrigger>
-		<DropdownMenuContent
-			{align}
-			{side}
-			sideOffset={8}
-			collisionPadding={8}
-			class="w-64 max-w-[calc(100vw-1rem)]"
-			getFocusReturnTarget={() => menuTrigger}
-			onCloseAutoFocus={(event) => {
-				if (handoff) event.preventDefault();
-			}}
-		>
-			{#each folded as id (id)}{@render control(id, true)}{/each}
-		</DropdownMenuContent>
-	</DropdownMenu>
-{/if}
+		{#if hiddenBypass}<ShieldAlert class="size-4" />{:else}<Ellipsis class="size-4" />{/if}
+	</DropdownMenuTrigger>
+	<DropdownMenuContent
+		{align}
+		{side}
+		sideOffset={8}
+		collisionPadding={8}
+		class="w-64 max-w-[calc(100vw-1rem)]"
+		getFocusReturnTarget={() => menuTrigger}
+		onCloseAutoFocus={(event) => handOffComposerMenuFocus(event, handoff)}
+	>
+		{#each folded as id (id)}{@render control(id, 'menu')}{/each}
+	</DropdownMenuContent>
+</DropdownMenu>
