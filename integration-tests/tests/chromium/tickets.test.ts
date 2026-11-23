@@ -89,16 +89,26 @@ describe("Chromium Tickets interaction", () => {
       await page.goto(integration.garcon.baseUrl);
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
-      await page.getByRole("button", { name: "New ticket", exact: true }).click();
       const dialog = page.getByRole("dialog");
-      await dialog.locator("summary", { hasText: "More details" }).evaluate(async (control: HTMLElement) => {
-        control.click();
-        await new Promise(requestAnimationFrame);
-        control.closest('[role="dialog"]')!.getAnimations().find(animation => animation.id === "dialog-resize")!.pause();
-      });
-      await page.keyboard.press("Escape");
-      await browserExpect(page.locator('[data-slot="dialog-content"]')).toHaveCount(0);
-      await browserExpect(page.locator("body")).not.toHaveCSS("pointer-events", "none");
+      for (const dirty of [false, true]) {
+        await page.getByRole("button", { name: "New ticket", exact: true }).click();
+        if (dirty) await dialog.getByLabel("Title", { exact: true }).fill("Synthetic retained draft");
+        const resize = await dialog.locator("summary", { hasText: "More details" }).evaluateHandle(async (control: HTMLElement) => {
+          control.click();
+          await new Promise(requestAnimationFrame);
+          const animation = control.closest('[role="dialog"]')!.getAnimations().find(animation => animation.id === "dialog-resize")!;
+          animation.pause();
+          return animation;
+        });
+        await page.keyboard.press("Escape");
+        if (dirty) {
+          await browserExpect.poll(() => resize.evaluate(animation => animation.playState)).toBe("idle");
+          await dialog.getByRole("button", { name: "Keep draft and close", exact: true }).click();
+        }
+        await resize.dispose();
+        await browserExpect(page.locator('[data-slot="dialog-content"]')).toHaveCount(0);
+        await browserExpect(page.locator("body")).not.toHaveCSS("pointer-events", "none");
+      }
     });
   });
 
