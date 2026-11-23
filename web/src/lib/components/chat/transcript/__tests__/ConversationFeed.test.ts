@@ -17,6 +17,7 @@ import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-st
 import { AssistantMessage } from '$shared/chat-types';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
 import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
+import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
 import { ConversationToolGroupState } from '../ConversationToolGroupState.svelte.js';
 import { CHAT_FEED_ANNOUNCEMENT_BATCH_MS } from '../conversation-feed-announcer.js';
 
@@ -649,6 +650,30 @@ describe('ConversationFeed', () => {
 		expect(mountedTranscriptRows).toBeGreaterThan(0);
 		expect(mountedItems).toBeLessThan(120);
 		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
+	});
+
+	it('resolves row attachments only for newly rendered keys on a range-only scroll', async () => {
+		const item = vi.spyOn(ConversationFeedVirtualController.prototype, 'item');
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'local-truncation',
+		});
+		const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]')!;
+		const sizer = container.querySelector<HTMLElement>('[data-chat-virtual-sizer]')!;
+		sizer.getBoundingClientRect = () => new DOMRect(0, -viewport.scrollTop, 900, 0);
+		const rows = () => [...sizer.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')];
+		await tick();
+		const before = new Set(rows());
+		item.mockClear();
+
+		viewport.scrollTop = 380;
+		await fireEvent.scroll(viewport);
+		const after = rows();
+		const added = after.filter((row) => !before.has(row));
+		expect(added.length).toBeGreaterThan(0);
+		expect(added.length).toBeLessThan(after.length);
+		expect(item.mock.calls.map(([key]) => key).sort()).toEqual(
+			added.map((row) => row.dataset.chatVirtualItem).sort(),
+		);
 	});
 
 	it('bounds a twenty-thousand-entry payload before virtual projection', async () => {

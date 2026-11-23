@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createVirtualListHarness } from './virtual-list-test-harness';
 
 const active: Array<ReturnType<typeof createVirtualListHarness>> = [];
@@ -764,12 +764,13 @@ describe('VirtualListController', () => {
 
 		test.environment.observer.emit(first.element, 90);
 		test.environment.observer.emit(second.element, -10);
-		test.environment.observer.emit(second.element, 40);
 		expect(test.controller.measuredSize('a')).toBe(40);
+		test.environment.observer.emit(second.element, 44);
+		expect(test.controller.measuredSize('a')).toBe(44);
 		expect(test.records.at(-1)).toMatchObject({
 			source: 'resize',
 			ignoredEntries: 2,
-			published: false,
+			published: true,
 		});
 		second.detach?.();
 	});
@@ -1080,7 +1081,49 @@ describe('VirtualListController', () => {
 		expect(test.controller.snapshot.revision).toBe(revision);
 	});
 
-	it('publishes no new revision for an unchanged observer measurement', () => {
+	it('records a first measurement matching the estimate without republishing geometry', () => {
+		const test = harness();
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'hidden'],
+			estimates: [40, 0],
+			anchor: { kind: 'none' },
+		});
+		const snapshot = test.controller.snapshot;
+		test.mountItem('a', 40);
+		test.mountItem('hidden', 0);
+		test.environment.flushMicrotasks();
+
+		expect(test.controller.measuredSize('a')).toBe(40);
+		expect(test.controller.measuredSize('hidden')).toBe(0);
+		expect(test.records.at(-1)).toMatchObject({ source: 'mount', published: false });
+		expect(test.controller.snapshot).toBe(snapshot);
+	});
+
+	it('uses observer sizes when delivered first and otherwise measures uncached mounts before paint', () => {
+		const test = harness();
+		test.controller.apply({
+			kind: 'update',
+			keys: ['observed', 'unobserved'],
+			estimates: [32, 32],
+			anchor: { kind: 'none' },
+		});
+		test.controller.setScrollActivity('dragging');
+		const observedRead = vi.fn(() => 41);
+		const fallbackRead = vi.fn(() => 53);
+		const observed = test.mountItem('observed', observedRead);
+		test.mountItem('unobserved', fallbackRead);
+		test.environment.observer.emit(observed.element, 41);
+		test.environment.flushMicrotasks();
+
+		expect(observedRead).not.toHaveBeenCalled();
+		expect(fallbackRead).toHaveBeenCalledTimes(1);
+		expect(test.controller.measuredSize('observed')).toBe(41);
+		expect(test.controller.measuredSize('unobserved')).toBe(53);
+		expect(test.writes).toBe(0);
+	});
+
+	it('skips viewport reads and transactions for a settled observer echo of a mount', () => {
 		const test = harness();
 		test.controller.apply({
 			kind: 'update',
@@ -1090,12 +1133,49 @@ describe('VirtualListController', () => {
 		});
 		const mounted = test.mountItem('a', 40);
 		test.environment.flushMicrotasks();
-		const revision = test.controller.snapshot.revision;
+		const snapshot = test.controller.snapshot;
+		const readViewport = vi.spyOn(test.viewport, 'getBoundingClientRect');
+		const recordCount = test.records.length;
 
 		test.environment.observer.emit(mounted.element, 40);
 
-		expect(test.controller.snapshot.revision).toBe(revision);
-		expect(test.records.at(-1)).toMatchObject({ source: 'resize', published: false });
+		expect(test.controller.snapshot).toBe(snapshot);
+		expect(readViewport).not.toHaveBeenCalled();
+		expect(test.records).toHaveLength(recordCount);
+		test.environment.observer.emit(mounted.element, 56);
+		expect(test.controller.measuredSize('a')).toBe(56);
+		expect(test.records.at(-1)).toMatchObject({ source: 'resize', published: true });
+	});
+
+	it('still reconciles an unchanged observer delivery when a prepend awaits settlement', () => {
+		const test = harness({ viewportSize: 80 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['b', 'c'],
+			estimates: [80, 80],
+			anchor: { kind: 'none' },
+		});
+		const mounted = test.mountItem('b', 80);
+		test.environment.flushMicrotasks();
+		test.setPhysicalScrollTop(40);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update',
+			keys: ['a', 'b', 'c'],
+			estimates: [20, 80, 80],
+			anchor: { kind: 'item', key: 'b' },
+		});
+		const readingOffset = () => test.controller.snapshot.positions.itemAt(1)!.start - test.viewport.scrollTop;
+		const before = readingOffset();
+		test.environment.observer.emit(mounted.element, 80);
+		expect(test.writes).toBe(0);
+
+		test.controller.setScrollActivity('idle');
+		test.environment.observer.emit(mounted.element, 80);
+		test.environment.flushMicrotasks();
+		expect(test.writes).toBe(1);
+		expect(test.records.at(-1)).toMatchObject({ source: 'resize', deviationAfter: 0 });
+		expect(readingOffset()).toBe(before);
 	});
 
 	it('reports visible leading content as reachable when it cannot align to the viewport top', () => {
