@@ -69,6 +69,8 @@ A faster projection helps both engines. It does not make sorting 2,000 chats fre
 
 ## Remaining work
 
+The [follow-up tall-feed and pane-fullscreen experiments](webkit-scroll-and-fullscreen.md) isolate real-row entry cost, record a production GTK Inspector trace, and check what survives hiding and restoring eleven panes. These CPU-only results narrow the physical-device work below; they do not replace it.
+
 The most useful next trace is the **longest tall-feed scroll frame** on GPU-backed Linux: attribute time to synchronous first-row content layout, Svelte mount, style, paint and the layer compositor, and watch the actual reading anchor. For switching, separate the time spent waiting for the right draft from editor construction and shared composer placement. Recheck busy typing with actual token streaming and realistic tool/code rows. On a physical iPhone test the compact single-chat path, keyboard, IME, VoiceOver, and a fling through a prepend while another chat updates. A narrow desktop viewport does not establish iOS performance.
 
 Behavior was checked independently of timing: 63 Chromium regressions across composer, message selection, popup hit testing, virtualized scrolling and paging, retained transcripts, sidebar layout/reordering, and Files polling. Playwright WebKit 27.2 passed login, submission, reload, and draft restoration at 1280 and 390 px. Neither test emulates the reporter's GPU, Brave build or iPhone display stack.

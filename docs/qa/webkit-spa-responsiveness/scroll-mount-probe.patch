@@ -1,0 +1,226 @@
+--- /dev/null
++++ b/web/src/lib/components/chat/transcript/scroll-probe.ts
+@@ -0,0 +1,95 @@
++import { emptyScrollCounters } from '$lib/virt/virtual-list-scroll-counters';
++
++type Size = [width: number, height: number];
++type Table = Record<string, Size>;
++type Mode = 'normal' | 'retained' | 'light-rows';
++const host = typeof window === 'undefined' ? undefined : window as Window & {
++	__garconScrollProbeSizes?: Table;
++	__garconScrollProbe?: unknown;
++};
++const query = new URLSearchParams(host?.location.search);
++const selected = query.get('scrollProbe');
++export const scrollProbeMode: Mode =
++	selected === 'retained' || selected === 'light-rows' ? selected : 'normal';
++export const scrollProbeCounters = query.get('scrollProbeCounters') === '1'
++	? { ...emptyScrollCounters } : undefined;
++export const probeEntryLimit = 150;
++const table: Table = Object.create(null);
++function importSizes() {
++	const sizes = host?.__garconScrollProbeSizes;
++	if (!sizes) return;
++	for (const [key, size] of Object.entries(sizes)) {
++		if (Array.isArray(size) && size.length === 2 && Number.isFinite(size[0]) && size[0] > 0 &&
++			Number.isFinite(size[1]) && size[1] >= 0) table[key] = [size[0], size[1]];
++	}
++}
++let armed = false;
++
++export function enteringRowSize(key: string): Size | undefined {
++	if (!armed) return;
++	const size = table[key];
++	if (scrollProbeCounters) {
++		if (size) scrollProbeCounters.lightMounts++;
++		else scrollProbeCounters.lightMisses++;
++	}
++	return size;
++}
++
++function visibleSizers() {
++	return [...document.querySelectorAll<HTMLElement>('[data-chat-virtual-sizer]')].filter(
++		s => (s.closest<HTMLElement>('[data-chat-scroll-viewport]')?.clientHeight ?? 0) > 0,
++	);
++}
++function wrappers(sizer: HTMLElement) {
++	return [...sizer.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')];
++}
++function info() {
++	return {
++		mode: scrollProbeMode, countersEnabled: Boolean(scrollProbeCounters), armed,
++		tableKeys: Object.keys(table).length, entryLimit: probeEntryLimit,
++		feeds: visibleSizers().map(s => {
++			const mounted = wrappers(s);
++			return {
++				entries: Number(s.dataset.chatTranscriptEntryCount), model: Number(s.dataset.chatVirtualModelCount),
++				mounted: mounted.length, placeholders: s.querySelectorAll('[data-scroll-probe-light]').length,
++				missingMountedSizes: scrollProbeMode === 'light-rows'
++					? mounted.filter(row => !table[row.dataset.chatVirtualItem!]).length : 0,
++			};
++		}),
++	};
++}
++if (host) host.__garconScrollProbe = {
++	info,
++	reset() { if (scrollProbeCounters) Object.assign(scrollProbeCounters, emptyScrollCounters); },
++	counters() { return scrollProbeCounters ? {...scrollProbeCounters} : null; },
++	capture() {
++		if (scrollProbeMode !== 'normal') throw Error('Collect sizes on a normal diagnostic page.');
++		for (const s of visibleSizers()) for (const row of wrappers(s)) {
++			const { width, height } = row.getBoundingClientRect();
++			if (width > 0) table[row.dataset.chatVirtualItem!] = [width, height];
++		}
++		return {...table};
++	},
++	arm() {
++		importSizes();
++		if (scrollProbeMode !== 'light-rows' || !Object.keys(table).length)
++			throw Error('Assign the captured normal table to window.__garconScrollProbeSizes before arm().');
++		const feeds = info().feeds;
++		if (feeds.length !== 1 || !feeds[0].mounted || feeds[0].entries > probeEntryLimit)
++			throw Error('Arm a single settled, visible synthetic feed of at most 150 entries.');
++		armed = true;
++		return info();
++	},
++	validate() {
++		let checked = 0, missing = 0, maxWidthError = 0, maxHeightError = 0;
++		for (const s of visibleSizers()) for (const row of wrappers(s)) {
++			const size = table[row.dataset.chatVirtualItem!];
++			if (!size) { missing++; continue; }
++			const { width, height } = row.getBoundingClientRect();
++			checked++;
++			maxWidthError = Math.max(maxWidthError, Math.abs(width - size[0]));
++			maxHeightError = Math.max(maxHeightError, Math.abs(height - size[1]));
++		}
++		return { checked, missing, maxWidthError, maxHeightError };
++	},
++};
+--- a/web/src/lib/components/chat/transcript/ConversationFeed.svelte
++++ b/web/src/lib/components/chat/transcript/ConversationFeed.svelte
+@@ -42,0 +43 @@
++	import { probeEntryLimit, scrollProbeMode } from './scroll-probe';
+@@ -353 +353,0 @@
+-	const renderedIndexes = $derived(virtualController.renderedIndexes(virtualSnapshot));
+@@ -354,0 +355,9 @@
++	const positionCount = $derived(positions.count);
++	const allProbeIndexes = $derived(
++		scrollProbeMode === 'retained' && isVisible && chatState.entries.length <= probeEntryLimit
++			? Array.from({ length: positionCount }, (_, i) => i) : null,
++	);
++	const renderedIndexes = $derived.by(() => {
++		const usual = virtualController.renderedIndexes(virtualSnapshot);
++		return allProbeIndexes && virtualSnapshot.visibleRange ? allProbeIndexes : usual;
++	});
+--- a/web/src/lib/components/chat/transcript/ConversationFeedVirtualController.svelte.ts
++++ b/web/src/lib/components/chat/transcript/ConversationFeedVirtualController.svelte.ts
+@@ -134,0 +135 @@
++			probeCounters: scrollProbeCounters,
+@@ -976,0 +978 @@
++import { scrollProbeCounters } from './scroll-probe';
+--- a/web/src/lib/components/chat/transcript/ConversationFeedVirtualItem.svelte
++++ b/web/src/lib/components/chat/transcript/ConversationFeedVirtualItem.svelte
+@@ -1,0 +2,2 @@
++	import { untrack } from 'svelte';
++	import { enteringRowSize, scrollProbeMode } from './scroll-probe';
+@@ -75,0 +78,6 @@
++	// The keyed component chooses only at creation, so arming leaves surviving real rows intact.
++	const probeSize = scrollProbeMode === 'light-rows'
++		? untrack(() => item.kind === 'transcript' || item.kind === 'tool-group'
++			? enteringRowSize(item.key) : undefined)
++		: undefined;
++
+@@ -137,0 +146,9 @@
++{:else if probeSize && (item.kind === 'transcript' || item.kind === 'tool-group')}
++	<div
++		data-scroll-probe-light
++		data-chat-row-id={item.kind === 'transcript' && item.item.kind === 'message' ? item.item.id : undefined}
++		data-chat-anchor-id={item.kind === 'transcript' && item.item.kind === 'message' && item.item.ordinal !== undefined
++			? item.item.id : undefined}
++		data-chat-message-type={item.kind === 'transcript' && item.item.kind === 'message' ? item.item.message.type : undefined}
++		style:height={`${probeSize[1]}px`}
++	></div>
+--- /dev/null
++++ b/web/src/lib/virt/virtual-list-scroll-counters.ts
+@@ -0,0 +1,9 @@
++export const emptyScrollCounters = {
++	driverScrolls: 0, driverScrollMs: 0, maxDriverScrollMs: 0,
++	geometryReads: 0, geometryReadMs: 0, snapshots: 0,
++	mountBatches: 0, mountRows: 0, mountReadMs: 0, maxMountReadMs: 0,
++	offsetHeightReads: 0, attaches: 0, detaches: 0,
++	resizeBatches: 0, resizeFirstRows: 0, resizeEchoRows: 0, resizeChangedRows: 0,
++	lightMounts: 0, lightMisses: 0,
++};
++export type VirtualScrollCounters = typeof emptyScrollCounters;
+--- a/web/src/lib/virt/virtual-list-controller.svelte.ts
++++ b/web/src/lib/virt/virtual-list-controller.svelte.ts
+@@ -2,0 +3 @@
++import type { VirtualScrollCounters } from './virtual-list-scroll-counters';
+@@ -22,0 +24 @@
++	readonly probeCounters?: VirtualScrollCounters;
+@@ -39,0 +42 @@
++		const counters = options.probeCounters;
+@@ -45,0 +49 @@
++				if (counters) counters.snapshots++;
+@@ -51,0 +56 @@
++			probeCounters: counters,
+@@ -57 +62,12 @@
+-			onResize: (measurements) => this.#transaction.observeSizes(measurements),
++			onResize: (measurements) => {
++				if (counters) {
++					counters.resizeBatches++;
++					for (const { key, size } of measurements) {
++						const previous = this.#transaction.geometry.measuredSize(key);
++						if (previous === undefined) counters.resizeFirstRows++;
++						else if (previous === size) counters.resizeEchoRows++;
++						else counters.resizeChangedRows++;
++					}
++				}
++				this.#transaction.observeSizes(measurements);
++			},
+--- a/web/src/lib/virt/virtual-list-dom-driver.ts
++++ b/web/src/lib/virt/virtual-list-dom-driver.ts
+@@ -2,0 +3 @@
++import type { VirtualScrollCounters } from './virtual-list-scroll-counters';
+@@ -18,0 +20 @@
++	readonly probeCounters?: VirtualScrollCounters;
+@@ -72,0 +75,2 @@
++		const counters = this.options.probeCounters;
++		const start = counters ? performance.now() : 0;
+@@ -81,0 +86,4 @@
++		if (counters) {
++			counters.geometryReads++;
++			counters.geometryReadMs += performance.now() - start;
++		}
+@@ -194,0 +203,2 @@
++		const counters = this.options.probeCounters;
++		if (counters) counters.attaches++;
+@@ -204,0 +215 @@
++			if (counters) counters.detaches++;
+@@ -218,0 +230,2 @@
++			const counters = this.options.probeCounters;
++			const start = counters ? performance.now() : 0;
+@@ -224,0 +238,7 @@
++			if (counters && measurements.length > 0) {
++				const elapsed = performance.now() - start;
++				counters.mountBatches++;
++				counters.mountRows += measurements.length;
++				counters.mountReadMs += elapsed;
++				counters.maxMountReadMs = Math.max(counters.maxMountReadMs, elapsed);
++			}
+@@ -263,0 +284,2 @@
++		if (this.options.probeCounters && !this.options.measureElement &&
++			entry?.borderBoxSize?.[0]?.blockSize == null) this.options.probeCounters.offsetHeightReads++;
+@@ -297 +319,11 @@
+-	#handleScroll = (): void => this.options.onScroll();
++	#handleScroll = (): void => {
++		const counters = this.options.probeCounters;
++		if (!counters) return this.options.onScroll();
++		const start = performance.now();
++		try { this.options.onScroll(); } finally {
++			const elapsed = performance.now() - start;
++			counters.driverScrolls++;
++			counters.driverScrollMs += elapsed;
++			counters.maxDriverScrollMs = Math.max(counters.maxDriverScrollMs, elapsed);
++		}
++	};
