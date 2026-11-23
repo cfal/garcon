@@ -418,7 +418,7 @@ describe('remote settings sections', () => {
 		const card = screen.getByText('Compaction model').closest('.rounded-lg');
 		expect(card).toBeTruthy();
 		await fireEvent.click(
-			within(card as HTMLElement).getByRole('button', { name: /Claude .* Opus .* Default/ }),
+			within(card as HTMLElement).getByRole('button', { name: 'Claude Opus', description: /Default/ }),
 		);
 		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
 		await waitFor(() => {
@@ -502,7 +502,7 @@ describe('remote settings sections', () => {
 		render(RemoteSettingsSectionTestHost);
 
 		const [titleTrigger] = screen.getAllByRole('button', {
-			name: /Claude .* Opus .* Default/,
+			name: 'Claude Opus', description: /Default/,
 		});
 		await fireEvent.click(titleTrigger);
 		let groupHeaders = Array.from(
@@ -518,7 +518,7 @@ describe('remote settings sections', () => {
 			expect(document.querySelectorAll('[data-slot="model-selector-agent-group"]')).toHaveLength(0);
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Codex .* GPT-5.4 .* Default/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex GPT-5.4', description: /Default/ }));
 		groupHeaders = Array.from(
 			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
 		);
@@ -668,7 +668,7 @@ describe('remote settings sections', () => {
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
 
-		await fireEvent.click(screen.getAllByRole('button', { name: /Claude .* Opus .* Default/ })[0]);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Claude Opus', description: /Default/ })[0]);
 		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenCalledWith({
@@ -679,7 +679,7 @@ describe('remote settings sections', () => {
 		});
 
 		vi.mocked(updateRemoteSettings).mockClear();
-		await fireEvent.click(screen.getByRole('button', { name: /Codex .* GPT-5.4 .* Low/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex GPT-5.4', description: /Low/ }));
 		await fireEvent.click(
 			await screen.findByRole('button', { name: /Ultra Highest available reasoning effort/ }),
 		);

@@ -74,8 +74,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
 
       await page.screenshot({ path: join(artifacts, `project-plus-${executionBackend}-mobile-dialog.png`) });
       phase('submitting a new chat on the captured executor and path');
-      const modelSelector = dialog.locator('button[aria-label*=" / "]').first();
-      await expect(modelSelector).toHaveAttribute('aria-label', /Integration Echo/);
+      const modelSelector = dialog.locator('[data-slot="model-selector-trigger"]');
+      await expect(modelSelector).toHaveAccessibleName(/Integration Echo/);
       await dialog.getByRole('button', { name: 'Start session', exact: true }).click();
       await expect(dialog).toHaveCount(0);
       await expect.poll(async () => (await client.listChats()).sessions.length).toBe(2);

@@ -96,7 +96,7 @@
 
 <div
 	class={toolbarDisplay === undefined
-		? 'relative inline-grid w-max min-w-0 max-w-full grid-cols-[minmax(0,1fr)]'
+		? 'relative inline-grid w-max min-w-0 max-w-full grid-cols-[minmax(0,1fr)] [justify-items:var(--model-trigger-justify,start)]'
 		: 'contents'}
 	bind:contentRect={available}
 >
@@ -130,7 +130,7 @@
 				data-slot="model-selector-overflow"
 				aria-label={m.chat_composer_more_settings()}
 				title={m.chat_composer_more_settings()}
-				class="col-start-1 row-start-1 inline-flex size-9 items-center justify-center justify-self-start rounded-lg border border-border bg-background hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+				class="col-start-1 row-start-1 inline-flex size-9 items-center justify-center rounded-lg border border-border bg-background hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 				><Ellipsis class="size-4" /></DropdownMenuTrigger
 			>
 			<DropdownMenuContent

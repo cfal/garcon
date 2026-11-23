@@ -1485,7 +1485,7 @@ describe('PromptComposer focus', () => {
 			],
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
@@ -1505,7 +1505,7 @@ describe('PromptComposer focus', () => {
 		const view = render(PromptComposerTestHost, {
 			catalog, selectedChatId: 'chat-1', selectedAgentId: 'claude', selectedStatus: 'running',
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 		expect(await screen.findByRole('button', { name: 'Codex' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Claude' })).toBeTruthy();
 		await view.rerender({ selectedAgentId: 'codex' });
@@ -1542,7 +1542,7 @@ describe('PromptComposer focus', () => {
 			],
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(
 			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
@@ -1567,7 +1567,7 @@ describe('PromptComposer focus', () => {
 			],
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		const groupHeaders = Array.from(
 			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),

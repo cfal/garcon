@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import { getModelCatalog, getExecutors } from '$lib/context';
@@ -116,12 +116,18 @@
 
 	$effect(() => {
 		if (typeof window.matchMedia !== 'function') return;
-		const compactMaxWidth = (showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) + (showExecutor ? 176 : 0);
+		const compactMaxWidth =
+			(showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) +
+			(showExecutor ? 176 : 0);
 		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
 		const updateLayout = () => {
+			if (isCompactLayout === mediaQuery.matches) return;
+			const replaceFocusedTrigger = document.activeElement === triggerNode;
 			isCompactLayout = mediaQuery.matches;
+			if (replaceFocusedTrigger)
+				void tick().then(() => (overflowAnchor ?? triggerNode)?.focus({ preventScroll: true }));
 		};
-		updateLayout();
+		untrack(updateLayout);
 		mediaQuery.addEventListener('change', updateLayout);
 		return () => mediaQuery.removeEventListener('change', updateLayout);
 	});
@@ -148,7 +154,9 @@
 	}
 
 	function isTileResize(event: Event): boolean {
-		return event.target instanceof Element && !!event.target.closest('[data-workspace-window-resizer]');
+		return (
+			event.target instanceof Element && !!event.target.closest('[data-workspace-window-resizer]')
+		);
 	}
 
 	function restoreTriggerFocus(event: Event): void {
@@ -176,7 +184,9 @@
 		if (!selector.open || !selector.executorReady) return;
 		const catalog = selector.modelCatalog;
 		void catalog.version;
-		untrack(() => { void catalog.refreshIfStale(); });
+		untrack(() => {
+			void catalog.refreshIfStale();
+		});
 	});
 
 	$effect(() => {
@@ -193,7 +203,13 @@
 		function handleDocumentPointerDown(event: PointerEvent): void {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
-			if (isTileResize(event) || trigger.contains(target) || overflowAnchor?.contains(target) || content.contains(target)) return;
+			if (
+				isTileResize(event) ||
+				trigger.contains(target) ||
+				overflowAnchor?.contains(target) ||
+				content.contains(target)
+			)
+				return;
 			closingFromOutside = true;
 			if (compactLayout) {
 				selector.discardAndClose();
@@ -211,34 +227,17 @@
 	});
 </script>
 
-{#snippet trigger()}
-	<ModelSelectorTrigger
-		bind:this={triggerFrame}
-		agent={committed.agentLabel}
-		model={committed.modelLabel}
-		buttonClass={triggerBaseClass}
-		{toolbarDisplay}
-		{onMeasure}
-		{triggerNode}
+{#snippet trigger(label: string, hidden: boolean)}
+	<Trigger
+		bind:ref={triggerNode}
 		{disabled}
-		{side}
-		{align}
-		{openPicker}
-		{dismissPicker}
+		{hidden}
+		title={selector.triggerTitle}
+		aria-description={selector.triggerTitle}
+		data-slot="model-selector-trigger"
+		data-composer-control={toolbarDisplay === undefined ? undefined : 'model'}
+		class="{triggerBaseClass} col-start-1 row-start-1">{label}</Trigger
 	>
-		{#snippet children(label, hidden)}
-			<Trigger
-				bind:ref={triggerNode}
-				{disabled}
-				{hidden}
-				title={selector.triggerTitle}
-				aria-label={selector.triggerTitle || m.model_selector_unavailable()}
-				data-slot="model-selector-trigger"
-				data-composer-control={toolbarDisplay === undefined ? undefined : 'model'}
-				class="{triggerBaseClass} col-start-1 row-start-1 justify-self-start"
-			>{label}</Trigger>
-		{/snippet}
-	</ModelSelectorTrigger>
 {/snippet}
 
 {#snippet catalogError()}
@@ -254,59 +253,76 @@
 	{/if}
 {/snippet}
 
-{#if isCompactLayout}
-	<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
-		{@render trigger()}
-		<Dialog.Content
-			onCloseAutoFocus={restoreTriggerFocus}
-			bind:ref={contentNode}
-			class={cn(
-				'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
-				contentClass,
-			)}
-			showCloseButton={false}
-		>
-			{@render catalogError()}
-			<div class="min-h-0 flex-1">
-			<ModelSelectorCompactLayout
-				{selector}
-				{showAgent}
-				showSource={sourceSelectionEnabled}
-				{modelListId}
-				onCancel={() => selector.discardAndClose()}
-				onDone={() => selector.commitAndClose()}
-			/>
-			</div>
-		</Dialog.Content>
-	</Dialog.Root>
-{:else}
-	<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
-		{@render trigger()}
-		<Popover.Content
-			customAnchor={overflowAnchor}
-			onInteractOutside={(event) => {
-				if (isTileResize(event)) event.preventDefault();
-			}}
-			getFocusReturnTarget={() => overflowAnchor ?? triggerNode}
-			onCloseAutoFocus={(event) => {
-				if (!closingFromOutside) restoreTriggerFocus(event);
-			}}
-			bind:ref={contentNode}
-			{align}
-			{side}
-			sideOffset={8}
-			collisionPadding={8}
-			class={cn(
-				contentWidthClass,
-				contentHeightClass,
-				'flex max-h-(--bits-popover-content-available-height) flex-col overflow-hidden p-0',
-				contentClass,
-			)}
-		>
-			{@render catalogError()}
-			<div class="min-h-0 flex-1">
-			<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
-			</div>
-		</Popover.Content>
-	</Popover.Root>
-{/if}
+<ModelSelectorTrigger
+	bind:this={triggerFrame}
+	agent={committed.agentLabel}
+	model={committed.modelLabel}
+	buttonClass={triggerBaseClass}
+	{toolbarDisplay}
+	{onMeasure}
+	{triggerNode}
+	{disabled}
+	{side}
+	{align}
+	{openPicker}
+	{dismissPicker}
+>
+	{#snippet children(label, hidden)}
+		{#if isCompactLayout}
+			<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
+				{@render trigger(label, hidden)}
+				<Dialog.Content
+					onCloseAutoFocus={restoreTriggerFocus}
+					bind:ref={contentNode}
+					class={cn(
+						'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
+						contentClass,
+					)}
+					showCloseButton={false}
+				>
+					{@render catalogError()}
+					<div class="min-h-0 flex-1">
+						<ModelSelectorCompactLayout
+							{selector}
+							{showAgent}
+							showSource={sourceSelectionEnabled}
+							{modelListId}
+							onCancel={() => selector.discardAndClose()}
+							onDone={() => selector.commitAndClose()}
+						/>
+					</div>
+				</Dialog.Content>
+			</Dialog.Root>
+		{:else}
+			<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
+				{@render trigger(label, hidden)}
+				<Popover.Content
+					customAnchor={overflowAnchor}
+					onInteractOutside={(event) => {
+						if (isTileResize(event)) event.preventDefault();
+					}}
+					getFocusReturnTarget={() => overflowAnchor ?? triggerNode}
+					onCloseAutoFocus={(event) => {
+						if (!closingFromOutside) restoreTriggerFocus(event);
+					}}
+					bind:ref={contentNode}
+					{align}
+					{side}
+					sideOffset={8}
+					collisionPadding={8}
+					class={cn(
+						contentWidthClass,
+						contentHeightClass,
+						'flex max-h-(--bits-popover-content-available-height) flex-col overflow-hidden p-0',
+						contentClass,
+					)}
+				>
+					{@render catalogError()}
+					<div class="min-h-0 flex-1">
+						<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
+					</div>
+				</Popover.Content>
+			</Popover.Root>
+		{/if}
+	{/snippet}
+</ModelSelectorTrigger>

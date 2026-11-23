@@ -192,10 +192,7 @@ describe("Chromium New Chat composer layout", () => {
           .click();
         await modelDialog.waitFor({ state: "detached" });
 
-        const longModelTrigger = bottomBar.getByRole("button", {
-          name: `Direct (Chat Completions) / Integration Fake OpenAI / ${LONG_MODEL_LABEL}`,
-          exact: true,
-        });
+        const longModelTrigger = bottomBar.locator('[data-slot="model-selector-trigger"]:visible');
         const send = bottomBar.getByRole("button", { name: "Start session" });
         await expectLocator(settingsMenu).toBeFocused();
         await expectLocator(longModelTrigger).toHaveCount(0);
@@ -231,6 +228,8 @@ describe("Chromium New Chat composer layout", () => {
         );
         await fixture.page.setViewportSize({ width: 640, height: 900 });
         await expectLocator(longModelTrigger).toHaveText(LONG_MODEL_LABEL);
+        await expectLocator(longModelTrigger).toHaveAccessibleName(LONG_MODEL_LABEL);
+        await expectLocator(longModelTrigger).toHaveAccessibleDescription(`Direct (Chat Completions) / Integration Fake OpenAI / ${LONG_MODEL_LABEL}`);
         expect(await longModelTrigger.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
         await longModelTrigger.click();
         const modelPopover = fixture.page.locator(

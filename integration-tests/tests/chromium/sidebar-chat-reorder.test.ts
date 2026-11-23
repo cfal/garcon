@@ -231,9 +231,9 @@ async function startNewOpenAiChat(fixture: ChromiumFixture): Promise<string> {
     .getByRole('status', { name: 'Loading chat defaults...' })
     .waitFor({ state: 'detached', timeout: 20_000 });
 
-  const modelSelector = dialog.locator('button[aria-label*=" / "]').first();
+  const modelSelector = dialog.locator('[data-slot="model-selector-trigger"]');
   await modelSelector.waitFor({ state: 'visible' });
-  const selectedModel = (await modelSelector.getAttribute('aria-label')) ?? '';
+  const selectedModel = (await modelSelector.getAttribute('aria-description')) ?? '';
   if (
     !selectedModel.includes('Direct (Chat Completions)') ||
     !selectedModel.includes('Integration Echo')

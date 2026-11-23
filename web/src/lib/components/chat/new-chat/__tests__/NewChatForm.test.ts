@@ -1040,7 +1040,7 @@ describe('NewChatForm', () => {
 		const onStartChat = vi.fn();
 		render(NewChatFormTestHost, { catalog, executorSnapshots: [localExecutor, remoteExecutor], onStartChat });
 		const picker = await screen.findByRole('button', {
-			name: initial === 'default' ? /Antigravity .* Default/ : /Antigravity .* Sample model \(High\)/,
+			name: initial === 'default' ? 'Antigravity Default' : 'Antigravity Sample model (High)',
 		});
 		await fireEvent.click(picker);
 		await fireEvent.click(await screen.findByRole('option', { name: model === 'default' ? 'Default' : 'Sample model (High)' }));
@@ -1072,10 +1072,10 @@ describe('NewChatForm', () => {
 			paths: { byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/project'] } } },
 		}));
 		render(NewChatFormTestHost, { catalog, executorSnapshots: [localExecutor, remoteExecutor] });
-		await screen.findByRole('button', { name: /Antigravity .* Local model/ });
+		await screen.findByRole('button', { name: 'Antigravity Local model' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Other executors…' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Worker: /worker/project' }));
-		expect(await screen.findByRole('button', { name: /Antigravity .* Default/ })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'Antigravity Default' })).toBeTruthy();
 	});
 
 	it('opens the model selector at recents when multiple recent targets exist', async () => {
@@ -1105,7 +1105,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Claude · Claude OAuth · Opus' })).toBeTruthy();
@@ -1141,7 +1141,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(
 			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
@@ -1223,7 +1223,7 @@ describe('NewChatForm', () => {
 		await view.rerender({ allowDirectChats: false });
 
 		await waitFor(() => {
-			expect(screen.getByRole('button', { name: /Claude .* Opus/ })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Claude Opus' })).toBeTruthy();
 		});
 		expect(
 			screen.queryByRole('button', {
@@ -1240,7 +1240,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(listbox).toBeTruthy();
