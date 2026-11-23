@@ -57,6 +57,7 @@ async function readyWorkbench() {
 	controller.setProjectState(availableProject('/project'));
 	controller.setPresentationVisible(true);
 	await controller.target.activate();
+	controller.repository.currentBranch = 'main';
 	return controller;
 }
 
@@ -66,39 +67,52 @@ describe('GitWorkbenchPanel', () => {
 		vi.clearAllMocks();
 	});
 
-	it.each(['stay', 'hide', 'hide and return', 'unmount', 'checkout', 'completed checkout'])(
-		'only opens Push in its original visit: %s',
-		async (change) => {
-			const controller = await readyWorkbench();
-			const remotes = Promise.withResolvers<typeof controller.repository.pushRemotes>();
-			const prepare = vi
-				.spyOn(controller.repository, 'loadPushRemotes')
-				.mockReturnValue(remotes.promise);
-			const props = { controller, presentation: 'window-main' as const };
-			const view = render(GitWorkbenchPanel, props);
-			await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
-			expect(prepare).toHaveBeenCalledOnce();
-			if (change === 'checkout' || change === 'completed checkout') {
-				controller.target.branchChangePending = true;
-				if (change === 'completed checkout') {
-					await tick();
-					controller.repository.currentBranch = 'next';
-					controller.target.branchChangePending = false;
-				}
-			} else if (change === 'unmount') {
-				view.unmount();
-			} else if (change !== 'stay') {
-				await view.rerender({ ...props, visible: false });
-				if (change === 'hide and return') await view.rerender({ ...props, visible: true });
+	it.each([
+		'stay',
+		'hide',
+		'hide and return',
+		'unmount',
+		'checkout',
+		'completed checkout',
+		'external checkout',
+		'external checkout and return',
+	])('only opens Push in its original visit: %s', async (change) => {
+		const controller = await readyWorkbench();
+		const remotes = Promise.withResolvers<typeof controller.repository.pushRemotes>();
+		const prepare = vi
+			.spyOn(controller.repository, 'loadPushRemotes')
+			.mockReturnValue(remotes.promise);
+		const props = { controller, presentation: 'window-main' as const };
+		const view = render(GitWorkbenchPanel, props);
+		await fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+		expect(prepare).toHaveBeenCalledOnce();
+		if (change === 'checkout' || change === 'completed checkout') {
+			controller.target.branchChangePending = true;
+			if (change === 'completed checkout') {
+				await tick();
+				controller.repository.currentBranch = 'next';
+				controller.target.branchChangePending = false;
 			}
-			const fetched = [{ name: 'backup', url: '/repos/backup' }];
-			remotes.resolve(fetched);
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
-			expect(controller.repository.showPushModal).toBe(change === 'stay');
-			expect(controller.repository.pushRemotes).toEqual(change === 'stay' ? fetched : []);
-			controller.dispose();
-		},
-	);
+		} else if (change.startsWith('external checkout')) {
+			// History publishes the branch without starting a checkout in this panel.
+			controller.repository.currentBranch = 'next';
+			if (change === 'external checkout and return') {
+				await tick();
+				controller.repository.currentBranch = 'main';
+			}
+		} else if (change === 'unmount') {
+			view.unmount();
+		} else if (change !== 'stay') {
+			await view.rerender({ ...props, visible: false });
+			if (change === 'hide and return') await view.rerender({ ...props, visible: true });
+		}
+		const fetched = [{ name: 'backup', url: '/repos/backup' }];
+		remotes.resolve(fetched);
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		expect(controller.repository.showPushModal).toBe(change === 'stay');
+		expect(controller.repository.pushRemotes).toEqual(change === 'stay' ? fetched : []);
+		controller.dispose();
+	});
 
 	it('keeps the chosen push remote when the owning tab is hidden and shown', async () => {
 		const controller = await readyWorkbench();

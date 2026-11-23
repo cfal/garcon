@@ -50,13 +50,15 @@
 	);
 	const activeProjectPath = $derived(controller.target.activeProjectPath);
 	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
-	const pushAvailable = $derived(presentationVisible && controller.target.canChangeTarget);
+	const pushBranch = $derived(
+		presentationVisible && controller.target.canChangeTarget ? repository.currentBranch : '',
+	);
 	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
 	let pushOpenGeneration = 0;
 
 	$effect(() => {
-		if (!pushAvailable) return;
-		// A remote list belongs to one uninterrupted visit to a pushable target.
+		if (!pushBranch) return;
+		// A remote list belongs to one uninterrupted visit to the branch that requested it.
 		return () => {
 			pushOpenGeneration++;
 		};
@@ -127,13 +129,14 @@
 
 	async function openPush(): Promise<void> {
 		const target = activeTarget;
-		if (!pushAvailable || !target) return;
+		const branch = pushBranch;
+		if (!branch || !target) return;
 		const generation = ++pushOpenGeneration;
 		const remotes = await repository.loadPushRemotes(target);
 		if (
 			!remotes.length ||
 			generation !== pushOpenGeneration ||
-			!pushAvailable ||
+			branch !== pushBranch ||
 			!sameGitProject(target, activeTarget)
 		)
 			return;
@@ -142,7 +145,7 @@
 	}
 
 	function submitPush(remote: string, branch: string): void {
-		if (!pushAvailable) return;
+		if (!branch || branch !== pushBranch) return;
 		void runMutation(async (project) => {
 			const ok = await repository.handlePush(project, remote, branch);
 			if (ok) await wb.refresh({ reason: 'git-action' });
@@ -236,7 +239,7 @@
 
 		{#if repository.showPushModal}
 			<GitPushModal
-				open={pushAvailable}
+				open={Boolean(pushBranch)}
 				remotes={repository.pushRemotes}
 				currentBranch={repository.currentBranch}
 				isPushing={repository.isPushing}
