@@ -3021,6 +3021,7 @@
 	"git_worktree_created_at": "Worktree created at {path}.",
 	"common_creating": "Creating...",
 	"executors_label": "Executor",
+	"executors_remote": "Remote executor",
 	"common_unavailable": "Unavailable",
 	"executors_add": "Add Executor",
 	"common_loading": "Loading...",

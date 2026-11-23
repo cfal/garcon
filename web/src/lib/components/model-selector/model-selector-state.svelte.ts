@@ -155,8 +155,10 @@ export class ModelSelectorState {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
 	}
 
-	get executorLabel(): string {
-		return this.#options.executors?.label(this.value.executorId) ?? 'Local';
+	get executorLabel(): string | null {
+		const executors = this.#options.executors;
+		if (this.committedExecutorId !== 'local' && !executors?.hasSnapshot) return null;
+		return executors?.label(this.committedExecutorId) ?? 'Local';
 	}
 
 	get draftExecutorLabel(): string {

@@ -217,13 +217,27 @@ test('a long generation executor name leaves room for every model field control'
       executorId: client.executorId, agentId, model: provider.model,
       apiProviderId: provider.providerId, modelEndpointId: provider.endpointId, modelProtocol: provider.protocol,
     } } });
-    await page.goto(integration.garcon.baseUrl);
-    await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Automation', exact: true }).click();
     const card = page.getByRole('group', { name: 'Commit message model', exact: true });
+    const selector = card.locator('[data-slot="model-selector-trigger"]');
+    const discovery = new Deferred<void>();
+    await page.route('**/api/v1/executors', async route => {
+      await discovery.promise;
+      await route.continue();
+    });
+    try {
+      await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+      await page.getByRole('tab', { name: 'Automation', exact: true }).click();
+      await browserExpect(card.getByText('Remote executor', { exact: true })).toBeVisible();
+      await browserExpect(selector).toBeVisible();
+      await browserExpect(selector).not.toHaveAccessibleDescription(new RegExp(client.executorId));
+    } finally {
+      discovery.resolve();
+    }
     const host = card.getByText(label, { exact: true });
     await browserExpect(host).toBeVisible();
+    await browserExpect(selector).toHaveAccessibleDescription(new RegExp(label));
     for (const width of [640, 680, 390, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await browserExpect.poll(() => host.evaluate(node => {

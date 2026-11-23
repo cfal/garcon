@@ -63,6 +63,10 @@ describe('remote settings sections', () => {
 		render(RemoteSettingsSectionTestHost, { executors: null });
 		const field = within(screen.getByRole('group', { name: 'Title model' }));
 		expect(field.queryByText(remoteExecutor.id)).toBeNull();
+		expect(field.getByRole('button', {
+			name: 'Claude Opus', description: 'Claude / Claude OAuth / Opus / Default',
+		})).toBeTruthy();
+		expect(field.getByText('Remote executor').getAttribute('role')).toBe('status');
 		expect(field.getByRole('button', { name: 'Auto (Local)' }).getAttribute('aria-pressed')).toBe('false');
 	});
 
