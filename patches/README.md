@@ -11,17 +11,17 @@ Keep `scripts/__tests__/svelte-derived-reconnect.test.js` and
 
 ## Bits UI focus-scope mounting
 
-`bits-ui@2.19.5` already includes the deferred-autofocus ownership and focus guards.
-The remaining patch makes mounting the same container idempotent. Remounting an
-unchanged scope otherwise schedules initial autofocus again and can take focus
-from a menu item the user already selected.
+`bits-ui@2.22.0` includes the [upstream remount guard](https://github.com/huntabyte/bits-ui/pull/2264),
+so no local patch is needed. Remounting an unchanged scope must not schedule
+initial autofocus again and take focus from a menu item the user already selected.
 
 Coverage lives in `WorkspaceWindowTitleBar.test.ts` and
 `integration-tests/tests/chromium/file-editor-polish.test.ts`.
 
 ## Bits UI scrollbar lifetime
 
-ScrollArea uses the existing plain debounce helper instead of runed's reactive
+The [upstream fix](https://github.com/huntabyte/bits-ui/pull/2261) included in
+`bits-ui@2.22.0` uses the existing plain debounce helper instead of runed's reactive
 debounce for scroll-end callbacks. The reactive accessor can retain detached
 conversation contexts in Chromium, even after its timer finishes. Both scroll
 visibility and thumb tracking keep their 100 ms debounce and explicitly cancel

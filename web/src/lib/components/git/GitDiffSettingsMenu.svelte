@@ -69,6 +69,7 @@
 			>
 				<Select.Trigger
 					class="data-[size=sm]:h-auto min-h-8 w-auto max-w-full py-1 whitespace-normal"
+					aria-label={m.git_diff_font_size()}
 					size="sm"
 				>
 					{typographySizeLabel('code-diff', diffFontSize)}
@@ -94,6 +95,7 @@
 			>
 				<Select.Trigger
 					class="data-[size=sm]:h-auto min-h-8 w-auto max-w-full py-1 whitespace-normal"
+					aria-label={m.git_diff_mode()}
 					size="sm"
 				>
 					{diffMode === 'unified' ? m.git_diff_unified() : m.git_diff_split()}
@@ -112,6 +114,7 @@
 			<Select.Root type="single" value={String(contextLines)} onValueChange={handleContextLines}>
 				<Select.Trigger
 					class="data-[size=sm]:h-auto min-h-8 w-auto max-w-full py-1 whitespace-normal"
+					aria-label={m.git_diff_context_lines()}
 					size="sm"
 				>
 					{m.git_diff_lines({ count: contextLines })}

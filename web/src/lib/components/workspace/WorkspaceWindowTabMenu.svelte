@@ -266,6 +266,7 @@
 
 {#if menu.kind === 'dropdown'}
 	<DropdownMenuContent
+		usePointerBackdrop
 		align="end"
 		class={contentClass}
 		data-workspace-window-menu={windowId}

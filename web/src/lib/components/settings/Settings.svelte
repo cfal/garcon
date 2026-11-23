@@ -105,6 +105,7 @@
 
 <Dialog.Root open={appShell.showSettings} onOpenChange={handleOpenChange}>
 	<Dialog.Content
+		preventBodyPointerEvents={false}
 		class="safe-viewport-dialog h-[85dvh] max-h-[50rem] max-w-[calc(100%-1rem)] sm:max-w-5xl flex flex-col gap-0 p-0 overflow-hidden"
 		showCloseButton={true}
 	>
