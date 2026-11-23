@@ -2,6 +2,8 @@ import {
   AgentCallError,
   AgentIntegrationError,
   createAgentResourceRef,
+  isNativeChildEvent,
+  normalizeNativeChildEvent,
   type AgentExecutionHandle,
   type AgentEstablishedSession,
   type AgentExecutionV5,
@@ -26,6 +28,7 @@ interface ProducerBinding {
   readonly ref: AgentProducerBinding;
   readonly chatId: string;
   readonly cancellation: AbortController;
+  readonly publication: AbortController;
   closed: boolean;
   detached: boolean;
   publishedSession: AgentEstablishedSession | null;
@@ -105,13 +108,14 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
     async bind({ binding, chatId }, options) {
       options?.signal?.throwIfAborted();
       if (!chatId) throw new TypeError('Producer chat ID is required');
-      bindings.bind(binding, { ref: binding, chatId, cancellation: new AbortController(), closed: false, detached: false, publishedSession: null });
+      bindings.bind(binding, { ref: binding, chatId, cancellation: new AbortController(), publication: new AbortController(), closed: false, detached: false, publishedSession: null });
     },
     async close(ref) {
       const binding = bindings.get(ref);
       binding.closed = true;
       bindings.delete(ref);
       binding.cancellation.abort();
+      binding.publication.abort();
       handles.removeWhere((operation) => operation.binding === binding);
       responses.removeWhere((value) => value.operation.binding === binding);
       const operation = active.get(binding.chatId);
@@ -128,6 +132,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
         throw error;
       }
       binding.detached = true;
+      binding.publication.abort();
       responses.removeWhere((value) => {
         if (value.operation.binding !== binding) return false;
         denyDetachedPermission(value.capability);
@@ -159,6 +164,15 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
   function publisherFor(operation: Operation): AgentRuntimePublisher {
     const binding = operation.binding;
     return (event) => {
+      if (isNativeChildEvent(event)) {
+        if (binding.closed || binding.detached) return;
+        try {
+          for (const childEvent of normalizeNativeChildEvent(event)) emit(binding, childEvent);
+        } catch {
+          host.logger.warn('Native child observation publication failed', { chatId: binding.chatId });
+        }
+        return;
+      }
       if (event.type === 'permission' && !event.runId) {
         host.logger.warn('Dropped an unnamed provider permission event', {
           chatId: binding.chatId, eventType: event.type, reason: 'missing operation run ID',
@@ -221,7 +235,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
       handle: createAgentResourceRef(host.scope, 'execution'),
     };
     const { producerBinding: _binding, ...context } = request;
-    const runtimeRequest = { ...context, admission: {
+    const runtimeRequest = { ...context, publicationSignal: binding.publication.signal, admission: {
       signal: options?.signal
         ? AbortSignal.any([options.signal, binding.cancellation.signal, operation.cancellation.signal])
         : AbortSignal.any([binding.cancellation.signal, operation.cancellation.signal]),

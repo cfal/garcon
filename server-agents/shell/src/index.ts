@@ -29,6 +29,7 @@ export default class ShellIntegration implements AgentIntegration {
   readonly endpoints = null;
   readonly singleQuery = null;
   readonly legacyHistoryImport = null;
+  readonly nativeChildObservation = null;
   readonly nativeActivity = null;
   readonly sessionConfiguration = null;
   readonly commands: NonNullable<AgentIntegration['commands']> = {

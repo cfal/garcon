@@ -1,5 +1,7 @@
 import {
   AgentCallError,
+  isNativeChildEvent,
+  NATIVE_CHILD_EVENT_BYTES,
   type AgentExecutionHandle,
   type AgentIntegration,
   type AgentProducerBinding,
@@ -22,6 +24,8 @@ const PRODUCER_SUPERSEDED_GRACE_MS = 5 * 60 * 1000;
 // Bounds worker memory across all bindings. Replay is paced by the session
 // queue, so the backlog need not fit that queue.
 const RETAINED_BYTES = 32 * 1024 * 1024;
+const OBSERVATION_BINDING_BYTES = 4 * 1024 * 1024;
+const OBSERVATION_RELAY_BYTES = 8 * 1024 * 1024;
 const PUMP_RETRY_MS = 10;
 // A chat launches one run at a time, so only its latest launches can have lost
 // their requests with a session.
@@ -42,6 +46,8 @@ interface RetainedFrame {
   // Only row batches are dropped under pressure; session, permission, and run
   // facts are small and keep the controller's run state coherent.
   readonly droppable: boolean;
+  readonly observation: boolean;
+  readonly captureEnded: boolean;
 }
 
 interface RelayedLaunch {
@@ -61,6 +67,8 @@ interface RelayedBinding {
   // Leading retained frames already handed to `session`.
   sent: number;
   retainedBytes: number;
+  observationBytes: number;
+  observationRetired: boolean;
   session: ProducerRelaySession | null;
   grace: { readonly timer: ReturnType<typeof setTimeout>; readonly deadline: number } | null;
   // The latest launch until its run ends or it fails, reported on resume.
@@ -105,6 +113,8 @@ export class ProducerRelay {
   readonly #supersededGraceMs: number;
   readonly #retainedLimit: number;
   #retainedBytes = 0;
+  #observationBytes = 0;
+  #captureEndedBytes = 0;
   #published = 0;
   #pumping = false;
   #pumpRetry: ReturnType<typeof setTimeout> | null = null;
@@ -125,6 +135,7 @@ export class ProducerRelay {
   bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): void {
     this.#bindings.set(ref.id, {
       integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null, received: [],
+      observationBytes: 0, observationRetired: false,
     });
   }
 
@@ -278,6 +289,8 @@ export class ProducerRelay {
     }
     this.#bindings.clear();
     this.#retainedBytes = 0;
+    this.#observationBytes = 0;
+    this.#captureEndedBytes = 0;
     if (this.#pumpRetry) clearTimeout(this.#pumpRetry);
     this.#pumpRetry = null;
   }
@@ -286,24 +299,72 @@ export class ProducerRelay {
     const binding = this.#bindings.get(notification.binding.id);
     if (binding?.integration !== integration) return;
     const { event } = notification;
+    const observation = isNativeChildEvent(event);
+    if (observation && binding.observationRetired) return;
+    if (event.type === 'native-child-capture-ended') {
+      this.#retireObservation(binding);
+      this.#pump();
+      return;
+    }
     if (event.type === 'run-ended' && binding.launch?.runId === event.runId) binding.launch = null;
+    const frame = this.#retain(binding, event);
+    if (observation && binding.observationBytes > Math.min(OBSERVATION_BINDING_BYTES, this.#retainedLimit / 8)) {
+      this.#retireObservation(binding);
+    }
+    while (this.#observationBytes > Math.min(OBSERVATION_RELAY_BYTES, this.#retainedLimit / 4)
+      || this.#retainedBytes - this.#captureEndedBytes > this.#retainedLimit) {
+      const largest = [...this.#bindings.values()].sort((a, b) => b.observationBytes - a.observationBytes)[0];
+      if (largest?.observationBytes) this.#retireObservation(largest);
+      else if (!this.#dropOldestRows(frame)) break;
+    }
+    if (binding.session) this.#pump();
+  }
+
+  #retain(binding: RelayedBinding, event: AgentProducerNotification['event']): RetainedFrame {
     binding.seq += 1;
     this.#published += 1;
-    const payload = encodeProducerFrame(binding.seq, notification);
+    const payload = encodeProducerFrame(binding.seq, { binding: binding.ref, event });
     const frame: RetainedFrame = {
       seq: binding.seq,
       order: this.#published,
       payload,
       bytes: Buffer.byteLength(payload),
-      droppable: notification.event.type === 'rows',
+      droppable: event.type === 'rows',
+      observation: isNativeChildEvent(event) && event.type !== 'native-child-capture-ended',
+      captureEnded: event.type === 'native-child-capture-ended',
     };
     binding.retained.push(frame);
     binding.retainedBytes += frame.bytes;
     this.#retainedBytes += frame.bytes;
-    while (this.#retainedBytes > this.#retainedLimit) {
-      if (!this.#dropOldestRows(frame)) break;
+    if (frame.observation) {
+      binding.observationBytes += frame.bytes;
+      this.#observationBytes += frame.bytes;
     }
-    if (binding.session) this.#pump();
+    if (frame.captureEnded) this.#captureEndedBytes += frame.bytes;
+    return frame;
+  }
+
+  #retireObservation(binding: RelayedBinding): void {
+    if (binding.observationRetired) return;
+    binding.observationRetired = true;
+    for (let index = binding.retained.length - 1; index >= 0; index--) {
+      if (!binding.retained[index]!.observation) continue;
+      const [frame] = binding.retained.splice(index, 1);
+      if (index < binding.sent) binding.sent--;
+      this.#releaseBytes(binding, frame!);
+    }
+    // A fixed allowance of one small terminal per binding cannot displace parent rows.
+    this.#retain(binding, { type: 'native-child-capture-ended', reason: 'retention-limit' });
+  }
+
+  #releaseBytes(binding: RelayedBinding, frame: RetainedFrame): void {
+    binding.retainedBytes -= frame.bytes;
+    this.#retainedBytes -= frame.bytes;
+    if (frame.observation) {
+      binding.observationBytes -= frame.bytes;
+      this.#observationBytes -= frame.bytes;
+    }
+    if (frame.captureEnded) this.#captureEndedBytes -= frame.bytes;
   }
 
   // Offers unsent frames in publication order until a session refuses one,
@@ -348,8 +409,7 @@ export class ProducerRelay {
       if (index < 0) continue;
       const [dropped] = binding.retained.splice(index, 1);
       if (index < binding.sent) binding.sent -= 1;
-      binding.retainedBytes -= dropped!.bytes;
-      this.#retainedBytes -= dropped!.bytes;
+      this.#releaseBytes(binding, dropped!);
       return true;
     }
     return false;
@@ -359,8 +419,7 @@ export class ProducerRelay {
     const firstKept = binding.retained.findIndex((frame) => frame.seq > seq);
     const released = binding.retained.splice(0, firstKept < 0 ? binding.retained.length : firstKept);
     for (const frame of released) {
-      binding.retainedBytes -= frame.bytes;
-      this.#retainedBytes -= frame.bytes;
+      this.#releaseBytes(binding, frame);
     }
     binding.sent = Math.max(0, binding.sent - released.length);
   }
@@ -383,7 +442,7 @@ export class ProducerRelay {
   #forget(binding: RelayedBinding): void {
     if (binding.grace) clearTimeout(binding.grace.timer);
     this.#bindings.delete(binding.ref.id);
-    this.#retainedBytes -= binding.retainedBytes;
+    for (const frame of binding.retained) this.#releaseBytes(binding, frame);
   }
 }
 
@@ -409,7 +468,14 @@ function launchFailure(error: unknown): AgentRunFailureDetail {
 
 function encodeProducerFrame(seq: number, notification: AgentProducerNotification): string {
   const payload = JSON.stringify({ type: 'producer', seq, notification } satisfies AgentProducerFrame);
-  if (Buffer.byteLength(payload) <= SESSION_MESSAGE_BYTES) return payload;
+  const observation = isNativeChildEvent(notification.event);
+  if (Buffer.byteLength(payload) <= SESSION_MESSAGE_BYTES
+    && (!observation || Buffer.byteLength(JSON.stringify(notification.event)) <= NATIVE_CHILD_EVENT_BYTES)) return payload;
+  if (observation) {
+    return JSON.stringify({ type: 'producer', seq, notification: {
+      binding: notification.binding, event: { type: 'native-child-gap', childKey: null },
+    } } satisfies AgentProducerFrame);
+  }
   return JSON.stringify({
     type: 'producer', seq, notification: {
       binding: notification.binding,

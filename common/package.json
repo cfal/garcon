@@ -28,6 +28,7 @@
     "./chat-id": "./chat-id.ts",
     "./chat-id-discovery": "./chat-id-discovery.ts",
     "./chat-list": "./chat-list.ts",
+    "./chat-observation": "./chat-observation.ts",
     "./chat-parentage": "./chat-parentage.ts",
     "./chat-parent-contracts": "./chat-parent-contracts.ts",
     "./chat-modes": "./chat-modes.ts",

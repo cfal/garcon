@@ -35,6 +35,28 @@ test('an open held in runningSessions cannot register a reader after bulk scope 
   } finally { released.resolve([]); fixture.server.dispose(); await fixture.native.executor.dispose(); }
 });
 
+test('child history uses only its exact nullable facet and validates executor-private references', async () => {
+  const native = integrationFixture();
+  const refs: string[] = [];
+  const integration = { ...native.integration, nativeChildObservation: {
+    async *loadHistory({ child, signal }: import('@garcon/server-agent-interface').AgentNativeChildHistoryRequest) {
+      signal.throwIfAborted();
+      refs.push(child.key);
+      yield [{ message: new AssistantMessage('2026-01-01T00:00:00Z', 'Child history') }];
+    },
+  } } satisfies import('@garcon/server-agent-interface').AgentIntegration;
+  const server = new HistoryRpcServer(new Map([['test', integration]]));
+  const child = { ownerId: 'test', schemaVersion: 1, key: 'child', value: { namespace: 'synthetic' } };
+  try {
+    const reader = await server.handle(request('history.open', { source: 'nativeChildObservation', request: { child } }), signal) as HistoryReaderRef;
+    expect(await server.handle(request('history.next', { reader, page: 0 }), signal)).toMatchObject({ rows: [{ message: { content: 'Child history' } }] });
+    expect(refs).toEqual(['child']);
+    expect(native.calls.import).toBe(0);
+    await server.handle(request('history.close', reader), signal);
+    await expect(server.handle(request('history.open', { source: 'nativeChildObservation', request: { child: { ...child, ownerId: 'wrong' } } }), signal)).rejects.toThrow('Invalid native child');
+  } finally { server.dispose(); await native.executor.dispose(); }
+});
+
 test('queued pages and a late native batch never advance a closed reader', async () => {
   const fixture = historyFixture();
   const entered = Promise.withResolvers<void>();

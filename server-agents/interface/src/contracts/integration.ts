@@ -30,6 +30,7 @@ import type {
 } from './native-history.js';
 import type { AgentUsageHistory } from './usage-history.js';
 import type { AgentCliUpdates } from './cli-updates.js';
+import type { AgentNativeChildObservation } from './native-child-observation.js';
 
 export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
@@ -54,6 +55,7 @@ export interface AgentIntegration {
   // ledger existed; core skips it for a chat that records no native session.
   readonly legacyHistoryImport: AgentHistoryImport | null;
   readonly nativeHistoryImport: AgentHistoryImport | null;
+  readonly nativeChildObservation: AgentNativeChildObservation | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;
   readonly nativeSessions: AgentNativeSessionAccess | null;
   readonly configurationValidation: AgentConfigurationValidation | null;

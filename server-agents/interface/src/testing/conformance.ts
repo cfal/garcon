@@ -28,6 +28,7 @@ const NULLABLE_FACET_METHODS = {
   singleQuery: ['run'],
   legacyHistoryImport: ['load'],
   nativeHistoryImport: ['load'],
+  nativeChildObservation: ['loadHistory'],
   nativeActivity: ['lastActivity'],
   nativeSessions: ['resolveNativeSession', 'describeSource', 'release'],
   configurationValidation: ['validate'],

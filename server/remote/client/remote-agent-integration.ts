@@ -8,6 +8,8 @@ import {
   AgentIntegrationError,
   assertAgentResourceScope,
   isAgentResourceRef,
+  isNativeChildEvent,
+  normalizeNativeChildEvent,
   type AgentHistoryImport,
   type AgentIntegration,
   type AgentImportedTranscriptRow,
@@ -15,12 +17,13 @@ import {
   type AgentExecutionHandle,
   type AgentProducerNotification,
   type AgentResourceScope,
+  type AgentInstanceCallOptions,
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import type {
-  ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
+  ExecutorRpcMethods, HistoryOpenRequest, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
 } from '../transport/rpc-protocol.js';
 import type { RemoteSessionBacking, RemoteSessions } from './executor-client.js';
 import { failureReason } from '../transport/failure-reason.js';
@@ -86,6 +89,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly singleQuery: AgentIntegration['singleQuery'];
   readonly legacyHistoryImport: AgentIntegration['legacyHistoryImport'];
   readonly nativeHistoryImport: AgentIntegration['nativeHistoryImport'];
+  readonly nativeChildObservation: AgentIntegration['nativeChildObservation'];
   readonly nativeActivity: AgentIntegration['nativeActivity'];
   readonly nativeSessions: AgentIntegration['nativeSessions'];
   readonly configurationValidation: AgentIntegration['configurationValidation'];
@@ -281,14 +285,13 @@ export class RemoteAgentIntegration implements AgentIntegration {
       ...(manifest.singleQueryRunsToolsWithoutPermission ? { runsToolsWithoutPermission: true as const } : {}),
     } : null;
     const integration = this;
-    const history = (source: 'legacyHistoryImport' | 'nativeHistoryImport'): AgentHistoryImport => ({
-      async *load({ signal, ...request }, options) {
+    async function* loadHistory(open: HistoryOpenRequest, signal: AbortSignal, options?: AgentInstanceCallOptions) {
         if (options) assertAgentResourceScope(integration.producers.scope, options.expectedScope);
         // A reader belongs to the session that opened it.
         const { backing: { rpc }, timeoutMs } = await sessions.acquire('bulk', { signal, instanceId: options?.expectedScope.instanceId });
         const close = (ref: ExecutorRpcMethods['history.open']['result']) =>
           rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 });
-        const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, timeoutMs, onLateResult: close });
+        const ref = await rpc.call(manifest.descriptor.id, 'history.open', open, { signal, timeoutMs, onLateResult: close });
         // Keeping several pages in flight hides link latency behind the worker's
         // reading and the controller's ledger writes.
         const inFlight: Promise<ExecutorRpcMethods['history.next']['result']>[] = [];
@@ -307,10 +310,15 @@ export class RemoteAgentIntegration implements AgentIntegration {
         } finally {
           await close(ref).catch(() => undefined);
         }
-      },
+    }
+    const history = (source: 'legacyHistoryImport' | 'nativeHistoryImport'): AgentHistoryImport => ({
+      load: ({ signal, ...request }, options) => loadHistory({ source, request }, signal, options),
     });
     this.legacyHistoryImport = cap.legacyHistoryImport ? history('legacyHistoryImport') : null;
     this.nativeHistoryImport = cap.nativeHistoryImport ? history('nativeHistoryImport') : null;
+    this.nativeChildObservation = cap.nativeChildObservation ? {
+      loadHistory: ({ signal, ...request }, options) => loadHistory({ source: 'nativeChildObservation', request }, signal, options),
+    } : null;
     this.nativeActivity = cap.nativeActivity ? { lastActivity: (request, signal) => call('nativeActivity.lastActivity', request, { signal }) } : null;
     this.nativeSessions = cap.nativeSessions ? {
       resolveNativeSession: ({ signal, ...request }) => call('nativeSessions.resolveNativeSession', request, { signal }),
@@ -427,13 +435,14 @@ export class RemoteAgentIntegration implements AgentIntegration {
     state.receivedSeq = seq;
     this.#scheduleAcknowledgement();
     if (gap) this.#reportLostOutput(state);
-    const event = this.#decode(notification.event, scope, binding, seq);
-    if (event.type === 'publication-gap') this.#reportLostOutput(state);
-    else {
-      state.lostOutputReported = false;
-      if (event.type === 'publication-failed') this.#retireFailed(state);
-      if (event.type === 'launch-settled' || event.type === 'run-ended') this.#forgetLaunch(state, event.runId);
-      this.#emit({ binding, event });
+    for (const event of this.#decode(notification.event, scope, binding, seq)) {
+      if (event.type === 'publication-gap') this.#reportLostOutput(state);
+      else {
+        state.lostOutputReported = false;
+        if (event.type === 'publication-failed') this.#retireFailed(state);
+        if (event.type === 'launch-settled' || event.type === 'run-ended') this.#forgetLaunch(state, event.runId);
+        this.#emit({ binding, event });
+      }
     }
     if (this.#bindings.get(binding.id) === state) this.#settleLostLaunches(state);
   }
@@ -459,17 +468,19 @@ export class RemoteAgentIntegration implements AgentIntegration {
     scope: AgentResourceScope,
     binding: AgentProducerBinding,
     seq: number,
-  ): AgentProducerNotification['event'] {
+  ): readonly AgentProducerNotification['event'][] {
     try {
-      return decodeProducerEvent(event, scope);
+      if (isNativeChildEvent(event)) return normalizeNativeChildEvent(event);
+      return [decodeProducerEvent(event, scope)];
     } catch (error) {
       const type = typeof event?.type === 'string' ? event.type : 'unknown';
       this.#log.warn('Executor producer event could not be decoded', {
         integrationId: this.descriptor.id, bindingId: binding.id, seq, type, reason: failureReason(error),
       });
-      return type === 'rows'
+      if (type.startsWith('native-child-')) return [{ type: 'native-child-gap', childKey: null }];
+      return [type === 'rows'
         ? { type: 'publication-gap' }
-        : { type: 'publication-failed', error: UNREADABLE_EVENT_FAILURE };
+        : { type: 'publication-failed', error: UNREADABLE_EVENT_FAILURE }];
     }
   }
 

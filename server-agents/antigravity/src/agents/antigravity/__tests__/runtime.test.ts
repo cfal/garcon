@@ -380,6 +380,7 @@ describe('Antigravity ACP runtime', () => {
       settings: { ownerId: 'antigravity', schemaVersion: 1, values: {} },
       carriedContext: { prefix: 'Selected history.\n\n' }, prompt: 'Continue.',
       admission: { signal: new AbortController().signal, markStarted: async () => {} },
+      publicationSignal: new AbortController().signal,
     } as const;
     try {
       agent.configReply = {};
@@ -437,6 +438,7 @@ describe('Antigravity ACP runtime', () => {
         thinkingMode: 'none', endpoint: null, attachments: [], settings: { ownerId: 'antigravity', schemaVersion: 1, values: {} },
         carriedContext: { prefix: 'Selected history.\n\n' }, prompt: 'Continue.',
         admission: { signal: new AbortController().signal, markStarted },
+        publicationSignal: new AbortController().signal,
       }, event => events.push(event))).rejects.toThrow();
       expect(markStarted).toHaveBeenCalledTimes(1);
       expect(events.filter(event => event.type === 'session')).toEqual([]);

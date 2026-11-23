@@ -78,6 +78,47 @@ async function runningTurn(dialer: 'controller' | 'worker') {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`child content survives parent completion and remains isolated from malformed observations (${dialer} dials)`, async () => {
+    const { fixture, integration, request, publish } = await runningTurn(dialer);
+    try {
+      const received: AgentProducerNotification['event'][] = [];
+      integration.producers.subscribe(({ event }) => received.push(event));
+      publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      publish({ type: 'native-child-rows', childKey: 'child', rows: [{ message: new AssistantMessage('now', 'Child result') }] });
+      publish({ type: 'native-child-created', child: {} } as AgentRuntimeEvent);
+      publish(row('Parent late report'));
+      await integration.execution.runningSessions();
+      expect(received.map(event => event.type)).toEqual(['run-ended', 'native-child-rows', 'native-child-gap', 'rows']);
+      const child = received[1]!;
+      if (child.type !== 'native-child-rows') throw new Error('Expected child content');
+      expect(child.rows[0]!.message).toBeInstanceOf(AssistantMessage);
+      expect(fixture.generations[0]!.calls.abort).toBe(0);
+      expect(fixture.executor.availability).toBe('ready');
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`child history uses the bulk reader without root execution or import (${dialer} dials)`, async () => {
+    const child = { ownerId: 'test', schemaVersion: 1, key: 'synthetic-child', value: { root: 'synthetic-root' } };
+    const seen: string[] = [];
+    const fixture = await remoteFixture(dialer, (_controller, _worker, native) => {
+      native.integration.nativeChildObservation = {
+        async *loadHistory(request) {
+          seen.push(request.child.key);
+          yield [{ message: new AssistantMessage('now', 'Retained child') }];
+        },
+      };
+    });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const result = [];
+      for await (const batch of integration.nativeChildObservation!.loadHistory({ child, signal: new AbortController().signal })) result.push(...batch);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.message).toBeInstanceOf(AssistantMessage);
+      expect(seen).toEqual(['synthetic-child']);
+      expect(fixture.generations[0]!.calls).toMatchObject({ start: 0, resume: 0, import: 0, abort: 0 });
+    } finally { await fixture.dispose(); }
+  });
+
   test(`completion preserves the executor's Windows cwd (${dialer} dials)`, async () => {
     const { fixture, integration, request, publish } = await runningTurn(dialer);
     try {

@@ -33,6 +33,7 @@ function createFacetIntegration(host, id, lifecycle = {}) {
     attachments: null,
     legacyHistoryImport: null,
     nativeHistoryImport: null,
+    nativeChildObservation: null,
     nativeActivity: null,
     nativeSessions: null,
     configurationValidation: null,

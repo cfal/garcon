@@ -9,18 +9,22 @@ import type {
   AgentStartRequestV5,
   AgentExecutionAdmission,
   AgentSteerRequest,
+  AgentNativeChildEvent,
 } from '@garcon/server-agent-interface';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { providerMetadata } from '../native-session/provider-metadata.js';
 
 export type AgentRuntimeExecutionContext = Omit<AgentExecutionContextV5, 'producerBinding'> & {
   readonly admission: AgentExecutionAdmission;
+  readonly publicationSignal: AbortSignal;
 };
 export type AgentRuntimeStartRequest = Omit<AgentStartRequestV5, 'producerBinding'> & {
   readonly admission: AgentExecutionAdmission;
+  readonly publicationSignal: AbortSignal;
 };
 export type AgentRuntimeResumeRequest = Omit<AgentResumeRequestV5, 'producerBinding'> & {
   readonly admission: AgentExecutionAdmission;
+  readonly publicationSignal: AbortSignal;
 };
 
 export interface RuntimePermissionResponse {
@@ -42,6 +46,7 @@ type ProviderRunEndedEvent = Exclude<
 // Runtime publication is the provider event contract itself. The publisher a runtime was handed
 // is the route, so events carry no chat identity and require no adapter-specific dialect.
 export type AgentRuntimeEvent =
+  | Exclude<AgentNativeChildEvent, { readonly type: 'native-child-capture-ended' }>
   | Exclude<AgentProducerEvent, { readonly type: 'run-ended' | 'permission' }>
   | (Omit<Extract<AgentProducerEvent, { readonly type: 'permission' }>, 'decision'> & {
       readonly decision?: RuntimePermissionResponse;

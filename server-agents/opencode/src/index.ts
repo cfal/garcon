@@ -84,6 +84,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
+  readonly nativeChildObservation = null;
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;

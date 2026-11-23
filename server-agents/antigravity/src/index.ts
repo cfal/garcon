@@ -78,6 +78,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
   readonly permissions;
   readonly legacyHistoryImport = null;
   readonly nativeHistoryImport = null;
+  readonly nativeChildObservation = null;
   readonly nativeActivity = null;
   readonly nativeSessions: AgentNativeSessionAccess;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;

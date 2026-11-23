@@ -1,5 +1,5 @@
 import {
-  AgentCallError, type AgentIntegration, type AgentImportedTranscriptRow,
+  AgentCallError, parseAgentNativeChildRef, type AgentIntegration, type AgentImportedTranscriptRow,
 } from '@garcon/server-agent-interface';
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
 import type { ExecutorRpcRequest, HistoryReaderRef } from '../transport/rpc-protocol.js';
@@ -47,7 +47,7 @@ export class HistoryRpcServer {
     switch (call.method) {
       case 'history.open': {
         const { source: sourceKind, request } = call.request;
-        if (sourceKind !== 'nativeHistoryImport' && sourceKind !== 'legacyHistoryImport') {
+        if (sourceKind !== 'nativeHistoryImport' && sourceKind !== 'legacyHistoryImport' && sourceKind !== 'nativeChildObservation') {
           throw new AgentCallError('rejected', 'Unknown history source');
         }
         if (sourceKind === 'nativeHistoryImport') {
@@ -57,10 +57,20 @@ export class HistoryRpcServer {
             throw new AgentCallError('rejected', 'The turn is still running on the executor. Reload from native history after it finishes.', 'SESSION_BUSY');
           }
         }
-        const history = integration[sourceKind];
-        if (!history) throw new AgentCallError('rejected', 'History capability unavailable', 'OPERATION_UNSUPPORTED');
         const controller = new AbortController();
-        const source = history.load({ ...request, signal: controller.signal })[Symbol.asyncIterator]();
+        let batches: AsyncIterable<readonly AgentImportedTranscriptRow[]>;
+        if (sourceKind === 'nativeChildObservation') {
+          const child = parseAgentNativeChildRef(request.child);
+          if (!child || child.ownerId !== integration.descriptor.id) throw new AgentCallError('rejected', 'Invalid native child reference');
+          const history = integration.nativeChildObservation;
+          if (!history) throw new AgentCallError('rejected', 'Child history capability unavailable', 'OPERATION_UNSUPPORTED');
+          batches = history.loadHistory({ child, signal: controller.signal });
+        } else {
+          const history = integration[sourceKind];
+          if (!history) throw new AgentCallError('rejected', 'History capability unavailable', 'OPERATION_UNSUPPORTED');
+          batches = history.load({ ...request, signal: controller.signal });
+        }
+        const source = batches[Symbol.asyncIterator]();
         let returning: Promise<IteratorResult<readonly AgentImportedTranscriptRow[]>> | null = null;
         const closeSource = () => returning ??= Promise.resolve().then(() => source.return ? source.return() : { done: true as const, value: undefined });
         const assertCurrent = () => this.#assertOpen(controller.signal);

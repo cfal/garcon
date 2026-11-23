@@ -87,6 +87,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
+  readonly nativeChildObservation = null;
   readonly nativeActivity;
   readonly nativeSessions;
   readonly configurationValidation: NonNullable<AgentIntegration['configurationValidation']> = {

@@ -5,6 +5,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentExecutionHandle } from './execution-v5.js';
 import type { AgentNativeSessionRef } from './transcript.js';
+import type { AgentNativeChildEvent } from './native-child-observation.js';
 import type {
   AgentPermissionResponseRef,
   AgentProducerBinding,
@@ -132,6 +133,7 @@ export interface AgentProducerSink {
 export interface AgentProducerNotification {
   readonly binding: AgentProducerBinding;
   readonly event: AgentProducerEvent
+    | AgentNativeChildEvent
     | { readonly type: 'started'; readonly runId: string }
     // The run can take steering input from now on: its provider has started the turn's
     // input, so a steering target captured now is live.
