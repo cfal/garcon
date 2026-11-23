@@ -1,19 +1,19 @@
 export const GIT_ERROR_MESSAGE_LIMIT = 2048;
 
 export function redactGitDiagnostic(text: string): string {
-  if (!text.includes('://')) return text;
-  // Git quotes destinations without escaping spaces or embedded quotes. A clipped field may not close.
-  const quotedUrl = /(['"])[a-z][a-z\d+.-]*:\/\/(?:[^\r\n]*\1|[\s\S]*?(?:\1|$))/gi;
-  const redacted = text.replace(quotedUrl, '<remote>');
-  if (!redacted.includes('://')) return redacted;
+  const separator = text.indexOf('://');
+  if (separator < 0) return text;
 
-  // An unquoted destination has no reliable end delimiter before the next line.
-  return redacted.replace(/[^\r\n]+/g, line => {
-    const separator = line.indexOf('://');
-    if (separator < 0) return line;
-    const start = Math.max(line.lastIndexOf(' ', separator), line.lastIndexOf('\t', separator)) + 1;
-    return line.slice(0, start) + '<remote>';
-  });
+  // Git prints destinations verbatim: even a quote followed by a newline may still be URL data.
+  const start = Math.max(...[' ', '\t', '\r', '\n'].map(char => text.lastIndexOf(char, separator))) + 1;
+  const prefix = text.slice(0, start);
+  const redacted = prefix + '<remote>';
+  if (!/(?:^|: |\n)fatal: unable to access $/.test(prefix)) return redacted;
+
+  // Git's terminal HTTP access error puts the curl reason after a separately quoted URL.
+  const http = /^'https?:\/\/[^'\s]+': ([^\r\n]+)$/i.exec(text.slice(start));
+  if (!http || http[1].includes('://') || http[1].includes("': ")) return redacted;
+  return redacted + ': ' + http[1];
 }
 
 // Domain error type for git operations. Carries a machine-readable
