@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { GitDomainError } from './git-domain-error.js';
 import { createLogger } from '../../common/log.js';
-import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
+import { hasNodeErrorCode } from '../../common/errors.js';
 import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
 import { GIT_REF_RESULT_LIMITS, type GitCommandOptions } from './types.js';
 import { DEFAULT_GIT_REF_SORT } from '../../../common/git-refs.js';
@@ -59,6 +59,7 @@ function networkGitOptions(): GitCommandOptions {
     env: { GIT_TERMINAL_PROMPT: '0' },
   };
 }
+
 type CommitMessageDiffRunner = (
   cwd: string,
   args: string[],
@@ -190,7 +191,9 @@ function creatorDateIso(value: string | undefined): string | null {
   return Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : null;
 }
 
-function parseGitRefLine(line: string, currentBranch: string | null, head: string): GitRefOption | null {
+type GitHeadIdentity = { branch: string; ref: string } | { branch: null; oid: string };
+
+function parseGitRefLine(line: string, head: GitHeadIdentity | undefined): GitRefOption | null {
   if (!line) return null;
   const [refname, objectName, creatorDate] = line.split('\0');
   if (!refname) return null;
@@ -199,8 +202,8 @@ function parseGitRefLine(line: string, currentBranch: string | null, head: strin
   const { name, kind } = gitRefDisplayName(refname);
   const isCurrent =
     kind === 'local-branch'
-      ? currentBranch === name
-      : !currentBranch && Boolean(head) && objectName === head;
+      ? head?.branch === name
+      : head?.branch === null && Boolean(head.oid) && objectName === head.oid;
   return {
     name,
     ref: refname,
@@ -210,33 +213,59 @@ function parseGitRefLine(line: string, currentBranch: string | null, head: strin
   };
 }
 
-interface GitHeadIdentity {
-  currentBranch: string | null;
-  head: string;
-}
-
 async function readGitHeadIdentity(
   projectPath: string,
   signal?: AbortSignal,
 ): Promise<GitHeadIdentity> {
+  const options = readOnlyGitOptions({ signal });
   try {
-    const { stdout } = await runGit(
-      projectPath,
-      ['rev-parse', 'HEAD', '--symbolic-full-name', 'HEAD'],
-      readOnlyGitOptions({ signal }),
-    );
-    const [head = '', symbolicHead = ''] = stdout.trim().split(/\r?\n/);
+    // Revision lookup can select refs/HEAD instead of an unborn branch.
+    const { stdout } = await runGit(projectPath, ['symbolic-ref', '--quiet', 'HEAD'], options);
+    const ref = stdout.replace(/\r?\n$/, '');
     const prefix = 'refs/heads/';
-    return {
-      head,
-      currentBranch: symbolicHead.startsWith(prefix)
-        ? symbolicHead.slice(prefix.length)
-        : null,
-    };
+    if (ref.startsWith(prefix)) return { branch: ref.slice(prefix.length), ref };
   } catch (error) {
-    if (signal?.aborted) throw error;
-    return { currentBranch: null, head: '' };
+    if (!isExpectedMissingGitResult(error)) throw error;
   }
+  const { stdout } = await runGit(projectPath, ['show-ref', '--verify', '--hash', 'HEAD'], options);
+  return { branch: null, oid: stdout.trim() };
+}
+
+async function hasHeadCommit(projectPath: string): Promise<boolean> {
+  try {
+    await runGit(projectPath, ['show-ref', '--verify', '--quiet', 'HEAD'], readOnlyGitOptions());
+    return true;
+  } catch (error) {
+    if (isExpectedMissingGitResult(error)) return false;
+    throw error;
+  }
+}
+
+async function readCheckedOutRefFields(projectPath: string, ref: string, ...fields: string[]): Promise<string[]> {
+  const format = ['%(HEAD)', ...fields].join('%00');
+  const { stdout } = await runGit(
+    projectPath,
+    ['for-each-ref', '--count=1', `--format=${format}`, ref],
+    readOnlyGitOptions({ env: { LC_ALL: 'C' } }),
+  );
+  // Git checks existence and the original ref bytes, even if UTF-8 decoding lost the distinction.
+  const [marker, ...values] = stdout.replace(/\r?\n$/, '').split('\0');
+  if (marker !== '*') {
+    throw new GitDomainError('INVALID_INPUT', 'The checked-out branch has no commits or its exact name could not be verified.');
+  }
+  return values;
+}
+
+async function statusWithoutUpstream(projectPath: string, branch: string): Promise<GitRemoteStatus> {
+  const { stdout } = await runGit(projectPath, ['remote'], readOnlyGitOptions());
+  const remotes = stdout.split(/\r?\n/).filter(Boolean);
+  return {
+    hasRemote: remotes.length > 0,
+    hasUpstream: false,
+    branch,
+    remoteName: remotes.includes('origin') ? 'origin' : remotes[0] ?? null,
+    message: 'No remote tracking branch configured',
+  };
 }
 
 async function resolveLocalBranchCheckoutName(
@@ -328,32 +357,10 @@ export async function collectCommitMessageDiffContext(
   return diffContext;
 }
 
-// Resolves the display branch and whether the repository has any commits.
-// Detached HEAD falls back to a descriptive label.
 async function resolveStatusBranch(projectPath: string): Promise<{ branch: string; hasCommits: boolean }> {
-  try {
-    const { stdout } = await runGit(
-      projectPath,
-      ['rev-parse', '--abbrev-ref', 'HEAD'],
-      readOnlyGitOptions(),
-    );
-    let branch = stdout.trim();
-    if (branch === 'HEAD') {
-      const { stdout: headOutput } = await runGit(
-        projectPath,
-        ['rev-parse', '--verify', 'HEAD'],
-        readOnlyGitOptions(),
-      );
-      branch = await resolveDetachedHeadLabel(projectPath, headOutput.trim());
-    }
-    return { branch, hasCommits: true };
-  } catch (error) {
-    const message = errorMessage(error);
-    if (message.includes('unknown revision') || message.includes('ambiguous argument')) {
-      return { branch: 'main', hasCommits: false };
-    }
-    throw error;
-  }
+  const head = await readGitHeadIdentity(projectPath);
+  if (head.branch !== null) return { branch: head.branch, hasCommits: await hasHeadCommit(projectPath) };
+  return { branch: await resolveDetachedHeadLabel(projectPath, head.oid), hasCommits: true };
 }
 
 export function createStatusOperations() {
@@ -480,13 +487,13 @@ export function createStatusOperations() {
 
     // Preserves repository validation as the canonical failure; failures wait for every command to settle.
     if (repositoryResult.status === 'rejected') throw repositoryResult.reason;
-    if (identityResult.status === 'rejected') throw identityResult.reason;
+    if (identityResult.status === 'rejected' && signal?.aborted) throw identityResult.reason;
     if (refResult.status === 'rejected') throw refResult.reason;
 
-    const identity = identityResult.value;
+    const head = identityResult.status === 'fulfilled' ? identityResult.value : undefined;
     const refs = refResult.value.stdout
       .split('\n')
-      .map((line) => parseGitRefLine(line, identity.currentBranch, identity.head))
+      .map((line) => parseGitRefLine(line, head))
       .filter((ref): ref is GitRefOption => Boolean(ref));
     return { refs };
   }
@@ -534,60 +541,23 @@ export function createStatusOperations() {
   async function getRemoteStatus({ projectPath }: ProjectOptions): Promise<GitRemoteStatus> {
     await assertGitRepository(projectPath);
 
-    const { stdout: currentBranch } = await runGit(
-      projectPath,
-      ['rev-parse', '--abbrev-ref', 'HEAD'],
-      readOnlyGitOptions(),
+    const head = await readGitHeadIdentity(projectPath);
+    if (head.branch === null) return statusWithoutUpstream(projectPath, 'HEAD');
+
+    const [remoteName, remoteBranch, track] = await readCheckedOutRefFields(
+      projectPath, head.ref, '%(upstream:remotename)', '%(upstream:short)', '%(upstream:track,nobracket)',
     );
-    const branch = currentBranch.trim();
-
-    let trackingBranch: string;
-    let remoteName: string;
-    try {
-      const { stdout } = await runGit(
-        projectPath,
-        ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`],
-        readOnlyGitOptions(),
-      );
-      trackingBranch = stdout.trim();
-      remoteName = trackingBranch.split('/')[0];
-    } catch {
-      let hasRemote = false;
-      let foundRemoteName: string | null = null;
-      try {
-        const { stdout } = await runGit(projectPath, ['remote'], readOnlyGitOptions());
-        const remotes = stdout.trim().split('\n').filter((r) => r.trim());
-        if (remotes.length > 0) {
-          hasRemote = true;
-          foundRemoteName = remotes.includes('origin') ? 'origin' : remotes[0];
-        }
-      } catch { }
-
-      return {
-        hasRemote,
-        hasUpstream: false,
-        branch,
-        remoteName: foundRemoteName,
-        message: 'No remote tracking branch configured',
-      };
+    if (!remoteName || !remoteBranch || track === 'gone') {
+      return statusWithoutUpstream(projectPath, head.branch);
     }
 
-    const { stdout: countOutput } = await runGit(
-      projectPath,
-      ['rev-list', '--count', '--left-right', `${trackingBranch}...HEAD`],
-      readOnlyGitOptions(),
-    );
-    const [behind, ahead] = countOutput.trim().split('\t').map(Number);
-
+    const counts = /^(?:ahead (\d+))?(?:, )?(?:behind (\d+))?$/.exec(track);
+    if (!counts) throw new Error('Git returned unrecognized upstream tracking counts.');
+    const ahead = Number(counts[1] ?? 0);
+    const behind = Number(counts[2] ?? 0);
     return {
-      hasRemote: true,
-      hasUpstream: true,
-      branch,
-      remoteBranch: trackingBranch,
-      remoteName,
-      ahead: ahead || 0,
-      behind: behind || 0,
-      isUpToDate: ahead === 0 && behind === 0,
+      hasRemote: true, hasUpstream: true, branch: head.branch,
+      remoteName, remoteBranch, ahead, behind, isUpToDate: ahead === 0 && behind === 0,
     };
   }
 

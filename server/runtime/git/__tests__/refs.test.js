@@ -483,9 +483,8 @@ describe("git ref checkout and branch creation", () => {
         "--is-inside-work-tree",
       ]);
       expect(defaultQuery.commands).toContainEqual([
-        "rev-parse",
-        "HEAD",
-        "--symbolic-full-name",
+        "symbolic-ref",
+        "--quiet",
         "HEAD",
       ]);
       expect(
