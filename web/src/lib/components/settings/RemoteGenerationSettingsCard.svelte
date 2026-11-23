@@ -86,7 +86,7 @@
 	}
 </script>
 
-<div role="group" aria-label={modelLabel} class="bg-muted/50 border border-border rounded-lg px-4">
+<div role="group" aria-label={modelLabel} class="@container bg-muted/50 border border-border rounded-lg px-4">
 	{#if cardState.saveError}
 		<div
 			class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -128,18 +128,18 @@
 			</div>
 		{/if}
 
-		<div class="flex flex-col items-start justify-between gap-3 pb-1 pt-2 sm:flex-row">
+		<div class="grid items-start gap-3 pb-1 pt-2 @sm:grid-cols-[minmax(8rem,1fr)_auto]">
 			<div class="min-w-0 pt-1.5 text-sm font-medium text-foreground">
 				{modelLabel}
-				{#if cardState.executorId !== 'local'}
+				{#if cardState.executorId !== 'local' && executors.hasSnapshot}
 					{@const host = executors.get(cardState.executorId)}
-					{@const unavailable = executors.hasSnapshot && !executors.isReady(cardState.executorId)}
+					{@const unavailable = !executors.isReady(cardState.executorId)}
 					<p role="status" class="wrap-anywhere text-xs font-normal {unavailable ? 'text-destructive' : 'text-muted-foreground'}">
 						{executors.label(cardState.executorId)}{host && unavailable ? ` (${executorStatus(host)})` : ''}
 					</p>
 				{/if}
 			</div>
-			<div class="flex min-w-0 max-w-full flex-col items-start sm:items-end sm:[--model-trigger-justify:end]">
+			<div class="flex min-w-0 flex-col items-start @sm:items-end @sm:[--model-trigger-justify:end]">
 				<Button
 					variant={cardState.isAuto ? 'secondary' : 'ghost'}
 					size="sm"
@@ -173,7 +173,7 @@
 					{/if}
 				</Button>
 				<div
-					class="mt-1 min-h-4 max-w-full break-words text-xs leading-4 sm:max-w-sm sm:text-right"
+					class="mt-1 min-h-4 max-w-[min(100%,24rem)] wrap-anywhere text-xs leading-4 @sm:text-right"
 					role="status"
 					aria-live="polite"
 				>

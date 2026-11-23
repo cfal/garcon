@@ -20,7 +20,7 @@
 
 	interface Props {
 		section?: 'all' | 'general' | 'automation' | 'notifications';
-		executors?: ExecutorSnapshot[];
+		executors?: ExecutorSnapshot[] | null;
 	}
 
 	let { section = 'all', executors }: Props = $props();

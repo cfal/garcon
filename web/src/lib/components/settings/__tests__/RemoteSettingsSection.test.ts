@@ -54,6 +54,18 @@ describe('remote settings sections', () => {
 		expect(screen.getByText(availability === 'ready' ? remoteExecutor.label : new RegExp(`${remoteExecutor.label} \\(.+\\)`)).getAttribute('role')).toBe('status');
 	});
 
+	it('waits for executor discovery before naming a saved remote target', () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeRemoteSettingsSnapshot({
+			ui: { chatTitle: { enabled: true, executorId: remoteExecutor.id, model: 'opus' } },
+		}));
+		setTestRemoteSettingsStore(store);
+		render(RemoteSettingsSectionTestHost, { executors: null });
+		const field = within(screen.getByRole('group', { name: 'Title model' }));
+		expect(field.queryByText(remoteExecutor.id)).toBeNull();
+		expect(field.getByRole('button', { name: 'Auto (Local)' }).getAttribute('aria-pressed')).toBe('false');
+	});
+
 	it.each(['not-a-executor', '', '22222222-2222-4222-8222-222222222222'])(
 		'shows an unavailable saved generator and requires explicit Auto repair (%s)',
 		async (executorId) => {

@@ -207,6 +207,40 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
   { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 180_000);
 
+test('a long generation executor name leaves room for every model field control', async () => {
+  await withChromiumFixture('generation-executor-field', async ({ page, integration }) => {
+    const { client, directAgents } = integration;
+    const { agentId, provider } = directAgents.openAi;
+    const label = 'Generation-'.padEnd(100, 'W');
+    await client.patch(`/api/v1/executors/${client.executorId}`, { label });
+    await client.updateSettings({ ui: { commitMessage: {
+      executorId: client.executorId, agentId, model: provider.model,
+      apiProviderId: provider.providerId, modelEndpointId: provider.endpointId, modelProtocol: provider.protocol,
+    } } });
+    await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('button', { name: 'More actions', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Automation', exact: true }).click();
+    const card = page.getByRole('group', { name: 'Commit message model', exact: true });
+    const host = card.getByText(label, { exact: true });
+    await browserExpect(host).toBeVisible();
+    for (const width of [640, 680, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await browserExpect.poll(() => host.evaluate(node => {
+        const card = node.closest('[role="group"]')!;
+        const field = card.getBoundingClientRect();
+        const name = node.getBoundingClientRect();
+        return [...card.querySelectorAll('button')].filter(button => {
+          const rect = button.getBoundingClientRect();
+          const overlapsName = rect.left < name.right && rect.right > name.left
+            && rect.top < name.bottom && rect.bottom > name.top;
+          return rect.width > 0 && (overlapsName || rect.left < field.left || rect.right > field.right);
+        }).map(button => button.getAttribute('aria-label') ?? button.textContent?.trim());
+      }), { message: `Overlapping or out-of-bounds field controls at ${width}px` }).toEqual([]);
+    }
+  }, undefined, { executionBackend: 'remote-controller-dials' });
+}, 60_000);
+
 test('accepted executor handoffs update the Files target before background chat refresh', async () => {
   await withChromiumFixture('chat-host-handoff-project', async ({ page, integration, assertNoBrowserErrors }) => {
     const { client, executionDirs, directAgents } = integration;
