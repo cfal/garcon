@@ -119,7 +119,6 @@ async function constrainComposerActions(container: HTMLElement): Promise<void> {
 	await Promise.resolve();
 	const root = container.querySelector<HTMLElement>('[data-composer-toolbar]');
 	if (!root) throw new Error('Missing composer toolbar');
-	Object.defineProperty(root, 'clientWidth', { configurable: true, get: () => 190 });
 	ResizeObserverHarness.emit(root, 190);
 	await Promise.resolve();
 }

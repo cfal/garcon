@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ComposerAgentSettings } from '../composer-toolbar-types';
 import AgentSettingControl from '../AgentSettingControl.svelte';
 
-describe('AgentSettingsControls', () => {
+describe('AgentSettingControl', () => {
 	afterEach(cleanup);
 
 	it('focuses a native number setting and leaves its editing keys to the input', async () => {

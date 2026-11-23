@@ -33,6 +33,10 @@ async function bounds(locator: Locator) {
   return box;
 }
 
+function setToolbarWidth(toolbar: Locator, width: string): Promise<void> {
+  return toolbar.evaluate((bar, value) => { bar.style.width = value; }, width);
+}
+
 async function waitForAnimations(locator: Locator): Promise<void> {
   await locator.evaluate(async (node) => {
     await Promise.all(
@@ -104,7 +108,7 @@ describe("Chromium New Chat composer layout", () => {
         await fixture.page.setViewportSize({ width: 390, height: 844 });
 
         markPhase("opening both overflow menus at the tile width floor");
-        await bottomBar.evaluate((bar) => { bar.style.width = '136px'; });
+        await setToolbarWidth(bottomBar, "136px");
         const addTrigger = bottomBar.getByRole("button", { name: "More composer actions" });
         await addTrigger.click();
         const addMenu = fixture.page.getByRole("menu");
@@ -140,7 +144,7 @@ describe("Chromium New Chat composer layout", () => {
           '[data-slot="model-selector-compact"]',
         );
         await compactSelector.waitFor({ state: "visible" });
-        await bottomBar.evaluate((bar) => { bar.style.removeProperty("width"); });
+        await setToolbarWidth(bottomBar, "");
         const modelDialog = fixture.page.getByRole("dialog").filter({
           has: compactSelector,
         });
@@ -246,7 +250,7 @@ describe("Chromium New Chat composer layout", () => {
         expect(popoverBox.x).toBeGreaterThanOrEqual(8);
         expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(632);
         markPhase("resizing a desktop tile with the model picker open");
-        await bottomBar.evaluate((bar) => { bar.style.width = "196px"; });
+        await setToolbarWidth(bottomBar, "196px");
         await settingsMenu.waitFor();
         expect(await modelPopover.isVisible()).toBe(true);
         await fixture.page.keyboard.press("Escape");
@@ -255,7 +259,7 @@ describe("Chromium New Chat composer layout", () => {
         await settingsMenu.click();
         await fixture.page.getByRole("menuitem", { name: /Agent \/ model/ }).click();
         await modelPopover.waitFor();
-        await bottomBar.evaluate((bar) => { bar.style.removeProperty("width"); });
+        await setToolbarWidth(bottomBar, "");
         await longModelTrigger.waitFor();
         await modelPopover.getByRole("textbox").press("Enter");
         await modelPopover.waitFor({ state: "detached" });
@@ -280,13 +284,13 @@ describe("Chromium New Chat composer layout", () => {
         const permissionTrigger = bottomBar.getByRole("button", { name: /^Permission mode:/ });
         await permissionTrigger.press("ArrowDown");
         await fixture.page.getByRole("menuitemradio").first().focus();
-        await bottomBar.evaluate((bar) => { bar.style.width = "136px"; });
+        await setToolbarWidth(bottomBar, "136px");
         await expectLocator(settingsMenu).toBeFocused();
         await expectLocator(fixture.page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
         markPhase("returning focus to a newly inline editing action");
         await addTrigger.click();
         await fixture.page.getByRole("menuitem", { name: "Open expanded composer" }).focus();
-        await bottomBar.evaluate((bar) => { bar.style.width = "350px"; });
+        await setToolbarWidth(bottomBar, "350px");
         await expectLocator(bottomBar.getByRole("button", { name: "Open expanded composer" })).toBeFocused();
         await expectLocator(fixture.page.getByRole("menu")).toHaveCount(0);
         expect(await bottomBar.evaluate((bar) => bar.scrollWidth <= bar.clientWidth)).toBe(true);
