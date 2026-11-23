@@ -162,20 +162,16 @@ describe('getAntigravityAuthStatus', () => {
   };
 
   it('does not report a successful sign-in when the ACP peer offers no in-band authentication', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'agy-external-auth-'));
-    try {
-      const binary = join(root, 'agy');
-      await writeFile(binary, `#!/bin/sh
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-external-auth-'));
+    const binary = join(dir.path, 'agy');
+    await writeFile(binary, `#!/bin/sh
 read -r init && echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[]}}'
-read -r next && case "$next" in *'"method":"authenticate"'*) echo '{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Unexpected authenticate"}}';; esac
+read -r initialized
 `, { mode: 0o700 });
-      const external = config({ binary: () => binary });
-      const status = await getAntigravityAuthStatus(external, { ...createAntigravityProbes(external), headlessAuthenticate: true });
-      expect(status).toMatchObject({ authenticated: false, source: 'unknown', canReauth: false });
-      expect(status.detail).toContain('does not advertise in-band authentication');
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    const external = config({ binary: () => binary });
+    const status = await getAntigravityAuthStatus(external, { ...createAntigravityProbes(external), headlessAuthenticate: true });
+    expect(status).toMatchObject({ authenticated: false, source: 'unknown', canReauth: false });
+    expect(status.detail).toContain('does not advertise in-band authentication');
   });
 
   it.each(['oauth-personal', 'gemini-api-key'])('does not offer sign-in or report ready for %s when agy is missing', async (method) => {

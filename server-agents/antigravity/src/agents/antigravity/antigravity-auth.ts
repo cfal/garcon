@@ -101,7 +101,8 @@ export async function getAntigravityAuthStatus(
     // check as a real session wherever it cannot open a browser.
     const canReauth = method === 'oauth-personal';
     if (headlessAuthenticate) {
-      if (!await waitUnlessAborted(authenticate(), signal)) {
+      const authenticated = await waitUnlessAborted(authenticate(), signal);
+      if (!authenticated) {
         return {
           authenticated: false, canReauth: false, label: '', source: 'unknown',
           detail: 'The ACP agent does not advertise in-band authentication. Sign-in is checked when a session opens.',
