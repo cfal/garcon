@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { openModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { E2eFixture } from '../../support/e2e-fixture.js';
@@ -370,8 +370,7 @@ test('New Chat selects a worktree from its chosen executor', async () => {
     await openModelSelector(fixture.page);
     await app.waitForButton('Chat Completions');
     await app.clickButton('Chat Completions');
-    await app.waitForButton('Integration Echo');
-    await app.clickButton('Integration Echo');
+    await selectModelOption(fixture.page, 'Integration Echo');
     await app.fill('[role="dialog"] input[aria-label="Project Path"]', executionDirs.project);
     await app.waitForButton('Select a different worktree');
     const listing = fixture.page.waitForResponse(response => {

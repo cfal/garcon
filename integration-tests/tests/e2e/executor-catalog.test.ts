@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { openModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
@@ -158,8 +158,7 @@ test('late remote catalog discovery preserves a schedule retargeted to Local', a
     await openModelSelector(fixture.page);
     await app.waitForButton('Chat Completions');
     await app.clickButton('Chat Completions');
-    await app.waitForButton('Integration Echo');
-    await app.clickButton('Integration Echo');
+    await selectModelOption(fixture.page, 'Integration Echo');
     await fixture.page.evaluate(() => document.dispatchEvent(new Event('release-remote-catalog')));
     await fixture.page.waitForFunction(() => document.documentElement.dataset.remoteCatalogReleased === 'true');
     await app.waitForDialogButtonEnabled('Save Prompt');
@@ -206,8 +205,7 @@ test('new and scheduled chats retain input and require Retry after cached remote
       await openModelSelector(fixture.page);
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
+      await selectModelOption(fixture.page, 'Integration Echo');
       const pathSelector = kind === 'new' ? '[role="dialog"] input[aria-label="Project Path"]' : '#scheduled-project-path';
       const promptSelector = kind === 'new' ? '[role="dialog"] textarea[placeholder="How can I help you today?"]' : '[data-slot="scheduled-prompt-field"] textarea';
       const submitLabel = kind === 'new' ? 'Start session' : 'Save Prompt';

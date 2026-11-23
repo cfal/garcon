@@ -5,7 +5,7 @@ import type { AgentRunCommandRequest } from '../../../common/chat-command-contra
 import { effectiveExecutorId, type ExecutorSnapshot } from '../../../common/executors.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
-import { openModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 
 test.each(['stay', 'chat switch', 'reload'])('committed agent choices survive navigation and preserve composer text (%s)', async (leave) => {
   await withE2eFixture('executor-chat-reconciliation', async fixture => {
@@ -46,9 +46,8 @@ test.each(['stay', 'chat switch', 'reload'])('committed agent choices survive na
       await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
       await app.waitForButton('Anthropic');
       await app.clickButton('Anthropic');
-      await app.waitForButton('Integration Anthropic Echo');
       const committed = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
-      await app.clickButton('Integration Anthropic Echo');
+      await selectModelOption(fixture.page, 'Integration Anthropic Echo');
       expect((await committed).status()).toBe(200);
       await fixture.page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-slot="composer-bottom-bar"] [data-executor-picker]')?.disabled === false);
     };
@@ -133,9 +132,8 @@ test.each(['different agent', 'durable owner'])(
     await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
     await app.waitForButton('Anthropic');
     await app.clickButton('Anthropic');
-    await app.waitForButton('Integration Anthropic Echo');
     const agentCommitted = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
-    await app.clickButton('Integration Anthropic Echo');
+    await selectModelOption(fixture.page, 'Integration Anthropic Echo');
     expect((await agentCommitted).status()).toBe(200);
     await fixture.page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-slot="composer-bottom-bar"] [data-executor-picker]')?.disabled === false);
     const picker = '[data-slot="composer-bottom-bar"] [data-executor-picker]';
@@ -152,8 +150,7 @@ test.each(['different agent', 'durable owner'])(
       await openModelSelector(fixture.page);
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
+      await selectModelOption(fixture.page, 'Integration Echo');
     }
     await app.waitForDialogButtonEnabled('Use This Executor');
     await app.clickDialogButton('Use This Executor');
