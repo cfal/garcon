@@ -11,6 +11,7 @@ import {
 } from '$lib/api/settings.js';
 import { ApiError } from '$lib/api/client.js';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
 import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
@@ -41,6 +42,16 @@ vi.mock('$lib/api/settings.js', () => ({
 describe('remote settings sections', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+	});
+
+	it.each(['ready', 'offline'] as const)('identifies a %s generation executor beside the model field', (availability) => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeRemoteSettingsSnapshot({
+			ui: { chatTitle: { enabled: true, executorId: remoteExecutor.id, model: 'opus' } },
+		}));
+		setTestRemoteSettingsStore(store);
+		render(RemoteSettingsSectionTestHost, { executors: [localExecutor, { ...remoteExecutor, availability }] });
+		expect(screen.getByText(availability === 'ready' ? remoteExecutor.label : new RegExp(`${remoteExecutor.label} \\(.+\\)`)).getAttribute('role')).toBe('status');
 	});
 
 	it.each(['not-a-executor', '', '22222222-2222-4222-8222-222222222222'])(

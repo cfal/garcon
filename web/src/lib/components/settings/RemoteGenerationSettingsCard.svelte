@@ -7,6 +7,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import { getExecutors, getModelCatalog, getRemoteSettings } from '$lib/context';
+	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		DEFAULT_COMMIT_MESSAGE_PROMPT,
@@ -128,13 +129,17 @@
 		{/if}
 
 		<div class="flex flex-col items-start justify-between gap-3 pb-1 pt-2 sm:flex-row">
-			<div class="pt-1.5 text-sm font-medium text-foreground">
+			<div class="min-w-0 pt-1.5 text-sm font-medium text-foreground">
 				{modelLabel}
-				{#if cardState.executorId !== 'local' && executors.hasSnapshot && !executors.get(cardState.executorId)}
-					<p role="status" class="text-xs text-destructive">{executors.label(cardState.executorId)}</p>
+				{#if cardState.executorId !== 'local'}
+					{@const host = executors.get(cardState.executorId)}
+					{@const unavailable = executors.hasSnapshot && !executors.isReady(cardState.executorId)}
+					<p role="status" class="wrap-anywhere text-xs font-normal {unavailable ? 'text-destructive' : 'text-muted-foreground'}">
+						{executors.label(cardState.executorId)}{host && unavailable ? ` (${executorStatus(host)})` : ''}
+					</p>
 				{/if}
 			</div>
-			<div class="flex min-w-0 max-w-full flex-col items-start sm:items-end">
+			<div class="flex min-w-0 max-w-full flex-col items-start sm:items-end sm:[--model-trigger-justify:end]">
 				<Button
 					variant={cardState.isAuto ? 'secondary' : 'ghost'}
 					size="sm"
