@@ -43,6 +43,10 @@ export class ExecutorsStore {
 		return this.executors.some((executor) => executor.id !== 'local');
 	}
 
+	showComposerExecutor(selectedId: string): boolean {
+		return this.hasRemoteExecutors || effectiveExecutorId(selectedId) !== 'local';
+	}
+
 	get(id?: string | null): ExecutorSnapshot | undefined {
 		return this.executors.find((executor) => executor.id === effectiveExecutorId(id));
 	}

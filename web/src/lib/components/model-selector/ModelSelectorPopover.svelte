@@ -29,6 +29,7 @@
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
 		triggerClass?: string;
+		overflowAnchor?: HTMLElement | null;
 		contentClass?: string;
 	}
 
@@ -43,6 +44,7 @@
 		align = 'end',
 		side = 'bottom',
 		triggerClass,
+		overflowAnchor = null,
 		contentClass,
 	}: Props = $props();
 
@@ -121,6 +123,21 @@
 		untrack(() => selector.reconcileExecutor());
 	});
 
+	export function selectionSummary(): string {
+		const { agentLabel, modelLabel } = selector.committedSelection;
+		return [agentLabel, modelLabel].filter(Boolean).join(' / ');
+	}
+
+	export function openPicker(): void {
+		if (!disabled && !selector.open) handleOpenChange(true);
+	}
+
+	function restoreOverflowFocus(event: Event): void {
+		if (!overflowAnchor) return;
+		event.preventDefault();
+		overflowAnchor.focus({ preventScroll: true });
+	}
+
 	function handleOpenChange(open: boolean): void {
 		if (open) {
 			void executors.refresh();
@@ -155,7 +172,7 @@
 		function handleDocumentPointerDown(event: PointerEvent): void {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
-			if (trigger.contains(target) || content.contains(target)) return;
+			if (trigger.contains(target) || overflowAnchor?.contains(target) || content.contains(target)) return;
 			if (compactLayout) {
 				selector.discardAndClose();
 				return;
@@ -215,6 +232,7 @@
 			{@render triggerContent()}
 		</Dialog.Trigger>
 		<Dialog.Content
+			onCloseAutoFocus={restoreOverflowFocus}
 			bind:ref={contentNode}
 			class={cn(
 				'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
@@ -247,6 +265,9 @@
 			{@render triggerContent()}
 		</Popover.Trigger>
 		<Popover.Content
+			customAnchor={overflowAnchor}
+			getFocusReturnTarget={() => overflowAnchor ?? triggerNode}
+			onCloseAutoFocus={restoreOverflowFocus}
 			bind:ref={contentNode}
 			{align}
 			{side}

@@ -16,6 +16,8 @@
 		preferRecentsOnOpen?: boolean;
 		getSelectableAgentIds?: (executorId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
+		overflowAnchor?: HTMLElement | null;
+		triggerClass?: string;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
 	}
@@ -28,12 +30,20 @@
 		preferRecentsOnOpen = false,
 		getSelectableAgentIds,
 		disabled = false,
+		overflowAnchor,
+		triggerClass,
 		align = 'end',
 		side = 'bottom',
 	}: Props = $props();
+	let picker = $state<ModelSelectorPopover>();
+	export function selectionSummary(): string { return picker?.selectionSummary() ?? ''; }
+	export function openPicker(): void { picker?.openPicker(); }
 </script>
 
 <ModelSelectorPopover
+	bind:this={picker}
+	{overflowAnchor}
+	{triggerClass}
 	{value}
 	mode={{ ...mode, executor: 'fixed', surface: 'composer' }}
 	{onChange}

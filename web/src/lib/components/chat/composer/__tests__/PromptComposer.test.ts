@@ -237,13 +237,13 @@ describe('PromptComposer focus', () => {
 		},
 	);
 
-	it('hides the composer executor selector for a removed remote when only Local remains', () => {
+	it('keeps a removed remote identifiable without falling back to Local', () => {
 		render(PromptComposerTestHost, {
 			executors: [localExecutor],
 			selectedExecutorId: remoteExecutor.id,
 		});
 
-		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		expect(screen.getByRole('button', { name: `Executor: Unavailable executor: ${remoteExecutor.id}` })).toBeTruthy();
 	});
 
 	it('updates executor visibility without remounting or clearing the composer draft', async () => {
@@ -263,7 +263,7 @@ describe('PromptComposer focus', () => {
 		expect(document.activeElement).toBe(textarea);
 
 		await rerender({ selectedChatId: 'remote-chat', selectedExecutorId: remoteExecutor.id });
-		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		expect(screen.getByRole('button', { name: /Executor: Unavailable executor/ })).toBeTruthy();
 		await rerender({ selectedChatId: 'chat-1', selectedExecutorId: 'local' });
 		await waitFor(() => expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull());
 		expect(screen.getByRole('textbox')).toBe(textarea);
@@ -1893,7 +1893,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 
-		const permissionButton = screen.getAllByTitle('Default')[0];
+		const permissionButton = screen.getByRole('button', { name: 'Permission mode: Default' });
 		expect(permissionButton).toBeTruthy();
 		if (!permissionButton) throw new Error('Missing permission control');
 		permissionButton.focus();

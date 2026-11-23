@@ -75,6 +75,19 @@ it('hides the selector before executor discovery completes', () => {
 	expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
 });
 
+it('retains a missing chat executor without presenting Local as the selected host', async () => {
+	const executors = new ExecutorsStore(async () => [localExecutor]);
+	executors.applySnapshot([localExecutor]);
+	const onSelect = vi.fn();
+	render(ExecutorSelector, { executors, executorId: remoteExecutor.id, service: 'agents', presentation: 'composer', onSelect });
+	await fireEvent.click(screen.getByRole('button', { name: `Executor: Unavailable executor: ${remoteExecutor.id}` }));
+	const missing = screen.getByRole('menuitemradio', { name: /Unavailable executor/ });
+	expect(missing.getAttribute('aria-disabled')).toBe('true');
+	expect(missing.getAttribute('aria-checked')).toBe('true');
+	expect(screen.getByRole('menuitemradio', { name: 'Local' }).getAttribute('aria-checked')).toBe('false');
+	expect(onSelect).not.toHaveBeenCalled();
+});
+
 it.each(['files', 'git', 'agents'] as const)(
 	'shows the themed executor icon with an offline remote (%s)',
 	(service) => {
