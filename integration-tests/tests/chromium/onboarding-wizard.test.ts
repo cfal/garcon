@@ -3,6 +3,7 @@ import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { measureDialogHeightChange } from '../../support/dialog-resize.js';
 import type { Page } from 'playwright';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 
@@ -24,7 +25,10 @@ test('uses natural dialog height while the search page saves its initial setting
     await page.getByRole('button', { name: 'Restart setup wizard', exact: true }).click();
     const wizard = page.getByRole('dialog');
     const next = wizard.getByRole('button', { name: 'Continue', exact: true });
-    for (let i = 0; i < 4; i++) await next.click();
+    const { before, middle, after } = await next.evaluate(measureDialogHeightChange);
+    expect(middle).toBeGreaterThan(Math.min(before, after));
+    expect(middle).toBeLessThan(Math.max(before, after));
+    for (let i = 1; i < 4; i++) await next.click();
     await browserExpect(wizard.getByRole('heading', { name: 'Writing and behavior' })).toBeFocused();
     const save = Promise.withResolvers<void>();
     await page.route('**/api/v1/app/settings', async route => {
