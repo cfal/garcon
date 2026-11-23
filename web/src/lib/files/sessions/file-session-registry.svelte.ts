@@ -223,6 +223,10 @@ export class FileSessionRegistry {
 		return this.all.length;
 	}
 
+	hasOpenDocuments(): boolean {
+		return this.#documentIdByIdentity.size !== 0;
+	}
+
 	get(sessionId: string): FileViewSession | null {
 		return this.sessions[sessionId] ?? null;
 	}
@@ -875,9 +879,8 @@ export class FileSessionRegistry {
 		return this.#drafts?.flush() ?? Promise.resolve();
 	}
 
-	viewVisibilityChanged(sessionId: string): void {
-		const session = this.get(sessionId);
-		if (session) this.#io.visibilityChanged(session.documentId);
+	documentVisibilityChanged(documentId: string): void {
+		this.#io.visibilityChanged(documentId);
 	}
 
 	async showSource(sessionId: string): Promise<boolean> {
