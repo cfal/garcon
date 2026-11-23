@@ -18,12 +18,12 @@ const AUTHENTICATE_PROBE_TIMEOUT_MS = 10_000;
 
 interface AntigravityProbes {
   readonly runModels: () => Promise<AntigravityCliResult>;
-  readonly authenticate: () => Promise<void>;
+  readonly authenticate: () => Promise<boolean>;
 }
 
 // A completed login replaces both in-flight probes and their last observed status.
 export function createAntigravityProbes(config: AntigravityConfig): AntigravityProbes & { lastProbed: AgentAuthStatus | null } {
-  const authentication = new Map<string, Promise<void>>();
+  const authentication = new Map<string, Promise<boolean>>();
   const models = new Map<string, Promise<AntigravityCliResult>>();
   return {
     lastProbed: null,
@@ -34,13 +34,16 @@ export function createAntigravityProbes(config: AntigravityConfig): AntigravityP
   };
 }
 
-async function authenticateOnce(config: AntigravityConfig): Promise<void> {
+async function authenticateOnce(config: AntigravityConfig): Promise<boolean> {
   const client = new AcpClient(new AcpTransport({ requestTimeoutMs: AUTHENTICATE_PROBE_TIMEOUT_MS }), {
     initialize: garconInitializeParams(),
     authenticateMethodId: config.authMethod(),
   });
   try {
-    await client.connect({ command: config.binary(), args: ['acp'], cwd: tmpdir(), env: antigravityLoginEnvironment(config) });
+    const { authenticatedMethodId } = await client.connect({
+      command: config.binary(), args: ['acp'], cwd: tmpdir(), env: antigravityLoginEnvironment(config),
+    });
+    return authenticatedMethodId !== null;
   } finally {
     client.close();
   }
@@ -98,7 +101,12 @@ export async function getAntigravityAuthStatus(
     // check as a real session wherever it cannot open a browser.
     const canReauth = method === 'oauth-personal';
     if (headlessAuthenticate) {
-      await waitUnlessAborted(authenticate(), signal);
+      if (!await waitUnlessAborted(authenticate(), signal)) {
+        return {
+          authenticated: false, canReauth: false, label: '', source: 'unknown',
+          detail: 'The ACP agent does not advertise in-band authentication. Sign-in is checked when a session opens.',
+        };
+      }
     } else {
       const result = await waitUnlessAborted(runModels(), signal);
       if (result.exitCode !== 0) {

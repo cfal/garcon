@@ -146,6 +146,23 @@ describe('getAntigravityAuthStatus', () => {
     authenticate: () => { throw new Error('Unexpected authentication probe'); },
   };
 
+  it('does not report a successful sign-in when the ACP peer offers no in-band authentication', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agy-external-auth-'));
+    try {
+      const binary = join(root, 'agy');
+      await writeFile(binary, `#!/bin/sh
+read -r init && echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[]}}'
+read -r next && case "$next" in *'"method":"authenticate"'*) echo '{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Unexpected authenticate"}}';; esac
+`, { mode: 0o700 });
+      const external = config({ binary: () => binary });
+      const status = await getAntigravityAuthStatus(external, { ...createAntigravityProbes(external), headlessAuthenticate: true });
+      expect(status).toMatchObject({ authenticated: false, source: 'unknown', canReauth: false });
+      expect(status.detail).toContain('does not advertise in-band authentication');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.each(['oauth-personal', 'gemini-api-key'])('does not offer sign-in or report ready for %s when agy is missing', async (method) => {
     const status = await getAntigravityAuthStatus(createAntigravityConfig(environment({
       GARCON_ANTIGRAVITY_BINARY: '/synthetic/uninstalled/agy', GARCON_ANTIGRAVITY_AUTH_METHOD: method, GEMINI_API_KEY: 'synthetic-key',
@@ -199,9 +216,9 @@ describe('getAntigravityAuthStatus', () => {
 
   it('offers in-app sign-in only for the personal Google method', async () => {
     expect(await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), {
-      ...noProbes, authenticate: async () => {}, headlessAuthenticate: true,
+      ...noProbes, authenticate: async () => true, headlessAuthenticate: true,
     })).toEqual({ authenticated: true, canReauth: false, label: 'agent-platform', source: 'cli' });
-    expect(await getAntigravityAuthStatus(config(), { ...noProbes, authenticate: async () => {}, headlessAuthenticate: true }))
+    expect(await getAntigravityAuthStatus(config(), { ...noProbes, authenticate: async () => true, headlessAuthenticate: true }))
       .toEqual({ authenticated: true, canReauth: true, label: 'Google', source: 'cli' });
   });
 
