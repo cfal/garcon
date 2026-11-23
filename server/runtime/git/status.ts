@@ -1,4 +1,4 @@
-import { assertGitWorkingPath, markGitMutationDispatched } from './operation-context.js';
+import { assertGitWorkingPath, isGitCancellation, markGitMutationDispatched } from './operation-context.js';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { GitDomainError } from './git-domain-error.js';
@@ -192,18 +192,19 @@ function creatorDateIso(value: string | undefined): string | null {
   return Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : null;
 }
 
-type GitHeadIdentity = { branch: string; ref: string } | { branch: null; oid: string };
+type AttachedBranch = { branch: string; ref: string };
+type GitHeadIdentity = AttachedBranch | { branch: null; oid: string };
 
 function parseGitRefLine(line: string, head: GitHeadIdentity | undefined): GitRefOption | null {
   if (!line) return null;
-  const [refname, objectName, creatorDate] = line.split('\0');
+  const [refname, objectName, creatorDate, headMarker] = line.split('\0');
   if (!refname) return null;
   if (refname.startsWith('refs/remotes/') && refname.endsWith('/HEAD')) return null;
 
   const { name, kind } = gitRefDisplayName(refname);
   const isCurrent =
     kind === 'local-branch'
-      ? head?.branch === name
+      ? headMarker === '*'
       : head?.branch === null && Boolean(head.oid) && objectName === head.oid;
   return {
     name,
@@ -214,22 +215,30 @@ function parseGitRefLine(line: string, head: GitHeadIdentity | undefined): GitRe
   };
 }
 
-async function readGitHeadIdentity(
+async function readAttachedBranch(
   projectPath: string,
   signal?: AbortSignal,
-): Promise<GitHeadIdentity> {
-  const options = readOnlyGitOptions({ signal });
+): Promise<AttachedBranch | null> {
   try {
     // Revision lookup can select refs/HEAD instead of an unborn branch.
-    const { stdout } = await runGit(projectPath, ['symbolic-ref', '--quiet', 'HEAD'], options);
+    const { stdout } = await runGit(projectPath, ['symbolic-ref', '--quiet', 'HEAD'], readOnlyGitOptions({ signal }));
     const ref = stdout.replace(/\r?\n$/, '');
     const prefix = 'refs/heads/';
     if (ref.startsWith(prefix)) return { branch: ref.slice(prefix.length), ref };
   } catch (error) {
     if (!isExpectedMissingGitResult(error)) throw error;
   }
-  const { stdout } = await runGit(projectPath, ['show-ref', '--verify', '--hash', 'HEAD'], options);
-  return { branch: null, oid: stdout.trim() };
+  return null;
+}
+
+async function readHeadOid(projectPath: string, signal?: AbortSignal): Promise<string> {
+  const { stdout } = await runGit(projectPath, ['show-ref', '--verify', '--hash', 'HEAD'], readOnlyGitOptions({ signal }));
+  return stdout.trim();
+}
+
+async function readGitHeadIdentity(projectPath: string, signal?: AbortSignal): Promise<GitHeadIdentity> {
+  const branch = await readAttachedBranch(projectPath, signal);
+  return branch ?? { branch: null, oid: await readHeadOid(projectPath, signal) };
 }
 
 async function hasHeadCommit(projectPath: string): Promise<boolean> {
@@ -359,9 +368,15 @@ export async function collectCommitMessageDiffContext(
 }
 
 async function resolveStatusBranch(projectPath: string): Promise<{ branch: string; hasCommits: boolean }> {
-  const head = await readGitHeadIdentity(projectPath);
-  if (head.branch !== null) return { branch: head.branch, hasCommits: await hasHeadCommit(projectPath) };
-  return { branch: await resolveDetachedHeadLabel(projectPath, head.oid), hasCommits: true };
+  const [symbolic, oid] = await Promise.allSettled([readAttachedBranch(projectPath), readHeadOid(projectPath)]);
+  if (symbolic.status === 'rejected') throw symbolic.reason;
+  const branch = symbolic.value?.branch;
+  if (oid.status === 'rejected') {
+    if (branch === undefined || isGitCancellation(oid.reason)) throw oid.reason;
+    // Only the quiet form of show-ref distinguishes an unborn HEAD from a lookup error.
+    return { branch, hasCommits: await hasHeadCommit(projectPath) };
+  }
+  return { branch: branch ?? await resolveDetachedHeadLabel(projectPath, oid.value), hasCommits: true };
 }
 
 export function createStatusOperations() {
@@ -476,7 +491,7 @@ export function createStatusOperations() {
       'for-each-ref',
       `--count=${normalizeRefResultLimit(limit)}`,
       ...gitRefSortArgs(sort, refPatterns),
-      '--format=%(refname)%00%(objectname)%00%(creatordate:unix)',
+      '--format=%(refname)%00%(objectname)%00%(creatordate:unix)%00%(HEAD)',
       ...refPatterns,
     ];
     const [repositoryResult, identityResult, refResult] =

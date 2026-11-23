@@ -161,6 +161,19 @@ test.skipIf(process.platform === 'win32')('does not push a different branch with
   expect(await listRefs(remote)).toBe(`refs/heads/${branch} ${tip}\n`);
 });
 
+test.skipIf(process.platform === 'win32')('does not mark a byte-distinct branch current for an unborn HEAD', async () => {
+  const { git, projectPath } = await executorRuntimeFixture();
+  const branch = 'release\ufffd';
+  await runGit(projectPath, ['branch', branch]);
+  const checkout = Bun.spawnSync(['sh', '-c', String.raw`exec git switch --orphan "$(printf 'release\377')"`], {
+    cwd: projectPath, env: process.env,
+  });
+  expect(checkout.exitCode).toBe(0);
+  const { refs } = await git.getRefs({ projectPath });
+  expect(refs.map(ref => ref.name)).toContain(branch);
+  expect(refs.filter(ref => ref.isCurrent)).toEqual([]);
+});
+
 test('distinguishes up-to-date, behind and diverged upstreams', async () => {
   const { git, projectPath } = await pushFixture();
   const status = () => git.getRemoteStatus({ projectPath });
