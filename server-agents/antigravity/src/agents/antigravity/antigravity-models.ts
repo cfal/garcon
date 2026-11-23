@@ -26,17 +26,13 @@ export async function runAntigravityModels(config: AntigravityConfig, timeoutMs 
   }
   const stdout = pipeText(proc.stdout);
   const stderr = pipeText(proc.stderr);
-  // The deadline also releases pipes that a descendant might still hold open.
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<never>((_, reject) => {
-    deadline = setTimeout(() => {
-      reject(new Error(`agy models timed out after ${timeoutMs} ms`));
-    }, timeoutMs);
-  });
+  // A descendant can keep the pipes open after agy exits, so the deadline covers reads as well as exit.
+  const timeout = Promise.withResolvers<never>();
+  const timer = setTimeout(() => timeout.reject(new Error(`agy models timed out after ${timeoutMs} ms`)), timeoutMs);
   try {
     const [stdoutText, stderrText, exitCode] = await Promise.race([
       Promise.all([stdout.text, stderr.text, proc.exited.catch(() => null)]),
-      timedOut,
+      timeout.promise,
     ]);
     return { stdout: stdoutText, stderr: stderrText, exitCode };
   } catch (error) {
@@ -45,7 +41,7 @@ export async function runAntigravityModels(config: AntigravityConfig, timeoutMs 
     stderr.cancel();
     throw error;
   } finally {
-    clearTimeout(deadline);
+    clearTimeout(timer);
   }
 }
 
