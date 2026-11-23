@@ -39,35 +39,50 @@ export function buildChatToolDiff(oldContent: string, newContent: string): ChatT
 
 	const oldLines = oldContent.split('\n');
 	const newLines = newContent.split('\n');
-	const oldLineCount = oldLines.length;
-	const newLineCount = newLines.length;
-	const lengths: number[][] = Array.from({ length: oldLineCount + 1 }, () =>
-		Array(newLineCount + 1).fill(0),
+	let oldEnd = oldLines.length;
+	let newEnd = newLines.length;
+	while (oldEnd > 0 && newEnd > 0 && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
+		oldEnd -= 1;
+		newEnd -= 1;
+	}
+	let prefix = 0;
+	while (prefix < oldEnd && prefix < newEnd && oldLines[prefix] === newLines[prefix]) {
+		prefix += 1;
+	}
+
+	const width = newEnd - prefix + 1;
+	const lengths: number[][] = Array.from({ length: oldEnd - prefix + 1 }, () =>
+		Array(width).fill(0),
 	);
 
-	for (let oldIndex = 1; oldIndex <= oldLineCount; oldIndex += 1) {
-		for (let newIndex = 1; newIndex <= newLineCount; newIndex += 1) {
-			if (oldLines[oldIndex - 1] === newLines[newIndex - 1]) {
-				lengths[oldIndex][newIndex] = lengths[oldIndex - 1][newIndex - 1] + 1;
-			} else {
-				lengths[oldIndex][newIndex] = Math.max(
-					lengths[oldIndex - 1][newIndex],
-					lengths[oldIndex][newIndex - 1],
-				);
-			}
+	for (let i = 1; i < lengths.length; i += 1) {
+		const previous = lengths[i - 1];
+		const row = lengths[i];
+		const oldLine = oldLines[prefix + i - 1];
+		for (let j = 1; j < width; j += 1) {
+			row[j] = oldLine === newLines[prefix + j - 1]
+				? previous[j - 1] + 1
+				: Math.max(previous[j], row[j - 1]);
 		}
 	}
 
+	// Backtracking may match a duplicate across the shared prefix. Inside that
+	// prefix the shorter sequence is already a subsequence of the longer one.
+	function lengthAt(i: number, j: number): number {
+		if (i <= prefix || j <= prefix) return Math.min(i, j);
+		return prefix + lengths[i - prefix][j - prefix];
+	}
+
 	const reversed: ChatToolDiffLine[] = [];
-	let oldIndex = oldLineCount;
-	let newIndex = newLineCount;
+	let oldIndex = oldEnd;
+	let newIndex = newEnd;
 	while (oldIndex > 0 || newIndex > 0) {
 		if (oldIndex > 0 && newIndex > 0 && oldLines[oldIndex - 1] === newLines[newIndex - 1]) {
 			oldIndex -= 1;
 			newIndex -= 1;
 		} else if (
 			newIndex > 0 &&
-			(oldIndex === 0 || lengths[oldIndex][newIndex - 1] >= lengths[oldIndex - 1][newIndex])
+			(oldIndex === 0 || lengthAt(oldIndex, newIndex - 1) >= lengthAt(oldIndex - 1, newIndex))
 		) {
 			reversed.push({
 				type: 'added',
