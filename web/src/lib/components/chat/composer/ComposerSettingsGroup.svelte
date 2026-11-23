@@ -57,7 +57,7 @@
 	let menuTrigger = $state<HTMLElement | null>(null);
 	let picker = $state<ComposerModelSelector>();
 	let menuOpen = $state(false);
-	let openingModel = false;
+	let handoff = false;
 	const folded = $derived(ids.filter((id) => !layout.inline.has(id)));
 	const hiddenBypass = $derived(
 		folded.includes('permission') &&
@@ -69,9 +69,13 @@
 		[m.chat_composer_more_settings(), hiddenBypass?.label].filter(Boolean).join(': '),
 	);
 
-	async function openModel() {
-		openingModel = true;
+	export function closeOverflow(): void {
+		handoff = true;
 		menuOpen = false;
+	}
+
+	async function openModel() {
+		closeOverflow();
 		await tick();
 		picker?.openPicker();
 	}
@@ -139,6 +143,7 @@
 		<div
 			hidden={!layout.inline.has(id)}
 			class="min-w-0"
+			class:flex={layout.inline.has(id)}
 			style:max-width="{layout.modelWidthRem}rem"
 			data-composer-control="model"
 		>
@@ -159,7 +164,7 @@
 	<DropdownMenu
 		bind:open={menuOpen}
 		onOpenChange={(open) => {
-			if (open) openingModel = false;
+			if (open) handoff = false;
 		}}
 	>
 		<DropdownMenuTrigger
@@ -180,7 +185,7 @@
 			class="w-64 max-w-[calc(100vw-1rem)]"
 			getFocusReturnTarget={() => menuTrigger}
 			onCloseAutoFocus={(event) => {
-				if (openingModel) event.preventDefault();
+				if (handoff) event.preventDefault();
 			}}
 		>
 			{#each folded as id (id)}{@render control(id, true)}{/each}

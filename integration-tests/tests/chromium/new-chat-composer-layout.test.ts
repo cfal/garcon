@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Locator } from "playwright";
+import { expect as expectLocator } from "playwright/test";
 import {
   withChromiumFixture,
   type ChromiumFixture,
@@ -250,7 +251,7 @@ describe("Chromium New Chat composer layout", () => {
         expect(await modelPopover.isVisible()).toBe(true);
         await fixture.page.keyboard.press("Escape");
         await modelPopover.waitFor({ state: "detached" });
-        await fixture.page.waitForFunction(() => document.activeElement?.getAttribute("data-composer-overflow") === "settings");
+        await expectLocator(settingsMenu).toBeFocused();
         await settingsMenu.click();
         await fixture.page.getByRole("menuitem", { name: /Agent \/ model/ }).click();
         await modelPopover.waitFor();
@@ -258,6 +259,7 @@ describe("Chromium New Chat composer layout", () => {
         await longModelTrigger.waitFor();
         await fixture.page.keyboard.press("Escape");
         await modelPopover.waitFor({ state: "detached" });
+        await expectLocator(longModelTrigger).toBeFocused();
         expect(await bottomBar.evaluate((bar) => bar.scrollWidth <= bar.clientWidth)).toBe(true);
         fixture.assertNoBrowserErrors();
       },

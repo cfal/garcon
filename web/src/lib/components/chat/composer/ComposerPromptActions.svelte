@@ -32,6 +32,12 @@
 		'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
 	const ordinary = 'border-border bg-background text-foreground hover:bg-muted';
 	let handoff = false;
+	let menuOpen = $state(false);
+
+	export function closeOverflow(): void {
+		handoff = true;
+		menuOpen = false;
+	}
 
 	function activate(action: ComposerPromptAction): void {
 		if (action.disabled) return;
@@ -45,6 +51,7 @@
 
 {#if folded.length}
 	<DropdownMenu
+		bind:open={menuOpen}
 		onOpenChange={(open) => {
 			if (open) handoff = false;
 		}}

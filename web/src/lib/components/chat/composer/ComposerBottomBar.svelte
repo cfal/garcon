@@ -58,6 +58,8 @@
 		...prompt
 	}: Props = $props();
 	let row = $state<HTMLDivElement>();
+	let promptGroup = $state<ComposerPromptActions>();
+	let settingsGroup = $state<ComposerSettingsGroup>();
 	let unit = $state<HTMLElement>();
 	let widthRem = $state(0);
 	$effect(() => {
@@ -98,9 +100,12 @@
 	const groups = $derived(modelControlsLeft ? ['settings', 'prompt'] : ['prompt', 'settings']);
 	const sendLabel = $derived(prompt.isPromptTransformPending ? promptTransformStatus : sendTitle);
 	$effect.pre(() => {
-		void layout;
+		const { inline } = layout;
 		void groups;
-		if (row) void retainComposerToolbarFocus(row);
+		if (row)
+			void retainComposerToolbarFocus(row, inline, (group) => {
+				(group === 'prompt' ? promptGroup : settingsGroup)?.closeOverflow();
+			});
 	});
 </script>
 
@@ -121,6 +126,7 @@
 				>
 					{#if group === 'prompt'}
 						<ComposerPromptActions
+							bind:this={promptGroup}
 							{actions}
 							inline={layout.inline}
 							align={first ? 'start' : 'end'}
@@ -128,6 +134,7 @@
 						/>
 					{:else}
 						<ComposerSettingsGroup
+							bind:this={settingsGroup}
 							ids={settings}
 							{layout}
 							{executor}

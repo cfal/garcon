@@ -288,13 +288,13 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
-	// Focus textarea when path validates successfully, but not while browsing.
+	// Layer changes alone must not take focus back from a toolbar picker.
 	$effect(() => {
 		if (
 			initialContentReady &&
 			form.validationStatus === 'valid' &&
 			!form.showBrowser &&
-			canFocusTextarea()
+			untrack(canFocusTextarea)
 		) {
 			untrack(returnTextareaFocus);
 		}

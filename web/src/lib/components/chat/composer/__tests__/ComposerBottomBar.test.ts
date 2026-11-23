@@ -81,6 +81,18 @@ describe('ComposerBottomBar', () => {
 		expect(row.lastElementChild).toBe(send);
 	});
 
+	it('returns focus to a promoted action even when other actions still overflow', async () => {
+		const { container } = render(ComposerBottomBar, controls());
+		await resize(container, 115);
+		await fireEvent.click(screen.getByRole('button', { name: 'More composer actions' }));
+		screen.getByRole('menuitem', { name: 'Open expanded composer' }).focus();
+		await resize(container, 196);
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(document.activeElement).toBe(
+			screen.getByRole('button', { name: 'Open expanded composer' }),
+		);
+	});
+
 	it('uses the same live executor choices in overflow and never refreshes on resize', async () => {
 		const offline = { ...remoteExecutor, availability: 'offline' as const };
 		const read = vi.fn(async () => [localExecutor, offline]);
@@ -91,6 +103,13 @@ describe('ComposerBottomBar', () => {
 			...controls(),
 			executor: { executors, executorId: offline.id, onSelect },
 		});
+		await resize(container, 800);
+		screen.getByRole('button', { name: 'Thinking effort: High' }).focus();
+		await resize(container, 156);
+		expect(screen.getByRole('button', { name: 'Executor: Worker' })).toBeTruthy();
+		expect(document.activeElement).toBe(
+			screen.getByRole('button', { name: 'More model settings' }),
+		);
 		await resize(container, 115);
 		await fireEvent.click(screen.getByRole('button', { name: 'More model settings' }));
 		const host = screen.getByRole('menuitem', { name: 'Executor: Worker' });
