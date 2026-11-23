@@ -6,7 +6,7 @@ export function redactPushDiagnostic(text: string, source: 'complete-stderr' | '
   const start = Math.max(...[' ', '\t', '\r', '\n'].map(char => text.lastIndexOf(char, separator))) + 1;
   const prefix = text.slice(0, start);
   const redacted = prefix + '<remote>';
-  if (source !== 'complete-stderr' || !/(?:^|: |\n)fatal: unable to access $/.test(prefix)) return redacted;
+  if (source !== 'complete-stderr' || !/(?:^|\n)fatal: unable to access $/.test(prefix)) return redacted;
 
   // Only a complete terminal HTTP access error separates the curl reason from the quoted URL.
   const http = /^'https?:\/\/[^'\s]+': ([^\r\n]+)$/i.exec(text.slice(start));

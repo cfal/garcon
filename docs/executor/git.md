@@ -133,7 +133,7 @@ Keep domain operations rather than exposing `git(args)` or serializing arbitrary
 
 ### Workbench Push
 
-Push reads the attached local branch from symbolic HEAD, not a display label. When the caller supplies `remoteBranch`, the executor rejects a mismatch before dispatch. An unborn branch or a name that cannot round-trip through UTF-8 is not pushed. Remote status obtains the tracking counts and remote name from Git's configured upstream; the abbreviation is for display only.
+Push reads the attached local branch from symbolic HEAD, not a display label. When the caller supplies `remoteBranch`, the executor rejects a mismatch before dispatch. An unborn branch or a name that cannot round-trip through UTF-8 is not pushed. Full status shows the unborn branch name with `hasCommits: false`; remote status returns `GIT_INVALID_INPUT` until that branch has a commit. For a tracking branch, the counts and remote name come from Git's configured upstream; the abbreviation is for display only.
 
 Upgrade the controller and remote workers together. The [executor handshake](./transport.md) rejects older workers: their push replies have the same shape but do not confirm which branch was updated.
 

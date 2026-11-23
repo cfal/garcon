@@ -1,4 +1,3 @@
-import { errorMessage } from '../../common/errors.js';
 import { GIT_ERROR_MESSAGE_LIMIT, GitDomainError } from './git-domain-error.js';
 import { gitMutationDispatched, gitOutputTruncated, isGitCancellation } from './operation-context.js';
 import { redactPushDiagnostic } from './push-diagnostic.js';
@@ -48,7 +47,7 @@ function readPushReport(stdout: string, refspec: string) {
       index++;
       row = parseRefStatus(lines[index]);
     }
-    if (hasHeader && lines[index] === 'Done') {
+    if (hasHeader && lines[index] === 'Done' && index < lines.length - 1) {
       for (const reason of blockRejections) rejections.add(reason);
       if (!branchAccepted) confirmed = false;
     } else {
@@ -87,13 +86,14 @@ export async function pushBranchRef(projectPath: string, remote: string, ref: st
   } catch (error) {
     const failure: GitProcessError | undefined = error instanceof Error ? error : undefined;
     const stdout = typeof failure?.stdout === 'string' ? failure.stdout : undefined;
-    if (!gitMutationDispatched() && (stdout === undefined || isGitCancellation(error))) throw error;
+    const interrupted = isGitCancellation(error);
+    if (!gitMutationDispatched() && (stdout === undefined || interrupted)) throw error;
     const { rejections } = readPushReport(stdout ?? '', refspec);
-    const stderr = failure?.stderr;
-    const completeStderr = !stderrTruncated && !isGitCancellation(error) && typeof stderr === 'string'
-      && stderr.endsWith('\n') && stderr.trim() !== '';
-    const detail = redactPushDiagnostic(errorMessage(error).trim(), completeStderr ? 'complete-stderr' : 'unverified');
-    throw unconfirmedPush(rejections, detail);
+    const stderr = typeof failure?.stderr === 'string' ? failure.stderr : '';
+    const completeStderr = !stderrTruncated && !interrupted && stderr.endsWith('\n');
+    const detail = redactPushDiagnostic(stderr.trim(), completeStderr ? 'complete-stderr' : 'unverified');
+    const notice = interrupted ? 'Git push was cancelled or timed out.' : undefined;
+    throw unconfirmedPush(rejections, detail, notice);
   }
   const { confirmed, rejections } = readPushReport(result.stdout, refspec);
   if (!confirmed || gitOutputTruncated()) {

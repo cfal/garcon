@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { watch } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -256,6 +257,27 @@ test('does not pair a hook preview row with a skipped destination', async () => 
   expect(await listRefs(remote)).toBe(before);
   expect(await listRefs(preview)).toBe('');
 });
+
+test('an interrupted push reports only fixed reasons from newline-terminated frames, not raw stdout', async () => {
+  const { git, projectPath, remote } = await pushFixture();
+  const row = '!\trefs/heads/main:refs/heads/main\t[rejected]';
+  const output = ['private-hook-output', 'To first', row + ' (fetch first)', 'Done',
+    'To second', row + ' (non-fast-forward)', 'Done'].join('\n');
+  await installHook(projectPath, 'pre-push', `printf '%s' '${output}'\n: > .git/push-ready\nexec sleep 30`);
+  const abort = new AbortController();
+  const watcher = watch(path.join(projectPath, '.git'), (_event, name) => {
+    if (name === 'push-ready') abort.abort();
+  });
+  try {
+    const failure = await git.push({ projectPath }, { signal: abort.signal, timeoutMs: 5_000 })
+      .then(() => null, (error: Error) => error);
+    expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+    expect(failure?.message).toContain('[rejected] (fetch first)');
+    expect(failure?.message).not.toContain('non-fast-forward');
+    expect(failure?.message).not.toContain('private-hook-output');
+    expect(await listRefs(remote)).toBe('');
+  } finally { watcher.close(); }
+}, 15_000);
 
 test.skipIf(process.platform === 'win32')('does not disclose a status-shaped line in a multiline destination', async () => {
   const directory = 'published\n!\trefs/heads/main:refs/heads/main\tprivate-path-segment\nend.git';
