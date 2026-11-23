@@ -24,6 +24,7 @@
 		tone = '',
 		triggerSlot,
 		rainbow,
+		onOpenAutoFocus,
 	}: {
 		id: string;
 		label: string;
@@ -37,6 +38,7 @@
 		tone?: string;
 		triggerSlot?: string;
 		rainbow?: boolean;
+		onOpenAutoFocus?: (event: Event) => void;
 	} = $props();
 	const name = $derived(value ? `${label}: ${value}` : label);
 	const narrowViewport = new MediaQuery('(max-width: 640px)');
@@ -55,6 +57,7 @@
 			<MenuValueLabel {label} {value} />
 		</DropdownMenuSubTrigger>
 		<DropdownMenuSubContent
+			{onOpenAutoFocus}
 			side={narrowViewport.current ? side : 'right'}
 			{align}
 			collisionPadding={8}
@@ -76,7 +79,7 @@
 		>
 			{@render icon()}
 		</DropdownMenuTrigger>
-		<DropdownMenuContent {align} {side} class="w-64 max-w-[calc(100vw-1rem)]">
+		<DropdownMenuContent {align} {side} {onOpenAutoFocus} class="w-64 max-w-[calc(100vw-1rem)]">
 			{@render children()}
 		</DropdownMenuContent>
 	</DropdownMenu>

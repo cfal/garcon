@@ -43,6 +43,16 @@
 				: String(value ?? ''),
 	);
 	const inputId = $props.id();
+	let input = $state<HTMLInputElement>();
+
+	function focusInput(event: Event): void {
+		event.preventDefault();
+		queueMicrotask(() => input?.focus({ preventScroll: true }));
+	}
+
+	function keepEditingKeys(event: KeyboardEvent): void {
+		if (event.key !== 'Tab' && event.key !== 'Escape') event.stopPropagation();
+	}
 </script>
 
 <ComposerSettingMenu
@@ -54,6 +64,9 @@
 	{side}
 	disabled={settings.disabled}
 	triggerSlot="agent-setting-menu-trigger"
+	onOpenAutoFocus={descriptor.type === 'enum' || descriptor.type === 'boolean'
+		? undefined
+		: focusInput}
 	tone="border-composer-agent-setting-border bg-composer-agent-setting text-composer-agent-setting-foreground hover:bg-composer-agent-setting/80"
 >
 	{#snippet icon()}
@@ -96,6 +109,8 @@
 			{#if descriptor.type === 'number'}
 				<input
 					id={inputId}
+					bind:this={input}
+					onkeydown={keepEditingKeys}
 					type="number"
 					min={descriptor.min}
 					max={descriptor.max}
@@ -113,6 +128,8 @@
 			{:else}
 				<input
 					id={inputId}
+					bind:this={input}
+					onkeydown={keepEditingKeys}
 					type="text"
 					value={summary}
 					class="h-9 rounded border border-input bg-background px-2 text-base"

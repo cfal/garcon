@@ -1,10 +1,36 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ComposerAgentSettings } from '../composer-toolbar-types';
 import AgentSettingControl from '../AgentSettingControl.svelte';
 
 describe('AgentSettingsControls', () => {
 	afterEach(cleanup);
+
+	it('focuses a native number setting and leaves its editing keys to the input', async () => {
+		const descriptor = {
+			key: 'limit',
+			type: 'number',
+			label: 'Limit',
+			min: 1,
+			max: 8,
+			step: 1,
+		} as const;
+		const onChange = vi.fn();
+		const defaults = { ownerId: 'sample-agent', schemaVersion: 1, values: { limit: 1 } };
+		render(AgentSettingControl, {
+			descriptor,
+			settings: { descriptors: [descriptor], defaults, envelope: defaults, onChange },
+			overflow: false,
+			align: 'end',
+			side: 'top',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Limit: 1' }));
+		const input = screen.getByRole('spinbutton', { name: 'Limit' });
+		await waitFor(() => expect(document.activeElement).toBe(input));
+		expect(await fireEvent.keyDown(input, { key: 'ArrowUp' })).toBe(true);
+		await fireEvent.change(input, { target: { value: '4' } });
+		expect(onChange).toHaveBeenCalledWith(descriptor, 4);
+	});
 
 	it('renders runtime descriptors and reports provider-neutral changes', async () => {
 		const onChange = vi.fn();
@@ -39,7 +65,13 @@ describe('AgentSettingsControls', () => {
 			onChange,
 		} satisfies ComposerAgentSettings;
 		for (const descriptor of settings.descriptors) {
-			render(AgentSettingControl, { descriptor, settings, overflow: false, align: 'end', side: 'top' });
+			render(AgentSettingControl, {
+				descriptor,
+				settings,
+				overflow: false,
+				align: 'end',
+				side: 'top',
+			});
 		}
 
 		const effortTrigger = screen.getByRole('button', { name: 'Thinking: Auto' });
