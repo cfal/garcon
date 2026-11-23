@@ -25,10 +25,14 @@ test('reads the padded CLI table without splitting provider/model IDs on single 
 
 test('accepts only a clean empty listing, not failed or unrecognized discovery', () => {
   const empty = 'No models available. Use /login to log into a provider via OAuth or API key. See:\n  /docs/providers.md\n  /docs/models.md\n';
+  const loginWarning = `Warning: ${empty}`;
   expect(parsePiModelListing(empty, '')).toEqual([]);
   expect(parsePiModelListing('Migration complete\n' + empty, '')).toEqual([]);
+  expect(parsePiModelListing(empty, loginWarning.replaceAll('\n', '\r\n'))).toEqual([]);
   expect(() => parsePiModelListing(empty + 'unexpected row', '')).toThrow();
   expect(() => parsePiModelListing(empty, 'Warning: errors loading models.json')).toThrow('discovery errors');
+  expect(() => parsePiModelListing(empty, loginWarning + 'Warning: errors loading models.json')).toThrow('discovery errors');
+  expect(() => parsePiModelListing(empty, loginWarning.replace('/docs/', '/other/'))).toThrow('discovery errors');
   expect(() => parsePiModelListing('', '')).toThrow();
 });
 

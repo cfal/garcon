@@ -29,7 +29,7 @@ Common options and environment variables:
 - `GARCON_ANTIGRAVITY_BINARY`: Antigravity CLI (`agy`) override; defaults to `agy` on `PATH`.
 - `GARCON_ANTIGRAVITY_AUTH_METHOD`: Antigravity sign-in method: `oauth-personal`, `oauth-business`, `gemini-api-key`, or `agent-platform`. Defaults to `gemini-api-key` when `GEMINI_API_KEY` is set, otherwise `oauth-personal`.
 - `GEMINI_API_KEY`: Gemini API key for Antigravity sessions. See [Antigravity](antigravity.md).
-- `GARCON_PI_BINARY` / `PI_BINARY`: Pi executable on this executor. Chat, single queries, and model discovery all use the same override or `pi` on the service's `PATH`. The reference CLI is Pi 1.5.2; Garcon does not install the Pi SDK.
+- `GARCON_PI_BINARY` / `PI_BINARY`: Pi executable on this executor. Chat, single queries, and model discovery all use the same override or `pi` on the service's `PATH`. The reference CLI is Pi 1.6.0; Garcon does not install the Pi SDK.
 - `PI_CODING_AGENT_DIR`: Pi's configuration and data directory on this executor (default: `~/.pi/agent`).
 - `PI_CODING_AGENT_SESSION_DIR`: optional override for the session directory only.
 

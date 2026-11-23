@@ -44,9 +44,13 @@ it('discovers the renamed Azure provider without duplicating classifier variants
   const values = models.map((model) => model.value);
   expect(values).toContain('azure/gpt-5.4');
   expect(values).toContain('azure/deepseek-v4-pro');
+  expect(values).toContain('azure/gpt-6.2-astra');
+  expect(values).toContain('azure/gpt-6.2-sol');
   expect(values.some((value) => value.startsWith('azure-openai-responses/'))).toBe(false);
   expect(values).toContain('openai/gpt-5.5');
   expect(values).toContain('openai/gpt-6.1-terra');
+  expect(values).toContain('openai/gpt-6.2-astra');
+  expect(values).toContain('openai/gpt-6.2-sol');
   expect(values).toContain('google/gemini-robotics-er-2-preview');
   expect(values).not.toContain('openai/gpt-realtime-2.1');
   expect(values).not.toContain('google/gemini-3.1-flash-live-preview');
