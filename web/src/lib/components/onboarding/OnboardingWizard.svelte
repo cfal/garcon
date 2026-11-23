@@ -91,7 +91,7 @@
 		data-resize-motion={wizard.pageId === 'transcript-search' && transcriptSearch.isSaving
 			? 'none'
 			: undefined}
-		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto"
+		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto [@media(max-height:30rem)]:[scrollbar-gutter:stable]"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
 	>

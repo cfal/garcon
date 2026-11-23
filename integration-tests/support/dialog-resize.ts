@@ -8,9 +8,15 @@ export async function pauseDialogResize(control: HTMLElement): Promise<Animation
 }
 
 // Runs inside locator.evaluate so all three measurements see the same dialog and animation.
-export async function measureDialogHeightChange(control: HTMLElement, options?: { focus: boolean }) {
+export async function measureDialogHeightChange(control: HTMLElement, options?: { focus?: boolean; widthSelector?: string }) {
   const dialog = control.closest<HTMLElement>('[role="dialog"]')!;
-  const before = dialog.offsetHeight;
+  const field = options?.widthSelector ? dialog.querySelector<HTMLElement>(options.widthSelector) : null;
+  const widths: number[] = [];
+  const measure = () => {
+    if (field) widths.push(field.offsetWidth);
+    return dialog.offsetHeight;
+  };
+  const before = measure();
   if (options?.focus) control.focus();
   control.click();
   await new Promise(requestAnimationFrame);
@@ -20,7 +26,7 @@ export async function measureDialogHeightChange(control: HTMLElement, options?: 
     resize.pause();
     resize.currentTime = Number(resize.effect!.getTiming().duration) / 2;
   }
-  const middle = dialog.offsetHeight;
+  const middle = measure();
   resize?.finish();
-  return { before, middle, after: dialog.offsetHeight, focused: document.activeElement === control };
+  return { before, middle, after: measure(), widths, focused: document.activeElement === control };
 }

@@ -15,6 +15,40 @@ import {
 } from "../../support/chromium-workspace.js";
 
 describe("Chromium Tickets interaction", () => {
+  test("keeps ticket fields stable at the height cap and sizes naturally during refinement", async () => {
+    await withChromiumFixture("ticket-refine-disclosure", async ({ page, integration }) => {
+      await page.goto(integration.garcon.baseUrl);
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Tickets");
+      await page.setViewportSize({ width: 1200, height: 622 });
+      await page.getByRole("button", { name: "New ticket", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      const summary = dialog.locator("summary", { hasText: "More details" });
+      const { widths } = await summary.evaluate(measureDialogHeightChange, { widthSelector: ".ticket-title-input" });
+      expect(new Set(widths).size).toBe(1);
+
+      const description = dialog.getByLabel("Description", { exact: true });
+      await description.fill("Synthetic description");
+      const release = Promise.withResolvers<void>();
+      const refined = "Refined synthetic description. ".repeat(25).trim();
+      await page.route("**/api/v1/prompts/refine", async route => {
+        await release.promise;
+        await route.fulfill({ json: { success: true, refinedPrompt: refined } });
+      }, { times: 1 });
+      const running = await summary.evaluateHandle(pauseDialogResize);
+      try {
+        await dialog.getByRole("button", { name: "Refine prompt", exact: true }).click();
+        await browserExpect.poll(() => running.evaluate(animation => animation.playState)).toBe("idle");
+        const toggle = await summary.evaluate(measureDialogHeightChange);
+        expect(toggle.middle).toBe(toggle.after);
+      } finally {
+        release.resolve();
+        await running.dispose();
+      }
+      await browserExpect(description).toHaveValue(refined);
+    }, undefined, { classicScrollbars: true });
+  });
+
   test("animates native ticket disclosure in both directions unless motion is reduced", async () => {
     await withChromiumFixture("ticket-disclosure-motion", async ({ page, integration }) => {
       await page.goto(integration.garcon.baseUrl);
