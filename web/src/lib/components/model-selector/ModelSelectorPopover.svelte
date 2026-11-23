@@ -132,10 +132,25 @@
 		if (!disabled && !selector.open) handleOpenChange(true);
 	}
 
+	export function dismissPicker(): void {
+		if (selector.open) handleOpenChange(false);
+	}
+
+	function isTileResize(event: Event): boolean {
+		return event.target instanceof Element && !!event.target.closest('[data-workspace-window-resizer]');
+	}
+
 	function restoreOverflowFocus(event: Event): void {
 		if (!overflowAnchor) return;
 		event.preventDefault();
 		overflowAnchor.focus({ preventScroll: true });
+	}
+
+	function restoreDialogFocus(event: Event): void {
+		const target = overflowAnchor ?? triggerNode;
+		if (!target?.isConnected) return;
+		event.preventDefault();
+		target.focus({ preventScroll: true });
 	}
 
 	function handleOpenChange(open: boolean): void {
@@ -172,7 +187,7 @@
 		function handleDocumentPointerDown(event: PointerEvent): void {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
-			if (trigger.contains(target) || overflowAnchor?.contains(target) || content.contains(target)) return;
+			if (isTileResize(event) || trigger.contains(target) || overflowAnchor?.contains(target) || content.contains(target)) return;
 			if (compactLayout) {
 				selector.discardAndClose();
 				return;
@@ -232,7 +247,7 @@
 			{@render triggerContent()}
 		</Dialog.Trigger>
 		<Dialog.Content
-			onCloseAutoFocus={restoreOverflowFocus}
+			onCloseAutoFocus={restoreDialogFocus}
 			bind:ref={contentNode}
 			class={cn(
 				'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
@@ -266,6 +281,9 @@
 		</Popover.Trigger>
 		<Popover.Content
 			customAnchor={overflowAnchor}
+			onInteractOutside={(event) => {
+				if (isTileResize(event)) event.preventDefault();
+			}}
 			getFocusReturnTarget={() => overflowAnchor ?? triggerNode}
 			onCloseAutoFocus={restoreOverflowFocus}
 			bind:ref={contentNode}

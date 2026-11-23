@@ -41,10 +41,13 @@ test('the live composer follows tile width and local group order without changin
     phase('fitting the same remote chat to tile widths on a desktop viewport');
     await editor.fill('Synthetic unsent draft');
     const original = await editor.elementHandle();
+    const modelPicker = page.locator('[data-slot="popover-content"]');
+    await toolbar.locator('[data-composer-control="model"] button').click();
+    await expect(modelPicker).toBeVisible();
     for (const width of [680, 360, 240, 420, 240]) {
       const hit = (await divider.boundingBox())!;
       const outer = (await window.boundingBox())!;
-      const y = hit.y + hit.height / 2;
+      const y = hit.y + 6;
       await page.mouse.move(hit.x + hit.width / 2, y);
       await page.mouse.down();
       await page.mouse.move(outer.x + width, y, { steps: 5 });
@@ -52,6 +55,7 @@ test('the live composer follows tile width and local group order without changin
       await expect.poll(async () => Math.abs((await window.boundingBox())!.width - width)).toBeLessThan(5);
       await expect.poll(() => toolbar.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
       await expect(send).toBeVisible();
+      await expect(modelPicker).toBeVisible();
       await expect.poll(() => send.evaluate((button) => {
         const row = button.parentElement!.getBoundingClientRect();
         const bounds = button.getBoundingClientRect();
@@ -62,6 +66,7 @@ test('the live composer follows tile width and local group order without changin
     }
     await expect(promptMenu).toBeVisible();
     await settingsMenu.click();
+    await expect(modelPicker).toHaveCount(0);
     const host = page.getByRole('menuitem', { name: 'Executor: Integration worker' });
     await host.focus();
     await page.keyboard.press('ArrowRight');

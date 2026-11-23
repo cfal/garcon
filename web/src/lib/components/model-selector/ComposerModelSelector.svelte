@@ -38,6 +38,7 @@
 	let picker = $state<ModelSelectorPopover>();
 	export function selectionSummary(): string { return picker?.selectionSummary() ?? ''; }
 	export function openPicker(): void { picker?.openPicker(); }
+	export function dismissPicker(): void { picker?.dismissPicker(); }
 </script>
 
 <ModelSelectorPopover

@@ -164,7 +164,10 @@
 	<DropdownMenu
 		bind:open={menuOpen}
 		onOpenChange={(open) => {
-			if (open) handoff = false;
+			if (open) {
+				handoff = false;
+				picker?.dismissPicker();
+			}
 		}}
 	>
 		<DropdownMenuTrigger
