@@ -33,6 +33,7 @@
 	let query = $state('');
 	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let opener: HTMLElement | null = null;
 
 	let commandContext = $derived(commandRegistry.context());
 	let commands = $state.raw<readonly WorkbenchCommand[]>([]);
@@ -90,6 +91,7 @@
 	}
 
 	function open() {
+		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		transientLayers.open('main-inert', () => {
 			commands = captureCommands();
 			isOpen = true;
@@ -99,9 +101,14 @@
 	}
 
 	function close() {
-		isOpen = false;
-		commands = [];
-		query = '';
+		// The chat composer cannot receive the focus trap's restore until its inert flag is removed.
+		flushSync(() => {
+			isOpen = false;
+			commands = [];
+			query = '';
+		});
+		if (document.activeElement === document.body) opener?.focus({ preventScroll: true });
+		opener = null;
 	}
 
 	export function toggle() {
@@ -112,8 +119,7 @@
 	function selectItem(item: WorkbenchCommand) {
 		if (!isEnabled(item)) return;
 		const context = commandContext;
-		// Releases the focus trap before a command focuses another surface.
-		flushSync(close);
+		close();
 		void commandRegistry.invoke(item, context);
 	}
 
@@ -122,6 +128,8 @@
 			if (e.key === 'Escape') e.stopPropagation();
 			return;
 		}
+		// Starts the trap's reverse Tab cycle at its first tabbable after a background click.
+		if (e.key === 'Tab' && e.shiftKey && e.target === e.currentTarget) inputRef?.focus();
 		if (e.target instanceof HTMLButtonElement) {
 			if (!e.target.matches('[role="option"]')) return;
 			if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;

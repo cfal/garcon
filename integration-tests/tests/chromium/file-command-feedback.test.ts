@@ -20,6 +20,19 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     await integration.client.waitForTurnTerminal(chatId, started.turnId);
     await page.goto(integration.garcon.baseUrl);
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    const search = palette.getByRole('combobox');
+    const composer = page.locator('[data-composer] textarea:visible');
+    await composer.focus();
+    await composer.evaluate(el => {
+      el.addEventListener('focus', () => el.setAttribute('data-palette-restored', ''), { once: true });
+    });
+    await page.keyboard.press('Control+p');
+    await search.fill('Open Settings');
+    await search.press('Enter');
+    await browserExpect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
+    await browserExpect(page.locator('[data-palette-restored]')).toHaveCount(1);
+    await page.keyboard.press('Escape');
     await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
     const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
     const source = surface.locator('.cm-content');
@@ -40,8 +53,6 @@ test('reports command outcomes, reveals after tree startup, and restores status 
 
     markPhase('keeping command search stationary and returning focus to the editor');
     await source.press('Control+p');
-    const palette = page.getByRole('dialog', { name: 'Command palette' });
-    const search = palette.getByRole('combobox');
     await browserExpect(search).toBeFocused();
     for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
       expect(await search.evaluate((input, init) => input.dispatchEvent(
@@ -58,6 +69,8 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     const highlighted = await search.getAttribute('aria-activedescendant');
     await page.keyboard.press('ArrowDown');
     await browserExpect(search).not.toHaveAttribute('aria-activedescendant', highlighted!);
+    await page.keyboard.press('Shift+Tab');
+    await browserExpect(palette.getByRole('option', { disabled: false }).last()).toBeFocused();
     await search.fill('no-such-fixture-command-00000');
     await browserExpect(palette.getByRole('option')).toHaveCount(0);
     expect(await search.evaluate(el => el.getBoundingClientRect().top)).toBeCloseTo(top, 0);
