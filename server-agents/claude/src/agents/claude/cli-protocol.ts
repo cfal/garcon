@@ -34,6 +34,7 @@ export interface ClaudeCLIMessage {
   terminal_reason?: string;
   result?: unknown;
   user_message_uuid?: string;
+  user_message_uuids?: readonly string[];
   command_uuid?: string;
   state?: string;
   tasks?: unknown[];
@@ -292,14 +293,14 @@ export class ClaudeTurnState {
 
   correlateResult(message: ClaudeCLIMessage): ClaudeResultCorrelation {
     if (!this.inputStarted) return 'before-start';
-    if (
-      !this.hasAcceptedResult
-      && message.user_message_uuid
-      && message.user_message_uuid !== this.inputUuid
-    ) {
-      return 'mismatched';
-    }
-    return this.hasAcceptedResult ? 'continuation' : 'input';
+    if (this.hasAcceptedResult) return 'continuation';
+
+    // The singular UUID may name only the last input of a merged turn.
+    // https://github.com/anthropics/claude-agent-sdk-python/blob/3184360393a92ca8a6ec7bbbdee571afd1ce1c56/src/claude_agent_sdk/types.py#L1805-L1824
+    const inputUuids = Array.isArray(message.user_message_uuids) ? message.user_message_uuids : [];
+    if (!message.user_message_uuid && inputUuids.length === 0) return 'input';
+    return message.user_message_uuid === this.inputUuid || inputUuids.includes(this.inputUuid)
+      ? 'input' : 'mismatched';
   }
 
   recordAcceptedResult(message: ClaudeCLIMessage): void {

@@ -195,7 +195,7 @@ describe('scripted Claude permissions', () => {
     });
   }, 60_000);
 
-  test('executes an allowed Bash command and records its successful result', async () => {
+  test.each([{ alwaysAllow: false }, { alwaysAllow: true }])('executes Bash with alwaysAllow=$alwaysAllow', async ({ alwaysAllow }) => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const prompt = marker('ALLOWED_BASH_PROMPT');
@@ -206,6 +206,11 @@ describe('scripted Claude permissions', () => {
     testEnvironment.model.scriptTurn([
       claudeToolUse('toolu_allowed_bash', 'Bash', { command }),
     ]);
+    if (alwaysAllow) {
+      testEnvironment.model.scriptTurn([
+        claudeToolUse('toolu_allowed_bash_again', 'Bash', { command }),
+      ]);
+    }
     testEnvironment.model.scriptTurn([claudeText(reply)]);
 
     await withCliFixture('claude-scripted-allowed-bash', async (fixture) => {
@@ -233,7 +238,7 @@ describe('scripted Claude permissions', () => {
         chatId,
         permissionOccurrenceId,
         allow: true,
-        alwaysAllow: false,
+        alwaysAllow,
       })).status).toBe('accepted');
       await waitForVisibleResponse({
         fixture,
@@ -247,15 +252,20 @@ describe('scripted Claude permissions', () => {
       const resolution = messagesOfType(transcript.messages, 'permission-resolved').find(
         (message) => message.permissionOccurrenceId === permissionOccurrenceId,
       );
-      const bash = messagesOfType(transcript.messages, 'bash-tool-use').find(
+      const bash = messagesOfType(transcript.messages, 'bash-tool-use').filter(
         (message) => message.command === command,
       );
-      const result = messagesOfType(transcript.messages, 'tool-result').find(
-        (message) => message.toolId === bash?.toolId,
-      );
       expect(resolution?.allowed).toBe(true);
-      expect(result?.isError).toBe(false);
-      expect(JSON.stringify(result?.content)).toContain(output);
+      expect(messagesOfType(transcript.messages, 'permission-request')).toHaveLength(1);
+      expect(bash.map((message) => message.toolId)).toEqual(alwaysAllow
+        ? ['toolu_allowed_bash', 'toolu_allowed_bash_again']
+        : ['toolu_allowed_bash']);
+      const results = messagesOfType(transcript.messages, 'tool-result');
+      for (const { toolId } of bash) {
+        const result = results.find((message) => message.toolId === toolId);
+        expect(result?.isError).toBe(false);
+        expect(JSON.stringify(result?.content)).toContain(output);
+      }
       expect(await Bun.file(join(fixture.executionDirs.project, outputName)).text()).toBe(output);
       testEnvironment.model.assertSettled();
     }, {
