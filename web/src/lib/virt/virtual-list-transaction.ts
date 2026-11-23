@@ -400,17 +400,24 @@ export class VirtualListTransaction {
 		this.#driver?.resume();
 		const dom = this.#driver?.read();
 		if (!dom) return { kind: 'not-ready' };
+		if (target.kind === 'start') {
+			return this.#scheduleTarget({ kind: 'logical', offset: 0 }, 'resume', dom);
+		}
+		if (target.kind === 'end') return this.#scheduleTarget(target, 'resume', dom);
+		const index = this.geometry.indexOf(target.key);
+		const item = index === undefined ? null : this.geometry.item(index);
+		if (item) {
+			return this.#scheduleTarget(
+				{ kind: 'logical', offset: item.start - target.viewportOffset },
+				'resume',
+				dom,
+			);
+		}
+		// A missing anchor still exposes the current geometry for the caller's fallback.
 		this.#replacementPending = false;
 		this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);
 		this.#publish(dom, true);
-		if (target.kind === 'start') return this.#scheduleLogicalTarget(0, 'resume');
-		if (target.kind === 'end') return this.#scheduleTarget({ kind: 'end' }, 'resume');
-		const index = this.geometry.indexOf(target.key);
-		if (index === undefined) return { kind: 'missing-key' };
-		const item = this.geometry.item(index);
-		return item
-			? this.#scheduleLogicalTarget(item.start - target.viewportOffset, 'resume')
-			: { kind: 'missing-key' };
+		return { kind: 'missing-key' };
 	}
 
 	cancelOwnedScroll(): void {
@@ -436,18 +443,15 @@ export class VirtualListTransaction {
 		this.#driver?.destroy();
 	}
 
-	#scheduleLogicalTarget(
-		offset: number,
-		source: 'programmatic' | 'resume' = 'programmatic',
-	): VirtualScrollResult {
-		return this.#scheduleTarget({ kind: 'logical', offset }, source);
+	#scheduleLogicalTarget(offset: number): VirtualScrollResult {
+		return this.#scheduleTarget({ kind: 'logical', offset });
 	}
 
 	#scheduleTarget(
 		target: PendingTarget,
 		source: 'programmatic' | 'resume' = 'programmatic',
+		dom = this.#driver?.read(),
 	): VirtualScrollResult {
-		const dom = this.#driver?.read();
 		if (!dom || this.#suspended) return { kind: 'not-ready' };
 		this.#replacementPending = false;
 		this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);

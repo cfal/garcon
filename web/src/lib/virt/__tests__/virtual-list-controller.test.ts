@@ -1276,6 +1276,110 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(50);
 	});
 
+	it.each([
+		{
+			target: { kind: 'start' } as const,
+			range: { startIndex: 0, endIndex: 0 },
+			offset: 12,
+		},
+		{
+			target: { kind: 'end' } as const,
+			range: { startIndex: 3, endIndex: 3 },
+			offset: 162,
+		},
+		{
+			target: { kind: 'anchor', key: 'c', viewportOffset: -5 } as const,
+			range: { startIndex: 2, endIndex: 3 },
+			offset: 117,
+		},
+	])(
+		'publishes only the intended $target.kind range on reveal, then rereads committed layout',
+		({ target, range, offset }) => {
+			const test = harness({ viewportSize: 50 });
+			test.controller.apply({
+				kind: 'update',
+				keys: ['a', 'b'],
+				estimates: [50, 50],
+				anchor: { kind: 'none' },
+			});
+			test.controller.suspend();
+			const revision = test.controller.snapshot.revision;
+			test.controller.apply({
+				kind: 'update',
+				keys: ['a', 'b', 'c', 'd'],
+				estimates: [50, 50, 50, 50],
+				anchor: { kind: 'none' },
+			});
+			expect(test.controller.snapshot.revision).toBe(revision);
+			const reads = vi.spyOn(test.sizer, 'getBoundingClientRect');
+			const writes = test.writes;
+
+			expect(test.controller.resume(target)).toEqual({ kind: 'scheduled' });
+			expect(reads).toHaveBeenCalledTimes(1);
+			expect(test.controller.snapshot.revision).toBe(revision + 1);
+			expect(test.controller.snapshot.visibleRange).toEqual(range);
+			expect(test.writes).toBe(writes);
+
+			test.setLeadingOffset(12);
+			test.environment.flushMicrotasks();
+			expect(reads.mock.calls.length).toBeGreaterThan(1);
+			expect(test.viewport.scrollTop).toBe(offset);
+			expect(test.writes).toBe(writes + 1);
+		},
+	);
+
+	it('publishes current hidden updates without moving when the resume key was removed', () => {
+		const test = harness({ viewportSize: 50 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['old'],
+			estimates: [50],
+			anchor: { kind: 'none' },
+		});
+		test.controller.suspend();
+		test.controller.apply({
+			kind: 'update',
+			keys: ['new'],
+			estimates: [75],
+			anchor: { kind: 'none' },
+		});
+		const revision = test.controller.snapshot.revision;
+		const writes = test.writes;
+
+		expect(test.controller.resume({ kind: 'anchor', key: 'old', viewportOffset: -5 })).toEqual({
+			kind: 'missing-key',
+		});
+		expect(test.controller.snapshot.revision).toBe(revision + 1);
+		expect(test.controller.snapshot.positions.itemAt(0)?.key).toBe('new');
+		test.environment.flushMicrotasks();
+		expect(test.writes).toBe(writes);
+	});
+
+	it('does not commit a cancelled reveal or expose the stale view in its place', () => {
+		const test = harness({ viewportSize: 50 });
+		test.controller.apply({
+			kind: 'update',
+			keys: ['old'],
+			estimates: [300],
+			anchor: { kind: 'none' },
+		});
+		test.controller.suspend();
+		const writes = test.writes;
+		expect(test.controller.resume({ kind: 'end' })).toEqual({ kind: 'scheduled' });
+
+		test.controller.apply({ kind: 'replace-surface', keys: [], estimates: [] });
+		test.environment.flushMicrotasks();
+		test.environment.flushFrames();
+		expect(test.writes).toBe(writes);
+		expect(test.controller.snapshot.visibleRange).toBeNull();
+		expect(test.controller.snapshot.positions.count).toBe(0);
+		expect(test.controller.resume({ kind: 'anchor', key: 'old', viewportOffset: 0 })).toEqual({
+			kind: 'missing-key',
+		});
+		expect(test.controller.snapshot.positions.count).toBe(0);
+		expect(test.writes).toBe(writes);
+	});
+
 	it('rejects malformed mutations without changing the current snapshot', () => {
 		const test = harness();
 		const revision = test.controller.snapshot.revision;
