@@ -29,6 +29,7 @@ import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentName } from '../agents/session-types.js';
 import { isExecutorId } from '../../../common/executors.js';
 import { isCarryOverSegmentId } from './carryover/segment-types.js';
+import { assertObservationBindings, parseNativeObservationOrigin } from './native-observation.js';
 import { CHAT_REGISTRY_VERSION, type CarryOverHandoffTarget, type CarryOverMigrationQuarantine, type CarryOverSegmentRef, type ChatRegistryEntry, type ChatRegistrySnapshot } from './registry-contracts.js';
 
 export function createEmptyRegistry(): ChatRegistrySnapshot {
@@ -115,8 +116,9 @@ export function normalizeChatRegistryEntry(
   const preambleSelection = normalizePreambleSelection(rawEntry.preambleSelection);
   assertPreambleBoundaryBinding({ agentOwnershipEpoch, pendingPreambleBoundary, preambleSelection });
   assertSeedReceiptBinding({ agentSessionId, nativeSeedReceipt });
-  return {
+  const entry: ChatRegistryEntry = {
     ...(executorId === undefined ? {} : { executorId }),
+    nativeObservation: parseNativeObservationOrigin(rawEntry.nativeObservation ?? null, agentId),
     agentId,
     agentSessionId,
     nativeSession,
@@ -140,6 +142,9 @@ export function normalizeChatRegistryEntry(
     parentChatId: requireParentChatId(rawEntry.parentChatId, chatId),
     lineage: requireChatLineage(rawEntry.lineage, chatId),
   };
+  assertObservationBindings(entry);
+  if (entry.nativeObservation?.sourceChatId === chatId) throw new Error('Observation cannot own its source');
+  return entry;
 }
 
 export function requireChatLineage(value: unknown, chatId: string): ChatLineage | null {

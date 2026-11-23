@@ -4,7 +4,7 @@ import { isRecord } from '../../../common/json.js';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 
-export const CURRENT_WORKSPACE_VERSION = 10;
+export const CURRENT_WORKSPACE_VERSION = 11;
 
 const WORKSPACE_VERSION_FILE = 'workspace-version.json';
 const FRESH_WORKSPACE_IGNORED_FILES = new Set([
@@ -23,6 +23,7 @@ const MIGRATIONS = [
   { name: 'fork-ordinal-cleanup', version: 8 },
   { name: 'provider-assignments', version: 9 },
   { name: 'chat-relationships-split', version: 10 },
+  { name: 'native-child-observers', version: 11 },
 ] as const;
 
 export type WorkspaceMigrationName = typeof MIGRATIONS[number]['name'];

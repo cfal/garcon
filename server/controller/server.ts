@@ -145,6 +145,7 @@ import {
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
 import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
 import { splitChatRelationships } from './migrations/chat-relationships-split.js';
+import { migrateNativeChildObservers } from './migrations/native-child-observers.js';
 import { installUnhandledRejectionPolicy } from '../common/unhandled-rejection-policy.js';
 
 const logger = createLogger('server');
@@ -280,6 +281,8 @@ export async function startServer(): Promise<void> {
     providerAccess = access;
     await workspaceMigrations.checkpointThrough('provider-assignments');
     await workspaceMigrations.run('chat-relationships-split', () => splitChatRelationships(workspaceDir));
+    await workspaceMigrations.checkpointThrough('chat-relationships-split');
+    await workspaceMigrations.run('native-child-observers', () => migrateNativeChildObservers(workspaceDir));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { splitChatRelationships } from '../chat-relationships-split.js';
+import { migrateNativeChildObservers } from '../native-child-observers.js';
 import { WorkspaceMigrationRunner } from '../index.js';
 import { ChatRegistry } from '../../chats/store.js';
 import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.js';
@@ -53,6 +54,7 @@ describe('chat relationship split', () => {
     const bytes = await fs.readFile(file, 'utf8');
     await splitChatRelationships(directory);
     expect(await fs.readFile(file, 'utf8')).toBe(bytes);
+    await migrateNativeChildObservers(directory);
     const registry = new ChatRegistry(directory);
     await registry.init();
     expect(registry.getChat(A).lineage).toEqual((await read()).sessions[A].lineage);
@@ -110,17 +112,20 @@ describe('chat relationship split', () => {
     expect(JSON.parse(await fs.readFile(path.join(directory, 'workspace-version.json'), 'utf8')))
       .toEqual(version === 9 ? { version: 9 } : { version: 9, checkpoint: true });
     await runner.run('chat-relationships-split', () => splitChatRelationships(directory));
+    await runner.checkpointThrough('chat-relationships-split');
+    await runner.run('native-child-observers', () => migrateNativeChildObservers(directory));
     const registry = new ChatRegistry(directory);
     await registry.init();
     await registry.flush();
 
     const restarted = await WorkspaceMigrationRunner.open(directory);
-    expect(restarted.resumedFromCheckpoint).toBe(version !== 9);
+    expect(restarted.resumedFromCheckpoint).toBe(true);
     for (const name of historical) await restarted.run(name, async () => { throw new Error(`Replayed ${name}`); });
     await restarted.checkpointThrough('provider-assignments');
     await restarted.run('chat-relationships-split', () => splitChatRelationships(directory));
+    await restarted.run('native-child-observers', () => migrateNativeChildObservers(directory));
     await restarted.finish();
-    expect(JSON.parse(await fs.readFile(path.join(directory, 'workspace-version.json'), 'utf8'))).toEqual({ version: 10 });
+    expect(JSON.parse(await fs.readFile(path.join(directory, 'workspace-version.json'), 'utf8'))).toEqual({ version: 11 });
     expect((await WorkspaceMigrationRunner.open(directory)).resumedFromCheckpoint).toBe(false);
   });
 });

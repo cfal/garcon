@@ -28,7 +28,7 @@ test('new local chats omit the executor field; remote ownership survives save an
   for (const executorId of [undefined, null, 'local', EXECUTOR_ID]) {
     const { file, directory } = await fixture(executorId);
     const stored = JSON.parse(await readFile(file, 'utf8'));
-    expect(stored.version).toBe(6);
+    expect(stored.version).toBe(7);
     expect(stored.sessions[CHAT_ID].executorId).toBe(executorId === EXECUTOR_ID ? EXECUTOR_ID : undefined);
     const reloaded = new ChatRegistry(directory);
     await reloaded.init();

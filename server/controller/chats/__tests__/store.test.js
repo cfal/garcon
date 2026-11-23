@@ -35,6 +35,7 @@ function newChat(overrides = {}) {
 
 function persistedEntry(overrides = {}) {
   return {
+    nativeObservation: null,
     agentId: 'test',
     agentSessionId: 'native-1',
     nativeSession: nativeSession('test'),
@@ -68,7 +69,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function writeRegistry(sessions, version = 6) {
+async function writeRegistry(sessions, version = 7) {
   await fs.writeFile(path.join(tempDir, 'chats.json'), JSON.stringify({ version, sessions }));
 }
 
@@ -176,7 +177,7 @@ describe('ChatRegistry', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  it.each([null, [], 1, { version: 6 }, { version: 6, sessions: null }, { version: 6, sessions: [] }].map((value) => [value]))(
+  it.each([null, [], 1, { version: 7 }, { version: 7, sessions: null }, { version: 7, sessions: [] }].map((value) => [value]))(
     'rejects malformed registry containers without modifying their bytes: %j', async (value) => {
       const raw = JSON.stringify(value);
       const file = path.join(tempDir, 'chats.json');
@@ -314,7 +315,7 @@ describe('ChatRegistry', () => {
   it('repairs permissions on an existing registry during init', async () => {
     if (process.platform === 'win32') return;
     const registryPath = path.join(tempDir, 'chats.json');
-    await fs.writeFile(registryPath, JSON.stringify({ version: 6, sessions: {} }), { mode: 0o644 });
+    await fs.writeFile(registryPath, JSON.stringify({ version: 7, sessions: {} }), { mode: 0o644 });
 
     registry = new ChatRegistry(tempDir);
     await registry.init();
@@ -325,11 +326,11 @@ describe('ChatRegistry', () => {
   it('loads an existing registry when permission repair fails', async () => {
     if (process.platform === 'win32') return;
     const registryPath = path.join(tempDir, 'chats.json');
-    await fs.writeFile(registryPath, JSON.stringify({ version: 6, sessions: {} }), { mode: 0o644 });
+    await fs.writeFile(registryPath, JSON.stringify({ version: 7, sessions: {} }), { mode: 0o644 });
     const chmod = spyOn(fs, 'chmod').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EPERM' }));
     try {
       registry = new ChatRegistry(tempDir);
-      await expect(registry.init()).resolves.toEqual({ version: 6, sessions: {} });
+      await expect(registry.init()).resolves.toEqual({ version: 7, sessions: {} });
     } finally {
       chmod.mockRestore();
     }
@@ -513,7 +514,7 @@ describe('ChatRegistry', () => {
     }, { flush: true });
 
     const persisted = JSON.parse(await fs.readFile(path.join(tempDir, 'chats.json'), 'utf8'));
-    expect(persisted.version).toBe(6);
+    expect(persisted.version).toBe(7);
     expect(persisted.sessions[CHAT_ID]).toMatchObject({
       agentSessionId: 'native-1',
       nativeSession: nativeSession('test', { id: 'native-1' }),
@@ -1008,7 +1009,7 @@ describe('ChatRegistry', () => {
     await fs.rm(phasedDir, { recursive: true, force: true });
   });
 
-  it('loads a strict version-six registry and rebuilds its native ID index', async () => {
+  it('loads a strict version-seven registry and rebuilds its native ID index', async () => {
     await registry.flush();
     await writeRegistry({ [CHAT_ID]: persistedEntry() });
     registry = new ChatRegistry(tempDir);

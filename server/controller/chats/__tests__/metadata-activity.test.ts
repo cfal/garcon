@@ -7,6 +7,7 @@ import type { ChatRegistryEntry } from '../registry-contracts.js';
 import type { IChatRegistry, ChatRemovedCallback } from '../store.js';
 
 const session: ChatRegistryEntry = {
+  nativeObservation: null,
   agentId: 'codex', nativeSession: null, agentOwnershipEpoch: 'owner-1',
   agentSettingsById: {}, projectPath: '/synthetic', tags: [], agentSessionId: null,
   model: 'synthetic', permissionMode: 'default', thinkingMode: 'none',
