@@ -334,7 +334,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
-		expect(store.userMessageAlignment).toBe('right');
+		expect(store.userMessageAlignment).toBe('left');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.imageCacheSizeMiB).toBe(64);
 		expect(store.inlineMermaidThumbnailSize).toBe('medium');
@@ -386,15 +386,15 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it.each(['center', 'RIGHT', '', null, 1, {}])(
-		'defaults malformed user message alignment %j to right',
+	it.each([undefined, 'center', 'RIGHT', '', null, 1, {}])(
+		'defaults missing or malformed user message alignment %j to left',
 		(value) => {
 			localStorage.setItem(
 				LOCAL_STORAGE_KEYS.localSettings,
-				JSON.stringify({ userMessageAlignment: value }),
+				JSON.stringify({ chatListDock: 'left', userMessageAlignment: value }),
 			);
 			const store = createLocalSettingsStore();
-			expect(store.userMessageAlignment).toBe('right');
+			expect(store.userMessageAlignment).toBe('left');
 			store.destroy();
 		},
 	);

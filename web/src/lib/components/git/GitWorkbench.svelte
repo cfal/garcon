@@ -625,7 +625,7 @@
 		{/if}
 	</div>
 
-	{#if drafts.commentComposer.open && isMobile}
+	{#if active && drafts.commentComposer.open && isMobile}
 		<GitCommentModal
 			composer={drafts.commentComposer}
 			onBodyChange={(b) => {

@@ -13,38 +13,35 @@ export interface AntigravityCliResult {
   readonly exitCode: number | null;
 }
 
-export async function runAntigravityModels(config: AntigravityConfig): Promise<AntigravityCliResult> {
+export async function runAntigravityModels(config: AntigravityConfig, timeoutMs = MODELS_TIMEOUT_MS): Promise<AntigravityCliResult> {
   const binary = config.binary();
   const env = antigravityChildEnvironment(config);
   let proc;
   try {
     proc = Bun.spawn([binary, 'models'], {
-      env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', signal: AbortSignal.timeout(MODELS_TIMEOUT_MS),
+      env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
   } catch (error) {
     throw classifyAntigravityLaunchError(error);
   }
   const stdout = pipeText(proc.stdout);
   const stderr = pipeText(proc.stderr);
-  // The signal kills only agy; a descendant holding its pipes would keep the
-  // reads open, so the shared probe has its own deadline that releases them.
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<never>((_, reject) => {
-    deadline = setTimeout(() => {
-      proc.kill();
-      stdout.cancel();
-      stderr.cancel();
-      reject(new Error(`agy models did not finish within ${MODELS_TIMEOUT_MS / 1000} s`));
-    }, MODELS_TIMEOUT_MS + 1_000);
-  });
+  // A descendant can keep the pipes open after agy exits, so the deadline covers reads as well as exit.
+  const timeout = Promise.withResolvers<never>();
+  const timer = setTimeout(() => timeout.reject(new Error(`agy models timed out after ${timeoutMs} ms`)), timeoutMs);
   try {
     const [stdoutText, stderrText, exitCode] = await Promise.race([
       Promise.all([stdout.text, stderr.text, proc.exited.catch(() => null)]),
-      timedOut,
+      timeout.promise,
     ]);
     return { stdout: stdoutText, stderr: stderrText, exitCode };
+  } catch (error) {
+    proc.kill('SIGKILL');
+    stdout.cancel();
+    stderr.cancel();
+    throw error;
   } finally {
-    clearTimeout(deadline);
+    clearTimeout(timer);
   }
 }
 
@@ -82,9 +79,10 @@ export function antigravityCliFailure(result: AntigravityCliResult): string {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !/^Fetching available models/i.test(line))
-    .join(' ');
-  return detail.replace(/^Error:\s*/i, '')
-    || `agy models exited with code ${result.exitCode ?? 'unknown'}`;
+    .join(' ')
+    .replace(/^Error:\s*/i, '');
+  const status = `agy models exited with code ${result.exitCode ?? 'unknown'}`;
+  return detail ? `${status}: ${detail}` : status;
 }
 
 export function createAntigravityCatalog(runModels: () => Promise<AntigravityCliResult>, logger: AgentLogger) {

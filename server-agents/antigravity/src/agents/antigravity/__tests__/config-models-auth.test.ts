@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdtempDisposable, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, normalize, relative } from 'node:path';
 import type { AgentEnvironmentReader, AgentLogger } from '@garcon/server-agent-interface';
@@ -11,7 +11,7 @@ import {
   getAntigravityAuthStatus,
   validateAntigravityLoginCode,
 } from '../antigravity-auth.ts';
-import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels } from '../antigravity-models.ts';
+import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels, runAntigravityModels } from '../antigravity-models.ts';
 import { createAntigravityAccount } from '../antigravity-account.ts';
 
 const silentLogger = { debug() {}, info() {}, warn() {}, error() {} } satisfies AgentLogger;
@@ -124,11 +124,13 @@ describe('parseAntigravityModels', () => {
   });
 
   it('keeps Default usable for delegated start selection without confirming failed native discovery', async () => {
-    const catalog = createAntigravityCatalog(async () => ({ exitCode: 1, stdout: '', stderr: 'model listing failed' }), silentLogger);
+    const catalog = createAntigravityCatalog(async () => ({ exitCode: 7, stdout: '', stderr: 'Using current profile' }), silentLogger);
     const signal = new AbortController().signal;
     expect((await catalog.snapshot({ strict: false, signal })).models.map(model => model.value)).toEqual(['default']);
     expect((await catalog.snapshot({ strict: true, signal })).models.map(model => model.value)).toEqual(['default']);
-    await expect(catalog.snapshot({ strict: true, requireNativeDiscovery: true, signal })).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    await expect(catalog.snapshot({ strict: true, requireNativeDiscovery: true, signal })).rejects.toMatchObject({
+      code: 'UNAVAILABLE', message: 'agy models exited with code 7: Using current profile',
+    });
   });
 
   it('summarizes a signed-out failure without the progress line', () => {
@@ -136,7 +138,20 @@ describe('parseAntigravityModels', () => {
       stdout: '',
       stderr: 'Fetching available models...\nError: Please sign in to view available models.\n',
       exitCode: 1,
-    })).toBe('Please sign in to view available models.');
+    })).toBe('agy models exited with code 1: Please sign in to view available models.');
+  });
+
+  it('accepts a successful listing with a diagnostic on stderr', async () => {
+    const catalog = createAntigravityCatalog(async () => ({ exitCode: 0, stdout: 'm\tModel\n', stderr: 'Using current profile' }), silentLogger);
+    const snapshot = await catalog.snapshot({ strict: true, requireNativeDiscovery: true, signal: new AbortController().signal });
+    expect(snapshot.models.map(model => model.value)).toEqual(['default', 'm']);
+  });
+
+  it('reports a listing timeout rather than the subprocess banner or termination code', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-timeout-'));
+    const binary = join(dir.path, 'agy');
+    await writeFile(binary, '#!/bin/sh\necho "Using current profile" >&2\nexec sleep 15\n', { mode: 0o700 });
+    await expect(runAntigravityModels(config({ binary: () => binary }), 100)).rejects.toThrow('agy models timed out after 100 ms');
   });
 });
 
@@ -145,6 +160,19 @@ describe('getAntigravityAuthStatus', () => {
     runModels: () => { throw new Error('Unexpected model listing'); },
     authenticate: () => { throw new Error('Unexpected authentication probe'); },
   };
+
+  it('does not report a successful sign-in when the ACP peer offers no in-band authentication', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-external-auth-'));
+    const binary = join(dir.path, 'agy');
+    await writeFile(binary, `#!/bin/sh
+read -r init && echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[]}}'
+read -r initialized
+`, { mode: 0o700 });
+    const external = config({ binary: () => binary });
+    const status = await getAntigravityAuthStatus(external, { ...createAntigravityProbes(external), headlessAuthenticate: true });
+    expect(status).toMatchObject({ authenticated: false, source: 'unknown', canReauth: false });
+    expect(status.detail).toContain('does not advertise in-band authentication');
+  });
 
   it.each(['oauth-personal', 'gemini-api-key'])('does not offer sign-in or report ready for %s when agy is missing', async (method) => {
     const status = await getAntigravityAuthStatus(createAntigravityConfig(environment({
@@ -199,9 +227,9 @@ describe('getAntigravityAuthStatus', () => {
 
   it('offers in-app sign-in only for the personal Google method', async () => {
     expect(await getAntigravityAuthStatus(config({ authMethod: () => 'agent-platform' }), {
-      ...noProbes, authenticate: async () => {}, headlessAuthenticate: true,
+      ...noProbes, authenticate: async () => true, headlessAuthenticate: true,
     })).toEqual({ authenticated: true, canReauth: false, label: 'agent-platform', source: 'cli' });
-    expect(await getAntigravityAuthStatus(config(), { ...noProbes, authenticate: async () => {}, headlessAuthenticate: true }))
+    expect(await getAntigravityAuthStatus(config(), { ...noProbes, authenticate: async () => true, headlessAuthenticate: true }))
       .toEqual({ authenticated: true, canReauth: true, label: 'Google', source: 'cli' });
   });
 
@@ -264,7 +292,7 @@ describe('getAntigravityAuthStatus', () => {
       canReauth: true,
       label: '',
       source: 'none',
-      detail: 'Please sign in to view available models.',
+      detail: 'agy models exited with code 1: Please sign in to view available models.',
     });
   });
 });

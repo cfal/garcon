@@ -198,6 +198,7 @@
 	bind:this={viewportRef}
 	id={listboxId}
 	class="min-h-0 min-w-0 flex-1 overflow-y-auto px-1.5"
+	style:scrollbar-gutter="stable"
 	role="listbox"
 	aria-label={m.workspace_worktree_select()}
 	aria-busy={isBusy}

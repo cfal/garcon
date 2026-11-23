@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
+	import { flushSync } from 'svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import Fuse from 'fuse.js';
 	import Search from '@lucide/svelte/icons/search';
+	import X from '@lucide/svelte/icons/x';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { getWorkbenchCommands, getTransientLayers } from '$lib/context';
-	import { transientLayer } from '$lib/workspace/transient-layer-action.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import type {
 		WorkbenchCommand,
@@ -26,13 +28,12 @@
 	const transientLayers = getTransientLayers();
 	const uid = $props.id();
 	const listId = `${uid}-list`;
-	let focusReturnTarget: HTMLElement | null = null;
 
 	let isOpen = $state(false);
 	let query = $state('');
 	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
-	let paletteRef = $state<HTMLDivElement | null>(null);
+	let opener: HTMLElement | null = null;
 
 	let commandContext = $derived(commandRegistry.context());
 	let commands = $state.raw<readonly WorkbenchCommand[]>([]);
@@ -90,21 +91,24 @@
 	}
 
 	function open() {
-		focusReturnTarget =
-			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		transientLayers.open('main-inert', () => {
 			commands = captureCommands();
 			isOpen = true;
 			query = '';
 			selectedIndex = 0;
-			requestAnimationFrame(() => inputRef?.focus());
 		});
 	}
 
 	function close() {
-		isOpen = false;
-		commands = [];
-		query = '';
+		// The chat composer cannot receive the focus trap's restore until its inert flag is removed.
+		flushSync(() => {
+			isOpen = false;
+			commands = [];
+			query = '';
+		});
+		if (document.activeElement === document.body) opener?.focus({ preventScroll: true });
+		opener = null;
 	}
 
 	export function toggle() {
@@ -114,28 +118,30 @@
 
 	function selectItem(item: WorkbenchCommand) {
 		if (!isEnabled(item)) return;
-		void commandRegistry.invoke(item, commandContext);
+		const context = commandContext;
 		close();
+		void commandRegistry.invoke(item, context);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.isComposing) return;
-		if (e.key === 'Tab') {
-			const focusable = Array.from(
-				paletteRef?.querySelectorAll<HTMLElement>(
-					'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
-				) ?? [],
-			);
-			if (focusable.length === 0) {
-				e.preventDefault();
-				return;
-			}
-			const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-			const atBoundary = e.shiftKey ? currentIndex <= 0 : currentIndex === focusable.length - 1;
-			if (!atBoundary) return;
+		if (e.isComposing || e.keyCode === 229) {
+			if (e.key === 'Escape') e.stopPropagation();
+			return;
+		}
+		// Starts the trap's reverse Tab cycle at its first tabbable after a background click.
+		if (e.key === 'Tab' && e.shiftKey && e.target === e.currentTarget) inputRef?.focus();
+		if (e.target instanceof HTMLButtonElement) {
+			if (!e.target.matches('[role="option"]')) return;
+			if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
 			e.preventDefault();
-			focusable[e.shiftKey ? focusable.length - 1 : 0]?.focus();
-		} else if (e.key === 'ArrowDown') {
+			const options = Array.from(
+				e.target.parentElement!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+			);
+			const delta = e.key === 'ArrowDown' ? 1 : -1;
+			options[options.indexOf(e.target) + delta]?.focus();
+			return;
+		}
+		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
 		} else if (e.key === 'ArrowUp') {
@@ -143,13 +149,8 @@
 			selectedIndex = Math.max(selectedIndex - 1, 0);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
-			const item = filteredCommands[selectedIndex];
-			if (item) selectItem(item);
+			if (selectedCommand) selectItem(selectedCommand);
 		}
-	}
-
-	function handleBackdropClick() {
-		close();
 	}
 
 	function getCategoryIcon(category: WorkbenchCommandCategory) {
@@ -171,32 +172,16 @@
 </script>
 
 {#if isOpen}
-	<div class="fixed inset-0 z-50 transient-backdrop" role="presentation">
-		<button
-			class="absolute inset-0 w-full h-full cursor-default"
-			onclick={handleBackdropClick}
-			aria-label={m.command_close_menu()}
-			tabindex="-1"
-		></button>
-
-		<div
-			bind:this={paletteRef}
-			class="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-popover border border-border rounded-md shadow-2xl overflow-hidden"
-			role="dialog"
-			aria-modal="true"
+	<Dialog.Root open={true} requestClose={close}>
+		<Dialog.Content
+			class="top-[20%] translate-y-0 grid-cols-1 gap-0 overflow-hidden rounded-md bg-popover p-0 shadow-2xl"
+			showCloseButton={false}
 			aria-label={m.command_command_palette()}
-			tabindex="-1"
-			onkeydown={handleKeydown}
-			use:transientLayer={{
-				registry: transientLayers,
-				id: 'command-palette',
-				kind: 'application-dialog',
-				modality: 'main-inert',
-				onEscape: () => {
-					close();
-					return true;
-				},
-				restoreFocus: () => focusReturnTarget?.focus(),
+			tabindex={-1}
+			onkeydowncapture={handleKeydown}
+			onOpenAutoFocus={(event) => {
+				event.preventDefault();
+				inputRef?.focus();
 			}}
 		>
 			<div class="flex items-center gap-2 px-4 py-3 border-b border-border">
@@ -206,7 +191,7 @@
 					value={query}
 					oninput={handleQueryInput}
 					placeholder={m.command_placeholder()}
-					class="flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
+					class="min-w-0 flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground outline-none sm:pointer-fine:text-sm"
 					type="text"
 					role="combobox"
 					aria-expanded="true"
@@ -214,11 +199,18 @@
 					aria-autocomplete="list"
 					aria-activedescendant={selectedCommand ? optionIdFor(selectedCommand.id) : undefined}
 				/>
-				<kbd
-					class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
+				<Dialog.Close
+					class="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground"
+					aria-label={m.command_close_menu()}
 				>
-					{m.command_escape_hint()}
-				</kbd>
+					<X class="size-4 sm:hidden" />
+					<span class="sm:hidden"><span class="ansi-glyph" aria-hidden="true">[x]</span></span>
+					<kbd
+						class="hidden rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] sm:inline"
+					>
+						{m.command_escape_hint()}
+					</kbd>
+				</Dialog.Close>
 			</div>
 
 			<div id={listId} class="max-h-[300px] overflow-y-auto p-2" role="listbox">
@@ -241,8 +233,12 @@
 								? 'bg-accent text-accent-foreground'
 								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
-							onmouseenter={() => {
-								selectedIndex = i;
+							onfocus={() => (selectedIndex = i)}
+							onmouseenter={(event) => {
+								// A focused result owns native Enter and Space activation.
+								if (!event.currentTarget.parentElement?.contains(document.activeElement)) {
+									selectedIndex = i;
+								}
 							}}
 						>
 							<Icon class="w-4 h-4 flex-shrink-0 text-muted-foreground" />
@@ -264,6 +260,6 @@
 					{/each}
 				{/if}
 			</div>
-		</div>
-	</div>
+		</Dialog.Content>
+	</Dialog.Root>
 {/if}
