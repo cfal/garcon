@@ -1,3 +1,9 @@
+export const GIT_ERROR_MESSAGE_LIMIT = 2048;
+
+export function redactGitDiagnostic(text: string): string {
+  return text.replace(/(?:https?|ssh):\/\/\S+/gi, '<remote>');
+}
+
 // Domain error type for git operations. Carries a machine-readable
 // code for HTTP status mapping at the route boundary.
 export class GitDomainError extends Error {

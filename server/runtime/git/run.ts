@@ -230,7 +230,8 @@ async function runGitProcess(
     if (outputLimitError) throw outputLimitError;
     if (exitCode === 0 && !abortState.aborted()) return { stdout, stderr };
 
-    if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
+    // A hook or receiver can mention a lock after a push has already updated another ref.
+    if (args[0] !== 'push' && isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       lastFailure = { exitCode, stdout, stderr };
       // The attempt's timer was already cleaned up, so the delay itself must
       // respect the absolute budget; otherwise the total runtime overshoots

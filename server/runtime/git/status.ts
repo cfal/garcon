@@ -11,6 +11,7 @@ import { isExpectedMissingGitResult } from './comparison-errors.js';
 import { commitSelectedFiles } from './selected-file-commit.js';
 import { withRepositoryMutation } from './repository-coordination.js';
 import { discard } from './discard.js';
+import { pushBranchRef } from './push-branch.js';
 import { parsePorcelainV1Z } from './porcelain-status.js';
 import type {
   BranchOptions,
@@ -641,36 +642,24 @@ export function createStatusOperations() {
     return { remotes: Array.from(seen.values()) };
   }
 
-  // Pushes to a specific remote. Never sets upstream tracking.
   async function push({ projectPath, remote, remoteBranch }: PushOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
 
-    const { stdout: headBranch } = await runGit(
-      projectPath,
-      ['rev-parse', '--abbrev-ref', 'HEAD'],
-      readOnlyGitOptions(),
-    );
-    const branch = headBranch.trim();
     const targetRemote = remote || 'origin';
-    const targetBranch = remoteBranch || branch;
     assertSafeRemoteName(targetRemote);
-    if (remoteBranch) {
-      await assertSafeBranchName(projectPath, remoteBranch, 'remote branch name');
-      if (remoteBranch !== branch) {
-        throw new GitDomainError('INVALID_INPUT', 'Remote branch must match the current local branch.');
-      }
+    const head = await readGitHeadIdentity(projectPath);
+    if (head.branch === null) throw new GitDomainError('INVALID_INPUT', 'Check out a local branch before pushing.');
+    if (remoteBranch !== undefined && remoteBranch !== head.branch) {
+      throw new GitDomainError('INVALID_INPUT', 'Remote branch must match the current local branch.');
     }
+    await readCheckedOutRefFields(projectPath, head.ref);
 
-    const { stdout } = await runGit(
-      projectPath,
-      ['push', targetRemote, `${branch}:${targetBranch}`],
-      networkGitOptions(),
-    );
+    await pushBranchRef(projectPath, targetRemote, head.ref, networkGitOptions());
     return {
       success: true,
-      output: stdout || 'Push completed successfully',
+      output: 'Push completed successfully',
       remoteName: targetRemote,
-      remoteBranch: targetBranch,
+      remoteBranch: head.branch,
     };
   }
 

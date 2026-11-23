@@ -280,16 +280,12 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postPush(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const remote = typeof input.remote === 'string' ? input.remote : undefined;
-      const remoteBranch = typeof input.remoteBranch === 'string' ? input.remoteBranch : undefined;
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-
-      return git.push({ executorId: asJsonBody(body).executorId, signal: request.signal, projectPath: project, remote, remoteBranch });
+    return gitJson(git, () => {
+      const { project, executorId, ...fields } = body;
+      if (!isNonEmptyString(project)) return gitRouteError('Missing required parameter: project.', 400);
+      const input = { ...fields, projectPath: project };
+      validateGitRequest('push', input);
+      return git.push({ ...input, executorId, signal: request.signal });
     });
   }
 
