@@ -4,6 +4,7 @@
 	import { TextSelection } from '@tiptap/pm/state';
 	import { closeHistory } from '@tiptap/pm/history';
 	import { Placeholder } from '@tiptap/extensions/placeholder';
+	import './composer-markdown-base.css';
 	import { composerMarkdownCodec } from './composer-markdown-codec.js';
 	import { composerMarkdownEditorExtensions } from './composer-markdown-extensions.js';
 	import { composerMarkdownTableInput } from './composer-markdown-table-input.js';
@@ -240,6 +241,8 @@
 		};
 		const mountedEditor: Editor = new Editor({
 			element: container,
+			// Replacing the base stylesheet on each editor mount restyles the whole workspace.
+			injectCSS: false,
 			extensions: [
 				...extensions,
 				composerMarkdownEmptyMarks,

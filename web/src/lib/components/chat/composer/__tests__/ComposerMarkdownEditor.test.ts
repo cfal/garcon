@@ -1,7 +1,10 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TiptapEditorHTMLElement } from '@tiptap/core';
+import { Editor, type TiptapEditorHTMLElement } from '@tiptap/core';
 import ComposerMarkdownEditor from '../ComposerMarkdownEditor.svelte';
+import { composerMarkdownEditorExtensions } from '../composer-markdown-extensions.js';
 import { parseComposerMarkdown } from '../composer-markdown-parser.js';
 import type { ComposerMarkdownMention } from '../prompt-composer-markdown-controller.js';
 
@@ -56,6 +59,22 @@ function deleteText(editor: ReturnType<typeof mount>['editor'], from: number, to
 	if (marks) transaction.ensureMarks(marks);
 	editor.view.dispatch(transaction);
 }
+
+it('bundles the same base rules as the installed Tiptap editor', () => {
+	const reference = new Editor({ extensions: composerMarkdownEditorExtensions() });
+	try {
+		const injected = document.querySelector<HTMLStyleElement>('style[data-tiptap-style]')?.sheet;
+		expect(injected?.cssRules.length).toBeGreaterThan(0);
+		const bundled = new CSSStyleSheet();
+		bundled.replaceSync(
+			readFileSync(join(import.meta.dirname, '../composer-markdown-base.css'), 'utf8'),
+		);
+		const rules = (sheet: CSSStyleSheet) => Array.from(sheet.cssRules, (rule) => rule.cssText);
+		expect(rules(bundled)).toEqual(rules(injected!));
+	} finally {
+		reference.destroy();
+	}
+});
 
 describe('formatted editor cleared drafts', () => {
 	it.each(['`ab`', '**ab**', '_ab_', '~~ab~~', '**_ab_**', '[ab](https://example.test)'])(
