@@ -41,7 +41,7 @@ describe("Chromium Tickets interaction", () => {
       expect(collapsed.middle).toBeLessThan(collapsed.before);
       expect(collapsed.middle).toBeGreaterThan(collapsed.after);
 
-      const running = await summary.evaluateHandle(async (control: HTMLElement) => {
+      const startPausedResize = () => summary.evaluateHandle(async (control: HTMLElement) => {
         control.click();
         await new Promise(requestAnimationFrame);
         const resize = control.closest('[role="dialog"]')!.getAnimations()
@@ -49,17 +49,27 @@ describe("Chromium Tickets interaction", () => {
         resize.pause();
         return resize;
       });
+      const running = await startPausedResize();
       await page.setViewportSize({ width: 1280, height: 800 });
       await browserExpect.poll(() => running.evaluate(animation => animation.playState)).toBe("idle");
       await running.dispose();
       await page.setViewportSize({ width: 1440, height: 900 });
 
+      const interrupted = await startPausedResize();
       await page.emulateMedia({ reducedMotion: "reduce" });
+      await browserExpect.poll(() => interrupted.evaluate(animation => animation.playState)).toBe("idle");
+      await interrupted.dispose();
       const osReduced = await measureToggle();
-      expect(osReduced.after).toBeLessThan(osReduced.before);
+      expect(osReduced.after).toBeGreaterThan(osReduced.before);
       expect(osReduced.middle).toBe(osReduced.after);
 
       await page.emulateMedia({ reducedMotion: "no-preference" });
+      const appInterrupted = await startPausedResize();
+      await page.evaluate(() => document.documentElement.setAttribute("data-reduce-motion", ""));
+      await browserExpect.poll(() => appInterrupted.evaluate(animation => animation.playState)).toBe("idle");
+      await appInterrupted.dispose();
+      await page.evaluate(() => document.documentElement.removeAttribute("data-reduce-motion"));
+
       await page.evaluate(() => { document.documentElement.dataset.themeAppearance = "terminal"; });
       const terminal = await measureToggle();
       expect(terminal.after).toBeGreaterThan(terminal.before);
@@ -71,6 +81,24 @@ describe("Chromium Tickets interaction", () => {
       const appReduced = await measureToggle();
       expect(appReduced.after).toBeGreaterThan(appReduced.before);
       expect(appReduced.middle).toBe(appReduced.after);
+    });
+  });
+
+  test("releases the dialog and body lock on Escape during a resize", async () => {
+    await withChromiumFixture("ticket-close-during-resize", async ({ page, integration }) => {
+      await page.goto(integration.garcon.baseUrl);
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Tickets");
+      await page.getByRole("button", { name: "New ticket", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.locator("summary", { hasText: "More details" }).evaluate(async (control: HTMLElement) => {
+        control.click();
+        await new Promise(requestAnimationFrame);
+        control.closest('[role="dialog"]')!.getAnimations().find(animation => animation.id === "dialog-resize")!.pause();
+      });
+      await page.keyboard.press("Escape");
+      await browserExpect(page.locator('[data-slot="dialog-content"]')).toHaveCount(0);
+      await browserExpect(page.locator("body")).not.toHaveCSS("pointer-events", "none");
     });
   });
 

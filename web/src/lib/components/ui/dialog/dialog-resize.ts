@@ -1,18 +1,49 @@
 const resizeId = 'dialog-resize';
 const pendingFrames = new WeakSet<HTMLElement>();
 
-function skipResizeMotion(): boolean {
+function canResize(dialog: HTMLElement, reducedMotion: MediaQueryList): boolean {
 	const root = document.documentElement;
 	return (
-		root.hasAttribute('data-reduce-motion') ||
-		root.dataset.themeAppearance === 'terminal' ||
-		window.matchMedia('(prefers-reduced-motion: reduce)').matches
+		dialog.isConnected &&
+		dialog.dataset.state === 'open' &&
+		dialog.dataset.resizeMotion !== 'none' &&
+		!root.hasAttribute('data-reduce-motion') &&
+		root.dataset.themeAppearance !== 'terminal' &&
+		!reducedMotion.matches
 	);
+}
+
+function watchResize(
+	dialog: HTMLElement,
+	resize: Animation,
+	reducedMotion: MediaQueryList,
+	viewport: VisualViewport | null,
+): void {
+	const cancel = () => resize.cancel();
+	const check = () => {
+		if (!canResize(dialog, reducedMotion)) cancel();
+	};
+	// A closing dialog must not retain its interaction lock waiting for size motion.
+	const observer = new MutationObserver(check);
+	observer.observe(dialog, { attributeFilter: ['data-state', 'data-resize-motion'] });
+	observer.observe(document.documentElement, {
+		attributeFilter: ['data-reduce-motion', 'data-theme-appearance'],
+	});
+	const listeners = new AbortController();
+	reducedMotion.addEventListener('change', check, { signal: listeners.signal });
+	viewport?.addEventListener('resize', cancel, { signal: listeners.signal });
+	const release = () => {
+		observer.disconnect();
+		listeners.abort();
+	};
+	void resize.finished.then(release, release);
 }
 
 /** Captures the rendered box before a mode change, including a resize already in progress. */
 export function animateDialogResize(dialog: HTMLElement | null): void {
-	if (!dialog?.animate || skipResizeMotion() || pendingFrames.has(dialog)) return;
+	if (!dialog?.animate || pendingFrames.has(dialog)) return;
+	const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+	if (!canResize(dialog, reducedMotion)) return;
 	pendingFrames.add(dialog);
 	const width = dialog.offsetWidth;
 	const height = dialog.offsetHeight;
@@ -23,16 +54,16 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 	// The next frame includes both Svelte updates and native summary activation.
 	requestAnimationFrame(() => {
 		pendingFrames.delete(dialog);
-		if (!dialog.isConnected || dialog.dataset.state !== 'open') return;
 		dialog
 			.getAnimations()
 			.find((animation) => animation.id === resizeId)
 			?.cancel();
 		if (
-			skipResizeMotion() ||
+			!canResize(dialog, reducedMotion) ||
 			viewport?.width !== viewportWidth ||
 			viewport?.height !== viewportHeight
-		) return;
+		)
+			return;
 
 		const nextWidth = dialog.offsetWidth;
 		const nextHeight = dialog.offsetHeight;
@@ -45,11 +76,7 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 			if (dialog.scrollHeight <= dialog.clientHeight) dimensions.overflowY = ['hidden', 'hidden'];
 		}
 		const resize = dialog.animate(dimensions, { id: resizeId, duration: 200, easing: 'ease' });
-		// A rotation or software keyboard invalidates the measured destination.
-		const cancel = () => resize.cancel();
-		viewport?.addEventListener('resize', cancel, { once: true });
-		const release = () => viewport?.removeEventListener('resize', cancel);
-		void resize.finished.then(release, release);
+		watchResize(dialog, resize, reducedMotion, viewport);
 	});
 }
 
