@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { withGitOperation } from '../operation-context.js';
 import { pushBranchRef } from '../push-branch.js';
 import { gitServiceError } from '../service-errors.js';
@@ -337,7 +338,8 @@ test('confirms both push URLs and does not hide a rejected followed tag behind p
 });
 
 test('retains the receiving hook explanation after noisy or sensitive local diagnostics', async () => {
-  const { git, projectPath, remote } = await pushFixture();
+  const { git, projectPath, remote } = await pushFixture('policy repo\u00a0private-destination.git');
+  await runGit(projectPath, ['remote', 'set-url', 'origin', decodeURI(pathToFileURL(remote).href)]);
   await installHook(remote, 'update', 'echo "Reviewed commits only: ftps://user:private-ftps-token@host.invalid/policy" >&2\nexit 1');
   await installHook(projectPath, 'pre-push', 'printf "%03000d\\nhttps://%03000d:private-token@host.invalid/\\n" 0 0 >&2');
   const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
@@ -345,6 +347,7 @@ test('retains the receiving hook explanation after noisy or sensitive local diag
   expect(failure?.message).toMatch(/Inspect the remote[\s\S]*hook declined[\s\S]*<remote>[\s\S]*Reviewed commits only/);
   expect(failure?.message).not.toContain('private-token');
   expect(failure?.message).not.toContain('private-ftps-token');
+  expect(failure?.message).not.toContain('private-destination');
   expect(failure?.message.length).toBeLessThanOrEqual(2048);
   expect(await listRefs(remote)).toBe('');
 });
