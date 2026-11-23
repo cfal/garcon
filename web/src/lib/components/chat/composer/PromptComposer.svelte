@@ -13,7 +13,6 @@
 	} from '$lib/chat/composer/composer-availability.js';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
-	import AgentSettingsControls from './AgentSettingsControls.svelte';
 	import {
 		getComposerState,
 		getLocalSettings,
@@ -70,7 +69,7 @@
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
-	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
+	import { activeComposerModel } from './active-composer-model.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
 	import {
@@ -115,6 +114,7 @@
 	const appShell = getAppShell();
 	const rootModelCatalog = getModelCatalog();
 	const executors = getExecutors();
+	const activeModel = activeComposerModel();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
 	const executionAgent = $derived(modelCatalog.getAgent(agentState.agentId));
 	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
@@ -916,24 +916,18 @@
 				onSend={() => handleFormSubmit()}
 				{sendTitle}
 				{sendButtonClass}
-			>
-				{#snippet agentSettings()}
-					<AgentSettingsControls
-						descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
-						envelope={agentState.agentSettings}
-						defaults={modelCatalog.getDefaultAgentSettings(agentState.agentId)}
-						onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
-						disabled={!onAgentSettingChange || directAdmissionPending}
-					/>
-				{/snippet}
-				{#snippet modelSelector()}
-					<PromptComposerModelSelector
-						onChange={onModelChange}
-						{onExecutorChange}
-						disabled={directAdmissionPending}
-					/>
-				{/snippet}
-			</ComposerBottomBar>
+				executor={{ executors, executorId: agentState.executorId, onSelect: (id) => {
+					if (id !== agentState.executorId) onExecutorChange?.(id);
+				} }}
+				agentSettings={{
+					descriptors: modelCatalog.getAgentSettingsDescriptors(agentState.agentId),
+					envelope: agentState.agentSettings,
+					defaults: modelCatalog.getDefaultAgentSettings(agentState.agentId),
+					onChange: (descriptor, value) => onAgentSettingChange?.(descriptor, value),
+					disabled: !onAgentSettingChange || directAdmissionPending,
+				}}
+				model={{ ...activeModel, onChange: (next) => onModelChange?.(next), disabled: directAdmissionPending }}
+			/>
 		</form>
 	</div>
 {/snippet}

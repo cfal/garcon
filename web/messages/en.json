@@ -275,6 +275,8 @@
 	"chat_composer_model_unavailable": "Model unavailable",
 	"chat_composer_model_unavailable_detail": "The selected provider or model is unavailable on this executor.",
 	"chat_composer_more_actions": "More composer actions",
+	"chat_composer_model": "Agent / model",
+	"chat_composer_more_settings": "More model settings",
 	"chat_composer_open_expanded_editor": "Open expanded composer",
 	"chat_composer_permission_mode": "Permission mode",
 	"chat_composer_refining_prompt": "Refining prompt...",

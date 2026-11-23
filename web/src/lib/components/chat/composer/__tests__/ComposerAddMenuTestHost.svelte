@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ComposerAddMenu from '../ComposerAddMenu.svelte';
+	import ComposerBottomBar from '../ComposerBottomBar.svelte';
 	import { untrack } from 'svelte';
 	import { setAppShell } from '$lib/context';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
@@ -18,8 +18,10 @@
 	setAppShell(appShell);
 </script>
 
-<ComposerAddMenu
-	disabled={false}
+<ComposerBottomBar
+	permissionOptions={[]} selectedPermission="default" onPermissionSelect={() => {}}
+	thinkingOptions={[]} selectedThinking="none" onThinkingSelect={() => {}}
+	showSendButton={false} canSend={false} sendTitle="" sendButtonClass="" onSend={() => {}}
 	{canAttachImages}
 	attachImagesTooltip="Images are unavailable"
 	onAddImage={() => (imagePickerOpenCount += 1)}

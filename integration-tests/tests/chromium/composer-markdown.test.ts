@@ -1,3 +1,4 @@
+import { openComposerSnippets } from '../../support/composer-actions.js';
 import { expect, test } from "bun:test";
 import { expect as browserExpect, type Page } from "playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -559,8 +560,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
       await browserExpect(textarea).toHaveValue(/`a  b` at end synced \|$/);
       await editor.locator("p").first().click();
       const beforeSnippet = await textarea.inputValue();
-      await page.getByRole("button", { name: "Add to prompt" }).click();
-      await page.getByRole("menuitem", { name: /Snippets/ }).click();
+      await openComposerSnippets(page, page.locator('[data-composer-toolbar]'));
       await browserExpect(editor).toHaveCount(0);
       await browserExpect
         .poll(() =>

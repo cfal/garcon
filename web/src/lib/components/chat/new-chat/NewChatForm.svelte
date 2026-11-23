@@ -37,7 +37,6 @@
 	import ComposerAttachmentBadge from '../composer/ComposerAttachmentBadge.svelte';
 	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from '../composer/ComposerSnippetPalette.svelte';
-	import AgentSettingsControls from '../composer/AgentSettingsControls.svelte';
 	import NewChatPreambleControls from '../../preambles/NewChatPreambleControls.svelte';
 	import ChatTagEditor from '../ChatTagEditor.svelte';
 	import ChatTagToggleButton from '../ChatTagToggleButton.svelte';
@@ -65,7 +64,6 @@
 	import FileVideo from '@lucide/svelte/icons/file-video';
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
-	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import type {
 		ModelSelectorChange,
@@ -834,28 +832,18 @@
 					onSend={handleSubmit}
 					sendTitle={m.chat_new_chat_start_session()}
 					{sendButtonClass}
-				>
-					{#snippet agentSettings()}
-						<AgentSettingsControls
-							descriptors={form.agentSettingDescriptors}
-							envelope={form.agentSettings}
-							defaults={modelCatalog.getDefaultAgentSettings(form.agentId)}
-							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
-						/>
-					{/snippet}
-					{#snippet modelSelector()}
-						<ComposerModelSelector
-							value={modelSelectorValue}
-							mode={modelSelectorMode}
-							onChange={handleModelSelectorChange}
-							{getRecents}
-							preferRecentsOnOpen
-							getSelectableAgentIds={selectableAgentsForExecutor}
-							align="end"
-							side="bottom"
-						/>
-					{/snippet}
-				</ComposerBottomBar>
+					side="bottom"
+					agentSettings={{
+						descriptors: form.agentSettingDescriptors,
+						envelope: form.agentSettings,
+						defaults: modelCatalog.getDefaultAgentSettings(form.agentId),
+						onChange: (descriptor, value) => form.setAgentSetting(descriptor, value),
+					}}
+					model={{
+						value: modelSelectorValue, mode: modelSelectorMode, onChange: handleModelSelectorChange,
+						getRecents, preferRecentsOnOpen: true, getSelectableAgentIds: selectableAgentsForExecutor,
+					}}
+				/>
 
 				<ComposerSnippetPalette
 					open={snippetPalette.isOpen}

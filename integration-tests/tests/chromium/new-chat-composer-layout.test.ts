@@ -102,53 +102,29 @@ describe("Chromium New Chat composer layout", () => {
         ).toBe(true);
         await fixture.page.setViewportSize({ width: 390, height: 844 });
 
-        markPhase("checking responsive composer actions");
-        await bottomBar
-          .getByRole("button", { name: "More composer actions" })
-          .waitFor({ state: "visible" });
-        expect(
-          await bottomBar
-            .getByRole("button", { name: "Open expanded composer" })
-            .count(),
-        ).toBe(0);
-        expect(
-          await bottomBar
-            .getByRole("button", { name: "Refine prompt" })
-            .count(),
-        ).toBe(0);
-        await bottomBar
-          .getByRole("button", { name: "More composer actions" })
-          .click();
-        await fixture.page
-          .getByRole("menuitem", { name: "Open expanded composer" })
-          .waitFor();
-        await fixture.page
-          .getByRole("menuitem", { name: "Refine prompt" })
-          .waitFor();
-        await fixture.page.keyboard.press("Escape");
-
-        markPhase("checking the compact Add menu");
-        const addTrigger = bottomBar.getByRole("button", {
-          name: "Add to prompt",
-        });
+        markPhase("opening both overflow menus at the tile width floor");
+        await bottomBar.evaluate((bar) => { bar.style.width = '196px'; });
+        const addTrigger = bottomBar.getByRole("button", { name: "More composer actions" });
         await addTrigger.click();
         const addMenu = fixture.page.getByRole("menu");
-        const [triggerBox, menuBox] = await Promise.all([
-          bounds(addTrigger),
-          bounds(addMenu),
-        ]);
+        for (const name of [/Add image/, /Snippets/, /Open expanded composer/, /Refine prompt/]) {
+          await addMenu.getByRole("menuitem", { name }).waitFor();
+        }
+        const menuBox = await bounds(addMenu);
         expect(menuBox.width).toBeLessThanOrEqual(256);
-        expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(triggerBox.y);
         expect(menuBox.x).toBeGreaterThanOrEqual(8);
         expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(382);
         await fixture.page.keyboard.press("Escape");
 
-        markPhase("checking the compact model selector");
-        await bottomBar.getByRole("button", { name: /Claude .* Opus/ }).click();
+        markPhase("opening the compact model picker from overflow");
+        const settingsMenu = bottomBar.getByRole("button", { name: "More model settings" });
+        await settingsMenu.click();
+        await fixture.page.getByRole("menuitem", { name: /Agent \/ model.*Claude.*Opus/ }).click();
         const compactSelector = fixture.page.locator(
           '[data-slot="model-selector-compact"]',
         );
         await compactSelector.waitFor({ state: "visible" });
+        await bottomBar.evaluate((bar) => { bar.style.removeProperty("width"); });
         const modelDialog = fixture.page.getByRole("dialog").filter({
           has: compactSelector,
         });
@@ -204,17 +180,11 @@ describe("Chromium New Chat composer layout", () => {
           name: `Direct (Chat Completions) / Integration Fake OpenAI / ${LONG_MODEL_LABEL}`,
           exact: true,
         });
-        const thinkingTrigger = bottomBar.locator(
-          '[data-slot="thinking-mode-trigger"]',
-        );
-        const [addTriggerBox, thinkingTriggerBox, longModelTriggerBox] =
-          await Promise.all([
-            bounds(addTrigger),
-            bounds(thinkingTrigger),
-            bounds(longModelTrigger),
-          ]);
-        expect(thinkingTriggerBox.y).toBeCloseTo(addTriggerBox.y, 0);
-        expect(longModelTriggerBox.y).toBeCloseTo(addTriggerBox.y, 0);
+        const send = bottomBar.getByRole("button", { name: "Start session" });
+        const [sendBox, longModelTriggerBox] = await Promise.all([bounds(send), bounds(longModelTrigger)]);
+        expect(longModelTriggerBox.width).toBeGreaterThanOrEqual(90);
+        expect(longModelTriggerBox.y).toBeCloseTo(sendBox.y, 0);
+        expect(longModelTriggerBox.x + longModelTriggerBox.width).toBeLessThanOrEqual(sendBox.x);
         expect(
           await longModelTrigger.evaluate((node) => {
             const label = node.querySelector<HTMLElement>(
@@ -264,6 +234,21 @@ describe("Chromium New Chat composer layout", () => {
         expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(632);
         expect(popoverBox.x).toBeGreaterThanOrEqual(8);
         expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(632);
+        markPhase("resizing a desktop tile with the model picker open");
+        await bottomBar.evaluate((bar) => { bar.style.width = "196px"; });
+        await settingsMenu.waitFor();
+        expect(await modelPopover.isVisible()).toBe(true);
+        await fixture.page.keyboard.press("Escape");
+        await modelPopover.waitFor({ state: "detached" });
+        await fixture.page.waitForFunction(() => document.activeElement?.getAttribute("data-composer-overflow") === "settings");
+        await settingsMenu.click();
+        await fixture.page.getByRole("menuitem", { name: /Agent \/ model/ }).click();
+        await modelPopover.waitFor();
+        await bottomBar.evaluate((bar) => { bar.style.removeProperty("width"); });
+        await longModelTrigger.waitFor();
+        await fixture.page.keyboard.press("Escape");
+        await modelPopover.waitFor({ state: "detached" });
+        expect(await bottomBar.evaluate((bar) => bar.scrollWidth <= bar.clientWidth)).toBe(true);
         fixture.assertNoBrowserErrors();
       },
     );

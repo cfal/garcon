@@ -1,13 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import AgentSettingsControls from '../AgentSettingsControls.svelte';
+import type { ComposerAgentSettings } from '../composer-toolbar-types';
+import AgentSettingControl from '../AgentSettingControl.svelte';
 
 describe('AgentSettingsControls', () => {
 	afterEach(cleanup);
 
 	it('renders runtime descriptors and reports provider-neutral changes', async () => {
 		const onChange = vi.fn();
-		render(AgentSettingsControls, {
+		const settings = {
 			descriptors: [
 				{
 					key: 'effort',
@@ -34,13 +35,12 @@ describe('AgentSettingsControls', () => {
 				{ key: 'review', type: 'boolean', label: 'Review changes' },
 			],
 			defaults: { ownerId: 'sample-agent', schemaVersion: 1, values: { effort: 'low' } },
-			envelope: {
-				ownerId: 'sample-agent',
-				schemaVersion: 1,
-				values: { review: false },
-			},
+			envelope: { ownerId: 'sample-agent', schemaVersion: 1, values: { review: false } },
 			onChange,
-		});
+		} satisfies ComposerAgentSettings;
+		for (const descriptor of settings.descriptors) {
+			render(AgentSettingControl, { descriptor, settings, overflow: false, align: 'end', side: 'top' });
+		}
 
 		const effortTrigger = screen.getByRole('button', { name: 'Thinking: Auto' });
 		expect(effortTrigger.className).toContain('bg-composer-agent-setting');
@@ -51,7 +51,8 @@ describe('AgentSettingsControls', () => {
 		expect(screen.getByText('Lets Claude decide when extended thinking is useful.')).toBeTruthy();
 		expect(screen.getByText('Uses extended thinking for every response.')).toBeTruthy();
 		await fireEvent.click(await screen.findByRole('menuitemradio', { name: /^On/ }));
-		await fireEvent.click(screen.getByLabelText('Review changes'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Review changes: Off' }));
+		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'On' }));
 
 		expect(onChange).toHaveBeenNthCalledWith(
 			1,

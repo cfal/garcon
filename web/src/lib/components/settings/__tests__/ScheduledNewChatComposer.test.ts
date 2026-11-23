@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
@@ -89,9 +89,7 @@ function renderComposer(
 	const onPromptChange = vi.fn();
 	const onPromptKeydown = vi.fn();
 	const startup = makeStartup(overrides.modelSelectionError, overrides.executorId);
-	const modelCatalog = {
-		getSelectableAgents: () => [],
-	} as unknown as ModelCatalogStore;
+	const modelCatalog = new ModelCatalogStore();
 	const remoteSettings = {
 		snapshot: { recentAgentSettings: [] },
 	} as unknown as RemoteSettingsStore;

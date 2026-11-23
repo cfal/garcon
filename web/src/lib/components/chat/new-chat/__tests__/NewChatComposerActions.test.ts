@@ -117,19 +117,10 @@ async function settleExpandedDialogOpen(): Promise<void> {
 
 async function constrainComposerActions(container: HTMLElement): Promise<void> {
 	await Promise.resolve();
-	const root = container.querySelector<HTMLElement>('[data-responsive-surface-actions]');
-	if (!root) throw new Error('Missing responsive composer actions');
-	Object.defineProperty(root, 'clientWidth', { configurable: true, get: () => 36 });
-	for (const element of container.querySelectorAll<HTMLElement>('[data-surface-action-measure]')) {
-		element.getBoundingClientRect = () => ({ width: 36 }) as DOMRect;
-	}
-	const menuMeasure = container.querySelector<HTMLElement>(
-		'[data-surface-action-overflow-measure]',
-	);
-	if (!menuMeasure) throw new Error('Missing composer action menu measurement');
-	menuMeasure.getBoundingClientRect = () => ({ width: 36 }) as DOMRect;
-
-	ResizeObserverHarness.emit(root, 36);
+	const root = container.querySelector<HTMLElement>('[data-composer-toolbar]');
+	if (!root) throw new Error('Missing composer toolbar');
+	Object.defineProperty(root, 'clientWidth', { configurable: true, get: () => 190 });
+	ResizeObserverHarness.emit(root, 190);
 	await Promise.resolve();
 }
 

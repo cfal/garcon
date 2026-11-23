@@ -1,12 +1,10 @@
 <script lang="ts">
 	import ComposerBottomBar from '$lib/components/chat/composer/ComposerBottomBar.svelte';
-	import AgentSettingsControls from '$lib/components/chat/composer/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
 	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
-	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import NewChatPreambleControls from '$lib/components/preambles/NewChatPreambleControls.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
@@ -261,29 +259,18 @@
 					sendButtonClass=""
 					showAddMenu={false}
 					showSendButton={false}
-					mobileRightGroupFullRow={true}
-				>
-					{#snippet agentSettings()}
-						<AgentSettingsControls
-							descriptors={startup.agentSettingDescriptors}
-							envelope={startup.agentSettings}
-							defaults={modelCatalog.forExecutor(startup.executorId).getDefaultAgentSettings(startup.agentId)}
-							onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
-						/>
-					{/snippet}
-					{#snippet modelSelector()}
-						<ComposerModelSelector
-							value={modelSelectorValue}
-							mode={modelSelectorMode}
-							onChange={handleModelChange}
-							{getRecents}
-							preferRecentsOnOpen
-							{getSelectableAgentIds}
-							align="end"
-							side="bottom"
-						/>
-					{/snippet}
-				</ComposerBottomBar>
+					side="bottom"
+					agentSettings={{
+						descriptors: startup.agentSettingDescriptors,
+						envelope: startup.agentSettings,
+						defaults: modelCatalog.forExecutor(startup.executorId).getDefaultAgentSettings(startup.agentId),
+						onChange: (descriptor, value) => startup.setAgentSetting(descriptor, value),
+					}}
+					model={{
+						value: modelSelectorValue, mode: modelSelectorMode, onChange: handleModelChange,
+						getRecents, preferRecentsOnOpen: true, getSelectableAgentIds,
+					}}
+				/>
 			</div>
 		{/snippet}
 	</ScheduledPromptField>
