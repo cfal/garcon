@@ -62,17 +62,17 @@ describe('Settings', () => {
 		let rendered = render(SettingsTestHost, props);
 		try {
 			const alignment = screen.getByRole<HTMLSelectElement>('combobox', { name: 'User message alignment' });
-			expect(alignment.value).toBe('right');
+			expect(alignment.value).toBe('left');
 			expect(within(alignment).getAllByRole('option').map(option => option.textContent)).toEqual(['Left', 'Right']);
-			await fireEvent.change(alignment, { target: { value: 'left' } });
+			await fireEvent.change(alignment, { target: { value: 'right' } });
 			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
-				userMessageAlignment: 'left',
+				userMessageAlignment: 'right',
 			});
 			rendered.unmount();
 			rendered = render(SettingsTestHost, props);
 			expect(
 				screen.getByRole<HTMLSelectElement>('combobox', { name: 'User message alignment' }).value,
-			).toBe('left');
+			).toBe('right');
 		} finally {
 			rendered.unmount();
 		}

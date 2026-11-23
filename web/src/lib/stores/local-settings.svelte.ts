@@ -271,7 +271,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
-	userMessageAlignment: 'right',
+	userMessageAlignment: 'left',
 	autoHideChatScrollbar: true,
 	inlineImageThumbnailSize: 'medium',
 	imageCacheSizeMiB: 64,
