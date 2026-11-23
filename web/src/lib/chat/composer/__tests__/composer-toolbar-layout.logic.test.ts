@@ -49,6 +49,15 @@ describe('composer toolbar fit', () => {
 		}
 	});
 
+	it('lets the executor use spare space when the agent prefix is still too wide', () => {
+		expect(fitComposerToolbar(chat, 36.5, labels)).toMatchObject({
+			fullExecutor: true, modelDisplay: 'model', settingsMenu: false,
+		});
+		expect(fitComposerToolbar(chat, 37.75, labels)).toMatchObject({
+			fullExecutor: false, modelDisplay: 'combined', settingsMenu: false,
+		});
+	});
+
 	it('uses spare space for a short prefix without delaying the next button', () => {
 		const shortPrefix = { model: 7, combined: 8 };
 		const spare = fitComposerToolbar(chat, 15.75, shortPrefix);
