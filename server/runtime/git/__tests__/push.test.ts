@@ -274,6 +274,7 @@ test.each(['unterminated', 'truncated'])('an interrupted push reports its cancel
       .then(() => null, (error: Error) => error);
     expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
     if (capture === 'truncated') expect(failure?.message).toContain('truncated');
+    else expect(failure?.message).not.toContain('truncated');
     expect(failure?.message).toContain('cancelled or timed out');
     expect(failure?.message).toContain('[rejected] (fetch first)');
     expect(failure?.message).not.toContain('non-fast-forward');
@@ -343,9 +344,10 @@ test('does not confirm a multi-URL push when only the first complete report fits
   const second = await createBareRemote(root, 'second.git');
   await addOriginPushUrls(projectPath, remote, second);
   const tip = await oid(projectPath);
-  await expect(git.push({ projectPath })).rejects.toMatchObject({
-    code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('truncated'),
-  });
+  const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
+  expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+  expect(failure?.message).toContain('truncated');
+  expect(failure?.message).not.toContain('skipped destination');
   for (const dest of [remote, second]) expect(await listRefs(dest)).toBe(`refs/heads/main ${tip}\n`);
 });
 
