@@ -11,6 +11,7 @@ import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.j
 import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
+import * as tabActions from '$lib/workspace/workspace-window-tab-actions.js';
 import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 import {
 	PORTABLE_SINGLETON_KINDS,
@@ -373,6 +374,74 @@ describe('WorkspaceWindowTitleBar', () => {
 	afterEach(() => {
 		cleanup();
 		vi.unstubAllGlobals();
+	});
+
+	it.each([{ order: [chatSurface.id] }, { order: [chatSurface.id, gitSurface.id] }])(
+		'projects only the opened titlebar menu ($order)',
+		async ({ order }) => {
+			const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+			runtime.transientLayers = layers;
+			const initialNodes = document.body.childNodes.length;
+			using resolve = vi.spyOn(tabActions, 'resolveWorkspaceWindowTabActions');
+			renderTitleBar(workspaceWindow(order));
+			expect(screen.getAllByRole('tab')).toHaveLength(order.length);
+			expect(resolve).not.toHaveBeenCalled();
+			expect(document.body.childNodes).toHaveLength(initialNodes + 1);
+
+			const trigger = screen.getByRole('button', { name: m.workspace_window_actions() });
+			trigger.focus();
+			await fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+			const close = await screen.findByRole('menuitem', { name: m.workspace_close_tab() });
+			expect(close.closest('[data-workspace-window-tab-menu="dropdown"]')).toBeTruthy();
+			expect(resolve).toHaveBeenCalledTimes(1);
+			close.focus();
+			expect(layers.handleEscape(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			expect(document.activeElement).toBe(trigger);
+		},
+	);
+
+	it('keeps an opened tab menu across dismissal and releases it when the tab leaves the strip', async () => {
+		runtime.surfaces[fileSurface.id] = fileSurface;
+		const initialNodes = document.body.childNodes.length;
+		using resolve = vi.spyOn(tabActions, 'resolveWorkspaceWindowTabActions');
+		const { rerender } = renderTitleBar(
+			workspaceWindow([chatSurface.id, gitSurface.id, fileSurface.id]),
+		);
+		const tab = screen.getByRole('tab', { name: 'README.md' });
+		await fireEvent.contextMenu(tab);
+		const menu = await screen.findByRole('menu');
+		expect(menu.dataset.workspaceWindowTabContextMenu).toBe(fileSurface.id);
+		await fireEvent.keyDown(menu, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+		await fireEvent.contextMenu(tab);
+		expect((await screen.findByRole('menu')).dataset.workspaceWindowTabContextMenu).toBe(
+			fileSurface.id,
+		);
+		expect(resolve).toHaveBeenCalledTimes(1);
+		await rerender({ workspaceWindow: workspaceWindow([chatSurface.id, gitSurface.id]) });
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(document.body.childNodes).toHaveLength(initialNodes + 1);
+		expect(closeSurface).not.toHaveBeenCalled();
+	});
+
+	it.each([0, 1_000])('leaves untouched add menus out of the document at width %i', async (width) => {
+		runtime.terminalSessions = [
+			{ metadata: { terminalId: 'saved-terminal', displaySequence: 1, title: null } },
+		];
+		const initialNodes = document.body.childNodes.length;
+		render(WorkspaceWindowAddMenu, {
+			windowId: 'window-main',
+			tabs: workspaceWindow([chatSurface.id]).tabs,
+			measure: { naturalWidth: 100, viewportWidth: width },
+		});
+		const trigger = await screen.findByRole('button', {
+			name: width === 0 ? m.workspace_add_to_window() : m.workspace_terminal_actions(),
+		});
+		expect(document.body.childNodes).toHaveLength(initialNodes + 1);
+		await fireEvent.click(trigger);
+		expect(await screen.findByRole('menuitem', { name: m.workspace_new_terminal() })).toBeTruthy();
 	});
 
 	it('shows a draggable tab and direct controls for a one-tab window', () => {
@@ -2122,6 +2191,27 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(document.activeElement).toBe(trigger);
 		expect(moveTabToNewWindow).not.toHaveBeenCalled();
 	});
+
+	it.each(['window-main', 'window-two'] as const)(
+		'does not capture unrelated focus on the first touch open of a window menu (current: %s)',
+		async (currentWindowId) => {
+			const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+			runtime.transientLayers = layers;
+			renderTitleBar(workspaceWindow([chatSurface.id]));
+			const trigger = screen.getByRole('button', { name: m.workspace_window_actions() });
+			const otherControl = screen.getByRole('button', { name: m.workspace_fullscreen() });
+			otherControl.focus();
+			await fireEvent.pointerUp(trigger, { pointerType: 'touch' });
+			const close = await screen.findByRole('menuitem', { name: m.workspace_close_tab() });
+			close.focus();
+			runtime.currentWindowId = currentWindowId;
+			expect(layers.handleEscape(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			expect(document.activeElement).not.toBe(otherControl);
+			if (currentWindowId === 'window-main') expect(document.activeElement).toBe(trigger);
+			else expect(document.activeElement).not.toBe(trigger);
+		},
+	);
 
 	it('offers every other window as a Chat move destination', async () => {
 		const executor = workspaceWindow([chatSurface.id, gitSurface.id]);

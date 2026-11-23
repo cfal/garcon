@@ -132,12 +132,22 @@
 		void workspace.closeOtherWindows(windowId).catch(notifyFailure);
 	}
 
-	function handleDropdownCloseAutoFocus(event: Event): void {
-		const trigger = document.querySelector(
+	function currentDropdownTrigger(): HTMLElement | null {
+		if (workspace.currentWindowId !== windowId) return null;
+		return document.querySelector<HTMLElement>(
 			`[data-workspace-window-menu-trigger="${CSS.escape(windowId)}"]`,
 		);
+	}
+
+	function dropdownEscapeFocusTarget(): HTMLElement {
+		// A changed owner keeps its focus instead of restoring the control focused at first mount.
+		const focused = document.activeElement;
+		return currentDropdownTrigger() ?? (focused instanceof HTMLElement ? focused : document.body);
+	}
+
+	function handleDropdownCloseAutoFocus(event: Event): void {
 		// Removed windows can still expose their old focus owner during Svelte teardown.
-		if (!trigger || workspace.currentWindowId !== windowId) event.preventDefault();
+		if (!currentDropdownTrigger()) event.preventDefault();
 	}
 </script>
 
@@ -271,6 +281,7 @@
 		class={contentClass}
 		data-workspace-window-menu={windowId}
 		data-workspace-window-tab-menu="dropdown"
+		getFocusReturnTarget={dropdownEscapeFocusTarget}
 		onCloseAutoFocus={handleDropdownCloseAutoFocus}
 	>
 		{@render menuItems()}

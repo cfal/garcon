@@ -24,6 +24,7 @@
 		type WindowTabPresentation,
 	} from './workspace-window-tab-layout.js';
 	import WorkspaceWindowTabMenu from './WorkspaceWindowTabMenu.svelte';
+	import WorkspaceWindowMenuRoot from './WorkspaceWindowMenuRoot.svelte';
 	import { contextMenuPrimitives } from '$lib/components/ui/menu-primitives.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
@@ -569,15 +570,18 @@
 		{#if measurement || singleTabMenuSurfaceId || !hasContextMenu(surfaceId)}
 			{@render tabButton(surfaceId, measurement, {})}
 		{:else}
-			<ContextMenu
+			<WorkspaceWindowMenuRoot
+				root={ContextMenu}
 				open={tabMenuTarget?.surfaceId === surfaceId}
 				onOpenChange={(open) => handleTabMenuOpenChange(surfaceId, open)}
 			>
-				<ContextMenuTrigger>
-					{#snippet child({ props })}
-						{@render tabButton(surfaceId, false, props)}
-					{/snippet}
-				</ContextMenuTrigger>
+				{#snippet trigger()}
+					<ContextMenuTrigger>
+						{#snippet child({ props })}
+							{@render tabButton(surfaceId, false, props)}
+						{/snippet}
+					</ContextMenuTrigger>
+				{/snippet}
 				<WorkspaceWindowTabMenu
 					menu={contextMenuPrimitives}
 					{windowId}
@@ -588,7 +592,7 @@
 					{onSelect}
 					{surfaceMenuItems}
 				/>
-			</ContextMenu>
+			</WorkspaceWindowMenuRoot>
 		{/if}
 	</div>
 {/snippet}
@@ -613,12 +617,18 @@
 {/snippet}
 
 {#if singleTabMenuSurfaceId}
-	<ContextMenu bind:open={singleTabMenuOpen} onOpenChange={handleSingleTabMenuOpenChange}>
-		<ContextMenuTrigger>
-			{#snippet child({ props })}
-				{@render tabList({ ...props, disabled: undefined })}
-			{/snippet}
-		</ContextMenuTrigger>
+	<WorkspaceWindowMenuRoot
+		root={ContextMenu}
+		bind:open={singleTabMenuOpen}
+		onOpenChange={handleSingleTabMenuOpenChange}
+	>
+		{#snippet trigger()}
+			<ContextMenuTrigger>
+				{#snippet child({ props })}
+					{@render tabList({ ...props, disabled: undefined })}
+				{/snippet}
+			</ContextMenuTrigger>
+		{/snippet}
 		<WorkspaceWindowTabMenu
 			menu={contextMenuPrimitives}
 			{windowId}
@@ -632,7 +642,7 @@
 			onContextMenuInteractOutside={handleSingleTabMenuInteractOutside}
 			onContextMenuKeydownCapture={handleSingleTabMenuKeydown}
 		/>
-	</ContextMenu>
+	</WorkspaceWindowMenuRoot>
 {:else}
 	{@render tabList({})}
 {/if}
