@@ -50,6 +50,7 @@ export function fitComposerToolbar(
 	modelWidthsRem: ModelTriggerWidths = { model: icon, combined: icon },
 ) {
 	const inline = new Set<ComposerControlId>();
+	let modelDisplay: ModelTriggerDisplay = 'overflow';
 	const hidden = (group: readonly ComposerControlId[]) => group.some((id) => !inline.has(id));
 	function minimumWidth() {
 		const count =
@@ -62,7 +63,9 @@ export function fitComposerToolbar(
 			count * icon +
 			Math.max(0, count - 1) * gap +
 			sendSeparation +
-			(inline.has('model') ? modelWidthsRem.model - icon : 0)
+			(inline.has('model')
+				? modelWidthsRem[modelDisplay === 'combined' ? 'combined' : 'model'] - icon
+				: 0)
 		);
 	}
 
@@ -73,16 +76,18 @@ export function fitComposerToolbar(
 			const previous = minimumWidth();
 			inline.add(id);
 			const budget = id === 'model' ? widthRem : Math.max(widthRem, previous);
-			if (minimumWidth() > budget) inline.delete(id);
+			const width = minimumWidth();
+			if (width > budget) inline.delete(id);
+			else if (id === 'model') {
+				// Once the agent name fits, a later shortcut must not shorten it again.
+				modelDisplay = fitModelTrigger(modelWidthsRem, modelWidthsRem.model + (budget - width));
+			}
 		}
 	} else {
 		for (const id of ids) if (id !== 'image' && id !== 'snippet') inline.add(id);
+		if (inline.has('model')) modelDisplay = 'combined';
 	}
-	let spare = widthRem > 0 ? Math.max(0, widthRem - minimumWidth()) : Infinity;
-	const modelDisplay: ModelTriggerDisplay = inline.has('model')
-		? fitModelTrigger(modelWidthsRem, modelWidthsRem.model + spare)
-		: 'overflow';
-	if (modelDisplay === 'combined') spare -= modelWidthsRem.combined - modelWidthsRem.model;
+	const spare = widthRem > 0 ? widthRem - minimumWidth() : Infinity;
 	const fullExecutor = inline.has('executor') && spare >= labelledExecutor - icon;
 	return {
 		inline,

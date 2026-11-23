@@ -23,7 +23,7 @@ describe('composer toolbar fit', () => {
 	});
 
 	it('compacts the executor, then folds it before sacrificing a readable model', () => {
-		const medium = fitComposerToolbar(chat, 25, labels);
+		const medium = fitComposerToolbar(chat, 26, labels);
 		expect(medium.inline.has('executor')).toBe(true);
 		expect(medium.fullExecutor).toBe(false);
 		const narrow = fitComposerToolbar(chat, 15, labels);
@@ -39,6 +39,16 @@ describe('composer toolbar fit', () => {
 			new Set([...chat.prompt, ...chat.settings.filter((id) => id !== 'model')]),
 		);
 		expect(fit.settingsMenu).toBe(true);
+	});
+
+	it('never removes a short agent prefix to promote a shortcut as the tile grows', () => {
+		const modes = new Set<string>();
+		for (let pixels = 120; pixels <= 640; pixels++) {
+			const { modelDisplay } = fitComposerToolbar(chat, pixels / 16, { model: 7, combined: 8 });
+			if (modes.has('combined')) expect(modelDisplay).toBe('combined');
+			modes.add(modelDisplay);
+		}
+		expect([...modes]).toEqual(['overflow', 'model', 'combined']);
 	});
 
 	it('preserves cancellation and a configurable bypass ahead of ordinary controls', () => {
