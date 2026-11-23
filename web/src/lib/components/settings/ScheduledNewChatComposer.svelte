@@ -27,6 +27,7 @@
 	import { getAppShell, getExecutors } from '$lib/context';
 
 	interface Props {
+		modelControlsLeft?: boolean;
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
@@ -46,6 +47,7 @@
 	}
 
 	let {
+		modelControlsLeft = false,
 		startup,
 		modelCatalog,
 		remoteSettings,
@@ -244,6 +246,7 @@
 		{#snippet controls()}
 			<div data-slot="scheduled-new-chat-composer-controls">
 				<ComposerBottomBar
+					{modelControlsLeft}
 					canAttachImages={false}
 					attachImagesTooltip=""
 					onAddImage={() => {}}

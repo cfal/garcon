@@ -110,6 +110,9 @@
 			</div>
 			<TypographySettings />
 			<h3 class="pt-4 pb-2 text-sm font-semibold">{m.settings_layout()}</h3>
+			{@render settingRow(m.settings_model_controls_left(), ls.modelControlsLeft, () =>
+				ls.toggle('modelControlsLeft'),
+			)}
 			{@render settingRow(m.settings_highlight_active_window(), ls.highlightActiveWindow, () =>
 				ls.toggle('highlightActiveWindow'),
 			)}

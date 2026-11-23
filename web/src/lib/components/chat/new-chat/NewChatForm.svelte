@@ -808,6 +808,7 @@
 				/>
 
 				<ComposerBottomBar
+					modelControlsLeft={localSettings.modelControlsLeft}
 					canAttachImages={canAttachAttachments}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}

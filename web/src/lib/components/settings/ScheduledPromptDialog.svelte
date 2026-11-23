@@ -434,6 +434,7 @@
 				{#if form.targetType === 'new-chat'}
 					<ScheduledChatTitleField {form} onkeydown={handlePromptKeydown} />
 					<ScheduledNewChatComposer
+						modelControlsLeft={localSettings.modelControlsLeft}
 						conversationInput={form.executionPolicy === 'conversation'}
 						startup={form.startup}
 						{modelCatalog}

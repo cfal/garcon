@@ -3281,6 +3281,7 @@
 	"settings_ui_style": "UI Style",
 	"settings_typography": "Typography",
 	"settings_layout": "Layout",
+	"settings_model_controls_left": "Model controls on the left",
 	"settings_font_size": "Font Size",
 	"settings_typography_interface": "Interface",
 	"settings_typography_chat_list": "Chat List",
