@@ -1,7 +1,7 @@
 import { GitServiceError, isGitServiceErrorCode } from '../../../common/git-error.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { isProjectBoundaryError } from '../../common/path-boundary.js';
-import { GIT_ERROR_MESSAGE_LIMIT, GitDomainError, redactGitDiagnostic } from './git-domain-error.js';
+import { GIT_ERROR_MESSAGE_LIMIT, GitDomainError } from './git-domain-error.js';
 import { GhDomainError } from '../gh/gh-types.js';
 import { classifyGitError } from './git-error-classifier.js';
 import { classifyGhError } from '../gh/gh-error-classifier.js';
@@ -16,7 +16,8 @@ function boundedServiceError(domain: Domain, { code, message }: { code: string; 
   const candidate = code === 'GIT_LOCKED' || code === 'GH_MISSING' ? code : `${domain.toUpperCase()}_${code}`;
   const fallback = domain === 'git' ? 'GIT_OPERATION_FAILED' : 'GH_OPERATION_FAILED';
   const serviceCode = isGitServiceErrorCode(candidate) ? candidate : fallback;
-  return new GitServiceError(serviceCode, redactGitDiagnostic(message).slice(0, GIT_ERROR_MESSAGE_LIMIT));
+  const redacted = message.includes('://') ? message.replace(/\S+/g, word => word.includes('://') ? '<remote>' : word) : message;
+  return new GitServiceError(serviceCode, redacted.slice(0, GIT_ERROR_MESSAGE_LIMIT));
 }
 
 export function gitServiceError(error: unknown, domain: Domain = 'git'): Error {

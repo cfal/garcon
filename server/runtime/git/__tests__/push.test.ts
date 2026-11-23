@@ -257,6 +257,36 @@ test('does not pair a hook preview row with a skipped destination', async () => 
   expect(await listRefs(preview)).toBe('');
 });
 
+test.skipIf(process.platform === 'win32')('does not disclose a status-shaped line in a multiline destination', async () => {
+  const directory = 'published\n!\trefs/heads/main:refs/heads/main\tprivate-path-segment\nend.git';
+  const { git, projectPath, remote } = await pushFixture(directory);
+  await runGit(projectPath, ['remote', 'set-url', 'origin', decodeURI(pathToFileURL(remote).href)]);
+  const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
+  expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+  expect(failure?.message).not.toContain('private-path-segment');
+  expect(failure?.message).not.toContain('rejected ref');
+  expect(await listRefs(remote)).toBe(`refs/heads/main ${await oid(projectPath)}\n`);
+});
+
+test('does not interpret a clipped destination as a terminal HTTP error', async () => {
+  const { root, projectPath, remote } = await pushFixture();
+  const url = "http://127.0.0.1:1/path': private-destination";
+  await runGit(projectPath, ['remote', 'set-url', 'origin', url + '/more']);
+  const failureAt = (prefix: string) => withGitOperation(root, { mutation: true }, () =>
+    pushBranchRef(projectPath, 'origin', 'refs/heads/main', { maxStderrBytes: Buffer.byteLength(prefix), env: { LC_ALL: 'C' } }),
+  ).then(() => null, gitServiceError);
+  const prefix = "fatal: unable to access '" + url;
+  const native = await failureAt(prefix);
+  expect(native).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+  expect(native?.message).toEndWith('unable to access <remote>');
+
+  // A clipped stream can also end on a newline, just like a complete native diagnostic.
+  await runGit(projectPath, ['remote', 'set-url', 'origin', remote]);
+  await installHook(projectPath, 'pre-push', `printf '%s\\n' "${prefix}" 'remaining output' >&2\nexit 1`);
+  const clippedLine = await failureAt(prefix + '\n');
+  expect(clippedLine?.message).toEndWith('unable to access <remote>');
+});
+
 test('allows ordinary hook logs but does not confirm a truncated push report', async () => {
   const { git, projectPath, remote } = await pushFixture('remoteDone');
   await installHook(projectPath, 'pre-push', 'printf "To address all issues, run:\\n%040000d\\n" 0\nprintf "%02200000d\\n" 0 >&2');
@@ -345,10 +375,13 @@ test('retains the receiving hook explanation after noisy or sensitive local diag
   await installHook(projectPath, 'pre-push', 'printf "%03000d\\n" 0 >&2');
   const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
   expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
-  expect(failure?.message).toMatch(/Inspect the remote[\s\S]*hook declined[\s\S]*Reviewed commits only[\s\S]*<remote>/);
+  expect(failure?.message).toContain('Reviewed commits only');
+  expect(failure?.message).toContain('hook declined');
+  expect(failure?.message).toEndWith('<remote>');
   expect(failure?.message).not.toContain('private-destination');
   expect(failure?.message.length).toBeLessThanOrEqual(2048);
 
+  await runGit(projectPath, ['remote', 'set-url', 'origin', pathToFileURL(remote).href]);
   await installHook(projectPath, 'pre-push', 'printf "https://%03000d:private-token@host.invalid/\\n" 0 >&2');
   const ambiguous = await git.push({ projectPath }).then(() => null, (error: Error) => error);
   expect(ambiguous).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });

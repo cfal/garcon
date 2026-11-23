@@ -220,6 +220,7 @@ async function runGitProcess(
       captureOutput(readTextStreamPrefix(
         proc.stderr,
         options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
+        options.onStderrTruncated,
       )),
       proc.exited,
     ]).finally(async () => {
