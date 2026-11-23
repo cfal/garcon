@@ -145,7 +145,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');
       await app.clickButton('Integration Echo');
-      await fixture.page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some((button) => button.getAttribute('aria-label')?.startsWith('Direct (Chat Completions) /')));
+      await fixture.page.waitForSelector('[role="dialog"] [data-slot="model-selector-trigger"][aria-description^="Direct (Chat Completions) /"]');
       await app.fill('[role="dialog"] input[aria-label="Project Path"]', inboundDirs.project);
       const browsing = fixture.page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/files/browse' && new URL(response.url()).searchParams.get('executorId') === inbound.id);
       await fixture.page.$eval('input[aria-label="Project Path"]', (element) => (element as HTMLInputElement).focus());

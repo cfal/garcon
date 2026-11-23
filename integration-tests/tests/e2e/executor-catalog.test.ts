@@ -201,7 +201,7 @@ test('new and scheduled chats retain input and require Retry after cached remote
         await app.waitForButtonEnabled('Add Prompt');
         await app.clickButton('Add Prompt');
       }
-      await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].some((button) => !button.disabled && button.getAttribute('aria-label')?.includes(' / ')));
+      await fixture.page.waitForSelector('[role="dialog"] [data-slot="model-selector-trigger"]:not(:disabled)');
       await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Integration worker');
       await openModelSelector(fixture.page);
       await app.waitForButton('Chat Completions');

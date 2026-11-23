@@ -286,7 +286,7 @@ test('a same-executor agent switch chooses a new folder when the current one is 
     await app.waitForText('Project folder unavailable');
     await app.fill('[data-composer] textarea', 'Retained folder recovery draft');
 
-    await fixture.page.$eval('[data-slot="composer-bottom-bar"] button[aria-label^="Direct (Chat Completions)"]', element => (element as HTMLButtonElement).click());
+    await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
     await app.waitForButton('Anthropic');
     await app.clickButton('Anthropic');
     await app.waitForButton('Integration Anthropic Echo');
