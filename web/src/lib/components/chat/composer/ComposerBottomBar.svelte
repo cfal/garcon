@@ -4,6 +4,7 @@
 	import Send from '@lucide/svelte/icons/send';
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import type { ComposerModeOption } from '$lib/chat/composer/composer-controls';
+	import type { ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
 	import {
 		fitComposerToolbar,
 		type ComposerSettingId,
@@ -61,16 +62,21 @@
 	let promptGroup = $state<ComposerPromptActions>();
 	let settingsGroup = $state<ComposerSettingsGroup>();
 	let unit = $state<HTMLElement>();
-	let widthRem = $state(0);
+	let rowWidth = $state(0);
+	let rem = $state(16);
+	let modelWidths = $state<ModelTriggerWidths>();
 	$effect(() => {
 		const toolbar = row,
 			ruler = unit;
 		if (!toolbar || !ruler) return;
-		const measure = () => {
-			widthRem = toolbar.clientWidth / (ruler.clientWidth || 16);
-		};
-		measure();
-		const observer = new ResizeObserver(measure);
+		rowWidth = toolbar.clientWidth;
+		rem = ruler.clientWidth || 16;
+		const observer = new ResizeObserver((entries) => {
+			for (const { target, contentRect } of entries) {
+				if (target === toolbar) rowWidth = contentRect.width;
+				if (target === ruler && contentRect.width) rem = contentRect.width;
+			}
+		});
 		observer.observe(toolbar);
 		observer.observe(ruler);
 		return () => observer.disconnect();
@@ -94,7 +100,10 @@
 				refining: Boolean(prompt.isPromptRefinementPending),
 				bypass: selectedPermission === 'bypassPermissions' || selectedPermission === 'manualBypass',
 			},
-			widthRem,
+			rowWidth / rem,
+			modelWidths
+				? { combined: modelWidths.combined / rem, model: modelWidths.model / rem }
+				: undefined,
 		),
 	);
 	const groups = $derived(modelControlsLeft ? ['settings', 'prompt'] : ['prompt', 'settings']);
@@ -139,6 +148,9 @@
 							{layout}
 							{executor}
 							{model}
+							onModelMeasure={(widths) => {
+								modelWidths = widths;
+							}}
 							{agentSettings}
 							{permissionOptions}
 							{selectedPermission}

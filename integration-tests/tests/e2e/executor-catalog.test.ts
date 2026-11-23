@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { openDialogModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor } from '../../support/executor-ui.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
@@ -155,7 +155,7 @@ test('late remote catalog discovery preserves a schedule retargeted to Local', a
     await fixture.page.waitForFunction(() => document.documentElement.dataset.remoteCatalogPending === 'true');
     await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Local');
     await app.fill('#scheduled-project-path', dirs.project);
-    await openDialogModelSelector(fixture.page);
+    await openModelSelector(fixture.page);
     await app.waitForButton('Chat Completions');
     await app.clickButton('Chat Completions');
     await app.waitForButton('Integration Echo');
@@ -203,7 +203,7 @@ test('new and scheduled chats retain input and require Retry after cached remote
       }
       await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].some((button) => !button.disabled && button.getAttribute('aria-label')?.includes(' / ')));
       await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Integration worker');
-      await openDialogModelSelector(fixture.page);
+      await openModelSelector(fixture.page);
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');

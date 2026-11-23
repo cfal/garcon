@@ -12,6 +12,7 @@ test('the live composer follows tile width and local group order without changin
       });
       await integration.client.waitForTurnTerminal(chatId, turn.turnId);
     }
+    await page.setViewportSize({ width: 1920, height: 900 });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chats[0]}`);
     const toolbar = page.locator('[data-composer-toolbar]:visible');
     const editor = page.getByPlaceholder('Reply...', { exact: true });
@@ -42,9 +43,10 @@ test('the live composer follows tile width and local group order without changin
     await editor.fill('Synthetic unsent draft');
     const original = await editor.elementHandle();
     const modelPicker = page.locator('[data-slot="popover-content"]');
-    await toolbar.locator('[data-composer-control="model"] button').click();
+    const model = toolbar.locator('[data-slot="model-selector-trigger"]');
+    await model.click();
     await expect(modelPicker).toBeVisible();
-    for (const width of [680, 360, 240, 420, 240]) {
+    const resizeTile = async (width: number) => {
       const hit = (await divider.boundingBox())!;
       const outer = (await window.boundingBox())!;
       const y = hit.y + 6;
@@ -53,6 +55,9 @@ test('the live composer follows tile width and local group order without changin
       await page.mouse.move(outer.x + width, y, { steps: 5 });
       await page.mouse.up();
       await expect.poll(async () => Math.abs((await window.boundingBox())!.width - width)).toBeLessThan(5);
+    };
+    for (const width of [680, 360, 240, 420, 240]) {
+      await resizeTile(width);
       await expect.poll(() => toolbar.evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
       await expect(send).toBeVisible();
       await expect(modelPicker).toBeVisible();
@@ -67,6 +72,17 @@ test('the live composer follows tile width and local group order without changin
     await expect(promptMenu).toBeVisible();
     await settingsMenu.click();
     await expect(modelPicker).toHaveCount(0);
+    await expect(page.getByRole('menuitem', { name: /Agent \/ model.*Integration Echo/ })).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    phase('keeping the remote host accessible when only the full model name fits');
+    for (let width = 256; width <= 440; width += 12) {
+      await resizeTile(width);
+      if (await model.isVisible() && !await executor.isVisible()) break;
+    }
+    await expect(model).toHaveText('Integration Echo');
+    await expect(executor).toBeHidden();
+    await settingsMenu.click();
     const host = page.getByRole('menuitem', { name: 'Executor: Integration worker' });
     await host.focus();
     await page.keyboard.press('ArrowRight');

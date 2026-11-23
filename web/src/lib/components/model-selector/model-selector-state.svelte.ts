@@ -377,29 +377,6 @@ export class ModelSelectorState {
 		return this.draftSelection.modelLabelSource;
 	}
 
-	get triggerPrimary(): string {
-		const committed = this.committedSelection;
-		if (this.mode.surface === 'settings') return committed.agentLabel;
-		if (this.mode.agent === 'select') return committed.agentLabel;
-		return committed.modelLabel;
-	}
-
-	get triggerSecondary(): string {
-		const committed = this.committedSelection;
-		if (this.mode.surface === 'settings') {
-			const source = this.#visibleSourceFor(committed);
-			return [
-				source?.label,
-				committed.modelLabel,
-				this.effortSelectionEnabled ? this.selectedThinkingModeLabel : '',
-			]
-				.filter(Boolean)
-				.join(' / ');
-		}
-		if (this.mode.agent === 'select') return committed.modelLabel;
-		return '';
-	}
-
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
 		return [

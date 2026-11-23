@@ -104,7 +104,7 @@ describe("Chromium New Chat composer layout", () => {
         await fixture.page.setViewportSize({ width: 390, height: 844 });
 
         markPhase("opening both overflow menus at the tile width floor");
-        await bottomBar.evaluate((bar) => { bar.style.width = '196px'; });
+        await bottomBar.evaluate((bar) => { bar.style.width = '136px'; });
         const addTrigger = bottomBar.getByRole("button", { name: "More composer actions" });
         await addTrigger.click();
         const addMenu = fixture.page.getByRole("menu");
@@ -197,19 +197,20 @@ describe("Chromium New Chat composer layout", () => {
           exact: true,
         });
         const send = bottomBar.getByRole("button", { name: "Start session" });
-        await expectLocator(longModelTrigger).toBeFocused();
-        const [sendBox, longModelTriggerBox] = await Promise.all([bounds(send), bounds(longModelTrigger)]);
-        expect(longModelTriggerBox.width).toBeGreaterThanOrEqual(90);
-        expect(longModelTriggerBox.y).toBeCloseTo(sendBox.y, 0);
-        expect(longModelTriggerBox.x + longModelTriggerBox.width).toBeLessThanOrEqual(sendBox.x);
-        expect(
-          await longModelTrigger.evaluate((node) => {
-            const label = node.querySelector<HTMLElement>(
-              '[data-slot="model-selector-trigger-secondary"]',
-            );
-            return Boolean(label && label.scrollWidth > label.clientWidth);
-          }),
-        ).toBe(true);
+        await expectLocator(settingsMenu).toBeFocused();
+        await expectLocator(longModelTrigger).toHaveCount(0);
+        const [sendBox, settingsBox] = await Promise.all([bounds(send), bounds(settingsMenu)]);
+        expect(settingsBox.y).toBeCloseTo(sendBox.y, 0);
+        expect(settingsBox.x + settingsBox.width).toBeLessThanOrEqual(sendBox.x);
+        await settingsMenu.click();
+        const modelRow = fixture.page.getByRole("menuitem", { name: /Agent \/ model/ });
+        const summary = modelRow.locator("[data-menu-description]");
+        await expectLocator(summary).toHaveText(`Direct (Chat Completions) / ${LONG_MODEL_LABEL}`);
+        expect(await summary.evaluate(node => node.scrollWidth <= node.clientWidth && getComputedStyle(node).whiteSpace !== 'nowrap')).toBe(true);
+        await modelRow.click();
+        await expectLocator(compactSelector).toBeVisible();
+        await fixture.page.keyboard.press("Escape");
+        await expectLocator(settingsMenu).toBeFocused();
         expect(
           await bottomBar.evaluate(
             (node) => node.scrollWidth <= node.clientWidth,
@@ -232,8 +233,8 @@ describe("Chromium New Chat composer layout", () => {
         await bottomBar
           .getByRole("button", { name: "Open expanded composer" })
           .waitFor({ state: "visible" });
-        await expectLocator(bottomBar.getByRole("button", { name: "Add image" })).toBeVisible();
-        await expectLocator(addTrigger).toHaveCount(0);
+        await expectLocator(longModelTrigger).toHaveText(LONG_MODEL_LABEL);
+        expect(await longModelTrigger.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
         await longModelTrigger.click();
         const modelPopover = fixture.page.locator(
           '[data-slot="popover-content"]',
@@ -260,14 +261,20 @@ describe("Chromium New Chat composer layout", () => {
         await modelPopover.waitFor();
         await bottomBar.evaluate((bar) => { bar.style.removeProperty("width"); });
         await longModelTrigger.waitFor();
-        await fixture.page.keyboard.press("Escape");
+        await modelPopover.getByRole("textbox").press("Enter");
         await modelPopover.waitFor({ state: "detached" });
         await expectLocator(longModelTrigger).toBeFocused();
+        markPhase("restoring the agent prefix and every shortcut when the full row fits");
+        await fixture.page.setViewportSize({ width: 1280, height: 900 });
+        await dialog.evaluate(node => { node.style.maxWidth = node.style.width = '1000px'; });
+        await expectLocator(longModelTrigger).toHaveText(`Direct (Chat Completions) ${LONG_MODEL_LABEL}`);
+        await expectLocator(addTrigger).toHaveCount(0);
+        await expectLocator(settingsMenu).toHaveCount(0);
         markPhase("folding the focused permission picker without activating Project Path");
         const permissionTrigger = bottomBar.getByRole("button", { name: /^Permission mode:/ });
         await permissionTrigger.press("ArrowDown");
         await fixture.page.getByRole("menuitemradio").first().focus();
-        await bottomBar.evaluate((bar) => { bar.style.width = "196px"; });
+        await bottomBar.evaluate((bar) => { bar.style.width = "136px"; });
         await expectLocator(settingsMenu).toBeFocused();
         await expectLocator(fixture.page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
         markPhase("returning focus to a newly inline editing action");

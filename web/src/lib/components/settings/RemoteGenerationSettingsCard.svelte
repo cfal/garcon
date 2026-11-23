@@ -6,7 +6,7 @@
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import { getModelCatalog, getRemoteSettings } from '$lib/context';
+	import { getExecutors, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		DEFAULT_COMMIT_MESSAGE_PROMPT,
@@ -41,6 +41,7 @@
 	let promptDialogOpen = $state(false);
 
 	const remoteSettings = getRemoteSettings();
+	const executors = getExecutors();
 	const modelCatalog = getModelCatalog();
 	const selectorMode: ModelSelectorMode = {
 		executor: 'select',
@@ -127,7 +128,12 @@
 		{/if}
 
 		<div class="flex flex-col items-start justify-between gap-3 pb-1 pt-2 sm:flex-row">
-			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
+			<div class="pt-1.5 text-sm font-medium text-foreground">
+				{modelLabel}
+				{#if cardState.executorId !== 'local' && executors.hasSnapshot && !executors.get(cardState.executorId)}
+					<p role="status" class="text-xs text-destructive">{executors.label(cardState.executorId)}</p>
+				{/if}
+			</div>
 			<div class="flex min-w-0 max-w-full flex-col items-start sm:items-end">
 				<Button
 					variant={cardState.isAuto ? 'secondary' : 'ghost'}

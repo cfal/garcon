@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ModelSelectorPopover from './ModelSelectorPopover.svelte';
+	import type { ModelTriggerDisplay, ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
 	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		ModelSelectorChange,
@@ -17,7 +18,8 @@
 		getSelectableAgentIds?: (executorId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
 		overflowAnchor?: HTMLElement | null;
-		triggerClass?: string;
+		toolbarDisplay?: ModelTriggerDisplay;
+		onMeasure?: (widths: ModelTriggerWidths) => void;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
 	}
@@ -31,7 +33,8 @@
 		getSelectableAgentIds,
 		disabled = false,
 		overflowAnchor,
-		triggerClass,
+		toolbarDisplay,
+		onMeasure,
 		align = 'end',
 		side = 'bottom',
 	}: Props = $props();
@@ -44,7 +47,8 @@
 <ModelSelectorPopover
 	bind:this={picker}
 	{overflowAnchor}
-	{triggerClass}
+	{toolbarDisplay}
+	{onMeasure}
 	{value}
 	mode={{ ...mode, executor: 'fixed', surface: 'composer' }}
 	{onChange}

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
@@ -11,6 +10,8 @@
 	import ModelSelectorColumnsLayout from './ModelSelectorColumnsLayout.svelte';
 	import ModelSelectorCompactLayout from './ModelSelectorCompactLayout.svelte';
 	import { composerSelectionTriggerClass } from '$lib/components/shared/selection-trigger';
+	import ModelSelectorTrigger from './ModelSelectorTrigger.svelte';
+	import type { ModelTriggerDisplay, ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -28,7 +29,8 @@
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
-		triggerClass?: string;
+		toolbarDisplay?: ModelTriggerDisplay;
+		onMeasure?: (widths: ModelTriggerWidths) => void;
 		overflowAnchor?: HTMLElement | null;
 		contentClass?: string;
 	}
@@ -43,8 +45,9 @@
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
-		triggerClass,
-		overflowAnchor = null,
+		toolbarDisplay,
+		onMeasure,
+		overflowAnchor: toolbarAnchor = null,
 		contentClass,
 	}: Props = $props();
 
@@ -74,6 +77,11 @@
 	let isCompactLayout = $state(false);
 	let triggerNode = $state<HTMLElement | null>(null);
 	let contentNode = $state<HTMLElement | null>(null);
+	let closingFromOutside = false;
+	let triggerFrame = $state<ModelSelectorTrigger>();
+	const overflowAnchor = $derived(toolbarAnchor ?? triggerFrame?.standaloneAnchor() ?? null);
+	const Trigger = $derived(isCompactLayout ? Dialog.Trigger : Popover.Trigger);
+	const committed = $derived(selector.committedSelection);
 
 	const showAgent = $derived(mode.agent === 'select');
 	const sourceSelectionEnabled = $derived(mode.source === 'select');
@@ -97,12 +105,12 @@
 		return !showAgent && !sourceSelectionEnabled ? 'h-[18rem]' : 'h-[26rem]';
 	});
 	const triggerBaseClass = $derived(
-		surfaceIsSettings
-			? 'inline-flex min-h-9 min-w-0 max-w-[18rem] items-center justify-between gap-2 overflow-hidden rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
-			: cn(composerSelectionTriggerClass, 'max-w-[11rem] sm:max-w-[15rem]'),
-	);
-	const showTriggerSecondaryLine = $derived(
-		surfaceIsSettings || mode.agent === 'select' || Boolean(selector.triggerSecondary),
+		cn(
+			surfaceIsSettings
+				? 'inline-flex min-h-9 min-w-0 items-center rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
+				: composerSelectionTriggerClass,
+			'whitespace-nowrap font-medium',
+		),
 	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
 
@@ -124,7 +132,7 @@
 	});
 
 	export function selectionSummary(): string {
-		const { agentLabel, modelLabel } = selector.committedSelection;
+		const { agentLabel, modelLabel } = committed;
 		return [agentLabel, modelLabel].filter(Boolean).join(' / ');
 	}
 
@@ -133,20 +141,17 @@
 	}
 
 	export function dismissPicker(): void {
-		if (selector.open) handleOpenChange(false);
+		if (selector.open) {
+			closingFromOutside = true;
+			handleOpenChange(false);
+		}
 	}
 
 	function isTileResize(event: Event): boolean {
 		return event.target instanceof Element && !!event.target.closest('[data-workspace-window-resizer]');
 	}
 
-	function restoreOverflowFocus(event: Event): void {
-		if (!overflowAnchor) return;
-		event.preventDefault();
-		overflowAnchor.focus({ preventScroll: true });
-	}
-
-	function restoreDialogFocus(event: Event): void {
+	function restoreTriggerFocus(event: Event): void {
 		const target = overflowAnchor ?? triggerNode;
 		if (!target?.isConnected) return;
 		event.preventDefault();
@@ -155,6 +160,7 @@
 
 	function handleOpenChange(open: boolean): void {
 		if (open) {
+			closingFromOutside = false;
 			void executors.refresh();
 			selector.openDraft();
 			return;
@@ -188,6 +194,7 @@
 			const target = event.target;
 			if (!(target instanceof Element)) return;
 			if (isTileResize(event) || trigger.contains(target) || overflowAnchor?.contains(target) || content.contains(target)) return;
+			closingFromOutside = true;
 			if (compactLayout) {
 				selector.discardAndClose();
 				return;
@@ -204,22 +211,34 @@
 	});
 </script>
 
-{#snippet triggerContent()}
-	<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
-		<span class="truncate font-medium"
-			>{selector.executorSelectionEnabled && selector.committedExecutorId !== 'local' ? `${selector.executorLabel} / ` : ''}{selector.triggerPrimary || m.model_selector_unavailable()}</span
-		>
-		{#if showTriggerSecondaryLine}
-			<span
-				data-slot="model-selector-trigger-secondary"
-				aria-hidden={!selector.triggerSecondary}
-				class="min-h-4 truncate text-xs text-muted-foreground"
-			>
-				{selector.triggerSecondary}
-			</span>
-		{/if}
-	</span>
-	<ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
+{#snippet trigger()}
+	<ModelSelectorTrigger
+		bind:this={triggerFrame}
+		agent={committed.agentLabel}
+		model={committed.modelLabel}
+		buttonClass={triggerBaseClass}
+		{toolbarDisplay}
+		{onMeasure}
+		{triggerNode}
+		{disabled}
+		{side}
+		{align}
+		{openPicker}
+		{dismissPicker}
+	>
+		{#snippet children(label, hidden)}
+			<Trigger
+				bind:ref={triggerNode}
+				{disabled}
+				{hidden}
+				title={selector.triggerTitle}
+				aria-label={selector.triggerTitle || m.model_selector_unavailable()}
+				data-slot="model-selector-trigger"
+				data-composer-control={toolbarDisplay === undefined ? undefined : 'model'}
+				class="{triggerBaseClass} col-start-1 row-start-1 justify-self-start"
+			>{label}</Trigger>
+		{/snippet}
+	</ModelSelectorTrigger>
 {/snippet}
 
 {#snippet catalogError()}
@@ -237,17 +256,9 @@
 
 {#if isCompactLayout}
 	<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
-		<Dialog.Trigger
-			bind:ref={triggerNode}
-			{disabled}
-			title={selector.triggerTitle}
-			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
-			class={cn(triggerBaseClass, triggerClass)}
-		>
-			{@render triggerContent()}
-		</Dialog.Trigger>
+		{@render trigger()}
 		<Dialog.Content
-			onCloseAutoFocus={restoreDialogFocus}
+			onCloseAutoFocus={restoreTriggerFocus}
 			bind:ref={contentNode}
 			class={cn(
 				'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
@@ -270,22 +281,16 @@
 	</Dialog.Root>
 {:else}
 	<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
-		<Popover.Trigger
-			bind:ref={triggerNode}
-			{disabled}
-			title={selector.triggerTitle}
-			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
-			class={cn(triggerBaseClass, triggerClass)}
-		>
-			{@render triggerContent()}
-		</Popover.Trigger>
+		{@render trigger()}
 		<Popover.Content
 			customAnchor={overflowAnchor}
 			onInteractOutside={(event) => {
 				if (isTileResize(event)) event.preventDefault();
 			}}
 			getFocusReturnTarget={() => overflowAnchor ?? triggerNode}
-			onCloseAutoFocus={restoreOverflowFocus}
+			onCloseAutoFocus={(event) => {
+				if (!closingFromOutside) restoreTriggerFocus(event);
+			}}
 			bind:ref={contentNode}
 			{align}
 			{side}

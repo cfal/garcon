@@ -4,45 +4,74 @@ import { fitComposerToolbar, type ComposerToolbarControls } from '../composer-to
 const chat = {
 	prompt: ['snippet', 'image', 'refine', 'expand'],
 	settings: ['executor', 'model', 'effort', 'agent:speed', 'permission'],
-	send: true, bypass: false, refining: false,
+	send: true,
+	bypass: false,
+	refining: false,
 } satisfies ComposerToolbarControls;
+const labels = { model: 7, combined: 15 };
 
 describe('composer toolbar fit', () => {
-	it('promotes both groups without empty menus and bounds long labels', () => {
-		const fit = fitComposerToolbar(chat, 80);
-		expect([...fit.inline]).toEqual([...chat.prompt, ...chat.settings]);
-		expect(fit).toMatchObject({ promptMenu: false, settingsMenu: false, fullExecutor: true, modelWidthRem: 15 });
+	it('promotes both groups and both labels without empty menus', () => {
+		const fit = fitComposerToolbar(chat, 80, labels);
+		expect(fit.inline).toEqual(new Set([...chat.prompt, ...chat.settings]));
+		expect(fit).toMatchObject({
+			promptMenu: false,
+			settingsMenu: false,
+			fullExecutor: true,
+			modelDisplay: 'combined',
+		});
 	});
 
 	it('compacts the executor, then folds it before sacrificing a readable model', () => {
-		const medium = fitComposerToolbar(chat, 25);
+		const medium = fitComposerToolbar(chat, 25, labels);
 		expect(medium.inline.has('executor')).toBe(true);
 		expect(medium.fullExecutor).toBe(false);
-		const narrow = fitComposerToolbar(chat, 15);
+		const narrow = fitComposerToolbar(chat, 15, labels);
 		expect([...narrow.inline]).toEqual(['model']);
-		expect(narrow.modelWidthRem).toBeGreaterThanOrEqual(7);
-		expect(narrow).toMatchObject({ promptMenu: true, settingsMenu: true });
-		expect(fitComposerToolbar(chat, 12).inline.size).toBe(0);
+		expect(narrow).toMatchObject({ promptMenu: true, settingsMenu: true, modelDisplay: 'model' });
+		expect(fitComposerToolbar(chat, 12, labels).modelDisplay).toBe('overflow');
+	});
+
+	it('gives an unplaceable model its menu row, not the space of every other control', () => {
+		const fit = fitComposerToolbar(chat, 30, { model: 45, combined: 50 });
+		expect(fit.modelDisplay).toBe('overflow');
+		expect(fit.inline).toEqual(
+			new Set([...chat.prompt, ...chat.settings.filter((id) => id !== 'model')]),
+		);
+		expect(fit.settingsMenu).toBe(true);
 	});
 
 	it('preserves cancellation and a configurable bypass ahead of ordinary controls', () => {
-		const fit = fitComposerToolbar({ ...chat, refining: true, bypass: true }, 15);
+		const fit = fitComposerToolbar({ ...chat, refining: true, bypass: true }, 15, labels);
 		expect(fit.inline.has('refine')).toBe(true);
 		expect(fit.inline.has('permission')).toBe(true);
 		expect(fit.inline.has('agent:speed')).toBe(false);
 	});
 
 	it('only budgets applicable actions, including the no-send scheduling form', () => {
-		const fit = fitComposerToolbar({ ...chat, prompt: [], settings: ['model'], send: false }, 7);
+		const fit = fitComposerToolbar(
+			{ ...chat, prompt: [], settings: ['model'], send: false },
+			7,
+			labels,
+		);
 		expect([...fit.inline]).toEqual(['model']);
 		expect(fit).toMatchObject({ promptMenu: false, settingsMenu: false, fullExecutor: false });
 	});
 
-	it('reserves the wider gap before Send, but not in a composer without Send', () => {
+	it('uses exact label widths and the wider Send gap for both fit transitions', () => {
 		const controls = { ...chat, prompt: [], settings: ['model'] } as const;
-		expect(fitComposerToolbar(controls, 9.5).settingsMenu).toBe(true);
-		expect(fitComposerToolbar(controls, 9.75).settingsMenu).toBe(false);
-		expect(fitComposerToolbar({ ...controls, send: false }, 7).settingsMenu).toBe(false);
+		const widths = { model: 7.125, combined: 10.5 };
+		const fit = (w: number) => fitComposerToolbar(controls, w, widths).modelDisplay;
+		expect([13.25, 13.249, 9.875, 9.874, 13.25].map(fit)).toEqual([
+			'combined',
+			'model',
+			'model',
+			'overflow',
+			'combined',
+		]);
+		expect(fitComposerToolbar({ ...controls, send: false }, 7.125, widths).modelDisplay).toBe(
+			'model',
+		);
 	});
 
 	it('does not strand a single fixed-size command behind an equally wide menu trigger', () => {

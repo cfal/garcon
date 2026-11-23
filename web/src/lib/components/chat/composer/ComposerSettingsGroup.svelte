@@ -2,7 +2,8 @@
 	import type { ComponentProps } from 'svelte';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
-	import Bot from '@lucide/svelte/icons/bot';
+	import type { ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
+	import ModelSelectorMenuItem from '$lib/components/model-selector/ModelSelectorMenuItem.svelte';
 	import type {
 		ComposerSettingId,
 		fitComposerToolbar,
@@ -11,11 +12,9 @@
 	import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
-	import MenuValueLabel from '$lib/components/shared/MenuValueLabel.svelte';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
-		DropdownMenuItem,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import AgentSettingControl from './AgentSettingControl.svelte';
@@ -33,6 +32,7 @@
 		layout,
 		executor,
 		model,
+		onModelMeasure,
 		agentSettings,
 		permissionOptions,
 		selectedPermission,
@@ -48,6 +48,7 @@
 		layout: ReturnType<typeof fitComposerToolbar>;
 		executor?: ComposerExecutor;
 		model?: ComponentProps<typeof ComposerModelSelector>;
+		onModelMeasure: (widths: ModelTriggerWidths) => void;
 		agentSettings?: ComposerAgentSettings;
 		permissionOptions: ComposerModeOption<PermissionMode>[];
 		selectedPermission: PermissionMode;
@@ -121,16 +122,11 @@
 			{disabled}
 		/>
 	{:else if id === 'model' && placement === 'menu'}
-		<DropdownMenuItem
+		<ModelSelectorMenuItem
 			onSelect={() => closeOverflow(() => picker?.openPicker())}
 			disabled={model?.disabled || disabled}
-			textValue={m.chat_composer_model()}
-			data-composer-control="model"
-			class="group"
-		>
-			<Bot class="size-4" />
-			<MenuValueLabel label={m.chat_composer_model()} value={picker?.selectionSummary() ?? ''} />
-		</DropdownMenuItem>
+			summary={picker?.selectionSummary() ?? ''}
+		/>
 	{:else if agentSettings}
 		{@const descriptor = agentSettings.descriptors.find((item) => `agent:${item.key}` === id)}
 		{#if descriptor}
@@ -145,22 +141,15 @@
 <!-- Hidden triggers remain valid focus anchors for an enclosing dialog during resize. -->
 {#each ids as id (id)}
 	{#if id === 'model' && model}
-		<div
-			hidden={!layout.inline.has(id)}
-			class="min-w-0"
-			class:flex={layout.inline.has(id)}
-			style:max-width="{layout.modelWidthRem}rem"
-			data-composer-control="model"
-		>
-			<ComposerModelSelector
-				bind:this={picker}
-				{...model}
-				{align}
-				{side}
-				triggerClass="max-w-full sm:max-w-full"
-				overflowAnchor={layout.inline.has(id) ? null : menuTrigger}
-			/>
-		</div>
+		<ComposerModelSelector
+			bind:this={picker}
+			{...model}
+			{align}
+			{side}
+			toolbarDisplay={layout.modelDisplay}
+			onMeasure={onModelMeasure}
+			overflowAnchor={layout.inline.has(id) ? null : menuTrigger}
+		/>
 	{:else}
 		{@render control(id, layout.inline.has(id) ? 'inline' : 'hidden')}
 	{/if}

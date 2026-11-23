@@ -94,7 +94,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         await app.waitForButton('New Chat');
         await app.clickButton('New Chat');
         await expectTarget('#project-path-input', 'Integration worker', executionDirs.project);
-        await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"] [data-slot="model-selector-trigger-secondary"]')?.textContent?.includes('Integration Echo'));
+        await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"] [data-slot="model-selector-trigger"]')?.textContent?.includes('Integration Echo'));
         await selectExecutor(fixture.page, executorPicker, 'Local');
         if (!reload) {
           await fixture.page.waitForFunction(() => (window as typeof window & { __startupSettingsGate: StartupSettingsGate }).__startupSettingsGate.pending.length > 0);

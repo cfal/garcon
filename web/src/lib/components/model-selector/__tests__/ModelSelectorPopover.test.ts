@@ -186,6 +186,8 @@ describe('ModelSelectorPopover', () => {
 			});
 			const trigger = screen.getByRole('button', { name: /Claude .* Model 0/ });
 			const label = trigger.textContent;
+			expect(label).toBe('Claude Model 0');
+			expect(trigger.querySelector('svg')).toBeNull();
 			await fireEvent.click(trigger);
 			const destination = committedExecutor.id === 'local' ? remoteExecutor : localExecutor;
 			await fireEvent.click(await screen.findByRole('button', { name: destination.label }));
@@ -1072,7 +1074,7 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
-	it('reserves the trigger subtitle row when the committed subtitle is empty', () => {
+	it('shows only the agent when no model is available', () => {
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: '' },
 			mode: { agent: 'fixed', source: 'hidden', surface: 'settings' },
@@ -1081,11 +1083,9 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		const subtitle = document.querySelector('[data-slot="model-selector-trigger-secondary"]');
-
-		expect(subtitle).toBeTruthy();
-		expect(subtitle?.textContent).toBe('');
-		expect(subtitle?.getAttribute('aria-hidden')).toBe('true');
+		const trigger = screen.getByRole('button', { name: /Claude/ });
+		expect(trigger.textContent).toBe('Claude');
+		expect(trigger.childElementCount).toBe(0);
 	});
 
 	it('uses a compact drill-down layout on narrow screens starting from the selected model', async () => {

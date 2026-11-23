@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { openDialogModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor } from '../../support/executor-ui.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,7 +140,7 @@ test('normal app onboarding supports both directions and sends remote chat input
         return dialog && !dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]');
       });
       await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Inbound Worker');
-      await openDialogModelSelector(fixture.page);
+      await openModelSelector(fixture.page);
       await app.waitForButton('Chat Completions', { timeout: 20_000 });
       await app.clickButton('Chat Completions');
       await app.waitForButton('Integration Echo');
@@ -195,9 +195,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForButton('Automation');
       await app.clickButton('Automation');
       const commitModel = '[role="group"][aria-label="Commit message model"]';
-      const modelTrigger = `${commitModel} button:not(:disabled):has([data-slot="model-selector-trigger-secondary"])`;
-      await fixture.page.waitForSelector(modelTrigger);
-      await fixture.page.$eval(modelTrigger, button => (button as HTMLButtonElement).click());
+      await openModelSelector(fixture.page, commitModel);
       await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
         .some((button) => button.textContent?.trim() === 'Inbound Worker' && !button.disabled));
       await fixture.page.evaluate(() => {

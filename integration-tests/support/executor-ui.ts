@@ -1,12 +1,21 @@
 import type { Page } from 'puppeteer-core';
 
-export async function openDialogModelSelector(page: Page): Promise<void> {
-  const selector = '[role="dialog"] [data-slot="model-selector-trigger-secondary"]';
-  await page.waitForFunction((query) => {
-    const button = document.querySelector(query)?.closest('button');
-    return button && !button.disabled;
-  }, {}, selector);
-  await page.$eval(selector, (element) => element.closest('button')!.click());
+export async function openModelSelector(page: Page, scope = '[role="dialog"]'): Promise<void> {
+  const selector = `${scope} button[data-slot="model-selector-trigger"]:not(:disabled)`;
+  await page.waitForSelector(selector);
+  const folded = await page.$eval(selector, (element) => {
+    const button = element as HTMLButtonElement;
+    if (button.hidden) return true;
+    button.click();
+    return false;
+  });
+  if (folded) {
+    const menu = `${scope} :is([data-composer-overflow="settings"], [data-slot="model-selector-overflow"]):not([hidden])`;
+    await page.$eval(menu, (button) => (button as HTMLButtonElement).click());
+    const model = '[role="menuitem"][data-composer-control="model"]';
+    await page.waitForSelector(model);
+    await page.$eval(model, (item) => (item as HTMLElement).click());
+  }
 }
 
 export async function selectExecutor(page: Page, trigger: string, label: string): Promise<void> {

@@ -1,12 +1,40 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
-import type { Request } from 'playwright';
+import type { Locator, Page, Request } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { Deferred } from '../../support/deferred.js';
+
+async function checkStandaloneModelFit(page: Page, trigger: Locator): Promise<void> {
+  await browserExpect(trigger).toBeEnabled();
+  const combined = await trigger.innerText();
+  const combinedWidth = (await trigger.boundingBox())!.width;
+  const constrain = (width: number | null) => trigger.evaluate((node, max) => {
+    node.parentElement!.style.maxWidth = max === null ? '' : `${max}px`;
+  }, width);
+  await constrain(36);
+  const more = page.getByRole('dialog').getByRole('button', { name: 'More model settings', exact: true });
+  await browserExpect(trigger).toBeHidden();
+  await more.click();
+  const rows = page.getByRole('menu').getByRole('menuitem');
+  await browserExpect(rows).toHaveCount(1);
+  const [agent, model] = (await rows.locator('[data-menu-description]').innerText()).split(' / ');
+  expect(combined).toBe(`${agent} ${model}`);
+  await rows.click();
+  const picker = page.locator('[data-slot="model-selector-columns"]');
+  await browserExpect(picker).toBeVisible();
+  await page.keyboard.press('Escape');
+  await browserExpect(more).toBeFocused();
+  await constrain(combinedWidth - 1);
+  await browserExpect(trigger).toHaveText(model!);
+  await browserExpect(trigger).toBeFocused();
+  expect(await trigger.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await constrain(null);
+  await browserExpect(trigger).toHaveText(combined);
+}
 
 test('chat host selectors fit narrow containers and commit cancellable handoffs without sending', async () => {
   const failedResponses: Promise<{ url: string; status: number; body: string; beforeHandoff: boolean }>[] = [];
@@ -76,6 +104,7 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
     await host().click();
     await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
     await browserExpect(page.getByRole('heading', { name: 'Move to Local' })).toBeVisible();
+    await checkStandaloneModelFit(page, page.getByRole('dialog').locator('[data-slot="model-selector-trigger"]'));
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await browserExpect(composer).toHaveValue('Synthetic retained handoff input');
     await browserExpect(host()).toBeVisible();
@@ -125,7 +154,7 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
       await page.screenshot({ path: join(artifacts, `new-chat-host-${width}.png`) });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    const modelTrigger = dialog.locator('[data-slot="composer-bottom-bar"] button').filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') });
+    const modelTrigger = dialog.locator('[data-slot="model-selector-trigger"]');
     await modelTrigger.click();
     expect(await page.locator('[data-slot="model-selector-executors"]').count()).toBe(0);
     await page.keyboard.press('Escape');
@@ -134,7 +163,8 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Automation', exact: true }).click();
-    const generation = page.getByRole('dialog').locator('button').filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') }).first();
+    const generation = page.getByRole('dialog').locator('[data-slot="model-selector-trigger"]').first();
+    await checkStandaloneModelFit(page, generation);
     await generation.click();
     const columns = page.locator('[data-slot="model-selector-columns"]');
     await browserExpect(columns.locator('[data-slot="model-selector-executors"]')).toBeVisible();

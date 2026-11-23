@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { openDialogModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor } from '../../support/executor-ui.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { E2eFixture } from '../../support/e2e-fixture.js';
@@ -367,7 +367,7 @@ test('New Chat selects a worktree from its chosen executor', async () => {
       return dialog && !dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]');
     });
     await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Integration worker');
-    await openDialogModelSelector(fixture.page);
+    await openModelSelector(fixture.page);
     await app.waitForButton('Chat Completions');
     await app.clickButton('Chat Completions');
     await app.waitForButton('Integration Echo');
