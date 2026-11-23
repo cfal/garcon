@@ -1,5 +1,7 @@
 # Why popups slow down with tiled chat panes on Linux
 
+For typing, scrolling, pane switching and broader SPA workloads, see the [cross-browser interaction study](webkit-spa-responsiveness.md).
+
 Reproduced on `e3e5e1faf` with **one OS window**, 1, 8, or 12 visible chat panes, and no running agents. Opening the pane's three-dot menu or Settings got slower in both packaged Garcon and standalone WebKitGTK. Chromium stayed substantially faster on the same page. The Tauri host is not necessary to reproduce the problem; the evidence points first to how the page styles and renders popups over a large workspace.
 
 ## Changes Tested In The Packaged App
