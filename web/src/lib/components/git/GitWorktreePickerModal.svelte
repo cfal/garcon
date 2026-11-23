@@ -151,6 +151,7 @@
 	}}
 >
 	<Dialog.Content
+		{@attach Dialog.cancelResizeOnUnmount}
 		bind:ref={dialogElement}
 		showCloseButton={false}
 		aria-label={createOpen ? m.git_worktree_new() : m.workspace_worktree_select()}
@@ -159,7 +160,7 @@
 			event.preventDefault();
 			queueMicrotask(() => filterInputRef?.focus());
 		}}
-		class="top-[var(--app-viewport-center-y)] w-[calc(100vw-1rem)] max-w-lg overflow-hidden rounded-lg border border-border bg-popover p-0 shadow-2xl sm:w-full {dialogHeight}"
+		class="top-[var(--app-viewport-center-y)] w-[calc(100vw-1rem)] max-w-lg overflow-hidden rounded-lg border border-border bg-popover p-0 shadow-2xl transition-none sm:w-full {dialogHeight}"
 	>
 		<div class="flex h-full min-h-0 min-w-0 flex-col">
 			<div class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">

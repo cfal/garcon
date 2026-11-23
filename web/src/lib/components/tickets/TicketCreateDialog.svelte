@@ -65,7 +65,6 @@
 		bind:ref={content}
 		class="ticket-dialog sm:max-w-2xl"
 		showCloseButton={false}
-		data-resize-motion={closeRequested || refining ? 'none' : undefined}
 		data-ticket-dialog-owner={ownerId}
 		onOpenAutoFocus={(event) => {
 			event.preventDefault();

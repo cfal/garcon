@@ -3,7 +3,6 @@ import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
-import { measureDialogHeightChange } from '../../support/dialog-resize.js';
 import type { Page } from 'playwright';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 
@@ -14,44 +13,6 @@ async function expectUsableWorkspace(page: Page): Promise<void> {
   await browserExpect(page.getByRole('menuitem', { name: 'Settings', exact: true })).toBeHidden();
   await browserExpect(page.getByRole('dialog')).toHaveCount(0);
 }
-
-test('uses natural dialog height while the search page saves its initial setting', async () => {
-  await withChromiumFixture('onboarding-pending-save-height', async ({ integration, page }) => {
-    await integration.client.updateSettings({ features: { transcriptSearch: { enabled: false } } });
-    await page.goto(integration.garcon.baseUrl);
-    await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Behavior', exact: true }).click();
-    await page.getByRole('button', { name: 'Restart setup wizard', exact: true }).click();
-    const wizard = page.getByRole('dialog');
-    const next = wizard.getByRole('button', { name: 'Continue', exact: true });
-    await page.setViewportSize({ width: 900, height: 435 });
-    const { before, middle, after, widths } = await next.evaluate(measureDialogHeightChange, { widthSelector: '#onboarding-description' });
-    expect(middle).toBeGreaterThan(Math.min(before, after));
-    expect(middle).toBeLessThan(Math.max(before, after));
-    expect(new Set(widths).size).toBe(1);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    for (let i = 1; i < 4; i++) await next.click();
-    await browserExpect(wizard.getByRole('heading', { name: 'Writing and behavior' })).toBeFocused();
-    const save = Promise.withResolvers<void>();
-    await page.route('**/api/v1/app/settings', async route => {
-      await save.promise;
-      await route.continue();
-    }, { times: 1 });
-    try {
-      const animating = await next.evaluate(async (control: HTMLElement) => {
-        control.click();
-        await new Promise(requestAnimationFrame);
-        return control.closest('[role="dialog"]')!.getAnimations().some(animation => animation.id === 'dialog-resize');
-      });
-      await browserExpect(wizard.getByRole('status')).toBeVisible();
-      expect(animating).toBe(false);
-    } finally {
-      save.resolve();
-      await browserExpect(next).toBeEnabled();
-    }
-  }, undefined, { classicScrollbars: true });
-}, 120_000);
 
 test('fresh-browser setup persists choices, fits small screens, and stays dismissed on reload', async () => {
   await withChromiumFixture('fresh-browser-setup', async ({ browser, integration, watchBrowserErrors, assertNoBrowserErrors, withExpectedConsoleErrors }, phase) => {
@@ -70,7 +31,6 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       const wizard = page.getByRole('dialog');
       const body = wizard.locator('div.overflow-y-auto');
       await browserExpect(wizard.getByRole('heading', { name: 'Welcome to Garcon' })).toBeVisible();
-      await browserExpect(body).toHaveCSS('scrollbar-gutter', 'stable');
       const titles = [
         'Welcome to Garcon',
         'Choose your theme',

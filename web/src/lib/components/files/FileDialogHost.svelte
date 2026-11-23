@@ -63,12 +63,13 @@
 	}}
 >
 	<Dialog.Content
+		{@attach Dialog.cancelResizeOnUnmount}
 		showCloseButton={false}
 		transientKind="file-dialog"
 		data-workspace-surface-id={surfaceId ?? undefined}
 		class={maximized
-			? 'flex h-dvh w-screen max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none'
-			: 'flex h-[min(90dvh,1000px)] w-[min(96vw,1440px)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none'}
+			? 'flex h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 transition-none sm:max-w-none'
+			: 'flex h-[min(90dvh,1000px)] w-[min(96vw,1440px)] max-w-none flex-col gap-0 overflow-hidden p-0 transition-none sm:max-w-none'}
 	>
 		{#if session && surfaceId}
 			<div class="flex h-10 shrink-0 items-center justify-end gap-1 border-b border-border px-2">

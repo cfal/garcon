@@ -3,7 +3,6 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
-import { measureDialogHeightChange } from '../../support/dialog-resize.js';
 import {
   clickWorkspaceWindowAddAction,
   collapseCanonicalFilesWindow,
@@ -147,23 +146,6 @@ async function comparisonHeaderGeometry(page: Page) {
 }
 
 describe('Chromium Git comparison header', () => {
-  test('keeps revision fields stable as the comparison dialog reaches its height cap', async () => {
-    await withChromiumFixture('git-comparison-resize', async fixture => {
-      const { page, integration } = fixture;
-      await createGitFixture(integration.dirs.project);
-      await openChatWorkspace(fixture, integration.dirs.project);
-      await openCompare(page);
-      await page.locator(`${COMPARE_PANEL} [data-git-comparison-range]`).click();
-      await page.setViewportSize({ width: 900, height: 380 });
-      const dialog = page.getByRole('dialog', { name: 'Compare revisions' });
-      const revision = dialog.getByRole('button', { name: 'Revision', exact: true });
-      const { middle, before, after, widths } = await revision.evaluate(measureDialogHeightChange, { widthSelector: '#git-comparison-from' });
-      expect(middle).toBeGreaterThan(before);
-      expect(middle).toBeLessThan(after);
-      expect(new Set(widths).size).toBe(1);
-    }, undefined, { classicScrollbars: true });
-  });
-
   test('joins fitting summary groups and stacks them without moving the actions', async () => {
     await withChromiumFixture('git-comparison-header', async (fixture, markPhase) => {
       const projectPath = fixture.integration.dirs.project;

@@ -9,7 +9,6 @@
 	import type { ComponentProps } from 'svelte';
 	import { getOptionalTransientLayers } from '$lib/context';
 	import { getDialogLayerControl } from './dialog-layer-context';
-	import { cancelResizeOnUnmount } from './dialog-resize.js';
 	import type {
 		TransientLayerKind,
 		TransientLayerModality,
@@ -61,12 +60,10 @@
 <DialogPortal {...portalProps}>
 	<DialogOverlay />
 	<DialogPrimitive.Content
-		{@attach cancelResizeOnUnmount}
 		bind:ref
 		data-slot="dialog-content"
 		class={cn(
-			'bg-(color:--dialog-surface) data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%_-_2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-(--dialog-radius) border p-6 shadow-(--dialog-shadow) duration-200 overflow-x-hidden sm:max-w-lg',
-			'transition-none',
+			'bg-(color:--dialog-surface) data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%_-_2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-(--dialog-radius) border p-6 shadow-(--dialog-shadow) [animation-duration:200ms] overflow-x-hidden sm:max-w-lg',
 			className,
 		)}
 		{...restProps}

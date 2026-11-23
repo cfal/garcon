@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { expect as browserExpect } from "playwright/test";
 import {
   parseTicketBootstrap,
   parseTicketDetail,
@@ -7,130 +6,26 @@ import {
 import { parseTicketWriteResult } from "../../../common/ticket-records.js";
 import type { TicketMutationPayload } from "../../../common/ticket-commands.js";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
-import { measureDialogHeightChange, pauseDialogResize } from "../../support/dialog-resize.js";
-import { seedLocalSettings } from "../../support/local-settings-seed.js";
+import { measureDialogHeightChange } from "../../support/dialog-resize.js";
 import {
   clickWorkspaceWindowAddAction,
   collapseCanonicalFilesWindow,
 } from "../../support/chromium-workspace.js";
 
 describe("Chromium Tickets interaction", () => {
-  test("keeps ticket fields stable at the height cap and sizes naturally during refinement", async () => {
-    await withChromiumFixture("ticket-refine-disclosure", async ({ page, integration }) => {
+  test("lays out ticket details at their natural height without moving the fields", async () => {
+    await withChromiumFixture("ticket-natural-disclosure", async ({ page, integration }) => {
       await page.goto(integration.garcon.baseUrl);
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, "Open Tickets");
       await page.setViewportSize({ width: 1200, height: 622 });
       await page.getByRole("button", { name: "New ticket", exact: true }).click();
-      const dialog = page.getByRole("dialog");
-      const summary = dialog.locator("summary", { hasText: "More details" });
-      const { widths } = await summary.evaluate(measureDialogHeightChange, { widthSelector: ".ticket-title-input" });
-      expect(new Set(widths).size).toBe(1);
-
-      const description = dialog.getByLabel("Description", { exact: true });
-      await description.fill("Synthetic description");
-      const release = Promise.withResolvers<void>();
-      const refined = "Refined synthetic description. ".repeat(25).trim();
-      await page.route("**/api/v1/prompts/refine", async route => {
-        await release.promise;
-        await route.fulfill({ json: { success: true, refinedPrompt: refined } });
-      }, { times: 1 });
-      const running = await summary.evaluateHandle(pauseDialogResize);
-      try {
-        await dialog.getByRole("button", { name: "Refine prompt", exact: true }).click();
-        await browserExpect.poll(() => running.evaluate(animation => animation.playState)).toBe("idle");
-        const toggle = await summary.evaluate(measureDialogHeightChange);
-        expect(toggle.middle).toBe(toggle.after);
-      } finally {
-        release.resolve();
-        await running.dispose();
-      }
-      await browserExpect(description).toHaveValue(refined);
-    }, undefined, { classicScrollbars: true });
-  });
-
-  test("animates native ticket disclosure in both directions unless motion is reduced", async () => {
-    await withChromiumFixture("ticket-disclosure-motion", async ({ page, integration }) => {
-      await page.goto(integration.garcon.baseUrl);
-      await collapseCanonicalFilesWindow(page);
-      await clickWorkspaceWindowAddAction(page, "Open Tickets");
-      const openTicket = page.getByRole("button", { name: "New ticket", exact: true });
       const summary = page.getByRole("dialog").locator("summary", { hasText: "More details" });
-      const measureToggle = () => summary.evaluate(measureDialogHeightChange, { focus: true });
-
-      await openTicket.click();
-      const resizedWithoutPainting = await summary.evaluate(async (control: HTMLElement) => {
-        control.click();
-        control.click();
-        await new Promise(requestAnimationFrame);
-        return control.closest('[role="dialog"]')!.getAnimations()
-          .some(animation => animation.id === "dialog-resize");
-      });
-      expect(resizedWithoutPainting).toBe(false);
-      const expanded = await measureToggle();
-      expect(expanded.middle).toBeGreaterThan(expanded.before);
-      expect(expanded.middle).toBeLessThan(expanded.after);
-      expect(expanded.focused).toBe(true);
-      const collapsed = await measureToggle();
-      expect(collapsed.middle).toBeLessThan(collapsed.before);
-      expect(collapsed.middle).toBeGreaterThan(collapsed.after);
-
-      const startPausedResize = () => summary.evaluateHandle(pauseDialogResize);
-      const running = await startPausedResize();
-      await page.setViewportSize({ width: 1280, height: 800 });
-      await browserExpect.poll(() => running.evaluate(animation => animation.playState)).toBe("idle");
-      await running.dispose();
-      await page.setViewportSize({ width: 1440, height: 900 });
-
-      const interrupted = await startPausedResize();
-      await page.emulateMedia({ reducedMotion: "reduce" });
-      await browserExpect.poll(() => interrupted.evaluate(animation => animation.playState)).toBe("idle");
-      await interrupted.dispose();
-      const osReduced = await measureToggle();
-      expect(osReduced.after).toBeGreaterThan(osReduced.before);
-      expect(osReduced.middle).toBe(osReduced.after);
-
-      await page.emulateMedia({ reducedMotion: "no-preference" });
-      const appInterrupted = await startPausedResize();
-      await page.evaluate(() => document.documentElement.setAttribute("data-reduce-motion", ""));
-      await browserExpect.poll(() => appInterrupted.evaluate(animation => animation.playState)).toBe("idle");
-      await appInterrupted.dispose();
-      await page.evaluate(() => document.documentElement.removeAttribute("data-reduce-motion"));
-
-      await page.evaluate(() => { document.documentElement.dataset.themeAppearance = "terminal"; });
-      const terminal = await measureToggle();
-      expect(terminal.after).toBeGreaterThan(terminal.before);
-      expect(terminal.middle).toBe(terminal.after);
-
-      await page.evaluate(seedLocalSettings, { reduceMotion: true });
-      await page.reload();
-      await openTicket.click();
-      const appReduced = await measureToggle();
-      expect(appReduced.after).toBeGreaterThan(appReduced.before);
-      expect(appReduced.middle).toBe(appReduced.after);
-    });
-  });
-
-  test("releases the dialog and body lock on Escape during a resize", async () => {
-    await withChromiumFixture("ticket-close-during-resize", async ({ page, integration }) => {
-      await page.goto(integration.garcon.baseUrl);
-      await collapseCanonicalFilesWindow(page);
-      await clickWorkspaceWindowAddAction(page, "Open Tickets");
-      const dialog = page.getByRole("dialog");
-      for (const dirty of [false, true]) {
-        await page.getByRole("button", { name: "New ticket", exact: true }).click();
-        if (dirty) await dialog.getByLabel("Title", { exact: true }).fill("Synthetic retained draft");
-        const resize = await dialog.locator("summary", { hasText: "More details" }).evaluateHandle(pauseDialogResize);
-        await page.keyboard.press("Escape");
-        if (dirty) {
-          await browserExpect.poll(() => resize.evaluate(animation => animation.playState)).toBe("idle");
-          await dialog.getByRole("button", { name: "Keep draft and close", exact: true }).click();
-        }
-        await resize.dispose();
-        await browserExpect(page.locator('[data-slot="dialog-content"]')).toHaveCount(0);
-        await browserExpect(page.locator("body")).not.toHaveCSS("pointer-events", "none");
-      }
-    });
+      const toggle = await summary.evaluate(measureDialogHeightChange, { widthSelector: ".ticket-title-input" });
+      expect(toggle.after).toBeGreaterThan(toggle.before);
+      expect(toggle.middle).toBe(toggle.after);
+      expect(new Set(toggle.widths).size).toBe(1);
+    }, undefined, { classicScrollbars: true });
   });
 
   test("opens a chat assignee without source-row navigation on desktop and mobile", async () => {

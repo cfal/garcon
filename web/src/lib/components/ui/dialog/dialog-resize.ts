@@ -18,7 +18,6 @@ function canResize(dialog: HTMLElement, reducedMotion: MediaQueryList): boolean 
 	return (
 		dialog.isConnected &&
 		dialog.dataset.state === 'open' &&
-		dialog.dataset.resizeMotion !== 'none' &&
 		!root.hasAttribute('data-reduce-motion') &&
 		root.dataset.themeAppearance !== 'terminal' &&
 		!reducedMotion.matches
@@ -38,7 +37,7 @@ function watchResize(
 	};
 	// A closing dialog must not retain its interaction lock waiting for size motion.
 	const observer = new MutationObserver(check);
-	observer.observe(dialog, { attributeFilter: ['data-state', 'data-resize-motion'] });
+	observer.observe(dialog, { attributeFilter: ['data-state'] });
 	observer.observe(document.documentElement, {
 		attributeFilter: ['data-reduce-motion', 'data-theme-appearance'],
 	});
@@ -64,7 +63,7 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 	const viewportWidth = viewport?.width;
 	const viewportHeight = viewport?.height;
 
-	// The next frame includes both Svelte updates and native summary activation.
+	// Measures the new mode after Svelte applies its layout.
 	const frame = requestAnimationFrame(() => {
 		pendingFrames.delete(dialog);
 		activeResizes.get(dialog)?.cancel();
@@ -80,11 +79,7 @@ export function animateDialogResize(dialog: HTMLElement | null): void {
 		if (width === nextWidth && height === nextHeight) return;
 		const dimensions: PropertyIndexedKeyframes = {};
 		if (width !== nextWidth) dimensions.width = [`${width}px`, `${nextWidth}px`];
-		if (height !== nextHeight) {
-			dimensions.height = [`${height}px`, `${nextHeight}px`];
-			// Avoids a temporary scrollbar rewrapping content that fits at its natural height.
-			if (dialog.scrollHeight <= dialog.clientHeight) dimensions.overflowY = ['hidden', 'hidden'];
-		}
+		if (height !== nextHeight) dimensions.height = [`${height}px`, `${nextHeight}px`];
 		const resize = dialog.animate(dimensions, { id: resizeId, duration: 200, easing: 'ease' });
 		watchResize(dialog, resize, reducedMotion, viewport);
 	});

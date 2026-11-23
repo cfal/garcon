@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { resizeDialogOnClick } from '$lib/components/ui/dialog/dialog-resize.js';
 	import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 	import type { TicketDraftState } from '$lib/tickets/drafts/ticket-draft-state.svelte.js';
 	import type { TicketChatSummary } from './ticket-presentation.js';
@@ -91,9 +90,7 @@
 		{/if}
 	</div>
 	<details open={draft.current.kind !== 'create'}>
-		<summary onclickcapture={draft.current.kind === 'create' ? resizeDialogOnClick : undefined}>
-			{m.tickets_more_details()}
-		</summary>
+		<summary>{m.tickets_more_details()}</summary>
 		<div class="ticket-properties">
 			<label class="ticket-field"
 				>{m.tickets_priority()}<select

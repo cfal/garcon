@@ -3,12 +3,17 @@ import { expect as browserExpect } from 'playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { measureDialogHeightChange, pauseDialogResize } from '../../support/dialog-resize.js';
 
 test('reports command outcomes, reveals after tree startup, and restores status disclosure focus', async () => {
   await withChromiumFixture('file-command-feedback', async (fixture, markPhase) => {
     const { page, integration } = fixture;
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+      const key = 'pref_local_settings';
+      localStorage.setItem(key, JSON.stringify({
+        ...JSON.parse(localStorage.getItem(key) ?? '{}'), textEditorOpenPlacement: 'dialog',
+      }));
     });
     const filename = 'commands.txt';
     await writeFile(join(integration.dirs.project, filename), 'Selected file text\n', 'utf8');
@@ -34,6 +39,50 @@ test('reports command outcomes, reveals after tree startup, and restores status 
     await browserExpect(page.locator('[data-palette-restored]')).toHaveCount(1);
     await page.keyboard.press('Escape');
     await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
+    markPhase('maximizing and restoring the desktop file dialog');
+    const fileDialog = page.getByRole('dialog').filter({ has: page.locator('.cm-editor') });
+    const options = { widthSelector: '.cm-editor' };
+    const grow = await fileDialog.getByRole('button', { name: 'Maximize dialog' }).evaluate(measureDialogHeightChange, options);
+    expect(grow.before).toBeLessThan(grow.middle);
+    expect(grow.middle).toBeLessThan(grow.after);
+    expect(grow.widths[0]).toBeLessThan(grow.widths[1]!);
+    expect(grow.widths[1]).toBeLessThan(grow.widths[2]!);
+    const shrink = await fileDialog.getByRole('button', { name: 'Restore dialog' }).evaluate(measureDialogHeightChange, options);
+    expect(shrink.after).toBe(grow.before);
+    expect(shrink.middle).toBeGreaterThan(shrink.after);
+    expect(shrink.middle).toBeLessThan(shrink.before);
+    expect(shrink.widths[0]).toBeGreaterThan(shrink.widths[1]!);
+    expect(shrink.widths[1]).toBeGreaterThan(shrink.widths[2]!);
+    expect(shrink.widths[2]).toBe(grow.widths[0]);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const reduced = await fileDialog.getByRole('button', { name: 'Maximize dialog' }).evaluate(measureDialogHeightChange);
+    expect(reduced.after).toBeGreaterThan(reduced.before);
+    expect(reduced.middle).toBe(reduced.after);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const resizing = await fileDialog.getByRole('button', { name: 'Restore dialog' }).evaluateHandle(pauseDialogResize);
+    try {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await browserExpect.poll(() => resizing.evaluate(animation => animation.playState)).toBe('idle');
+    } finally {
+      await resizing.dispose();
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+    for (const [attribute, value] of [['data-reduce-motion', ''], ['data-theme-appearance', 'terminal']] as const) {
+      const root = page.locator('html');
+      const original = await root.getAttribute(attribute);
+      const running = await fileDialog.getByRole('button', { name: 'Maximize dialog' }).evaluateHandle(pauseDialogResize);
+      try {
+        await root.evaluate((el, [name, next]) => el.setAttribute(name, next), [attribute, value] as const);
+        await browserExpect.poll(() => running.evaluate(animation => animation.playState)).toBe('idle');
+        const restore = await fileDialog.getByRole('button', { name: 'Restore dialog' }).evaluate(measureDialogHeightChange);
+        expect(restore.before).toBeGreaterThan(restore.after);
+        expect(restore.middle).toBe(restore.after);
+      } finally {
+        await running.dispose();
+        await root.evaluate((el, [name, prior]) => prior === null ? el.removeAttribute(name) : el.setAttribute(name, prior), [attribute, original] as const);
+      }
+    }
+    await fileDialog.getByRole('button', { name: 'Move to window' }).click();
     const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
     const source = surface.locator('.cm-content');
     await source.waitFor({ state: 'visible' });

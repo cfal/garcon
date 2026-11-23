@@ -88,9 +88,6 @@
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		bind:ref={dialogElement}
-		data-resize-motion={wizard.pageId === 'transcript-search' && transcriptSearch.isSaving
-			? 'none'
-			: undefined}
 		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto [@media(max-height:30rem)]:[scrollbar-gutter:stable]"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
@@ -114,8 +111,8 @@
 
 		<div
 			bind:this={pageBodyElement}
-			class="relative min-h-0 flex-auto overflow-y-auto px-6 pt-2 pb-6 [@media(max-height:30rem)]:overflow-visible"
 			style:scrollbar-gutter="stable"
+			class="relative min-h-0 flex-auto overflow-y-auto px-6 pt-2 pb-6 [@media(max-height:30rem)]:overflow-visible"
 		>
 			{#if wizard.pageId === 'welcome'}
 				<OnboardingWelcomePage />
@@ -238,12 +235,7 @@
 		<Dialog.Footer
 			class="grid shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border px-4 py-4 sm:px-6"
 		>
-			<Button
-				variant="ghost"
-				onclickcapture={Dialog.resizeDialogOnClick}
-				onclick={() => wizard.back()}
-				disabled={wizard.isFirstPage}
-			>
+			<Button variant="ghost" onclick={() => wizard.back()} disabled={wizard.isFirstPage}>
 				{m.onboarding_back()}
 			</Button>
 			{#if wizard.isDonePage}
@@ -257,7 +249,6 @@
 				<Button
 					class="justify-self-end"
 					onclick={() => wizard.advance()}
-					onclickcapture={Dialog.resizeDialogOnClick}
 					disabled={wizard.pageId === 'transcript-search' && transcriptSearch.isSaving}
 					>{m.onboarding_continue()}</Button
 				>

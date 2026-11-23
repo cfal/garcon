@@ -99,9 +99,6 @@
 							? 'bg-background text-foreground shadow-sm'
 							: 'text-muted-foreground'}"
 						aria-pressed={comparison.toKind === 'revision'}
-						onclickcapture={comparison.toKind === 'revision'
-							? undefined
-							: Dialog.resizeDialogOnClick}
 						onclick={() => comparison.setToKind('revision')}>{m.git_compare_revision()}</button
 					>
 					<button
@@ -110,9 +107,6 @@
 							? 'bg-background text-foreground shadow-sm'
 							: 'text-muted-foreground'}"
 						aria-pressed={comparison.toKind === 'working-tree'}
-						onclickcapture={comparison.toKind === 'working-tree'
-							? undefined
-							: Dialog.resizeDialogOnClick}
 						onclick={() => comparison.setToKind('working-tree')}
 						>{m.git_compare_working_tree()}</button
 					>
