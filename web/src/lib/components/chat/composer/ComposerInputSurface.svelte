@@ -38,7 +38,7 @@
 		allowFileMentions?: boolean;
 	} = $props();
 	const sourceVisible = $derived(visible && !draft);
-	const contentSizing = contentSizedTextarea(() => (sourceVisible ? text : undefined));
+	const contentSizing = contentSizedTextarea(() => text, () => sourceVisible);
 </script>
 
 <div
