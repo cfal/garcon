@@ -50,7 +50,25 @@
 	);
 	const activeProjectPath = $derived(controller.target.activeProjectPath);
 	const activeTarget = $derived(controller.target.activeTarget ?? controller.target.fallbackTarget);
+	const pushBranch = $derived(
+		presentationVisible && controller.target.canChangeTarget ? repository.pushBranch : '',
+	);
+	const prompt = $derived(repository.pushPrompt);
+	const canConfirmPush = $derived(
+		prompt &&
+			prompt.selectedRemote &&
+			prompt.branch === pushBranch &&
+			sameGitProject(prompt.project, activeTarget),
+	);
 	const diffFontSize = $derived(Number.parseInt(localSettings.gitDiffFontSize, 10) || 12);
+	$effect(() => {
+		const owner = repository;
+		if (!pushBranch) return;
+		// Both the pending request and the displayed prompt end with this branch visit.
+		return () => {
+			owner.pushPrompt = null;
+		};
+	});
 
 	$effect(() => {
 		const target = activeTarget;
@@ -106,7 +124,10 @@
 		const target = controller.target.requestTarget;
 		if (!target || !controller.target.canChangeTarget) return;
 		const commit = surfaces.commit();
-		if (!commit.target.selectProject(target) && !sameGitProject(commit.target.requestTarget, target)) {
+		if (
+			!commit.target.selectProject(target) &&
+			!sameGitProject(commit.target.requestTarget, target)
+		) {
 			notifications.info(m.commit_surface_busy_target_retained(), { key: 'commit-busy-target' });
 		}
 		const opening = openCommitFromGitWorkbench(workspace, presentation);
@@ -115,11 +136,19 @@
 		});
 	}
 
-	async function openPush(): Promise<void> {
-		const target = activeTarget;
-		if (!target || !controller.target.canChangeTarget) return;
-		if (!(await repository.prepareToolbarPush(target))) return;
-		if (sameGitProject(target, activeTarget)) repository.showPushModal = true;
+	function openPush(): void {
+		const target = controller.target.requestTarget;
+		if (target && pushBranch) void repository.preparePush(target);
+	}
+
+	function submitPush(): void {
+		if (!prompt || !canConfirmPush) return;
+		const { branch, selectedRemote } = prompt;
+		void runMutation(async (project) => {
+			const ok = await repository.handlePush(project, selectedRemote, branch);
+			if (ok) await wb.refresh({ reason: 'git-action' });
+			return ok;
+		});
 	}
 
 	function openInEditor(relativePath: string, line: number): void {
@@ -145,13 +174,12 @@
 		{controller}
 		{presentation}
 		onCommit={openCommit}
-		onPush={() => void openPush()}
+		onPush={openPush}
 		onRefresh={() => void refresh()}
 	/>
 	<GitProjectContent
 		selection={controller.target.projectSelection}
-		ready={!controller.target.projectIdentityPending &&
-			controller.target.identity === controller.target.appliedIdentity}
+		ready={controller.target.projectReady}
 	>
 		{#if controller.target.lastError || repository.lastError || wb.lastError}
 			<div
@@ -186,7 +214,7 @@
 		<GitWorkbench
 			target={activeTarget}
 			{presentation}
-			active={presentationVisible}
+			active={presentationVisible && controller.target.projectReady}
 			{wb}
 			{onAppendToChatDraft}
 			onOpenChat={() => void workspace.focusChat()}
@@ -207,18 +235,14 @@
 			/>
 		{/if}
 
-		{#if repository.showPushModal}
+		{#if prompt && canConfirmPush}
 			<GitPushModal
-				remotes={repository.pushRemotes}
-				currentBranch={repository.currentBranch}
+				remotes={prompt.remotes}
+				bind:selectedRemote={prompt.selectedRemote}
+				currentBranch={prompt.branch}
 				isPushing={repository.isPushing}
-				onPush={(remote) =>
-					void runMutation(async (projectPath) => {
-						const ok = await repository.handlePush(projectPath, remote);
-						if (ok) await wb.refresh({ reason: 'git-action' });
-						return ok;
-					})}
-				onClose={() => (repository.showPushModal = false)}
+				onPush={submitPush}
+				onClose={() => (repository.pushPrompt = null)}
 			/>
 		{/if}
 	</GitProjectContent>

@@ -27,7 +27,7 @@
 	const reviewDisplay = getGitReviewDisplay();
 	const localSettings = getLocalSettings();
 	const canPush = $derived(
-		Boolean(controller.repository.remoteStatus?.hasRemote) &&
+		Boolean(controller.repository.pushBranch && controller.repository.remoteStatus?.hasRemote) &&
 			(!controller.repository.remoteStatus?.hasUpstream ||
 				(controller.repository.remoteStatus?.ahead ?? 0) > 0),
 	);

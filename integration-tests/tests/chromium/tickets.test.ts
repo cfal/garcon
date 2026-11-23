@@ -6,12 +6,28 @@ import {
 import { parseTicketWriteResult } from "../../../common/ticket-records.js";
 import type { TicketMutationPayload } from "../../../common/ticket-commands.js";
 import { withChromiumFixture } from "../../support/chromium-fixture.js";
+import { measureDialogHeightChange } from "../../support/dialog-resize.js";
 import {
   clickWorkspaceWindowAddAction,
   collapseCanonicalFilesWindow,
 } from "../../support/chromium-workspace.js";
 
 describe("Chromium Tickets interaction", () => {
+  test("lays out ticket details at their natural height without moving the fields", async () => {
+    await withChromiumFixture("ticket-natural-disclosure", async ({ page, integration }) => {
+      await page.goto(integration.garcon.baseUrl);
+      await collapseCanonicalFilesWindow(page);
+      await clickWorkspaceWindowAddAction(page, "Open Tickets");
+      await page.setViewportSize({ width: 1200, height: 622 });
+      await page.getByRole("button", { name: "New ticket", exact: true }).click();
+      const summary = page.getByRole("dialog").locator("summary", { hasText: "More details" });
+      const toggle = await summary.evaluate(measureDialogHeightChange, { widthSelector: ".ticket-title-input" });
+      expect(toggle.after).toBeGreaterThan(toggle.before);
+      expect(toggle.middle).toBe(toggle.after);
+      expect(new Set(toggle.widths).size).toBe(1);
+    }, undefined, { classicScrollbars: true });
+  });
+
   test("opens a chat assignee without source-row navigation on desktop and mobile", async () => {
     await withChromiumFixture("tickets-chat-assignee", async (fixture) => {
       const { page, integration } = fixture;

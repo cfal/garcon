@@ -40,7 +40,7 @@
 	}}
 >
 	<Dialog.Content
-		class="w-[calc(100%-2rem)] max-w-xl rounded-lg border border-border bg-popover p-0 shadow-2xl"
+		class="max-h-[calc(var(--app-height)-1rem)] w-[calc(100%-2rem)] max-w-xl overflow-y-auto [scrollbar-gutter:stable] rounded-lg border border-border bg-popover p-0 shadow-2xl"
 		showCloseButton={false}
 		aria-label={m.git_compare_title()}
 	>

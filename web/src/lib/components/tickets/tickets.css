@@ -738,6 +738,7 @@ select.ticket-input {
 .ticket-dialog {
 	max-height: calc(100dvh - 32px);
 	overflow-y: auto;
+	scrollbar-gutter: stable;
 	font-size: calc(13px * var(--interface-font-scale, 1));
 }
 .ticket-conflict {

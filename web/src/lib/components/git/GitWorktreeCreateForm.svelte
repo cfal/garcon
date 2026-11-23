@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resizeDialogOnClick } from '$lib/components/ui/dialog/dialog-resize.js';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { GitWorktreeCreation, GitWorktreeItem } from '$lib/api/git.js';
@@ -72,7 +73,7 @@
 		create();
 	}}
 >
-	<div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+	<div class="min-h-0 flex-1 space-y-5 overflow-y-auto p-4" style:scrollbar-gutter="stable">
 		<GitNameField
 			name={branchName}
 			bind:ref={nameInput}
@@ -105,6 +106,7 @@
 			type="button"
 			class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
 			aria-expanded={showAdvanced}
+			onclickcapture={resizeDialogOnClick}
 			onclick={() => (showAdvanced = !showAdvanced)}
 		>
 			<ChevronRight class="size-4 {showAdvanced ? 'rotate-90' : ''}" />

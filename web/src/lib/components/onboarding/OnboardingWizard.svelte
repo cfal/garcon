@@ -88,7 +88,7 @@
 <Dialog.Root open={appShell.showOnboardingWizard} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		bind:ref={dialogElement}
-		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto"
+		class="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl [@media(max-height:30rem)]:block [@media(max-height:30rem)]:overflow-y-auto [@media(max-height:30rem)]:[scrollbar-gutter:stable]"
 		aria-describedby="onboarding-description"
 		onOpenAutoFocus={handleOpenAutoFocus}
 	>
@@ -111,6 +111,7 @@
 
 		<div
 			bind:this={pageBodyElement}
+			style:scrollbar-gutter="stable"
 			class="relative min-h-0 flex-auto overflow-y-auto px-6 pt-2 pb-6 [@media(max-height:30rem)]:overflow-visible"
 		>
 			{#if wizard.pageId === 'welcome'}
