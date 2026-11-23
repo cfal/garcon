@@ -292,12 +292,13 @@ test('confirms both push URLs and does not hide a rejected followed tag behind p
 
 test('retains the receiving hook explanation after noisy or sensitive local diagnostics', async () => {
   const { git, projectPath, remote } = await pushFixture();
-  await installHook(remote, 'update', 'echo "Reviewed commits only" >&2\nexit 1');
+  await installHook(remote, 'update', 'echo "Reviewed commits only: ftps://user:private-ftps-token@host.invalid/policy" >&2\nexit 1');
   await installHook(projectPath, 'pre-push', 'printf "%03000d\\nhttps://%03000d:private-token@host.invalid/\\n" 0 0 >&2');
   const failure = await git.push({ projectPath }).then(() => null, (error: Error) => error);
   expect(failure).toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
   expect(failure?.message).toMatch(/Inspect the remote[\s\S]*hook declined[\s\S]*<remote>[\s\S]*Reviewed commits only/);
   expect(failure?.message).not.toContain('private-token');
+  expect(failure?.message).not.toContain('private-ftps-token');
   expect(failure?.message.length).toBeLessThanOrEqual(2048);
   expect(await listRefs(remote)).toBe('');
 });
