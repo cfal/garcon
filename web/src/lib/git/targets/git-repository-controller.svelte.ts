@@ -309,12 +309,12 @@ export class GitRepositoryController {
 		);
 	}
 
-	handlePush(project: GitProjectTarget, remote?: string): Promise<boolean> {
+	handlePush(project: GitProjectTarget, remote?: string, remoteBranch?: string): Promise<boolean> {
 		if (this.captureContext(project) === null) return Promise.resolve(false);
 		this.showPushModal = false;
 		return this.postGitAction(
 			project,
-			() => gitPush(project, remote),
+			() => gitPush(project, remote, remoteBranch),
 			(v) => (this.isPushing = v),
 		);
 	}

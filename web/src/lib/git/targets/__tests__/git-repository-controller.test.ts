@@ -484,8 +484,17 @@ describe('GitRepositoryController', () => {
 			expect(gitPush).toHaveBeenCalledWith(
 				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 				undefined,
+				undefined,
 			);
 			expect(controller.confirmAction).toBeNull();
+		});
+
+		it('sends the confirmed branch so the executor can reject a changed HEAD', async () => {
+			const project = { executorId: 'local', projectPath: '/project' };
+			vi.mocked(gitPush).mockResolvedValue({ success: false, error: 'Branch changed' });
+			expect(await controller.handlePush(project, 'origin', 'main')).toBe(false);
+			expect(gitPush).toHaveBeenCalledWith(project, 'origin', 'main');
+			expect(controller.lastError).toBe('Branch changed');
 		});
 
 		it('returns true for a successful confirmed discard', async () => {

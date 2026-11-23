@@ -141,10 +141,10 @@
 		repository.showPushModal = true;
 	}
 
-	function submitPush(remote: string): void {
+	function submitPush(remote: string, branch: string): void {
 		if (!pushAvailable) return;
 		void runMutation(async (project) => {
-			const ok = await repository.handlePush(project, remote);
+			const ok = await repository.handlePush(project, remote, branch);
 			if (ok) await wb.refresh({ reason: 'git-action' });
 			return ok;
 		});

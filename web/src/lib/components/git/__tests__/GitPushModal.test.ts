@@ -17,17 +17,21 @@ it('uses the selected remote and applies the same busy guard to keyboard and but
 	const dialog = await screen.findByRole('dialog', { name: 'Push to remote' });
 	const push = within(dialog).getByRole('button', { name: 'Push' });
 	await fireEvent.click(push);
-	expect(props.onPush).toHaveBeenLastCalledWith('origin');
+	expect(props.onPush).toHaveBeenLastCalledWith('origin', 'main');
 	await fireEvent.click(within(dialog).getByRole('radio', { name: /backup/ }));
 	const close = within(dialog).getByRole('button', { name: 'Close' });
 	close.focus();
 	await fireEvent.keyDown(close, { key: 'Enter', ctrlKey: true });
-	expect(props.onPush).toHaveBeenLastCalledWith('backup');
+	expect(props.onPush).toHaveBeenLastCalledWith('backup', 'main');
 	expect(props.onClose).not.toHaveBeenCalled();
 
 	await view.rerender({ ...props, isPushing: true });
 	expect(push.hasAttribute('disabled')).toBe(true);
 	await fireEvent.keyDown(dialog, { key: 'Enter', metaKey: true });
+	expect(props.onPush).toHaveBeenCalledTimes(2);
+	await view.rerender({ ...props, currentBranch: '' });
+	expect(push.hasAttribute('disabled')).toBe(true);
+	await fireEvent.keyDown(dialog, { key: 'Enter', ctrlKey: true });
 	expect(props.onPush).toHaveBeenCalledTimes(2);
 	await fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
 	expect(props.onClose).toHaveBeenCalledOnce();

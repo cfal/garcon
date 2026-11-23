@@ -11,7 +11,7 @@
 		remotes: GitRemoteEntry[];
 		currentBranch: string;
 		isPushing: boolean;
-		onPush: (remote: string) => void;
+		onPush: (remote: string, branch: string) => void;
 		onClose: () => void;
 	}
 
@@ -21,11 +21,11 @@
 		untrack(() => remotes.find((r) => r.name === 'origin')?.name ?? remotes[0]?.name ?? ''),
 	);
 
-	let canPush = $derived(selectedRemote.length > 0 && !isPushing);
+	let canPush = $derived(selectedRemote.length > 0 && currentBranch.length > 0 && !isPushing);
 
 	function handlePush(): void {
 		if (!canPush) return;
-		onPush(selectedRemote);
+		onPush(selectedRemote, currentBranch);
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {

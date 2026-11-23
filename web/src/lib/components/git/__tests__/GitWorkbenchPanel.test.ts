@@ -122,6 +122,7 @@ describe('GitWorkbenchPanel', () => {
 
 	it('does not submit an open Push prompt during checkout', async () => {
 		const controller = await readyWorkbench();
+		controller.repository.currentBranch = 'main';
 		controller.repository.pushRemotes = [{ name: 'origin', url: '/repos/origin' }];
 		controller.repository.showPushModal = true;
 		const dispatch = vi.spyOn(controller.repository, 'handlePush').mockResolvedValue(false);
