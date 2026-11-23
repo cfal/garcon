@@ -15,8 +15,9 @@
 	let { executorId, section }: { executorId: string; section: 'native' | 'other-agents' } = $props();
 	const catalog = getModelCatalog();
 	const executors = getExecutors();
+	// Replacing an inventory row with the same ID must not recreate sign-in state.
 	const authExecutorId = $derived(executorId);
-	const settingsAuth = $derived(new SettingsAuthState(catalog.forExecutor(authExecutorId), authExecutorId));
+	const settingsAuth = $derived(new SettingsAuthState(catalog.forExecutor(authExecutorId)));
 	const NATIVE_AGENT_IDS = ['claude', 'codex'];
 	const cliUpdates = $derived(new SettingsCliUpdateState(executorId, NATIVE_AGENT_IDS));
 	let openByAgent = $state<Record<string, boolean>>({});

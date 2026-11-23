@@ -16,8 +16,11 @@ export type GeminiPart =
       readonly args: Record<string, unknown>;
     };
 
+export const FAKE_GEMINI_API_KEY = 'garcon-test-key';
+
 export interface RecordedGeminiRequest {
   readonly id: number;
+  readonly signal: AbortSignal;
   readonly model: string;
   readonly body: Record<string, unknown>;
   readonly userTexts: readonly string[];
@@ -71,7 +74,7 @@ function contentParts(body: Record<string, unknown>): Array<{ role: string; part
   ).filter(isRecord).map((part) => ({ role: String(content.role ?? ''), part })));
 }
 
-function recordRequest(id: number, model: string, body: Record<string, unknown>): RecordedGeminiRequest {
+function recordRequest(id: number, model: string, body: Record<string, unknown>, signal: AbortSignal): RecordedGeminiRequest {
   const parts = contentParts(body);
   const userTexts = parts
     .filter(({ role, part }) => role === 'user' && typeof part.text === 'string')
@@ -85,7 +88,7 @@ function recordRequest(id: number, model: string, body: Record<string, unknown>)
       response: isRecord(response.response) ? response.response : {},
     }];
   });
-  return { id, model, body, userTexts, lastUserText: userTexts.at(-1) ?? '', functionResponses };
+  return { id, model, body, signal, userTexts, lastUserText: userTexts.at(-1) ?? '', functionResponses };
 }
 
 function wirePart(part: GeminiPart): Record<string, unknown> {
@@ -204,6 +207,10 @@ export class FakeGeminiModel {
 
   async #handleRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (request.headers.get('x-goog-api-key') !== FAKE_GEMINI_API_KEY) {
+      this.#violations.push(`Request to ${url.pathname} did not use the fixture API key`);
+      return Response.json({ error: { code: 403, message: 'expected fixture key', status: 'PERMISSION_DENIED' } }, { status: 403 });
+    }
     const path = url.pathname.match(STREAM_PATH);
     let body: unknown;
     try {
@@ -221,10 +228,7 @@ export class FakeGeminiModel {
         candidates: [{ content: { role: 'model', parts: [{ text: AUXILIARY_REPLY }] }, finishReason: 'STOP' }],
       });
     }
-    if (request.headers.get('x-goog-api-key') === null) {
-      this.#violations.push(`Request to ${url.pathname} carried no x-goog-api-key header`);
-    }
-    const recorded = recordRequest(++this.#requestId, path[1]!, body);
+    const recorded = recordRequest(++this.#requestId, path[1]!, body, request.signal);
     this.#requests.push(recorded);
     const turn = this.#turns.shift();
     if (!turn) {

@@ -36,7 +36,7 @@ function classifyCommitMessageAgentError(error: unknown): CommitMessageErrorCode
   if (error.code === 'AUTH_REQUIRED') return 'COMMIT_MESSAGE_AGENT_AUTH_REQUIRED';
   if (error.code === 'RATE_LIMITED') return 'COMMIT_MESSAGE_RATE_LIMITED';
   if (error.code === 'TIMEOUT') return 'COMMIT_MESSAGE_TIMEOUT';
-  if (error.code === 'BINARY_NOT_FOUND' || error.code === 'UNAVAILABLE') {
+  if (error.code === 'BINARY_NOT_FOUND' || error.code === 'UNAVAILABLE' || error.code === 'EXECUTOR_BUSY') {
     return 'COMMIT_MESSAGE_AGENT_UNAVAILABLE';
   }
   return 'COMMIT_MESSAGE_GENERATION_FAILED';

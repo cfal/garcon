@@ -176,6 +176,7 @@ export default function createAllRoutes(workspaceDir: string, {
 }): RouteMap {
   const canvases = new CanvasStore(workspaceDir);
   const inspectProject = executors.inspectProject;
+  const readyInstanceId = (id: string) => executors.readyInstanceId(id);
   const httpIdleSeconds = getHttpIdleTimeoutSeconds();
   const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
   const usageBudget = httpIdleSeconds > 0 ? Math.min(USAGE_READ_TIMEOUT_MS, gitBudget) : USAGE_READ_TIMEOUT_MS;
@@ -205,7 +206,7 @@ export default function createAllRoutes(workspaceDir: string, {
     createProjectResolutionRoutes({ registry, inspect: inspectProject }),
     createStaticRoutes(settings),
     authRoutes,
-    createAgentRoutes({ agents, apiProviders }),
+    createAgentRoutes({ agents, apiProviders, responseCache: modelCatalogResponseCache, readyInstanceId }),
     createApiProviderRoutes(apiProviders, modelCatalogResponseCache),
     createChatRoutes({
       registry,
@@ -247,6 +248,7 @@ export default function createAllRoutes(workspaceDir: string, {
     createModelsRoutes({
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
+      instanceId: id => executors.instanceId(id),
     }),
     createScheduledPromptRoutes(scheduledPrompts),
     createPullRequestReviewRoutes(pullRequestReviews),

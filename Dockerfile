@@ -66,9 +66,9 @@ FROM base AS runtime
 
 ARG GARCON_UID=1000
 ARG GARCON_GID=1000
-ARG OPENCODE_VERSION=1.19.5
+ARG OPENCODE_VERSION=1.19.6
 ARG CODEX_VERSION=0.171.0
-ARG PI_VERSION=1.5.2
+ARG PI_VERSION=1.6.0
 
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
       "@earendil-works/pi-coding-agent@${PI_VERSION}" && npm cache clean --force

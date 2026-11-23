@@ -36,7 +36,7 @@
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
 	} from '$shared/agents';
-	import type { ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
+	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 	import {
 		findModelForSelection,
 		modelValueForSelection,
@@ -49,6 +49,7 @@
 	} from '$shared/attachments';
 
 	interface Props {
+		catalog?: ModelCatalogStore;
 		seed?: NewChatDialogSeed;
 		composerInputMode?: 'source' | 'formatted';
 		executorSnapshots?: readonly ExecutorSnapshot[];
@@ -74,6 +75,7 @@
 	}
 
 	let {
+		catalog,
 		seed,
 		executorSnapshots,
 		onExecutors,
@@ -204,7 +206,7 @@
 		}),
 	);
 
-	setModelCatalog({
+	setModelCatalog(untrack(() => catalog) ?? {
 		forExecutor() { return this; },
 		get isValidated() { return catalogValidated; },
 		get error() { return catalogError; },

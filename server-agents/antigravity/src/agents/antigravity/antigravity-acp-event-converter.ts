@@ -61,7 +61,7 @@ export function splitExecutorError(text: string): { readonly text: string; reado
 function toolResultText(update: Record<string, unknown>): string {
   const rawOutput = asObject(update.rawOutput);
   const output = asString(rawOutput.output);
-  if (output !== undefined) return output;
+  if (output?.trim()) return output;
   const parts: string[] = [];
   for (const entry of Array.isArray(update.content) ? update.content : []) {
     const content = asObject(entry);
@@ -128,12 +128,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
         session.thinkingText += acpContentText(update.content);
         return flushed;
       }
-      // A call can arrive already settled, as a fast tool may; its result
-      // follows its row like a terminal update's.
       case 'tool_call':
-        return ACP_TERMINAL_TOOL_STATUSES.has(asString(update.status) ?? '')
-          ? this.#toolCallUpdate(session, update, context.timestamp)
-          : this.#toolCall(session, update, context.timestamp, false);
       case 'tool_call_update':
         return this.#toolCallUpdate(session, update, context.timestamp);
       default:
@@ -216,8 +211,14 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     session.toolNames.delete(toolCallId);
     session.toolInputs.delete(toolCallId);
     const text = antigravityToolResultText(name, toolResultText(update));
-    const failed = status !== 'completed';
-    const content = text.trim() ? { raw: text } : failed ? { status } : {};
+    // agy completes the tool invocation even when the command exits unsuccessfully.
+    const exitCode = name === 'run_command' ? asObject(update.rawOutput).exit_code : undefined;
+    const commandFailed = typeof exitCode === 'number' && exitCode !== 0;
+    const failed = status !== 'completed' || commandFailed;
+    const content: ToolResultMessage['content'] = {};
+    if (text.trim()) content.raw = text;
+    else if (commandFailed) content.exitCode = exitCode;
+    else if (failed) content.status = status;
     messages.push(new ToolResultMessage(timestamp, toolCallId, content, failed));
     return messages;
   }
@@ -240,7 +241,11 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const rows: ChatMessage[] = [];
     for (const call of session.deferredCalls.values()) {
       this.#remember(session.emittedToolIds, call.toolCallId);
-      rows.push(convertAntigravityToolUse(timestamp, { ...call, input: session.toolInputs.get(call.toolCallId) ?? call.input }));
+      rows.push(convertAntigravityToolUse(timestamp, {
+        ...call,
+        name: session.toolNames.get(call.toolCallId) ?? call.name,
+        input: session.toolInputs.get(call.toolCallId) ?? call.input,
+      }));
     }
     session.deferredCalls.clear();
     return rows;

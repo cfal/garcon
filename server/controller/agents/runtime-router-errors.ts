@@ -4,6 +4,7 @@ import {
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import { DomainError } from '../../common/domain-error.js';
+import { isErrorCode, type ErrorCode } from '../../../common/error-codes.js';
 
 // A failure before provider dispatch cannot have run anything.
 export function executionSetupFailure(error: unknown): unknown {
@@ -18,14 +19,19 @@ export function isLostLaunchReply(error: unknown): error is AgentCallError {
 }
 
 export function dispatchFailureDetail(error: unknown): AgentRunFailureDetail {
-  if (error instanceof AgentIntegrationError) {
-    return { code: error.code, ...(error.message ? { message: error.message } : {}) };
-  }
-  if (error instanceof DomainError) {
+  if (error instanceof AgentIntegrationError || error instanceof DomainError) {
     return { code: error.code, ...(error.message ? { message: error.message } : {}) };
   }
   return {
     code: 'DISPATCH_FAILED',
     ...(error instanceof Error && error.message ? { message: error.message } : {}),
+  };
+}
+
+export function publicDispatchFailure(error: unknown): { error: string; errorCode: ErrorCode } {
+  const { code } = dispatchFailureDetail(error);
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    errorCode: isErrorCode(code) ? code : 'INTERNAL_ERROR',
   };
 }

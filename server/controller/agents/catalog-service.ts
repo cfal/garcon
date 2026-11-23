@@ -2,6 +2,8 @@ import type {
   AgentCatalogEntry,
   AgentModelOption,
 } from "../../../common/agents.js";
+import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
+import { DomainError } from '../../common/domain-error.js';
 import type { ApiProviderEndpointResolver } from "../api-providers/endpoint-resolver.js";
 import type { AgentDirectory } from "./directory.js";
 import { createLogger } from "../../common/log.js";
@@ -12,9 +14,15 @@ const logger = createLogger("agents:catalog-service");
 export interface AgentModelQuery {
   executorId?: string | null;
   strict?: boolean;
+  requireNativeDiscovery?: true;
   signal?: AbortSignal;
   timeoutMs?: number;
   dispatchDeadline?: number;
+}
+
+export function isCatalogExecutorFailure(error: unknown): boolean {
+  return (error instanceof AgentCallError && error.outcome !== 'rejected')
+    || (error instanceof DomainError && error.code === 'EXECUTOR_UNAVAILABLE');
 }
 
 function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
@@ -109,13 +117,16 @@ export class AgentCatalogService {
     };
   }
 
-  async getAgentCatalogEntries(executorId?: string | null): Promise<AgentCatalogEntry[]> {
+  async getAgentCatalogEntries(executorId?: string | null, confirmingAgents: readonly string[] = []): Promise<AgentCatalogEntry[]> {
     const entries = (
       await Promise.all(
         this.deps.directory
           .list(executorId)
           .map((integration) =>
-            this.getAgentCatalogEntry(integration.descriptor.id, { executorId }),
+            this.getAgentCatalogEntry(integration.descriptor.id, {
+              executorId,
+              ...(confirmingAgents.includes(integration.descriptor.id) ? { requireNativeDiscovery: true } : {}),
+            }),
           ),
       )
     ).filter((entry): entry is AgentCatalogEntry => entry !== null);
@@ -135,9 +146,11 @@ export class AgentCatalogService {
   async #snapshot(agentId: string, query: AgentModelQuery) {
     const integration = this.deps.directory.require(agentId, query.executorId);
     const signal = query.signal ?? new AbortController().signal;
+    const strict = query.strict === true || query.requireNativeDiscovery === true;
     try {
       const snapshot = await integration.catalog.snapshot({
-        strict: query.strict ?? false,
+        strict,
+        ...(query.requireNativeDiscovery ? { requireNativeDiscovery: true } : {}),
         signal,
         timeoutMs: query.timeoutMs,
         dispatchDeadline: query.dispatchDeadline,
@@ -150,7 +163,10 @@ export class AgentCatalogService {
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof Error && error.name === 'AbortError') throw error;
-      if (query.strict) throw error;
+      // Unlike a failed listing, a missing or misconfigured provider is a definitive empty native catalog.
+      const unavailableProvider = query.requireNativeDiscovery && error instanceof AgentIntegrationError && !error.retryable
+        && (error.code === 'BINARY_NOT_FOUND' || error.code === 'INVALID_SETTINGS' || error.code === 'INVALID_ENDPOINT');
+      if (isCatalogExecutorFailure(error) || (strict && !unavailableProvider)) throw error;
       logger.warn('Agent catalog snapshot failed.', {
         code: 'CATALOG_SNAPSHOT_FAILED',
         integrationId: agentId,

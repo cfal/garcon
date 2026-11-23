@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
@@ -861,6 +862,7 @@ describe('Settings', () => {
 		};
 		const appShell = createAppShellStore();
 		appShell.openSettings('providers');
+		const beginLogin = vi.spyOn(ModelCatalogStore.prototype, 'beginLogin');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
@@ -890,7 +892,10 @@ describe('Settings', () => {
 			await waitFor(() =>
 				expect(providersApi.launchAgentAuthLogin).toHaveBeenCalledWith('claude', remoteExecutor.id),
 			);
+			expect(beginLogin).toHaveBeenCalledExactlyOnceWith('claude');
+			expect(beginLogin.mock.contexts[0]).toMatchObject({ executorId: remoteExecutor.id });
 		} finally {
+			beginLogin.mockRestore();
 			rendered.unmount();
 		}
 	});
@@ -939,6 +944,7 @@ describe('Settings', () => {
 			sessionId: 'synthetic-login',
 			deviceAuth,
 		});
+		const beginLogin = vi.spyOn(ModelCatalogStore.prototype, 'beginLogin');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
@@ -948,6 +954,8 @@ describe('Settings', () => {
 			const local = within(screen.getByRole('region', { name: 'Local' }));
 			const signIn = await local.findAllByRole('button', { name: 'Sign in' });
 			await fireEvent.click(signIn[0]);
+			expect(beginLogin).toHaveBeenCalledExactlyOnceWith('claude');
+			expect(beginLogin.mock.contexts[0]).toMatchObject({ executorId: localExecutor.id });
 			const input = await local.findByRole('textbox');
 			await fireEvent.input(input, { target: { value: 'synthetic-oauth-code' } });
 			vi.mocked(providersApi.getAgentAuthLoginStatus).mockImplementation(
@@ -974,6 +982,7 @@ describe('Settings', () => {
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('claude', 'local');
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('codex', 'local');
 		} finally {
+			beginLogin.mockRestore();
 			rendered.unmount();
 		}
 	});

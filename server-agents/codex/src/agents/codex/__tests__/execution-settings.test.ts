@@ -31,7 +31,7 @@ function configurationFixture() {
     model: 'model-a', permissionMode: 'default', thinkingMode: 'low', endpoint: null,
     settings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'standard' } },
   } satisfies AgentSessionConfiguration;
-  const next = { ...previous, settings: { ...previous.settings, values: { speed: 'ultrafast' } } };
+  const next = { ...previous, permissionModeExplicit: false, settings: { ...previous.settings, values: { speed: 'ultrafast' } } };
   return { execution, previous, next, update, running };
 }
 
@@ -45,7 +45,7 @@ describe('Codex speed preferences', () => {
 
   it('still applies mixed non-speed changes and propagates their failure', async () => {
     const { execution, previous, next, update } = configurationFixture();
-    const mixed = { ...next, model: 'model-b', thinkingMode: 'high', permissionMode: 'manualBypass' } as const;
+    const mixed = { ...next, model: 'model-b', thinkingMode: 'high', permissionMode: 'manualBypass', permissionModeExplicit: true } as const;
     await execution.applySessionConfiguration('thread-1', mixed, previous);
     expect(update).toHaveBeenCalledWith('thread-1', {
       model: 'model-b', thinkingMode: 'high', permissionMode: 'manualBypass',

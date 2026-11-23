@@ -3,18 +3,22 @@
 import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
-import { executorIdFromUrl, executorIdFromValue } from './executor-target.js';
+import { executorIdFromUrl, executorIdFromValue, onLoginInstance } from './executor-target.js';
+import { LOGIN_INSTANCE_QUERY, type AgentAuthLoginHttpStatus } from '../../../common/agent-auth.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 
 interface AgentRouteDeps {
   agents: AgentRegistryServiceContract;
   apiProviders: ApiProviderService;
+  responseCache: ModelCatalogResponseCache;
+  readyInstanceId(executorId: string): string;
 }
 
-export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDeps): RouteMap {
+export default function createAgentRoutes({ agents, apiProviders, responseCache, readyInstanceId }: AgentRouteDeps): RouteMap {
   function validateAuthLoginAgent(agentId: string, executorId: string): Response | null {
     agents.assertExecutorReady(executorId);
     if (!agents.hasAgent(agentId, executorId)) {
@@ -53,7 +57,11 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
     try {
       const executorId = executorIdFromUrl(url);
       if (agentId) {
-        const status = await agents.getAgentAuthStatus(agentId, executorId);
+        const status = await onLoginInstance(
+          () => readyInstanceId(executorId),
+          url.searchParams.get(LOGIN_INSTANCE_QUERY),
+          () => agents.getAgentAuthStatus(agentId, executorId),
+        );
         if (!status) {
           return jsonError(`Unknown agent: ${agentId}`, 400);
         }
@@ -85,6 +93,9 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
       if (invalidAgent) return invalidAgent;
       return Response.json(await agents.launchAgentAuthLogin(agentId, executorId));
     } catch (error) {
+      if (error instanceof AgentIntegrationError && error.code === 'OPERATION_UNSUPPORTED') {
+        return jsonError(error.message, 501, error.code, false);
+      }
       return jsonErrorFromUnknown(error);
     }
   }
@@ -99,7 +110,14 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
       const executorId = executorIdFromUrl(url);
       const invalidAgent = validateAuthLoginAgent(agentId, executorId);
       if (invalidAgent) return invalidAgent;
-      return Response.json(await agents.getAgentAuthLoginStatus(agentId, expectedSessionId, executorId));
+      const instanceId = readyInstanceId(executorId);
+      const status = await onLoginInstance(() => readyInstanceId(executorId), instanceId,
+        () => agents.getAgentAuthLoginStatus(agentId, expectedSessionId, executorId));
+      if (status.state === 'succeeded') {
+        if (status.sessionId === expectedSessionId) responseCache.clear(executorId);
+        return Response.json({ ...status, instanceId } satisfies AgentAuthLoginHttpStatus);
+      }
+      return Response.json(status);
     } catch (error) {
       return jsonErrorFromUnknown(error);
     }

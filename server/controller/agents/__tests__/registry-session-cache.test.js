@@ -19,12 +19,18 @@ import { AgentRegistry } from '../registry.ts';
 import { MetadataIndex } from '../../chats/metadata-store.ts';
 import { resolveChatTitle } from '../../chats/chat-title.ts';
 import createAgentRoutes from '../../routes/agents.ts';
+import { ModelCatalogResponseCache } from '../model-catalog-cache.ts';
 
 const CHAT_ID = '1783725900000200';
 const AT = '2026-08-15T00:00:00.000Z';
 const PREAMBLE_A = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 const PREAMBLE_B = '80becfa6-c9c7-4b31-9190-fd23c0bedf9c';
 const PREAMBLE_MISSING = '936903ad-8b98-43eb-a7d4-c17ce0dc18d8';
+
+function authRoutes(agents) {
+  return createAgentRoutes({ agents, apiProviders: { getCatalog: () => [] }, responseCache: new ModelCatalogResponseCache(),
+    readyInstanceId: () => 'test-instance' });
+}
 
 describe('AgentRegistry session cache', () => {
   let root;
@@ -246,7 +252,7 @@ describe('AgentRegistry session cache', () => {
       list: () => [integration],
       get: (id) => id === 'test' ? integration : null,
     });
-    const routes = createAgentRoutes({ agents: registry });
+    const routes = authRoutes(registry);
     const expected = { test: { authenticated: false, canReauth: false, label: 'Synthetic agent', source: 'none' } };
     for (const query of ['', '?agent=test']) {
       const url = new URL(`http://localhost/api/v1/agents/auth${query}`);
@@ -257,9 +263,16 @@ describe('AgentRegistry session cache', () => {
     expect(registry.supportsAuthLogin('test')).toBe(false);
   });
 
+  it('reports the actionable auth detail for a provider that is not ready', async () => {
+    const integration = { descriptor: { id: 'test' }, endpoints: null, readiness: null };
+    const registry = createRegistry(undefined, undefined, { list: () => [integration] });
+    expect(await registry.getAgentReadinessMap({ test: { authenticated: false, detail: 'Install the provider CLI.' } }))
+      .toMatchObject({ test: { ready: false, reason: 'Install the provider CLI.' } });
+  });
+
   it('returns a client error for unknown-agent auth and an empty command catalog', async () => {
     const registry = createRegistry();
-    const routes = createAgentRoutes({ agents: registry });
+    const routes = authRoutes(registry);
     const url = new URL('http://localhost/api/v1/agents/auth?agent=unknown-agent');
     const response = await routes['/api/v1/agents/auth'].GET(new Request(url), url);
     expect(response.status).toBe(400);
@@ -272,7 +285,7 @@ describe('AgentRegistry session cache', () => {
   it('preserves executor-unavailable responses rather than treating remote agents as unknown', async () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const registry = createRegistry();
-    const routes = createAgentRoutes({ agents: registry });
+    const routes = authRoutes(registry);
     const url = new URL(`http://localhost/api/v1/agents/auth?agent=unknown-agent&executorId=${executorId}`);
     const response = await routes['/api/v1/agents/auth'].GET(new Request(url), url);
     expect(response.status).toBe(503);

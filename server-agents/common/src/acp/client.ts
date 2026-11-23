@@ -25,6 +25,10 @@ export class AcpClient {
     this.#options = options;
   }
 
+  get isConnected(): boolean {
+    return this.#transport.isConnected;
+  }
+
   async connect(spec: AcpSpawnSpec): Promise<void> {
     await this.#transport.connect(spec);
     this.#initializeResult = await this.#transport.request<AcpInitializeResult>('initialize', this.#options.initialize);

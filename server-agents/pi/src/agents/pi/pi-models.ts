@@ -35,7 +35,12 @@ export function parsePiModelListing(stdout: string, stderr: string): SharedModel
   const rows = lines.slice(start + 1);
   if (header?.startsWith(EMPTY_BANNER) && rows.length === 2
     && rows[0]?.trimEnd().endsWith('providers.md') && rows[1]?.trimEnd().endsWith('models.md')) {
-    if (stderr.trim()) throw new Error('Pi reported discovery errors. Check pi --list-models on this executor.');
+    // Pi can repeat the login guidance as a startup warning before printing the empty listing.
+    // https://github.com/earendil-works/pi/blob/faac585884ae2c013a6b1400f3e9e77f10b34bac/packages/coding-agent/src/main.ts#L927-L973
+    const diagnostics = stderr.replaceAll('\r\n', '\n').trim();
+    if (diagnostics && diagnostics !== `Warning: ${[header, ...rows].join('\n')}`) {
+      throw new Error('Pi reported discovery errors. Check pi --list-models on this executor.');
+    }
     return [];
   }
   if (!header || !TABLE_HEADER.test(header) || !rows.length) {

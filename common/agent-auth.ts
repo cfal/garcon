@@ -37,3 +37,9 @@ export interface AgentAuthLoginCompleteResult {
   submitted: true;
   sessionId: string;
 }
+
+// Browser confirmation and discovery belong to the worker that finished the login.
+export type AgentAuthLoginHttpStatus = Exclude<AgentAuthLoginStatus, { state: 'succeeded' }>
+  | (Extract<AgentAuthLoginStatus, { state: 'succeeded' }> & { instanceId: string });
+
+export const LOGIN_INSTANCE_QUERY = 'loginInstance';
