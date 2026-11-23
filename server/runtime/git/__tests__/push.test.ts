@@ -62,8 +62,8 @@ async function pushFixture(remoteDirectory = 'remote.git') {
 
 test('preserves errors that prevent the push process from starting', async () => {
   const { root, projectPath } = await executorRuntimeFixture();
-  const failure = (signal?: AbortSignal) => withGitOperation(root, { mutation: true, signal }, () =>
-    pushBranchRef(projectPath, 'origin', 'refs/heads/main', { env: { PATH: projectPath } }),
+  const failure = (signal?: AbortSignal) => withGitOperation(root, { mutation: true }, () =>
+    pushBranchRef(projectPath, 'origin', 'refs/heads/main', { env: { PATH: projectPath }, signal }),
   ).then(() => null, gitServiceError);
   expect(await failure()).toMatchObject({ code: 'GIT_MISSING' });
   expect(await failure(AbortSignal.abort())).toMatchObject({ code: 'GIT_TIMEOUT' });
@@ -263,9 +263,15 @@ test('allows ordinary hook logs but does not confirm a truncated push report', a
 
 test('does not confirm a multi-URL push when only the first complete report fits', async () => {
   const { git, root, projectPath, remote } = await pushFixture();
+  await git.push({ projectPath });
+  const { stdout } = await runGit(projectPath, ['push', '--porcelain', 'origin', 'refs/heads/main:refs/heads/main']);
+  // The retained prefix must end at the first report's Done, not partway through the second.
+  const padding = 1024 * 1024 - Buffer.byteLength(stdout) - 1;
+  await installHook(projectPath, 'pre-push', `case "$2" in *remote.git) printf '%0${padding}d\\n' 0;; esac`);
+  expect(await git.push({ projectPath })).toMatchObject({ success: true });
+
   const second = await createBareRemote(root, 'second.git');
   await addOriginPushUrls(projectPath, remote, second);
-  await installHook(projectPath, 'pre-push', 'case "$2" in *second.git) printf "%02000000d\\n" 0;; esac');
   const tip = await oid(projectPath);
   await expect(git.push({ projectPath })).rejects.toMatchObject({
     code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('truncated'),
