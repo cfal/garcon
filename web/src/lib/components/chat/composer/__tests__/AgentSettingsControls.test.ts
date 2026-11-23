@@ -27,7 +27,20 @@ describe('AgentSettingsControls', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Limit: 1' }));
 		const input = screen.getByRole('spinbutton', { name: 'Limit' });
 		await waitFor(() => expect(document.activeElement).toBe(input));
-		expect(await fireEvent.keyDown(input, { key: 'ArrowUp' })).toBe(true);
+		const bubbled: string[] = [];
+		const record = (event: KeyboardEvent) => bubbled.push(event.key);
+		document.addEventListener('keydown', record);
+		try {
+			for (const key of ['ArrowUp', '1']) {
+				expect(await fireEvent.keyDown(input, { key })).toBe(true);
+				expect(document.activeElement).toBe(input);
+			}
+			expect(bubbled).toEqual([]);
+			await fireEvent.keyDown(input, { key: 'Tab' });
+			expect(bubbled).toEqual(['Tab']);
+		} finally {
+			document.removeEventListener('keydown', record);
+		}
 		await fireEvent.change(input, { target: { value: '4' } });
 		expect(onChange).toHaveBeenCalledWith(descriptor, 4);
 	});

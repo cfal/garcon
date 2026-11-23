@@ -49,7 +49,7 @@ test.each(['idle', 'queued'] as const)('drops native files onto the %s composer 
     });
     await browserExpect(send).toBeVisible({ timeout: 20_000 });
     await browserExpect(send).toBeEnabled();
-    const target = composer.locator('[data-composer-group="prompt"] button').first();
+    const target = composer.locator('[data-composer-group="prompt"]').getByRole('button').first();
     const bounds = await target.boundingBox();
     if (!bounds) throw new Error('Missing composer drop target bounds');
     const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
