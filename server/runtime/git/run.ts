@@ -212,10 +212,10 @@ async function runGitProcess(
         return '';
       });
     const diagnosticOutput = options.truncateStdout === true;
-    const stdoutLimit = diagnosticOutput ? options.maxStdoutBytes ?? 32_768 : options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES;
+    const stdoutLimit = options.maxStdoutBytes ?? (diagnosticOutput ? 32_768 : GIT_DEFAULT_MAX_STDOUT_BYTES);
     const [stdout, stderr, exitCode] = await Promise.all([
       captureOutput(diagnosticOutput
-        ? readTextStreamPrefix(proc.stdout, stdoutLimit)
+        ? readTextStreamPrefix(proc.stdout, stdoutLimit, markGitOutputTruncated)
         : readGitOutput(proc.stdout, 'stdout', stdoutLimit)),
       captureOutput(readTextStreamPrefix(
         proc.stderr,
@@ -227,7 +227,6 @@ async function runGitProcess(
       abortState.cleanup();
       await termination;
     });
-    if (diagnosticOutput && Buffer.byteLength(stdout) >= stdoutLimit) markGitOutputTruncated();
     if (outputLimitError) throw outputLimitError;
     if (exitCode === 0 && !abortState.aborted()) return { stdout, stderr };
 

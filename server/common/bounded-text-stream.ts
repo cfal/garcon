@@ -1,7 +1,8 @@
-async function readBoundedTextStream(
+// Drains the stream while retaining only its bounded prefix. Notifies on the first discarded byte.
+export async function readTextStreamPrefix(
   stream: ReadableStream<Uint8Array> | null,
   maxBytes: number,
-  createLimitError?: () => Error,
+  onTruncate?: () => void,
 ): Promise<string> {
   if (!stream) return '';
   const reader = stream.getReader();
@@ -14,7 +15,8 @@ async function readBoundedTextStream(
       if (next.done) break;
       const remainingBytes = maxBytes - byteCount;
       if (next.value.byteLength > remainingBytes) {
-        if (createLimitError) throw createLimitError();
+        onTruncate?.();
+        onTruncate = undefined;
         if (remainingBytes > 0) {
           chunks.push(decoder.decode(next.value.subarray(0, remainingBytes), { stream: true }));
           byteCount = maxBytes;
@@ -36,13 +38,5 @@ export function readTextStreamWithLimit(
   maxBytes: number,
   createLimitError: () => Error,
 ): Promise<string> {
-  return readBoundedTextStream(stream, maxBytes, createLimitError);
-}
-
-// Drains the stream while retaining only its bounded prefix.
-export function readTextStreamPrefix(
-  stream: ReadableStream<Uint8Array> | null,
-  maxBytes: number,
-): Promise<string> {
-  return readBoundedTextStream(stream, maxBytes);
+  return readTextStreamPrefix(stream, maxBytes, () => { throw createLimitError(); });
 }
