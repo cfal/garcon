@@ -39,6 +39,8 @@ export interface ConversationPermissionServiceOptions {
 // Owns what happens after the user answers a permission prompt, including the plan-approval
 // choices that resume the turn with a different permission mode.
 export class ConversationPermissionService {
+	readonly #pendingDecisions = new Set<string>();
+
 	constructor(private readonly options: ConversationPermissionServiceOptions) {}
 
 	handlePermissionDecision(
@@ -74,6 +76,8 @@ export class ConversationPermissionService {
 		failed: (detail: string) => string,
 	): void {
 		const { deps } = this.options;
+		const pendingKey = JSON.stringify([chatId, permissionOccurrenceId]);
+		if (this.#pendingDecisions.has(pendingKey)) return;
 		const command = {
 			clientRequestId: createClientCommandId(),
 			chatId,
@@ -83,6 +87,7 @@ export class ConversationPermissionService {
 			alwaysAllow: Boolean(decision.alwaysAllow),
 			response: decision.response,
 		};
+		this.#pendingDecisions.add(pendingKey);
 		void submitReplayedCommand(() => sendPermissionDecision(command))
 			.then(() => {
 				if (!deps.sessions.byId[chatId]) return;
@@ -95,7 +100,8 @@ export class ConversationPermissionService {
 					'error',
 					permissionDecisionFailureNotice(error, failed),
 				);
-			});
+			})
+			.finally(() => this.#pendingDecisions.delete(pendingKey));
 	}
 
 	#forgetPendingPermission(chatId: string, permissionOccurrenceId: string): void {

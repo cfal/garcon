@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 	import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 	import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
@@ -66,6 +67,9 @@
 	import type { AgentMetadata } from '$lib/agents/model-catalog-store.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
+	import { AssistantMessage } from '$shared/chat-types';
+	import type { ChatQueueState } from '$shared/queue-state';
+	import { composerQuestion, composerQuestionKey } from '$lib/chat/composer/composer-question.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
 		composerStatusBarGitProjects?: boolean;
@@ -119,7 +123,9 @@
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
 	});
-	setChatDrafts(new ChatDraftStore());
+	let selectedChatExists = $state(true);
+	const chatDrafts = new ChatDraftStore();
+	setChatDrafts(chatDrafts);
 	setAsyncQuestionController(new AsyncQuestionController());
 	const gitDeps = createGitSurfaceTestDeps();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
@@ -154,16 +160,16 @@
 			return selectedChat;
 		},
 		get byId() {
-			return { [selectedChat.id]: selectedChat };
+			return selectedChatExists ? { [selectedChat.id]: selectedChat } : {};
 		},
 		get orderedChats() {
-			return [selectedChat];
+			return selectedChatExists ? [selectedChat] : [];
 		},
 		get order() {
-			return [selectedChat.id];
+			return selectedChatExists ? [selectedChat.id] : [];
 		},
 		startupByChatId: {},
-		hasChat: (chatId: string) => chatId === selectedChat.id,
+		hasChat: (chatId: string) => selectedChatExists && chatId === selectedChat.id,
 		isDraft: () => false,
 		isChatProcessing: (chatId: string) => chatId === selectedChat.id && selectedChat.isProcessing,
 		processingPhase: () => selectedChat.processingPhase,
@@ -198,6 +204,7 @@
 		openNewChatDialog: () => {},
 	} as never);
 	setWs({
+		requestProcessingSnapshot: () => Promise.resolve(),
 		messages: [],
 		trimOffset: 0,
 		trimConsumedMessages: () => {},
@@ -215,6 +222,7 @@
 	} as never);
 	setRemoteSettings({} as never);
 	setModelCatalog({
+		isValidated: true,
 		getAgent: (id: string): AgentMetadata | null => executionPolicy === null ? null : ({
 			selectionLabel: 'Model',
 			inputFormatByModel: {},
@@ -379,6 +387,88 @@
 	export async function waitForBranchAction(): Promise<void> {
 		await branchAction;
 		await tick();
+	}
+
+	export async function seedChoice(
+		content = 'Which action do you prefer?\n- /clear\n- Keep the conversation',
+		viewId = 'gen-choices',
+	): Promise<string> {
+		selectedChat.isProcessing = false;
+		selectedChat.processingPhase = null;
+		seedTranscript(conversationPanel.transcript,
+			selectedChat.id,
+			viewId,
+			[{ ordinal: 1, message: new AssistantMessage('2026-01-01T00:00:00.000Z', content) }],
+			{ lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+		await tick();
+		const question = composerQuestion(conversationPanel.transcript.entries, [], {
+			isProcessing: false,
+			hasLaterMessages: false,
+		});
+		if (!question) throw new Error('Expected a synthetic composer question');
+		return composerQuestionKey(question, selectedChat.id, viewId);
+	}
+
+	export async function answerChoice(answer: string, viewId = 'gen-choices'): Promise<boolean> {
+		if (!panelActions) throw new Error('Expected registered conversation panel actions');
+		const question = composerQuestion(conversationPanel.transcript.entries, [], {
+			isProcessing: false, hasLaterMessages: false,
+		});
+		if (question?.kind !== 'plain') return false;
+		const prompt = question.questions[0];
+		const option = prompt.options.find(option => option.label === answer);
+		if (!option) return false;
+		return panelActions.answerChoice(CANONICAL_CHAT_SURFACE_ID, selectedChat.id, viewId,
+			composerQuestionKey(question, selectedChat.id, viewId),
+			[{ questionId: prompt.id, selectedOptionIds: [option.id] }]);
+	}
+
+	export async function answerChoices(
+		answers: import('$lib/chat/composer/response-choices.js').ResponseChoiceAnswer[],
+	): Promise<boolean> {
+		if (!panelActions) throw new Error('Expected registered conversation panel actions');
+		const question = composerQuestion(conversationPanel.transcript.entries, [], {
+			isProcessing: false, hasLaterMessages: false,
+		});
+		if (question?.kind !== 'plain') return false;
+		return panelActions.answerChoice(CANONICAL_CHAT_SURFACE_ID, selectedChat.id, 'gen-choices',
+			composerQuestionKey(question, selectedChat.id, 'gen-choices'), answers);
+	}
+
+	export function choiceStatus(key: string) {
+		return panelActions?.choiceStatus(key);
+	}
+
+	export function setChoiceDraft(text: string, attachments: File[]): void {
+		chatDrafts.setText(selectedChat.id, text);
+		chatDrafts.setAttachments(selectedChat.id, attachments);
+	}
+
+	export function choiceDraft() {
+		return chatDrafts.snapshot(selectedChat.id);
+	}
+
+	export function changeChoiceTarget(viewId: string, ownerEpoch: string): void {
+		conversationPanel.transcript.transcriptViewId = viewId;
+		selectedChat.agentOwnershipEpoch = ownerEpoch;
+	}
+
+	export function setChoiceQueue(queue: ChatQueueState): void {
+		conversationUi.setExecutionControlFromLiveUpdate(selectedChat.id, {
+			serverInstanceId: 'server-instance-test',
+			queue,
+			version: 100,
+			updatedAt: null,
+		});
+	}
+
+	export function choiceCleanupTargets() {
+		return { conversationUi, transcript: conversationPanel.transcript };
+	}
+
+	export function deleteChoiceChat(): void {
+		selectedChatExists = false;
 	}
 </script>
 
