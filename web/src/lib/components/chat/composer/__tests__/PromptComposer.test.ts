@@ -101,7 +101,7 @@ describe('PromptComposer focus', () => {
 		});
 		const editor = screen.getByRole<HTMLTextAreaElement>('textbox');
 		await fireEvent.input(editor, { target: { value: 'Retained draft' } });
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 		expect(await screen.findByRole('button', { name: 'Codex' })).toBeTruthy();
 		await rendered.rerender({ observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true } });
 		await waitFor(() => expect(screen.queryByRole('button', { name: 'Codex' })).toBeNull());
