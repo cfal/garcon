@@ -477,6 +477,9 @@
 	setPreambles(preambles);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
+	export function getFocusServices() {
+		return { appShell, transientLayers };
+	}
 	setCanonicalWorkspaceLayout();
 	onDestroy(() => {
 		unsubscribeSidebarRecenter();

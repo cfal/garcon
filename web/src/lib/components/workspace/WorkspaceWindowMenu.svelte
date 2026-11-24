@@ -5,6 +5,7 @@
 	import { dropdownMenuPrimitives } from '$lib/components/ui/menu-primitives.js';
 	import { getWorkspaceCoordinator } from '$lib/context';
 	import WorkspaceWindowTabMenu from './WorkspaceWindowTabMenu.svelte';
+	import WorkspaceWindowMenuRoot from './WorkspaceWindowMenuRoot.svelte';
 	import {
 		DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
 		type WorkspaceWindowTitlebarMetrics,
@@ -47,16 +48,18 @@
 	});
 </script>
 
-<DropdownMenu bind:open>
-	<DropdownMenuTrigger
-		class="flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-		style={`height: ${titlebarMetrics.controlSizePx}px; width: ${titlebarMetrics.controlSizePx}px;`}
-		aria-label={m.workspace_window_actions()}
-		title={m.workspace_window_actions()}
-		data-workspace-window-menu-trigger={windowId}
-	>
-		<EllipsisVertical size={titlebarMetrics.iconSizePx} />
-	</DropdownMenuTrigger>
+<WorkspaceWindowMenuRoot root={DropdownMenu} bind:open>
+	{#snippet trigger()}
+		<DropdownMenuTrigger
+			class="flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			style={`height: ${titlebarMetrics.controlSizePx}px; width: ${titlebarMetrics.controlSizePx}px;`}
+			aria-label={m.workspace_window_actions()}
+			title={m.workspace_window_actions()}
+			data-workspace-window-menu-trigger={windowId}
+		>
+			<EllipsisVertical size={titlebarMetrics.iconSizePx} />
+		</DropdownMenuTrigger>
+	{/snippet}
 	<WorkspaceWindowTabMenu
 		menu={dropdownMenuPrimitives}
 		{windowId}
@@ -67,4 +70,4 @@
 		{onSelect}
 		{surfaceMenuItems}
 	/>
-</DropdownMenu>
+</WorkspaceWindowMenuRoot>

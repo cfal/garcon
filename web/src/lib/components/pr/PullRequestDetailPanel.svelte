@@ -91,7 +91,7 @@
 				<PullRequestReviewTab controller={pullRequests} {currentTime} {onOpenChat} />
 			{:else if detail}
 				{#if pullRequests.tab === 'changes'}
-					<PullRequestChangesTab {detail} />
+					<PullRequestChangesTab {detail} progress={pullRequests.fileProgress} />
 				{:else}
 					<PullRequestChecksTab checks={detail.checks} />
 				{/if}

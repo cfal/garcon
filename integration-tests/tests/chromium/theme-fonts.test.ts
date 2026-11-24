@@ -250,7 +250,7 @@ test("terminal fonts update without clearing output or replacing the shell", asy
             .getByRole("button", { name: "Terminal settings", exact: true })
             .click();
           await page
-            .getByRole("button", { name: "Font size", exact: true })
+            .getByRole("combobox", { name: "Font size", exact: true })
             .click();
           const option = page.getByRole("option", {
             name: "13px (Default)",

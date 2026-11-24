@@ -114,6 +114,8 @@ describe('WorkspaceHostGeometryState', () => {
 		harness.setMeasured(820, 640);
 		ResizeObserverHarness.emit(harness.element, 820, 640);
 		expect(frames.size).toBe(1);
+		expect(harness.geometry.size).toBeNull();
+		expect(harness.geometry.measureHostSize()).toEqual({ width: 820, height: 640 });
 		flushFrames();
 		expect(harness.geometry.size).toEqual({ width: 820, height: 640 });
 

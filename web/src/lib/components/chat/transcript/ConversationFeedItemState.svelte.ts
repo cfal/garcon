@@ -1,3 +1,5 @@
+import type { ConversationRowMembership } from './conversation-retained-row-lookup.js';
+
 export type ConversationDisclosureKind =
 	| 'thinking'
 	| 'tool-input'
@@ -89,7 +91,7 @@ export class ConversationFeedItemState {
 
 	reconcile(
 		surfaceIdentity: string,
-		validRowIds: ReadonlySet<string>,
+		validRowIds: ConversationRowMembership,
 		pendingPermissionOccurrences: ReadonlySet<string>,
 	): void {
 		if (surfaceIdentity !== this.#surfaceIdentity) {

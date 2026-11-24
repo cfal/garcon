@@ -19,10 +19,6 @@
 	const transientLayers = getOptionalTransientLayers();
 	const layerControl = getTransientLayerControl();
 	const layerId = allocateTransientLayerId('context-menu');
-	const focusReturnTarget =
-		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
-			? document.activeElement
-			: null;
 
 	$effect(() => {
 		if (!transientLayers || !ref) return;
@@ -36,7 +32,8 @@
 				layerControl.close();
 				return true;
 			},
-			restoreFocus: () => focusReturnTarget?.focus(),
+			// Bits restores this opening's focus and honors the consumer's onCloseAutoFocus.
+			restoreFocus: () => undefined,
 		});
 	});
 </script>

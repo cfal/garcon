@@ -14,6 +14,7 @@ import type {
 	VirtualListSnapshot,
 	VirtualMutationAnchor,
 	VirtualMutationResult,
+	VirtualPositionView,
 	VirtualRange,
 	VirtualResumeResult,
 	VirtualResumeTarget,
@@ -194,6 +195,16 @@ export class VirtualListTransaction {
 			followEnd: anchor.kind === 'end',
 		});
 		return { kind: 'applied' };
+	}
+
+	observeSizes(measurements: readonly VirtualElementMeasurement[]): void {
+		// An observer's initial delivery commonly confirms the prepaint mount read.
+		if (
+			!this.#pendingCommit &&
+			this.#deviation.value === 0 &&
+			measurements.every(({ key, size }) => this.geometry.measuredSize(key) === size)
+		) return;
+		this.measure(measurements, 'resize');
 	}
 
 	measure(measurements: readonly VirtualElementMeasurement[], source: 'mount' | 'resize'): void {
@@ -389,17 +400,24 @@ export class VirtualListTransaction {
 		this.#driver?.resume();
 		const dom = this.#driver?.read();
 		if (!dom) return { kind: 'not-ready' };
+		if (target.kind === 'start') {
+			return this.#scheduleTarget({ kind: 'logical', offset: 0 }, 'resume', dom);
+		}
+		if (target.kind === 'end') return this.#scheduleTarget(target, 'resume', dom);
+		const index = this.geometry.indexOf(target.key);
+		const item = index === undefined ? null : this.geometry.item(index);
+		if (item) {
+			return this.#scheduleTarget(
+				{ kind: 'logical', offset: item.start - target.viewportOffset },
+				'resume',
+				dom,
+			);
+		}
+		// A missing anchor still exposes the current geometry for the caller's fallback.
 		this.#replacementPending = false;
 		this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);
 		this.#publish(dom, true);
-		if (target.kind === 'start') return this.#scheduleLogicalTarget(0, 'resume');
-		if (target.kind === 'end') return this.#scheduleTarget({ kind: 'end' }, 'resume');
-		const index = this.geometry.indexOf(target.key);
-		if (index === undefined) return { kind: 'missing-key' };
-		const item = this.geometry.item(index);
-		return item
-			? this.#scheduleLogicalTarget(item.start - target.viewportOffset, 'resume')
-			: { kind: 'missing-key' };
+		return { kind: 'missing-key' };
 	}
 
 	cancelOwnedScroll(): void {
@@ -425,18 +443,15 @@ export class VirtualListTransaction {
 		this.#driver?.destroy();
 	}
 
-	#scheduleLogicalTarget(
-		offset: number,
-		source: 'programmatic' | 'resume' = 'programmatic',
-	): VirtualScrollResult {
-		return this.#scheduleTarget({ kind: 'logical', offset }, source);
+	#scheduleLogicalTarget(offset: number): VirtualScrollResult {
+		return this.#scheduleTarget({ kind: 'logical', offset });
 	}
 
 	#scheduleTarget(
 		target: PendingTarget,
 		source: 'programmatic' | 'resume' = 'programmatic',
+		dom = this.#driver?.read(),
 	): VirtualScrollResult {
-		const dom = this.#driver?.read();
 		if (!dom || this.#suspended) return { kind: 'not-ready' };
 		this.#replacementPending = false;
 		this.#setDeviation(SETTLED_VIRTUAL_DEVIATION);
@@ -620,10 +635,14 @@ export class VirtualListTransaction {
 				: this.#clampLogicalOffset(intendedLogicalOffset, dom);
 		const visibleRange =
 			!notReady && dom ? this.geometry.range(logicalOffset, dom.viewportSize) : null;
-		const overscanRange = visibleRange ? this.#overscanRange(visibleRange) : null;
 		const sizerSize = Math.max(0, this.geometry.totalSize() - this.#deviation.value);
 		const geometryChanged = this.#publishedGeometryRevision !== this.geometry.revision;
 		const deviationChanged = this.#publishedDeviation !== this.#deviation.value;
+		const positions =
+			geometryChanged || deviationChanged
+				? this.geometry.positionView(this.#deviation.value)
+				: this.#snapshot.positions;
+		const overscanRange = visibleRange ? this.#overscanRange(visibleRange, positions) : null;
 		if (
 			!force &&
 			!geometryChanged &&
@@ -640,7 +659,7 @@ export class VirtualListTransaction {
 			visibleRange,
 			overscanRange,
 			sizerSize,
-			positions: this.geometry.positionView(this.#deviation.value),
+			positions,
 		};
 		this.#publishedGeometryRevision = this.geometry.revision;
 		this.#publishedDeviation = this.#deviation.value;
@@ -667,12 +686,11 @@ export class VirtualListTransaction {
 		return target.offset + dom.leadingOffset - target.leadingOffset;
 	}
 
-	#overscanRange(visible: VirtualRange): VirtualRange | null {
+	#overscanRange(visible: VirtualRange, positions: VirtualPositionView): VirtualRange | null {
 		const overscan = Math.max(0, Math.floor(this.options.getOverscan()));
 		let startIndex = Math.max(0, visible.startIndex - overscan);
 		const endIndex = Math.min(this.geometry.count - 1, visible.endIndex + overscan);
-		const view = this.geometry.positionView(this.#deviation.value);
-		while (startIndex <= endIndex && (view.itemAt(startIndex)?.end ?? 0) <= 0) startIndex += 1;
+		while (startIndex <= endIndex && (positions.itemAt(startIndex)?.end ?? 0) <= 0) startIndex += 1;
 		return startIndex <= endIndex ? { startIndex, endIndex } : null;
 	}
 

@@ -63,6 +63,23 @@ describe('sidebar display preferences', () => {
 });
 
 describe('recursive sidebar projection', () => {
+	it('does not index project paths when project grouping is disabled', () => {
+		let reads = 0;
+		const record = {
+			...chat('a'),
+			get projectPath() {
+				reads++;
+				return '/workspace/project';
+			},
+		};
+		const model = buildSidebarRowModel(projectionInput([record], {
+			groupingFields: selections(['status']),
+			groupNestedProjectPaths: true,
+		}));
+		expect(model.visibleChatIds).toEqual(['a']);
+		expect(reads).toBe(0);
+	});
+
 	it.each(permutations(SIDEBAR_GROUPING_FIELDS))(
 		'indents every grouping level in order %j',
 		(...fields) => {

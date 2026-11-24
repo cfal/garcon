@@ -41,7 +41,6 @@
 		getSidebarSearch,
 		getWorkspaceCoordinator,
 		getSingletonSurfaces,
-		getTransientLayers,
 		setChatDrafts,
 		setNewChatPromptDrafts,
 	} from '$lib/context';
@@ -73,15 +72,15 @@
 		SearchResultSelection,
 	} from '$lib/sidebar/search/search-result-navigation-controller.js';
 	import { createAppShellSidebarOrder } from './app-shell-sidebar-order';
+	import { createAppShellMobileDrawer } from './app-shell-mobile-drawer.js';
 	import SidebarDisplayDialog from '../sidebar/SidebarDisplayDialog.svelte';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
+	import type { DrawerComposerSelection } from '$lib/stores/app-shell.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
-	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
-	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
 	const commandRegistry = getWorkbenchCommands();
 	const navigation = getNavigation();
@@ -97,7 +96,6 @@
 	let handledTicketLink: string | null = null;
 	const sidebarSearch = getSidebarSearch();
 	const workspace = getWorkspaceCoordinator();
-	const transientLayers = getTransientLayers();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
 	const chatDrafts = new ChatDraftStore();
 	setChatDrafts(chatDrafts);
@@ -110,18 +108,7 @@
 	let sidebarDisplayReturnFocus = $state<(() => void) | undefined>();
 	const sidebarOrder = createAppShellSidebarOrder();
 	const displayedSidebarChatIds = $derived(sidebarOrder.projection.rowModel.visibleChatIds);
-	let mobileSidebarFocusReturnTarget: HTMLElement | null = null;
-	const mobileSidebarLayer = transientLayerAttachment({
-		registry: transientLayers,
-		id: allocateTransientLayerId('mobile-sidebar'),
-		kind: 'sidebar-overlay',
-		modality: 'main-inert',
-		onEscape: () => {
-			closeMobileSidebar();
-			return true;
-		},
-		restoreFocus: restoreMobileSidebarFocus,
-	});
+	const mobileDrawer = createAppShellMobileDrawer(handleChatSelect);
 	const archiveUndo = new ArchiveUndoController(sessions, notifications);
 	$effect(() => archiveUndo.reconcile());
 	const chatActionController = new ChatActionController({
@@ -193,6 +180,7 @@
 			return chatListAutohideActive;
 		},
 	});
+	const desktopChatListHidden = $derived(hideChatList || chatListAutohide.collapsed);
 	let desktopChatListPanelElement = $state<HTMLElement | null>(null);
 	let chatListRevealTrigger = $state<HTMLButtonElement | null>(null);
 	const mobileActiveDescriptor = $derived(
@@ -249,11 +237,9 @@
 		setSelectedChatId: (chatId) => sessions.setSelectedChatId(chatId),
 		navigateToChat: gotoChat,
 		navigateToBareRoute: () => goto(resolve('/')),
-		requestComposerFocus: () => appShell.requestComposerFocus(),
+		requestComposerFocus: (selection) => appShell.requestComposerFocus(selection),
 		requestSidebarRecenter: () => appShell.requestSidebarRecenterToSelected(),
-		reportOpenError: (error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		},
+		reportOpenError: reportWorkspaceOpenError,
 		reportDeleteError: (error) => {
 			notifications.error(
 				error instanceof Error ? error.message : m.notifications_delete_chat_failed(),
@@ -395,9 +381,9 @@
 		void sessions.refreshChats();
 	});
 
-	function handleChatSelect(chatId: string): void {
+	function handleChatSelect(chatId: string, drawerSelection?: DrawerComposerSelection): void {
 		cancelSearchResultNavigation();
-		void chatNavigation.showChatInCurrentWindow(chatId, { navigate: true });
+		void chatNavigation.showChatInCurrentWindow(chatId, { navigate: true, drawerSelection });
 	}
 
 	function cancelSearchResultNavigation(): void {
@@ -420,7 +406,7 @@
 		cancelSearchResultNavigation();
 		const version = searchSelectionVersion;
 		const port = searchResultNavigation;
-		if (isMobile) closeMobileSidebar();
+		if (isMobile) mobileDrawer.close();
 		// Completes dialog and drawer focus restoration before navigation owns focus.
 		await tick();
 		if (version !== searchSelectionVersion || port !== searchResultNavigation) return;
@@ -431,18 +417,18 @@
 		await port.open(selection);
 	}
 
+	function reportWorkspaceOpenError(error: unknown): void {
+		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+	}
+
 	function handleOpenChatInNewWindow(chatId: string, edge?: WorkspaceWindowEdge): void {
-		void workspace.openChatInNewWindow(chatId, undefined, edge).catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		});
+		void workspace.openChatInNewWindow(chatId, undefined, edge).catch(reportWorkspaceOpenError);
 	}
 
 	function handleOpenForkedChat(chatId: string, sourceChatId: string): void {
 		void workspace
 			.openForkedChat(chatId, sourceChatId, localSettings.forkOpenPlacement)
-			.catch((error) => {
-				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-			});
+			.catch(reportWorkspaceOpenError);
 	}
 
 	function handleNewChat() {
@@ -524,36 +510,8 @@
 		}
 	}
 
-	function toggleMobileSidebar() {
-		if (appShell.sidebarOpen) {
-			closeMobileSidebar();
-			return;
-		}
-		transientLayers.open('main-inert', () => appShell.setSidebarOpen(true));
-	}
-
-	function closeMobileSidebar() {
-		appShell.setSidebarOpen(false);
-	}
-
-	function captureMobileSidebarFocusReturnTarget(): void {
-		mobileSidebarFocusReturnTarget =
-			document.activeElement instanceof HTMLElement ? document.activeElement : null;
-	}
-
-	function restoreMobileSidebarFocus(): void {
-		const target = mobileSidebarFocusReturnTarget;
-		mobileSidebarFocusReturnTarget = null;
-		if (target?.isConnected) target.focus({ preventScroll: true });
-	}
-
-	function handleMobileSidebarCloseAutoFocus(event: Event): void {
-		event.preventDefault();
-		restoreMobileSidebarFocus();
-	}
-
 	async function handleShowUsage(): Promise<void> {
-		if (isMobile) closeMobileSidebar();
+		if (isMobile) mobileDrawer.close();
 		// Completes drawer focus restoration before the surface owns focus.
 		await tick();
 		try {
@@ -561,11 +519,6 @@
 		} catch (error) {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
 		}
-	}
-
-	function handleMobileChatSelect(chatId: string): void {
-		handleChatSelect(chatId);
-		closeMobileSidebar();
 	}
 
 	function handleChatProjectPathUpdated(chatId: string, patch: { projectPath: string }): void {
@@ -707,6 +660,7 @@
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
 	<Sidebar
+		actionsHidden={!isMobile && desktopChatListHidden}
 		projection={sidebarOrder.projection}
 		reorder={sidebarOrder}
 		onShowDisplay={(returnFocus) => {
@@ -735,6 +689,7 @@
 		onShareChat={requestShareChat}
 		onManageTags={requestTagsChat}
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
+		onTileWorkingChats={(chatIds) => workspace.tileChats(chatIds)}
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
@@ -754,7 +709,6 @@
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}
-	{@const panelHidden = hideChatList || chatListAutohide.collapsed}
 	<div
 		data-workspace-chat-list
 		onfocusin={handleDesktopChatListFocus}
@@ -807,8 +761,8 @@
 			class:border-e={dividerEdge === 'end' && !hideChatList}
 			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
 			tabindex="-1"
-			aria-hidden={panelHidden}
-			inert={panelHidden}
+			aria-hidden={desktopChatListHidden}
+			inert={desktopChatListHidden}
 		>
 			{@render sidebarContent(false, handleChatSelect)}
 			{#if !hideChatList}
@@ -834,24 +788,24 @@
 		<DialogPrimitive.Root
 			open={appShell.sidebarOpen}
 			onOpenChange={(open) => {
-				if (!open) closeMobileSidebar();
+				if (!open) mobileDrawer.close();
 			}}
 		>
 			<DialogPrimitive.Overlay
 				class="fixed inset-0 z-40 transient-backdrop"
-				onclick={closeMobileSidebar}
+				onclick={mobileDrawer.close}
 			/>
 			<DialogPrimitive.Content
 				data-workspace-chat-list
 				aria-label={m.layout_chat_list()}
 				class="fixed inset-y-0 left-0 z-50 h-full w-[85%] max-w-sm bg-card shadow-2xl"
-				onOpenAutoFocus={captureMobileSidebarFocusReturnTarget}
-				onCloseAutoFocus={handleMobileSidebarCloseAutoFocus}
+				onOpenAutoFocus={mobileDrawer.captureReturnTarget}
+				onCloseAutoFocus={mobileDrawer.onCloseAutoFocus}
 				onfocusin={() => workspace.noteChatListFocus()}
-				onpointerdown={() => workspace.noteChatListFocus()}
-				{@attach mobileSidebarLayer}
+				onpointerdown={mobileDrawer.onPointerDown}
+				{@attach appShell.sidebarOpen ? mobileDrawer.layer : undefined}
 			>
-				{@render sidebarContent(true, handleMobileChatSelect)}
+				{@render sidebarContent(true, mobileDrawer.selectChat)}
 			</DialogPrimitive.Content>
 		</DialogPrimitive.Root>
 	{/if}
@@ -877,7 +831,7 @@
 				<BottomTabBar
 					activeItem={mobileActiveTab}
 					onTabChange={handleMobileTabChange}
-					onMenuClick={toggleMobileSidebar}
+					onMenuClick={mobileDrawer.toggle}
 				/>
 			{/if}
 		</div>

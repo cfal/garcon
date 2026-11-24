@@ -112,13 +112,14 @@ export class ConversationFeedRenderModelController {
 	}
 
 	#sameRows(rows: ChatDisplayRow[]): boolean {
-		return rows.length === this.#rows.length && this.#samePrefix(rows, rows.length);
+		return rows === this.#rows || (rows.length === this.#rows.length && this.#samePrefix(rows, rows.length));
 	}
 
 	#samePrefix(rows: ChatDisplayRow[], count: number): boolean {
 		for (let index = 0; index < count; index += 1) {
 			const previous = this.#rows[index];
 			const next = rows[index];
+			if (previous === next) continue;
 			if (!previous || !next || previous.kind !== next.kind || previous.id !== next.id) {
 				return false;
 			}

@@ -529,6 +529,30 @@ describe('PromptComposer focus', () => {
 		expect(textarea.style.height).toBe('96px');
 	});
 
+	it('keeps the last Source height until the shared composer is visible again', async () => {
+		const { rerender } = render(PromptComposerTestHost, { selectedChatId: 'chat-hidden-fit' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		Object.defineProperty(textarea, 'scrollHeight', {
+			get: () => textarea.value.includes('\n') ? 120 : 52,
+		});
+		await fireEvent.input(textarea, { target: { value: 'First line' } });
+		expect(textarea.style.height).toBe('52px');
+
+		const layoutRead = vi.spyOn(textarea, 'getClientRects');
+		window.dispatchEvent(new Event('resize'));
+		await rerender({ isVisible: false });
+		await fireEvent.click(screen.getByTestId('append-draft'));
+		await nextAnimationFrame();
+		window.dispatchEvent(new Event('resize'));
+		await nextAnimationFrame();
+		expect(layoutRead).not.toHaveBeenCalled();
+		expect(textarea.style.height).toBe('52px');
+
+		await rerender({ isVisible: true });
+		expect(textarea.value).toBe('First line\n\nAppended review block');
+		expect(textarea.style.height).toBe('120px');
+	});
+
 	it('ignores a saved manual height and leaves the composer entirely content-sized', async () => {
 		localStorage.setItem('composerHeight', '300');
 		render(PromptComposerTestHost, { selectedChatId: 'chat-no-manual-height' });

@@ -17,9 +17,11 @@ import {
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import type {
+	WorkspaceHostSize,
 	WorkspaceWindowsFitResolver,
 	WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
+import { planChatTiles } from './workspace-chat-tiling.js';
 import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 import {
 	balanceWindowRow,
@@ -106,6 +108,47 @@ interface WorkspaceChatPlacementPlan {
 
 export class WorkspaceChatPlacementService {
 	constructor(private readonly deps: WorkspaceChatPlacementServiceDeps) {}
+
+	async tileChats(
+		chatIds: readonly string[],
+		getHostSize: () => WorkspaceHostSize | null,
+	): Promise<number> {
+		if (!chatIds.length) return 0;
+		let tiled = 0;
+		await this.#commitPlacement((latest) => {
+			if (this.deps.isMobile()) {
+				tiled = 1;
+				const firstChatId = chatIds[0];
+				const existing = this.#existingPlacementPlan(latest, firstChatId);
+				if (existing) return existing;
+				const windowId = this.deps.resolveWindowId(latest, this.deps.lastFocusedWindowId());
+				return this.#setWindowChatPlan(windowId, firstChatId);
+			}
+			for (const window of collectWindowNodes(latest.desktopRoot)) {
+				if (
+					this.deps.windowReservations.has(window.id) ||
+					window.tabs.order.some((id) => this.deps.surfaceReservations.has(id))
+				) {
+					throw new Error(m.workspace_tile_busy());
+				}
+			}
+			const rows = planChatTiles(latest, chatIds, getHostSize());
+			const tiles = rows.flat();
+			tiled = tiles.length;
+			const focusedId = this.deps.lastFocusedWindowId();
+			const focusedWindow = focusedId && windowNodeById(latest.desktopRoot, focusedId);
+			const active = focusedWindow && latest.surfaces[focusedWindow.tabs.activeId];
+			const focusedTile = active?.type === 'chat'
+				? tiles.find((tile) => tile.windowId === focusedId && tile.chatId === active.chatId)
+				: null;
+			const { windowId } = focusedTile ?? tiles.find((tile) => tile.chatId === chatIds[0])!;
+			return {
+				destination: { windowId, surfaceId: chatViewSurfaceId(windowId) },
+				mutations: [{ type: 'tile-chats', partitionId: `partition-tile-${createRandomId()}`, rows }],
+			};
+		});
+		return tiled;
+	}
 
 	showInCurrentWindow(
 		chatId: string,

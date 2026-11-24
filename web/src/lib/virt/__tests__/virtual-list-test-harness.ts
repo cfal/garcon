@@ -194,9 +194,11 @@ export function createVirtualListHarness(options?: {
 			detachViewportAttachment = controller.viewport(viewport);
 			if (viewportSize > 0) environment.observer.emit(viewport, viewportSize);
 		},
-		mountItem(key: string, size: number) {
+		mountItem(key: string, size: number | (() => number)) {
 			const element = document.createElement('div');
-			Object.defineProperty(element, 'offsetHeight', { get: () => size });
+			Object.defineProperty(element, 'offsetHeight', {
+				get: typeof size === 'number' ? () => size : size,
+			});
 			sizer.append(element);
 			const detach = controller.item(key)(element);
 			return { element, detach };

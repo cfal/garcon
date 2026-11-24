@@ -1,0 +1,11 @@
+panes,operation,wheel_events,scroll_events,scroll_px,virtual_rows_entered,inputs,pointerdowns,function_calls_self_ms,virtual_scroll_callback_self_ms,style_total_ms,layout_total_ms,paint_total_ms,composite_total_ms
+1,idle,0,0,0,0,0,0,1,0,3,0,1,0
+1,scroll-down,12,5,1164,15,0,0,301,246,77,21,17,2
+1,scroll-up,12,4,-1164,14,0,0,187,163,111,7,11,3
+1,typing,0,0,0,0,10,0,118,0,57,15,4,0
+12,idle,0,0,0,0,0,0,1,0,1,0,0,0
+12,scroll-down,12,11,1164,6,0,0,266,180,214,39,28,61
+12,scroll-up,12,14,-1164,6,0,0,137,101,85,8,14,6
+12,typing,0,0,0,0,10,0,105,0,51,10,8,0
+12,switch-away,0,0,0,1,0,1,67,0,51,11,10,0
+12,switch-back,0,0,0,0,0,1,50,0,48,11,9,0

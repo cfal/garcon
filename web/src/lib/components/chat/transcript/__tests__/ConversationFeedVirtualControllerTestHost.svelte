@@ -111,13 +111,7 @@
 					...groupMembers.map((id): [string, number] => [id, 0]),
 					...tail.map((item, index): [string, number] => [item.item.id, index + 1]),
 				]),
-				targetByDomAnchorId: new Map(),
-				memberRowIdByDomAnchorId: new Map(),
-				representativeRowIdByKey: new Map([
-					[keys[0], groupMembers[0]],
-					...tail.map((item): [string, string] => [item.key, item.item.id]),
-				]),
-				collapsedGroupByMemberRowId: new Map(),
+				rowIdByToolAnchorId: new Map(),
 				transcriptStartIndex: 0,
 				transcriptEndIndex: items.length,
 			};
@@ -138,10 +132,7 @@
 			items,
 			indexByKey: new Map(keys.map((key, index) => [key, index])),
 			indexByRowId: new Map(),
-			targetByDomAnchorId: new Map(),
-			memberRowIdByDomAnchorId: new Map(),
-			representativeRowIdByKey: new Map(keys.map((key, index) => [key, `row-${index}`])),
-			collapsedGroupByMemberRowId: new Map(),
+			rowIdByToolAnchorId: new Map(),
 			transcriptStartIndex: 0,
 			transcriptEndIndex: items.length,
 		};

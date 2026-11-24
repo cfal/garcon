@@ -708,6 +708,7 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
         .locator("[data-composer]")
         .elementHandle();
       const bounds = await page.locator("[data-composer]").boundingBox();
+      const warmSheets = await page.evaluateHandle(() => Array.from(document.styleSheets));
       for (const id of [ids[1], ids[0], ids[1], ids[0]]) {
         await selectChat(id);
         expect(
@@ -716,8 +717,19 @@ test("editable Markdown tables preserve drafts, focus, submission, and responsiv
             composerElement,
           ),
         ).toBe(true);
-        await browserExpect(editor).toHaveCount(1);
+        await browserExpect(
+          editor.locator(id === ids[0] ? "table" : "p.is-editor-empty"),
+        ).toHaveCount(1);
+        await browserExpect(editor).toHaveCSS("font-variant-ligatures", "none");
+        await browserExpect(editor).toHaveCSS("white-space", "pre-wrap");
+        expect(
+          await warmSheets.evaluate((sheets) =>
+            sheets.length === document.styleSheets.length &&
+            sheets.every((sheet, index) => document.styleSheets[index] === sheet),
+          ),
+        ).toBe(true);
       }
+      await warmSheets.dispose();
       expect((await page.locator("[data-composer]").boundingBox())?.y).toBe(
         bounds?.y,
       );

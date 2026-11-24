@@ -383,7 +383,7 @@ describe('TerminalSurface', () => {
 		expect(popover.classList).toContain('bg-popover');
 		expect(popover.firstElementChild?.classList).not.toContain('border');
 		expect(popover.firstElementChild?.classList).not.toContain('bg-card');
-		await fireEvent.pointerDown(screen.getByRole('button', { name: 'Font size' }), {
+		await fireEvent.pointerDown(screen.getByRole('combobox', { name: 'Font size' }), {
 			button: 0,
 			ctrlKey: false,
 			pointerType: 'mouse',

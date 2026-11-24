@@ -16,6 +16,7 @@ import {
 	appendConversationVirtualTranscriptTail,
 	buildConversationVirtualFeedModel,
 	estimateConversationFeedItemSize,
+	resolveConversationVirtualTarget,
 	type ConversationEarlierBoundaryMode,
 } from '../conversation-feed-virtual-items.js';
 
@@ -86,7 +87,7 @@ describe('conversation virtual feed model', () => {
 		const rendered = buildConversationFeedRenderModel(rows).items;
 		const model = build(rendered);
 		expect(model.indexByRowId.get('generation-1:2')).not.toBe(model.indexByRowId.get('generation-1:1'));
-		expect(model.targetByDomAnchorId.get('generation-1:2')?.innerRowId).toBe('generation-1:2');
+		expect(resolveConversationVirtualTarget(model, { kind: 'dom-anchor', id: 'generation-1:2' })?.innerRowId).toBe('generation-1:2');
 	});
 
 	it('rebuilds output when a result arrives without more stdout', () => {
@@ -116,12 +117,14 @@ describe('conversation virtual feed model', () => {
 		expect(model.items).toHaveLength(3);
 		expect(model.indexByRowId.get('generation-1:1')).toBe(1);
 		expect(model.indexByRowId.get('generation-1:2')).toBe(1);
-		expect(model.targetByDomAnchorId.get('tool-input-reused')).toEqual({
+		expect(resolveConversationVirtualTarget(model, { kind: 'dom-anchor', id: 'tool-input-reused' })).toEqual({
 			index: 1,
 			innerRowId: group.anchorId,
+			collapsedMemberRowId: 'generation-1:2',
 		});
-		expect(model.memberRowIdByDomAnchorId.get('tool-input-reused')).toBe('generation-1:2');
-		expect(model.representativeRowIdByKey.get(group.key)).toBe('generation-1:1');
+		expect(resolveConversationVirtualTarget(model, { kind: 'presentation-row', id: 'generation-1:2' })).toEqual({
+			index: 1, innerRowId: group.anchorId,
+		});
 		expect(estimateConversationFeedItemSize(group)).toBe(36);
 	});
 
@@ -175,7 +178,9 @@ describe('conversation virtual feed model', () => {
 			'transcript',
 		]);
 		expect(expanded.indexByRowId.get('generation-1:2')).toBe(3);
-		expect(expanded.collapsedGroupByMemberRowId.size).toBe(0);
+		expect(resolveConversationVirtualTarget(expanded, { kind: 'dom-anchor', id: 'tool-input-tool-2' })).toEqual({
+			index: 3, innerRowId: 'generation-1:2',
+		});
 	});
 
 	it('keeps anchored permission UI between tool runs', () => {
@@ -202,15 +207,30 @@ describe('conversation virtual feed model', () => {
 			'Duplicate conversation feed key',
 		);
 	});
+	it('keeps the last DOM alias in presentation order without retargeting a durable row or an older snapshot', () => {
+		const alias = 'tool-input-reused';
+		const surface = 'chat-1:generation-1';
+		const first = build([bashItem(1, 'reused')]);
+		const collision = appendConversationVirtualTranscriptTail(first, surface, [{ ...userItem(2), id: alias }])!;
+		const reused = appendConversationVirtualTranscriptTail(collision, surface, [bashItem(3, 'reused')])!;
+		const target = { kind: 'dom-anchor' as const, id: alias };
+		expect(resolveConversationVirtualTarget(first, target)).toEqual({ index: 1, innerRowId: 'generation-1:1' });
+		expect(resolveConversationVirtualTarget(collision, target)).toEqual({ index: 2, innerRowId: alias });
+		expect(resolveConversationVirtualTarget(reused, target)).toEqual({ index: 3, innerRowId: 'generation-1:3' });
+		expect(resolveConversationVirtualTarget(reused, { kind: 'row', id: alias }))
+			.toEqual({ index: 2, innerRowId: alias });
+		expect(resolveConversationVirtualTarget(first, { kind: 'row', id: alias })).toBeUndefined();
+	});
+
 	it('builds stable key, row, and target indexes for 20,000 rows', () => {
 		const model = build(Array.from({ length: 20_000 }, (_, index) => userItem(index + 1)));
 
 		expect(model.items).toHaveLength(20_002);
 		expect(model.indexByKey.size).toBe(20_002);
 		expect(model.indexByRowId.size).toBe(20_000);
-		expect(model.targetByDomAnchorId.size).toBe(20_000);
+		expect(model.rowIdByToolAnchorId.size).toBe(0);
 		expect(model.indexByRowId.get('generation-1:20000')).toBe(20_000);
-		expect(model.targetByDomAnchorId.get('generation-1:20000')).toEqual({
+		expect(resolveConversationVirtualTarget(model, { kind: 'dom-anchor', id: 'generation-1:20000' })).toEqual({
 			index: 20_000,
 			innerRowId: 'generation-1:20000',
 		});
@@ -274,7 +294,7 @@ describe('conversation virtual feed model', () => {
 			pendingPermissions: [],
 		});
 
-		expect(model.targetByDomAnchorId.get(`tool-result-${resultRowId}`)).toEqual({
+		expect(resolveConversationVirtualTarget(model, { kind: 'dom-anchor', id: `tool-result-${resultRowId}` })).toEqual({
 			index: 2,
 			innerRowId: resultRowId,
 		});
@@ -509,9 +529,9 @@ describe('conversation virtual feed model', () => {
 		expect(appended?.items[2]).toMatchObject({ spacingAfter: 'transcript' });
 		expect(appended?.indexByKey).not.toBe(model.indexByKey);
 		expect(appended?.indexByRowId).not.toBe(model.indexByRowId);
-		expect(appended?.targetByDomAnchorId).not.toBe(model.targetByDomAnchorId);
+		expect(appended?.rowIdByToolAnchorId).toBe(model.rowIdByToolAnchorId);
 		expect(model.indexByRowId.has('generation-1:2')).toBe(false);
-		expect(model.targetByDomAnchorId.has('generation-1:2')).toBe(false);
+		expect(resolveConversationVirtualTarget(model, { kind: 'dom-anchor', id: 'generation-1:2' })).toBeUndefined();
 		expect(model.indexByKey.get(priorEndKey)).toBe(priorEndIndex);
 		expect(appended?.indexByKey.get(priorEndKey)).toBe(priorEndIndex + 1);
 		expect(appended?.indexByRowId.get('generation-1:2')).toBe(2);

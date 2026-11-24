@@ -11,7 +11,6 @@
 		type PullRequestReviewRun,
 	} from '$shared/pull-request-reviews';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
-	import { errorMessage } from '$lib/utils/error-message.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import PullRequestReviewChip from './PullRequestReviewChip.svelte';
@@ -42,20 +41,7 @@
 					run.post.status !== 'too-long')),
 	);
 	const historyUnavailable = $derived(controller.isRunsLoading || controller.runsError !== null);
-	let pending = $state<'review' | 'stop' | 'post' | null>(null);
-	let actionError = $state<string | null>(null);
-
-	async function act(kind: 'review' | 'stop' | 'post', action: () => Promise<void>): Promise<void> {
-		pending = kind;
-		actionError = null;
-		try {
-			await action();
-		} catch (error) {
-			actionError = errorMessage(error, m.pull_request_review_action_failed());
-		} finally {
-			pending = null;
-		}
-	}
+	const pending = $derived(controller.pendingReviewAction);
 
 	function shortSha(sha: string | null): string {
 		return sha ? sha.slice(0, 7) : '';
@@ -107,23 +93,24 @@
 							historyUnavailable ||
 							controller.isRunLoading ||
 							controller.runError !== null}
-						onclick={() => act('post', () => controller.reviews.post(run.id))}
+						onclick={() => void controller.performReviewAction('post')}
 					>
 						<Send class="h-3.5 w-3.5" />
-						{pending === 'post'
-							? m.pull_request_review_posting()
-							: run.post.status === 'posted'
-								? m.pull_request_review_retry_cleanup()
-								: m.pull_request_review_post()}
+						{#if pending?.kind === 'post' && pending.runId === run.id}
+							{m.pull_request_review_posting()}
+						{:else if run.post.status === 'posted'}
+							{m.pull_request_review_retry_cleanup()}
+						{:else}
+							{m.pull_request_review_post()}
+						{/if}
 					</button>
 				{/if}
 				{#if active && entry.latestRun}
-					{@const latest = entry.latestRun}
 					<button
 						type="button"
 						class="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
 						disabled={pending !== null}
-						onclick={() => act('stop', () => controller.reviews.stop(latest.id))}
+						onclick={() => void controller.performReviewAction('stop')}
 					>
 						<Square class="h-3.5 w-3.5" />
 						{m.pull_request_review_stop()}
@@ -138,8 +125,7 @@
 								: 'bg-primary text-primary-foreground hover:bg-primary/90',
 						)}
 						disabled={pending !== null || historyUnavailable}
-						onclick={() =>
-							act('review', () => controller.reviews.review(entry.repositoryId, entry.pull.number))}
+						onclick={() => void controller.performReviewAction('review')}
 						data-pr-review-start
 					>
 						<RotateCw class="h-3.5 w-3.5" />
@@ -178,8 +164,8 @@
 					{m.pull_request_review_posts_as({ login: `@${repository.viewerLogin}` })}
 				</p>
 			{/if}
-			{#if actionError}
-				<p class="text-xs text-status-error-foreground" role="alert">{actionError}</p>
+			{#if controller.reviewActionError}
+				<p class="text-xs text-status-error-foreground" role="alert">{controller.reviewActionError}</p>
 			{/if}
 			{#if run?.state === 'needs-input'}
 				<p

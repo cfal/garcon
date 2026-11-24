@@ -1,0 +1,166 @@
+--- a/web/src/lib/components/chat/transcript/ConversationFeed.svelte
++++ b/web/src/lib/components/chat/transcript/ConversationFeed.svelte
+@@ -3,0 +4 @@
++	import { createRowShell, rowShellRequested } from './row-shell-probe';
+@@ -294,0 +296,7 @@
++	const rowShell = rowShellRequested ? createRowShell({
++		get root() { return virtualRoot; },
++		get model() { return projection.model; },
++		get entries() { return chatState.entries.length; },
++		get revision() { return projection.projectedDataRevision; },
++		get visible() { return isVisible; },
++	}) : undefined;
+@@ -442,0 +451 @@
++		rowShell?.destroy();
+@@ -501,0 +511 @@
++						{rowShell}
+--- a/web/src/lib/components/chat/transcript/ConversationFeedVirtualRow.svelte
++++ b/web/src/lib/components/chat/transcript/ConversationFeedVirtualRow.svelte
+@@ -2 +2 @@
+-	import { onDestroy } from 'svelte';
++	import { onDestroy, onMount, untrack } from 'svelte';
+@@ -14,0 +15 @@
++	import { rowShellRequested, type RowShell } from './row-shell-probe';
+@@ -23,0 +25 @@
++		rowShell?: RowShell;
+@@ -50,0 +53 @@
++		rowShell,
+@@ -77,0 +81,2 @@
++	const mountClone = rowShellRequested && untrack(() => rowShell?.enter(item));
++	if (mountClone) onMount(() => mountClone(wrapper));
+@@ -104,0 +110 @@
++	{#if !mountClone}
+@@ -133,0 +140 @@
++	{/if}
+--- /dev/null
++++ b/web/src/lib/components/chat/transcript/row-shell-probe.ts
+@@ -0,0 +1,129 @@
++import type {
++	ConversationVirtualFeedItem,
++	ConversationVirtualFeedModel,
++} from './conversation-feed-virtual-items.js';
++
++export const rowShellRequested = typeof window !== 'undefined' &&
++	new URLSearchParams(window.location.search).get('rowShell') === 'clone';
++
++interface Feed {
++	readonly root: HTMLElement | null;
++	readonly model: ConversationVirtualFeedModel;
++	readonly entries: number;
++	readonly revision: number;
++	readonly visible: boolean;
++}
++
++function ordinaryRow(item: ConversationVirtualFeedItem) {
++	if (item.kind !== 'transcript' || item.item.kind !== 'message') return;
++	const { message } = item.item;
++	if ((message.type === 'user-message' && !message.presentation) ||
++		(message.type === 'assistant-message' && !message.questions)) return item.item;
++}
++
++export function createRowShell(feed: Feed) {
++	const snapshots = new Map<string, DocumentFragment>();
++	const eligible = new Set<string>();
++	const seen = new Set<string>();
++	let root: HTMLElement | null = null;
++	let model: ConversationVirtualFeedModel | null = null;
++	let revision: number;
++	let armed = false;
++	let hits = 0;
++	let misses = 0;
++
++	function checkFeed() {
++		const current = feed.root;
++		if (!current?.isConnected || !feed.visible || feed.entries < 1 || feed.entries > 150 ||
++			document.querySelectorAll('[data-chat-virtual-sizer]').length !== 1) {
++			throw Error('Row shell requires one visible synthetic feed of 1-150 entries');
++		}
++		if (root && (root !== current || model !== feed.model || revision !== feed.revision)) {
++			throw Error('Row shell feed changed; reload and calibrate again');
++		}
++		return current;
++	}
++
++	function info() {
++		return {
++			armed, hits, misses, eligible: eligible.size, captured: snapshots.size,
++			missing: eligible.size - snapshots.size, seen: seen.size, model: model?.items.length ?? 0,
++			mountedClones: root?.querySelectorAll(':scope > [data-row-shell-cloned]').length ?? 0,
++		};
++	}
++
++	function capture() {
++		if (armed) throw Error('Cannot capture armed rows');
++		root = checkFeed();
++		if (!model) {
++			model = feed.model;
++			revision = feed.revision;
++			for (const item of model.items) if (ordinaryRow(item)) eligible.add(item.key);
++		}
++		for (const wrapper of root.querySelectorAll<HTMLElement>(':scope > [data-chat-virtual-item]')) {
++			const key = wrapper.dataset.chatVirtualItem!;
++			const index = model.indexByKey.get(key);
++			if (index === undefined) throw Error('Row shell wrapper does not belong to the model');
++			seen.add(key);
++			if (!eligible.has(key)) continue;
++			const row = ordinaryRow(model.items[index])!;
++			const rendered = wrapper.querySelector<HTMLElement>('.chat-message[data-chat-message-type]');
++			if (rendered?.dataset.chatRowId !== row.id || rendered.dataset.chatMessageType !== row.message.type ||
++				wrapper.querySelector('[data-chat-layout-pending="true"], img, iframe, canvas, video, audio, object, embed, script')) {
++				snapshots.delete(key);
++				continue;
++			}
++			if (snapshots.has(key)) continue;
++			const body = document.createDocumentFragment();
++			for (const node of wrapper.childNodes) body.appendChild(node.cloneNode(true));
++			snapshots.set(key, body);
++		}
++		return info();
++	}
++
++	function arm() {
++		checkFeed();
++		if (!eligible.size || seen.size !== model?.items.length || snapshots.size !== eligible.size) {
++			throw Error('Incomplete row shell coverage; inspect info() and visit every settled row');
++		}
++		armed = true;
++		return info();
++	}
++
++	const api = { capture, arm, info };
++	const host = window as Window & { __rowShell?: typeof api };
++	host.__rowShell = api;
++	return {
++		enter(item: ConversationVirtualFeedItem) {
++			if (!armed || !ordinaryRow(item)) return;
++			const body = host.__rowShell === api && root === feed.root && feed.visible &&
++				model === feed.model && revision === feed.revision ? snapshots.get(item.key) : undefined;
++			if (!body) { misses++; return; }
++			return (wrapper: HTMLElement) => {
++				const copy = body.cloneNode(true) as DocumentFragment;
++				// Both branches own the same trailing Svelte anchor. Keeps the real anchor, not a duplicate.
++				const anchor = wrapper.firstChild;
++				if (anchor) {
++					if (anchor.nextSibling || !copy.lastChild?.isEqualNode(anchor) || anchor.nodeType === 1) {
++						throw Error('Unexpected row shell mount anchor');
++					}
++					copy.removeChild(copy.lastChild);
++				}
++				wrapper.insertBefore(copy, anchor);
++				wrapper.dataset.rowShellCloned = '';
++				hits++;
++			};
++		},
++		destroy() {
++			if (host.__rowShell === api) delete host.__rowShell;
++			snapshots.clear();
++			seen.clear();
++			eligible.clear();
++			root = null;
++			model = null;
++			armed = false;
++		},
++	};
++}
++
++export type RowShell = ReturnType<typeof createRowShell>;

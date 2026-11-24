@@ -25,6 +25,63 @@ async function initializeGitRepo(projectPath: string): Promise<void> {
 }
 
 describe('Lightpanda workspace windows', () => {
+  test('tiles working chats from the sidebar and reports when only one pane fits', async () => {
+    await withE2eFixture('tile-working-chats', async (fixture) => {
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      const { client, fakeProviders, directAgents, dirs } = fixture.integration;
+      async function tileWorkingChats(): Promise<void> {
+        await app.clickButton('More actions');
+        await app.clickMenuItem('Tile working chats');
+      }
+      await app.setViewport(1_440, 900);
+      await app.open();
+      await fixture.waitForSpaWebSocket();
+      await app.startOpenAiDirectChat('idle chat');
+      await app.waitForText('echo:idle chat');
+      await app.waitForChatProcessing(false);
+      const idleChat = (await client.listChats()).sessions[0];
+      const turns = ['first working chat', 'second working chat'].map((content) => ({
+        chatId: fixture.integration.newChatId(),
+        content,
+        held: fakeProviders.openAi.holdNext({ lastUserText: content }),
+      }));
+      for (const { chatId, content, held } of turns) {
+        await client.startDirectChat({ chatId, content, projectPath: dirs.project, agent: directAgents.openAi });
+        await held.received;
+        await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatId}"] [data-status="working"]`);
+      }
+      const chatIds = turns.map((turn) => turn.chatId);
+      await tileWorkingChats();
+      await waitForPersistedWindowState(fixture.page, { windowCount: 2, chatIds, requiredSingletons: ['files'] });
+      await fixture.page.waitForFunction((ids) => {
+        const panes = [...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]:not([inert])')];
+        const allPanesShowChats = panes.every((pane) =>
+          pane.dataset.workspaceWindowActiveSurface === `chat-view:${pane.dataset.workspaceWindowId}`,
+        );
+        return panes.length === ids.length && allPanesShowChats &&
+          ids.every((id) => document.querySelector(`[data-conversation-panel-chat-id="${id}"]`));
+      }, { timeout: 20_000 }, chatIds);
+      for (const chatId of chatIds) {
+        await app.clickSidebarChatById(chatId);
+        await app.waitForSelectedChat(chatId);
+      }
+      await app.setViewport(900, 400);
+      await tileWorkingChats();
+      await app.waitForWorkspaceWindowCount(1);
+      await app.waitForText('Tiled 1 of 2 working chats. The rest could not fit.');
+      await app.setViewport(390, 844);
+      await app.clickButton('Menu');
+      await app.clickSidebarChatById(idleChat.id);
+      await app.waitForSelectedChat(idleChat.id);
+      await app.clickButton('Menu');
+      await tileWorkingChats();
+      await fixture.page.waitForSelector('[role="dialog"][data-workspace-chat-list]', { hidden: true });
+      await fixture.page.waitForFunction((ids) => ids.some((id) =>
+        document.querySelector(`[data-conversation-panel-chat-id="${id}"]`)), {}, chatIds);
+      for (const { held } of turns) held.releaseEcho();
+    });
+  });
+
   test('opens global views in new windows and local views as capacity-aware tabs', async () => {
     await withE2eFixture('workspace-window-placement', async (fixture) => {
       await initializeGitRepo(fixture.integration.dirs.project);

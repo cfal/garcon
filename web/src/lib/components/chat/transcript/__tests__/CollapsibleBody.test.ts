@@ -122,21 +122,23 @@ describe('CollapsibleBody', () => {
 	});
 
 	it('remeasures after width and content reflow', async () => {
+		const offsetHeight = vi.spyOn(HTMLDivElement.prototype, 'offsetHeight', 'get');
 		layout.contentHeight = 260;
 		const { container } = render(CollapsibleBodyTestHost, { content: 'Responsive content' });
 		await screen.findByRole('button', { name: 'Show more' });
 
 		const body = container.querySelector<HTMLElement>('[data-slot="collapsible-body"]')!;
 		const content = container.querySelector<HTMLElement>('[data-slot="collapsible-body-content"]')!;
+		expect(ResizeObserverHarness.instances.some((observer) => observer.observed.has(body))).toBe(false);
 		layout.width = 900;
 		layout.contentHeight = 80;
-		ResizeObserverHarness.emit(body, layout.width, layout.contentHeight);
 		ResizeObserverHarness.emit(content, layout.width, layout.contentHeight);
 		await waitFor(() => expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull());
 
 		layout.contentHeight = 260;
 		ResizeObserverHarness.emit(content, layout.width, layout.contentHeight);
 		await screen.findByRole('button', { name: 'Show more' });
+		expect(offsetHeight.mock.contexts).not.toContain(content);
 	});
 
 	it('returns an expanded body to its collapsed presentation when reflow removes overflow', async () => {
@@ -163,13 +165,11 @@ describe('CollapsibleBody', () => {
 		const content = container.querySelector<HTMLElement>('[data-slot="collapsible-body-content"]')!;
 		layout.width = 0;
 		layout.contentHeight = 0;
-		ResizeObserverHarness.emit(body, 0, 0);
 		ResizeObserverHarness.emit(content, 0, 0);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded'))
 			.toBe('true'));
 		layout.width = 600;
 		layout.contentHeight = 260;
-		ResizeObserverHarness.emit(body, 600, 260);
 		ResizeObserverHarness.emit(content, 600, 260);
 		await waitFor(() => expect(body.classList).not.toContain('collapsible-body-collapsed'));
 	});

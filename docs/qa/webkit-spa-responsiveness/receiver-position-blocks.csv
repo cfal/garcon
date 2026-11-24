@@ -1,0 +1,7 @@
+block,version,position,width_px,height_px,start_gap_px,entries,model,revision,first_ordinal,measured_overlap,failures
+reader-1,2.50.6,pinned,760,440,0,84,86,5,1,4,0
+reader-2,2.50.6,detached,760,440,1302,84,86,5,1,4,0
+reader-3,2.50.6,detached,760,440,1302,84,86,5,1,4,0
+reader-4,2.50.6,pinned,760,440,0,84,86,5,1,3,0
+counters-detached,2.50.6,detached,760,440,1302,84,86,5,1,2,0
+counters-pinned,2.50.6,pinned,760,440,0,84,86,5,1,2,0

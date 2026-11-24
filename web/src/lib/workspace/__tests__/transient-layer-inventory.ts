@@ -12,7 +12,7 @@ export const CUSTOM_TRANSIENT_SOURCES = [
 	'components/chat/new-chat/NewChatForm.svelte',
 	'components/chat/composer/PromptComposer.svelte',
 	'components/chat/composer/SlashCommandMenu.svelte',
-	'components/layout/AppShell.svelte',
+	'components/layout/app-shell-mobile-drawer.ts',
 ] as const;
 
 export const TRANSIENT_BACKDROP_SOURCES = [

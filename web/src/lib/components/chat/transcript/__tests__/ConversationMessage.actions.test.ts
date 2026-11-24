@@ -2,6 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, CommandOutputMessage, CommandResultMessage, UserMessage } from '$shared/chat-types';
+import * as context from '$lib/context';
+import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 const copyToClipboard = vi.hoisted(() => vi.fn().mockResolvedValue(true));
@@ -110,6 +113,23 @@ describe('ConversationMessage actions', () => {
 		expect(row).toBe(container.firstElementChild);
 	});
 
+	it.each([
+		new UserMessage('', 'Synthetic input'),
+		new AssistantMessage('', 'Synthetic response'),
+	])('mounts a $type without writing unopened actions into the document body', async (message) => {
+		const existing = new Set(document.body.childNodes);
+		const { container } = render(ConversationMessageHost, { message });
+		expect(container.querySelector('[data-chat-message-type]')?.textContent).toContain(message.content);
+		const outsideRow = [...document.body.childNodes].filter(node => node !== container && !existing.has(node));
+		expect(outsideRow).toHaveLength(0);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'More message actions' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
+		const dialog = await screen.findByRole('dialog');
+		expect(container.contains(dialog)).toBe(false);
+		expect(dialog.textContent).toContain(message.content);
+	});
+
 	it('renders the assistant message action button as a compact overlay', () => {
 		const { container } = render(ConversationMessageHost, {
 			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
@@ -202,6 +222,27 @@ describe('ConversationMessage actions', () => {
 		expect(container.querySelector('.cli-row-message')).toBeNull();
 		expect(container.querySelector('[role="alert"]')).toBeNull();
 		expect(screen.getByText('Body')).toBeTruthy();
+	});
+
+	it('omits the resting shadow only from ordinary user bubbles', async () => {
+		const at = '2026-01-01T00:00:00Z';
+		const ordinary = new UserMessage(at, 'Synthetic input');
+		const { container, rerender } = render(ConversationMessageHost, { message: ordinary });
+		const bubble = () => container.querySelector<HTMLElement>('.user-message-context-target')!;
+		for (const presentation of [
+			{ origin: 'cli', style: 'info' },
+			{ origin: 'cli', style: 'custom', customStyle: { lightAccent: '#123456', darkAccent: '#abcdef' } },
+			{ origin: 'cli', disclosure: 'collapsed' },
+		] as const) {
+			await rerender({ message: new UserMessage(at, 'Synthetic input', undefined, undefined, presentation) });
+			expect(bubble().classList.contains('shadow-sm')).toBe(true);
+		}
+		await rerender({ message: ordinary });
+		expect(bubble().dataset.state).toBe('closed');
+		expect(bubble().classList.contains('shadow-sm')).toBe(false);
+		await fireEvent.contextMenu(bubble());
+		expect(bubble().dataset.state).toBe('open');
+		expect(bubble().classList.contains('data-[state=open]:shadow-sm')).toBe(true);
 	});
 
 	it('gives non-image attachments their own selection surface', () => {
@@ -410,6 +451,40 @@ describe('ConversationMessage actions', () => {
 		await waitFor(() => {
 			expect(trigger.getAttribute('data-state')).toBe('open');
 		});
+	});
+
+	it('returns registry Escape to the current opener on a repeated context menu', async () => {
+		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+		using layerContext = vi.spyOn(context, 'getOptionalTransientLayers');
+		layerContext.mockReturnValue(layers);
+		render(ConversationMessageHost, {
+			message: new AssistantMessage(
+				'', '[First](https://example.test/a) [Second](https://example.test/b)',
+			),
+		});
+		const first = screen.getByRole('link', { name: 'First' });
+		const second = screen.getByRole('link', { name: 'Second' });
+		const more = screen.getByRole('button', { name: 'More message actions' });
+		async function openAndEscape(link: HTMLElement): Promise<void> {
+			link.focus();
+			await fireEvent.click(more);
+			(await screen.findByRole('menuitem', { name: 'Copy text' })).focus();
+			expect(layers.handleEscape(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		}
+		await openAndEscape(first);
+		expect(document.activeElement).toBe(first);
+		const staleFocus = vi.fn();
+		first.addEventListener('focus', staleFocus);
+		await openAndEscape(second);
+		expect(staleFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(second);
+
+		await fireEvent.click(more);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select text' }));
+		const dialog = await screen.findByRole('dialog');
+		await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+		expect(staleFocus).not.toHaveBeenCalled();
 	});
 
 	it('closes the message menu on the first outside touch pointerdown', async () => {

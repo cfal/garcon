@@ -171,11 +171,19 @@ function setup(
 	});
 	controller.setPresentationVisible(true);
 	const onOpenChat = vi.fn();
-	render(PullRequestsPanel, {
+	const panel = render(PullRequestsPanel, {
 		controller,
 		onOpenChat,
 	});
-	return { api, onOpenChat, controller, getDetail, getRuns, getRun, notifyError };
+	return { api, onOpenChat, controller, getDetail, getRuns, getRun, notifyError, panel };
+}
+
+async function startPendingPost(api: ReturnType<typeof setup>['api']) {
+	const request = Promise.withResolvers<PullRequestReviewsSnapshot>();
+	api.post.mockReturnValueOnce(request.promise);
+	await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+	await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+	return request;
 }
 
 describe('PullRequestsPanel', () => {
@@ -241,6 +249,21 @@ describe('PullRequestsPanel', () => {
 				},
 			};
 		}
+
+		it('clears Viewed and collapsed marks when the accepted head changes', async () => {
+			const first = diffDetail();
+			const getDetail = vi.fn<() => Promise<PullRequestDetail>>()
+				.mockResolvedValueOnce(first)
+				.mockResolvedValue({ ...first, headRefOid: 'b'.repeat(40), documentId: 'revision:b' });
+			const { controller } = setup({ getDetail });
+			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+			await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+			await fireEvent.click(await screen.findByRole('button', { name: 'Viewed' }));
+			controller.reviews.apply(refreshedSnapshot(2, { headRefOid: 'b'.repeat(40) }));
+			await waitFor(() => expect(controller.detail?.headRefOid).toBe('b'.repeat(40)));
+			expect(screen.getByRole('button', { name: 'Viewed' }).getAttribute('aria-pressed')).toBe('false');
+			expect(screen.getByRole('button', { name: /synthetic.ts/ }).getAttribute('aria-expanded')).toBe('true');
+		});
 
 		function refreshedSnapshot(
 			revision: number,
@@ -969,6 +992,54 @@ describe('PullRequestsPanel', () => {
 		await screen.findByText('No actionable findings.');
 		await fireEvent.click(screen.getByRole('button', { name: 'Post to GitHub' }));
 		await waitFor(() => expect(api.post).toHaveBeenCalledWith('run-1'));
+	});
+
+	it('retains an in-flight post and its error when the panel moves to another window', async () => {
+		const { controller, onOpenChat, api, panel, notifyError } = setup();
+		const request = await startPendingPost(api);
+		await panel.unmount();
+		render(PullRequestsPanel, { controller, onOpenChat });
+		expect(screen.getByRole('button', { name: /Posting/ })).toHaveProperty('disabled', true);
+		request.reject(new Error('Posting failed'));
+		await screen.findByText('Posting failed');
+		expect(notifyError).not.toHaveBeenCalled();
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', false);
+		expect(api.post).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(['run', 'pull request'] as const)('does not attribute a post to another %s', async (target) => {
+		const older = { ...run, id: 'older', review: 'Older run' };
+		const { controller, onOpenChat, api, panel, notifyError } = setup({
+			getPage: async (_repository, number) => ({
+				runs: number === 7 ? [run, older] : [], nextCursor: null, revision: 1,
+			}),
+			getRun: async (id) => id === older.id ? older : run,
+		});
+		const request = await startPendingPost(api);
+		if (target === 'run') controller.selectRun(older.id);
+		else controller.select(snapshot.inbox[1]);
+		await panel.unmount();
+		render(PullRequestsPanel, { controller, onOpenChat });
+		await waitFor(() => expect(controller.isRunsLoading || controller.isRunLoading).toBe(false));
+		expect(screen.queryByRole('button', { name: /Posting/ })).toBeNull();
+		const button = target === 'run' ? 'Post to GitHub' : 'Review';
+		expect(screen.getByRole('button', { name: button })).toHaveProperty('disabled', target === 'run');
+		request.reject(new Error('Original post failed'));
+		await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Original post failed'));
+		expect(screen.queryByText('Original post failed')).toBeNull();
+		expect(api.post).toHaveBeenCalledExactlyOnceWith(run.id);
+	});
+
+	it.each(['hidden panel', 'different tab'] as const)('notifies a post failure with a %s', async (view) => {
+		const { controller, api, notifyError } = setup();
+		const request = await startPendingPost(api);
+		if (view === 'hidden panel') controller.setPresentationVisible(false);
+		else controller.tab = 'checks';
+		request.reject(new Error('Post failed while away'));
+		await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Post failed while away'));
+		controller.setPresentationVisible(true);
+		controller.tab = 'review';
+		await screen.findByText('Post failed while away');
 	});
 
 	for (const status of ['unknown', 'posted'] as const) {
