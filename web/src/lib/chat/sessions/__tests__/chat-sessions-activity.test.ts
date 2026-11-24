@@ -80,6 +80,29 @@ describe('ChatSessionsStore activity snapshot reconciliation', () => {
 		expect(store.byId.second).toBeUndefined();
 	});
 
+	it('keeps the roster stable for a duplicate completion without suppressing mixed patches', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			entry('foreground'),
+			{ ...entry('receiver', 'working'), isProcessing: true, processingPhase: 'running' },
+		]);
+		const working = store.byId.receiver;
+		store.patchChat('receiver', { activityStatus: 'complete' });
+		expect(store.byId.receiver).not.toBe(working);
+		expect(store.byId.receiver.activityStatus).toBe('complete');
+		store.applyProcessingEvent('receiver', null);
+		const idle = store.byId;
+		const roster = store.orderedChats;
+		store.patchChat('receiver', { activityStatus: 'complete' });
+		expect(store.byId).toBe(idle);
+		expect(store.orderedChats).toBe(roster);
+		expect(store.byId.receiver.processingPhase).toBeNull();
+
+		store.patchChat('receiver', { activityStatus: 'complete', title: 'Updated title' });
+		expect(store.byId.receiver.title).toBe('Updated title');
+		expect(store.byId.foreground).toBe(idle.foreground);
+	});
+
 	it('retains unchanged activity events without discarding unrelated fetched fields', async () => {
 		const pending = deferredList();
 		const listChats = vi.fn<NonNullable<ChatSessionsStoreDeps['listChats']>>()

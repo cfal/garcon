@@ -857,11 +857,12 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	/** Updates a chat record field, such as title after rename. */
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
-		// Only the activity field supersedes a list requested before the event, including initial hydration.
+		const chat = this.#baseById[chatId];
+		// Even an unchanged activity event supersedes a list requested before it.
 		if ('activityStatus' in patch) {
 			this.#fetchActivityUpdates?.set(chatId, patch.activityStatus ?? null);
+			if (chat?.activityStatus === patch.activityStatus && Object.keys(patch).length === 1) return;
 		}
-		const chat = this.#baseById[chatId];
 		if (!chat) return;
 		this.#projectBindings.publishIfChanged(
 			chatId,
