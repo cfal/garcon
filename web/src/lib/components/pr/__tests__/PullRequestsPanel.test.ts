@@ -1020,7 +1020,7 @@ describe('PullRequestsPanel', () => {
 		await waitFor(() => expect(controller.isRunsLoading || controller.isRunLoading).toBe(false));
 		expect(screen.queryByRole('button', { name: /Posting/ })).toBeNull();
 		const button = target === 'run' ? 'Post to GitHub' : 'Review';
-		expect(screen.getByRole('button', { name: button, exact: true })).toHaveProperty('disabled', target === 'run');
+		expect(screen.getByRole('button', { name: button })).toHaveProperty('disabled', target === 'run');
 		request.reject(new Error('Original post failed'));
 		await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Original post failed'));
 		expect(screen.queryByText('Original post failed')).toBeNull();
