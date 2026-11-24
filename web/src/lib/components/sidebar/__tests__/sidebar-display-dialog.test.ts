@@ -133,10 +133,12 @@ it('discards archive separation on Cancel', async () => {
 
 it('applies nested, ungrouped defaults after Reset', async () => {
 	const settings = createLocalSettingsStore();
+	settings.set('collapseDelegatedChatsByDefault', false);
 	settings.set('sidebarNestDelegatedChats', false);
 	settings.set('sidebarGroupingFields', [{ field: 'project', enabled: true }]);
 	render(SidebarDisplayDialogHost, { settings });
 	await fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+	expect(settings.collapseDelegatedChatsByDefault).toBe(false);
 	expect(settings.sidebarNestDelegatedChats).toBe(false);
 	expect(settings.sidebarGroupingFields.find((field) => field.field === 'project')?.enabled).toBe(
 		true,
@@ -144,5 +146,8 @@ it('applies nested, ungrouped defaults after Reset', async () => {
 	await fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 	expect(settings.sidebarNestDelegatedChats).toBe(true);
 	expect(settings.sidebarGroupingFields.filter((field) => field.enabled)).toEqual([]);
+	const restored = createLocalSettingsStore();
+	expect(restored.collapseDelegatedChatsByDefault).toBe(false);
+	restored.destroy();
 	settings.destroy();
 });

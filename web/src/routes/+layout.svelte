@@ -144,8 +144,10 @@
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
 	const notifications = createNotificationsStore();
+	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const chatSessions = createChatSessionsStore({
 		notifyError: (message) => notifications.error(message),
+		onChatDeleted: (id) => sidebarProjectCollapse.forgetDeletedChat(id),
 	});
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
@@ -214,7 +216,6 @@
 	const workspace = workspaceServices.coordinator;
 	const workspaceShortcuts = workspaceServices.shortcuts;
 	const workbenchCommands = workspaceServices.commands;
-	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const minuteClock = createMinuteClockStore();
 	const themeController = new ThemeController({
 		getPreference: () => localSettings.themePreference,

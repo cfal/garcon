@@ -9,6 +9,11 @@ import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 import { isSidebarChatInactive } from './chat-inactivity';
 import { buildSidebarDelegationForest } from './sidebar-delegation';
 import {
+	DELEGATION_KEY_PREFIX,
+	isSidebarKeyCollapsed,
+	type SidebarCollapseChoices,
+} from './sidebar-collapse';
+import {
 	enabledSidebarGroupingFields,
 	type SidebarGroupingSelection,
 	type SidebarGroupingField,
@@ -32,7 +37,7 @@ const sections: SidebarChatSection[] = [
 	'caught-up',
 ];
 
-export interface SidebarRowModelInput {
+export interface SidebarRowModelInput extends SidebarCollapseChoices {
 	allChats: readonly ChatSessionRecord[];
 	matchingChatIds?: ReadonlySet<string>;
 	orders: SidebarChatOrderMap;
@@ -44,7 +49,7 @@ export interface SidebarRowModelInput {
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
 	groupNestedProjectPaths?: boolean;
-	collapsedProjectKeys?: ReadonlySet<string>;
+	collapseDelegatedChatsByDefault?: boolean;
 	executorOrder?: readonly string[];
 	isChatOptimisticallyArchived?: (chatId: string) => boolean;
 }
@@ -358,7 +363,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			const chat = byId.get(id)!;
 			const branch = forest.branches.get(id)!;
 			const list = chatOrderGroupFor(chat);
-			const collapseKey = `delegation:${id}`;
+			const collapseKey = DELEGATION_KEY_PREFIX + id;
 			const contextOnly = !matches.has(id);
 			const row: SidebarVirtualChatRow = {
 				type: 'chat',
@@ -384,7 +389,9 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				branch: branch.descendants
 					? {
 							collapseKey,
-							isCollapsed: !filtered && Boolean(input.collapsedProjectKeys?.has(collapseKey)),
+							isCollapsed:
+								!filtered &&
+								isSidebarKeyCollapsed(collapseKey, input, input.collapseDelegatedChatsByDefault),
 							descendants: branch.descendants,
 							unread: branch.unread - Number(chat.isUnread),
 							processing: branch.processing - Number(chat.isProcessing),
