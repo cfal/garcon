@@ -108,7 +108,7 @@ Replay retains the captured binding and child identity, never discovering old
 children or reattaching a retired child. Child history uses the existing bulk
 `history.open` discriminated request and session-scoped reader sequence through
 the nullable `nativeChildObservation` facet. Bulk loss leaves primary capture
-healthy; no replacement reader resumes automatically. Protocol revision 59
+healthy; no replacement reader resumes automatically. Protocol revision 70
 includes these contracts and the observer list/snapshot projection.
 
 Each authenticated socket owns one session. `MessageSession` is a bounded send
