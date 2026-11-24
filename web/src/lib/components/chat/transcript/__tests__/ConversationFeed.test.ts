@@ -322,26 +322,31 @@ describe('ConversationFeed', () => {
 		const viewport = await ready.promise;
 		const group = await screen.findByRole('button', { name: 'Execute 3 commands' });
 		const seek = vi.spyOn(VirtualListController.prototype, 'scrollToAnchor');
+		const aligned = vi.spyOn(VirtualListController.prototype, 'scrollToIndex');
 		const id = 'generation-1:2';
 		const keyOf = (element: Element) =>
 			element.closest<HTMLElement>('[data-chat-virtual-item]')!.dataset.chatVirtualItem;
 		expect(await viewport.scrollToTarget(
 			{ kind: 'presentation-row', id }, { viewportOffset: -8.25 },
 		)).toBe('completed');
-		expect(seek).toHaveBeenCalledWith(keyOf(group), -8.25);
+		expect(seek).toHaveBeenCalledExactlyOnceWith(keyOf(group), -8.25);
+		expect(seek).toHaveLastReturnedWith({ kind: 'scheduled' });
 		expect(group.getAttribute('aria-expanded')).toBe('false');
 		expect(container.querySelector(`[data-chat-row-id="${id}"]`)).toBeNull();
 
 		expect(await viewport.scrollToTarget({ kind: 'row', id }, { viewportOffset: 6.5 })).toBe('completed');
 		const member = container.querySelector(`[data-chat-row-id="${id}"]`);
 		expect(member).not.toBeNull();
-		expect(seek).toHaveBeenCalledWith(keyOf(member!), 6.5);
+		expect(seek).toHaveBeenNthCalledWith(2, keyOf(member!), 6.5);
+		expect(seek).toHaveLastReturnedWith({ kind: 'scheduled' });
+		expect(aligned).not.toHaveBeenCalled();
 		expect(group.getAttribute('aria-expanded')).toBe('true');
 		for (const ordinal of [1, 3]) {
 			const memberId = `generation-1:${ordinal}`;
 			expect(await viewport.scrollToTarget({ kind: 'row', id: memberId })).toBe('completed');
 			expect(container.querySelector(`[data-chat-row-id="${memberId}"]`)).not.toBeNull();
 		}
+		expect(seek).toHaveBeenCalledTimes(2);
 	});
 
 	it('keeps simultaneous message and permission file links bound to their panel executor', async () => {

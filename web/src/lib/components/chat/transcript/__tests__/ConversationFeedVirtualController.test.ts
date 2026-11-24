@@ -323,11 +323,15 @@ describe('ConversationFeedVirtualController', () => {
 
 	it('centers ordinary navigation but preserves an explicit zero reader offset', async () => {
 		const { exposure } = await renderController({ initialPinned: false });
-		const { view, node, writes } = observeReadingTarget(exposure, 3);
+		const view = exposure.viewport()!;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await settleController();
+		const { node, writes } = observeReadingTarget(exposure, 3);
 		const target = { kind: 'row', id: 'row-3' } as const;
 		expect(await exposure.controller.scrollToTarget(target)).toBe('completed');
 		const centered = node.getBoundingClientRect();
 		expect(centered.top + centered.height / 2).toBe(view.clientHeight / 2);
+		expect(writes).toHaveLength(1);
 		writes.length = 0;
 		expect(await exposure.controller.scrollToTarget(target, { viewportOffset: 0 })).toBe('completed');
 		expect(writes).toEqual([exposure.controller.snapshot.positions.itemAt(3)!.start]);

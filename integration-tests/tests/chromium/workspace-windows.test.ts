@@ -2888,12 +2888,14 @@ describe('Chromium workspace windows', () => {
         });
         if (!row) return null;
         element.scrollTop += row.getBoundingClientRect().top - view.top + 8;
-        return { rowId: row.dataset.chatRowId!, offset: row.getBoundingClientRect().top - view.top };
+        return row.dataset.chatRowId!;
       }, sourceFeed);
-      const reading = (await clipped.jsonValue())!;
-      expect(Math.abs(reading.offset + 8)).toBeLessThanOrEqual(1);
-      await waitForChatReadingPosition(page, source, reading);
+      const rowId = (await clipped.jsonValue())!;
       await page.locator(`[data-workspace-window-menu-trigger="${source}"]`).click();
+      const savedOffset = await feed.locator(`[data-chat-row-id="${rowId}"]`).evaluate(row =>
+        row.getBoundingClientRect().top - row.closest('[data-chat-scroll-viewport]')!.getBoundingClientRect().top,
+      );
+      expect(Math.abs(savedOffset + 8)).toBeLessThanOrEqual(1);
 
       markPhase('checking the first readable position in the new pane');
       const movedPanel = `[data-conversation-panel-chat-id="${chatId}"]:not([data-conversation-panel="chat-view:${source}"])`;
@@ -2901,18 +2903,21 @@ describe('Chromium workspace windows', () => {
         // Polls for the row, not the correct offset: a later correction must not hide a bad frame.
         page.waitForFunction(({ movedPanel, rowId }) => {
           const feed = document.querySelector(`${movedPanel} [data-chat-scroll-viewport]`);
-          if (!feed) return null;
+          const row = feed?.querySelector(`[data-chat-row-id="${CSS.escape(rowId)}"]`);
+          if (!feed || !row) return null;
           const view = feed.getBoundingClientRect();
-          const hit = document.elementFromPoint(view.left + view.width / 2, view.top + 1);
-          const row = hit?.closest<HTMLElement>('[data-chat-row-id]');
-          if (row?.dataset.chatRowId !== rowId || !feed.contains(row)) return null;
-          return { offset: row.getBoundingClientRect().top - view.top };
-        }, { movedPanel, rowId: reading.rowId }),
+          const rect = row.getBoundingClientRect();
+          const top = Math.max(view.top, rect.top);
+          const bottom = Math.min(view.bottom, rect.bottom);
+          if (bottom <= top) return null;
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, (top + bottom) / 2);
+          return row.contains(hit) ? { offset: rect.top - view.top } : null;
+        }, { movedPanel, rowId }),
         page.locator(`[data-workspace-window-menu="${source}"] [data-workspace-window-tab-action="move-new-bottom"]`)
           .click(),
       ]);
       const { offset } = (await first.jsonValue())!;
-      expect(Math.abs(offset - reading.offset), `first: ${offset}px, saved: ${reading.offset}px`).toBeLessThanOrEqual(1);
+      expect(Math.abs(offset - savedOffset), `first: ${offset}px, saved: ${savedOffset}px`).toBeLessThanOrEqual(1);
     });
   });
 
