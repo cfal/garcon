@@ -53,6 +53,25 @@ it('records an expansion when the sidebar menu opens a default-collapsed branch'
 	expect(projectCollapse.snapshot().expandedDelegationKeys).toEqual(['delegation:parent']);
 });
 
+it('keeps a branch choice until the server deletion event, even after HTTP success', async () => {
+	const collapse = createCollapseStore();
+	const sessions = new ChatSessionsStore({
+		deleteChat: async () => ({ success: true }),
+		onChatDeleted: (id) => collapse.forgetDeletedChat(id),
+	});
+	sessions.upsertFromServer([rosterEntry('parent'), rosterEntry('other')]);
+	collapse.setCollapsed('delegation:parent', false);
+	collapse.setCollapsed('delegation:other', true);
+	sessions.removeChat('parent');
+	await sessions.deleteRemoteChat('parent');
+	expect(collapse.isCollapsed('delegation:parent', true)).toBe(false);
+	sessions.applyServerDeletion('parent');
+	expect(collapse.snapshot()).toEqual({
+		collapsedProjectKeys: ['delegation:other'],
+		expandedDelegationKeys: [],
+	});
+});
+
 it('clears an empty project group before another chat appears in that project', async () => {
 	const removed = rosterEntry('removed');
 	const projectKey = sidebarGroupCollapseKey(null, [

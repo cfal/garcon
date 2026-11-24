@@ -79,6 +79,7 @@ describe('handleChatDeleted', () => {
 		expect(ctx.removeChat).toHaveBeenCalledWith('chat-1');
 		expect(ctx.clearChatPresentations).toHaveBeenCalledWith('chat-1');
 		expect(ctx.removeChatTranscript).toHaveBeenCalledWith('chat-1');
+		expect(ctx.refreshChats).not.toHaveBeenCalled();
 		// Navigate must happen before remove so the order lookup works.
 		const navOrder = ctx.navigateAwayFromChat.mock.invocationCallOrder[0];
 		const removeOrder = ctx.removeChat.mock.invocationCallOrder[0];
@@ -94,6 +95,7 @@ describe('handleChatDeleted', () => {
 		expect(ctx.removeChat).not.toHaveBeenCalled();
 		expect(ctx.clearChatPresentations).not.toHaveBeenCalled();
 		expect(ctx.removeChatTranscript).not.toHaveBeenCalled();
+		expect(ctx.refreshChats).not.toHaveBeenCalled();
 	});
 });
 
