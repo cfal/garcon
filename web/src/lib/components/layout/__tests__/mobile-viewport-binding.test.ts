@@ -173,15 +173,20 @@ describe('bindMobileViewport', () => {
 			['--app-viewport-offset-top', '53px'], ['--app-viewport-center-y', '313px'],
 		]);
 		writes.mockClear();
-		resize(800, 499.5, 52.5);
+		const panned = resize(800, 499.5, 52.5);
 		expect(writes.mock.calls).toEqual([
 			['--app-height', '500px'], ['--app-viewport-center-y', '303px'],
 		]);
 		expect(resize(800)?.keyboardVisible).toBe(false);
 		expect(style.getPropertyValue('--app-height')).toBe('');
+		expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('');
+		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('');
 		writes.mockClear();
-		expect(resize(800, 520, 40)).toEqual(open);
+		expect(resize(800, 499.5, 52.5)).toEqual(panned);
 		expect(writes).toHaveBeenCalledTimes(3);
+		writes.mockClear();
+		expect(resize(800, 499.5, 52.5)).toEqual(panned);
+		expect(writes).not.toHaveBeenCalled();
 	});
 
 	it('repairs missing or higher-priority declarations even at unchanged desktop geometry', () => {
@@ -232,16 +237,14 @@ describe('bindMobileViewport', () => {
 		}
 	});
 
-	it('does not use native window motion to change keyboard reporting', () => {
+	it('reports a real keyboard after a native maximize is reversed before the page resizes', () => {
 		bindDesktop();
-		for (const [inner, outer, gap] of [
-			[960, 998, 0], [960, 1231, 0], [960, 998, 0], [680, 998, 280],
-			[1121, 1231, 0], [1121, 1171, 0], [1111, 1111, 0], [1001, 1111, 110],
-		]) {
+		for (const outer of [998, 1231, 998]) {
 			vi.stubGlobal('outerHeight', outer);
-			expect(resize(inner)).toMatchObject({ keyboardVisible: gap > 0, keyboardHeight: gap });
-			expect(style.getPropertyValue('--app-height')).toBe(gap ? `${inner}px` : '');
+			expect(resize(960)?.keyboardVisible).toBe(false);
 		}
+		expect(resize(680)).toMatchObject({ keyboardVisible: true, keyboardHeight: 280 });
+		expect(style.getPropertyValue('--app-height')).toBe('680px');
 	});
 
 	it('cancels pending work, removes listeners, and clears overrides on teardown', () => {
