@@ -128,9 +128,9 @@ describe('ComposerBottomBar', () => {
 				(g) => g.dataset.composerGroup,
 			);
 		const send = screen.getByRole('button', { name: 'Send' });
-		expect(groups()).toEqual(['prompt', 'settings']);
-		await rerender({ modelControlsLeft: true });
 		expect(groups()).toEqual(['settings', 'prompt']);
+		await rerender({ modelControlsLeft: false });
+		expect(groups()).toEqual(['prompt', 'settings']);
 		expect(row.lastElementChild).toBe(send);
 	});
 

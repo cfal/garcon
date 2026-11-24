@@ -242,7 +242,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showThinking: true,
 	allowDirectChats: false,
 	reduceMotion: false,
-	modelControlsLeft: false,
+	modelControlsLeft: true,
 	...COMPOSER_STATUS_BAR_DEFAULTS,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,

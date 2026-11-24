@@ -57,7 +57,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     phase('open Pull Requests from Github before connecting');
     // Wide enough for the inbox list and detail to stay side by side next to the review chat.
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.addInitScript(seedLocalSettings, { modelControlsLeft: true });
+    await page.addInitScript(seedLocalSettings, { modelControlsLeft: false });
     await page.goto(integration.garcon.baseUrl);
     await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().waitFor({ timeout: 30_000 });
     await collapseCanonicalFilesWindow(page);
@@ -74,7 +74,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await connectForm.getByText('Review automatically', { exact: true }).waitFor();
     const modelControls = connectForm.locator('[data-composer-group="settings"]');
     await browserExpect.poll(() => modelControls.evaluate(group =>
-      Math.abs(group.getBoundingClientRect().left - group.parentElement!.getBoundingClientRect().left),
+      Math.abs(group.getBoundingClientRect().right - group.parentElement!.getBoundingClientRect().right),
     )).toBeLessThan(1);
     // Review prompts offer their own tokens, not the scheduled-prompt chat ID.
     await connectForm.getByRole('button', { name: 'Insert variable', exact: true }).click();

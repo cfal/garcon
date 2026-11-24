@@ -26,7 +26,7 @@ test('the live composer follows tile width and local group order without changin
     await expect(executor).toHaveText('Integration worker');
     await expect(promptMenu).toHaveCount(0);
     await expect(settingsMenu).toHaveCount(0);
-    await expect(groups.first()).toHaveAttribute('data-composer-group', 'prompt');
+    await expect(groups.first()).toHaveAttribute('data-composer-group', 'settings');
 
     phase('fitting each host name at its actual width');
     const { client } = integration;
@@ -58,9 +58,9 @@ test('the live composer follows tile width and local group order without changin
     await settings.getByRole('button', { name: 'Model controls on the left Appearance', exact: true }).click();
     await settings.getByRole('switch', { name: 'Model controls on the left' }).click();
     await settings.getByRole('button', { name: 'Close', exact: true }).click();
-    await expect(groups.first()).toHaveAttribute('data-composer-group', 'settings');
+    await expect(groups.first()).toHaveAttribute('data-composer-group', 'prompt');
     await page.reload();
-    await expect(groups.first()).toHaveAttribute('data-composer-group', 'settings');
+    await expect(groups.first()).toHaveAttribute('data-composer-group', 'prompt');
 
     phase('fitting the same remote chat to tile widths on a desktop viewport');
     await editor.fill('Synthetic unsent draft');
@@ -80,11 +80,11 @@ test('the live composer follows tile width and local group order without changin
     const sidebar = page.getByRole('separator', { name: 'Resize sidebar' });
     const grip = (await sidebar.boundingBox())!;
     const initialWidth = (await toolbar.boundingBox())!.width;
-    const gripX = grip.x + 3;
-    const gripY = grip.y + grip.height / 2;
-    await sidebar.hover({ position: { x: 3, y: grip.height / 2 } });
+    // The open picker can cover the middle of the divider when model controls are on the right.
+    const gripOffset = { x: 3, y: 6 };
+    await sidebar.hover({ position: gripOffset });
     await page.mouse.down();
-    await page.mouse.move(gripX + 70, gripY, { steps: 4 });
+    await page.mouse.move(grip.x + gripOffset.x + 70, grip.y + gripOffset.y, { steps: 4 });
     await page.mouse.up();
     await expect.poll(async () => (await toolbar.boundingBox())!.width).toBeLessThan(initialWidth);
     await expect(filter).toHaveValue('Echo');

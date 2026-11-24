@@ -27,7 +27,7 @@
 		agentSettings,
 		model,
 		send,
-		modelControlsLeft = false,
+		modelControlsLeft = true,
 		side = 'top',
 		settingsDisabled = false,
 		promptTransformStatus = m.snippets_expanding(),
