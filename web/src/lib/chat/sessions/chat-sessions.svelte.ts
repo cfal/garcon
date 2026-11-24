@@ -777,6 +777,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		}
 	}
 
+	applyServerDeletion(chatId: string): void {
+		this.removeChat(chatId);
+		this.#deps.onChatDeleted?.(chatId);
+	}
+
 	removeChat(chatId: string): void {
 		this.#recentHistory.remove(chatId);
 		this.#fetchActivityUpdates?.delete(chatId);

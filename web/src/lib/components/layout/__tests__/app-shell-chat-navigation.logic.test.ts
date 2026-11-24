@@ -77,23 +77,23 @@ describe('resolveAdjacentChatId', () => {
 			}
 		},
 	);
-	it('anchors a hidden selected descendant on its visible collapsed parent', () => {
+	it.each([
+		{ mode: 'explicit', collapse: { collapsedProjectKeys: new Set(['delegation:parent']) } },
+		{ mode: 'default', collapse: { collapseDelegatedChatsByDefault: true } },
+	])('anchors a hidden selection on its visible parent ($mode collapse)', ({ collapse }) => {
 		const chats = [
 			chat('before'),
 			chat('parent'),
 			{ ...chat('child'), parentChatId: 'parent', lineage: null },
 			chat('after'),
 		];
-		const { rowModel } = buildSidebarChatListProjection({
-			allChats: chats,
-			groupingFields: [],
-			nestDelegatedChats: true,
-			collapsedProjectKeys: new Set(['delegation:parent']),
-			currentTime: new Date('2026-01-01'),
-			inactivityDuration: '3-days',
-			sortMode: 'manual',
-			pinnedInsertPosition: 'top',
-		});
+		const { rowModel } = buildSidebarChatListProjection(
+			projectionInput(chats, {
+				groupingFields: [],
+				currentTime: new Date('2026-01-01'),
+				...collapse,
+			}),
+		);
 		expect(rowModel.visibleChatIds).toEqual(['before', 'parent', 'after']);
 		for (const offset of [-1, 1] as const) {
 			expect(

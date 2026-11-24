@@ -28,7 +28,7 @@ Garcon runs agents, terminals, files, Git, and pull request commands on the host
 
 ## Install
 
-Requirements: [Bun](https://bun.sh/), `git`, a modern browser, and at least one coding agent CLI (signed in) or API provider. Install the CLIs you use on each executor and put them on its service `PATH`. Source setup and prebuilt Garcon executables do not provision them; the Docker image does. Pull request features also need an authenticated GitHub CLI (`gh`).
+Requirements: [Bun](https://bun.sh/), Git (2.29 or newer for Workbench Push), a modern browser, and at least one coding agent CLI (signed in) or API provider. Install the CLIs you use on each executor and put them on its service `PATH`. Source setup and prebuilt Garcon executables do not provision them; the Docker image does. Pull request features also need an authenticated GitHub CLI (`gh`).
 
 Choose one path:
 

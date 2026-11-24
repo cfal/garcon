@@ -77,7 +77,7 @@ export type EventRouterSessionsStore = Pick<
 	| 'patchPreview'
 	| 'patchActivity'
 	| 'quietRefreshChats'
-	| 'removeChat'
+	| 'applyServerDeletion'
 	| 'patchChat'
 	| 'reconcileProcessing'
 	| 'isChatProcessing'
@@ -280,7 +280,7 @@ function buildDispatch(
 	};
 
 	const sidebarCtx: SidebarContext = {
-		removeChat: (chatId) => stores.sessions.removeChat(chatId),
+		removeChat: (chatId) => stores.sessions.applyServerDeletion(chatId),
 		navigateAwayFromChat: stores.navigation.navigateAwayFromChat,
 		patchChatTitle: (chatId, title) => stores.sessions.patchChat(chatId, { title }),
 		patchChatProjectPath: (chatId, patch) => stores.sessions.patchChat(chatId, patch),

@@ -33,6 +33,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_typography(),
 			m.settings_model_controls_left(),
 			m.settings_highlight_active_window(),
+			m.settings_collapse_delegated_chats_by_default(),
 			m.settings_fullscreen_covers_sidebar(),
 			m.settings_workspace_titlebar_size(),
 			m.settings_chat_max_width(),

@@ -80,7 +80,7 @@ test('deadline during upstream discovery does not publish a false missing-remote
     const original = Bun.spawn;
     let heldProbe = false;
     spawn = spyOn(Bun, 'spawn').mockImplementation((args, options) => {
-      if (!args.includes('main@{upstream}')) return original(args, options);
+      if (!args.includes('for-each-ref') || args.at(-1) !== 'refs/heads/main') return original(args, options);
       heldProbe = true;
       return original([process.execPath, '-e', 'setTimeout(() => {}, 10000)'], options);
     });

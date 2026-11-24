@@ -117,6 +117,11 @@
 				ls.toggle('highlightActiveWindow'),
 			)}
 			{@render settingRow(
+				m.settings_collapse_delegated_chats_by_default(),
+				ls.collapseDelegatedChatsByDefault,
+				() => ls.toggle('collapseDelegatedChatsByDefault'),
+			)}
+			{@render settingRow(
 				m.settings_fullscreen_covers_sidebar(),
 				ls.fullscreenCoversSidebar,
 				() => ls.toggle('fullscreenCoversSidebar'),

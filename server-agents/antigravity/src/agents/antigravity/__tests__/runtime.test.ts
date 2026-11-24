@@ -60,8 +60,10 @@ class FakeAntigravityAgent {
   // When set, `session/resume` replies only after this settles.
   resumeGate: Promise<void> | null = null;
   newSessionGate: Promise<void> | null = null;
+  newSessionFailure: string | null = null;
   processesKilled = 0;
   capabilities: AcpInitializeResult['agentCapabilities'] = { loadSession: true, sessionCapabilities: { resume: {} } };
+  authMethods: AcpInitializeResult['authMethods'] = [{ id: 'oauth-personal' }];
   resumeErrorCode = -32603;
   // When set, `session/set_config_option` replies only after this settles.
   configReplyGate: Promise<void> | null = null;
@@ -163,7 +165,7 @@ class FakeAntigravityAgent {
     };
     switch (message.method) {
       case 'initialize':
-        return reply({ protocolVersion: 1, agentCapabilities: this.capabilities });
+        return reply({ protocolVersion: 1, agentCapabilities: this.capabilities, authMethods: this.authMethods });
       case 'authenticate':
         return reply({});
       case 'session/set_model':
@@ -171,6 +173,9 @@ class FakeAntigravityAgent {
         this.#sessionModels.set(String(params.sessionId), String(params.modelId));
         return reply({});
       case 'session/new': {
+        if (this.newSessionFailure) {
+          return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: this.newSessionFailure } });
+        }
         const sessionId = `session-${this.#nextSession++}`;
         this.sessions.add(sessionId);
         const result = { sessionId, models: MODELS, configOptions: [{ ...MODE_OPTION, options: this.modeOptions }] };
@@ -576,6 +581,16 @@ describe('Antigravity ACP runtime', () => {
     agent.endPrompt();
     await expect(replacement).rejects.toThrow('synthetic failure');
     runtime.shutdown();
+  });
+
+  it('lets session/new report a sign-in error when no in-band authentication is offered', async () => {
+    const { agent, runtime, request } = harness();
+    agent.authMethods = [];
+    agent.newSessionFailure = 'Sign-in required to open session';
+    try {
+      await expect(runtime.startSession(request())).rejects.toThrow('Sign-in required to open session');
+      expect(agent.received.map(frame => frame.method)).toEqual(['initialize', 'notifications/initialized', 'session/new']);
+    } finally { runtime.shutdown(); }
   });
 
   it('authenticates, applies model and mode, and sends images inline', async () => {

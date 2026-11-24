@@ -9,6 +9,71 @@ import { initializeFixtureRepository, runFixtureGit, runFixtureGitAt } from '../
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`Git Push publishes the confirmed branch, not its same-named tag (${executionBackend})`, async () => {
+    await withIntegrationFixture(`git-push-ref-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const project = fixture.executionDirs.project;
+      const target = { executorId: client.executorId, project };
+      const query = new URLSearchParams(target);
+      const push = (remoteBranch?: string) => client.post('/api/v1/git/push', { ...target, remote: 'origin', remoteBranch });
+      const remote = join(fixture.executionDirs.root, 'origin.git');
+      const refs = () => runFixtureGit(remote, 'for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)');
+      const head = async () => (await runFixtureGit(project, 'rev-parse', 'HEAD')).trim();
+
+      await initializeFixtureRepository(project);
+      await runFixtureGit(project, 'config', 'core.warnAmbiguousRefs', 'true');
+      await runFixtureGit(project, 'branch', '-m', 'release');
+      await runFixtureGit(project, 'tag', 'release');
+      const tag = await head();
+      await runFixtureGit(project, 'commit', '--allow-empty', '-m', 'Advance branch only');
+      await runFixtureGit(project, 'init', '--bare', remote);
+      await runFixtureGit(project, 'remote', 'add', 'origin', remote);
+
+      expect(await client.get(`/api/v1/git/worktrees?${query}`)).toMatchObject({ worktrees: [{ branch: 'release' }] });
+      expect(await client.get(`/api/v1/git/status?${query}`)).toMatchObject({ branch: 'release', hasCommits: true });
+      expect(await client.get(`/api/v1/git/remote-status?${query}`)).toMatchObject({ branch: 'release', hasUpstream: false });
+      for (const invalid of [{ remoteBranch: null }, { remote: 42 }]) {
+        expect(await rejectionOf(client.post('/api/v1/git/push', { ...target, ...invalid })))
+          .toMatchObject({ status: 400, body: { errorCode: 'GIT_INVALID_INPUT' } });
+        expect(await refs()).toBe('');
+      }
+      expect(await push()).toMatchObject({ success: true, remoteBranch: 'release' });
+      expect(await refs()).toBe(`refs/heads/release ${await head()}\n`);
+
+      await runFixtureGit(project, 'push', 'origin', 'refs/tags/release');
+      await runFixtureGit(project, 'branch', '--set-upstream-to=origin/release');
+      await runFixtureGit(project, 'commit', '--allow-empty', '-m', 'Advance tracked branch');
+      expect(await client.get(`/api/v1/git/remote-status?${query}`)).toMatchObject({ branch: 'release', hasUpstream: true, ahead: 1 });
+      expect(await push('release')).toMatchObject({ success: true, remoteBranch: 'release' });
+      const published = `refs/heads/release ${await head()}\nrefs/tags/release ${tag}\n`;
+      expect(await refs()).toBe(published);
+
+      await runFixtureGit(project, 'switch', '-c', 'heads/release');
+      await runFixtureGit(project, 'commit', '--allow-empty', '-m', 'Advance different branch');
+      expect(await rejectionOf(push('release'))).toMatchObject({ status: 400, body: { errorCode: 'GIT_INVALID_INPUT' } });
+      expect(await refs()).toBe(published);
+      expect(await push('heads/release')).toMatchObject({ success: true, remoteBranch: 'heads/release' });
+      expect(await refs()).toBe(`refs/heads/heads/release ${await head()}\n${published}`);
+
+      await runFixtureGit(project, 'push', 'origin', 'HEAD:refs/heads/release');
+      await runFixtureGit(project, 'switch', 'release');
+      const advanced = await refs();
+      const unconfirmed = 'Git did not confirm the push. Inspect the remote before pushing again.';
+      expect(await rejectionOf(push('release'))).toMatchObject({
+        status: 503, body: { errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN', error: unconfirmed + '\n[rejected] (non-fast-forward)' },
+      });
+      expect(await refs()).toBe(advanced);
+
+      await runFixtureGit(project, 'switch', '-c', 'candidate');
+      await runFixtureGit(project, 'push', 'origin', 'HEAD:refs/heads/refs/heads/candidate');
+      const aliased = await refs();
+      expect(await rejectionOf(push('candidate'))).toMatchObject({
+        status: 503, body: { errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN', error: unconfirmed },
+      });
+      expect(await refs()).toBe(aliased);
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+
   test(`Git quick summary reports untracked presence without weakening full review (${executionBackend})`, async () => {
     await withIntegrationFixture(`git-quick-summary-${executionBackend}`, async fixture => {
       const { client } = fixture;

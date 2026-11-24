@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 import { runCli } from '../../support/cli-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 test('fork parent picker and CLI converge without changing lineage or reloading conversations', async () => {
   await withChromiumFixture('chat-parent', async ({ page, context, integration, assertNoBrowserErrors, withExpectedConsoleErrors }, phase) => {
+    await context.addInitScript(seedLocalSettings, { collapseDelegatedChatsByDefault: false });
     const child = integration.newChatId();
     const source = integration.newChatId();
     const parent = integration.newChatId();

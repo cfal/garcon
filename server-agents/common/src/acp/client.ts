@@ -15,6 +15,17 @@ export interface AcpClientOptions {
   authenticateMethodId?: string;
 }
 
+function authenticationMethod(configured: string | undefined, advertised: AcpInitializeResult['authMethods']): string | null {
+  if (!configured) return null;
+  // Older peers omit the list; only an explicitly empty list opts out of in-band auth.
+  if (!Array.isArray(advertised)) return configured;
+  if (advertised.length === 0) return null;
+  if (!advertised.some(method => method.id === configured)) {
+    throw new Error(`ACP agent does not advertise the configured authentication method: ${configured}`);
+  }
+  return configured;
+}
+
 export class AcpClient {
   #transport: AcpTransport;
   #options: AcpClientOptions;
@@ -29,15 +40,15 @@ export class AcpClient {
     return this.#transport.isConnected;
   }
 
-  async connect(spec: AcpSpawnSpec): Promise<void> {
+  async connect(spec: AcpSpawnSpec): Promise<{ authenticatedMethodId: string | null }> {
     await this.#transport.connect(spec);
     this.#initializeResult = await this.#transport.request<AcpInitializeResult>('initialize', this.#options.initialize);
-    if (this.#options.authenticateMethodId) {
-      await this.#transport.request('authenticate', {
-        methodId: this.#options.authenticateMethodId,
-      });
+    const methodId = authenticationMethod(this.#options.authenticateMethodId, this.#initializeResult.authMethods);
+    if (methodId !== null) {
+      await this.#transport.request('authenticate', { methodId });
     }
     this.#transport.notify('notifications/initialized', {});
+    return { authenticatedMethodId: methodId };
   }
 
   async newSession(params: {
