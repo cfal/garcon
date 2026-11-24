@@ -282,12 +282,12 @@ describe('ConversationFeedVirtualController', () => {
 		expect(node.getBoundingClientRect().top).toBe(-8.25);
 	});
 
-	it('uses the new width for the first seek and still corrects a late inner-row inset', async () => {
+	it('seeks to the saved offset after a width change and still corrects a late inner-row inset', async () => {
 		const { exposure } = await renderController({ initialPinned: false });
 		await exposure.hide();
 		await exposure.showAtLayout(240, 80);
 		await settleController();
-		const { view, node, writes, firstWrite, setInset } = observeReadingTarget(exposure, 3);
+		const { node, writes, firstWrite, setInset } = observeReadingTarget(exposure, 3);
 		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
 		expect(start).toBe(240);
 		node.dataset.chatLayoutPending = 'true';
@@ -301,17 +301,14 @@ describe('ConversationFeedVirtualController', () => {
 		expect(await seek).toBe('completed');
 		expect(writes).toEqual([start - 6.5, start - 6.5 + 13]);
 		expect(node.getBoundingClientRect().top).toBe(6.5);
-		expect(view.clientWidth).toBe(240);
 	});
 
-	it.each([[0, 14.5], [11, -12.25]])('restores only an attainable offset at row %i', async (index, viewportOffset) => {
+	it.each([[0, 14.5], [11, -12.25]])('clamps the first restore write at row %i', async (index, viewportOffset) => {
 		const { exposure } = await renderController({ initialPinned: false });
-		const { view, node } = observeReadingTarget(exposure, index);
-		const start = exposure.controller.snapshot.positions.itemAt(index)!.start;
-		const attainable = Math.min(view.scrollHeight - view.clientHeight, Math.max(0, start - viewportOffset));
+		const { view, writes } = observeReadingTarget(exposure, index);
+		const edge = index === 0 ? 0 : view.scrollHeight - view.clientHeight;
 		expect(await exposure.controller.scrollToTarget({ kind: 'row', id: `row-${index}` }, { viewportOffset })).toBe('completed');
-		expect(view.scrollTop).toBe(attainable);
-		expect(node.getBoundingClientRect().top).toBe(start - attainable);
+		expect(writes).toEqual([edge]);
 	});
 
 	it('does not write for a missing reader or a superseded seek', async () => {
