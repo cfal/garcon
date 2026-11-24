@@ -89,7 +89,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       // Pending Bun matchers can drop subprocess pipe events (oven-sh/bun#33261).
       const reloadError = await fixture.client.reloadChat(chatId).then(() => null, (error: unknown) => error);
       expect(reloadError).toMatchObject({ response: {
-        code: 'HISTORY_LOAD_FAILED', message: expect.stringContaining('turn is still running'),
+        code: 'CHAT_RUNNING', message: expect.stringContaining('turn is still running'),
       } });
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
       expect(held.releaseText('Synthetic output while controller was disconnected')).toBe(true);
@@ -100,7 +100,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
           expect(assistantContents(reloaded.messages)).toContain('Synthetic output while controller was disconnected');
           break;
         } catch (error) {
-          if (!(error instanceof GarconWsRequestError) || error.response.code !== 'HISTORY_LOAD_FAILED'
+          if (!(error instanceof GarconWsRequestError) || error.response.code !== 'CHAT_RUNNING'
             || !error.response.message.includes('turn is still running') || Date.now() >= deadline) throw error;
           await Bun.sleep(10);
         }
