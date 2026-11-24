@@ -13,7 +13,6 @@ import {
 	type WorkspaceLayoutReader,
 	type WorkspaceLayoutSnapshot,
 	type WorkspaceWindowId,
-	type WorkspaceWindowNode,
 	type WorkspaceWindowTabState,
 } from './surface-types.js';
 import {
@@ -23,24 +22,16 @@ import {
 	mapPartitions,
 	mapWindows,
 	projectedWindowCountAfterTabMove,
-	removeWindowAndCollapse,
 	windowCount,
 	windowIdOfSurface,
 	windowNodeById,
 } from './window-tree.js';
 import { canonicalWorkspaceSnapshot } from './canonical-layout.js';
-import { activateTab, insertTab, removeTab, tabsWithOrder } from './workspace-window-tabs.js';
+import { activateTab, insertTab, removeTab } from './workspace-window-tabs.js';
+import { singleTabWindow, closeWindow, mergeWindow, tileChats } from './workspace-window-layout.js';
 
 function unique(values: readonly string[]): string[] {
 	return [...new Set(values)];
-}
-
-function singleTabWindow(windowId: WorkspaceWindowId, surfaceId: string): WorkspaceWindowNode {
-	return {
-		type: 'window',
-		id: windowId,
-		tabs: { order: [surfaceId], activeId: surfaceId, mru: [surfaceId] },
-	};
 }
 
 function normalizeReturnStack(stack: readonly MobileReturnTarget[]): MobileReturnTarget[] {
@@ -554,93 +545,6 @@ function moveTabToNewWindow(
 	};
 }
 
-function removeOwnedSurfaceDescriptors(
-	snapshot: WorkspaceLayoutSnapshot,
-	removedSurfaceIds: readonly string[],
-	desktopRoot: DesktopWorkspaceNode,
-	fullscreenWindowId: WorkspaceWindowId | null,
-): WorkspaceLayoutSnapshot {
-	const removed = new Set(removedSurfaceIds);
-	const surfaces = { ...snapshot.surfaces };
-	const unplacedTerminalIds = [...snapshot.unplacedTerminalIds];
-	for (const surfaceId of removed) {
-		const surface = surfaces[surfaceId];
-		if (surface?.type === 'terminal') unplacedTerminalIds.push(surface.terminalId);
-		delete surfaces[surfaceId];
-	}
-	const fallbackActiveId = collectWindowNodes(desktopRoot)[0]?.tabs.activeId;
-	if (!fallbackActiveId) throw new Error('At least one workspace window must remain');
-	return {
-		...snapshot,
-		desktopRoot,
-		surfaces,
-		fullscreenWindowId,
-		mobileActiveSurfaceId: removed.has(snapshot.mobileActiveSurfaceId)
-			? fallbackActiveId
-			: snapshot.mobileActiveSurfaceId,
-		mobileReturnStack: snapshot.mobileReturnStack.filter(
-			(target) => !removed.has(target.invokerSurfaceId),
-		),
-		unplacedTerminalIds: unique(unplacedTerminalIds),
-	};
-}
-
-function mergeWindow(
-	snapshot: WorkspaceLayoutSnapshot,
-	sourceWindowId: WorkspaceWindowId,
-	destinationWindowId: WorkspaceWindowId,
-): WorkspaceLayoutSnapshot {
-	if (sourceWindowId === destinationWindowId) return snapshot;
-	const source = windowNodeById(snapshot.desktopRoot, sourceWindowId);
-	const destination = windowNodeById(snapshot.desktopRoot, destinationWindowId);
-	if (!source || !destination) throw new Error('Cannot merge missing workspace windows');
-	const sourceChatId = chatViewSurfaceId(sourceWindowId);
-	const destinationChatId = chatViewSurfaceId(destinationWindowId);
-	const sourceChat = snapshot.surfaces[sourceChatId];
-	const transferChat = sourceChat?.type === 'chat' && !snapshot.surfaces[destinationChatId];
-	const movedIds = source.tabs.order.flatMap((id) => {
-		if (id !== sourceChatId) return [id];
-		return transferChat ? [destinationChatId] : [];
-	});
-	const root = removeWindowAndCollapse(snapshot.desktopRoot, sourceWindowId)!;
-	const merged = mapWindows(root, (window) =>
-		window.id === destinationWindowId
-			? { ...window, tabs: tabsWithOrder(window.tabs, [...window.tabs.order, ...movedIds]) }
-			: window,
-	);
-	const next = removeOwnedSurfaceDescriptors(
-		snapshot,
-		sourceChat ? [sourceChatId] : [],
-		merged,
-		null,
-	);
-	if (!transferChat) return next;
-	return {
-		...next,
-		surfaces: { ...next.surfaces, [destinationChatId]: { ...sourceChat, id: destinationChatId } },
-	};
-}
-
-function closeWindow(
-	snapshot: WorkspaceLayoutSnapshot,
-	windowId: WorkspaceWindowId,
-): WorkspaceLayoutSnapshot {
-	if (windowCount(snapshot.desktopRoot) === 1) {
-		throw new Error('At least one workspace window must remain');
-	}
-	const workspaceWindow = windowNodeById(snapshot.desktopRoot, windowId);
-	if (!workspaceWindow) throw new Error(`Workspace window does not exist: ${windowId}`);
-	if (
-		workspaceWindow.tabs.order.some((surfaceId) => snapshot.surfaces[surfaceId]?.type === 'chat') &&
-		workspaceChatViewCount(snapshot) <= 1
-	) {
-		throw new Error('At least one Chat view must remain');
-	}
-	const root = removeWindowAndCollapse(snapshot.desktopRoot, windowId);
-	if (!root) throw new Error('At least one workspace window must remain');
-	return removeOwnedSurfaceDescriptors(snapshot, workspaceWindow.tabs.order, root, null);
-}
-
 function normalizeFullscreenWindow(snapshot: WorkspaceLayoutSnapshot): WorkspaceLayoutSnapshot {
 	if (!snapshot.fullscreenWindowId) return snapshot;
 	if (!windowNodeById(snapshot.desktopRoot, snapshot.fullscreenWindowId)) {
@@ -667,6 +571,8 @@ function applyMutation(
 	mutation: WorkspaceLayoutMutation,
 ): WorkspaceLayoutSnapshot {
 	switch (mutation.type) {
+		case 'tile-chats':
+			return tileChats(snapshot, mutation.rows);
 		case 'register-surface':
 			return registerSurface(snapshot, mutation);
 		case 'register-surface-in-new-window':

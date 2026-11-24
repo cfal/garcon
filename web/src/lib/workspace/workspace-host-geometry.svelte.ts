@@ -51,14 +51,21 @@ export class WorkspaceHostGeometryState {
 		});
 	}
 
-	#measure(): void {
+	measureHostSize(): WorkspaceHostSize | null {
 		const rect = this.#element?.getBoundingClientRect();
-		if (!rect || rect.width <= 0 || rect.height <= 0) {
+		return rect && rect.width > 0 && rect.height > 0
+			? { width: rect.width, height: rect.height }
+			: null;
+	}
+
+	#measure(): void {
+		const size = this.measureHostSize();
+		if (!size) {
 			this.size = null;
 			return;
 		}
-		if (!this.size || this.size.width !== rect.width || this.size.height !== rect.height) {
-			this.size = { width: rect.width, height: rect.height };
+		if (!this.size || this.size.width !== size.width || this.size.height !== size.height) {
+			this.size = size;
 		}
 		if (this.#settleTimer !== null) clearTimeout(this.#settleTimer);
 		this.#settleTimer = null;

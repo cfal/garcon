@@ -77,6 +77,11 @@ export interface WorkspaceWindowNode {
 	readonly tabs: WorkspaceWindowTabState;
 }
 
+export interface WorkspaceChatTile {
+	readonly windowId: WorkspaceWindowId;
+	readonly chatId: string;
+}
+
 export interface WorkspacePartitionNode {
 	readonly type: 'partition';
 	readonly id: WorkspacePartitionId;
@@ -125,6 +130,7 @@ export interface WorkspaceLayoutCommitPort {
 }
 
 export type WorkspaceLayoutMutation =
+	| { type: 'tile-chats'; rows: readonly (readonly WorkspaceChatTile[])[] }
 	| {
 			type: 'merge-window';
 			sourceWindowId: WorkspaceWindowId;
