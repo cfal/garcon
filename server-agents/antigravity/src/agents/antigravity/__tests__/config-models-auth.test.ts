@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, setSystemTime } from 'bun:test';
 import { mkdtemp, mkdtempDisposable, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, normalize, relative } from 'node:path';
@@ -9,6 +9,7 @@ import {
   antigravityLoginEnvironment,
   createAntigravityProbes,
   getAntigravityAuthStatus,
+  MODEL_LISTING_REUSE_MS,
   validateAntigravityLoginCode,
 } from '../antigravity-auth.ts';
 import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels, runAntigravityModels } from '../antigravity-models.ts';
@@ -78,7 +79,7 @@ describe('parseAntigravityModels', () => {
       await writeFile(binary, `#!${join(root, 'missing-interpreter')}\n`, { mode: 0o700 });
       const config = createAntigravityConfig(environment({ GARCON_ANTIGRAVITY_BINARY: binary }));
       expect(config.binary()).toBe(binary);
-      const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, silentLogger);
+      const catalog = createAntigravityCatalog(createAntigravityProbes(config).listModels, silentLogger);
       const signal = new AbortController().signal;
       expect((await catalog.snapshot({ signal, strict: false })).models).toEqual([]);
       await expect(catalog.snapshot({ signal, strict: true })).rejects.toMatchObject({ code: 'BINARY_NOT_FOUND' });
@@ -96,7 +97,7 @@ describe('parseAntigravityModels', () => {
     const config = createAntigravityConfig(environment({
       GARCON_ANTIGRAVITY_BINARY: process.execPath, GARCON_ANTIGRAVITY_AUTH_METHOD: 'invalid-method',
     }));
-    const catalog = createAntigravityCatalog(createAntigravityProbes(config).runModels, silentLogger);
+    const catalog = createAntigravityCatalog(createAntigravityProbes(config).listModels, silentLogger);
     const signal = new AbortController().signal;
     expect((await catalog.snapshot({ signal, strict: false })).models).toEqual([]);
     await expect(catalog.snapshot({ signal, strict: true })).rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
@@ -152,6 +153,120 @@ describe('parseAntigravityModels', () => {
     const binary = join(dir.path, 'agy');
     await writeFile(binary, '#!/bin/sh\necho "Using current profile" >&2\nexec sleep 15\n', { mode: 0o700 });
     await expect(runAntigravityModels(config({ binary: () => binary }), 100)).rejects.toThrow('agy models timed out after 100 ms');
+  });
+});
+
+describe('createAntigravityProbes model listing reuse', () => {
+  async function fakeAgy(root: string) {
+    const binary = join(root, 'agy');
+    await writeFile(binary, `#!/bin/sh
+cd "$(dirname "$0")" || exit 1
+echo run >> runs
+if test -f fail; then echo "Error: Please sign in to view available models." >&2; exit 1; fi
+printf '%s\\tModel\\n' "$(cat model)"
+`, { mode: 0o700 });
+    await writeFile(join(root, 'model'), 'model-a');
+    const runs = async () => (await Bun.file(join(root, 'runs')).text().catch(() => '')).split('\n').filter(Boolean).length;
+    return { probes: createAntigravityProbes(config({ binary: () => binary })), runs };
+  }
+
+  it('reuses a successful catalog listing instead of running agy for every caller', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-reuse-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    const first = await probes.listModels();
+    const second = await probes.listModels();
+    expect(first).toMatchObject({ exitCode: 0, stdout: 'model-a\tModel\n' });
+    expect(second).toEqual(first);
+    expect(await runs()).toBe(1);
+  });
+
+  it('answers the catalog from the last listing while a stale one refreshes', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-refresh-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    const start = Date.now();
+    try {
+      setSystemTime(start);
+      await probes.listModels();
+      await writeFile(join(dir.path, 'model'), 'model-b');
+      setSystemTime(start + MODEL_LISTING_REUSE_MS);
+      expect((await probes.listModels()).stdout).toBe('model-a\tModel\n');
+      const deadline = AbortSignal.timeout(5000);
+      while ((await probes.listModels()).stdout !== 'model-b\tModel\n') {
+        deadline.throwIfAborted();
+        await Bun.sleep(10);
+      }
+      expect(await runs()).toBe(2);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  it('runs agy again after a failed listing so sign-in changes surface', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-failure-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    await writeFile(join(dir.path, 'fail'), '');
+    expect((await probes.listModels()).exitCode).toBe(1);
+    await rm(join(dir.path, 'fail'));
+    expect((await probes.listModels()).stdout).toBe('model-a\tModel\n');
+    expect(await runs()).toBe(2);
+  });
+
+  it('reports a sign-out within the reuse window after at most one stale status', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-revoke-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    const status = () => getAntigravityAuthStatus(config(), { ...probes, headlessAuthenticate: false });
+    try {
+      setSystemTime(Date.now());
+      expect((await status()).authenticated).toBe(true);
+      await writeFile(join(dir.path, 'fail'), '');
+      expect((await status()).authenticated).toBe(true);
+      const deadline = AbortSignal.timeout(5000);
+      while ((await status()).authenticated) {
+        deadline.throwIfAborted();
+        await Bun.sleep(10);
+      }
+      expect((await probes.listModels()).exitCode).toBe(1);
+      expect(await runs()).toBeLessThanOrEqual(4);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  it('waits for a fresh listing when the last status check is older than the reuse window', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-expired-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    const status = () => getAntigravityAuthStatus(config(), { ...probes, headlessAuthenticate: false });
+    const start = Date.now();
+    try {
+      setSystemTime(start);
+      expect((await status()).authenticated).toBe(true);
+      await writeFile(join(dir.path, 'fail'), '');
+      setSystemTime(start + MODEL_LISTING_REUSE_MS);
+      expect((await status()).authenticated).toBe(false);
+      expect(await runs()).toBe(2);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  it('publishes a listing before another caller can start a duplicate run', async () => {
+    const runs: Array<PromiseWithResolvers<{ stdout: string; stderr: string; exitCode: number | null }>> = [];
+    const probes = createAntigravityProbes(config(), () => {
+      const run = Promise.withResolvers<{ stdout: string; stderr: string; exitCode: number | null }>();
+      runs.push(run);
+      return run.promise;
+    });
+    const callers = [probes.listModels()];
+    runs[0]?.resolve({ stdout: 'model-a\tModel\n', stderr: '', exitCode: 0 });
+    for (let tick = 0; tick < 20; tick += 1) {
+      await Promise.resolve();
+      callers.push(probes.listModels());
+    }
+    for (const duplicate of runs.slice(1)) duplicate.reject(new Error('Duplicate listing'));
+    await Promise.allSettled(callers);
+    expect(runs).toHaveLength(1);
+    expect((await probes.listModels()).stdout).toBe('model-a\tModel\n');
+    expect(runs).toHaveLength(1);
   });
 });
 
