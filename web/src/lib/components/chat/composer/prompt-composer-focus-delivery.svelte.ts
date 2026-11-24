@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 
 interface PromptComposerFocusDeliveryOptions {
 	selectedChatId: string | null;
@@ -19,13 +20,32 @@ interface PendingFocusRequest {
 const FOCUS_RETRY_TIMEOUT_MS = 500;
 
 export class PromptComposerFocusDelivery {
+	#lastShellRequestId = 0;
 	#nextRequestId = 0;
 	#pending = $state<PendingFocusRequest | null>(null);
 
-	request(
+	constructor(private readonly options: PromptComposerFocusDeliveryOptions) {}
+
+	requestCurrentChat(): void {
+		this.#request(this.options.selectedChatId, this.options.userInteractionGeneration(), 'default');
+	}
+
+	acceptShellRequest({ id, drawerSelection }: AppShellStore['composerFocusRequest']): void {
+		if (id === 0 || id === this.#lastShellRequestId) return;
+		this.#lastShellRequestId = id;
+		untrack(() => {
+			if (drawerSelection) {
+				this.#request(drawerSelection.chatId, drawerSelection.userInteractionGeneration, 'drawer-selection');
+			} else {
+				this.requestCurrentChat();
+			}
+		});
+	}
+
+	#request(
 		chatId: string | null,
 		userInteractionGeneration: number,
-		origin: PendingFocusRequest['origin'] = 'default',
+		origin: PendingFocusRequest['origin'],
 	): void {
 		if (!chatId) {
 			this.#pending = null;
@@ -40,7 +60,8 @@ export class PromptComposerFocusDelivery {
 		};
 	}
 
-	deliver(options: PromptComposerFocusDeliveryOptions): (() => void) | undefined {
+	deliver(): (() => void) | undefined {
+		const options = this.options;
 		const request = this.#pending;
 		const target = options.target;
 		if (!request) return;
