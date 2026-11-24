@@ -61,6 +61,7 @@
 		class="absolute inset-y-0 -left-2 w-4 cursor-col-resize group select-none touch-none pointer-events-auto"
 		onpointerdown={handlePointerDown}
 		role="separator"
+		data-layout-resizer
 		aria-orientation="vertical"
 		aria-label={m.layout_resize_sidebar()}
 		tabindex="-1"

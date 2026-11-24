@@ -72,8 +72,23 @@ test('the live composer follows tile width and local group order without changin
     await editor.click({ position: { x: 10, y: 8 } });
     await expect(modelPicker).toHaveCount(0);
     await expect(editor).toBeFocused();
+    await page.setViewportSize({ width: 1440, height: 900 });
     await model.click();
     await expect(modelPicker).toBeVisible();
+    const filter = modelPicker.getByRole('textbox');
+    await filter.fill('Echo');
+    const sidebar = page.getByRole('separator', { name: 'Resize sidebar' });
+    const grip = (await sidebar.boundingBox())!;
+    const initialWidth = (await toolbar.boundingBox())!.width;
+    const gripX = grip.x + 3;
+    const gripY = grip.y + grip.height / 2;
+    await sidebar.hover({ position: { x: 3, y: grip.height / 2 } });
+    await page.mouse.down();
+    await page.mouse.move(gripX + 70, gripY, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => (await toolbar.boundingBox())!.width).toBeLessThan(initialWidth);
+    await expect(filter).toHaveValue('Echo');
+    await page.setViewportSize({ width: 1920, height: 900 });
     const resizeTile = async (width: number) => {
       const hit = (await divider.boundingBox())!;
       const outer = (await window.boundingBox())!;

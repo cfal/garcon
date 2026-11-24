@@ -163,7 +163,7 @@
 	ondblclick={handleReset}
 	onkeydown={handleKeyDown}
 	role="separator"
-	data-workspace-window-resizer
+	data-layout-resizer
 	aria-orientation={isHorizontal ? 'vertical' : 'horizontal'}
 	aria-label={m.layout_resize_windows()}
 	aria-valuemin={Math.round(minRatio * 100)}

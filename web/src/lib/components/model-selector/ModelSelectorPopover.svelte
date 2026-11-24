@@ -150,10 +150,8 @@
 		}
 	}
 
-	function isTileResize(event: Event): boolean {
-		return (
-			event.target instanceof Element && !!event.target.closest('[data-workspace-window-resizer]')
-		);
+	function isLayoutResize(event: Event): boolean {
+		return event.target instanceof Element && !!event.target.closest('[data-layout-resizer]');
 	}
 
 	function restoreTriggerFocus(event: Event): void {
@@ -202,7 +200,7 @@
 			const target = event.target;
 			if (!(target instanceof Element)) return;
 			if (
-				isTileResize(event) ||
+				isLayoutResize(event) ||
 				trigger.contains(target) ||
 				overflowAnchor?.contains(target) ||
 				content.contains(target)
@@ -295,7 +293,7 @@
 				<Popover.Content
 					customAnchor={overflowAnchor ?? triggerNode}
 					onInteractOutside={(event) => {
-						if (isTileResize(event)) event.preventDefault();
+						if (isLayoutResize(event)) event.preventDefault();
 					}}
 					getFocusReturnTarget={() => overflowAnchor ?? triggerNode}
 					onCloseAutoFocus={(event) => {
