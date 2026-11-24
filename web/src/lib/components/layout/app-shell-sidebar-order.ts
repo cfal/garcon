@@ -41,6 +41,8 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 					sessions.isChatOptimisticallyArchived(chatId),
 				groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 				collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+				expandedDelegationKeys: projectCollapse.expandedDelegationKeys,
+				collapseDelegatedChatsByDefault: localSettings.collapseDelegatedChatsByDefault,
 			};
 		},
 		write: reorderChat,

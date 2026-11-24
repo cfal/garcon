@@ -363,6 +363,25 @@ describe('recursive sidebar projection', () => {
 			model.rows.some((row) => row.type === 'section-header' && row.section === 'in-progress'),
 		).toBe(false);
 	});
+
+	it('applies the collapse default to each untouched parent, but not to search or flat lists', () => {
+		const chats = [chat('root'), delegated('child', 'root'), delegated('leaf', 'child')];
+		const input = projectionInput(chats, {
+			collapseDelegatedChatsByDefault: true,
+			groupingFields: selections(['project']),
+		});
+		expect(buildSidebarRowModel(input).visibleChatIds).toEqual(['root']);
+		const expandedRoot = buildSidebarRowModel({
+			...input,
+			expandedDelegationKeys: new Set(['delegation:root']),
+		});
+		expect(expandedRoot.visibleChatIds).toEqual(['root', 'child']);
+		const search = buildSidebarRowModel({ ...input, matchingChatIds: new Set(['leaf']) });
+		expect(search.visibleChatIds).toEqual(['root', 'child', 'leaf']);
+		expect(search.actionableChatIds).toEqual(['leaf']);
+		const flat = buildSidebarRowModel({ ...input, nestDelegatedChats: false });
+		expect(flat.visibleChatIds).toEqual(['root', 'child', 'leaf']);
+	});
 	it.each(['top', 'bottom'] as const)(
 		'honors pinned %s branch recency at each level and stable ties',
 		(pinnedInsertPosition) => {

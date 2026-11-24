@@ -190,7 +190,7 @@
 			else next.add(projectKey);
 			collapsedProjectKeys = next;
 		},
-		pruneToRoster() {},
+		pruneGroupChoices() {},
 	} as never);
 	setSidebarSearch(sidebarSearchContext);
 

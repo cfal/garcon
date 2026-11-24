@@ -174,7 +174,7 @@
 		patchLastReadAt: () => {},
 		applyStartEntry: () => {},
 		upsertServerChat: () => {},
-		removeChat: () => {},
+		applyServerDeletion: () => {},
 		setSelectedChatId: () => {},
 		applyProcessingEvent: () => {},
 		reconcileProcessing: () => {},

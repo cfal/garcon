@@ -20,6 +20,29 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
+	it.each([undefined, null, 'false', 0])(
+		'defaults delegated trees to collapsed for %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ collapseDelegatedChatsByDefault: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.collapseDelegatedChatsByDefault).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('remembers opting out of collapsed delegated trees', () => {
+		const store = createLocalSettingsStore();
+		expect(store.collapseDelegatedChatsByDefault).toBe(true);
+		store.toggle('collapseDelegatedChatsByDefault');
+		const restored = createLocalSettingsStore();
+		expect(restored.collapseDelegatedChatsByDefault).toBe(false);
+		store.destroy();
+		restored.destroy();
+	});
+
 	it('applies only dialog-owned preferences against the latest settings', () => {
 		const store = createLocalSettingsStore();
 		store.set('sidebarNestDelegatedChats', false);

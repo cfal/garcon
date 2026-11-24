@@ -4,7 +4,11 @@
 
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
-import { createEventRouter, type EventRouterStores } from '$lib/events/router.svelte';
+import {
+	createEventRouter,
+	type EventRouterSessionsStore,
+	type EventRouterStores,
+} from '$lib/events/router.svelte';
 import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
@@ -20,23 +24,7 @@ import type { ConversationPanelRegistry } from './conversation-panel-registry.sv
 import type { ConversationLifecyclePort } from './conversation-lifecycle-registry.svelte.js';
 
 export interface ConversationRouterStoreDeps {
-	sessions: Pick<
-		ChatSessionsPort,
-		| 'byId'
-		| 'selectedChat'
-		| 'selectedChatId'
-		| 'order'
-		| 'patchPreview'
-		| 'patchActivity'
-		| 'patchChat'
-		| 'patchLastReadAt'
-		| 'removeChat'
-		| 'setSelectedChatId'
-		| 'isChatProcessing'
-		| 'applyProcessingEvent'
-		| 'reconcileProcessing'
-		| 'quietRefreshChats'
-	>;
+	sessions: EventRouterSessionsStore & Pick<ChatSessionsPort, 'selectedChatId' | 'order'>;
 	chatState: ActiveTranscriptPort & { discardChat(chatId: string): void };
 	agentState: AgentState;
 	lifecycle: Pick<

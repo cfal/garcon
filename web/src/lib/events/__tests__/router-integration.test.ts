@@ -200,7 +200,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			patchPreview: vi.fn(),
 			patchActivity: vi.fn(),
 			quietRefreshChats: vi.fn(),
-			removeChat: vi.fn(),
+			applyServerDeletion: vi.fn(),
 			patchChat: vi.fn(),
 			reconcileProcessing: vi.fn(),
 			isChatProcessing: vi.fn(() => selectedChat.isProcessing),
@@ -685,6 +685,8 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages([{ type: 'chat-session-deleted', chatId: 'chat-a' }], stores);
 
 		expect(stores.chatPresentations.clearDeletedChat).toHaveBeenCalledWith('chat-a');
+		expect(stores.sessions.applyServerDeletion).toHaveBeenCalledWith('chat-a');
+		expect(stores.sessions.quietRefreshChats).not.toHaveBeenCalled();
 	});
 
 	it('routes ws-fault through normalize + global filter + handler without a chat ID', () => {

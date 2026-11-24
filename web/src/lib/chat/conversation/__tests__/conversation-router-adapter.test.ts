@@ -90,7 +90,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			patchActivity: vi.fn(),
 			patchChat: vi.fn(),
 			patchLastReadAt: vi.fn(),
-			removeChat: vi.fn(),
+			applyServerDeletion: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			isChatProcessing: (chatId) => chatId === selectedChat?.id && selectedChat.isProcessing,
 			applyProcessingEvent: vi.fn(),

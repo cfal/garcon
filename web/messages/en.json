@@ -1841,6 +1841,7 @@
 	"settings_inline_mermaid_thumbnail_size_full": "Full",
 	"settings_workspace_titlebar_size": "Titlebar size adjustment",
 	"settings_highlight_active_window": "Highlight active window",
+	"settings_collapse_delegated_chats_by_default": "Collapse delegated chat trees by default",
 	"settings_fullscreen_covers_sidebar": "Always cover chat sidebar in fullscreen",
 	"settings_fullscreen_covers_sidebar_autohide": "Disabled while sidebar auto-hide is enabled.",
 	"settings_workspace_titlebar_size_description": "Scales desktop window titlebars, labels, icons, and controls.",

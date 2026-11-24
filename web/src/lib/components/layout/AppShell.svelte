@@ -470,9 +470,7 @@
 		void chatNavigation.showChatInCurrentWindow(targetId, { navigate: true });
 	}
 
-	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
-	// would apply once the server broadcast arrives. Running it eagerly lets
-	// the sidebar and URL update without waiting for the HTTP round-trip.
+	// Updates navigation immediately; only a confirmed deletion retires the saved branch choice.
 	function locallyDeleteChat(chatId: string) {
 		if (!sessions.hasChat(chatId)) return;
 		const wasSelected = sessions.selectedChatId === chatId;

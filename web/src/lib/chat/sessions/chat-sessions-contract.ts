@@ -27,6 +27,7 @@ import type {
 
 export interface ChatSessionsStoreDeps {
 	listChats?: typeof import('$lib/api/chats.js').listChats;
+	onChatDeleted?: (chatId: string) => void;
 	deleteChat?: typeof deleteChat;
 	setLastSelectedChat?: typeof setLastSelectedChat;
 	generateChatTitle?: typeof generateChatTitle;
@@ -92,6 +93,7 @@ export interface ChatSessionsPort {
 	applyStartEntry(entry: ChatListEntry): void;
 	upsertServerChat(entry: ChatListEntry): void;
 	removeChat(chatId: string): void;
+	applyServerDeletion(chatId: string): void;
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
 	patchActivity(chatId: string, timestamp: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;

@@ -434,6 +434,7 @@ describe('Chromium sidebar chat reorder', () => {
       await page.addInitScript(seedLocalSettings, {
         sidebarSortMode: 'manual',
         sidebarNestDelegatedChats: true,
+        collapseDelegatedChatsByDefault: false,
       });
       const { a, b, a1, a2, b1, canonical } = await createSidebarDelegationFixture(integration);
       await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
