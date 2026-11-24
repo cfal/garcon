@@ -871,11 +871,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			chat.executorId,
 			'executorId' in patch ? patch.executorId : chat.executorId,
 		);
-		const nextChat = {
-			...chat,
-			...patch,
-			...normalizeExecutionFields({ ...chat, ...patch }),
-		};
+		const nextChat = { ...chat, ...patch };
+		Object.assign(nextChat, normalizeExecutionFields(nextChat));
 		if (patch.title !== undefined) this.#titles.noteConfirmation();
 		this.#baseById = {
 			...this.#baseById,
