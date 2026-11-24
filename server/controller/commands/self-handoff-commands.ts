@@ -46,6 +46,7 @@ export class SelfHandoffCommands {
   }
 
   async #submit(input: SelfHandoffRunCommandRequest, deadline: number): Promise<ForkRunCommandResponse> {
+    this.support.requireExecutableChat(input.sourceChatId);
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(
       input.clientMessageId,

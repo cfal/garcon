@@ -258,10 +258,10 @@ export class AgentOwnershipJournal {
     const intent = await this.#mutate((journal) => {
       assertAvailable(journal, chatId, 'SESSION_BUSY');
       if (!current) return { journal, result: null };
-      const integration = this.#integrations.get(current.agentId, current.executorId);
+      const integration = current.nativeObservation ? null : this.#integrations.get(current.agentId, current.executorId);
       const revision = carryOverRevision(current.carryOverSegments, current.carryOverMigrationQuarantine);
       const settings = current.agentSettingsById[current.agentId];
-      const reference = integration
+      const reference = current.nativeObservation ? null : integration
         ? toAgentChatReference(integration, chatId, current, revision)
         : settings ? {
             chatId, agentId: current.agentId, agentSessionId: current.agentSessionId,

@@ -74,7 +74,8 @@ export class AgentCommandReplies {
   }
 
   current(source: ReplySource, signal: AbortSignal): boolean {
-    return !signal.aborted && this.context.registry.getChat(source.chatId) !== null
+    const entry = this.context.registry.getChat(source.chatId);
+    return !signal.aborted && entry !== null && !entry.nativeObservation
       && this.context.notices.existingCurrentView(source.chatId)?.viewId === source.viewId;
   }
 

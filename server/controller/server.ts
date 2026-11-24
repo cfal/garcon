@@ -2,6 +2,7 @@
 // This is the single place where dependencies are resolved.
 
 import path from 'path';
+import { assertChatExecutable } from './chats/native-observation.js';
 import { rm } from 'node:fs/promises';
 import { cliRuntimeFile } from '@garcon/common/cli-runtime-paths';
 import { getConfigDir, initializeServerConfig } from './config.js';
@@ -19,6 +20,7 @@ import { startExecutionControlPlane } from './execution-control-plane.js';
 import { ChatRegistry } from './chats/store.js';
 import { ChatParentMutationService } from './chats/chat-parent-mutation-service.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
+import { NativeChildObserverService } from './chats/native-child-observer-service.js';
 import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { RecentTitleIconStore } from './chats/recent-title-icons.js';
@@ -423,7 +425,13 @@ export async function startServer(): Promise<void> {
       onSelectionCommitted: (chatId, revision) => eventWiring?.notifyChatPreamblesInvalidated(chatId, revision),
     });
 
+    const chatIds = new ChatIdAllocator(chatRegistry);
+    const nativeChildren = new NativeChildObserverService({
+      registry: chatRegistry, ledger: transcriptLedger, chatIds, settings,
+      onError: (message, chatId) => logger.warn(message, { chatId }),
+    });
     agentRegistry = new AgentRegistry({
+      observers: nativeChildren,
       onSettingsCommitted: (chatId) => eventWiring?.notifyChatSettingsUpdated(chatId),
       getSettingsExecution() {
         if (!queue) throw new Error('Chat execution coordinator is not initialized');
@@ -542,6 +550,10 @@ export async function startServer(): Promise<void> {
         workingDirectorySettlement: new WorkingDirectorySettler({ registry: chatRegistry, ledger: transcriptLedger, inspect: inspectProject, lock: chatMutationLock }),
         attachmentAdmission: queuedAttachmentAdmission(chatRegistry, agentRegistry),
         canDispatch: (chatId) => executors.isReady(effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId)),
+        assertChatExecutable: (chatId) => {
+          const entry = chatRegistry.getChat(chatId);
+          if (entry) assertChatExecutable(entry);
+        },
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
         appendControlReceipt: agentCommands.appendControlReceipt,
         isControlInputViewCurrent: (chatId, viewId) => chatRegistry.getChat(chatId) !== null
@@ -589,7 +601,6 @@ export async function startServer(): Promise<void> {
       ),
     });
     const lastSelectedChat = new InMemoryLastSelectedChatState();
-    const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
       registry: chatRegistry,
       settings,

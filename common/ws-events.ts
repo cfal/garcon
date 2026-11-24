@@ -345,6 +345,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'agent-handoff',
   'execution-settings-updated',
   'metadata-repaired',
+  'observation-changed',
 ] as const;
 
 export type ChatListInvalidationReason =

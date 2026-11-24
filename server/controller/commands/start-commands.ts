@@ -92,7 +92,7 @@ export class StartCommands {
     deadline: number,
   ): Promise<AgentCommandStartAdmission> {
     signal.throwIfAborted();
-    this.support.requireChat(input.parentChatId);
+    this.support.requireExecutableChat(input.parentChatId);
     if (this.deps.transcripts.existingCurrentView(input.parentChatId)?.viewId !== input.sourceViewId) {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
     }

@@ -1,3 +1,4 @@
+import type { NativeChildObserverService } from '../chats/native-child-observer-service.js';
 import type {
   AgentIntegration,
   AgentNativeSessionRef,
@@ -224,6 +225,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     getSettingsExecution(): SettingsExecutionPort;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
+    observers?: NativeChildObserverService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
     preambles: Pick<PreambleService, 'snapshot'>;
     selectionAdmissionLock: KeyedPromiseLock;
@@ -248,6 +250,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       createCarriedContext: args.createCarriedContext,
       ledger: this.#ledger,
       adoption: this.#adoption,
+      observers: args.observers,
       hasPendingOwnershipTransfer: args.hasPendingOwnershipTransfer,
       resolveFileMentions: args.resolveFileMentions,
     });

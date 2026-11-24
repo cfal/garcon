@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import { asyncQuestionReplyText, parseAsyncQuestionReply, type AsyncQuestionReply } from '../../../common/async-user-questions.js';
 import type { DerivedChatNameInput } from '../chats/chat-title.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
@@ -378,10 +379,16 @@ export class CommandSupport {
     );
   }
 
-  requireChat(chatId: string, message = 'Session not found'): void {
-    if (!this.deps.chats.getChat(chatId)) {
+  requireChat(chatId: string, message = 'Session not found'): ChatRegistryEntry {
+    const entry = this.deps.chats.getChat(chatId);
+    if (!entry) {
       throw new CommandValidationError('SESSION_NOT_FOUND', message, 404);
     }
+    return entry;
+  }
+
+  requireExecutableChat(chatId: string): void {
+    assertChatExecutable(this.requireChat(chatId));
   }
 
   requireClientRequestId(value: string | undefined, field = 'clientRequestId'): string {

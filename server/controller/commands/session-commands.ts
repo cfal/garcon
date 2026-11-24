@@ -65,6 +65,7 @@ export class SessionCommands {
   async submitAgentHandoff(input: AgentHandoffCommandRequest, signal: AbortSignal): Promise<AgentHandoffCommandResponse> {
     this.support.requireClientRequestId(input.clientRequestId);
     return this.support.withChatMutationLock(input.chatId, async (deadline) => {
+      this.support.requireExecutableChat(input.chatId);
       let reservation: TranscriptSnapshotReservation | undefined;
       try {
         signal.throwIfAborted();
@@ -104,6 +105,7 @@ export class SessionCommands {
       || !isDirectDelegatedChild(input.sourceChatId, input.chatId, child)) {
       throw new CommandValidationError('AGENT_RESUME_NOT_DELEGATED', 'Only a directly delegated child can be resumed', 403);
     }
+    this.support.requireExecutableChat(input.sourceChatId);
     if (this.deps.transcripts.existingCurrentView(input.sourceChatId)?.viewId !== input.sourceViewId) {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
     }
@@ -124,6 +126,7 @@ export class SessionCommands {
       || !isDirectDelegatedChild(input.sourceChatId, input.chatId, this.deps.chats.getChat(input.chatId))) {
       throw new CommandValidationError('AGENT_STOP_NOT_DELEGATED', 'Only a directly delegated child can be stopped or removed', 403);
     }
+    this.support.requireExecutableChat(input.sourceChatId);
     if (this.deps.transcripts.existingCurrentView(input.sourceChatId)?.viewId !== input.sourceViewId) {
       throw new CommandValidationError('STALE_TRANSCRIPT_VIEW', 'The requesting transcript view is no longer current', 409);
     }
@@ -139,6 +142,7 @@ export class SessionCommands {
   }
 
   private async submitRunLocked(input: SubmitRunInput, deadline: number): Promise<AgentTurnCommandResponse> {
+    this.support.requireExecutableChat(input.chatId);
     await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
     this.support.assertQuestionReply(input, input.command);
     const normalizedInput = {
@@ -278,7 +282,7 @@ export class SessionCommands {
     input: PermissionDecisionInput,
     deadline: number,
   ): Promise<CommandAcceptedResponse> {
-    this.support.requireChat(input.chatId);
+    this.support.requireExecutableChat(input.chatId);
     const ledgerInput = {
       commandType: 'permission-decision',
       chatId: input.chatId,
@@ -374,21 +378,21 @@ export class SessionCommands {
   }
 
   async submitStop(input: StopInput): Promise<AgentStopResponse> {
-    this.support.requireChat(input.chatId);
+    this.support.requireExecutableChat(input.chatId);
     this.support.requireClientRequestId(input.clientRequestId);
     this.deps.handoffs.cancelPreparation(input.chatId);
     return this.support.withChatMutationLock(input.chatId, () => this.submitStopLocked(input));
   }
 
   async submitInterruptAndSend(input: StopInput): Promise<AgentInterruptAndSendResponse> {
-    this.support.requireChat(input.chatId);
+    this.support.requireExecutableChat(input.chatId);
     this.support.requireClientRequestId(input.clientRequestId);
     this.deps.handoffs.cancelPreparation(input.chatId);
     return this.support.withChatMutationLock(input.chatId, () => this.submitInterruptAndSendLocked(input));
   }
 
   async submitCompact(input: CompactInput): Promise<CommandAcceptedResponse> {
-    this.support.requireChat(input.chatId);
+    this.support.requireExecutableChat(input.chatId);
     return this.support.withChatMutationLock(input.chatId, (deadline) => this.submitCompactLocked(input, deadline));
   }
 
@@ -406,12 +410,13 @@ export class SessionCommands {
   }
 
   private async deleteChatLocked(chatId: string): Promise<{ success: true; chatId: string }> {
-    this.support.requireChat(chatId);
+    const entry = this.support.requireChat(chatId);
+    if (entry.nativeObservation) this.deps.transcripts.closeChat(chatId);
     this.deps.ledger.beginChatDeletion(chatId);
 
     let retired: boolean;
     try {
-      retired = await this.deps.queue.abortForChatDeletion(chatId);
+      retired = entry.nativeObservation ? true : await this.deps.queue.abortForChatDeletion(chatId);
     } catch (error) {
       await this.deps.ledger.cancelChatDeletion(chatId);
       logger.warn(
@@ -440,7 +445,7 @@ export class SessionCommands {
       await this.deps.ownership.delete(chatId);
     } catch (error) {
       if (this.deps.chats.getChat(chatId)) {
-        this.deps.queue.rollbackChatDeletion(chatId);
+        if (!entry.nativeObservation) this.deps.queue.rollbackChatDeletion(chatId);
         await this.deps.ledger.cancelChatDeletion(chatId);
         throw error;
       }
@@ -461,6 +466,7 @@ export class SessionCommands {
   }
 
   private async submitStopLocked(input: StopInput): Promise<AgentStopResponse> {
+    this.support.requireExecutableChat(input.chatId);
     const ledger = await this.deps.ledger.accept({
       commandType: 'agent-stop',
       chatId: input.chatId,
@@ -500,6 +506,7 @@ export class SessionCommands {
   }
 
   private async submitInterruptAndSendLocked(input: StopInput): Promise<AgentInterruptAndSendResponse> {
+    this.support.requireExecutableChat(input.chatId);
     const ledger = await this.deps.ledger.accept({
       commandType: 'agent-interrupt-and-send',
       chatId: input.chatId,
@@ -541,6 +548,7 @@ export class SessionCommands {
   }
 
   private async submitCompactLocked(input: CompactInput, deadline: number): Promise<CommandAcceptedResponse> {
+    this.support.requireExecutableChat(input.chatId);
     // Compaction starts its own turn and cannot share its agent session with an active turn.
     const chat = this.deps.chats.getChat(input.chatId);
     if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId, chat.executorId)) {
@@ -594,6 +602,7 @@ export class SessionCommands {
   }
 
   private async updateProjectPathLocked(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
+    this.support.requireExecutableChat(input.chatId);
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);

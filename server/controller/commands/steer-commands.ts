@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import type {
   CommandAcceptedResponse,
   CommandErrorCode,
@@ -57,6 +58,7 @@ export class SteerCommands {
       'clientMessageId',
     );
     const initialChat = this.deps.chats.getChat(input.chatId);
+    if (initialChat) assertChatExecutable(initialChat);
     const integrationId = initialChat?.agentId;
     // The steer's interactive deadline starts here, before it asks for the chat lock.
     const deadline = interactiveDeadline();
@@ -97,6 +99,7 @@ export class SteerCommands {
 
         await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
         const currentChat = this.deps.chats.getChat(input.chatId);
+        if (currentChat) assertChatExecutable(currentChat);
         if (input.expectedAgentOwnershipEpoch !== undefined
           && input.expectedAgentOwnershipEpoch !== currentChat?.agentOwnershipEpoch) {
           throw new CommandValidationError('STALE_CHAT_OWNERSHIP', 'Chat ownership changed before steering', 409);
@@ -238,6 +241,7 @@ export class SteerCommands {
     }
 
     const initialChat = this.deps.chats.getChat(input.chatId);
+    if (initialChat) assertChatExecutable(initialChat);
     const integrationId = initialChat?.agentId;
     const observedControl = initialChat
       ? await this.deps.queue.readChatExecutionControl(input.chatId)
@@ -272,6 +276,8 @@ export class SteerCommands {
     try {
       let providerContent = observedEntry?.content ?? '';
       const scheduleResponse = () => this.support.withChatMutationLock(input.chatId, async () => {
+        const currentChat = this.deps.chats.getChat(input.chatId);
+        if (currentChat) assertChatExecutable(currentChat);
         if (!initialChat) {
           const observed = await this.deps.ledger.observe(ledgerInput);
           if (observed) {

@@ -44,6 +44,7 @@ export interface ChatExecutionCoordinatorOptions {
   projectAdmission: ProjectAdmissionPort;
   attachmentAdmission: QueuedAttachmentAdmissionPort;
   canDispatch: (chatId: string) => boolean;
+  assertChatExecutable: (chatId: string) => void;
   isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
   appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;

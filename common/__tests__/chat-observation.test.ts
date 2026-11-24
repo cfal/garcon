@@ -6,12 +6,13 @@ describe('native child presentation contracts', () => {
   it('requires an explicit observer projection or null', () => {
     expect(parseChatObservation(null)).toBeNull();
     for (const captureStatus of ['attached', 'detached'] as const) {
-      expect(parseChatObservation({ kind: 'native-child', captureStatus }))
-        .toEqual({ kind: 'native-child', captureStatus });
+      expect(parseChatObservation({ kind: 'native-child', captureStatus, isWorking: false }))
+        .toEqual({ kind: 'native-child', captureStatus, isWorking: false });
     }
     for (const value of [undefined, {}, { kind: 'native-child', captureStatus: 'running' }]) {
       expect(() => parseChatObservation(value)).toThrow();
     }
+    expect(() => parseChatObservation({ kind: 'native-child', captureStatus: 'detached', isWorking: true })).toThrow();
   });
 
   it('round trips only recognized native lifecycle and recovery details', () => {

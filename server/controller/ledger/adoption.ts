@@ -14,6 +14,7 @@ import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { LedgerRowDraft, TranscriptView } from './contracts.js';
 import { frozenDrafts, importedDrafts, type ImportedRow } from './imported-drafts.js';
 import { TranscriptLedgerService } from './service.js';
+import { TranscriptViewNotInitializedError } from './errors.js';
 
 export interface TranscriptAdoptionOptions {
   readonly ledger: TranscriptLedgerService;
@@ -42,7 +43,13 @@ export class TranscriptAdoptionService {
     chatId: string,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<TranscriptView> {
-    if (!this.options.registry.getChat(chatId)) throw unknownChatError(chatId);
+    const registered = this.options.registry.getChat(chatId);
+    if (!registered) throw unknownChatError(chatId);
+    if (registered.nativeObservation) {
+      const current = this.options.ledger.existingCurrentView(chatId);
+      if (!current) throw new TranscriptViewNotInitializedError(chatId);
+      return current;
+    }
     const currentView = this.options.ledger.currentView(chatId);
     if (currentView) {
       this.#repairSessionCache(chatId);

@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import type {
   ChatPreambleSelectionTargetResponse,
   UpdateChatPreambleSelectionRequest,
@@ -147,6 +148,7 @@ export class ChatPreambleSelectionService {
   ): Promise<ChatPreambleSelectionUpdateOutcome> {
     const chatId = input.chatId;
     const session = this.#requireChat(chatId);
+    assertChatExecutable(session);
     const view = await this.#withTranscriptErrors(() => this.deps.adoption.ensure(chatId));
     if (view.viewId !== input.transcriptViewId) {
       throw new DomainError(
