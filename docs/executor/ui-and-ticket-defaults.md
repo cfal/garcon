@@ -27,6 +27,8 @@ Changing the executor chooses the destination's saved default or most recent dir
 
 In New Chat, typing a path, executor discovery, and path validation never move focus. Committing a pin, worktree, or directory returns focus to the prompt as soon as the picker closes. Escape or Cancel returns to the opener. Drafting does not require a valid path; sending still does.
 
+On phones, tapping Project Path opens the directory browser when the selected executor offers Files. Without Files, the field accepts a typed path instead.
+
 The scheduled prompts list shows each prompt's executor as a pill: the executor a new chat will start on, or the current executor of an existing chat. The Local pill remains visible when it is the only executor. A prompt whose chat no longer exists shows no pill.
 
 ## Chat Composer
