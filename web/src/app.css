@@ -757,9 +757,7 @@
 		--composer-thinking-composer-border: hsl(var(--border));
 		--composer-thinking-status-border: hsl(var(--border));
 	}
-}
 
-@media (prefers-reduced-motion: no-preference) {
 	.chat-processing-spinner {
 		animation: var(--animate-spin);
 		animation-timing-function: var(--processing-motion-timing);

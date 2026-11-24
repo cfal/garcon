@@ -99,9 +99,8 @@
 	<ComposerStatusBarFrame tone="processing" {announcementsEnabled}>
 		<div class="flex min-w-0 items-center gap-1.5">
 			<span
-				class="flex-shrink-0 text-sm text-status-processing {animationPhase % 2 === 0
-					? 'scale-110'
-					: ''}"
+				class="flex-shrink-0 text-sm text-status-processing"
+				class:scale-110={animationPhase % 2 === 0}
 			>
 				{activeSpinners[animationPhase]}
 			</span>

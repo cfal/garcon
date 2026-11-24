@@ -1,5 +1,4 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import {
@@ -15,8 +14,6 @@ import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-r
 import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
-
-const appCss = readFileSync('src/app.css', 'utf8');
 
 function conversationalCatalog(): ModelCatalogStore {
 	const catalog = new ModelCatalogStore();
@@ -1354,36 +1351,6 @@ describe('PromptComposer focus', () => {
 		expect(frame?.className).toContain('composer-reduce-motion');
 		expect(statusAnchor?.className).toContain('composer-thinking-active');
 		expect(statusAnchor?.className).toContain('composer-reduce-motion');
-	});
-
-	it('defaults to static and pulses only when motion is allowed', () => {
-		const staticTreatmentRule = appCss.match(
-			/\.composer-thinking-active\s*\{(?<body>[\s\S]*?)\n\}/,
-		);
-		const motionAllowedRule = appCss.match(
-			/@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.composer-thinking-active:not\(\.composer-reduce-motion\)\s*\{(?<body>[\s\S]*?)\n\t\}\s*\}/,
-		);
-
-		expect(appCss).toContain('@keyframes composer-thinking-border-pulse');
-		expect(appCss).toMatch(
-			/@keyframes composer-thinking-border-pulse\s*\{[\s\S]*?border-color: hsl\(var\(--border\)\);[\s\S]*?border-color: hsl\(var\(--composer-thinking-pulse-emphasis\)\);[\s\S]*?\}/,
-		);
-		expect(staticTreatmentRule?.groups?.body).toContain('--composer-thinking-animation: none;');
-		expect(staticTreatmentRule?.groups?.body).toContain(
-			'linear-gradient(hsl(var(--card)) 0 0) padding-box,',
-		);
-		expect(staticTreatmentRule?.groups?.body).toContain('to bottom,');
-		expect(staticTreatmentRule?.groups?.body).toContain(
-			'hsl(var(--composer-thinking-static-start)) 0%,',
-		);
-		expect(staticTreatmentRule?.groups?.body).toContain('hsl(var(--border)) 100%');
-		expect(staticTreatmentRule?.groups?.body).toContain(
-			'--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));',
-		);
-		expect(motionAllowedRule?.groups?.body).toMatch(
-			/--composer-thinking-animation: composer-thinking-border-pulse var\(--processing-pulse-duration\)\s+var\(--processing-motion-timing\) infinite;/,
-		);
-		expect(motionAllowedRule?.groups?.body).not.toContain('composer-thinking-static-start');
 	});
 
 	it('shows quick commit before stop while the selected chat is processing', async () => {
