@@ -59,14 +59,30 @@ import {
 	type WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
 import { computeWindowRects } from './window-tree.js';
+import { visiblePresentationMap } from './visible-presentations.js';
 import {
-	fileSurfaceId,
 	singletonSurfaceId,
 	type DesktopPlacement,
 	type WorkspaceWindowId,
 	type PresentationHostId,
 	type WorkspaceLayoutReader,
+	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
+
+function presentedFileDocuments(
+	snapshot: WorkspaceLayoutSnapshot,
+	isMobile: boolean,
+	files: FileSessionRegistry,
+): Set<string> {
+	const documents = new Set<string>();
+	for (const id of visiblePresentationMap(snapshot, isMobile ? 'mobile' : 'desktop').values()) {
+		const surface = snapshot.surfaces[id];
+		if (surface?.type !== 'file') continue;
+		const view = files.get(surface.fileSessionId);
+		if (view) documents.add(view.documentId);
+	}
+	return documents;
+}
 
 export function resolveConfiguredFilePlacement(
 	settings: LocalSettingsStore,
@@ -385,6 +401,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		gitBranchActions,
 	});
 
+	let visibleFileDocuments = new Set<string>();
 	const files: FileSessionRegistry = new FileSessionRegistry({
 		saveText: async (request, options) => {
 			try {
@@ -451,10 +468,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			);
 		},
 		openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-		isDocumentVisible: (documentId) =>
-			[...(files.documents[documentId]?.viewIds ?? [])].some((viewId) =>
-				placement?.isSurfacePresented(fileSurfaceId(viewId)),
-			),
+		isDocumentVisible: (documentId) => visibleFileDocuments.has(documentId),
 	});
 	const coordinator = new WorkspaceCoordinator({
 		arbiter: new WorkspaceTransitionArbiter(layout, layout),
@@ -475,7 +489,18 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		onLayoutChanged: (snapshot) => {
 			hostGeometry.layoutPublished();
 			persistence.schedule(snapshot);
-			for (const session of files.all) files.viewVisibilityChanged(session.id);
+			if (!files.hasOpenDocuments()) {
+				visibleFileDocuments.clear();
+				return;
+			}
+			const previous = visibleFileDocuments;
+			visibleFileDocuments = presentedFileDocuments(snapshot, coordinator.isMobile, files);
+			for (const id of previous) {
+				if (!visibleFileDocuments.has(id)) files.documentVisibilityChanged(id);
+			}
+			for (const id of visibleFileDocuments) {
+				if (!previous.has(id)) files.documentVisibilityChanged(id);
+			}
 		},
 		onTerminalLauncherDismissed: deps.onTerminalLauncherDismissed,
 		getRouteIdentity: deps.getRouteIdentity,

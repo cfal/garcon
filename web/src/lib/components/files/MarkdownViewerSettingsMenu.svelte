@@ -40,7 +40,11 @@
 					if (value) setFontSize(value);
 				}}
 			>
-				<Select.Trigger class="w-[80px]" size="sm">
+				<Select.Trigger
+					class="w-[80px]"
+					size="sm"
+					aria-label={m.settings_appearance_settings_code_editor_font_size_label()}
+				>
 					{localSettings.markdownViewerFontSize}px
 				</Select.Trigger>
 				<Select.Content>

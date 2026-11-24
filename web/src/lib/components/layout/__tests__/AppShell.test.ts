@@ -1,7 +1,7 @@
 import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { tick } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import {
 	AppShellBreakpointWorkspace,
 	AppShellLocalSettingsState,
@@ -14,6 +14,7 @@ import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.j
 import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 import { page } from '$lib/mocks/app/state';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
+import type { WorkspaceShortcutDispatcher } from '$lib/workspace/workspace-shortcuts.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
@@ -26,6 +27,7 @@ import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-stor
 import { chat } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+const shortcuts = vi.hoisted(() => ({ userInteractionGeneration: 0 }) satisfies Pick<WorkspaceShortcutDispatcher, 'userInteractionGeneration'>);
 const chatNavigation = vi.hoisted(() => ({
 	gotoChat: vi.fn<(_chatId: string) => Promise<void>>(() => Promise.resolve()),
 }));
@@ -52,6 +54,7 @@ vi.mock('$lib/context', () => ({
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
+	getWorkspaceShortcuts: () => shortcuts,
 	getWorkbenchCommands: () => testContext.current?.commands,
 	getSingletonSurfaces: () => testContext.current?.singletons,
 	getTransientLayers: () => testContext.current?.transientLayers,
@@ -178,6 +181,7 @@ function setViewportWidth(width: number, dispatch = true): void {
 }
 
 function installContext(chats: ChatSessionRecord[] = []): AppShellBreakpointWorkspace {
+	shortcuts.userInteractionGeneration = 0;
 	const workspace = new AppShellBreakpointWorkspace();
 	const appShell = new AppShellStore();
 	vi.spyOn(appShell, 'setSidebarOpen');
@@ -615,6 +619,45 @@ describe('AppShell responsive workspace binding', () => {
 		expect(transientLayers.ownsTopModalTarget(dialog)).toBe(true);
 	});
 
+	it('releases only the closed drawer while its exit DOM is retained', async () => {
+		const workspace = installContext();
+		const appShell = testContext.current!.appShell as AppShellStore;
+		const layers = testContext.current!.transientLayers as TransientLayerRegistry;
+		setViewportWidth(390, false);
+		render(AppShell);
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open chat drawer' }));
+		const drawer = await screen.findByRole('dialog', { name: 'Chats' });
+		const setOpen = (open: boolean) => flushSync(() => appShell.setSidebarOpen(open));
+		setOpen(false);
+		expect(drawer.isConnected).toBe(true);
+		expect(drawer.dataset.state).toBe('closed');
+		expect(layers.makesMainInert).toBe(false);
+
+		setOpen(true);
+		await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+		expect(layers.ownsTopModalTarget(drawer)).toBe(true);
+		const other = document.createElement('button');
+		document.body.append(other);
+		const releaseOther = layers.register({
+			id: 'synthetic-dialog', kind: 'application-dialog', modality: 'main-inert',
+			isOpen: () => true, element: () => other, onEscape: () => false, restoreFocus: () => {},
+		});
+		try {
+			setOpen(false);
+			other.focus();
+			await waitFor(() => expect(drawer.isConnected).toBe(false));
+			expect(layers.makesMainInert).toBe(true);
+			expect(layers.ownsTopModalTarget(other)).toBe(true);
+			expect(document.activeElement).toBe(other);
+			expect(appShell.requestComposerFocus).not.toHaveBeenCalled();
+		} finally {
+			releaseOther();
+			other.remove();
+		}
+		expect(layers.makesMainInert).toBe(false);
+	});
+
 	it('resets the sidebar search dialog cluster when the mobile drawer closes', async () => {
 		const workspace = installContext();
 		const appShell = testContext.current?.appShell as AppShellStore;
@@ -714,6 +757,28 @@ describe('AppShell responsive workspace binding', () => {
 		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
 		expect(appShell.requestSidebarRecenterToSelected).toHaveBeenCalledOnce();
 		expect(chatNavigation.gotoChat).toHaveBeenCalledOnce();
+	});
+
+	it.each(['mouse', 'touch', 'pen', 'keyboard'])('scopes the early drawer request to mouse selection (%s)', async (modality) => {
+		const workspace = installContext();
+		const appShell = testContext.current!.appShell as AppShellStore;
+		setViewportWidth(390, false);
+		render(AppShell);
+		await waitFor(() => expect(workspace.enterCalls).toBe(1));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open chat drawer' }));
+		const row = await screen.findByRole('button', { name: 'Select test chat' });
+		const route = Promise.withResolvers<void>();
+		chatNavigation.gotoChat.mockReturnValueOnce(route.promise);
+		shortcuts.userInteractionGeneration = 4;
+		if (modality === 'keyboard') await fireEvent.keyDown(row, { key: 'Enter' });
+		else await fireEvent.pointerDown(row, { pointerType: modality });
+		await fireEvent.click(row);
+		shortcuts.userInteractionGeneration++;
+		route.resolve();
+		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
+		expect(appShell.composerFocusRequest.drawerSelection).toEqual(
+			modality === 'mouse' ? { chatId: 'chat-test', userInteractionGeneration: 4 } : undefined,
+		);
 	});
 
 	it.each(['resolve', 'reject'] as const)(

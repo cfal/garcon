@@ -84,6 +84,24 @@ async function formatted({
 }
 
 describe('formatted composer integration', () => {
+	it('fits the source textarea when revealed, not on each formatted edit', async () => {
+		const { editor, textarea } = await formatted({ source: 'Draft' });
+		const layoutRead = vi.spyOn(textarea, 'getClientRects');
+		Object.defineProperty(textarea, 'scrollHeight', { get: () => 96 });
+		for (const word of [' one', ' two']) {
+			await act(() => {
+				richEditor(editor).commands.insertContent(word);
+			});
+		}
+		expect(textarea.value).toBe('Draft one two');
+		expect(layoutRead).not.toHaveBeenCalled();
+
+		await selectMode('source');
+		expect(screen.getByRole('textbox')).toBe(textarea);
+		expect(textarea.style.height).toBe('96px');
+		expect(layoutRead).toHaveBeenCalled();
+	});
+
 	it.each([
 		'def f(*args):',
 		'2*3*4',

@@ -1,11 +1,11 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'svelte';
 import { BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
 import { installResizeObserverHarness, ResizeObserverHarness } from '$lib/components/shared/__tests__/resize-observer-harness';
 import type { ConversationFeedMutationKind } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import type { ConversationFeedProjection } from '../ConversationFeedProjectionState.svelte.js';
-import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
 import type {
 	ConversationVirtualFeedItem,
 	ConversationVirtualFeedModel,
@@ -13,7 +13,10 @@ import type {
 	ToolGroupVirtualFeedItem,
 } from '../conversation-feed-virtual-items.js';
 import { buildConversationVirtualFeedModel } from '../conversation-feed-virtual-items.js';
-import ConversationFeedVirtualControllerHiddenRemapHost from './ConversationFeedVirtualControllerHiddenRemapHost.svelte';
+import { remapConversationAnchor } from '../conversation-feed-anchor-remapping.js';
+import HiddenRemapHost from './ConversationFeedVirtualControllerHiddenRemapHost.svelte';
+
+type Controls = Parameters<ComponentProps<typeof HiddenRemapHost>['onReady']>[0];
 
 const timestamp = '2026-08-03T00:00:00.000Z';
 
@@ -62,15 +65,7 @@ function projection(
 			]),
 			['tail', items.length - 1],
 		]),
-		targetByDomAnchorId: new Map(),
-		memberRowIdByDomAnchorId: new Map(),
-		representativeRowIdByKey: new Map(items.map((item): [string, string] => [
-			item.key,
-			item.kind === 'tool-group' ? memberIds[0] : item.key,
-		])),
-		collapsedGroupByMemberRowId: new Map(
-			collapsed ? members.map((member): [string, ToolGroupVirtualFeedItem] => [member.item.id, group]) : [],
-		),
+		rowIdByToolAnchorId: new Map(),
 		transcriptStartIndex: 0,
 		transcriptEndIndex: items.length,
 	};
@@ -156,20 +151,11 @@ async function hiddenRemapPosition(
 	scrollTop: number,
 ): Promise<{ key: string | undefined; start: number; end: number; scrollTop: number }> {
 	const restoreObserver = installResizeObserverHarness();
-	const firstPublication = publications[0];
-	if (!firstPublication) throw new Error('Expected at least one hidden publication');
-	let exposure: {
-		controller: ConversationFeedVirtualController;
-		viewport(): HTMLDivElement | null;
-		hide(): Promise<void>;
-		combine(): Promise<void>;
-		apply(next: ConversationFeedProjection): Promise<void>;
-		show(): Promise<void>;
-	} | undefined;
+	if (!publications.length) throw new Error('Expected at least one hidden publication');
+	let exposure: Controls | undefined;
 	try {
-		render(ConversationFeedVirtualControllerHiddenRemapHost, {
+		render(HiddenRemapHost, {
 			initial,
-			combined: firstPublication,
 			onReady(value) { exposure = value; },
 		});
 		await waitFor(() => expect(exposure).toBeDefined());
@@ -196,6 +182,49 @@ async function hiddenRemapPosition(
 }
 
 describe('ConversationFeedVirtualController hidden remap', () => {
+	it('takes fallback keys from published geometry without reading unrelated items', () => {
+		const previous = projection(false, 1);
+		const next = projection(true, 2);
+		const readTailKey = vi.fn(() => 'tail');
+		Object.defineProperty(next.model.items.at(-1)!, 'key', { get: readTailKey });
+		const anchor = { key: 'member', viewportOffset: -12, fallbackKeys: [] };
+		expect(remapConversationAnchor(anchor, previous.model, next)).toEqual({
+			oldKey: 'member',
+			anchor: { key: 'summary:member', viewportOffset: 0, fallbackKeys: ['before', 'tail'] },
+		});
+		expect(readTailKey).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{ keepCollapsed: true, expected: 'cancelled' },
+		{ keepCollapsed: false, expected: 'target-missing' },
+	])('rechecks the original member and DOM alias after async reveal ($expected)', async ({ keepCollapsed, expected }) => {
+		const initial = fallbackProjection(1, true, true, false);
+		const publishedDuringReveal = fallbackProjection(2, true, keepCollapsed, true);
+		const requested: string[] = [];
+		const restoreObserver = installResizeObserverHarness();
+		let exposure!: Controls;
+		try {
+			render(HiddenRemapHost, {
+				initial,
+				async revealToolGroup(rowId) {
+					requested.push(rowId);
+					await exposure.apply(publishedDuringReveal);
+					return 'applied';
+				},
+				onReady(value) { exposure = value; },
+			});
+			await waitFor(() => expect(exposure?.viewport()).toBeTruthy());
+			ResizeObserverHarness.emit(exposure.viewport()!, 400, 80);
+			const result = await exposure.controller.scrollToTarget({ kind: 'dom-anchor', id: 'tool-input-a' });
+			expect(requested).toEqual(['view:3']);
+			expect(result).toBe(expected);
+		} finally {
+			cleanup();
+			restoreObserver();
+		}
+	});
+
 	it('restores a compressed summary to the viewport instead of the old member depth', async () => {
 		const restored = await hiddenRemapPosition(projection(false, 1), [projection(true, 2)], 340);
 		expect(restored.key).toBe('summary:member');

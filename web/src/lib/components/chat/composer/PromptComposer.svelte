@@ -202,9 +202,15 @@
 	let destroyed = false;
 	let fileMentionMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
 	let slashCommandMenu: { handleKeyDown: (event: KeyboardEvent) => boolean } | undefined = $state();
-	let handledAppShellFocusRequestId = 0;
 	let handledDraftAppendRequestId = 0;
-	const focusDelivery = new PromptComposerFocusDelivery();
+	const focusDelivery = new PromptComposerFocusDelivery({
+		get selectedChatId() { return sessions.selectedChatId; },
+		get disabled() { return isDisabled; },
+		get visible() { return isVisible; },
+		get target() { return formattedDraft ? ui.formattedTarget : textarea; },
+		userInteractionGeneration: () => workspaceShortcuts.userInteractionGeneration,
+		drawerFocusBlocked: () => appShell.sidebarOpen || transientLayers.makesMainInert,
+	});
 	const snippetContextHint = $derived(
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
 	);
@@ -281,15 +287,8 @@
 	});
 	onDestroy(() => onAvailabilityNoticeChange?.(null));
 
-	function requestComposerFocusForChat(chatId: string | null): void {
-		focusDelivery.request(
-			chatId,
-			untrack(() => workspaceShortcuts.userInteractionGeneration),
-		);
-	}
-
 	onMount(() => {
-		tick().then(() => requestComposerFocusForChat(sessions.selectedChatId));
+		tick().then(() => focusDelivery.requestCurrentChat());
 	});
 
 	const promptRefinement = new PromptComposerRefinementController({
@@ -375,23 +374,10 @@
 	});
 
 	// Keeps shell focus requests durable while navigation changes ownership.
-	$effect(() => {
-		const requestId = appShell.composerFocusRequestId;
-		if (requestId === 0 || requestId === handledAppShellFocusRequestId) return;
-		handledAppShellFocusRequestId = requestId;
-		untrack(() => requestComposerFocusForChat(sessions.selectedChatId));
-	});
+	$effect(() => focusDelivery.acceptShellRequest(appShell.composerFocusRequest));
 
 	// Keeps focus pending through transient visibility during window moves.
-	$effect(() =>
-		focusDelivery.deliver({
-			selectedChatId: sessions.selectedChatId,
-			disabled: isDisabled,
-			visible: isVisible,
-			target: formattedDraft ? ui.formattedTarget : textarea,
-			userInteractionGeneration: () => workspaceShortcuts.userInteractionGeneration,
-		}),
-	);
+	$effect(() => focusDelivery.deliver());
 
 	const imageAttachments = new ImageAttachmentState();
 

@@ -1,0 +1,11 @@
+panes,operation,timeline_record,build_chunk,line,column,records,ms,aggregation
+12,scroll-down,RecalculateStyles,no-stack,,,11,85.7,inclusive_ms
+12,scroll-down,RecalculateStyles,Ckpk6cWV.js,3,9998,3,40.6,inclusive_ms
+12,scroll-down,RecalculateStyles,C_KzIgmW.js,1,121,5,39.8,inclusive_ms
+12,scroll-down,RecalculateStyles,DNnRfaVV.js,1,19910,8,31.7,inclusive_ms
+12,scroll-down,RecalculateStyles,DNnRfaVV.js,1,13190,5,12.1,inclusive_ms
+12,scroll-down,RecalculateStyles,DNnRfaVV.js,1,6925,4,2.3,inclusive_ms
+12,scroll-down,RecalculateStyles,C_KzIgmW.js,1,557,1,1.1,inclusive_ms
+12,scroll-down,RecalculateStyles,DNnRfaVV.js,1,19837,1,0.9,inclusive_ms
+12,typing,FunctionCall,DlwFfFEI.js,10,29950,10,62.7,self_ms
+1,typing,FunctionCall,DlwFfFEI.js,10,29950,10,68.4,self_ms

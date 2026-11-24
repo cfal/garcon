@@ -110,15 +110,14 @@ describe('AppShellStore', () => {
 			expect(cb).toHaveBeenCalledTimes(1);
 		});
 
-		it('requestComposerFocus increments the reactive request counter', () => {
+		it('supersedes the drawer selection when an ordinary composer focus request arrives', () => {
 			const store = new AppShellStore();
-
-			expect(store.composerFocusRequestId).toBe(0);
+			expect(store.composerFocusRequest.id).toBe(0);
+			const drawerSelection = { chatId: 'selected-chat', userInteractionGeneration: 3 };
+			store.requestComposerFocus(drawerSelection);
+			expect(store.composerFocusRequest).toEqual({ id: 1, drawerSelection });
 			store.requestComposerFocus();
-			expect(store.composerFocusRequestId).toBe(1);
-
-			store.requestComposerFocus();
-			expect(store.composerFocusRequestId).toBe(2);
+			expect(store.composerFocusRequest).toEqual({ id: 2, drawerSelection: undefined });
 		});
 
 		it('requestRenameSelectedChat fires callbacks', () => {

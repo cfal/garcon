@@ -178,11 +178,15 @@ export class VirtualListGeometry {
 		for (const measurement of measurements) {
 			const { key, size } = measurement;
 			const index = this.#indexByKey.get(key);
-			if (index === undefined || this.#measurements.get(key) === size) continue;
-			delta += size - this.#sizes[index];
+			if (index === undefined) continue;
+			const previous = this.#measurements.get(key);
+			if (previous === size) continue;
+			this.#measurements.set(key, size);
+			const previousSize = previous ?? this.#sizes[index];
+			if (size === previousSize) continue;
+			delta += size - previousSize;
 			changedCount += 1;
 			firstChangedIndex = firstChangedIndex === null ? index : Math.min(firstChangedIndex, index);
-			this.#measurements.set(key, size);
 			this.#markDirty(index, 1);
 		}
 		return { delta, changedCount, firstChangedIndex };

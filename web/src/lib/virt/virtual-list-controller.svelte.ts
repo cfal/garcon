@@ -54,7 +54,7 @@ export class VirtualListController {
 			measureElement: options.measureElement,
 			shouldMeasureMount: (key) => this.#transaction.geometry.measuredSize(key) === undefined,
 			onMount: (measurements) => this.#transaction.measure(measurements, 'mount'),
-			onResize: (measurements) => this.#transaction.measure(measurements, 'resize'),
+			onResize: (measurements) => this.#transaction.observeSizes(measurements),
 			onViewportResize: () => this.#transaction.viewportChanged(true),
 			onScroll: () => this.#transaction.scrolled(),
 			onUserIntent: () => this.#transaction.cancelOwnedScroll(),

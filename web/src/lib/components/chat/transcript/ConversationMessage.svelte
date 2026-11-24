@@ -284,10 +284,11 @@
 		return isImageAttachmentMimeType(attachmentMimeType(attachment));
 	}
 
-	let messageMenuOpen = $state(false);
+	// Undefined keeps unopened portals out of document.body; false retains their close and focus lifecycle.
+	let messageMenuOpen = $state<boolean>();
 	let messageMenuTriggerRef = $state<HTMLElement | null>(null);
 	let messageMenuContentRef = $state<HTMLElement | null>(null);
-	let selectTextDialogOpen = $state(false);
+	let selectTextDialogOpen = $state<boolean>();
 	let messageSelectionText = $state<string | null>(null);
 	let messageLongPressTimer: ReturnType<typeof setTimeout> | null = null;
 	let suppressNextMenuButtonClick = false;
@@ -564,6 +565,30 @@
 	});
 </script>
 
+{#snippet messageMenuContent()}
+	{#if messageMenuOpen !== undefined}
+		<ContextMenuContent
+			bind:ref={messageMenuContentRef}
+			onInteractOutside={closeMessageMenuFromInteractOutside}
+		>
+			<MessageActionMenu
+				hasSelection={hasMessageSelection}
+				canFork={Boolean(onForkChat && forkUpToSeq)}
+				onClearBefore={asUser && onClearBefore && forkUpToSeq !== undefined ? () => onClearBefore?.(forkUpToSeq!) : undefined}
+				canForkNow={canForkAtMessageNow}
+				onFork={handleFork}
+				onCopy={copyText}
+				onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
+				onSendToNewSession={sendToNewSession}
+				onSelectText={openSelectTextDialog}
+				onGenerateTitleFromMessage={canGenerateTitleFromMessage
+					? generateTitleFromCurrentMessage
+					: undefined}
+			/>
+		</ContextMenuContent>
+	{/if}
+{/snippet}
+
 {#snippet floatingMessageMenuButton(positionClass: string)}
 	<button
 		type="button"
@@ -598,7 +623,8 @@
 						bind:ref={messageMenuTriggerRef}
 						oncontextmenucapture={captureMessageSelection}
 						class={cn(
-							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 shadow-sm min-w-0 max-w-full',
+							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 min-w-0 max-w-full',
+							userMessagePresentation ? 'shadow-sm' : 'data-[state=open]:shadow-sm',
 							!userMessagePresentation?.style &&
 								'data-[state=open]:bg-user-bubble-selected selection:bg-user-bubble-foreground selection:text-user-bubble',
 							userMessageSurfaceClass,
@@ -668,25 +694,7 @@
 							{/if}
 						</div>
 					</ContextMenuTrigger>
-					<ContextMenuContent
-						bind:ref={messageMenuContentRef}
-						onInteractOutside={closeMessageMenuFromInteractOutside}
-					>
-						<MessageActionMenu
-							hasSelection={hasMessageSelection}
-							canFork={Boolean(onForkChat && forkUpToSeq)}
-							onClearBefore={onClearBefore && forkUpToSeq !== undefined ? () => onClearBefore?.(forkUpToSeq!) : undefined}
-							canForkNow={canForkAtMessageNow}
-							onFork={handleFork}
-							onCopy={copyText}
-							onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
-							onSendToNewSession={sendToNewSession}
-							onSelectText={openSelectTextDialog}
-							onGenerateTitleFromMessage={canGenerateTitleFromMessage
-								? generateTitleFromCurrentMessage
-								: undefined}
-						/>
-					</ContextMenuContent>
+					{@render messageMenuContent()}
 				</ContextMenu>
 				<div
 					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
@@ -851,24 +859,7 @@
 									{@render floatingMessageMenuButton('-bottom-1 right-1')}
 								</div>
 							</ContextMenuTrigger>
-							<ContextMenuContent
-								bind:ref={messageMenuContentRef}
-								onInteractOutside={closeMessageMenuFromInteractOutside}
-							>
-								<MessageActionMenu
-									hasSelection={hasMessageSelection}
-									canFork={Boolean(onForkChat && forkUpToSeq)}
-									canForkNow={canForkAtMessageNow}
-									onFork={handleFork}
-									onCopy={copyText}
-									onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
-									onSendToNewSession={sendToNewSession}
-									onSelectText={openSelectTextDialog}
-									onGenerateTitleFromMessage={canGenerateTitleFromMessage
-										? generateTitleFromCurrentMessage
-										: undefined}
-								/>
-							</ContextMenuContent>
+							{@render messageMenuContent()}
 						</ContextMenu>
 					{:else if asCliRow}
 						<CliRow
@@ -937,7 +928,7 @@
 	</div>
 {/if}
 
-{#if !shouldHideThinking && messageMenuText}
+{#if selectTextDialogOpen !== undefined && !shouldHideThinking && messageMenuText}
 	<MessageTextSelectionDialog
 		open={selectTextDialogOpen}
 		text={messageMenuText}

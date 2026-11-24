@@ -36,6 +36,11 @@ export interface ChatPreambleSelectionTarget {
 	readonly transcriptViewId: string;
 }
 
+export interface DrawerComposerSelection {
+	readonly chatId: string;
+	readonly userInteractionGeneration: number;
+}
+
 export class AppShellStore {
 	showSettings = $state(false);
 	showScheduledPrompts = $state(false);
@@ -46,7 +51,7 @@ export class AppShellStore {
 	settingsTab = $state<SettingsTab>('appearance');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
-	composerFocusRequestId = $state(0);
+	composerFocusRequest = $state.raw<{ id: number; drawerSelection?: DrawerComposerSelection }>({ id: 0 });
 	/** Height of the virtual keyboard in px, tracked via visualViewport. */
 	keyboardHeight = $state(0);
 	/** Read-only project base path from server config. Set once on settings load. */
@@ -221,8 +226,8 @@ export class AppShellStore {
 	}
 
 	/** Requests focus on the active chat composer input. */
-	requestComposerFocus(): void {
-		this.composerFocusRequestId = untrack(() => this.composerFocusRequestId) + 1;
+	requestComposerFocus(drawerSelection?: DrawerComposerSelection): void {
+		this.composerFocusRequest = { id: untrack(() => this.composerFocusRequest.id) + 1, drawerSelection };
 	}
 
 	/** Opens the new-chat dialog, optionally seeding it with prefill data. */

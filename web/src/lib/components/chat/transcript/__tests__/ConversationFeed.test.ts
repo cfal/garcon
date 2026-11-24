@@ -14,11 +14,22 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { AssistantMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, ThinkingMessage } from '$shared/chat-types';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
 import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
+import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
 import { ConversationToolGroupState } from '../ConversationToolGroupState.svelte.js';
 import { CHAT_FEED_ANNOUNCEMENT_BATCH_MS } from '../conversation-feed-announcer.js';
+
+const disclosureTimestamp = '2026-01-01T00:00:00.000Z';
+
+function disclosureRows(firstOrdinal: number) {
+	return [
+		{ ordinal: firstOrdinal, message: new BashToolUseMessage(disclosureTimestamp, 'one', 'pwd') },
+		{ ordinal: firstOrdinal + 1, message: new BashToolUseMessage(disclosureTimestamp, 'two', 'pwd') },
+		{ ordinal: firstOrdinal + 2, message: new ThinkingMessage(disclosureTimestamp, 'Synthetic thinking') },
+	];
+}
 
 async function showFeedScrollbar(container: HTMLElement): Promise<{
 	scrollbar: HTMLElement;
@@ -149,6 +160,47 @@ describe('ConversationFeed', () => {
 		expect(screen.queryByText('Synthetic appended answer')).toBeNull();
 	});
 
+	it.each([
+		[640, 'group'], [3000, 'group'], [3000, 'thinking'], [3000, 'default'],
+	] as const)('does not read unrelated row IDs on append (%i rows, %s)', async (size, mode) => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
+		const transcript = new ActiveTranscriptState(undefined, null, { combineMessages: true });
+		const entry = (ordinal: number) => ({ ordinal, message: new AssistantMessage(disclosureTimestamp, 'Synthetic answer ' + ordinal) });
+		seedTranscript(transcript, 'chat-1', 'generation-1', disclosureRows(1), {
+			lastOrdinal: 3, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const { container, unmount } = render(ConversationFeedTestHost, { transcript });
+		try {
+			if (mode !== 'default') {
+				const button = await screen.findByRole('button', { name: mode === 'group' ? 'Execute 2 commands' : 'Thinking' });
+				await fireEvent.click(button);
+				expect(button.getAttribute('aria-expanded')).toBe(String(mode === 'group'));
+			}
+			const more = Array.from({ length: size - 3 }, (_, i) => entry(i + 4));
+			expect(transcript.applyMessages('chat-1', 'generation-1', more, 4, size)).toBe('applied');
+			await tick();
+			expect(transcript.visibleRows).toHaveLength(size);
+			const sizer = container.querySelector<HTMLElement>('[data-chat-virtual-sizer]')!;
+			const modelCount = Number(sizer.dataset.chatVirtualModelCount);
+			const revision = Number(sizer.dataset.chatVirtualDataRevision);
+			let reads = 0;
+			// Excludes mounted edge rows and the announcer's independent 512-row tail.
+			for (const row of transcript.visibleRows.slice(25, -512)) {
+				const id = row.id;
+				Object.defineProperty(row, 'id', { configurable: true, get() { reads++; return id; } });
+			}
+			expect(transcript.applyMessages('chat-1', 'generation-1', [entry(size + 1)], size + 1, size + 1)).toBe('applied');
+			await tick();
+			expect(Number(sizer.dataset.chatTranscriptEntryCount)).toBe(size + 1);
+			expect(Number(sizer.dataset.chatVirtualModelCount)).toBe(modelCount + 1);
+			expect(Number(sizer.dataset.chatVirtualDataRevision)).toBe(revision + 1);
+			expect(reads).toBe(0);
+		} finally {
+			unmount();
+			transcript.transcriptCache.flush();
+		}
+	});
+
 	it('keeps the raw feed unchanged until refresh, then combines rows behind an accessible disclosure', async () => {
 		const raw = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
 		await waitFor(() => expect(raw.container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
@@ -170,6 +222,39 @@ describe('ConversationFeed', () => {
 		await fireEvent.click(group);
 		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0));
 		expect(group.getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('keeps moved disclosures but prunes evicted ones when a hidden pane is revealed', async () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
+		const transcript = new ActiveTranscriptState(undefined, null, { combineMessages: true });
+		const original = disclosureRows(10);
+		const replace = (rows: Parameters<typeof seedTranscript>[3]) =>
+			seedTranscript(transcript, 'chat-1', 'generation-1', rows, {
+				lastOrdinal: rows.at(-1)!.ordinal, pageOldestOrdinal: rows[0].ordinal, nextBeforeOrdinal: null, hasMore: false,
+			});
+		replace(original);
+		const { rerender, unmount } = render(ConversationFeedTestHost, { transcript });
+		const group = () => screen.findByRole('button', { name: 'Execute 2 commands' });
+		const thinking = () => screen.findByRole('button', { name: 'Thinking' });
+		try {
+			await fireEvent.click(await group());
+			await fireEvent.click(await thinking());
+			replace([{ ordinal: 9, message: new AssistantMessage(disclosureTimestamp, 'Earlier') }, ...original]);
+			await screen.findByText('Earlier');
+			expect((await group()).getAttribute('aria-expanded')).toBe('true');
+			expect((await thinking()).getAttribute('aria-expanded')).toBe('false');
+			await rerender({ isVisible: false });
+			replace([{ ordinal: 20, message: new AssistantMessage(disclosureTimestamp, 'Different window') }]);
+			await rerender({ isVisible: true });
+			await screen.findByText('Different window');
+			replace(original);
+			await screen.findByText('Synthetic thinking');
+			expect((await group()).getAttribute('aria-expanded')).toBe('false');
+			expect((await thinking()).getAttribute('aria-expanded')).toBe('true');
+		} finally {
+			unmount();
+			transcript.transcriptCache.flush();
+		}
 	});
 
 	it('keeps grouping and focus unchanged when combination is disabled in another tab', async () => {
@@ -649,6 +734,30 @@ describe('ConversationFeed', () => {
 		expect(mountedTranscriptRows).toBeGreaterThan(0);
 		expect(mountedItems).toBeLessThan(120);
 		expect(container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy();
+	});
+
+	it('resolves row attachments only for newly rendered keys on a range-only scroll', async () => {
+		const item = vi.spyOn(ConversationFeedVirtualController.prototype, 'item');
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'local-truncation',
+		});
+		const viewport = container.querySelector<HTMLElement>('[data-chat-scroll-viewport]')!;
+		const sizer = container.querySelector<HTMLElement>('[data-chat-virtual-sizer]')!;
+		sizer.getBoundingClientRect = () => new DOMRect(0, -viewport.scrollTop, 900, 0);
+		const rows = () => [...sizer.querySelectorAll<HTMLElement>('[data-chat-virtual-item]')];
+		await tick();
+		const before = new Set(rows());
+		item.mockClear();
+
+		viewport.scrollTop = 380;
+		await fireEvent.scroll(viewport);
+		const after = rows();
+		const added = after.filter((row) => !before.has(row));
+		expect(added.length).toBeGreaterThan(0);
+		expect(added.length).toBeLessThan(after.length);
+		expect(item.mock.calls.map(([key]) => key).sort()).toEqual(
+			added.map((row) => row.dataset.chatVirtualItem).sort(),
+		);
 	});
 
 	it('bounds a twenty-thousand-entry payload before virtual projection', async () => {

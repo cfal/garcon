@@ -45,10 +45,10 @@ import {
 	remapConversationAnchor,
 } from './conversation-feed-anchor-remapping.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
-import type {
-	ConversationVirtualFeedModel,
-	ConversationVirtualTarget,
-	ToolGroupVirtualFeedItem,
+import {
+	resolveConversationVirtualTarget,
+	type ConversationVirtualFeedModel,
+	type ToolGroupVirtualFeedItem,
 } from './conversation-feed-virtual-items.js';
 
 export const CHAT_VIRTUAL_OVERSCAN = 6;
@@ -285,17 +285,17 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		const selected = identityChanged
 			? null
-				: remapConversationAnchor(readingAnchor, previousModel, input.next.model);
+			: remapConversationAnchor(readingAnchor, previousModel, input.next);
 		const selectedAnchor = selected?.anchor ?? null;
 		const nextHiddenAnchor = identityChanged
 			? null
-				: (remapConversationAnchor(this.#hiddenAnchor, previousModel, input.next.model)?.anchor ?? null);
-			const anchor = conversationProjectionMutationAnchor({
-				selected,
-				restoreEnd,
-				explicitNavigation: nextGeometry.endBehavior === 'explicit-navigation',
-				targetScrollActive: this.#activeTargetScrolls > 0,
-			});
+			: (remapConversationAnchor(this.#hiddenAnchor, previousModel, input.next)?.anchor ?? null);
+		const anchor = conversationProjectionMutationAnchor({
+			selected,
+			restoreEnd,
+			explicitNavigation: nextGeometry.endBehavior === 'explicit-navigation',
+			targetScrollActive: this.#activeTargetScrolls > 0,
+		});
 		const result = this.#virt.apply(
 			identityChanged
 				? {
@@ -579,22 +579,20 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			await nextConversationLayoutFrame();
 			if (token !== this.#targetToken) return 'cancelled';
 			if (!this.isReady()) return 'not-ready';
-			const memberRowId = this.#memberRowId(target);
-			if (
-				target.kind !== 'presentation-row' &&
-				memberRowId &&
-				this.#configuredModel.collapsedGroupByMemberRowId.has(memberRowId)
-			) {
+			let resolved = resolveConversationVirtualTarget(this.#configuredModel, target);
+			const memberRowId = resolved?.collapsedMemberRowId;
+			if (memberRowId) {
 				const surface = this.#configuredGeometry.surfaceIdentity;
 				const revealed = await this.options.revealToolGroup?.(memberRowId);
 				if (token !== this.#targetToken || surface !== this.#configuredGeometry.surfaceIdentity) {
 					return 'cancelled';
 				}
 				if (revealed !== 'applied' || !this.isReady()) return 'not-ready';
-				if (this.#configuredModel.collapsedGroupByMemberRowId.has(memberRowId)) return 'cancelled';
+				const member = resolveConversationVirtualTarget(this.#configuredModel, { kind: 'row', id: memberRowId });
+				if (member?.collapsedMemberRowId) return 'cancelled';
+				resolved = resolveConversationVirtualTarget(this.#configuredModel, target);
 			}
 			const model = this.#configuredModel;
-			const resolved = this.#resolveTarget(target, model);
 			if (!resolved) return 'target-missing';
 			const key = model.items[resolved.index]?.key;
 			if (!key) return 'target-missing';
@@ -760,29 +758,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#clearPendingToolGroupFocus(): void {
 		this.#pendingToolGroupFocus?.release();
 		this.#pendingToolGroupFocus = null;
-	}
-
-	#memberRowId(target: ConversationViewportTarget): string | undefined {
-		if (target.kind === 'dom-anchor') {
-			return this.#configuredModel.memberRowIdByDomAnchorId.get(target.id);
-		}
-		return target.id;
-	}
-
-	#resolveTarget(
-		target: ConversationViewportTarget,
-		model: ConversationVirtualFeedModel,
-	): ConversationVirtualTarget | undefined {
-		if (target.kind === 'dom-anchor') return model.targetByDomAnchorId.get(target.id);
-		const index = model.indexByRowId.get(target.id);
-		if (index === undefined) return undefined;
-
-		let innerRowId = target.id;
-		const item = model.items[index];
-		if (target.kind === 'presentation-row' && item?.kind === 'tool-group') {
-			innerRowId = item.anchorId;
-		}
-		return { index, innerRowId };
 	}
 
 	#restoreVirtualAnchor(anchor: ConversationVirtualAnchor): boolean {

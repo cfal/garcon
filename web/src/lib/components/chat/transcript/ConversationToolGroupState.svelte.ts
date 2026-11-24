@@ -1,3 +1,5 @@
+import type { ConversationRowMembership } from './conversation-retained-row-lookup.js';
+
 export class ConversationToolGroupState {
 	#surfaceIdentity: string | null = null;
 	#expandedMemberIds = $state.raw<ReadonlySet<string>>(new Set());
@@ -15,7 +17,7 @@ export class ConversationToolGroupState {
 		if (next.size !== this.#expandedMemberIds.size) this.#expandedMemberIds = next;
 	}
 
-	reconcile(surfaceIdentity: string, validRowIds: ReadonlySet<string>): void {
+	reconcile(surfaceIdentity: string, validRowIds: ConversationRowMembership): void {
 		if (this.#surfaceIdentity !== surfaceIdentity) {
 			this.#surfaceIdentity = surfaceIdentity;
 			this.#expandedMemberIds = new Set();

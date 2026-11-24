@@ -41,7 +41,7 @@
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
 	import { ConversationToolGroupState } from './ConversationToolGroupState.svelte.js';
-	import { virtualItems as selectVirtualItems } from '$lib/virt/virtual-list-types.js';
+	import { ConversationRetainedRowLookup } from './conversation-retained-row-lookup.js';
 	import {
 		ConversationFeedAnnouncementBatcher,
 		ConversationFeedAnnouncerState,
@@ -210,6 +210,7 @@
 	const retention = new ConversationFeedRetentionState();
 	const itemState = new ConversationFeedItemState();
 	const toolGroups = new ConversationToolGroupState();
+	const retainedRows = new ConversationRetainedRowLookup();
 	const revealWaiters = new Map<
 		symbol,
 		{ rowId: string; surfaceIdentity: string; resolve: (result: 'applied' | 'cancelled') => void }
@@ -352,7 +353,7 @@
 	});
 	const virtualSnapshot = $derived(virtualController.snapshot);
 	const renderedIndexes = $derived(virtualController.renderedIndexes(virtualSnapshot));
-	const virtualItems = $derived(selectVirtualItems(virtualSnapshot, renderedIndexes));
+	const positions = $derived(virtualSnapshot.positions);
 
 	$effect(() => {
 		if (!isVisible) return;
@@ -363,11 +364,8 @@
 	$effect.pre(() => {
 		if (!isVisible) return;
 		const validRowIds = toolGroups.expandedMemberIds.size > 0 || itemState.hasDisclosureOverrides
-			? new Set(chatState.visibleRows.map((row) => row.id)) : new Set<string>();
-		toolGroups.reconcile(
-			surfaceIdentity,
-			validRowIds,
-		);
+			? retainedRows.forRows(chatState.visibleRows) : retainedRows.clear();
+		toolGroups.reconcile(surfaceIdentity, validRowIds);
 		const input = projectionInput;
 		const pendingPermissionOccurrences = new Set(
 			activePendingPermissionRequests.map((request) => request.permissionOccurrenceId),
@@ -487,15 +485,16 @@
 			style:height={`${virtualSnapshot.sizerSize}px`}
 			style="overflow-anchor: none;"
 			data-chat-virtual-sizer
-			data-chat-virtual-count={virtualItems.length}
+			data-chat-virtual-count={renderedIndexes.length}
 			data-chat-virtual-model-count={projection.model.items.length}
 			data-chat-virtual-data-revision={projection.projectedDataRevision}
 			data-chat-transcript-entry-count={chatState.entries.length}
 			data-chat-transcript-first-ordinal={chatState.entries[0]?.ordinal}
 			{@attach virtualController.sizer}
 		>
-			{#each virtualItems as virtualItem (virtualItem.key)}
-				{@const itemIndex = projection.model.indexByKey.get(String(virtualItem.key))}
+			{#each renderedIndexes as index (positions.itemAt(index)!.key)}
+				{@const virtualItem = positions.itemAt(index)!}
+				{@const itemIndex = projection.model.indexByKey.get(virtualItem.key)}
 				{@const item = itemIndex === undefined ? undefined : projection.model.items[itemIndex]}
 				{#if item}
 					<ConversationFeedVirtualRow

@@ -1,0 +1,294 @@
+diff -rNU0 a/integration-tests/scripts/composer-input-probe.ts b/integration-tests/scripts/composer-input-probe.ts
+--- a/integration-tests/scripts/composer-input-probe.ts	2026-11-24 01:28:23.113800511 +0000
++++ b/integration-tests/scripts/composer-input-probe.ts	2026-11-24 01:28:41.623576257 +0000
+@@ -0,0 +1,2 @@
++import type { ReceiverPublicationTrial, ReceiverStudyWindow } from '../../web/src/lib/components/chat/transcript/receiver-publication-study.js';
++
+@@ -2 +4 @@
+-export function composerInputProbe(ids: string[], drafts: string[], compact: boolean) {
++export function composerInputProbe(ids: string[], drafts: string[], compact: boolean, receiverStudy = false) {
+@@ -70 +72 @@
+-  let user = '', assistant = '', receipt: { kind: string; at: number }[] = [];
++  let user = '', assistant = '', receipt: { kind: string; at: number; ordinal: number; view: string }[] = [];
+@@ -71,0 +74,8 @@
++  const win = window as ReceiverStudyWindow;
++  let marks: [string, number][] = [];
++  const mark = (stage: string, at = performance.now()) => { marks.push([stage, at]); };
++  let expectedTurn = '', terminals = 0, receiverFrame = 0, observedRow = '';
++  let previousAssistant = 0, previousView = '', persistentViewport: HTMLElement | undefined;
++  let prepared: { mode: 'unarmed' | ReceiverPublicationTrial['mode']; entries: number; model: number; head: string | undefined; revision: number; width: number; height: number } | null = null;
++  const rowIn = (root: Element, id: string) => one<HTMLElement>('[data-chat-row-id="' + CSS.escape(id) + '"]', root);
++  const gap = (v: HTMLElement) => Math.abs(v.scrollHeight - v.clientHeight - v.scrollTop);
+@@ -74,0 +85,6 @@
++    if (receiverStudy && m.chatId === ids[2] && m.turnId === expectedTurn && (m.type === 'agent-run-finished' || m.type === 'agent-run-failed')) {
++      if (m.type !== 'agent-run-finished' || m.outcome !== 'finished') disconnected = true;
++      terminals++;
++      mark('terminal');
++      return;
++    }
+@@ -76 +92 @@
+-    for (const { message } of m.messages) {
++    for (const { ordinal, message } of m.messages) {
+@@ -79 +95,3 @@
+-      receipt.push({ kind, at: performance.now() });
++      const at = performance.now();
++      receipt.push({ kind, at, ordinal, view: m.transcriptViewId });
++      if (receiverStudy) mark('wire-' + kind, at);
+@@ -109 +127 @@
+-      down = time(); const ed = input();
++      down = time(); if (receiverStudy) mark('key', down); const ed = input();
+@@ -114 +132 @@
+-      if (down && !beforeTime && e.isTrusted && e.inputType === 'insertText' && e.data === 'x') { beforeTime = time(); trustedBefore = true; }
++      if (down && !beforeTime && e.isTrusted && e.inputType === 'insertText' && e.data === 'x') { beforeTime = time(); trustedBefore = true; if (receiverStudy) mark('beforeinput', beforeTime); }
+@@ -118 +136 @@
+-      inputTime = time(); const ed = input(); inputOwner = anchor(i) && e.target === ed;
++      inputTime = time(); if (receiverStudy) mark('input', inputTime); const ed = input(); inputOwner = anchor(i) && e.target === ed;
+@@ -120 +138,4 @@
+-      requestAnimationFrame(() => { firstFrame = time(); requestAnimationFrame(() => { two = time() }); });
++      requestAnimationFrame(() => {
++        firstFrame = time(); if (receiverStudy) mark('key-frame1', firstFrame);
++        requestAnimationFrame(() => { two = time(); if (receiverStudy) mark('key-frame2', two); });
++      });
+@@ -148 +169,4 @@
+-      if (!compact) {
++      if (receiverStudy) {
++        marks = []; prepared = null; expectedTurn = ''; terminals = receiverFrame = 0; observedRow = '';
++        delete win.__receiverTrial;
++      } else if (!compact) {
+@@ -158,0 +183,36 @@
++    async prepareReceiver(mode: 'unarmed' | ReceiverPublicationTrial['mode'], turnId: string) {
++      if (!receiverStudy || compact || prepared || !turnId) throw Error('Unexpected receiver request');
++      const u = receipt[0], v = feed(2);
++      if (!u || u.kind !== 'user' || !Number.isSafeInteger(u.ordinal) || u.ordinal <= previousAssistant ||
++          !u.view || (previousView && u.view !== previousView) || !v) throw Error('Wrong user occurrence or transcript');
++      const userRowId = u.view + ':' + u.ordinal;
++      expectedTurn = turnId;
++      await until(() => settledFeed(2) && rowIn(v, userRowId)?.dataset.chatMessageType === 'user-message' &&
++        !!rowIn(v, userRowId)?.textContent?.includes(user), 'pinned user occurrence before assistant release');
++      const sizer = one<HTMLElement>('[data-chat-virtual-sizer]', v)!;
++      const entries = Number(sizer.dataset.chatTranscriptEntryCount), model = Number(sizer.dataset.chatVirtualModelCount);
++      const revision = Number(sizer.dataset.chatVirtualDataRevision);
++      if (!ids.every((_, i) => settledFeed(i)) || !anchor(0) || panel(2)?.hasAttribute('data-conversation-panel-composer-anchor') ||
++          persistentViewport && persistentViewport !== v || !Number.isSafeInteger(revision) || entries < 1 || entries > 100 || model !== entries + 2) {
++        throw Error('Fixture not in the four-tile pinned precondition');
++      }
++      persistentViewport = v;
++      prepared = { mode, entries, model, revision, head: sizer.dataset.chatTranscriptFirstOrdinal, width: v.clientWidth, height: v.clientHeight };
++      if (mode !== 'unarmed') {
++        win.__receiverTrial = { mode, chatId: ids[2]!, viewId: u.view, userRowId, expectedAssistant: assistant,
++          priorEntries: entries, priorRevision: revision, phase: 'armed', mark };
++      }
++      mark('user-ready');
++      // Uses only DOM identity and text here. Geometry is checked outside the measured edit.
++      observer = new MutationObserver(() => {
++        if (Number(sizer.dataset.chatVirtualDataRevision) <= revision) return;
++        const el = sizer.querySelectorAll<HTMLElement>('[data-chat-message-type="assistant-message"][data-chat-row-id]');
++        const last = el[el.length - 1], id = last?.dataset.chatRowId ?? '';
++        if (!id.startsWith(u.view + ':') || Number(id.slice(u.view.length + 1)) <= u.ordinal || !last?.textContent?.includes(assistant)) return;
++        projectedAt = performance.now(); observedRow = id; mark('receiver-dom', projectedAt);
++        observer?.disconnect();
++        requestAnimationFrame(() => { receiverFrame = performance.now(); mark('receiver-frame', receiverFrame); });
++      });
++      observer.observe(sizer, { childList: true, subtree: true, characterData: true,
++        attributes: true, attributeFilter: ['data-chat-virtual-data-revision'] });
++    },
+@@ -163 +223,2 @@
+-      user = '';
++      if (receiverStudy) await until(() => terminals > 0 && receiverFrame > 0, 'matching finished turn and receiver frame');
++      else user = '';
+@@ -169,0 +231,29 @@
++    receiverResult() {
++      const base = prepared, u = receipt[0], a = receipt[1], v = feed(2);
++      if (!base || !u || !a || !v || !projectedAt || !receiverFrame) throw Error('Incomplete receiver trial');
++      const sizer = one<HTMLElement>('[data-chat-virtual-sizer]', v)!;
++      const aid = a.view + ':' + a.ordinal, ur = rowIn(sizer, u.view + ':' + u.ordinal), ar = rowIn(sizer, aid);
++      const ordered = u.kind === 'user' && a.kind === 'assistant' && a.view === u.view && a.ordinal > u.ordinal &&
++        !!(ur && ar && ur.compareDocumentPosition(ar) & Node.DOCUMENT_POSITION_FOLLOWING) &&
++        ar?.dataset.chatMessageType === 'assistant-message' && ur?.dataset.chatMessageType === 'user-message' &&
++        !!ur?.textContent?.includes(user) && !!ar?.textContent?.includes(assistant) && observedRow === aid;
++      const oneRow = Number(sizer.dataset.chatTranscriptEntryCount) === base.entries + 1 &&
++        Number(sizer.dataset.chatVirtualModelCount) === base.model + 1 &&
++        Number(sizer.dataset.chatVirtualDataRevision) === base.revision + 1 && sizer.dataset.chatTranscriptFirstOrdinal === base.head;
++      const gate = win.__receiverTrial;
++      const expected = base.mode === 'unarmed' ? [] : base.mode === 'immediate' ? ['eligible','reconcile','model','published'] :
++        ['eligible','task','reconcile','model','published'];
++      const stages = marks.filter(([s]) => ['eligible','task','reconcile','model','published'].includes(s)).map(([s]) => s);
++      const gateValid = (!gate ? base.mode === 'unarmed' : gate.phase === 'applied') && stages.join() === expected.join();
++      const receiverGap = gap(v), editingGap = gap(feed(0)!);
++      const width = v.clientWidth, height = v.clientHeight, sameGeometry = base.width === width && base.height === height;
++      const pinned = receiverGap <= 1 && editingGap <= 1 && ids.every((_, i) => settledFeed(i)) && anchor(0) && v === persistentViewport;
++      const delta = (to: number, from: number) => Math.round((to - from) * 10) / 10;
++      const result = { pass: ordered && oneRow && pinned && gateValid && sameGeometry && terminals === 1 && !disconnected,
++        mode: base.mode, gateValid, invalidReason: gate?.invalidReason, ordered, oneRow, pinned, terminals,
++        priorEntries: base.entries, receiverGap, editingGap, sizeBefore: [base.width,base.height], sizeAfter: [width,height],
++        wireToDomMs: delta(projectedAt,a.at), wireToReceiverFrameMs: delta(receiverFrame,a.at),
++        stages: marks.map(([s,t]) => [s,delta(t,down)]) };
++      previousView = a.view; previousAssistant = a.ordinal; user = ''; delete win.__receiverTrial;
++      return result;
++    },
+@@ -185 +275 @@
+-    close() { observer?.disconnect(); abort.abort(); if (!socket) Object.defineProperty(MessageEvent.prototype, 'data', prop); },
++    close() { observer?.disconnect(); abort.abort(); if (receiverStudy) delete win.__receiverTrial; if (!socket) Object.defineProperty(MessageEvent.prototype, 'data', prop); },
+diff -rNU0 a/integration-tests/scripts/composer-input.ts b/integration-tests/scripts/composer-input.ts
+--- a/integration-tests/scripts/composer-input.ts	2026-11-24 01:28:23.112745062 +0000
++++ b/integration-tests/scripts/composer-input.ts	2026-11-24 01:28:41.624471229 +0000
+@@ -13 +13 @@
+-  'focus-diagnostic': { type: 'boolean' },
++  'focus-diagnostic': { type: 'boolean' }, 'receiver-study': { type: 'boolean' },
+@@ -18,0 +19,2 @@
++const receiverStudy = values['receiver-study'] ?? false;
++assert.ok(!receiverStudy || (!compact && !diagnostic), 'Receiver study requires four visible desktop tiles');
+@@ -63,2 +65,2 @@
+-      await d.navigate(f.garcon.baseUrl + '/chat/' + ids[index]);
+-      await d.evaluate(`window.inputQA=(${composerInputProbe})(...arguments);return true;`, ids, drafts, compact);
++      await d.navigate(f.garcon.baseUrl + '/chat/' + ids[index] + (receiverStudy ? '?receiverStudy=1' : ''));
++      await d.evaluate(`window.inputQA=(${composerInputProbe})(...arguments);return true;`, ids, drafts, compact, receiverStudy);
+@@ -85,2 +87,4 @@
+-      async function trial(active: boolean, block: number, key: number) {
+-        const tag = String(++sequence).padStart(3, '0'), prompt = 'Synthetic request ' + tag, reply = 'Synthetic response ' + tag;
++      type Mode = 'unarmed' | 'immediate' | 'next-task';
++      async function trial(active: boolean, block: number, key: number, mode?: Mode) {
++        const tag = receiverStudy ? 'same' : String(++sequence).padStart(3, '0');
++        const prompt = 'Synthetic request ' + tag, reply = 'Synthetic response ' + tag;
+@@ -93 +97,4 @@
+-          if (active) { turn = await run(); await held.received; await call('userSeen'); }
++          if (active) {
++            turn = await run(); await held.received; await call('userSeen');
++            if (mode) await call('prepareReceiver', mode, turn.turnId!);
++          }
+@@ -104 +111,3 @@
+-          emit('key', { block, key, active, ...edit, ...delivery });
++          const receiverSample = mode ? await call('receiverResult') : null;
++          emit(mode ? 'receiver-key' : 'key', { block, key, active, ...edit, ...delivery, ...(receiverSample ? { receiver: receiverSample } : {}) });
++          if (receiverSample && !receiverSample.pass) failures++;
+@@ -110,0 +120,10 @@
++      if (receiverStudy) {
++        const [u,i,t] = ['unarmed','immediate','next-task'] as const;
++        const blocks = [[u,i,t],[t,i,u],[i,t,u],[u,t,i],[t,u,i],[i,u,t]] as const;
++        for (const [key, mode] of [u,i,t].entries()) await trial(true, -1, key, mode);
++        if (!values.smoke) for (const [block, modes] of blocks.entries()) {
++          for (const [key, mode] of modes.entries()) await trial(true, block, key, mode);
++        }
++        await call('close');
++        return;
++      }
+@@ -121 +140 @@
+-    emit('setup', { version: d.version, ...viewport, visible: compact ? 1 : 4, mode: 'formatted', smoke: !!values.smoke, diagnostic });
++    emit('setup', { version: d.version, ...viewport, visible: compact ? 1 : 4, mode: 'formatted', smoke: !!values.smoke, diagnostic, receiverStudy });
+@@ -130 +149 @@
+-    const moves = diagnostic ? [[0,1],[1,0],[1,1],[1,0],[0,1],[0,0],[1,0],[0,1]] :
++    const moves = receiverStudy ? [] : diagnostic ? [[0,1],[1,0],[1,1],[1,0],[0,1],[0,0],[1,0],[0,1]] :
+diff -rNU0 a/web/src/lib/components/chat/transcript/ConversationFeed.svelte b/web/src/lib/components/chat/transcript/ConversationFeed.svelte
+--- a/web/src/lib/components/chat/transcript/ConversationFeed.svelte	2026-11-24 01:28:23.115778520 +0000
++++ b/web/src/lib/components/chat/transcript/ConversationFeed.svelte	2026-11-24 01:28:41.622722680 +0000
+@@ -38,0 +39 @@
++	import type { ReceiverPublicationTrial, ReceiverStudyWindow } from './receiver-publication-study.js';
+@@ -294,0 +296,64 @@
++	const receiverStudy = typeof location !== 'undefined' && new URLSearchParams(location.search).get('receiverStudy') === '1';
++	let receiverWake = $state(0);
++	let held: { trial: ReceiverPublicationTrial; input: ConversationFeedProjectionInput; from: typeof projection; timer: number } | null = null;
++
++	function abandonHeld(reason: string) {
++		if (!held) return;
++		window.clearTimeout(held.timer);
++		held.trial.phase = 'invalid';
++		held.trial.invalidReason = reason;
++		held = null;
++	}
++
++	function studyPublication(input: ConversationFeedProjectionInput): ReceiverPublicationTrial | 'wait' | undefined {
++		const trial = (window as ReceiverStudyWindow).__receiverTrial;
++		if (held) {
++			if (held.trial !== trial || chatContext.chatId !== held.trial.chatId) abandonHeld('changed-trial');
++			else if (held.from !== projection) abandonHeld('changed-previous-model');
++			else if (held.input !== input) {
++				// The clock getter returns a fresh wrapper; compare its revision and both immutable payloads.
++				const previous = held.input, oldClock = previous.mutationClock, clock = input.mutationClock;
++				const changedKey = (Object.keys(previous) as (keyof ConversationFeedProjectionInput)[]).find(
++					(key) => key !== 'mutationClock' && previous[key] !== input[key],
++				);
++				if (changedKey) abandonHeld('changed-' + changedKey);
++				else if (oldClock.dataRevision !== clock.dataRevision || oldClock.lastRevisionByKind !== clock.lastRevisionByKind ||
++					oldClock.lastResponseRevisionByMessageType !== clock.lastResponseRevisionByMessageType) abandonHeld('changed-clock');
++			}
++		}
++		if (!trial || chatContext.chatId !== trial.chatId || (trial.phase !== 'armed' && trial.phase !== 'waiting' && trial.phase !== 'released')) return;
++		const tail = input.rows.at(-1);
++		if (tail?.kind !== 'message' || tail.message.type !== 'assistant-message' || tail.message.content !== trial.expectedAssistant) {
++			if (held) abandonHeld('changed-tail');
++			return;
++		}
++		const prior = projection.renderModel.items.at(-1);
++		const revision = input.mutationClock.dataRevision;
++		if (!pinnedToBottom || !input.isLiveWindow || !input.rows.length || input.rows.length !== trial.priorEntries + 1 ||
++			input.transcriptViewId !== trial.viewId || prior?.id !== trial.userRowId || input.rows.at(-2)?.id !== trial.userRowId ||
++			!tail.ordinal || tail.id !== `${trial.viewId}:${tail.ordinal}` || input.pendingPermissions.length || activePendingPermissionRequests.length ||
++			revealWaiters.size || scrollbarPointerY !== null ||
++			chatState.pageStates.earlier.status !== 'idle' || chatState.pageStates.later.status !== 'idle' ||
++			projection.projectedDataRevision !== trial.priorRevision || revision !== trial.priorRevision + 1 ||
++			input.mutationClock.lastRevisionByKind['live-append'] !== revision) {
++			abandonHeld('fixture-changed');
++			trial.phase = 'invalid';
++			trial.invalidReason = 'fixture-changed';
++			return;
++		}
++		if (held) {
++			if (trial.phase === 'waiting') return 'wait';
++			held = null;
++			return trial;
++		}
++		trial.mark('eligible');
++		if (trial.mode === 'immediate') return trial;
++		trial.phase = 'waiting';
++		const timer = window.setTimeout(() => {
++			trial.mark('task');
++			trial.phase = 'released';
++			receiverWake += 1;
++		}, 0);
++		held = { trial, input, from: projection, timer };
++		return 'wait';
++	}
+@@ -363 +428,5 @@
+-		if (!isVisible) return;
++		if (receiverStudy) void receiverWake;
++		if (!isVisible) {
++			if (receiverStudy) abandonHeld('hidden');
++			return;
++		}
+@@ -374,0 +444,3 @@
++			const trial = receiverStudy ? studyPublication(input) : undefined;
++			if (trial === 'wait') return;
++			trial?.mark('reconcile');
+@@ -375,0 +448 @@
++			trial?.mark('model');
+@@ -381,0 +455,4 @@
++				if (trial) {
++					trial.phase = 'invalid';
++					trial.invalidReason = 'rejected-projection';
++				}
+@@ -385,0 +463,4 @@
++			if (trial) {
++				trial.phase = 'applied';
++				trial.mark('published');
++			}
+@@ -442,0 +524 @@
++		if (receiverStudy) abandonHeld('destroyed');
+diff -rNU0 a/web/src/lib/components/chat/transcript/receiver-publication-study.ts b/web/src/lib/components/chat/transcript/receiver-publication-study.ts
+--- a/web/src/lib/components/chat/transcript/receiver-publication-study.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/web/src/lib/components/chat/transcript/receiver-publication-study.ts	2026-11-24 01:28:41.622828430 +0000
+@@ -0,0 +1,15 @@
++// Only the isolated fixture arms this single assistant publication.
++export interface ReceiverPublicationTrial {
++	mode: 'immediate' | 'next-task';
++	chatId: string;
++	viewId: string;
++	userRowId: string;
++	expectedAssistant: string;
++	priorEntries: number;
++	priorRevision: number;
++	phase: 'armed' | 'waiting' | 'released' | 'applied' | 'invalid';
++	invalidReason?: string;
++	mark(stage: 'eligible' | 'task' | 'reconcile' | 'model' | 'published'): void;
++}
++
++export type ReceiverStudyWindow = Window & { __receiverTrial?: ReceiverPublicationTrial };

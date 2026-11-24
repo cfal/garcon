@@ -37,19 +37,21 @@ function fitTextareaToContent(target: HTMLTextAreaElement): void {
  */
 export function contentSizedTextarea(
 	getValue: () => HTMLTextareaAttributes['value'],
+	isVisible: () => boolean = () => true,
 ): Attachment<HTMLTextAreaElement> {
 	return (target) => {
 		const initialHeight = target.style.height;
 		let width = -1;
 		let frame: number | null = null;
 		function scheduleResize(): void {
-			if (frame !== null) return;
+			if (frame !== null || !isVisible()) return;
 			frame = requestAnimationFrame(() => {
 				frame = null;
-				fitTextareaToContent(target);
+				if (isVisible()) fitTextareaToContent(target);
 			});
 		}
 		$effect(() => {
+			if (!isVisible()) return;
 			getValue();
 			untrack(() => fitTextareaToContent(target));
 		});

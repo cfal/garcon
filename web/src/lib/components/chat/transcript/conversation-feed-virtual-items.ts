@@ -5,6 +5,7 @@ import {
 	isInterAgentMessageReceivedNoticeDetail,
 } from '$shared/transcript-notice-details';
 import type { PendingPermissionRequest } from '$lib/types/chat';
+import type { ConversationViewportTarget } from '$lib/chat/transcript/conversation-viewport-port.js';
 import {
 	conversationFeedItemLayout,
 	type ConversationFeedRenderItem,
@@ -51,19 +52,17 @@ export type ConversationVirtualFeedItem =
 			spacingAfter: 'none';
 	  };
 
-export interface ConversationVirtualTarget {
+interface ConversationVirtualTarget {
 	index: number;
 	innerRowId: string;
+	collapsedMemberRowId?: string;
 }
 
 export interface ConversationVirtualFeedModel {
 	items: ConversationVirtualFeedItem[];
 	indexByKey: Map<string, number>;
 	indexByRowId: Map<string, number>;
-	targetByDomAnchorId: Map<string, ConversationVirtualTarget>;
-	memberRowIdByDomAnchorId: Map<string, string>;
-	representativeRowIdByKey: Map<string, string>;
-	collapsedGroupByMemberRowId: Map<string, ToolGroupVirtualFeedItem>;
+	rowIdByToolAnchorId: ReadonlyMap<string, string>;
 	transcriptStartIndex: number;
 	transcriptEndIndex: number;
 }
@@ -86,15 +85,33 @@ function namespacedKey(surfaceIdentity: string, localKey: string): string {
 	return JSON.stringify([surfaceIdentity, localKey]);
 }
 
-function toolAnchorIds(item: ConversationFeedRenderItem): string[] {
-	if (item.kind !== 'message') return [];
+function toolAnchorId(item: ConversationFeedRenderItem): string | undefined {
+	if (item.kind !== 'message') return;
 	if (isToolUseMessage(item.message)) {
-		return [`tool-input-${item.message.toolId}`];
+		return `tool-input-${item.message.toolId}`;
 	}
 	if (item.message instanceof ToolResultMessage) {
-		return [`tool-result-${item.id}`];
+		return `tool-result-${item.id}`;
 	}
-	return [];
+}
+
+export function resolveConversationVirtualTarget(
+	model: ConversationVirtualFeedModel,
+	target: ConversationViewportTarget,
+): ConversationVirtualTarget | undefined {
+	const rowId = target.kind === 'dom-anchor'
+		? model.rowIdByToolAnchorId.get(target.id) ?? target.id
+		: target.id;
+	const index = model.indexByRowId.get(rowId);
+	if (index === undefined) return undefined;
+	const item = model.items[index];
+	if (item.kind !== 'tool-group') return { index, innerRowId: rowId };
+	if (target.kind === 'presentation-row') return { index, innerRowId: item.anchorId };
+	return {
+		index,
+		innerRowId: target.kind === 'row' ? rowId : item.anchorId,
+		collapsedMemberRowId: rowId,
+	};
 }
 
 function transcriptSpacing(item: ConversationFeedRenderItem): ConversationFeedSpacing {
@@ -271,49 +288,38 @@ function indexConversationItems(
 	items: ConversationVirtualFeedItem[],
 	transcriptStartIndex: number,
 	transcriptEndIndex: number,
+	tail?: { previous: ConversationVirtualFeedModel; from: number },
 ): ConversationVirtualFeedModel {
-	const indexByKey = new Map<string, number>();
-	const indexByRowId = new Map<string, number>();
-	const targetByDomAnchorId = new Map<string, ConversationVirtualTarget>();
-	const memberRowIdByDomAnchorId = new Map<string, string>();
-	const representativeRowIdByKey = new Map<string, string>();
-	const collapsedGroupByMemberRowId = new Map<string, ToolGroupVirtualFeedItem>();
-	for (const [index, virtualItem] of items.entries()) {
+	// An append retains every member. Only a growing tail group and the suffix need new targets.
+	const indexByKey = new Map(tail?.previous.indexByKey);
+	const indexByRowId = new Map(tail?.previous.indexByRowId);
+	const previousAliases = tail?.previous.rowIdByToolAnchorId;
+	let changedAliases: Map<string, string> | undefined;
+	function indexRow(item: ConversationFeedRenderItem, index: number): void {
+		indexByRowId.set(item.id, index);
+		const alias = toolAnchorId(item);
+		if (alias === undefined && !(changedAliases ?? previousAliases)?.has(item.id)) return;
+		changedAliases ??= new Map(previousAliases);
+		// When an alias coincides with a row ID the last indexed occurrence owns that DOM target.
+		changedAliases.delete(item.id);
+		if (alias !== undefined) changedAliases.set(alias, item.id);
+	}
+	if (tail) {
+		for (let index = tail.from; index < tail.previous.items.length; index++) {
+			indexByKey.delete(tail.previous.items[index].key);
+		}
+	}
+	for (let index = tail?.from ?? 0; index < items.length; index++) {
+		const virtualItem = items[index];
 		if (indexByKey.has(virtualItem.key)) {
 			throw new Error(`Duplicate conversation feed key: ${virtualItem.key}`);
 		}
 		indexByKey.set(virtualItem.key, index);
 		if (virtualItem.kind === 'tool-group') {
-			representativeRowIdByKey.set(virtualItem.key, virtualItem.members[0].item.id);
 			if (virtualItem.expanded) continue;
-			for (const member of virtualItem.members) {
-				collapsedGroupByMemberRowId.set(member.item.id, virtualItem);
-				indexByRowId.set(member.item.id, index);
-				targetByDomAnchorId.set(member.item.id, {
-					index,
-					innerRowId: virtualItem.anchorId,
-				});
-				memberRowIdByDomAnchorId.set(member.item.id, member.item.id);
-				for (const anchorId of toolAnchorIds(member.item)) {
-					targetByDomAnchorId.set(anchorId, {
-						index,
-						innerRowId: virtualItem.anchorId,
-					});
-					memberRowIdByDomAnchorId.set(anchorId, member.item.id);
-				}
-			}
+			for (const member of virtualItem.members) indexRow(member.item, index);
 		} else if (virtualItem.kind === 'transcript') {
-			representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
-			indexByRowId.set(virtualItem.item.id, index);
-			targetByDomAnchorId.set(virtualItem.item.id, {
-				index,
-				innerRowId: virtualItem.item.id,
-			});
-			memberRowIdByDomAnchorId.set(virtualItem.item.id, virtualItem.item.id);
-			for (const anchorId of toolAnchorIds(virtualItem.item)) {
-				targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
-				memberRowIdByDomAnchorId.set(anchorId, virtualItem.item.id);
-			}
+			indexRow(virtualItem.item, index);
 		}
 	}
 
@@ -321,13 +327,44 @@ function indexConversationItems(
 		items,
 		indexByKey,
 		indexByRowId,
-		targetByDomAnchorId,
-		memberRowIdByDomAnchorId,
-		representativeRowIdByKey,
-		collapsedGroupByMemberRowId,
+		rowIdByToolAnchorId: changedAliases ?? previousAliases ?? new Map(),
 		transcriptStartIndex,
 		transcriptEndIndex,
 	};
+}
+
+function newTranscriptTail(
+	model: ConversationVirtualFeedModel,
+	surfaceIdentity: string,
+	appendedItems: ConversationFeedRenderItem[],
+): TranscriptVirtualFeedItem[] | null {
+	if (appendedItems.length === 0) return null;
+	const seen = new Set<string>();
+	const tail: TranscriptVirtualFeedItem[] = [];
+	for (const item of appendedItems) {
+		if (model.indexByRowId.has(item.id) || seen.has(item.id)) return null;
+		seen.add(item.id);
+		tail.push({
+			kind: 'transcript',
+			key: namespacedKey(surfaceIdentity, `transcript:${item.id}`),
+			item,
+			spacingAfter: transcriptSpacing(item),
+		});
+	}
+	return tail;
+}
+
+function replaceTranscriptTail(
+	model: ConversationVirtualFeedModel,
+	from: number,
+	tail: ConversationVirtualFeedItem[],
+): ConversationVirtualFeedModel {
+	const footer = model.items.slice(model.transcriptEndIndex);
+	const items = model.items.slice(0, from).concat(tail, footer);
+	return indexConversationItems(items, model.transcriptStartIndex, from + tail.length, {
+		previous: model,
+		from,
+	});
 }
 
 export function appendConversationVirtualTranscriptTail(
@@ -335,51 +372,8 @@ export function appendConversationVirtualTranscriptTail(
 	surfaceIdentity: string,
 	appendedItems: ConversationFeedRenderItem[],
 ): ConversationVirtualFeedModel | null {
-	if (appendedItems.length === 0) return null;
-	const insertIndex = model.transcriptEndIndex;
-	const appendedVirtualItems = appendedItems.map((item): TranscriptVirtualFeedItem => ({
-		kind: 'transcript',
-		key: namespacedKey(surfaceIdentity, `transcript:${item.id}`),
-		item,
-		spacingAfter: transcriptSpacing(item),
-	}));
-	if (appendedVirtualItems.some((item) => model.indexByKey.has(item.key))) return null;
-
-	const items = model.items.slice(0, insertIndex).concat(appendedVirtualItems, model.items.slice(insertIndex));
-
-	const indexByKey = new Map(model.indexByKey);
-	const indexByRowId = new Map(model.indexByRowId);
-	const targetByDomAnchorId = new Map(model.targetByDomAnchorId);
-	const memberRowIdByDomAnchorId = new Map(model.memberRowIdByDomAnchorId);
-	const representativeRowIdByKey = new Map(model.representativeRowIdByKey);
-	for (let index = insertIndex; index < items.length; index += 1) {
-		indexByKey.set(items[index].key, index);
-	}
-	for (const [offset, virtualItem] of appendedVirtualItems.entries()) {
-		const index = insertIndex + offset;
-		representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
-		indexByRowId.set(virtualItem.item.id, index);
-		targetByDomAnchorId.set(virtualItem.item.id, {
-			index,
-			innerRowId: virtualItem.item.id,
-		});
-		memberRowIdByDomAnchorId.set(virtualItem.item.id, virtualItem.item.id);
-		for (const anchorId of toolAnchorIds(virtualItem.item)) {
-			targetByDomAnchorId.set(anchorId, { index, innerRowId: virtualItem.item.id });
-			memberRowIdByDomAnchorId.set(anchorId, virtualItem.item.id);
-		}
-	}
-
-	return {
-		...model,
-		items,
-		indexByKey,
-		indexByRowId,
-		targetByDomAnchorId,
-		memberRowIdByDomAnchorId,
-		representativeRowIdByKey,
-		transcriptEndIndex: insertIndex + appendedVirtualItems.length,
-	};
+	const appended = newTranscriptTail(model, surfaceIdentity, appendedItems);
+	return appended ? replaceTranscriptTail(model, model.transcriptEndIndex, appended) : null;
 }
 
 export function appendCombinedConversationTail(
@@ -390,32 +384,17 @@ export function appendCombinedConversationTail(
 	>,
 	appendedItems: ConversationFeedRenderItem[],
 ): { model: ConversationVirtualFeedModel; changedIndex: number } | null {
+	const appendedVirtualItems = newTranscriptTail(model, input.surfaceIdentity, appendedItems);
+	if (!appendedVirtualItems) return null;
 	let changedIndex = model.transcriptEndIndex;
-	const tail = model.items[changedIndex - 1];
-	if (tail?.kind === 'tool-group') {
-		changedIndex -= 1;
-	} else if (tail && groupableToolInput(tail)) {
-		while (
-			changedIndex > model.transcriptStartIndex &&
-			groupableToolInput(model.items[changedIndex - 1])
-		) {
+	if (groupableToolInput(appendedVirtualItems[0])) {
+		while (changedIndex > model.transcriptStartIndex && groupableToolInput(model.items[changedIndex - 1])) {
 			changedIndex -= 1;
 		}
 		if (model.items[changedIndex - 1]?.kind === 'tool-group') changedIndex -= 1;
 	}
 	const previousGroup = model.items[changedIndex];
 	const members = previousGroup?.kind === 'tool-group' ? previousGroup.members : [];
-	const appendedVirtualItems: TranscriptVirtualFeedItem[] = appendedItems.map((item) => ({
-		kind: 'transcript',
-		key: namespacedKey(input.surfaceIdentity, `transcript:${item.id}`),
-		item,
-		spacingAfter: transcriptSpacing(item),
-	}));
-	const seen = new Set<string>();
-	for (const item of appendedVirtualItems) {
-		if (model.indexByRowId.has(item.item.id) || seen.has(item.item.id)) return null;
-		seen.add(item.item.id);
-	}
 	const grouped = groupToolRuns(
 		[...members, ...appendedVirtualItems],
 		(key) => namespacedKey(input.surfaceIdentity, key),
@@ -432,14 +411,7 @@ export function appendCombinedConversationTail(
 		grouped[0]?.kind === 'tool-group' &&
 		previousGroup.expanded !== grouped[0].expanded
 	) return null;
-	const items = model.items.slice(0, changedIndex).concat(
-		grouped,
-		model.items.slice(model.transcriptEndIndex),
-	);
-	return {
-		model: indexConversationItems(items, model.transcriptStartIndex, changedIndex + grouped.length),
-		changedIndex,
-	};
+	return { model: replaceTranscriptTail(model, changedIndex, grouped), changedIndex };
 }
 
 export function estimateConversationFeedItemSize(

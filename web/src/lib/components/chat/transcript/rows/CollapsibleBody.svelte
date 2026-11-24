@@ -22,8 +22,7 @@
 	const OVERFLOW_TOLERANCE_PX = 1;
 	let localExpanded = $state(false);
 	let bodyElement = $state<HTMLDivElement>();
-	let bodyWidth = $state(0);
-	let contentHeight = $state(0);
+	let contentSize = $state.raw<DOMRectReadOnly>();
 	let hasOverflow = $state(false);
 	let measuredCollapsedHeight: number | undefined;
 	const bodyId = $props.id();
@@ -34,21 +33,10 @@
 	const bodyExpanded = $derived(expansionRequested && hasOverflow);
 	const showDisclosure = $derived(collapsible && hasOverflow);
 
-	function measureOverflow(
-		element: HTMLDivElement,
-		_bodyWidth: number,
-		_contentHeight: number,
-	): void {
-		if (element.clientWidth === 0 || element.clientHeight === 0) return;
-		if (!collapsible) {
-			hasOverflow = false;
-			measuredCollapsedHeight = undefined;
-			return;
-		}
-
-		const collapsedHeight = bodyExpanded
-			? (measuredCollapsedHeight ?? element.clientHeight)
-			: element.clientHeight;
+	function measureOverflow(element: HTMLDivElement): void {
+		const height = element.clientHeight;
+		if (height === 0 || element.clientWidth === 0) return;
+		const collapsedHeight = bodyExpanded ? (measuredCollapsedHeight ?? height) : height;
 		const nextHasOverflow = element.scrollHeight > collapsedHeight + OVERFLOW_TOLERANCE_PX;
 
 		if (!bodyExpanded && nextHasOverflow) measuredCollapsedHeight = collapsedHeight;
@@ -76,8 +64,9 @@
 			return;
 		}
 		if (!bodyElement) return;
-		// Dimension arguments register both ResizeObserver bindings as effect dependencies.
-		measureOverflow(bodyElement, bodyWidth, contentHeight);
+		// The full-width flow root reports reflow even when the outer body stays clamped.
+		void contentSize;
+		measureOverflow(bodyElement);
 	});
 </script>
 
@@ -86,13 +75,12 @@
 		id={bodyId}
 		data-slot="collapsible-body"
 		bind:this={bodyElement}
-		bind:clientWidth={bodyWidth}
 		class:collapsible-body-collapsed={!bodyExpanded}
 		class:collapsible-body-truncated={showDisclosure && !bodyExpanded}
 		class:collapsible-body-tall={previewHeight === 'tall'}
 		onfocusin={expandOnFocus}
 	>
-		<div class="flow-root" data-slot="collapsible-body-content" bind:offsetHeight={contentHeight}>
+		<div class="flow-root" data-slot="collapsible-body-content" bind:contentRect={contentSize}>
 			{@render children()}
 		</div>
 	</div>

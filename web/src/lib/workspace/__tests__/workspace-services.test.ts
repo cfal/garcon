@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { ApiError } from '$lib/api/client.js';
-import { saveText } from '$lib/api/files.js';
+import { getFileRevision, saveText } from '$lib/api/files.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -19,13 +19,15 @@ import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ProjectTarget } from '$shared/project-resolution';
-import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
+import { fileSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 import { windowNodeById } from '../window-tree.js';
 import type { FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { FILE_SHORTCUT_COMMANDS } from '../workspace-shortcuts.js';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
+import { DocumentPollingCoordinator } from '$lib/files/persistence/document-polling-coordinator.js';
+import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
 import {
@@ -61,6 +63,10 @@ vi.mock('$lib/api/files.js', async (importOriginal) => {
 		readText: vi.fn(async ({ filePath }: { filePath: string }) => ({
 			content: '',
 			path: `/workspace/${filePath}`,
+			revision: `v1:${filePath}`,
+		})),
+		getFileRevision: vi.fn<typeof actual.getFileRevision>(async ({ filePath }) => ({
+			status: 'ready',
 			revision: `v1:${filePath}`,
 		})),
 		saveText: vi.fn<typeof actual.saveText>(async ({ projectPath, filePath }) => ({
@@ -160,6 +166,24 @@ function assembleWorkspaceServices(
 	return { services, ghCapability, chatSessions, notifications };
 }
 
+async function openPollingFile(
+	services: WorkspaceServices,
+	relativePath: string,
+	placement?: Pick<FileOpenRequest, 'target' | 'openToSide'>,
+) {
+	const session = await services.files.open({
+		fileRootPath: '/workspace',
+		relativePath,
+		mode: 'markdown',
+		origin: DEFAULT_WINDOW,
+		target: { type: 'window', windowId: DEFAULT_WINDOW },
+		reason: 'responsive-restore',
+		...placement,
+	});
+	if (!session) throw new Error(`File not opened: ${relativePath}`);
+	return session;
+}
+
 describe('createWorkspaceServices', () => {
 	let services: WorkspaceServices | null = null;
 	let rootLocalSettings: LocalSettingsStore | null = null;
@@ -171,20 +195,116 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = null;
 		projectResolutionApiMocks.resolveProject.mockReset();
 		vi.mocked(saveText).mockClear();
+		vi.mocked(getFileRevision).mockClear();
 		gitProjectInvalidations.pruneExecutors(new Set());
 		vi.restoreAllMocks();
 		vi.useRealTimers();
+	});
+
+	function pollingWorkspace() {
+		vi.useFakeTimers();
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings, null));
+		vi.spyOn(services.surfaceFrames, 'waitFor').mockResolvedValue({
+			element: document.createElement('div'),
+			attachRetainedRenderer() {},
+			focusPrimary() {},
+		});
+		return services;
+	}
+
+	it.each([1, 40])(
+		'notifies only document visibility changes with %i parked files',
+		async (count) => {
+			const workspace = pollingWorkspace();
+			const first = await openPollingFile(workspace, 'parked-0.md');
+			for (let i = 1; i < count; i++) await openPollingFile(workspace, `parked-${i}.md`);
+			const shown = await openPollingFile(workspace, 'shown.md');
+			const visibility = vi.spyOn(DocumentPollingCoordinator.prototype, 'visibilityChanged');
+			const revision = vi.mocked(getFileRevision).mockClear();
+
+			await workspace.coordinator.enterWindowFullscreen(DEFAULT_WINDOW);
+			expect(workspace.layout.snapshot.fullscreenWindowId).toBe(DEFAULT_WINDOW);
+			expect(visibility).not.toHaveBeenCalled();
+			expect(revision).not.toHaveBeenCalled();
+
+			await workspace.coordinator.focusFileSession(first.id);
+			expect(visibility.mock.calls).toEqual([[shown.documentId], [first.documentId]]);
+			expect(revision.mock.calls.map(([request]) => request.filePath)).toEqual(['parked-0.md']);
+			await vi.advanceTimersByTimeAsync(15_000);
+			expect(revision.mock.calls.map(([request]) => request.filePath)).toEqual([
+				'parked-0.md',
+				'parked-0.md',
+			]);
+		},
+	);
+
+	it('keeps a shared document visible until its last presented view closes', async () => {
+		const workspace = pollingWorkspace();
+		const first = await openPollingFile(workspace, 'shared.md');
+		const visibility = vi.spyOn(DocumentPollingCoordinator.prototype, 'visibilityChanged');
+		const revision = vi.mocked(getFileRevision).mockClear();
+		const dialog = await openPollingFile(workspace, 'shared.md', {
+			target: { type: 'dialog' },
+			openToSide: true,
+		});
+		expect(dialog.documentId).toBe(first.documentId);
+		await workspace.coordinator.focusSurface('chat-view:window-main');
+		expect(visibility).not.toHaveBeenCalled();
+		expect(revision).not.toHaveBeenCalled();
+
+		await expect(workspace.coordinator.closeSurface(fileSurfaceId(dialog.id))).resolves.toBe(true);
+		expect(workspace.files.get(dialog.id)).toBeNull();
+		expect(visibility.mock.calls).toEqual([[first.documentId]]);
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(revision).not.toHaveBeenCalled();
+		await workspace.coordinator.focusFileSession(first.id);
+		expect(revision.mock.calls.map(([request]) => request.filePath)).toEqual(['shared.md']);
+	});
+
+	it('polls the mobile presentation and checks the desktop document upon return', async () => {
+		const workspace = pollingWorkspace();
+		await openPollingFile(workspace, 'desktop.md');
+		const dialog = await openPollingFile(workspace, 'dialog.md', { target: { type: 'dialog' } });
+		const revision = vi.mocked(getFileRevision).mockClear();
+
+		await workspace.coordinator.enterMobilePresentation();
+		expect(workspace.layout.snapshot.mobileActiveSurfaceId).toBe(fileSurfaceId(dialog.id));
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(revision.mock.calls.map(([request]) => request.filePath)).toEqual(['dialog.md']);
+		await workspace.coordinator.exitMobilePresentation();
+		expect(revision.mock.calls.map(([request]) => request.filePath)).toEqual([
+			'dialog.md',
+			'desktop.md',
+		]);
+	});
+
+	it('keeps polling the presented document when a new view fails before publication', async () => {
+		const workspace = pollingWorkspace();
+		const shown = await openPollingFile(workspace, 'shown.md');
+		const visibility = vi.spyOn(DocumentPollingCoordinator.prototype, 'visibilityChanged');
+		const revision = vi.mocked(getFileRevision).mockClear();
+		vi.spyOn(workspace.surfaceFrames, 'beginTransfer').mockImplementationOnce(() => {
+			throw new Error('Frame preparation failed');
+		});
+		await expect(openPollingFile(workspace, 'failed.md')).rejects.toThrow('Frame preparation failed');
+		expect(workspace.files.all).toEqual([shown]);
+		expect(visibility).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(revision.mock.calls.map(([request]) => request.filePath)).toEqual(['shown.md']);
 	});
 
 	it.each([
 		{ root: '/workspace', relativePath: 'notes/todo.md', outcome: 'saved' },
 		{ root: '/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'saved' },
 		{ root: '/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'unknown' },
+		{ root: '/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'aborted' },
+		{ root: '/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'saved', hideRepoA: true },
 		{ root: '/', relativePath: 'repo-b/src/file.ts', outcome: 'saved' },
 		{ root: 'C:/workspace', relativePath: 'repo-b/src/file.ts', outcome: 'saved' },
 	])(
 		'refreshes all visible Git projects on the saved file host: $root/$relativePath ($outcome)',
-		async ({ root, relativePath, outcome }) => {
+		async ({ root, relativePath, outcome, hideRepoA }) => {
 			rootLocalSettings = createLocalSettingsStore();
 			({ services } = assembleWorkspaceServices(rootLocalSettings));
 			const executorId = '22222222-2222-4222-8222-222222222222';
@@ -202,7 +322,7 @@ describe('createWorkspaceServices', () => {
 				{ executorId, projectPath: repoB, isProcessing: false },
 				{ executorId: 'local', projectPath: repoB, isProcessing: false },
 			];
-			services.gitQuickSummary.visibleProjects = projects;
+			services.gitQuickSummary.visibleProjects = hideRepoA ? projects.slice(1) : projects;
 			const refresh = vi
 				.spyOn(services.gitQuickSummary, 'scheduleRefreshFor')
 				.mockReturnValue(undefined);
@@ -210,6 +330,8 @@ describe('createWorkspaceServices', () => {
 				vi.mocked(saveText).mockRejectedValueOnce(
 					new ApiError(502, 'Save unconfirmed', 'FILE_SAVE_OUTCOME_UNKNOWN'),
 				);
+			} else if (outcome === 'aborted') {
+				vi.mocked(saveText).mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
 			}
 
 			await expect(services.files.save(session.id)).resolves.toBe(outcome === 'saved');
@@ -221,7 +343,7 @@ describe('createWorkspaceServices', () => {
 			expect(gitProjectInvalidations.version(executorId)).toBeGreaterThan(0);
 			expect(gitProjectInvalidations.version('local')).toBe(0);
 			expect(refresh.mock.calls).toEqual([
-				[projects[0], 'invalidation', 100],
+				...(hideRepoA ? [] : [[projects[0], 'invalidation', 100]]),
 				[projects[1], 'invalidation', 100],
 			]);
 		},

@@ -25,6 +25,7 @@
 		type WorkspaceWindowTabState,
 	} from '$lib/workspace/surface-types.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
+	import WorkspaceWindowMenuRoot from './WorkspaceWindowMenuRoot.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import { WorkspaceWindowAddMenuState } from './workspace-window-add-menu-state.svelte.js';
 	import {
@@ -258,18 +259,20 @@
 >
 	{#each inlineActions as action (action.id)}
 		{#if action.kind === 'view-group'}
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					class={ADD_ACTION_CONTROL_CLASS}
-					style={addControlStyle()}
-					aria-label={action.label}
-					title={action.label}
-					data-workspace-window-add-action={action.id}
-					data-workspace-window-add-inline={action.id}
-					data-workspace-window-add-group-trigger={action.id}
-				>
-					<action.icon size={titlebarMetrics.iconSizePx} />
-				</DropdownMenuTrigger>
+			<WorkspaceWindowMenuRoot root={DropdownMenu}>
+				{#snippet trigger()}
+					<DropdownMenuTrigger
+						class={ADD_ACTION_CONTROL_CLASS}
+						style={addControlStyle()}
+						aria-label={action.label}
+						title={action.label}
+						data-workspace-window-add-action={action.id}
+						data-workspace-window-add-inline={action.id}
+						data-workspace-window-add-group-trigger={action.id}
+					>
+						<action.icon size={titlebarMetrics.iconSizePx} />
+					</DropdownMenuTrigger>
+				{/snippet}
 				<DropdownMenuContent
 					align="end"
 					class="w-64"
@@ -280,19 +283,21 @@
 				>
 					{@render viewGroupMenuItems(action)}
 				</DropdownMenuContent>
-			</DropdownMenu>
+			</WorkspaceWindowMenuRoot>
 		{:else if action.kind === 'terminal' && hasUnplacedTerminalSessions}
-			<DropdownMenu onOpenChange={captureTerminalMenu}>
-				<DropdownMenuTrigger
-					class={ADD_ACTION_CONTROL_CLASS}
-					style={addControlStyle()}
-					aria-label={m.workspace_terminal_actions()}
-					title={m.workspace_terminal_actions()}
-					data-workspace-window-add-action={action.id}
-					data-workspace-window-add-terminal-trigger={windowId}
-				>
-					<WorkspaceSurfaceIcon kind="terminal" size={titlebarMetrics.iconSizePx} />
-				</DropdownMenuTrigger>
+			<WorkspaceWindowMenuRoot root={DropdownMenu} onOpenChange={captureTerminalMenu}>
+				{#snippet trigger()}
+					<DropdownMenuTrigger
+						class={ADD_ACTION_CONTROL_CLASS}
+						style={addControlStyle()}
+						aria-label={m.workspace_terminal_actions()}
+						title={m.workspace_terminal_actions()}
+						data-workspace-window-add-action={action.id}
+						data-workspace-window-add-terminal-trigger={windowId}
+					>
+						<WorkspaceSurfaceIcon kind="terminal" size={titlebarMetrics.iconSizePx} />
+					</DropdownMenuTrigger>
+				{/snippet}
 				<DropdownMenuContent
 					align="end"
 					class="w-64"
@@ -305,7 +310,7 @@
 					<DropdownMenuSeparator />
 					{@render unplacedTerminalMenuItems()}
 				</DropdownMenuContent>
-			</DropdownMenu>
+			</WorkspaceWindowMenuRoot>
 		{:else if action.kind === 'terminal'}
 			<TerminalCreateAction
 				{terminals}
@@ -332,16 +337,22 @@
 		{/if}
 	{/each}
 	{#if showOverflowMenu}
-		<DropdownMenu bind:open={menuState.overflowMenuOpen} onOpenChange={captureTerminalMenu}>
-			<DropdownMenuTrigger
-				class={ADD_ACTION_CONTROL_CLASS}
-				style={addControlStyle()}
-				aria-label={m.workspace_add_to_window()}
-				title={m.workspace_add_to_window()}
-				data-workspace-window-add-trigger={windowId}
-			>
-				<Plus size={titlebarMetrics.iconSizePx} />
-			</DropdownMenuTrigger>
+		<WorkspaceWindowMenuRoot
+			root={DropdownMenu}
+			bind:open={menuState.overflowMenuOpen}
+			onOpenChange={captureTerminalMenu}
+		>
+			{#snippet trigger()}
+				<DropdownMenuTrigger
+					class={ADD_ACTION_CONTROL_CLASS}
+					style={addControlStyle()}
+					aria-label={m.workspace_add_to_window()}
+					title={m.workspace_add_to_window()}
+					data-workspace-window-add-trigger={windowId}
+				>
+					<Plus size={titlebarMetrics.iconSizePx} />
+				</DropdownMenuTrigger>
+			{/snippet}
 			<DropdownMenuContent
 				bind:ref={menuState.overflowMenuContent}
 				getFocusReturnTarget={() => menuState.focusReturnTarget()}
@@ -375,6 +386,6 @@
 					{@render unplacedTerminalMenuItems()}
 				{/if}
 			</DropdownMenuContent>
-		</DropdownMenu>
+		</WorkspaceWindowMenuRoot>
 	{/if}
 </div>

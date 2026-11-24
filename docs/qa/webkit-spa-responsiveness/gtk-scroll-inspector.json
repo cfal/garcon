@@ -1,0 +1,172 @@
+{
+  "validInput": true,
+  "before": {
+    "width": 1520,
+    "height": 806,
+    "start": 5633,
+    "midpoint": {
+      "x": 1080,
+      "y": 443
+    }
+  },
+  "after": {
+    "wheels": 14,
+    "deltaY": 1358,
+    "scrolls": 10,
+    "movement": 1358,
+    "sameFeed": true,
+    "sameSize": true,
+    "initialRows": 29,
+    "finalRows": 29,
+    "newRows": 16
+  },
+  "wheelMarkers": 14,
+  "rafGapsInsideTrain": 6,
+  "completeRenderingFrames": 46,
+  "gcAvailable": true,
+  "firstToLastWheel": {
+    "startMsFromFirstWheel": 0,
+    "elapsedMs": 791.91,
+    "exclusiveMs": {
+      "outside timed records": 520.36,
+      "RenderingFrame (envelope only)": 107.33,
+      "FunctionCall": 106.68,
+      "RecalculateStyles": 44.49,
+      "Paint": 5.87,
+      "Layout": 5.47,
+      "EventDispatch (envelope only)": 1.37,
+      "TimerFire (envelope only)": 0.17,
+      "ObserverCallback (envelope only)": 0.07,
+      "Composite": 0.05,
+      "FireAnimationFrame (envelope only)": 0.04
+    },
+    "gcOverlapMsNotAdditive": 0,
+    "gcEvents": 0,
+    "callbackSitesMsWithinExclusive": {
+      "chunks/D7rZ23SH.js:1:3992": 80.71,
+      "chunks/Ckpk6cWV.js:1:25706": 12.29,
+      "nodes/0.DvsYuGAx.js:25:36395": 5.73,
+      "chunks/BcZPKAth.js:5:10167": 3.48,
+      "nodes/0.DvsYuGAx.js:28:74635": 1.85,
+      "chunks/DNnRfaVV.js:1:19894": 1.07,
+      "<no asset>": 0.73,
+      "chunks/Ckpk6cWV.js:3:9613": 0.3
+    },
+    "styleLayoutContextsMsWithinExclusive": {
+      "RecalculateStyles inside chunks/D7rZ23SH.js:1:3992": 30.92,
+      "RecalculateStyles inside chunks/DNnRfaVV.js:1:19894": 6.78,
+      "RecalculateStyles inside <no asset>": 6.12,
+      "Layout inside chunks/D7rZ23SH.js:1:3992": 5.12,
+      "RecalculateStyles inside chunks/Ckpk6cWV.js:1:25706": 0.67,
+      "Layout inside chunks/Ckpk6cWV.js:1:25706": 0.35
+    },
+    "styleLayoutStacksMsWithinExclusive": {
+      "RecalculateStyles: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 30.92,
+      "RecalculateStyles: a@chunks/DNnRfaVV.js:1:19910": 6.78,
+      "RecalculateStyles: <no captured app stack>": 6.12,
+      "Layout: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 5.12,
+      "RecalculateStyles: Te@chunks/DNnRfaVV.js:1:19837 <- t@chunks/DNnRfaVV.js:1:17103 <- Tt@chunks/Ckpk6cWV.js:1:5910": 0.67,
+      "Layout: ?@chunks/DNnRfaVV.js:1:6925 <- Tt@chunks/Ckpk6cWV.js:1:5910": 0.35
+    }
+  },
+  "longestRafGap": {
+    "startMsFromFirstWheel": 573.06,
+    "elapsedMs": 180.04,
+    "exclusiveMs": {
+      "outside timed records": 134.76,
+      "FunctionCall": 21.44,
+      "RenderingFrame (envelope only)": 11,
+      "RecalculateStyles": 10.13,
+      "Paint": 1.29,
+      "Layout": 1.15,
+      "EventDispatch (envelope only)": 0.22,
+      "TimerFire (envelope only)": 0.02,
+      "ObserverCallback (envelope only)": 0.02,
+      "FireAnimationFrame (envelope only)": 0.01,
+      "Composite": 0.01
+    },
+    "gcOverlapMsNotAdditive": 0,
+    "gcEvents": 0,
+    "callbackSitesMsWithinExclusive": {
+      "chunks/D7rZ23SH.js:1:3992": 18,
+      "chunks/Ckpk6cWV.js:1:25706": 1.42,
+      "chunks/BcZPKAth.js:5:10167": 0.73,
+      "nodes/0.DvsYuGAx.js:25:36395": 0.69,
+      "nodes/0.DvsYuGAx.js:28:74635": 0.23,
+      "chunks/Ckpk6cWV.js:3:9613": 0.13,
+      "chunks/D7rZ23SH.js:1:340": 0.09,
+      "<no asset>": 0.08
+    },
+    "styleLayoutContextsMsWithinExclusive": {
+      "RecalculateStyles inside chunks/D7rZ23SH.js:1:3992": 7.08,
+      "RecalculateStyles inside chunks/DNnRfaVV.js:1:19894": 3.05,
+      "Layout inside chunks/D7rZ23SH.js:1:3992": 1.15
+    },
+    "styleLayoutStacksMsWithinExclusive": {
+      "RecalculateStyles: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 7.08,
+      "RecalculateStyles: a@chunks/DNnRfaVV.js:1:19910": 3.05,
+      "Layout: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 1.15
+    }
+  },
+  "longestRenderingFrame": {
+    "startMsFromFirstWheel": 355.32,
+    "elapsedMs": 54.76,
+    "exclusiveMs": {
+      "FunctionCall": 24.24,
+      "RenderingFrame (envelope only)": 14.96,
+      "RecalculateStyles": 12.75,
+      "Layout": 1.39,
+      "Paint": 1.34,
+      "EventDispatch (envelope only)": 0.07,
+      "ObserverCallback (envelope only)": 0.01,
+      "FireAnimationFrame (envelope only)": 0
+    },
+    "gcOverlapMsNotAdditive": 0,
+    "gcEvents": 0,
+    "callbackSitesMsWithinExclusive": {
+      "chunks/D7rZ23SH.js:1:3992": 22.69,
+      "chunks/Ckpk6cWV.js:1:25706": 1.39,
+      "chunks/Ckpk6cWV.js:3:9613": 0.06,
+      "chunks/D7rZ23SH.js:1:340": 0.05,
+      "chunks/DNnRfaVV.js:1:19894": 0.03,
+      "<no asset>": 0.02
+    },
+    "styleLayoutContextsMsWithinExclusive": {
+      "RecalculateStyles inside chunks/D7rZ23SH.js:1:3992": 11.63,
+      "Layout inside chunks/D7rZ23SH.js:1:3992": 1.39,
+      "RecalculateStyles inside chunks/DNnRfaVV.js:1:19894": 1.12
+    },
+    "styleLayoutStacksMsWithinExclusive": {
+      "RecalculateStyles: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 11.63,
+      "Layout: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 1.39,
+      "RecalculateStyles: a@chunks/DNnRfaVV.js:1:19910": 1.12
+    }
+  },
+  "longestTimedEvent": {
+    "type": "EventDispatch",
+    "kind": "scroll",
+    "startMsFromFirstWheel": 357.5,
+    "elapsedMs": 37.17,
+    "exclusiveMs": {
+      "FunctionCall": 24.08,
+      "RecalculateStyles": 11.63,
+      "Layout": 1.39,
+      "EventDispatch (envelope only)": 0.07
+    },
+    "gcOverlapMsNotAdditive": 0,
+    "gcEvents": 0,
+    "callbackSitesMsWithinExclusive": {
+      "chunks/D7rZ23SH.js:1:3992": 22.69,
+      "chunks/Ckpk6cWV.js:1:25706": 1.39,
+      "<no asset>": 0
+    },
+    "styleLayoutContextsMsWithinExclusive": {
+      "RecalculateStyles inside chunks/D7rZ23SH.js:1:3992": 11.63,
+      "Layout inside chunks/D7rZ23SH.js:1:3992": 1.39
+    },
+    "styleLayoutStacksMsWithinExclusive": {
+      "RecalculateStyles: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 11.63,
+      "Layout: v@chunks/C55f_mpC.js:105:5019 <- ?@chunks/C55f_mpC.js:105:5291 <- Sr@chunks/Ckpk6cWV.js:1:22624 <- Er@chunks/Ckpk6cWV.js:1:23764 <- en@chunks/Ckpk6cWV.js:1:12927": 1.39
+    }
+  }
+}

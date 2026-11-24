@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
 import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
+import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
+import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 	EXECUTOR_HEADER_ROW_HEIGHT,
@@ -376,6 +380,56 @@ afterEach(() => {
 });
 
 describe('SidebarVirtualSortableChatList', () => {
+	it.each([4, 50, 2_000])('only matches mounted rows for %i chats', async (count) => {
+		const rows = makeRows(count);
+		const sessions = new ChatSessionsStore();
+		sessions.byId = Object.fromEntries(rows.map(({ chat }) => [chat.id, chat]));
+		sessions.order = rows.map(({ chat }) => chat.id);
+		sessions.selectedChatId = 'chat-0';
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows,
+			rowHeight,
+			selectedChatId: sessions.selectedChatId,
+			displayOptions: { chatItemLayout: 'detailed' },
+		});
+		await tick();
+		const mounted = view.container.querySelectorAll('[data-sidebar-virtual-row]').length;
+		expect(mounted).toBeGreaterThan(1);
+		expect(mounted).toBeLessThanOrEqual(Math.min(count, 40));
+		const recipient = view.container.querySelector('[data-sidebar-virtual-row="chat-1"]')!;
+		const neighbor = view.container.querySelector('[data-sidebar-virtual-row="chat-0"]')!;
+		const neighborRecord = sessions.selectedChat;
+		applyChatMessageBatchActivity(sessions, 'chat-1', [
+			new UserMessage('2025-01-01T01:00:00Z', 'New question'),
+			new AssistantMessage('2025-01-01T01:00:01Z', 'New preview\nMore text'),
+		]);
+		sessions.applyProcessingEvent('chat-1', 'running');
+		expect(sessions.selectedChat).toBe(neighborRecord);
+
+		let offscreenKeyReads = 0;
+		const geometry = vi.spyOn(VirtualListController.prototype, 'apply');
+		const next = rows.map((row, index) => ({
+			...row,
+			chat: sessions.byId[row.chat.id],
+			get key() {
+				if (index >= mounted) offscreenKeyReads++;
+				return row.key;
+			},
+		}));
+		await view.rerender({ rows: next });
+		expect(view.container.querySelector('[data-sidebar-virtual-row="chat-1"]')).toBe(recipient);
+		expect(view.container.querySelector('[data-sidebar-virtual-row="chat-0"]')).toBe(neighbor);
+		expect(recipient.querySelector('[data-slot="chat-preview"]')?.textContent?.trim()).toBe(
+			'New preview',
+		);
+		expect(recipient.querySelector('[data-slot="sidebar-chat-unread-status"]')).not.toBeNull();
+		expect(recipient.querySelector('[data-slot="chat-activity-indicator"]')).not.toBeNull();
+		expect(neighbor.querySelector('[data-slot="chat-activity-indicator"]')).toBeNull();
+		expect(geometry).not.toHaveBeenCalled();
+		// The geometry equality check visits every key; matching rendered items needs no second pass.
+		expect(offscreenKeyReads).toBe(count - mounted);
+	});
+
 	it.each(['recent', 'manual'] as const)(
 		'updates a renamed row without reordering or remounting it in %s mode',
 		async (sortMode) => {
@@ -386,10 +440,13 @@ describe('SidebarVirtualSortableChatList', () => {
 			});
 			const row = view.container.querySelector('[data-sidebar-virtual-row="chat-1"]');
 			expect(screen.getByText('Chat 1')).toBeTruthy();
+			await tick();
+			const applyGeometry = vi.spyOn(VirtualListController.prototype, 'apply');
 
 			await view.rerender({ chats: [{ ...chats[0], title: 'Renamed chat' }, chats[1]] });
 
 			expect(screen.getByText('Renamed chat')).toBeTruthy();
+			expect(applyGeometry).not.toHaveBeenCalled();
 			expect(screen.queryByText('Chat 1')).toBeNull();
 			expect(view.container.querySelector('[data-sidebar-virtual-row="chat-1"]')).toBe(row);
 			const visibleChatIds = Array.from(
@@ -433,6 +490,10 @@ describe('SidebarVirtualSortableChatList', () => {
 			document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-1"]')
 				?.style.top,
 		).toBe('175px');
+		await view.rerender({ rows: [rows[1]] });
+		expect(screen.queryByText('Chat 0')).toBeNull();
+		expect(screen.getByText('Chat 1')).toBeTruthy();
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]')).toHaveLength(1);
 		update.mockRestore();
 		await view.rerender({ rows, rowHeight });
 		await tick();

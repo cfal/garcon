@@ -17,11 +17,14 @@ describe('GitDiffSettingsMenu', () => {
 			onSetDiffFontSize: vi.fn(),
 		});
 		await fireEvent.click(screen.getByRole('button', { name: m.git_diff_settings() }));
-		await fireEvent.pointerDown(screen.getByRole('button', { name: '5 lines' }), {
-			button: 0,
-			ctrlKey: false,
-			pointerType: 'mouse',
-		});
+		await fireEvent.pointerDown(
+			screen.getByRole('combobox', { name: m.git_diff_context_lines() }),
+			{
+				button: 0,
+				ctrlKey: false,
+				pointerType: 'mouse',
+			},
+		);
 		await fireEvent.pointerUp(await screen.findByRole('option', { name: '10 lines' }), {
 			pointerType: 'mouse',
 		});
