@@ -103,7 +103,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           await fixture.page.evaluate(() => {
             (window as typeof window & { __startupSettingsGate: StartupSettingsGate }).__startupSettingsGate.release();
           });
-          await expectTarget('#project-path-input', 'Local', dirs.project);
+          await expectTarget('[data-new-chat-landing="true"] input[aria-label="Project Path"]', 'Local', dirs.project);
         }
         await closeNewChat();
       }

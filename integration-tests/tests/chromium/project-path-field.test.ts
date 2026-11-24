@@ -95,8 +95,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await page.getByRole('dialog', { name: 'New worktree', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
         await browserExpect.poll(() => resize.evaluate(animation => animation.playState)).toBe('idle');
         await resize.dispose();
-        await page.keyboard.press('Escape');
+        // The shared picker closes outright, so a subsequent Escape would dismiss New Chat.
         await browserExpect(worktreePicker).toHaveCount(0);
+        await browserExpect(landing).toBeVisible();
       }
       expect((await integration.client.listChats()).sessions).toEqual([]);
       await assertExactPreambleScope();
