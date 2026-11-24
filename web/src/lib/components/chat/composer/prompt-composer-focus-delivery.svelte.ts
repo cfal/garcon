@@ -12,7 +12,6 @@ interface PromptComposerFocusDeliveryOptions {
 
 interface PendingFocusRequest {
 	chatId: string;
-	requestId: number;
 	userInteractionGeneration: number;
 	origin: 'default' | 'drawer-selection';
 }
@@ -21,8 +20,7 @@ const FOCUS_RETRY_TIMEOUT_MS = 500;
 
 export class PromptComposerFocusDelivery {
 	#lastShellRequestId = 0;
-	#nextRequestId = 0;
-	#pending = $state<PendingFocusRequest | null>(null);
+	#pending = $state.raw<PendingFocusRequest | null>(null);
 
 	constructor(private readonly options: PromptComposerFocusDeliveryOptions) {}
 
@@ -47,17 +45,7 @@ export class PromptComposerFocusDelivery {
 		userInteractionGeneration: number,
 		origin: PendingFocusRequest['origin'],
 	): void {
-		if (!chatId) {
-			this.#pending = null;
-			return;
-		}
-		this.#nextRequestId += 1;
-		this.#pending = {
-			chatId,
-			requestId: this.#nextRequestId,
-			userInteractionGeneration,
-			origin,
-		};
+		this.#pending = chatId ? { chatId, userInteractionGeneration, origin } : null;
 	}
 
 	deliver(): (() => void) | undefined {
@@ -82,7 +70,7 @@ export class PromptComposerFocusDelivery {
 		const startedAt = performance.now();
 		let frameId = 0;
 		const attempt = (): void => {
-			if (this.#pending?.requestId !== request.requestId) return;
+			if (this.#pending !== request) return;
 			if (
 				request.userInteractionGeneration !== options.userInteractionGeneration() ||
 				(drawer && (request.chatId !== options.selectedChatId || options.drawerFocusBlocked()))
@@ -112,6 +100,6 @@ export class PromptComposerFocusDelivery {
 	}
 
 	#complete(request: PendingFocusRequest): void {
-		if (this.#pending?.requestId === request.requestId) this.#pending = null;
+		if (this.#pending === request) this.#pending = null;
 	}
 }
