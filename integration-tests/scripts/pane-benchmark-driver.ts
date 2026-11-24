@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-interface PaneBenchmarkDriver {
+export interface PaneBenchmarkDriver {
   version: string;
   navigate(url: string): Promise<void>;
   evaluate<T>(body: string, ...args: unknown[]): Promise<T>;
@@ -13,6 +13,7 @@ interface PaneBenchmarkDriver {
 }
 
 export const paneViewport = { width: 1840, height: 960 };
+export const compactPaneViewport = { width: 480, height: 844 };
 
 export async function openPaneBenchmarkDriver(
   engine: 'chromium' | 'gtk', endpoint?: string, viewport = paneViewport,
@@ -88,7 +89,10 @@ export async function openPaneBenchmarkDriver(
     click: (x, y) => post('/actions', { actions: [pointer(x, y)] }),
     key: value => post('/actions', { actions: [key(value)] }),
     // Consecutive W3C ticks put the key after pointerUp without inspecting or waiting for readiness.
-    clickThenKey: (x, y, value) => post('/actions', { actions: [pointer(x, y), key(value, 3)] }),
+    clickThenKey(x, y, value) {
+      const click = pointer(x, y);
+      return post('/actions', { actions: [click, key(value, click.actions.length)] });
+    },
     // WebKitGTK 2.50.6 delivers only the first notch when the same input source is reused.
     wheel: (x, y, deltaY) => post('/actions', { actions: [{
       type: 'wheel', id: 'wheel-' + ++wheelSequence,

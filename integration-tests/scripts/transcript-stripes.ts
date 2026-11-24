@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
-import type { openPaneBenchmarkDriver } from './pane-benchmark-driver.js';
+import type { PaneBenchmarkDriver } from './pane-benchmark-driver.js';
 
 function markColumns() {
   const view = document.querySelector<HTMLElement>('[data-chat-scroll-viewport]')!;
@@ -58,7 +58,7 @@ function markColumns() {
   } });
 }
 
-export async function stripeSampler(d: Awaited<ReturnType<typeof openPaneBenchmarkDriver>>, container: string, display: string) {
+export async function stripeSampler(d: PaneBenchmarkDriver, container: string, display: string) {
   const source = await readFile(new URL('../../docs/qa/webkit-spa-responsiveness/sample-x11-columns.py', import.meta.url), 'utf8');
   const libc = dlopen('libc.so.6', { clock_gettime: { args: [FFIType.i32, FFIType.ptr], returns: FFIType.i32 } });
   const timespec = new BigInt64Array(2);

@@ -4,8 +4,8 @@ import { parseArgs } from 'node:util';
 import type { PersistedWorkspaceLayoutNode, PersistedWorkspaceLayoutV2 } from '../../common/workspace-layout.js';
 import { createIntegrationFixture } from '../support/integration-fixture.js';
 import { requireCurrentWebBuild } from '../support/web-build-gate.js';
-import { openPaneBenchmarkDriver, paneViewport } from './pane-benchmark-driver.js';
-import { composerInputProbe } from './composer-input-probe.js';
+import { compactPaneViewport, openPaneBenchmarkDriver, paneViewport } from './pane-benchmark-driver.js';
+import { composerInputClient, composerInputProbe } from './composer-input-probe.js';
 import { drawerFocusProbe } from './composer-input-focus-probe.js';
 import { receiverPositionProbe } from './receiver-position-probe.js';
 
@@ -16,7 +16,8 @@ const { values } = parseArgs({ options: {
 } });
 assert.ok(values.webdriver && ['desktop', 'compact'].includes(values.viewport!),
   'Use --webdriver=http://127.0.0.1:PORT --viewport=desktop|compact [--smoke]');
-const compact = values.viewport === 'compact', viewport = compact ? { width: 480, height: 844 } : paneViewport;
+const compact = values.viewport === 'compact';
+const viewport = compact ? compactPaneViewport : paneViewport;
 const diagnostic = values['focus-diagnostic'] ?? false;
 const position = values['receiver-position'], counters = !!values['receiver-counters'];
 assert.ok(!position || (!compact && !diagnostic && ['pinned', 'detached'].includes(position)));
@@ -57,9 +58,7 @@ try {
   }
   const d = await openPaneBenchmarkDriver('gtk', values.webdriver, viewport);
   try {
-    type Page = ReturnType<typeof composerInputProbe>;
-    const call = <K extends keyof Page>(method: K, ...args: Parameters<Page[K]>) =>
-      d.evaluate<Awaited<ReturnType<Page[K]>>>(`return window.inputQA.${method}(...arguments)`, ...args);
+    const call = composerInputClient(d);
     async function open(index: number) {
       await d.navigate(f.garcon.baseUrl + '/robots.txt');
       await d.evaluate(`

@@ -55,7 +55,7 @@ export async function installFullscreenProbe(panes: number) {
       mounted: document.querySelectorAll('[data-chat-scroll-viewport]').length,
       sameFeeds: positions.filter(n => originalFeeds[n].isConnected && viewport(n) === originalFeeds[n] &&
         panel(n) === originalPanels[n]).length,
-      presented: positions.filter(n => presented(windowAt(n)!)).length,
+      presented: panes - hidden.length,
       fillsHost: sameRect(target.getBoundingClientRect(), target.closest('.workspace-host-region')!.getBoundingClientRect()),
       originalTiles: positions.every(n => sameRect(windowAt(n)!.getBoundingClientRect(), originalRects[n]!)),
       hiddenInert: hidden.filter(w => w.inert && w.getAttribute('aria-hidden') === 'true').length,

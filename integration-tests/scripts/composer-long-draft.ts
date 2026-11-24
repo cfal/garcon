@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import { parseArgs } from 'node:util';
 import { createIntegrationFixture } from '../support/integration-fixture.js';
 import { requireCurrentWebBuild } from '../support/web-build-gate.js';
-import { composerInputProbe } from './composer-input-probe.js';
-import { openPaneBenchmarkDriver } from './pane-benchmark-driver.js';
+import { composerInputClient, composerInputProbe } from './composer-input-probe.js';
+import { compactPaneViewport, openPaneBenchmarkDriver } from './pane-benchmark-driver.js';
 
 const { values } = parseArgs({ options: { webdriver: { type: 'string' }, block: { type: 'string' } } });
 assert.ok(values.webdriver && /^[0-3]$/.test(values.block ?? ''), 'Supply --webdriver=<loopback URL> and --block=0..3');
 const block = Number(values.block);
-const viewport = { width: 480, height: 844 };
 const shapes = [
   ['short', 250, 'Check the work_queue & path [0] here. '],
   ['plain', 24_000, 'Check the work_queue & path [0] here. '],
@@ -25,11 +24,9 @@ try {
   assert.ok(turn.turnId);
   const end = await fixture.client.waitForTurnTerminal(id, turn.turnId);
   assert.ok(end.type === 'agent-run-finished' && end.outcome === 'finished');
-  const driver = await openPaneBenchmarkDriver('gtk', values.webdriver, viewport);
+  const driver = await openPaneBenchmarkDriver('gtk', values.webdriver, compactPaneViewport);
   try {
-    type Probe = ReturnType<typeof composerInputProbe>;
-    const call = <K extends keyof Probe>(method: K, ...args: Parameters<Probe[K]>) =>
-      driver.evaluate<Awaited<ReturnType<Probe[K]>>>(`return window.inputQA.${method}(...arguments)`, ...args);
+    const call = composerInputClient(driver);
     for (const [shape, length, unit] of block % 2 === 0 ? shapes : [...shapes].reverse()) {
       const draft = unit.repeat(Math.ceil(length / unit.length)).slice(0, length - 1) + '.';
       await driver.navigate(fixture.garcon.baseUrl + '/robots.txt');
@@ -42,7 +39,7 @@ try {
       `, fixture.garcon.authToken, id, draft);
       await driver.navigate(fixture.garcon.baseUrl + '/chat/' + id);
       await driver.evaluate(`window.inputQA=(${composerInputProbe})(...arguments)`, [id], [draft], true);
-      assert.deepEqual(await call('start', 0), { ...viewport, visible: 1 });
+      assert.deepEqual(await call('start', 0), { ...compactPaneViewport, visible: 1 });
       await driver.evaluate(`document.querySelector('[data-composer-markdown-editor] [role=textbox]').focus()`);
       await call('focusReady', 0);
       for (let key = 0; key < 4; key++) {

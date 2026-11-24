@@ -1,3 +1,11 @@
+import type { PaneBenchmarkDriver } from './pane-benchmark-driver.js';
+
+export function composerInputClient(driver: PaneBenchmarkDriver) {
+  type Probe = ReturnType<typeof composerInputProbe>;
+  return <K extends keyof Probe>(method: K, ...args: Parameters<Probe[K]>) =>
+    driver.evaluate<Awaited<ReturnType<Probe[K]>>>(`return window.inputQA.${method}(...arguments)`, ...args);
+}
+
 // Serialized into the isolated fixture page. Text, socket frames and chat IDs never leave it.
 export function composerInputProbe(ids: string[], drafts: string[], compact: boolean, observeReplyDom = !compact) {
   const one = <T extends Element = HTMLElement>(selector: string, root: ParentNode = document) => root.querySelector<T>(selector);
@@ -17,6 +25,11 @@ export function composerInputProbe(ids: string[], drafts: string[], compact: boo
   const anchor = (i: number) => !!panel(i)?.hasAttribute('data-conversation-panel-composer-anchor') &&
     panel(i)?.dataset.conversationPanel === host()?.dataset.conversationComposerHost && !host()?.closest('[inert]');
   const input = () => source()?.parentElement?.hidden ? rich() : source();
+  function inputSurface(target: EventTarget | null) {
+    if (target === rich()) return 'formatted';
+    if (target === source()) return 'source';
+    return 'other';
+  }
   const textOf = (ed: HTMLElement | null | undefined) => ed instanceof HTMLTextAreaElement ? ed.value : ed?.textContent;
   const range = (ed: HTMLElement | null | undefined) => {
     if (ed instanceof HTMLTextAreaElement) return [ed.selectionStart, ed.selectionEnd];
@@ -74,8 +87,9 @@ export function composerInputProbe(ids: string[], drafts: string[], compact: boo
     const m = JSON.parse(e.data);
     if (m.type !== 'chat-messages' || m.chatId !== ids[2]) return;
     for (const { message, ordinal } of m.messages) {
-      const kind = message.type === 'user-message' && message.content === user ? 'user' :
-        message.type === 'assistant-message' && message.content === assistant ? 'assistant' : 'unexpected';
+      let kind = 'unexpected';
+      if (message.type === 'user-message' && message.content === user) kind = 'user';
+      else if (message.type === 'assistant-message' && message.content === assistant) kind = 'assistant';
       receipt.push({ kind, at: performance.now(), view: m.transcriptViewId, ordinal });
     }
   }
@@ -108,7 +122,7 @@ export function composerInputProbe(ids: string[], drafts: string[], compact: boo
       if (!e.isTrusted || e.key !== 'x' || down) return;
       down = time(); const ed = input();
       early = { owner: anchor(i), focused: e.target === ed && document.activeElement === ed,
-        text: textOf(ed) === before, caret: range(ed), surface: e.target === rich() ? 'formatted' : e.target === source() ? 'source' : 'other' };
+        text: textOf(ed) === before, caret: range(ed), surface: inputSurface(e.target) };
     }, options);
     window.addEventListener('beforeinput', e => {
       if (down && !beforeTime && e.isTrusted && e.inputType === 'insertText' && e.data === 'x') { beforeTime = time(); trustedBefore = true; }
