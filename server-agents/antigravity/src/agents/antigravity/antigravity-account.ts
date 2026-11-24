@@ -31,5 +31,5 @@ export function createAntigravityAccount(config: AntigravityConfig, logger: Agen
     completeLogin: (sessionId, code) => login.complete(sessionId, code),
     loginStatus: async (expectedSessionId) => login.status(expectedSessionId),
   } satisfies NonNullable<AgentIntegration['auth']>;
-  return { catalog: createAntigravityCatalog(() => probes.runModels(), logger), auth, stop: () => login.stop() };
+  return { catalog: createAntigravityCatalog(() => probes.listModels(), logger), auth, stop: () => login.stop() };
 }

@@ -23,31 +23,42 @@ interface AntigravityProbes {
 }
 
 // A completed login replaces both in-flight probes, the reused model listing, and their last observed status.
-export function createAntigravityProbes(config: AntigravityConfig): AntigravityProbes & { lastProbed: AgentAuthStatus | null } {
+export function createAntigravityProbes(
+  config: AntigravityConfig,
+  runModelsCli: (config: AntigravityConfig) => Promise<AntigravityCliResult> = runAntigravityModels,
+): AntigravityProbes & { readonly listModels: () => Promise<AntigravityCliResult>; lastProbed: AgentAuthStatus | null } {
   const authentication = new Map<string, Promise<boolean>>();
   const models = new Map<string, Promise<AntigravityCliResult>>();
   const listings = new Map<string, { readonly result: AntigravityCliResult; readonly listedAt: number }>();
-  const listModels = (key: string) => sharedProbe(models, key, () => runAntigravityModels(config)).then(
-    (result) => {
+  const modelsKey = () => JSON.stringify([config.binary(), config.authMethod(), config.apiKey()]);
+  const refreshListing = (key: string) => sharedProbe(models, key, async () => {
+    try {
+      const result = await runModelsCli(config);
       if (result.exitCode === 0) listings.set(key, { result, listedAt: Date.now() });
       else listings.delete(key);
       return result;
-    },
-    (error: unknown) => {
+    } catch (error) {
       listings.delete(key);
       throw error;
-    },
-  );
+    }
+  });
+  const runModels = () => {
+    const key = modelsKey();
+    const listing = listings.get(key);
+    const refreshed = refreshListing(key);
+    if (!listing) return refreshed;
+    refreshed.catch(() => {});
+    return Promise.resolve(listing.result);
+  };
   return {
     lastProbed: null,
     authenticate: () => sharedProbe(authentication, JSON.stringify([config.binary(), config.authMethod()]),
       () => authenticateOnce(config)),
-    runModels: () => {
-      const key = JSON.stringify([config.binary(), config.authMethod(), config.apiKey()]);
-      const listing = listings.get(key);
-      if (!listing) return listModels(key);
-      if (Date.now() - listing.listedAt >= MODEL_LISTING_REUSE_MS) void listModels(key).catch(() => {});
-      return Promise.resolve(listing.result);
+    runModels,
+    listModels: () => {
+      const listing = listings.get(modelsKey());
+      if (listing && Date.now() - listing.listedAt < MODEL_LISTING_REUSE_MS) return Promise.resolve(listing.result);
+      return runModels();
     },
   };
 }
