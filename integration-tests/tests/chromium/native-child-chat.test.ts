@@ -6,6 +6,7 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { codexAssistantMessage, codexCollaborationCall, codexFinalAnswerMessage } from '../../support/fake-codex-model.js';
 
 test('[TLV5-OBSERVE.05-CHROMIUM-01] native children hide the composer, show only active status, and preserve executable drafts across switches', async () => {
@@ -22,6 +23,7 @@ test('[TLV5-OBSERVE.05-CHROMIUM-01] native children hide the composer, show only
   [codexAssistantMessage(Array.from({ length: 60 }, (_, index) => `Synthetic parent UI answer ${index + 1}.`).join('\n\n'))]);
   try {
     await withChromiumFixture('native-child-chat', async ({ page, context, integration }, phase) => {
+      await context.addInitScript(seedLocalSettings, { collapseDelegatedChatsByDefault: false });
       const { client } = integration;
       const parentId = integration.newChatId();
       const started = await client.startChat(liveCodexStartRequest({
