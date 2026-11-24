@@ -69,9 +69,10 @@ export class ConversationChoiceService {
 					excludedResendOrdinals: [...transcript.excludedResendOrdinals],
 				};
 				if (requiresQueuedSubmission({ isProcessing: false, control: deps.conversationUi.getExecutionControl(chatId) })) {
+					const response = deps.conversationUi.captureExecutionResponse();
 					const result = await this.inputs.enqueue({ ...target, content: answer }).submit();
 					if (deps.sessions.byId[chatId]?.agentOwnershipEpoch === captured.agentOwnershipEpoch)
-						deps.conversationUi.setExecutionControlFromLiveUpdate(chatId, result.control);
+						response.setExecutionControlFromLiveUpdate(chatId, result.control);
 				} else {
 					await this.inputs.run({ ...target, command: answer }).submit();
 					if (deps.sessions.byId[chatId]?.agentOwnershipEpoch === captured.agentOwnershipEpoch

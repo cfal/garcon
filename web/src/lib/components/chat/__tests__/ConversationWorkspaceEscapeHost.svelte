@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 	import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 	import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
@@ -394,7 +395,7 @@
 	): Promise<string> {
 		selectedChat.isProcessing = false;
 		selectedChat.processingPhase = null;
-		conversationPanel.transcript.replaceGeneration(
+		seedTranscript(conversationPanel.transcript,
 			selectedChat.id,
 			viewId,
 			[{ ordinal: 1, message: new AssistantMessage('2026-01-01T00:00:00.000Z', content) }],

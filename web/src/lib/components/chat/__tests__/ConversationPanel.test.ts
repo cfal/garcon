@@ -244,7 +244,7 @@ describe('ConversationPanel', () => {
 		runtime.processing = false;
 		executors.applySnapshot([localExecutor]);
 		const { panel } = makePanel();
-		panel.transcript.replaceGeneration(
+		seedTranscript(panel.transcript,
 			'chat-1',
 			'view-choices',
 			[
@@ -314,7 +314,7 @@ describe('ConversationPanel', () => {
 
 	it('offers choices when the assistant closes with a separate reminder block', async () => {
 		const { panel, actions } = choicePanel();
-		panel.transcript.replaceGeneration(
+		seedTranscript(panel.transcript,
 			'chat-1',
 			'view-choices',
 			[
