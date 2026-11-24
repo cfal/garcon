@@ -1,6 +1,7 @@
 import * as m from '$lib/paraglide/messages.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import { forkFailureNotice, requestChatFork } from '$lib/chat/actions/fork-chat-request.js';
+import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 import { errorDetail } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import { HandoffForkConfirmationState } from '$lib/chat/conversation/handoff-fork-confirmation.svelte.js';
 import { createClientChatId } from '$shared/client-chat-id';
@@ -208,6 +209,7 @@ export class ChatActionController {
 	}
 
 	async forkChat(sourceChatId: string): Promise<void> {
+		if (!canExecuteChat(this.deps.chats.find(chat => chat.id === sourceChatId))) return;
 		// A long fork would otherwise look idle and invite a duplicate fork.
 		if (this.#pendingForks.has(sourceChatId)) return;
 		this.#pendingForks.add(sourceChatId);

@@ -5,6 +5,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import PromptComposer from './composer/PromptComposer.svelte';
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import QueuedInputEditorDialog from './queue/QueuedInputEditorDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
 	import ClearChatDialog from './ClearChatDialog.svelte';
@@ -209,6 +210,7 @@
 	setAgentState(agentState);
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
+	const selectedExecutable = $derived(canExecuteChat(sessions.selectedChat));
 	const hasSubagentEvents = $derived(
 		chatState.entries.some(({ message }) => message.type === 'codex-subagent-tool-use'),
 	);
@@ -220,7 +222,7 @@
 		}),
 	);
 	const canInterruptSelectedChat = $derived(
-		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
+		selectedExecutable && selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
@@ -373,7 +375,7 @@
 
 	function allowsConversationalActions(chatId: string): boolean {
 		const chat = sessions.byId[chatId];
-		if (!chat) return false;
+		if (!chat || !canExecuteChat(chat)) return false;
 		const agent = rootModelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId);
 		return agent?.executionPolicy === 'conversation';
 	}
@@ -560,6 +562,7 @@
 			!event.repeat &&
 			!event.isComposing &&
 			sessions.selectedChatId &&
+			selectedExecutable &&
 			workspaceShortcuts.matchesGlobalShortcut('open-composer-editor', event)
 		) {
 			event.preventDefault();
@@ -588,13 +591,13 @@
 
 	function onSubmit(text?: string, images?: File[]) {
 		const chatId = sessions.selectedChatId;
-		if (!chatId) return;
+		if (!chatId || !selectedExecutable) return;
 		void controller.submitForChat(chatId, text, images);
 	}
 
 	function onSteerPreferredSubmit(): void {
 		const chatId = sessions.selectedChatId;
-		if (!chatId) return;
+		if (!chatId || !selectedExecutable) return;
 		void controller.submitComposerWithSteerPreference(chatId);
 	}
 
@@ -635,7 +638,8 @@
 			throw new Error(m.sidebar_chats_reload_requires_open_chat());
 		}
 		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_already_pending());
-		return reloadDialog.request(chatId, [...chatState.resendCandidates]);
+		return reloadDialog.request(chatId, [...chatState.resendCandidates],
+			sessions.byId[chatId]?.observation ? 'native-child' : 'session');
 	}
 
 	async function reloadFromNative(
@@ -871,12 +875,14 @@
 	<div
 		bind:this={composerHost}
 		class="pointer-events-auto"
+		hidden={!selectedExecutable}
+		inert={!selectedExecutable}
 		data-conversation-composer-host={composerAnchorSurfaceId}
 		data-reserve-mobile-toolbar={reserveMobileToolbar}
 	>
 		<PromptComposer
-			{isVisible}
-			{isPresented}
+			isVisible={isVisible && selectedExecutable}
+			isPresented={isPresented && selectedExecutable}
 			{directAdmissionPending}
 			requiresQueuedSubmission={composerRequiresQueuedSubmission}
 			{composerEditorOpenRequestId}
@@ -937,6 +943,7 @@
 	{/if}
 
 	<ReloadChatDialog
+		source={reloadDialog.source}
 		open={reloadDialog.open}
 		candidates={reloadDialog.candidates}
 		busy={reloadDialog.running}

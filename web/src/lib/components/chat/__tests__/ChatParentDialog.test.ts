@@ -28,7 +28,7 @@ function chat(id: string, title = 'Duplicate'): ChatSessionRecord {
 		isProcessing: true,
 		processingPhase: null,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch',

@@ -151,7 +151,7 @@ function sidebarChat(chatId: string): Record<string, unknown> {
     isArchived: false,
     isProcessing: false,
     processingPhase: null,
-    canReloadFromNativeHistory: false,
+    observation: null, canReloadFromNativeHistory: false,
     isUnread: false,
     status: 'running',
     agentOwnershipEpoch: null,

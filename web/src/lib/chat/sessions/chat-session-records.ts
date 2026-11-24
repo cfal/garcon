@@ -32,6 +32,7 @@ export function toRecord(session: ChatListEntry): ChatSessionRecord {
 	}
 	return {
 		id: session.id,
+		observation: session.observation,
 		executorId: session.executorId,
 		parentChatId: session.parentChatId,
 		lineage: session.lineage,
@@ -70,6 +71,7 @@ export function toDraftRecord(
 ): ChatSessionRecord {
 	return {
 		id,
+		observation: null,
 		parentChatId: null,
 		lineage: null,
 		projectPath,
@@ -110,6 +112,8 @@ function arraysEqual(a: string[], b: string[]): boolean {
 export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	return (
 		a.id === b.id &&
+		a.observation?.captureStatus === b.observation?.captureStatus &&
+		a.observation?.isWorking === b.observation?.isWorking &&
 		(a.executorId ?? 'local') === (b.executorId ?? 'local') &&
 		a.parentChatId === b.parentChatId &&
 		chatLineagesEqual(a.lineage, b.lineage) &&

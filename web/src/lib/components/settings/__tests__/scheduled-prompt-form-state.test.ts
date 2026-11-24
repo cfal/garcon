@@ -8,6 +8,7 @@ import {
 	type ScheduledPrompt,
 } from '$shared/scheduled-prompts';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
+import type { ChatObservation } from '$shared/chat-observation';
 import { ModelCatalogStore, type ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { findModelForSelection } from '../../../../test/model-catalog';
@@ -27,9 +28,10 @@ function createForm(
 	existingIds = new Set(['123']),
 	selectableAgentIds: () => readonly SessionAgentId[] = () => ['claude', 'codex'],
 	catalogOverrides: CatalogOverrides = {},
+	observation: ChatObservation | null = null,
 ): ScheduledPromptFormState {
 	const sessions = {
-		get byId() { return Object.fromEntries([...existingIds].map(id => [id, { agentId: 'claude', executorId: 'local' }])); },
+		get byId() { return Object.fromEntries([...existingIds].map(id => [id, { agentId: 'claude', executorId: 'local', observation }])); },
 		hasChat: (chatId: string) => existingIds.has(chatId),
 		isDraft: () => false,
 	};
@@ -144,6 +146,16 @@ function newChatPrompt(
 }
 
 describe('ScheduledPromptFormState', () => {
+	it('rejects a saved schedule targeting a native observer', async () => {
+		const form = createForm(new Set(['123']), () => ['claude'], {}, {
+			kind: 'native-child', captureStatus: 'detached', isWorking: false,
+		});
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' }));
+		expect(form.targetValid).toBe(false);
+		expect(form.buildDefinition(new Date('2029-12-01T00:00:00.000Z'))).toBeNull();
+		form.dispose();
+	});
+
 	it.each(['checking', 'valid'] as const)('preserves %s path validation when saved startup settings finish loading', async (status) => {
 		vi.useFakeTimers();
 		const form = createForm();

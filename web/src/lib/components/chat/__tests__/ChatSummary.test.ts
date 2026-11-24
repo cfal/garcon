@@ -27,7 +27,7 @@ function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 		isProcessing: true,
 		processingPhase: 'running',
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		isUnread: true,
 		status: 'running',
 		lastMessage: 'A longer preview that remains readable inside a detailed board card.',
@@ -37,6 +37,21 @@ function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 }
 
 describe('ChatSummary', () => {
+	it.each(['sidebar', 'board'] as const)('shows native child activity independently of execution in %s', async (variant) => {
+		const session = chat({
+			isProcessing: false, processingPhase: null,
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true },
+		});
+		const view = render(ChatSummary, { session, variant });
+		expect(screen.getByText('Native subagent (read-only)')).toBeTruthy();
+		expect(screen.getByText('Chat is processing')).toBeTruthy();
+		await view.rerender({ session: {
+			...session, observation: { kind: 'native-child', captureStatus: 'detached', isWorking: false },
+		} });
+		expect(screen.queryByText('Chat is processing')).toBeNull();
+		expect(screen.getByText('Native subagent (read-only)')).toBeTruthy();
+	});
+
 	it.each(['single-line', 'compact', 'detailed'] as const)(
 		'keeps the title first and shows only the applicable trailing metadata in %s rows',
 		async (chatItemLayout) => {

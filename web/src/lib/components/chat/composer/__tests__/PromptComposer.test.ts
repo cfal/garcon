@@ -77,6 +77,26 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it('keeps observer click, Enter and steer shortcuts inert while retaining the ordinary draft', async () => {
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		const rendered = render(PromptComposerTestHost, { onsubmit, onSteerPreferredSubmit, steerWithCtrlEnter: true });
+		const editor = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(editor, { target: { value: 'Retained draft' } });
+		await rendered.rerender({ observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true } });
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(editor, { key: 'Enter' });
+		await fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+		await rendered.rerender({ observation: null });
+		expect(screen.getByRole('textbox')).toBe(editor);
+		expect(editor.value).toBe('Retained draft');
+		expect(send.disabled).toBe(false);
+	});
+
 	it.each(['in', 'rename', 'move', 'tag', 'fork'])(
 		'completes the literal /%s app command without provider discovery or submission', async name => {
 			const onsubmit = vi.fn();

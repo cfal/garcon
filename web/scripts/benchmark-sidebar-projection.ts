@@ -74,6 +74,7 @@ function fixture(size: number, nestedProjects: boolean): ChatSessionRecord[] {
 			isProcessing: index % 17 === 0,
 			processingPhase: index % 17 === 0 ? 'running' : null,
 			canReloadFromNativeHistory: false,
+			observation: null,
 			isUnread: index % 7 === 0,
 			status: 'running',
 			agentOwnershipEpoch: null,

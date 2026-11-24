@@ -27,7 +27,7 @@ export function sourceChat(): ChatSessionRecord {
 		agentId: 'codex', model: 'current-model', permissionMode: 'default', thinkingMode: 'none',
 		agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} },
 		createdAt: null, lastActivityAt: null, lastReadAt: null, isPinned: false, isArchived: false,
-		isProcessing: false, processingPhase: null, activityStatus: null, canReloadFromNativeHistory: false,
+		isProcessing: false, processingPhase: null, activityStatus: null, observation: null, canReloadFromNativeHistory: false,
 		isUnread: false, status: 'running', agentOwnershipEpoch: 'epoch-a', tags: ['source'],
 	};
 }

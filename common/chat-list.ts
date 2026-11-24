@@ -8,9 +8,11 @@ import { parseChatId } from './chat-id.js';
 import { isRecord } from './json.js';
 import { isExecutorId } from './executors.js';
 import { isChatActivityStatus, type ChatActivityStatus } from './chat-activity.js';
+import { parseChatObservation, type ChatObservation } from './chat-observation.js';
 
 export interface ChatListEntry {
   id: string;
+  observation: ChatObservation | null;
   executorId?: string | null;
   parentChatId: string | null;
   lineage: ChatLineage | null;
@@ -97,6 +99,9 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
     if (!lineage || lineage.sourceChatId === value.id) fail(field('lineage'));
   }
   const agentId = nonEmptyString(value.agentId, field('agentId'));
+  let observation: ChatObservation | null;
+  try { observation = parseChatObservation(value.observation); }
+  catch { return fail(field('observation')); }
   const executorId = value.executorId;
   if (executorId != null && !isExecutorId(executorId)) fail(field('executorId'));
   const agentOwnershipEpoch = nonEmptyString(
@@ -149,11 +154,13 @@ function parseChatListEntry(value: unknown, index: number): ChatListEntry {
   if (isProcessing !== processing || isActive !== processing) {
     fail(field('processing state'));
   }
+  if (observation && processing) fail(field('observer processing state'));
   if (isPinned !== (orderGroup === 'pinned')) fail(field('isPinned'));
   if (isArchived !== (orderGroup === 'archived')) fail(field('isArchived'));
 
   return {
     id: value.id,
+    observation,
     ...(executorId === undefined ? {} : { executorId }),
     parentChatId,
     lineage,

@@ -26,7 +26,7 @@ function entry(id: string, activityStatus: ChatListEntry['activityStatus'] = nul
 		isProcessing: false,
 		processingPhase: null,
 		activityStatus,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		isUnread: false,
 	};
 }

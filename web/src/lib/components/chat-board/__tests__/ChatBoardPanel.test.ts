@@ -52,7 +52,7 @@ function chat(id = 'chat-1', title = 'Polish onboarding'): ChatSessionRecord {
 		isProcessing: true,
 		processingPhase: 'running',
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		isUnread: true,
 		status: 'running',
 		agentOwnershipEpoch: null,

@@ -28,7 +28,7 @@ function occurrence(overrides: Partial<ChatSessionRecord> = {}): ChatBoardOccurr
 			isProcessing: true,
 			processingPhase: 'running',
 			activityStatus: null,
-			canReloadFromNativeHistory: false,
+			observation: null, canReloadFromNativeHistory: false,
 			isUnread: true,
 			status: 'running',
 			agentOwnershipEpoch: null,

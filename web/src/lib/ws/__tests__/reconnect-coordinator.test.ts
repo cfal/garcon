@@ -475,7 +475,7 @@ describe('ChatReconnectCoordinator', () => {
 			observedAt: TS, messageLimit: 1, processingPhase: null,
 			chat: { id: 'chat-1', title: 'Synthetic chat', agentId: 'claude', agentOwnershipEpoch: 'epoch',
 				carryOverRevision: 'carryover', model: null, apiProviderId: null, modelEndpointId: null, modelProtocol: null,
-				permissionMode: 'default', thinkingMode: 'none', projectPath: '/repo', tags: [], activityStatus: null, canReloadFromNativeHistory: false,
+				permissionMode: 'default', thinkingMode: 'none', projectPath: '/repo', tags: [], activityStatus: null, observation: null, canReloadFromNativeHistory: false,
 				activity: { createdAt: TS, lastActivityAt: TS } },
 			control: controlState(true, 'successor'),
 			transientFeed: { ...transientFeed('chat-1', replacementView), serverInstanceId: 'successor', transientRevision: 1,

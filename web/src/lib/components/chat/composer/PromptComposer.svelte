@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
@@ -681,7 +682,8 @@
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
-	const isDisabled = $derived(directAdmissionPending && sessions.selectedChat?.status === 'draft');
+	const isDisabled = $derived(!canExecuteChat(sessions.selectedChat)
+		|| (directAdmissionPending && sessions.selectedChat?.status === 'draft'));
 	const canFormat = $derived(
 		isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen,
 	);

@@ -612,11 +612,14 @@ export async function startServer(): Promise<void> {
       metadata,
       processing: chatProcessingActivity,
       transientFeeds,
+      observers: nativeChildren,
       canReloadFromNativeHistory(_chatId, session) {
+        const integration = directory.get(session.agentId, session.executorId);
+        if (session.nativeObservation) return Boolean(integration?.nativeChildObservation);
         return Boolean(
           session.agentSessionId
           && session.nativeSession
-          && directory.get(session.agentId, session.executorId)?.nativeHistoryImport,
+          && integration?.nativeHistoryImport,
         );
       },
     });

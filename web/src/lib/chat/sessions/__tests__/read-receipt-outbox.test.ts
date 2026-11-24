@@ -179,7 +179,7 @@ describe('ReadReceiptOutboxStore', () => {
 				processingPhase: null,
 				isUnread: true,
 				activityStatus: null,
-				canReloadFromNativeHistory: false,
+				observation: null, canReloadFromNativeHistory: false,
 			},
 		]);
 
@@ -226,7 +226,7 @@ describe('ReadReceiptOutboxStore', () => {
 				processingPhase: null,
 				isUnread: true,
 				activityStatus: null,
-				canReloadFromNativeHistory: false,
+				observation: null, canReloadFromNativeHistory: false,
 			},
 			{
 				id: 'b',
@@ -255,7 +255,7 @@ describe('ReadReceiptOutboxStore', () => {
 				processingPhase: null,
 				isUnread: false,
 				activityStatus: null,
-				canReloadFromNativeHistory: false,
+				observation: null, canReloadFromNativeHistory: false,
 			},
 		]);
 

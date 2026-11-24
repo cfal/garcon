@@ -56,7 +56,7 @@ function chatRecord(): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		agentOwnershipEpoch: null,

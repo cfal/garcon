@@ -1,6 +1,7 @@
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
+import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
@@ -84,7 +85,7 @@ export class ScheduledPromptFormState {
 		private readonly modelCatalog: ModelCatalogStore,
 		remoteSettings: RemoteSettingsStore,
 		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'> & {
-			readonly byId: Record<string, Pick<ChatSessionsStore['byId'][string], 'agentId' | 'executorId'>>;
+			readonly byId: Record<string, Pick<ChatSessionsStore['byId'][string], 'agentId' | 'executorId' | 'observation'>>;
 		},
 		private readonly options: ScheduledPromptFormStateOptions,
 	) {
@@ -199,7 +200,8 @@ export class ScheduledPromptFormState {
 			return Boolean(
 				this.existingChatId &&
 				this.sessions.hasChat(this.existingChatId) &&
-				!this.sessions.isDraft(this.existingChatId),
+				!this.sessions.isDraft(this.existingChatId) &&
+				canExecuteChat(this.sessions.byId[this.existingChatId]),
 			);
 		}
 		return (

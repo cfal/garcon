@@ -5,19 +5,21 @@
 
 	interface Props {
 		tone?: 'idle' | 'processing';
+		placement?: 'composer-cap' | 'standalone';
 		announcementsEnabled?: boolean;
 		busy?: boolean;
 		children: Snippet;
 	}
 
-	let { tone = 'idle', announcementsEnabled = true, busy = false, children }: Props = $props();
+	let { tone = 'idle', placement = 'composer-cap', announcementsEnabled = true, busy = false, children }: Props = $props();
 </script>
 
 <!-- The composer overlaps the out-of-flow frame; notice/queue/feed owns its reserved space. -->
-<div class="absolute bottom-full left-0 right-0 z-10 translate-y-3">
+<div class={placement === 'composer-cap' ? 'absolute bottom-full left-0 right-0 z-10 translate-y-3' : 'relative'}>
 	<div
 		class={cn(
-			'pointer-events-auto flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border px-3 pb-5 pt-2 sm:px-4',
+			'pointer-events-auto flex items-center justify-between gap-3 border border-border px-3 sm:px-4',
+			placement === 'composer-cap' ? 'min-h-14 rounded-t-2xl border-b-0 pb-5 pt-2' : 'min-h-10 rounded-md py-2',
 			tone === 'processing' ? 'bg-chat-thinking' : 'bg-card',
 		)}
 		role={announcementsEnabled ? 'status' : undefined}

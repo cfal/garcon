@@ -72,7 +72,7 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		...overrides,
@@ -107,7 +107,7 @@ function createServerEntry(id: string) {
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 	};
 }
 

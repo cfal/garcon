@@ -31,7 +31,7 @@ function response() {
       isProcessing: false,
       processingPhase: null,
       activityStatus: null,
-      canReloadFromNativeHistory: true,
+      observation: null, canReloadFromNativeHistory: true,
       isUnread: true,
     }],
     total: 1,

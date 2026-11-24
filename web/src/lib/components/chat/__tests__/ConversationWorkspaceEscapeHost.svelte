@@ -68,6 +68,7 @@
 	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
+		observation?: ChatSessionRecord['observation'];
 		composerStatusBarGitProjects?: boolean;
 		executionPolicy?: 'conversation' | 'literal' | null;
 		onRegisterSubmit?: (submit: (message: string) => Promise<boolean>) => void;
@@ -81,6 +82,7 @@
 	}
 
 	let {
+		observation = null,
 		composerStatusBarGitProjects = false,
 		executionPolicy = 'conversation',
 		onRegisterSubmit,
@@ -115,6 +117,7 @@
 		isUnread: false,
 		activityStatus: null,
 		canReloadFromNativeHistory: false,
+		observation: untrack(() => observation),
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],

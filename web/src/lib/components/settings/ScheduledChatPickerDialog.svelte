@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import SidebarSearchPanel from '$lib/components/sidebar/search/SidebarSearchPanel.svelte';
 	import { SIDEBAR_SEARCH_DIALOG_CONTENT_CLASS } from '$lib/components/sidebar/search/sidebar-search-panel';
@@ -20,7 +21,7 @@
 	let filter = $derived(parseChatSearch(query));
 	let filteredChats = $derived(
 		sessions.orderedChats.filter(
-			(chat) => chat.status !== 'draft' && matchesChatFilter(chat, filter),
+			(chat) => canExecuteChat(chat) && chat.status !== 'draft' && matchesChatFilter(chat, filter),
 		),
 	);
 

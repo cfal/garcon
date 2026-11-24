@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import Network from '@lucide/svelte/icons/network';
+	import Eye from '@lucide/svelte/icons/eye';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
 	import ChatActivityIndicator, { type ChatIndicatorStatus } from './ChatActivityIndicator.svelte';
@@ -47,6 +48,7 @@
 	let isSidebar = $derived(variant === 'sidebar');
 	let sidebarIndicatorStatus = $derived.by<ChatIndicatorStatus | null>(() => {
 		if (!isSidebar) return null;
+		if (session.observation?.isWorking) return 'working';
 		const { isProcessing, activityStatus } = session;
 		if (isProcessing) return activityStatus === 'pending-user-action' ? activityStatus : 'working';
 		return activityStatus === 'error' ? activityStatus : null;
@@ -63,7 +65,7 @@
 		showTimestamp ? formatRelativeTimestamp(activityTimestamp, currentTime) : null,
 	);
 	let headerTimestamp = $derived(
-		!session.isProcessing && (isSidebar || isSingleLine) ? formattedTimestamp : null,
+		!session.isProcessing && !session.observation?.isWorking && (isSidebar || isSingleLine) ? formattedTimestamp : null,
 	);
 	let selectedForeground = $derived(isSidebar && isSelected);
 	let titleClass = $derived(
@@ -125,6 +127,12 @@
 		data-slot="chat-summary-header"
 	>
 		{@render titlePrefix?.()}
+		{#if session.observation}
+			<span class="shrink-0 text-muted-foreground" title={m.chat_native_child_read_only()} data-native-child-indicator>
+				<Eye class="size-3.5" aria-hidden="true" />
+				<span class="sr-only">{m.chat_native_child_read_only()}</span>
+			</span>
+		{/if}
 		<span class={titleClass} title={chatName}>
 			{chatName}
 		</span>
@@ -134,7 +142,7 @@
 			</span>
 		{/if}
 		{@render titleBadge?.()}
-		{#if !isSidebar && session.isProcessing}
+		{#if !isSidebar && (session.isProcessing || session.observation?.isWorking)}
 			<span
 				class={isSingleLine
 					? cn('flex items-center justify-end pr-0.5', headerStatusClass)

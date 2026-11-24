@@ -82,7 +82,7 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		...overrides,
 		parentChatId: overrides.parentChatId ?? null,
@@ -121,6 +121,30 @@ describe('ChatSessionsStore IO', () => {
 
 		expect(store.byId['chat-2']?.title).toBe('Quiet');
 		expect(store.isLoadingChats).toBe(false);
+	});
+
+	it('hydrates background observation changes without selecting or processing the child', async () => {
+		const store = new ChatSessionsStore();
+		const root = makeServerSession({ id: 'root' });
+		const child = makeServerSession({
+			id: 'child', parentChatId: 'root',
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true },
+		});
+		store.upsertFromServer([root, child]);
+		store.setSelectedChatId('root');
+		for (const observation of [
+			{ kind: 'native-child', captureStatus: 'attached', isWorking: false },
+			{ kind: 'native-child', captureStatus: 'detached', isWorking: false },
+		] as const) {
+			mockListChats.mockResolvedValueOnce({
+				sessions: [root, { ...child, observation }], total: 2, lastSelectedChatId: 'root',
+			});
+			await store.quietRefreshChats();
+			expect(store.byId.child.observation).toEqual(observation);
+			expect(store.byId.child.isProcessing).toBe(false);
+			expect(store.byId.child.processingPhase).toBeNull();
+			expect(store.selectedChatId).toBe('root');
+		}
 	});
 
 	it('reports quiet refresh failures without rejecting a successful mutation caller', async () => {

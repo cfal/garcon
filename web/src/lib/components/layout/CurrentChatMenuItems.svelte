@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import Edit2 from '@lucide/svelte/icons/pencil';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import GitFork from '@lucide/svelte/icons/git-fork';
@@ -137,13 +138,13 @@
 		<Info />
 		{m.sidebar_chats_details()}
 	</menu.Item>
-	{#if onConfigurePreambles}
+	{#if onConfigurePreambles && canExecuteChat(selectedChat)}
 		<menu.Item onSelect={onConfigurePreambles}>
 			<ListPlus />
 			{m.sidebar_chats_configure_preambles()}
 		</menu.Item>
 	{/if}
-	{#if canFork}
+	{#if canFork && canExecuteChat(selectedChat)}
 		<menu.Item disabled={!canForkNow} onSelect={() => canForkNow && onFork()}>
 			<GitFork />
 			{m.sidebar_chats_fork()}
@@ -153,7 +154,7 @@
 		<Edit2 />
 		{m.sidebar_tooltips_edit_chat_name()}
 	</menu.Item>
-	{#if canUpdateProjectPath}
+	{#if canUpdateProjectPath && canExecuteChat(selectedChat)}
 		<menu.Item
 			disabled={selectedChat.isProcessing}
 			onSelect={() => !selectedChat.isProcessing && onProjectPath()}
@@ -170,8 +171,8 @@
 	{/if}
 	{#if canReload}
 		<menu.Item
-			disabled={selectedChat.isProcessing}
-			onSelect={() => !selectedChat.isProcessing && onReload()}
+			disabled={selectedChat.isProcessing || selectedChat.observation?.isWorking}
+			onSelect={() => !selectedChat.isProcessing && !selectedChat.observation?.isWorking && onReload()}
 		>
 			<RefreshCw />
 			{m.sidebar_chats_reload()}

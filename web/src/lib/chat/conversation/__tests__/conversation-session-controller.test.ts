@@ -191,7 +191,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		processingPhase: isProcessing ? 'running' : null,
 		isUnread: true,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
@@ -294,7 +294,7 @@ function chatSnapshot(
 			projectPath: '/workspace/project',
 			tags: [],
 			activityStatus: null,
-			canReloadFromNativeHistory: false,
+			observation: null, canReloadFromNativeHistory: false,
 			activity: {
 				createdAt: null,
 				lastActivityAt: '2026-03-27T08:00:00.000Z',
@@ -381,7 +381,7 @@ function createServerEntry(id: string) {
 		agentOwnershipEpoch: 'epoch-1',
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 	};
 }
 
@@ -819,6 +819,23 @@ function createClearDeps() {
 }
 
 describe('ConversationSessionController', () => {
+	it('rejects observer submission, steering, Stop and queue creation without changing the draft', async () => {
+		const { deps } = createDeps(createRunningChat({
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true },
+		}));
+		deps.composerState.inputText = 'Keep draft';
+		const controller = new ConversationSessionController(deps);
+		expect(await controller.submitForChat('chat-1')).toBe('rejected');
+		expect(await controller.submitComposerWithSteerPreference('chat-1')).toBe('rejected');
+		await controller.handleAbortForChat('chat-1');
+		await controller.createQueueEntryForChat('chat-1', 'Queued');
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginStopping).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('Keep draft');
+	});
+
 	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
 		'only confirms literal Clear through %s and never dispatches unsupported requests', async (submit) => {
 			for (const policy of ['conversation', 'literal', 'unknown']) {

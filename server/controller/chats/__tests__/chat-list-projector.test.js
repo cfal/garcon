@@ -62,6 +62,7 @@ function makeDeps() {
       },
       processing: { phase: mock(() => 'running') },
       transientFeeds: { hasPendingUserAction: mock(() => false) },
+      observers: { projection: () => null },
       canReloadFromNativeHistory: mock(() => true),
     },
   };
@@ -99,7 +100,7 @@ describe('ChatListProjector', () => {
       isActive: true,
       isProcessing: true,
       processingPhase: 'running',
-      canReloadFromNativeHistory: true,
+      observation: null, canReloadFromNativeHistory: true,
       title: 'First line',
     });
   });
@@ -146,7 +147,7 @@ describe('ChatListProjector', () => {
         title: 'First line',
         projectPath: '/alias',
         tags: ['cli', 'review-needed'],
-        canReloadFromNativeHistory: true,
+        observation: null, canReloadFromNativeHistory: true,
         activity: {
           createdAt: '2026-01-01T00:00:00.000Z',
           lastActivityAt: '2026-01-02T00:00:00.000Z',
