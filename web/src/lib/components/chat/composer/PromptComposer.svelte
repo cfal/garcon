@@ -376,20 +376,27 @@
 
 	// Keeps shell focus requests durable while navigation changes ownership.
 	$effect(() => {
-		const requestId = appShell.composerFocusRequestId;
+		const { id: requestId, drawerSelection } = appShell.composerFocusRequest;
 		if (requestId === 0 || requestId === handledAppShellFocusRequestId) return;
 		handledAppShellFocusRequestId = requestId;
-		untrack(() => requestComposerFocusForChat(sessions.selectedChatId));
+		untrack(() => {
+			if (drawerSelection) {
+				focusDelivery.request(drawerSelection.chatId, drawerSelection.userInteractionGeneration, 'drawer-selection');
+			} else {
+				requestComposerFocusForChat(sessions.selectedChatId);
+			}
+		});
 	});
 
 	// Keeps focus pending through transient visibility during window moves.
 	$effect(() =>
 		focusDelivery.deliver({
-			selectedChatId: sessions.selectedChatId,
-			disabled: isDisabled,
-			visible: isVisible,
-			target: formattedDraft ? ui.formattedTarget : textarea,
+			get selectedChatId() { return sessions.selectedChatId; },
+			get disabled() { return isDisabled; },
+			get visible() { return isVisible; },
+			get target() { return formattedDraft ? ui.formattedTarget : textarea; },
 			userInteractionGeneration: () => workspaceShortcuts.userInteractionGeneration,
+			drawerFocusBlocked: () => appShell.sidebarOpen || transientLayers.makesMainInert,
 		}),
 	);
 

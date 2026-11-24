@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
+import type { DrawerComposerSelection } from '$lib/stores/app-shell.svelte.js';
 import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 
 interface AppShellChatNavigationControllerOptions {
@@ -13,7 +14,7 @@ interface AppShellChatNavigationControllerOptions {
 	setSelectedChatId(chatId: string | null): void;
 	navigateToChat(chatId: string): Promise<void>;
 	navigateToBareRoute(): Promise<void>;
-	requestComposerFocus(): void;
+	requestComposerFocus(drawerSelection?: DrawerComposerSelection): void;
 	requestSidebarRecenter(): void;
 	reportOpenError(error: unknown): void;
 	reportDeleteError(error: unknown): void;
@@ -56,7 +57,10 @@ export class AppShellChatNavigationController {
 		void this.showChatInCurrentWindow(chatId, { navigate: false });
 	}
 
-	async showChatInCurrentWindow(chatId: string, options: { navigate: boolean }): Promise<void> {
+	async showChatInCurrentWindow(chatId: string, options: {
+		navigate: boolean;
+		drawerSelection?: DrawerComposerSelection;
+	}): Promise<void> {
 		if (this.#disposed) return;
 		const generation = this.#begin(chatId);
 		try {
@@ -67,7 +71,7 @@ export class AppShellChatNavigationController {
 			this.#options.setSelectedChatId(chatId);
 			if (options.navigate) await this.#queueChatRoute(chatId, generation);
 			if (this.#isCurrent(generation)) {
-				this.#options.requestComposerFocus();
+				this.#options.requestComposerFocus(options.drawerSelection);
 				this.#options.requestSidebarRecenter();
 			}
 		} catch (error) {
