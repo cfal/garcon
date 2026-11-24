@@ -165,7 +165,7 @@
 			>
 				<EllipsisVertical class="h-3.5 w-3.5" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" onCloseAutoFocus={handleMenuCloseFocus}>
+			<DropdownMenuContent align="end" inert={actionsHidden} onCloseAutoFocus={handleMenuCloseFocus}>
 				{#if sidebarMenuSearches.length > 0}
 					{#each sidebarMenuSearches as search (search.id)}
 						<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.(search.query)}>

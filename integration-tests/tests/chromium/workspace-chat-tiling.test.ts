@@ -70,12 +70,35 @@ test('retains transcript scroll and keyboard focus when tiling already open chat
 
 test('hiding the sidebar in fullscreen dismisses its portaled menu', async () => {
   await withChromiumFixture('tile-fullscreen-menu', async ({ page, integration }) => {
+    const chatId = integration.newChatId();
+    const content = 'Hold the fullscreen chat';
+    const held = integration.fakeProviders.openAi.holdNext({ lastUserText: content });
+    using holds = new DisposableStack();
+    await integration.client.startDirectChat({
+      chatId, content, projectPath: integration.dirs.project, agent: integration.directAgents.openAi,
+    });
+    await held.received;
+    holds.defer(() => held.releaseEcho());
     await page.setViewportSize({ width: 790, height: 400 });
-    await page.goto(integration.garcon.baseUrl);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     await page.getByRole('button', { name: 'More actions' }).click();
-    await browserExpect(page.getByRole('menu')).toBeVisible();
+    const tile = page.getByRole('menuitem', { name: 'Tile working chats' });
+    await tile.hover();
+    await page.mouse.down();
+    const sidebar = page.locator('[data-workspace-chat-list-panel]');
+    await sidebar.evaluate(panel => {
+      const observer = new MutationObserver(() => {
+        if (!panel.hasAttribute('inert')) return;
+        observer.disconnect();
+        const menu = document.querySelector('[role="menu"]');
+        panel.setAttribute('data-menu-was-inert', String(!menu || menu.closest('[inert]') !== null));
+      });
+      observer.observe(panel, { attributes: true, attributeFilter: ['inert'] });
+    });
     await page.keyboard.press('Control+Shift+F');
-    await browserExpect(page.locator('[data-workspace-chat-list-panel]')).toHaveAttribute('inert', '');
+    await page.mouse.up();
+    await browserExpect(sidebar).toHaveAttribute('data-menu-was-inert', 'true');
     await browserExpect(page.getByRole('menu')).toHaveCount(0);
+    await browserExpect(sidebar).toHaveAttribute('inert', '');
   });
 });
