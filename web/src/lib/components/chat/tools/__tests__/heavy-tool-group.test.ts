@@ -75,7 +75,7 @@ it('keeps grouped code and result payloads out of the collapsed DOM and disclose
 			container.querySelector('[data-chat-message-type="exec-tool-use"] code')?.textContent?.trim(),
 		).toBe(oldCode);
 		expect(buildDiff).not.toHaveBeenCalled();
-		await fireEvent.click(getByRole('button', { name: 'Expand', exact: true }));
+		await fireEvent.click(getByRole('button', { name: 'Expand' }));
 		await waitFor(() => expect(buildDiff).toHaveBeenCalledTimes(1));
 		const changedLines = container.querySelectorAll(
 			'.typography-code-diff > div > span:last-child',
