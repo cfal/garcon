@@ -193,6 +193,7 @@
 			return chatListAutohideActive;
 		},
 	});
+	const desktopChatListHidden = $derived(hideChatList || chatListAutohide.collapsed);
 	let desktopChatListPanelElement = $state<HTMLElement | null>(null);
 	let chatListRevealTrigger = $state<HTMLButtonElement | null>(null);
 	const mobileActiveDescriptor = $derived(
@@ -707,7 +708,7 @@
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
 	<Sidebar
-		actionsHidden={!isMobile && (hideChatList || chatListAutohide.collapsed)}
+		actionsHidden={!isMobile && desktopChatListHidden}
 		projection={sidebarOrder.projection}
 		reorder={sidebarOrder}
 		onShowDisplay={(returnFocus) => {
@@ -756,7 +757,6 @@
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}
-	{@const panelHidden = hideChatList || chatListAutohide.collapsed}
 	<div
 		data-workspace-chat-list
 		onfocusin={handleDesktopChatListFocus}
@@ -809,8 +809,8 @@
 			class:border-e={dividerEdge === 'end' && !hideChatList}
 			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
 			tabindex="-1"
-			aria-hidden={panelHidden}
-			inert={panelHidden}
+			aria-hidden={desktopChatListHidden}
+			inert={desktopChatListHidden}
 		>
 			{@render sidebarContent(false, handleChatSelect)}
 			{#if !hideChatList}

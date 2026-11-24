@@ -27,14 +27,13 @@ export function workingChatIdsForTiling(
 	return [...waiting, ...working];
 }
 
-function fitChatRows(chatIds: readonly string[], host: WorkspaceHostSize | null): string[][] {
-	if (!chatIds.length) return [];
+function fitChatGrid(chatCount: number, host: WorkspaceHostSize | null) {
 	if (!host || host.width < SPLIT_MIN_WINDOW_WIDTH_PX || host.height < SPLIT_MIN_WINDOW_HEIGHT_PX) {
-		return [[chatIds[0]]];
+		return { count: 1, rowCount: 1 };
 	}
 	const maxColumns = Math.floor(host.width / SPLIT_MIN_WINDOW_WIDTH_PX);
 	const maxRows = Math.floor(host.height / SPLIT_MIN_WINDOW_HEIGHT_PX);
-	const count = Math.min(chatIds.length, maxColumns * maxRows, WORKSPACE_WINDOW_RESOURCE_CEILING);
+	const count = Math.min(chatCount, maxColumns * maxRows, WORKSPACE_WINDOW_RESOURCE_CEILING);
 
 	// Maximizes the smaller dimension relative to its minimum, preferring fewer rows on a tie.
 	const minRows = Math.ceil(count / maxColumns);
@@ -52,12 +51,7 @@ function fitChatRows(chatIds: readonly string[], host: WorkspaceHostSize | null)
 		}
 	}
 
-	const rows: string[][] = [];
-	const remaining = chatIds.slice(0, count);
-	for (let rowsLeft = rowCount; rowsLeft > 0; rowsLeft--) {
-		rows.push(remaining.splice(0, Math.ceil(remaining.length / rowsLeft)));
-	}
-	return rows;
+	return { count, rowCount };
 }
 
 export function planChatTiles(
@@ -65,14 +59,16 @@ export function planChatTiles(
 	chatIds: readonly string[],
 	host: WorkspaceHostSize | null,
 ): WorkspaceChatTile[][] {
-	const rows = fitChatRows(chatIds, host);
-	const unplaced = new Set(rows.flat());
+	if (!chatIds.length) return [];
+	const { count, rowCount } = fitChatGrid(chatIds.length, host);
+	const unplaced = new Set(chatIds.slice(0, count));
 	const windows = collectWindowNodes(snapshot.desktopRoot);
 	const retained = new Map<WorkspaceWindowId, string>();
 	for (const { id } of windows) {
 		const chat = snapshot.surfaces[chatViewSurfaceId(id)];
-		if (chat?.type === 'chat' && chat.chatId && unplaced.delete(chat.chatId))
+		if (chat?.type === 'chat' && chat.chatId && unplaced.delete(chat.chatId)) {
 			retained.set(id, chat.chatId);
+		}
 	}
 	// Reordering mounted windows detaches their DOM and resets transcript scroll in Chromium.
 	const remaining = [...unplaced];
@@ -82,5 +78,9 @@ export function planChatTiles(
 		if (chatId !== undefined) tiles.push({ windowId: id, chatId });
 	}
 	for (const chatId of remaining) tiles.push({ windowId: `window-${createRandomId()}`, chatId });
-	return rows.map((row) => tiles.splice(0, row.length));
+	const columns = Math.floor(count / rowCount);
+	const longerRows = count % rowCount;
+	return Array.from({ length: rowCount }, (_, row) =>
+		tiles.splice(0, row < longerRows ? columns + 1 : columns),
+	);
 }
