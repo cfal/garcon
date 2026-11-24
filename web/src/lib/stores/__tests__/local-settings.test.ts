@@ -238,7 +238,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	const composerDefaults = { ...COMPOSER_STATUS_BAR_DEFAULTS, modelControlsLeft: false };
+	const composerDefaults = { ...COMPOSER_STATUS_BAR_DEFAULTS, modelControlsLeft: true };
 	it.each(
 		Object.keys(composerDefaults) as (keyof typeof composerDefaults)[],
 	)('persists, synchronizes, validates and resets %s independently', (key) => {

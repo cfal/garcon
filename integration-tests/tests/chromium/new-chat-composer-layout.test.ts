@@ -258,7 +258,8 @@ describe("Chromium New Chat composer layout", () => {
         await expectLocator(longModelTrigger).toBeFocused();
         markPhase("restoring the agent prefix and every shortcut when the full row fits");
         await fixture.page.setViewportSize({ width: 1280, height: 900 });
-        await dialog.evaluate(node => { node.style.maxWidth = node.style.width = '1000px'; });
+        // Leaves the right end of Project Path exposed beside the open model picker.
+        await dialog.evaluate(node => { node.style.maxWidth = node.style.width = '1120px'; });
         await expectLocator(longModelTrigger).toHaveText(`Direct (Chat Completions) ${LONG_MODEL_LABEL}`);
         await expectLocator(addTrigger).toHaveCount(0);
         await expectLocator(settingsMenu).toHaveCount(0);
@@ -266,16 +267,16 @@ describe("Chromium New Chat composer layout", () => {
         const pathInput = dialog.locator('#project-path-input');
         await longModelTrigger.click();
         await modelPopover.waitFor();
-        await pathInput.click({ position: { x: 8, y: 8 } });
+        await pathInput.click({ position: { x: (await bounds(pathInput)).width - 16, y: 16 } });
         await modelPopover.waitFor({ state: "detached" });
         await expectLocator(pathInput).toBeFocused();
         await pathInput.press("Escape");
         await expectLocator(fixture.page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
         markPhase("dropping the agent prefix before folding any buttons");
         await bottomBar.evaluate(bar => {
-          const [prompt, settings] = Array.from(bar.querySelectorAll('[data-composer-group]'),
+          const [left, right] = Array.from(bar.querySelectorAll('[data-composer-group]'),
             group => group.getBoundingClientRect());
-          const spaceBetweenGroups = settings!.left - prompt!.right;
+          const spaceBetweenGroups = right!.left - left!.right;
           bar.style.width = `${Math.floor(bar.getBoundingClientRect().width - spaceBetweenGroups)}px`;
         });
         await expectLocator(longModelTrigger).toHaveText(LONG_MODEL_LABEL);

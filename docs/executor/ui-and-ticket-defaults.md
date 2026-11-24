@@ -33,6 +33,8 @@ The scheduled prompts list shows each prompt's executor as a pill: the executor 
 
 ## Chat Composer
 
+Model controls appear on the left by default. Turning off **Model controls on the left** in Appearance swaps them with the prompt actions; Send stays on the right.
+
 A separate executor selector sits immediately to the left of the model selector. The composer's model picker does not select executors, and its trigger carries no executor prefix.
 
 The composer fits the full executor name, then its icon, then an Executor row in the settings overflow. All three open the same choices, with the current host checked and unavailable hosts disabled. The name expands only after fitting the other buttons and the optional agent prefix on the model trigger.
