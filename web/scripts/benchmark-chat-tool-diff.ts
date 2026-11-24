@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { EditToolUseMessage } from '../../common/chat-types.js';
 import {
 	buildChatToolDiff,
 	type ChatToolDiff,
@@ -39,23 +38,30 @@ function sample(run: () => ChatToolDiff) {
 
 const median = (samples: number[]) =>
 	Number(samples.sort((a, b) => a - b)[Math.floor(samples.length / 2)].toFixed(3));
+
+function revisedLines(lines: string[], edit: string): string[] {
+	const replacement = 'const replacement = changed();';
+	switch (edit) {
+		case 'head':
+			return lines.with(0, replacement);
+		case 'end':
+			return lines.with(-1, replacement);
+		case 'both-ends':
+			return lines.with(0, 'const first = changed();').with(-1, 'const last = changed();');
+		case 'disjoint':
+			return lines.map((line) => '// ' + line);
+		default:
+			return lines.with(Math.floor(lines.length / 2), replacement);
+	}
+}
+
 for (const edit of ['ordinary', 'head', 'middle', 'end', 'both-ends', 'disjoint']) {
 	const length = edit === 'ordinary' ? 20 : 450;
 	const lines = Array.from({ length }, (_, i) => `const component${i} = makeComponent(${i});`);
-	const index = edit === 'head' ? 0 : edit === 'end' ? length - 1 : Math.floor(length / 2);
-	let revised = lines.with(index, 'const replacement = changed();');
-	if (edit === 'both-ends')
-		revised = lines.with(0, 'const first = changed();').with(-1, 'const last = changed();');
-	if (edit === 'disjoint') revised = lines.map((line) => '// ' + line);
-	const message = new EditToolUseMessage(
-		'2026-01-01T00:00:00Z',
-		'edit',
-		'/project/example.ts',
-		lines.join('\n'),
-		revised.join('\n'),
-	);
-	const before = () => stock(message.oldString!, message.newString!);
-	const after = () => buildChatToolDiff(message.oldString!, message.newString!);
+	const originalText = lines.join('\n');
+	const revisedText = revisedLines(lines, edit).join('\n');
+	const before = () => stock(originalText, revisedText);
+	const after = () => buildChatToolDiff(originalText, revisedText);
 	const baseline = inspect(before);
 	const candidate = inspect(after);
 	assert.deepEqual(candidate.result, baseline.result);
