@@ -31,6 +31,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_theme_title(),
 			m.settings_ui_style(),
 			m.settings_typography(),
+			m.settings_model_controls_left(),
 			m.settings_highlight_active_window(),
 			m.settings_fullscreen_covers_sidebar(),
 			m.settings_workspace_titlebar_size(),

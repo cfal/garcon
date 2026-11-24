@@ -54,7 +54,8 @@ test('the live composer follows tile width and local group order without changin
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
-    await settings.getByRole('tab', { name: 'Appearance', exact: true }).click();
+    await settings.getByRole('searchbox', { name: 'Search settings' }).fill('Model controls on the left');
+    await settings.getByRole('button', { name: 'Model controls on the left Appearance', exact: true }).click();
     await settings.getByRole('switch', { name: 'Model controls on the left' }).click();
     await settings.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(groups.first()).toHaveAttribute('data-composer-group', 'settings');

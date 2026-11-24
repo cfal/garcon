@@ -15,6 +15,7 @@ describe('settings search', () => {
 		});
 	});
 	it.each([
+		'Model controls on the left',
 		'User message alignment',
 		'Auto-hide chat scrollbar',
 		'Composer status bar',
