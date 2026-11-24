@@ -205,6 +205,7 @@
 					<p class="text-xs text-muted-foreground">{promptVariables.help}</p>
 				{:else}
 					<ScheduledNewChatComposer
+						modelControlsLeft={localSettings.modelControlsLeft}
 						conversationInput
 						startup={form.startup}
 						{modelCatalog}

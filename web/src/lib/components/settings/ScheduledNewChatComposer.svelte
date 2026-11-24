@@ -20,7 +20,7 @@
 	import { getAppShell, getExecutors } from '$lib/context';
 
 	interface Props {
-		modelControlsLeft?: boolean;
+		modelControlsLeft: boolean;
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
@@ -40,7 +40,7 @@
 	}
 
 	let {
-		modelControlsLeft = false,
+		modelControlsLeft,
 		startup,
 		modelCatalog,
 		remoteSettings,

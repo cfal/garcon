@@ -49,6 +49,7 @@
 </script>
 
 <ScheduledNewChatComposer
+	modelControlsLeft={false}
 	{conversationInput}
 	{startup}
 	{modelCatalog}
