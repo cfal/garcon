@@ -333,6 +333,15 @@ describe('composer Markdown source preservation', () => {
 			expect(manager.parse(output)).toEqual(paragraph(text));
 		}
 	});
+	it.each([
+		['see [[left](url) and [[plain] ok [later', 'see \\[\\[left](url) and [[plain] ok [later'],
+		['[[a]x [b](y) [c][name] [d]:m [open', '[[a]x \\[b](y) \\[c][name] \\[d]:m [open'],
+		['[x] task and [x] text', '\\[x] task and [x] text'],
+	])('escapes only link-like labels and leading task markers in edited prose: %s', (text, expected) => {
+		expect(composerMarkdownCodec.serialize({
+			type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+		})).toBe(expected);
+	});
 	it('does not turn an exclamation before a link into an image', () => {
 		const document = parseDocument('Wow[x](https://example.test)');
 		document.content![0].content![0].text = 'Wow!';

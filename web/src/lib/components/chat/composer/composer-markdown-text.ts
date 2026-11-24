@@ -14,7 +14,6 @@ const PRIVATE_USE_END = 0xf8ff;
 const ASCII_PUNCTUATION = /[!-/:-@[-`{-~]/;
 const WORD_CHARACTER = /[\p{L}\p{N}]/u;
 const AUTOLINK = /^<(?:[a-z][a-z0-9+.-]{1,31}:|[^\s<>@]+@)/i;
-const LINK_CLOSE = /^\[[^\]]*\][([:]/;
 const TASK_MARKER = /^\[[ xX]\](?:\s|$)/;
 
 /** Scans repeated mark attributes once per pass without expanding them into JSON strings. */
@@ -57,41 +56,50 @@ export interface TextContext {
 	link: boolean;
 }
 
-function staysLiteral(text: string, index: number, context: TextContext): boolean {
-	const previous = text[index - 1];
-	const next = text[index + 1];
-	const rest = text.slice(index);
-	const leading = context.lineStart && text.slice(0, index).trim() === '';
-	switch (text[index]) {
-		case '\\':
-			// A backslash escapes only ASCII punctuation; a trailing one may meet it in the next node.
-			return next !== undefined && !ASCII_PUNCTUATION.test(next);
-		case '*':
-			if (leading || previous === undefined || next === undefined) return false;
-			return /\s/.test(previous) && /\s/.test(next);
-		case '_':
-			if (previous === undefined || next === undefined) return false;
-			return (
-				(WORD_CHARACTER.test(previous) && WORD_CHARACTER.test(next)) ||
-				(/\s/.test(previous) && /\s/.test(next))
-			);
-		case '~':
-			return text.indexOf('~') === text.lastIndexOf('~');
-		case '[':
-			if (context.link || (leading && TASK_MARKER.test(rest))) return false;
-			return !LINK_CLOSE.test(rest);
-		case ']':
-			return !context.link;
-		case '&':
-			// The draft parser leaves character references as written, so none needs an escape.
-			return true;
-		case '<':
-			return !AUTOLINK.test(rest);
-		case '>':
-			return !leading;
-		default:
-			return false;
-	}
+function literalProseAt(text: string, context: TextContext): (index: number) => boolean {
+	const leading = context.lineStart ? text.search(/\S/) : -1;
+	let close = -1;
+	return (index) => {
+		const previous = text[index - 1];
+		const next = text[index + 1];
+		switch (text[index]) {
+			case '\\':
+				// A backslash escapes only ASCII punctuation; a trailing one may meet it in the next node.
+				return next !== undefined && !ASCII_PUNCTUATION.test(next);
+			case '*':
+				if (index === leading || previous === undefined || next === undefined) return false;
+				return /\s/.test(previous) && /\s/.test(next);
+			case '_':
+				if (previous === undefined || next === undefined) return false;
+				return (
+					(WORD_CHARACTER.test(previous) && WORD_CHARACTER.test(next)) ||
+					(/\s/.test(previous) && /\s/.test(next))
+				);
+			case '~':
+				return text.indexOf('~', index + 1) === -1 && text.indexOf('~') === index;
+			case '[': {
+				if (context.link || (index === leading && TASK_MARKER.test(text.slice(index)))) return false;
+				// Nested or unfinished labels share the same next `]` as protection moves forward.
+				if (index > close) {
+					close = text.indexOf(']', index + 1);
+					if (close === -1) close = text.length;
+				}
+				const after = text[close + 1];
+				return after !== '(' && after !== '[' && after !== ':';
+			}
+			case ']':
+				return !context.link;
+			case '&':
+				// The draft parser leaves character references as written, so none needs an escape.
+				return true;
+			case '<':
+				return !AUTOLINK.test(text.slice(index));
+			case '>':
+				return index !== leading;
+			default:
+				return false;
+		}
+	};
 }
 
 export interface TextProtection {
@@ -138,7 +146,7 @@ export function createTextProtection(draft: JSONContent | string): TextProtectio
 	};
 	return {
 		verbatim: (text) => protect(text, () => true),
-		prose: (text, context) => protect(text, (index) => staysLiteral(text, index, context)),
+		prose: (text, context) => protect(text, literalProseAt(text, context)),
 		restore: (markdown) =>
 			markdown.replace(sentinels, (character) => {
 				const index = character.charCodeAt(0) - base;
