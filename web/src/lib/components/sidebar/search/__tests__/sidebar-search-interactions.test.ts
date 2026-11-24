@@ -590,14 +590,12 @@ describe('sidebar search interactions', () => {
 				'[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
 			),
 		);
-		expect(items[0]?.textContent).toContain('Unread');
-		expect(items[1]?.textContent).toContain('Active');
-		expect(items[2]?.textContent).toContain('Mark all as read');
+		expect(items.slice(0, 7).map((item) => item.textContent?.trim())).toEqual([
+			'Unread', 'Active', 'Tile working chats', 'Mark all as read',
+			'Manual', 'Recent activity', 'Sidebar display',
+		]);
 		expect(screen.getByRole('menuitemradio', { name: 'Manual' })).toBeTruthy();
-		expect(items[3]?.textContent).toContain('Manual');
 		expect(screen.getByRole('menuitemradio', { name: 'Recent activity' })).toBeTruthy();
-		expect(items[4]?.textContent).toContain('Recent activity');
-		expect(items[5]?.textContent).toContain('Sidebar display');
 		expect(screen.queryByRole('menuitemradio', { name: 'Project' })).toBeNull();
 		expect(screen.queryByRole('menuitemradio', { name: 'Detailed' })).toBeNull();
 

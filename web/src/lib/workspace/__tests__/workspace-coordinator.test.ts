@@ -110,6 +110,7 @@ function createHarness(
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 		windowsFitHost?: WorkspaceWindowsFitResolver;
+		hostSize?: WorkspaceHostSize;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
 		currentProjectTarget?: ProjectTarget | null;
 		projectResolution?: ProjectResolver;
@@ -265,6 +266,7 @@ function createHarness(
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
 		windowsFitHost: options.windowsFitHost ?? (() => true),
+		getHostSize: () => options.hostSize ?? null,
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
@@ -282,6 +284,51 @@ function createHarness(
 		transientLayers,
 	};
 }
+
+describe('tiling chats', () => {
+	it('replaces the visible grid in one publication without losing chat bindings or other tabs', async () => {
+		const { coordinator, layout, files } = createHarness({ hostSize: { width: 720, height: 240 } });
+		await coordinator.showChatInWindow('retained', 'window-files');
+		await coordinator.openChatInNewWindow('idle', 'window-main');
+		const extra = coordinator.currentWindowId;
+		await coordinator.placeFileSession('edited', { type: 'window', windowId: extra });
+		await coordinator.enterWindowFullscreen(extra);
+		const revision = layout.revision;
+		expect(await coordinator.tileChats(['retained', 'new', 'omitted'])).toBe(2);
+		expect(layout.revision).toBe(revision + 1);
+		expect(coordinator.focusedChatId).toBe('retained');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(collectWindowNodes(layout.snapshot.desktopRoot).map((w) => [w.id, layout.surface(w.tabs.activeId)])).toMatchObject([
+			['window-files', { type: 'chat', chatId: 'retained' }],
+			['window-main', { type: 'chat', chatId: 'new' }],
+		]);
+		expect(windowTabs(layout.snapshot, 'window-files').order).toEqual(expect.arrayContaining([CANONICAL_FILES_SURFACE_ID, fileSurfaceId('edited')]));
+		expect(files.destroy).not.toHaveBeenCalled();
+	});
+
+	it('leaves all panes alone while a file is being closed', async () => {
+		const guard = deferred<boolean>();
+		const { coordinator, layout } = createHarness({ confirmDestructive: () => guard.promise });
+		await coordinator.placeFileSession('edited', { type: 'window', windowId: 'window-files' });
+		const closing = coordinator.closeSurface(fileSurfaceId('edited'));
+		const revision = layout.revision;
+		await expect(coordinator.tileChats(['working'])).rejects.toThrow('Try tiling again');
+		expect(layout.revision).toBe(revision);
+		guard.resolve(false);
+		expect(await closing).toBe(false);
+	});
+
+	it('does nothing for an empty list and presents only the first chat on mobile', async () => {
+		const { coordinator, layout } = createHarness();
+		const revision = layout.revision;
+		expect(await coordinator.tileChats([])).toBe(0);
+		expect(layout.revision).toBe(revision);
+		await coordinator.enterMobilePresentation();
+		expect(await coordinator.tileChats(['first', 'second'])).toBe(1);
+		expect(coordinator.focusedChatId).toBe('first');
+		expect(coordinator.windowCount).toBe(2);
+	});
+});
 
 async function populateWindowLimitFixture(coordinator: WorkspaceCoordinator): Promise<void> {
 	await coordinator.openSingletonInNewWindow('git-history');

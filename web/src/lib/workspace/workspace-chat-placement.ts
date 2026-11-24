@@ -17,9 +17,11 @@ import {
 } from './chat-surface-transfer.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
 import type {
+	WorkspaceHostSize,
 	WorkspaceWindowsFitResolver,
 	WorkspaceSplitAdmissionResolver,
 } from './window-geometry-policy.js';
+import { planChatTiles } from './workspace-chat-tiling.js';
 import { requireWorkspaceSplitAdmission } from './workspace-split-blocked-error.js';
 import {
 	balanceWindowRow,
@@ -106,6 +108,45 @@ interface WorkspaceChatPlacementPlan {
 
 export class WorkspaceChatPlacementService {
 	constructor(private readonly deps: WorkspaceChatPlacementServiceDeps) {}
+
+	async tileChats(
+		chatIds: readonly string[],
+		getHostSize: () => WorkspaceHostSize | null,
+	): Promise<number> {
+		if (!chatIds.length) return 0;
+		let tiled = 0;
+		await this.#commitPlacement((latest) => {
+			if (this.deps.isMobile()) {
+				tiled = 1;
+				return (
+					this.#existingPlacementPlan(latest, chatIds[0]) ??
+					this.#setWindowChatPlan(
+						this.deps.resolveWindowId(latest, this.deps.lastFocusedWindowId()),
+						chatIds[0],
+					)
+				);
+			}
+			if (
+				collectWindowNodes(latest.desktopRoot).some(
+					(window) =>
+						this.deps.windowReservations.has(window.id) ||
+						window.tabs.order.some((id) => this.deps.surfaceReservations.has(id)),
+				)
+			) {
+				throw new Error(m.workspace_tile_busy());
+			}
+			const rows = planChatTiles(latest, chatIds, getHostSize());
+			const tiles = rows.flat();
+			tiled = tiles.length;
+			const { windowId } =
+				tiles.find((tile) => tile.windowId === this.deps.lastFocusedWindowId()) ?? tiles[0];
+			return {
+				destination: { windowId, surfaceId: chatViewSurfaceId(windowId) },
+				mutations: [{ type: 'tile-chats', rows }],
+			};
+		});
+		return tiled;
+	}
 
 	showInCurrentWindow(
 		chatId: string,

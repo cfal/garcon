@@ -251,9 +251,7 @@
 		navigateToBareRoute: () => goto(resolve('/')),
 		requestComposerFocus: () => appShell.requestComposerFocus(),
 		requestSidebarRecenter: () => appShell.requestSidebarRecenterToSelected(),
-		reportOpenError: (error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		},
+		reportOpenError: reportWorkspaceOpenError,
 		reportDeleteError: (error) => {
 			notifications.error(
 				error instanceof Error ? error.message : m.notifications_delete_chat_failed(),
@@ -431,18 +429,18 @@
 		await port.open(selection);
 	}
 
+	function reportWorkspaceOpenError(error: unknown): void {
+		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+	}
+
 	function handleOpenChatInNewWindow(chatId: string, edge?: WorkspaceWindowEdge): void {
-		void workspace.openChatInNewWindow(chatId, undefined, edge).catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		});
+		void workspace.openChatInNewWindow(chatId, undefined, edge).catch(reportWorkspaceOpenError);
 	}
 
 	function handleOpenForkedChat(chatId: string, sourceChatId: string): void {
 		void workspace
 			.openForkedChat(chatId, sourceChatId, localSettings.forkOpenPlacement)
-			.catch((error) => {
-				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-			});
+			.catch(reportWorkspaceOpenError);
 	}
 
 	function handleNewChat() {
@@ -737,6 +735,7 @@
 		onShareChat={requestShareChat}
 		onManageTags={requestTagsChat}
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
+		onTileWorkingChats={(chatIds) => workspace.tileChats(chatIds)}
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}

@@ -22,6 +22,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
+	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import type { SidebarSortMode } from '$lib/stores/local-settings.svelte';
@@ -42,6 +43,7 @@
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
+		onTileWorkingChats?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -66,6 +68,7 @@
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
+		onTileWorkingChats,
 		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
@@ -158,6 +161,10 @@
 				{#if showQuickSearchSeparator}
 					<DropdownMenuSeparator />
 				{/if}
+				<DropdownMenuItem onclick={onTileWorkingChats} disabled={!onTileWorkingChats || isLoading}>
+					<PanelsTopLeft class="h-3.5 w-3.5" />
+					{m.sidebar_chats_tile_working()}
+				</DropdownMenuItem>
 				<DropdownMenuItem onclick={onMarkAllRead} disabled={!showMarkAllRead || isLoading}>
 					<SquareCheck class="h-3.5 w-3.5" />
 					{m.sidebar_chats_mark_all_read()}

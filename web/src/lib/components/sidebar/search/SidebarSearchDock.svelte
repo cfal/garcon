@@ -18,6 +18,7 @@
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
+		onTileWorkingChats?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -45,6 +46,7 @@
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
+		onTileWorkingChats,
 		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
@@ -78,6 +80,7 @@
 		{onOpenSearchDialog}
 		{onCreateChat}
 		{onMarkAllRead}
+		{onTileWorkingChats}
 		{onSetSortMode}
 		{onToggleChatListAutohide}
 		{onSetDockOnRight}
