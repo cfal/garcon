@@ -43,7 +43,7 @@ export interface ChatExecutionCoordinatorOptions {
   workingDirectorySettlement?: WorkingDirectorySettlementPort;
   projectAdmission: ProjectAdmissionPort;
   attachmentAdmission: QueuedAttachmentAdmissionPort;
-  canDispatch?: (chatId: string) => boolean;
+  canDispatch: (chatId: string) => boolean;
   isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
   appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
@@ -325,6 +325,8 @@ export type ProjectUnavailableCallback = (
   error: import('../../common/domain-error.ts').ProjectUnavailableError,
 ) => void;
 export type ProcessingInvalidatedCallback = (chatId: string) => void;
+export type InputAcceptedCallback = (chatId: string, runId?: string) => void;
+export type TurnStartedCallback = (chatId: string, runId: string) => void;
 export type TurnFailedCallback = (
   chatId: string,
   errorMessage: string,
@@ -342,6 +344,8 @@ export interface ChatExecutionCoordinatorEvents {
   'turn-failed': Parameters<TurnFailedCallback>;
   'turn-settled': Parameters<TurnSettledCallback>;
   'processing-invalidated': Parameters<ProcessingInvalidatedCallback>;
+  'input-accepted': Parameters<InputAcceptedCallback>;
+  'turn-started': Parameters<TurnStartedCallback>;
 }
 
 export type DrainSuppressionReason = 'abort' | 'manual-stop' | 'deletion';

@@ -25,7 +25,8 @@ const board: ChatBoard = {
 function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: `/workspace/${id}`,
 		orderGroup: 'normal',
 		title: id,
@@ -41,6 +42,7 @@ function chat(id: string, overrides: Partial<ChatSessionRecord> = {}): ChatSessi
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'running',

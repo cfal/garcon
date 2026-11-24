@@ -8,6 +8,7 @@ import { chooseSimulator, validateSimulatorMetadata } from '../scripts/ios-app.j
 import { instrumentGradle, prepareAndroidTests } from '../scripts/prepare-android-tests.js';
 
 const root = resolve(import.meta.dir, '..');
+const workflow = Bun.YAML.parse(await readFile(resolve(root, '../.github/workflows/native-app.yml'), 'utf8'));
 
 async function temporary(run) {
   const parent = process.env.TMPDIR ?? resolve(homedir(), 'tmp');
@@ -141,8 +142,28 @@ test('simulator gate selects a supported iPhone type without using any existing 
   expect(() => chooseSimulator({ ...catalog, devicetypes: [] })).toThrow('No compatible');
 });
 
-test('mobile safety and artifact gates precede uploads without signing secrets', async () => {
-  const workflow = Bun.YAML.parse(await readFile(resolve(root, '../.github/workflows/native-app.yml'), 'utf8'));
+test.skipIf(process.platform !== 'linux')('Android CI installs the Gradle mirror before building the APK', async () => {
+  const { defaults, steps } = workflow.jobs.android;
+  const script = 'scripts/android-ci.init.gradle';
+  const install = steps.findIndex(step => step.run?.includes(script));
+  expect(install).toBeGreaterThanOrEqual(0);
+  expect(install).toBeLessThan(steps.findIndex(step => step.run?.includes('tauri android build')));
+
+  const cwd = resolve(root, '..', defaults.run['working-directory']);
+  const expected = await readFile(resolve(root, script), 'utf8');
+  await temporary(async home => {
+    for (const gradleUserHome of [undefined, resolve(home, 'custom')]) {
+      const result = Bun.spawnSync(['bash', '-ec', steps[install].run], {
+        cwd, env: { PATH: process.env.PATH, HOME: home, GRADLE_USER_HOME: gradleUserHome },
+      });
+      expect(result.exitCode, result.stderr.toString()).toBe(0);
+      const installed = resolve(gradleUserHome ?? resolve(home, '.gradle'), 'init.d/garcon-android.gradle');
+      expect(await readFile(installed, 'utf8')).toBe(expected);
+    }
+  });
+});
+
+test('mobile safety and artifact gates precede uploads without signing secrets', () => {
   for (const job of Object.values(workflow.jobs)) {
     const steps = job.steps;
     const upload = steps.findIndex(step => step.uses === 'actions/upload-artifact@v4');

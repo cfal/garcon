@@ -13,6 +13,7 @@ import {
   stopJsonEnvelope,
 } from '../automation-output.js';
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import { chat } from './chat-research-fixtures.js';
 
 const CHAT_ID = '1785337200123456';
 const PARENT_ID = '1785337200123455';
@@ -24,7 +25,8 @@ const receipt = {
   turnId: 'turn-1',
   status: 'accepted' as const,
   acceptedAt: '2026-09-08T00:00:00.000Z',
-  parentChat: { chatId: PARENT_ID, relation: 'delegation' as const },
+  parentChatId: PARENT_ID,
+  lineage: null,
 };
 const terminalReceipt: AgentTurnReceipt = {
   state: 'completed',
@@ -38,6 +40,37 @@ const terminalReceipt: AgentTurnReceipt = {
 };
 
 describe('automation JSON output', () => {
+  test('falls back to nested relationships only when the top-level field is undefined', () => {
+    const nested = chat({
+      parentChatId: PARENT_ID,
+      lineage: { sourceChatId: PARENT_ID, kind: 'fork', transcriptViewId: 'source-view', ordinal: 1 },
+    });
+    const accepted: StartChatCommandResponse = {
+      ...receipt,
+      commandType: 'chat-start',
+      chat: nested,
+      parentChatId: undefined,
+      lineage: undefined,
+    };
+    const titleUpdate = { status: 'not-requested' as const };
+    expect(startAsyncJsonEnvelope(context, { accepted, titleUpdate })).toMatchObject({
+      parentChatId: PARENT_ID,
+      lineage: nested.lineage,
+    });
+    expect(startAsyncJsonEnvelope(context, {
+      accepted: { ...accepted, parentChatId: null, lineage: null },
+      titleUpdate,
+    })).toMatchObject({ parentChatId: null, lineage: null });
+    expect(startAsyncJsonEnvelope(context, {
+      accepted: { ...accepted, parentChatId: '1785337200123457', lineage: null },
+      titleUpdate,
+    })).toMatchObject({ parentChatId: '1785337200123457', lineage: null });
+    expect(startAsyncJsonEnvelope(context, {
+      accepted: { ...accepted, chat: null },
+      titleUpdate,
+    })).toMatchObject({ parentChatId: null, lineage: null });
+  });
+
   test('projects a stable start-async envelope including accepted work and title failure', () => {
     const accepted: StartChatCommandResponse = {
       ...receipt,
@@ -48,7 +81,7 @@ describe('automation JSON output', () => {
       accepted,
       titleUpdate: { status: 'failed', error: new Error('title unavailable') },
     })).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'start-async',
       workspace: 'default',
       serverInstanceId: 'instance-1',
@@ -60,7 +93,8 @@ describe('automation JSON output', () => {
         status: 'accepted',
         acceptedAt: '2026-09-08T00:00:00.000Z',
       },
-      parentChat: { chatId: PARENT_ID, relation: 'delegation' },
+      parentChatId: PARENT_ID,
+      lineage: null,
       titleUpdate: {
         status: 'failed',
         error: { phase: 'submission', errorCode: null, message: 'title unavailable' },
@@ -74,10 +108,11 @@ describe('automation JSON output', () => {
       delivery: 'new-turn',
       response: resumed,
     })).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'resume-async',
       receipt: { chatId: CHAT_ID, turnId: 'turn-1', status: 'accepted' },
-      parentChat: { chatId: PARENT_ID, relation: 'delegation' },
+      parentChatId: PARENT_ID,
+      lineage: null,
       delivery: 'new-turn',
     });
 
@@ -88,7 +123,7 @@ describe('automation JSON output', () => {
       control: emptyChatExecutionControlState('instance-1'),
     };
     expect(stopJsonEnvelope(context, { response: stopped })).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'stop',
       receipt: {
         commandType: 'agent-stop',

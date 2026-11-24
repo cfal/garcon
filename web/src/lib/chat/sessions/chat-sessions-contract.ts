@@ -1,9 +1,9 @@
+import type { ChatSettingsMutations } from './chat-settings-mutations.js';
 import type {
 	applyChatTagDelta,
 	deleteChat,
 	generateChatTitle,
 	recoverChatTags,
-	reorderChat,
 	replaceChatTags,
 	setLastSelectedChat,
 	transitionChatTags,
@@ -12,7 +12,6 @@ import type {
 import type { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
-import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
 import type {
 	ChatProcessingEntry,
 	ChatProcessingPhase,
@@ -28,11 +27,11 @@ import type {
 
 export interface ChatSessionsStoreDeps {
 	listChats?: typeof import('$lib/api/chats.js').listChats;
+	onChatDeleted?: (chatId: string) => void;
 	deleteChat?: typeof deleteChat;
 	setLastSelectedChat?: typeof setLastSelectedChat;
 	generateChatTitle?: typeof generateChatTitle;
 	updateSessionName?: typeof updateSessionName;
-	reorderChat?: typeof reorderChat;
 	replaceChatTags?: typeof replaceChatTags;
 	applyChatTagDelta?: typeof applyChatTagDelta;
 	transitionChatTags?: typeof transitionChatTags;
@@ -66,6 +65,7 @@ export function isChatTagRefreshRequired(
 }
 
 export interface ChatSessionsPort {
+	readonly settingsMutations: Pick<ChatSettingsMutations, 'change' | 'pendingFor'>;
 	byId: Record<string, ChatSessionRecord>;
 	order: string[];
 	readonly chatListStatus: ChatListLoadStatus;
@@ -76,10 +76,6 @@ export interface ChatSessionsPort {
 	setSelectedChatId(chatId: string | null): void;
 	quietRefreshChats(): Promise<void>;
 	renameChat(chatId: string, newTitle: string): Promise<boolean>;
-	moveChatToBoundary(
-		chatId: string,
-		boundary: ChatOrderBoundary,
-	): Promise<ReorderChatResponse | null>;
 	readonly orderedChats: ChatSessionRecord[];
 	readonly pendingTagMutationChatIds: ReadonlySet<string>;
 	readonly tagRecoveryRequiredChatIds: ReadonlySet<string>;
@@ -97,6 +93,7 @@ export interface ChatSessionsPort {
 	applyStartEntry(entry: ChatListEntry): void;
 	upsertServerChat(entry: ChatListEntry): void;
 	removeChat(chatId: string): void;
+	applyServerDeletion(chatId: string): void;
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
 	patchActivity(chatId: string, timestamp: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;

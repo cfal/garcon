@@ -10,7 +10,8 @@ function occurrence(overrides: Partial<ChatSessionRecord> = {}): ChatBoardOccurr
 		columnId: 'column',
 		chat: {
 			id: 'chat-1',
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			projectPath: '/workspace/project',
 			orderGroup: 'normal',
 			title: 'Polish onboarding',
@@ -26,6 +27,7 @@ function occurrence(overrides: Partial<ChatSessionRecord> = {}): ChatBoardOccurr
 			isArchived: false,
 			isProcessing: true,
 			processingPhase: 'running',
+			activityStatus: null,
 			canReloadFromNativeHistory: false,
 			isUnread: true,
 			status: 'running',

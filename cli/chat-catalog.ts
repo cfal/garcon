@@ -15,7 +15,7 @@ export interface CliChatSummary {
   readonly chatId: string;
   readonly executorId: string;
   readonly parentChatId: string | null;
-  readonly parentRelation: 'fork' | 'handoff' | 'delegation' | null;
+  readonly lineage: ChatListEntry['lineage'];
   readonly title: string;
   readonly projectPath: string;
   readonly agentId: string;
@@ -84,8 +84,8 @@ export function projectCliChat(chat: ChatListEntry): CliChatSummary {
   return {
     chatId: chat.id,
     executorId: effectiveExecutorId(chat.executorId),
-    parentChatId: chat.parentChat?.chatId ?? null,
-    parentRelation: chat.parentChat?.relation ?? null,
+    parentChatId: chat.parentChatId,
+    lineage: chat.lineage,
     title: chat.title,
     projectPath: chat.projectPath,
     agentId: chat.agentId,

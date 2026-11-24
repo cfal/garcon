@@ -151,7 +151,10 @@ test('confirmed Shell clear works on desktop and mobile while AI clear is reject
       await browserExpect(dialog).toHaveCount(0);
       await browserExpect(editor).toHaveValue(loseAcknowledgement ? '/clear ' : '');
       await browserExpect(feed).not.toContainText('synthetic-old-history');
-      if (loseAcknowledgement) await browserExpect(page.getByText('Clear could not be confirmed.', { exact: false })).toBeVisible();
+      if (loseAcknowledgement) {
+        await browserExpect(page.getByRole('region', { name: 'Chat messages', exact: true })
+          .getByText('Clear could not be confirmed.', { exact: false })).toBeVisible();
+      }
       expect(clearPosts).toBe(previousPosts + 1);
       expect((await client.getMessages(chatId)).messages).toEqual([]);
       if (dropReplacement) await browserExpect.poll(() => droppedReplacements).toBeGreaterThan(0);

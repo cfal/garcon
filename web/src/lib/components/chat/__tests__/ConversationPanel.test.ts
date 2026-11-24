@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -99,7 +100,8 @@ import ConversationPanel from '../ConversationPanel.svelte';
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/project',
 		orderGroup: 'normal',
 		title: 'Chat',
@@ -116,6 +118,7 @@ function chat(): ChatSessionRecord {
 		isProcessing: runtime.processing,
 		processingPhase: runtime.processing ? 'running' : null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: runtime.processing ? 'running' : 'draft',
 		agentOwnershipEpoch: null,
@@ -627,7 +630,7 @@ describe('ConversationPanel', () => {
 	it('leaves remount scroll restoration to the panel registry', async () => {
 		runtime.autoScrollToBottom = true;
 		const { panel } = makePanel();
-		panel.transcript.replaceGeneration(
+		seedTranscript(panel.transcript,
 			'chat-1',
 			'view-1',
 			[

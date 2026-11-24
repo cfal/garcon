@@ -86,7 +86,10 @@ export class RemoteGitServices {
     } catch (error) {
       if (mutation && (error instanceof AgentCallError && error.outcome === 'unknown'
         || error instanceof GitServiceError && error.code === 'GIT_INVALID_RESULT')) {
-        throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation could not be confirmed. Inspect the repository before trying again.');
+        const message = method === 'push'
+          ? 'Push could not be confirmed. Inspect the remote before pushing again.'
+          : 'Git mutation could not be confirmed. Inspect the repository before trying again.';
+        throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', message);
       }
       throw error;
     }

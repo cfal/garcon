@@ -109,6 +109,29 @@ describe('HiddenBashCommandsSettingsCard', () => {
 		expect(updateRemoteSettings).not.toHaveBeenCalled();
 	});
 
+	it('closes the preset menu before a pending save completes and reopens afterward', async () => {
+		const store = renderCard();
+		const pending = Promise.withResolvers<UpdateRemoteSettingsResponse>();
+		vi.mocked(updateRemoteSettings).mockReturnValueOnce(pending.promise);
+		try {
+			await selectGarconAmpPreset();
+			await waitFor(() => expect(updateRemoteSettings).toHaveBeenCalledTimes(1));
+			await waitFor(() => expect(screen.queryByRole('menuitem')).toBeNull());
+			expect((screen.getByRole('button', { name: 'Add preset' }) as HTMLButtonElement).disabled).toBe(true);
+		} finally {
+			pending.resolve({
+				success: true,
+				settings: makeRemoteSettingsSnapshot({
+					version: (store.snapshot?.version ?? 1) + 1,
+					ui: { hiddenBashCommandPatterns: [...HIDDEN_BASH_COMMAND_PATTERN_PRESETS[0].patterns] },
+				}),
+			});
+		}
+		await waitFor(() => expect((screen.getByRole('button', { name: 'Add preset' }) as HTMLButtonElement).disabled).toBe(false));
+		await selectGarconAmpPreset();
+		expect(updateRemoteSettings).toHaveBeenCalledTimes(1);
+	});
+
 	it('rejects invalid patterns without sending a request', async () => {
 		renderCard();
 

@@ -25,6 +25,7 @@ import type { ReadReceiptOutboxStore } from '$lib/chat/sessions/read-receipt-out
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte';
 import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
+import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte.js';
 import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte.js';
 import type { AppTitleStore } from '$lib/stores/app-title';
 import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
@@ -75,6 +76,8 @@ export const [getExecutors, setExecutors, hasExecutors] = createContext<Executor
 export const [getApiProviders, setApiProviders] = createContext<ApiProvidersStore>();
 export const [getNotifications, setNotifications] = createContext<NotificationsStore>();
 export const [getSidebarSearch, setSidebarSearch] = createContext<SidebarSearchStore>();
+export const [getSidebarOrder, setSidebarOrder] =
+	createContext<Pick<SidebarOrderController, 'moveChatToBoundary'>>();
 export const [getGhCapability, setGhCapability] = createContext<GhCapabilityContext>();
 export const [getSidebarProjectCollapse, setSidebarProjectCollapse] =
 	createContext<SidebarProjectCollapseStore>();
@@ -137,6 +140,7 @@ export interface WorkspaceChatActions {
 	requestDetails: (chat: ChatSessionRecord) => void;
 	requestShare: (chat: ChatSessionRecord) => void;
 	requestProjectPath: (chat: ChatSessionRecord) => void;
+	requestParent: (chat: ChatSessionRecord) => void;
 	configurePreambles: (chat: ChatSessionRecord, transcriptViewId: string) => void;
 	fork: (chat: ChatSessionRecord) => void;
 	reload: (chat: ChatSessionRecord) => void;

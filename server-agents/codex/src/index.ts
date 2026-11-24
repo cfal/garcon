@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 import { CODEX_MODELS } from '@garcon/common/models';
+import { CODEX_SPEED_SETTING, codexSpeed } from './agents/codex/service-tier.js';
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
@@ -37,6 +38,7 @@ import {
   createCodexAuthStatusResolver,
   resolveCodexExecAuthStatus,
 } from './agents/codex/codex-auth.js';
+import { createCodexCliUpdates } from './agents/codex/cli-updates.js';
 import { CodexExecution } from './agents/codex/execution.js';
 import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
 import {
@@ -44,7 +46,7 @@ import {
   isCodexThreadNotFound,
 } from './agents/codex/codex-forking.js';
 import { createCodexForkTargetPath } from './agents/codex/fork-target-path.js';
-import { inspectCodexHistoryProfile } from './agents/codex/history-profile.js';
+import { inspectCodexHistoryProfile, inspectCodexSessionModelProvider } from './agents/codex/history-profile.js';
 import { createCodexNativeEvidence } from './agents/codex/transcript.js';
 import {
   buildCodexAppServerEndpointRuntime,
@@ -52,6 +54,7 @@ import {
   buildCodexHostProviderConfig,
 } from './agents/codex/app-server/endpoint-runtime.js';
 import { CodexAppServerClient } from './agents/codex/app-server/client.js';
+import { CODEX_CLI_NOT_FOUND, resolveCodexCli } from './agents/codex/app-server/cli.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
@@ -68,6 +71,7 @@ const CODEX_DESCRIPTOR = {
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: ['openai-compatible'],
   configuration: [
+    { key: 'GARCON_CODEX_CLI', source: 'environment', description: 'Codex CLI executable.' },
     { key: 'OPENAI_API_KEY', source: 'environment', description: 'OpenAI API key.' },
     { key: 'CODEX_API_KEY', source: 'environment', description: 'Codex exec API key.' },
     { key: 'OPENAI_BASE_URL', source: 'environment', description: 'OpenAI API base URL.' },
@@ -93,13 +97,14 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
   // Codex publishes completed items before stamping their persisted native records.
-  // https://github.com/openai/codex/blob/cb41599ccbe371272892f156286a236aa097bada/codex-rs/core/src/stream_events_utils.rs#L397-L408
-  // https://github.com/openai/codex/blob/cb41599ccbe371272892f156286a236aa097bada/codex-rs/rollout/src/recorder.rs#L2136-L2154
+  // https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/codex-rs/core/src/stream_events_utils.rs#L449-L465
+  // https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/codex-rs/rollout/src/recorder.rs#L2109-L2125
   readonly nativeActivity = null;
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates = null;
   readonly usageHistory: NonNullable<AgentIntegration['usageHistory']>;
+  readonly cliUpdates: NonNullable<AgentIntegration['cliUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -134,7 +139,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       skillDiscovery,
     });
     const login = new CliLoginController({
-      command: () => ['codex', 'login', '--device-auth'],
+      command: () => [resolveCodexCli().command, 'login', '--device-auth'],
       mode: 'device-code',
       logger,
       cwd: os.homedir(),
@@ -145,8 +150,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.settings = createVersionedSettings({
       ownerId: 'codex',
       schemaVersion: 1,
-      defaults: {},
-      descriptors: [],
+      defaults: { speed: 'standard' },
+      descriptors: [CODEX_SPEED_SETTING],
     });
     const execution = new CodexExecution(
       host,
@@ -174,6 +179,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       format: codexUsageFormat,
       roots: () => [path.join(config.home(), 'sessions'), path.join(config.home(), 'archived_sessions')],
     });
+    this.cliUpdates = createCodexCliUpdates({ config, logger });
     // Codex compacts natively through its app-server; the execution object owns
     // the call, the facet advertises that it exists.
     this.compaction = {
@@ -200,6 +206,16 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
+        if (!Bun.which(resolveCodexCli().command)) {
+          authStatus.invalidate();
+          return {
+            authenticated: false,
+            canReauth: false,
+            label: 'Codex',
+            source: 'none',
+            detail: CODEX_CLI_NOT_FOUND,
+          };
+        }
         const status = await authStatus.refresh(signal);
         return {
           authenticated: status.authenticated,
@@ -297,6 +313,9 @@ export default class CodexAgentIntegration implements AgentIntegration {
     };
     this.singleQuery = {
       async run(request) {
+        if (codexSpeed(request.settings) !== 'standard') {
+          throw new AgentIntegrationError('INVALID_SETTINGS', 'Codex background generation supports Standard speed only.', false);
+        }
         const runtimeOptions = singleQueryRuntimeOptions(request);
         try {
           return await withSingleQueryControl(runtimeOptions, async (signal) => {
@@ -361,12 +380,23 @@ async function forkCodexNativeSession(
     );
   }
   if (source.path && !await codexRolloutHasContent(source.path)) return null;
+  // Native forks use new-thread configuration rather than inheriting the saved provider.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server/src/request_processors/thread_processor.rs#L5663-L5673
+  const modelProvider = !endpointRuntime && source.path
+    ? await inspectCodexSessionModelProvider({
+      nativePath: source.path,
+      expectedThreadId: request.source.agentSessionId ?? source.agentSessionId,
+      signal: request.signal,
+    })
+    : null;
+  request.signal.throwIfAborted();
   let result;
   try {
     result = await runtime.forkSession({
+      speed: codexSpeed(request.settings),
       sourceSession: {
         projectPath: request.source.projectPath,
-        model: request.source.model,
+        model: request.model,
         agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
         nativePath: source.path,
       },
@@ -374,6 +404,7 @@ async function forkCodexNativeSession(
       codexConfig: endpointRuntime?.codexConfig
         ?? buildCodexHostProviderConfig(await resolveAuthStatus(request.signal)),
       lastTurnId: lastTurnId ?? null,
+      modelProvider,
     });
   } catch (error) {
     // A never-persisted thread cannot fork natively; the JSONL path resolves it

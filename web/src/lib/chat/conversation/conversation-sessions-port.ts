@@ -16,10 +16,10 @@ export type ConversationSessionsPort = Pick<
 	| 'upsertServerChat'
 	| 'reconcileAcceptedHandoffProjection'
 	| 'quietRefreshChats'
+	| 'settingsMutations'
 	| 'observeCommandTagMutation'
 	| 'setSelectedChatId'
 	| 'renameChat'
-	| 'moveChatToBoundary'
 	| 'tagReconciliationKind'
 	| 'applyChatTagDelta'
 >;

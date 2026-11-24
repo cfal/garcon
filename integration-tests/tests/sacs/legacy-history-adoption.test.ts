@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { ANTIGRAVITY_BINARY } from '../../support/scripted-antigravity.js';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatMessage } from '../../../common/chat-types.js';
@@ -66,11 +67,13 @@ test('[TLV5-ADOPT.07-SACS-CAPABILITY-01] disables Direct legacy migration and re
     'native-history-import',
     'native-sessions',
   ]));
+  // A non-Direct provider adopts legacy history from the native history it
+  // reads; one without readable native history, such as Antigravity, has neither.
   expect(sacsScriptedDriverFactories
     .filter((driver) => !DIRECT_DRIVER_IDS.includes(
       driver.id as typeof DIRECT_DRIVER_IDS[number],
     ))
-    .every((driver) => driver.legacyHistoryImport !== null))
+    .every((driver) => (driver.legacyHistoryImport !== null) === (driver.nativeHistoryImport !== null)))
     .toBe(true);
   expect(sacsScriptedDriverFactories
     .filter((driver) => Boolean(driver.legacyHistoryImport?.directoryScoped))
@@ -90,6 +93,7 @@ test('[TLV5-ADOPT.08-SACS-CAPABILITY-01] registers native import independently f
     ['direct-anthropic-compatible', true],
     ...(process.platform === 'linux' ? [['opencode', true]] : []),
     ['pi', true],
+    ...(ANTIGRAVITY_BINARY ? [['antigravity', false]] : []),
   ]);
 });
 
@@ -596,8 +600,10 @@ for (const driverFactory of sacsScriptedDriverFactories) {
   });
 }
 
+// Direct providers own their history natively, with nothing to adopt; a
+// provider with neither facet has no history to reload at all.
 for (const driverFactory of sacsScriptedDriverFactories.filter((candidate) => (
-  candidate.legacyHistoryImport === null
+  candidate.legacyHistoryImport === null && candidate.nativeHistoryImport !== null
 ))) {
   describe(`SACS Direct native history: ${driverFactory.label}`, () => {
     let driver: SacsDriverEnvironment | undefined;

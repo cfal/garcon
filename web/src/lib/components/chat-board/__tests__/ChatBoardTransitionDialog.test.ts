@@ -31,7 +31,8 @@ const board: ChatBoard = {
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace',
 		orderGroup: 'normal',
 		title: 'Refine authentication',
@@ -47,6 +48,7 @@ function chat(): ChatSessionRecord {
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'running',

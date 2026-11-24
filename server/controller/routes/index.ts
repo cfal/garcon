@@ -36,6 +36,8 @@ import type { TicketSourceReader } from '../chats/chat-message-reader.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import type { PullRequestReviewsRuntime } from '../pull-request-reviews/setup.js';
 import { createChatTagRoutes } from './chat-tags.js';
+import { createChatParentRoutes } from './chat-parent.js';
+import type { ChatParentMutationService } from '../chats/chat-parent-mutation-service.js';
 import type { ServerRuntimeState } from '../../common/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { composeRoutes } from '../lib/compose-routes.js';
@@ -77,6 +79,8 @@ import { PreambleProjectPathService } from '../preambles/project-path-service.js
 import { createExecutorRoutes } from './executors.js';
 import { createUsageRoutes } from './usage.js';
 import { UsageService } from '../usage/usage-service.js';
+import { createAgentCliUpdateRoutes } from './agent-cli-updates.js';
+import { AgentCliUpdateService } from '../cli-updates/cli-update-service.js';
 import { getHttpIdleTimeoutSeconds } from '../config.js';
 import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS } from '../../../common/git-execution.js';
 import { USAGE_READ_TIMEOUT_MS } from '../../../common/usage.js';
@@ -110,6 +114,7 @@ export default function createAllRoutes(workspaceDir: string, {
   tickets,
   resolveTicketProject,
   chatTags,
+  chatParents,
   chatMutationLock,
   terminals,
   searchIndex,
@@ -153,6 +158,7 @@ export default function createAllRoutes(workspaceDir: string, {
   tickets: TicketRuntime;
   resolveTicketProject: Parameters<typeof createTicketRoutes>[1];
   chatTags: ChatTagMutationService;
+  chatParents: ChatParentMutationService;
   chatMutationLock: Pick<KeyedPromiseLock, 'runExclusive'>;
   terminals: TerminalController;
   searchIndex: TranscriptSearchController;
@@ -170,12 +176,14 @@ export default function createAllRoutes(workspaceDir: string, {
 }): RouteMap {
   const canvases = new CanvasStore(workspaceDir);
   const inspectProject = executors.inspectProject;
+  const readyInstanceId = (id: string) => executors.readyInstanceId(id);
   const httpIdleSeconds = getHttpIdleTimeoutSeconds();
   const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
   const usageBudget = httpIdleSeconds > 0 ? Math.min(USAGE_READ_TIMEOUT_MS, gitBudget) : USAGE_READ_TIMEOUT_MS;
   return composeRoutes(
     createExecutorRoutes(executors),
     createUsageRoutes(new UsageService(executors), usageBudget),
+    createAgentCliUpdateRoutes(new AgentCliUpdateService(executors)),
     createRuntimeRoutes(runtimeState, workspaceName),
     createAgentTurnReceiptRoutes(commandLedger),
     createChatSnapshotRoutes({
@@ -198,7 +206,7 @@ export default function createAllRoutes(workspaceDir: string, {
     createProjectResolutionRoutes({ registry, inspect: inspectProject }),
     createStaticRoutes(settings),
     authRoutes,
-    createAgentRoutes({ agents, apiProviders }),
+    createAgentRoutes({ agents, apiProviders, responseCache: modelCatalogResponseCache, readyInstanceId }),
     createApiProviderRoutes(apiProviders, modelCatalogResponseCache),
     createChatRoutes({
       registry,
@@ -218,6 +226,7 @@ export default function createAllRoutes(workspaceDir: string, {
       projects: (executorId) => executors.projectService(executorId),
     }),
     createChatTagRoutes(chatTags),
+    createChatParentRoutes(chatParents),
     createChatBoardRoutes(chatBoards),
     createTicketRoutes(tickets, resolveTicketProject),
     createChatTicketSourceRoutes(registry, ticketSources),
@@ -239,6 +248,7 @@ export default function createAllRoutes(workspaceDir: string, {
     createModelsRoutes({
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
+      instanceId: id => executors.instanceId(id),
     }),
     createScheduledPromptRoutes(scheduledPrompts),
     createPullRequestReviewRoutes(pullRequestReviews),

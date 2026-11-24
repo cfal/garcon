@@ -2,7 +2,6 @@ import { constants } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
   AgentRunCommandRequest,
@@ -14,14 +13,12 @@ import {
   type IntegrationDirectories,
 } from './integration-fixture.js';
 import { withTimeout } from './deferred.js';
+import { CODEX_BINARY } from './pinned-agent-binaries.js';
 
 const SCRIPTED_CODEX_MODEL = 'integration-codex-model';
 export const LIVE_CODEX_THINKING_MODE = 'low';
 export type CodexTestToolMode = 'direct' | 'code_mode' | 'code_mode_only';
 
-const CODEX_BINARY = fileURLToPath(
-  new URL('../node_modules/.bin/codex', import.meta.url),
-);
 const CODEX_AGENT_SETTINGS: AgentSettingsEnvelope = {
   ownerId: 'codex',
   schemaVersion: 1,

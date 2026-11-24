@@ -57,7 +57,9 @@ test.each(['executor-connects', 'controller-connects'] as const)(
     const rpc = await connected.promise;
     await waitReady(manager, configured.id);
     manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null, routes: {}, isShuttingDown: () => false }));
-    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    // Native await avoids a Bun promise-matcher failure during WebSocket delivery.
+    expect(await Promise.allSettled([rpc.call('', 'controllerCli.describe', null)]))
+      .toMatchObject([{ status: 'rejected', reason: { code: 'CLI_ACCESS_DENIED' } }]);
     const id = configured.id;
     await expect(withFailingDirectorySync(root, () => manager.update(id, { allowControllerCli: true, allowExecutorManagement: true })))
       .rejects.toMatchObject({ renamed: true });
@@ -153,9 +155,11 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   const connection = await connected.promise;
   const rpc = connection.primary;
   await waitReady(manager, config.id);
-  await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+  expect(await Promise.allSettled([rpc.call('', 'controllerCli.describe', null)]))
+    .toMatchObject([{ status: 'rejected', reason: { code: 'CLI_ACCESS_DENIED' } }]);
   await manager.update(config.id, { allowControllerCli: true });
-  await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
+  expect(await Promise.allSettled([rpc.call('', 'controllerCli.describe', null)]))
+    .toMatchObject([{ status: 'rejected', reason: { code: 'CLI_CONTROLLER_UNAVAILABLE' } }]);
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   let calls = 0;
@@ -167,7 +171,8 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   try {
     const bulk = await connection.bulk.wait();
     expect(await rpc.call('', 'controllerCli.describe', null)).toMatchObject({ defaultExecutorId: config.id });
-    await expect(bulk.call('forged-provider', 'controllerCli.request', request)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    expect(await Promise.allSettled([bulk.call('forged-provider', 'controllerCli.request', request)]))
+      .toMatchObject([{ status: 'rejected', reason: { code: 'CLI_ACCESS_DENIED' } }]);
     const pending = bulk.call('', 'controllerCli.request', request);
     const result = Promise.allSettled([pending]);
     await entered.promise;
@@ -179,7 +184,8 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
     expect(calls).toBe(1);
     expect(link.current).toBe(rpc.transport);
     manager.quiesce();
-    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_CONTROLLER_UNAVAILABLE' });
+    expect(await Promise.allSettled([rpc.call('', 'controllerCli.describe', null)]))
+      .toMatchObject([{ status: 'rejected', reason: { code: 'CLI_CONTROLLER_UNAVAILABLE' } }]);
   } finally { release.resolve(); }
 });
 
@@ -219,7 +225,9 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
       operation: operation === 'mutation' ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats',
       query: [], body: operation === 'mutation' ? {} : null,
     } });
-  await expect(pending).rejects.toMatchObject({ code: operation === 'mutation' ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' });
+  expect(await Promise.allSettled([pending])).toMatchObject([{
+    status: 'rejected', reason: { code: operation === 'mutation' ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_CONTROLLER_UNAVAILABLE' },
+  }]);
 });
 
 function sharedListener(manager: ExecutorManager, limits?: NoiseServerOptions) {
@@ -358,6 +366,11 @@ test('a reconnecting executor holds calls instead of reporting itself unavailabl
   link.dial(url(config.id));
   await waitReady(manager, config.id);
   const executor = manager.requireExecutor(config.id);
+  const transitions: string[] = [];
+  const offSnapshots = manager.onChanged(() => {
+    const availability = manager.list().find(item => item.id === config.id)?.availability;
+    if (availability && transitions.at(-1) !== availability) transitions.push(availability);
+  });
   const reconnecting = new Promise<void>((resolve) => {
     const off = manager.onAvailabilityChanged((executorId, value) => {
       if (executorId === config.id && value === 'reconnecting') { off(); resolve(); }
@@ -371,6 +384,9 @@ test('a reconnecting executor holds calls instead of reporting itself unavailabl
   expect(manager.integrationsFor(config.id).get('test')).not.toBeNull();
   expect((await manager.inspectProject(root, config.id)).kind).toBe('available');
   expect(manager.isReady(config.id)).toBe(true);
+  offSnapshots();
+  expect(transitions.filter(value => value !== 'ready')).toEqual(['reconnecting']);
+  expect(transitions.at(-1)).toBe('ready');
 });
 
 test('two inbound workers share one listener and keep distinct integration/resource scopes', async () => {

@@ -4,13 +4,14 @@
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import SidebarChatList from '../SidebarChatList.svelte';
-	import { buildSidebarChatListProjection } from '../sidebar-row-model';
+	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+	import { chatOrderGroupFor } from '$shared/chat-filter-query';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
-	} from '../sidebar-display-options';
+	} from '../../../sidebar/display/sidebar-display-options';
 	import type {
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
@@ -59,7 +60,8 @@
 	let viewportRef = $state<HTMLElement | null>(null);
 	let displayOptions = $derived({
 		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
-		grouping: 'none' as const,
+		groupingFields: [],
+		nestDelegatedChats: false,
 		sortMode: 'manual' as const,
 		...displayOptionsInput,
 	});
@@ -101,20 +103,45 @@
 	} as never);
 
 	setWorkspaceWindowDndTestContext();
-	const projection = $derived(
-		buildSidebarChatListProjection({
-			displayedChats: searchFilter.trim() ? filteredChats : chats,
-			optimisticArchiveOrder: chats,
-			grouping: displayOptions.grouping,
-			currentTime: new Date('2025-01-01T03:00:00.000Z'),
-			inactivityDuration: displayOptions.inactivityDuration,
-			sortMode: displayOptions.sortMode,
-			pinnedInsertPosition: displayOptions.pinnedInsertPosition,
-			groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
-			collapsedProjectKeys: effectiveCollapsedKeys,
-			executorOrder: executorStore.executors.map((executor) => executor.id),
-		}),
-	);
+	const projectionInput = $derived({
+		allChats: chats,
+		matchingChatIds: searchFilter.trim()
+			? new Set(filteredChats.map((chat) => chat.id))
+			: undefined,
+		groupingFields: displayOptions.groupingFields,
+		nestDelegatedChats: displayOptions.nestDelegatedChats,
+		separateArchivedBranches: displayOptions.separateArchivedBranches,
+		currentTime: new Date('2025-01-01T03:00:00.000Z'),
+		inactivityDuration: displayOptions.inactivityDuration,
+		sortMode: displayOptions.sortMode,
+		pinnedInsertPosition: displayOptions.pinnedInsertPosition,
+		groupNestedProjectPaths: displayOptions.groupNestedProjectPaths,
+		collapsedProjectKeys: effectiveCollapsedKeys,
+		executorOrder: executorStore.executors.map((executor) => executor.id),
+	});
+	const reorder = new SidebarOrderController({
+		get input() {
+			return projectionInput;
+		},
+		write: (request) =>
+			new Promise((resolve, reject) => {
+				const chat = chats.find((chat) => chat.id === request.chatId)!;
+				if (request.placement.kind !== 'relative') throw new Error('Expected relative move');
+				onQuickMove(
+					chatOrderGroupFor(chat),
+					request.chatId,
+					request.placement,
+					() => resolve({ success: true, chatId: request.chatId, orderGroup: chatOrderGroupFor(chat), changed: true }),
+					reject,
+				);
+			}),
+		refresh: async () => true,
+		sort: async (key) => {
+			onSortChatOrder(key);
+			return { changed: false };
+		},
+		onError: () => {},
+	});
 </script>
 
 <div
@@ -124,7 +151,7 @@
 >
 	<SidebarChatList
 		{viewportRef}
-		{projection}
+		projection={reorder.projection}
 		{selectedChatId}
 		isLoading={false}
 		{isMobile}
@@ -141,7 +168,7 @@
 		onShareChat={() => {}}
 		onTogglePinned={() => {}}
 		onToggleArchive={() => {}}
-		{onQuickMove}
+		{reorder}
 		{onSortChatOrder}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>

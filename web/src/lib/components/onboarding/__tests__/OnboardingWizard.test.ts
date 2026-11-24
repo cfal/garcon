@@ -115,7 +115,7 @@ describe('OnboardingWizard', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
-		await fireEvent.click(screen.getByRole('radio', { name: /Single line/ }));
+		await fireEvent.click(screen.getByRole('radio', { name: /Single-line/ }));
 		expect(localSettings.sidebarChatItemLayout).toBe('single-line');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -168,7 +168,7 @@ describe('OnboardingWizard', () => {
 		const { localSettings } = renderWizard();
 		await advanceToThemePage();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		const grouping = screen.getByRole('combobox', { name: 'Chat grouping' });
+		const grouping = screen.getByRole('checkbox', { name: 'Project path' });
 		const projectPath = screen.getByRole('checkbox', { name: 'Show project path' });
 		const dockRight = screen.getByRole('checkbox', { name: 'Dock sidebar on the right' });
 		await fireEvent.click(projectPath);
@@ -178,14 +178,12 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(dockRight);
 		expect(localSettings.chatListDock).toBe('left');
 		await fireEvent.click(dockRight);
-		expect((grouping as HTMLSelectElement).value).toBe('none');
-		expect(
-			(screen.getByRole('radio', { name: 'Recent activity' }) as HTMLInputElement).checked,
-		).toBe(true);
-		await fireEvent.change(grouping, { target: { value: 'project' } });
-		await fireEvent.click(screen.getByRole('radio', { name: 'Manual' }));
-		expect(localSettings.sidebarGrouping).toBe('project');
-		expect(localSettings.sidebarSortMode).toBe('manual');
+		expect((grouping as HTMLInputElement).checked).toBe(false);
+		await fireEvent.click(grouping);
+		expect(localSettings.sidebarGroupingFields.filter((field) => field.enabled)).toEqual([
+			{ field: 'project', enabled: true },
+		]);
+		expect(localSettings.sidebarSortMode).toBe('recent');
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: 'Writing and behavior' });
@@ -204,8 +202,8 @@ describe('OnboardingWizard', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		expect(
-			(screen.getByRole('combobox', { name: 'Chat grouping' }) as HTMLSelectElement).value,
-		).toBe('project');
+			(screen.getByRole('checkbox', { name: 'Project path' }) as HTMLInputElement).checked,
+		).toBe(true);
 	});
 
 	it('dismisses automatic setup even when closing before making any selection', async () => {
@@ -242,35 +240,26 @@ describe('OnboardingWizard', () => {
 		).toEqual(['rose-light', 'rose-dark']);
 	});
 
-	it('renders real sidebar previews for each layout option and tracks the selection', async () => {
+	it('uses one production-projection preview for every row layout', async () => {
 		const { localSettings } = renderWizard();
 		await advanceToThemePage();
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		await screen.findByRole('heading', { name: 'Arrange your sidebar' });
-
-		const previews = document.querySelectorAll('[data-onboarding-layout-preview]');
-		expect(previews).toHaveLength(3);
-
-		const previewFor = (layout: string) => {
-			const preview = document.querySelector(`[data-onboarding-layout-preview="${layout}"]`);
-			if (!preview) throw new Error(`Missing layout preview for ${layout}`);
-			return preview;
-		};
-
-		// Only the detailed layout renders the sample last-message line.
-		const sampleMessage = 'Draft the release notes and verify the upgrade path.';
-		expect(previewFor('detailed').textContent).toContain(sampleMessage);
-		expect(previewFor('compact').textContent).not.toContain(sampleMessage);
-		expect(previewFor('single-line').textContent).not.toContain(sampleMessage);
-		expect(document.body.textContent).not.toContain('/workspace/aurora');
-
-		expect(previewFor(localSettings.sidebarChatItemLayout).getAttribute('data-selected')).toBe(
-			'true',
-		);
-
-		await fireEvent.click(screen.getByRole('radio', { name: /Single line/ }));
-		expect(previewFor('single-line').getAttribute('data-selected')).toBe('true');
-		expect(previewFor('compact').getAttribute('data-selected')).toBe('false');
+		const preview = document.querySelector('[data-sidebar-display-preview]');
+		expect(preview).toBeTruthy();
+		for (const [layout, label] of [
+			['compact', 'Compact'],
+			['detailed', 'Detailed'],
+			['single-line', 'Single-line'],
+		] as const) {
+			await fireEvent.click(screen.getByRole('radio', { name: label }));
+			expect(localSettings.sidebarChatItemLayout).toBe(layout);
+			expect(preview?.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(4);
+			expect(
+				Array.from(preview!.querySelectorAll('[data-slot="sidebar-chat-summary"]')).every(
+					(row) => row.getAttribute('data-layout') === layout,
+				),
+			).toBe(true);
+		}
 	});
 
 	it('enables workspace transcript search and retains an explicit opt-out across pages', async () => {

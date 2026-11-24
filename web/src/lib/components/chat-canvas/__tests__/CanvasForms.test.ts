@@ -13,7 +13,8 @@ import CanvasInspector from '../CanvasInspector.svelte';
 afterEach(cleanup);
 const chat: ChatSessionRecord = {
 	id: '1780000000000001',
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	projectPath: '/workspace/project',
 	orderGroup: 'normal',
 	title: 'Research chat',
@@ -29,6 +30,7 @@ const chat: ChatSessionRecord = {
 	isArchived: false,
 	isProcessing: false,
 	processingPhase: null,
+	activityStatus: null,
 	canReloadFromNativeHistory: false,
 	isUnread: true,
 	status: 'running',

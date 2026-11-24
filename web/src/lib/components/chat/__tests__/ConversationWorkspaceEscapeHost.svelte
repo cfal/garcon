@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 	import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
@@ -10,6 +11,7 @@
 	import {
 		setAppShell,
 		setChatSessions,
+		setSidebarOrder,
 		setLocalSettings,
 		setModelCatalog,
 		setNotifications,
@@ -96,7 +98,8 @@
 
 	let selectedChat = $state<ChatSessionRecord>({
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Running chat',
@@ -113,6 +116,7 @@
 		isProcessing: true,
 		processingPhase: 'running',
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
@@ -147,6 +151,7 @@
 	setConversationUi(conversationUi);
 
 	const sessions = {
+		settingsMutations: new ChatSettingsMutations(),
 		get selectedChatId() {
 			return selectedChat.id;
 		},
@@ -174,7 +179,7 @@
 		patchLastReadAt: () => {},
 		applyStartEntry: () => {},
 		upsertServerChat: () => {},
-		removeChat: () => {},
+		applyServerDeletion: () => {},
 		setSelectedChatId: () => {},
 		applyProcessingEvent: () => {},
 		reconcileProcessing: () => {},
@@ -182,6 +187,7 @@
 	};
 
 	setChatSessions(sessions as never);
+	setSidebarOrder({ moveChatToBoundary: async () => null });
 	setLocalSettings({
 		...COMPOSER_STATUS_BAR_DEFAULTS,
 		autoScrollToBottom: true,

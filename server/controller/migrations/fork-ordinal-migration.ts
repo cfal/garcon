@@ -3,8 +3,7 @@ import path from 'node:path';
 import { parseChatId } from '../../../common/chat-id.js';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
-import { isObjectRecord, normalizeChatRegistryEntry } from '../chats/registry-entry-codec.js';
-import { CHAT_REGISTRY_VERSION } from '../chats/registry-contracts.js';
+import { isRecord } from '../../../common/json.js';
 
 export async function removeLegacyForkOrdinals(workspaceDir: string): Promise<void> {
   const registryPath = path.join(workspaceDir, 'chats.json');
@@ -17,18 +16,18 @@ export async function removeLegacyForkOrdinals(workspaceDir: string): Promise<vo
   }
 
   const registry: unknown = parseStoredJson(raw, 'chats.json');
-  if (!isObjectRecord(registry)
-    || registry.version !== CHAT_REGISTRY_VERSION
-    || !isObjectRecord(registry.sessions)) {
+  if (!isRecord(registry)
+    || registry.version !== 5
+    || !isRecord(registry.sessions)) {
     throw new Error('Invalid chat registry for fork ordinal cleanup');
   }
 
   let changed = false;
   for (const [chatId, entry] of Object.entries(registry.sessions)) {
-    if (!isObjectRecord(entry)) {
+    parseChatId(chatId);
+    if (!isRecord(entry) || typeof entry.agentOwnershipEpoch !== 'string' || !entry.agentOwnershipEpoch) {
       throw new Error(`Invalid chat registry entry for ${chatId}`);
     }
-    normalizeChatRegistryEntry(entry, parseChatId(chatId));
     if (Object.hasOwn(entry, 'nextForkOrdinal')) {
       delete entry.nextForkOrdinal;
       changed = true;

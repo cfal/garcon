@@ -663,21 +663,21 @@ describe('WorkspaceWindowTitleBar', () => {
 			workspaceWindow([chatSurface.id, gitSurface.id], gitSurface.id),
 			false,
 		);
-		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
-		const indicator = chatTab.querySelector('[data-slot="workspace-chat-processing-indicator"]');
-		const descriptionId = chatTab.getAttribute('aria-describedby');
+		const chatTab = screen.getByRole('tab', {
+			name: 'Chat A',
+			description: m.chat_window_processing(),
+		});
+		const indicator = chatTab.querySelector('[data-slot="chat-activity-indicator"]');
 
-		expect(indicator).toBeTruthy();
+		expect(indicator?.getAttribute('data-status')).toBe('working');
+		expect(indicator?.querySelector('.chat-processing-spinner')).toBeTruthy();
+		expect(indicator?.hasAttribute('title')).toBe(false);
+		expect(chatTab.title).toContain('Chat A');
 		expect(chatTab.querySelector('.lucide-message-square')).toBeNull();
-		expect(descriptionId).toBeTruthy();
-		if (!descriptionId) throw new Error('Processing tab has no accessible description');
-		expect(document.getElementById(descriptionId)?.textContent).toBe(m.chat_window_processing());
 		const measurementTab = container.querySelector(
 			`[data-window-tab-measure-id="${chatSurface.id}"]`,
 		);
-		expect(
-			measurementTab?.querySelector('[data-slot="workspace-chat-processing-indicator"]'),
-		).toBeNull();
+		expect(measurementTab?.querySelector('[data-slot="chat-activity-indicator"]')).toBeNull();
 		expect(measurementTab?.querySelector('.lucide-message-square')).toBeTruthy();
 	});
 
@@ -685,11 +685,9 @@ describe('WorkspaceWindowTitleBar', () => {
 		const { container } = renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
 		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
 
-		expect(chatTab.querySelector('[data-slot="workspace-chat-processing-indicator"]')).toBeNull();
+		expect(chatTab.querySelector('[data-slot="chat-activity-indicator"]')).toBeNull();
 		expect(chatTab.querySelector('.lucide-message-square')).toBeTruthy();
-		expect(
-			container.querySelectorAll('[data-slot="workspace-chat-processing-indicator"]'),
-		).toHaveLength(0);
+		expect(container.querySelectorAll('[data-slot="chat-activity-indicator"]')).toHaveLength(0);
 	});
 
 	it('replaces the one-tab Chat icon while processing', () => {
@@ -697,7 +695,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		const { container } = renderTitleBar(workspaceWindow([chatSurface.id]));
 
 		const chatTab = screen.getByRole('tab', { name: 'Chat A' });
-		expect(chatTab.querySelector('[data-slot="workspace-chat-processing-indicator"]')).toBeTruthy();
+		expect(chatTab.querySelector('[data-slot="chat-activity-indicator"]')).toBeTruthy();
 		expect(chatTab.querySelector('.lucide-message-square')).toBeNull();
 		expect(
 			container.querySelector(

@@ -4,6 +4,9 @@ import { TYPOGRAPHY_SURFACES, type TypographySurface } from '$lib/theme/typograp
 import { searchSettings, settingsSearchEntries } from '../settings-search';
 
 describe('settings search', () => {
+	it('omits inactivity controls owned by the sidebar display dialog', () => {
+		expect(searchSettings(settingsSearchEntries(), 'inactivity')).toEqual([]);
+	});
 	it('finds the chat-swap preference under Behavior', () => {
 		expect(searchSettings(settingsSearchEntries(), 'swap chats')).toContainEqual({
 			tab: 'behavior',
@@ -14,6 +17,7 @@ describe('settings search', () => {
 	it.each([
 		'User message alignment',
 		'Auto-hide chat scrollbar',
+		'Collapse delegated chat trees by default',
 		'Composer status bar',
 		'Show for Git projects',
 		'Show for non-Git projects',

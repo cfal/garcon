@@ -1,3 +1,4 @@
+import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	createLocalSettingsStore,
@@ -12,28 +13,143 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import { DEFAULT_THEME_PREFERENCE } from '$lib/theme/themes.js';
 import { CHAT_BOARD_MAX_COUNT, type ChatBoard } from '$shared/chat-boards';
 import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
-import { DEFAULT_SIDEBAR_DISPLAY_OPTIONS } from '$lib/components/sidebar/sidebar-display-options';
+import { DEFAULT_SIDEBAR_DISPLAY_OPTIONS } from '../../sidebar/display/sidebar-display-options';
 
 describe('LocalSettingsStore', () => {
 	beforeEach(() => {
 		localStorage.clear();
 	});
 
-	it.each([false, true])('keeps the active combination mode until a new app store is created (%s)', combined => {
-		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: combined }));
+	it.each([undefined, null, 'false', 0])(
+		'defaults delegated trees to collapsed for %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ collapseDelegatedChatsByDefault: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.collapseDelegatedChatsByDefault).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('remembers opting out of collapsed delegated trees', () => {
 		const store = createLocalSettingsStore();
-		store.toggle('combineToolUseMessages');
-		expect(store.activeCombineToolUseMessages).toBe(combined);
-		expect(store.combineToolUseMessages).toBe(!combined);
-		const refreshed = createLocalSettingsStore();
-		expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
-		localStorage.clear();
-		window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
-		expect(store.activeCombineToolUseMessages).toBe(combined);
-		expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
+		expect(store.collapseDelegatedChatsByDefault).toBe(true);
+		store.toggle('collapseDelegatedChatsByDefault');
+		const restored = createLocalSettingsStore();
+		expect(restored.collapseDelegatedChatsByDefault).toBe(false);
 		store.destroy();
-		refreshed.destroy();
+		restored.destroy();
 	});
+
+	it('applies only dialog-owned preferences against the latest settings', () => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarNestDelegatedChats', false);
+		const draft = store.snapshot();
+		store.set('sidebarSortMode', 'manual');
+		store.toggle('sidebarNestDelegatedChats');
+		store.set('chatListDock', 'right');
+		store.setSidebarDisplay({
+			...draft,
+			sidebarSeparateArchivedBranches: true,
+			sidebarGroupingFields: [
+				{ field: 'status', enabled: false },
+				{ field: 'project', enabled: true },
+			],
+			sidebarInactivityDuration: '1-week',
+			sidebarGroupNestedProjectPaths: true,
+			sidebarChatItemLayout: 'compact',
+			sidebarShowProjectPath: true,
+		});
+		const restored = createLocalSettingsStore();
+		expect(restored.snapshot()).toMatchObject({
+			sidebarSortMode: 'manual',
+			sidebarNestDelegatedChats: false,
+			sidebarSeparateArchivedBranches: true,
+			chatListDock: 'right',
+			sidebarInactivityDuration: '1-week',
+			sidebarGroupNestedProjectPaths: true,
+			sidebarChatItemLayout: 'compact',
+			sidebarShowProjectPath: true,
+		});
+		expect(restored.sidebarGroupingFields).toEqual([
+			{ field: 'status', enabled: false },
+			{ field: 'project', enabled: true },
+			{ field: 'executor', enabled: false },
+			{ field: 'activity', enabled: false },
+		]);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([undefined, null, 'true', 1, {}, false])(
+		'defaults archive separation off for %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ sidebarSeparateArchivedBranches: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.sidebarSeparateArchivedBranches).toBe(false);
+			expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.separateArchivedBranches).toBe(false);
+			store.destroy();
+		},
+	);
+
+	it.each([false, true])('persists archive separation independently of nesting (%s)', (enabled) => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarSeparateArchivedBranches', enabled);
+		store.set('sidebarNestDelegatedChats', false);
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarSeparateArchivedBranches).toBe(enabled);
+		restored.set('sidebarNestDelegatedChats', true);
+		expect(restored.sidebarSeparateArchivedBranches).toBe(enabled);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it('normalizes grouping fields immediately and before persistence through set', () => {
+		const store = createLocalSettingsStore();
+		expect(store.sidebarNestDelegatedChats).toBe(true);
+		store.set('sidebarGroupingFields', [
+			{ field: 'project', enabled: true },
+			{ field: 'project', enabled: false },
+		]);
+		const expected = [
+			{ field: 'project', enabled: true },
+			{ field: 'executor', enabled: false },
+			{ field: 'activity', enabled: false },
+			{ field: 'status', enabled: false },
+		];
+		expect(store.sidebarGroupingFields).toEqual(expected);
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!).sidebarGroupingFields,
+		).toEqual(expected);
+		store.destroy();
+	});
+
+	it.each([false, true])(
+		'keeps the active combination mode until a new app store is created (%s)',
+		(combined) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ combineToolUseMessages: combined }),
+			);
+			const store = createLocalSettingsStore();
+			store.toggle('combineToolUseMessages');
+			expect(store.activeCombineToolUseMessages).toBe(combined);
+			expect(store.combineToolUseMessages).toBe(!combined);
+			const refreshed = createLocalSettingsStore();
+			expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
+			localStorage.clear();
+			window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }));
+			expect(store.activeCombineToolUseMessages).toBe(combined);
+			expect(refreshed.activeCombineToolUseMessages).toBe(!combined);
+			store.destroy();
+			refreshed.destroy();
+		},
+	);
 
 	it.each([undefined, null, 'false', 0, {}])(
 		'defaults chat swapping on for a missing or malformed preference: %s',
@@ -85,7 +201,9 @@ describe('LocalSettingsStore', () => {
 		store.save();
 		const restored = createLocalSettingsStore();
 		expect(restored.hadSavedSettingsOnLoad).toBe(true);
-		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toEqual(store.snapshot());
+		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toEqual(
+			store.snapshot(),
+		);
 		expect(store.hadSavedSettingsOnLoad).toBe(false);
 		store.destroy();
 		restored.destroy();
@@ -93,11 +211,11 @@ describe('LocalSettingsStore', () => {
 
 	it('recognizes existing preferences and captures freshness before early setting writes', () => {
 		const store = createLocalSettingsStore();
-		store.set('sidebarGrouping', 'project');
+		store.set('sidebarGroupingFields', migrateSidebarGrouping('project'));
 		expect(store.hadSavedSettingsOnLoad).toBe(false);
 		const restored = createLocalSettingsStore();
 		expect(restored.hadSavedSettingsOnLoad).toBe(true);
-		expect(restored.sidebarGrouping).toBe('project');
+		expect(restored.sidebarGroupingFields).toEqual(migrateSidebarGrouping('project'));
 		store.destroy();
 		restored.destroy();
 	});
@@ -239,7 +357,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
-		expect(store.userMessageAlignment).toBe('right');
+		expect(store.userMessageAlignment).toBe('left');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.imageCacheSizeMiB).toBe(64);
 		expect(store.inlineMermaidThumbnailSize).toBe('medium');
@@ -248,7 +366,8 @@ describe('LocalSettingsStore', () => {
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.combineToolUseMessages).toBe(true);
 		expect(store.allowDirectChats).toBe(false);
-		expect(store.sidebarGrouping).toBe('none');
+		expect(store.sidebarGroupingFields).toEqual(migrateSidebarGrouping('none'));
+		expect(store.sidebarNestDelegatedChats).toBe(true);
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
 		expect(store.sidebarChatItemLayout).toBe('single-line');
@@ -257,7 +376,10 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatBoardItemLayout).toBeNull();
 		expect(store.chatBoardActiveColumnByBoardId).toEqual({});
 		expect(store.sidebarSortMode).toBe('recent');
-		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.grouping).toBe(store.sidebarGrouping);
+		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.groupingFields).toEqual(store.sidebarGroupingFields);
+		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.nestDelegatedChats).toBe(
+			store.sidebarNestDelegatedChats,
+		);
 		expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.sortMode).toBe(store.sidebarSortMode);
 		expect(store.sidebarSearchResultSort).toBe('relevance');
 		expect(store.reduceMotion).toBe(false);
@@ -287,15 +409,15 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it.each(['center', 'RIGHT', '', null, 1, {}])(
-		'defaults malformed user message alignment %j to right',
+	it.each([undefined, 'center', 'RIGHT', '', null, 1, {}])(
+		'defaults missing or malformed user message alignment %j to left',
 		(value) => {
 			localStorage.setItem(
 				LOCAL_STORAGE_KEYS.localSettings,
-				JSON.stringify({ userMessageAlignment: value }),
+				JSON.stringify({ chatListDock: 'left', userMessageAlignment: value }),
 			);
 			const store = createLocalSettingsStore();
-			expect(store.userMessageAlignment).toBe('right');
+			expect(store.userMessageAlignment).toBe('left');
 			store.destroy();
 		},
 	);
@@ -379,13 +501,36 @@ describe('LocalSettingsStore', () => {
 		},
 	);
 
+	it.each([undefined, null, 'false', 0])(
+		'defaults missing or invalid delegation nesting %j to enabled without grouping',
+		(sidebarNestDelegatedChats) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ sidebarNestDelegatedChats }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.sidebarNestDelegatedChats).toBe(true);
+			expect(store.sidebarGroupingFields.filter((field) => field.enabled)).toEqual([]);
+			store.destroy();
+		},
+	);
+
+	it.each([false, true])('persists an explicit delegation nesting preference of %s', (enabled) => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarNestDelegatedChats', enabled);
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarNestDelegatedChats).toBe(enabled);
+		store.destroy();
+		restored.destroy();
+	});
+
 	it('preserves explicitly saved sidebar grouping and manual order', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
 			JSON.stringify({ sidebarGrouping: 'project-and-activity', sidebarSortMode: 'manual' }),
 		);
 		const store = createLocalSettingsStore();
-		expect(store.sidebarGrouping).toBe('project-and-activity');
+		expect(store.sidebarGroupingFields).toEqual(migrateSidebarGrouping('project-and-activity'));
 		expect(store.sidebarSortMode).toBe('manual');
 		store.destroy();
 	});
@@ -399,25 +544,37 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it.each(['source', 'formatted'] as const)('defaults to Formatted and persists an explicit %s preference', (mode) => {
-		const store = createLocalSettingsStore();
-		expect(store.composerInputMode).toBe('formatted');
-		store.set('composerInputMode', mode);
-		const restored = createLocalSettingsStore();
-		expect(restored.composerInputMode).toBe(mode);
-		store.destroy();
-		restored.destroy();
-	});
+	it.each(['source', 'formatted'] as const)(
+		'defaults to Formatted and persists an explicit %s preference',
+		(mode) => {
+			const store = createLocalSettingsStore();
+			expect(store.composerInputMode).toBe('formatted');
+			store.set('composerInputMode', mode);
+			const restored = createLocalSettingsStore();
+			expect(restored.composerInputMode).toBe(mode);
+			store.destroy();
+			restored.destroy();
+		},
+	);
 
-	it.each([undefined, 'automatic', '', null, true, {}])('defaults missing or invalid composer mode %j to Formatted', (mode) => {
-		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ composerInputMode: mode }));
-		const store = createLocalSettingsStore();
-		expect(store.composerInputMode).toBe('formatted');
-		store.destroy();
-	});
+	it.each([undefined, 'automatic', '', null, true, {}])(
+		'defaults missing or invalid composer mode %j to Formatted',
+		(mode) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ composerInputMode: mode }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.composerInputMode).toBe('formatted');
+			store.destroy();
+		},
+	);
 
 	it('ignores the unused language key in saved settings', () => {
-		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ language: 'fr', codeEditorVimMode: true }));
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ language: 'fr', codeEditorVimMode: true }),
+		);
 		const store = createLocalSettingsStore();
 		expect(store.codeEditorVimMode).toBe(true);
 		expect(store.snapshot()).not.toHaveProperty('language');
@@ -553,8 +710,9 @@ describe('LocalSettingsStore', () => {
 		store.toggle('combineToolUseMessages');
 		expect(store.combineToolUseMessages).toBe(false);
 		expect(store.autoExpandTools).toBe(false);
-		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'))
-			.toMatchObject({ combineToolUseMessages: false, autoExpandTools: false });
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ combineToolUseMessages: false, autoExpandTools: false });
 		const restored = createLocalSettingsStore();
 		expect(restored.combineToolUseMessages).toBe(false);
 		restored.set('combineToolUseMessages', true);
@@ -565,7 +723,10 @@ describe('LocalSettingsStore', () => {
 
 	it('ignores malformed persisted tool-use combination values', () => {
 		for (const value of [null, 1, 'true', {}, []]) {
-			localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: value }));
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ combineToolUseMessages: value }),
+			);
 			const store = createLocalSettingsStore();
 			expect(store.combineToolUseMessages).toBe(true);
 			store.destroy();
@@ -576,14 +737,22 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 		const changed = JSON.stringify({ ...store.snapshot(), combineToolUseMessages: false });
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, changed);
-		window.dispatchEvent(new StorageEvent('storage', {
-			key: LOCAL_STORAGE_KEYS.localSettings, newValue: changed, storageArea: localStorage,
-		}));
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: changed,
+				storageArea: localStorage,
+			}),
+		);
 		expect(store.combineToolUseMessages).toBe(false);
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
-		window.dispatchEvent(new StorageEvent('storage', {
-			key: LOCAL_STORAGE_KEYS.localSettings, newValue: null, storageArea: localStorage,
-		}));
+		window.dispatchEvent(
+			new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				newValue: null,
+				storageArea: localStorage,
+			}),
+		);
 		expect(store.combineToolUseMessages).toBe(true);
 		store.destroy();
 	});
@@ -672,17 +841,20 @@ describe('LocalSettingsStore', () => {
 	it('persists the project path toggle independently of grouping and layout', () => {
 		const store = createLocalSettingsStore();
 		store.toggle('sidebarShowProjectPath');
-		store.set('sidebarGrouping', 'project');
+		store.set('sidebarGroupingFields', migrateSidebarGrouping('project'));
 		store.set('sidebarChatItemLayout', 'compact');
 		const restored = createLocalSettingsStore();
 		expect(restored.sidebarShowProjectPath).toBe(true);
 		expect(restored.sidebarChatItemLayout).toBe('compact');
-		restored.set('sidebarGrouping', 'none');
+		restored.set('sidebarGroupingFields', migrateSidebarGrouping('none'));
 		restored.set('sidebarChatItemLayout', 'detailed');
 		expect(restored.sidebarShowProjectPath).toBe(true);
 		store.destroy();
 		restored.destroy();
-		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ sidebarShowProjectPath: 'yes' }));
+		localStorage.setItem(
+			LOCAL_STORAGE_KEYS.localSettings,
+			JSON.stringify({ sidebarShowProjectPath: 'yes' }),
+		);
 		const malformed = createLocalSettingsStore();
 		expect(malformed.sidebarShowProjectPath).toBe(false);
 		malformed.destroy();
@@ -1079,8 +1251,9 @@ describe('LocalSettingsStore', () => {
 	});
 
 	it('groups Claude Monitor with shell tools', () => {
-		expect(HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash')?.toolTypes)
-			.toContain('claude-monitor-tool-use');
+		expect(HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'bash')?.toolTypes).toContain(
+			'claude-monitor-tool-use',
+		);
 	});
 
 	it('hides Pi and Claude tool search with the provider tool group', () => {
@@ -1253,10 +1426,10 @@ describe('LocalSettingsStore', () => {
 
 	it('persists activity grouping and rejects the unused project-and-time token', () => {
 		const store = createLocalSettingsStore();
-		store.set('sidebarGrouping', 'activity');
+		store.set('sidebarGroupingFields', migrateSidebarGrouping('activity'));
 
 		const restored = createLocalSettingsStore();
-		expect(restored.sidebarGrouping).toBe('activity');
+		expect(restored.sidebarGroupingFields).toEqual(migrateSidebarGrouping('activity'));
 		store.destroy();
 		restored.destroy();
 
@@ -1265,16 +1438,16 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ sidebarGrouping: 'project-and-time' }),
 		);
 		const oldToken = createLocalSettingsStore();
-		expect(oldToken.sidebarGrouping).toBe('none');
+		expect(oldToken.sidebarGroupingFields).toEqual(migrateSidebarGrouping('none'));
 		oldToken.destroy();
 	});
 
 	it('persists status grouping', () => {
 		const store = createLocalSettingsStore();
-		store.set('sidebarGrouping', 'status');
+		store.set('sidebarGroupingFields', migrateSidebarGrouping('status'));
 
 		const restored = createLocalSettingsStore();
-		expect(restored.sidebarGrouping).toBe('status');
+		expect(restored.sidebarGroupingFields).toEqual(migrateSidebarGrouping('status'));
 		store.destroy();
 		restored.destroy();
 	});
@@ -1336,7 +1509,7 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
-		store.set('sidebarGrouping', 'project-and-activity');
+		store.set('sidebarGroupingFields', migrateSidebarGrouping('project-and-activity'));
 		store.set('sidebarInactivityDuration', '2-weeks');
 		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarChatItemLayout', 'compact');
@@ -1347,7 +1520,7 @@ describe('LocalSettingsStore', () => {
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
 			chatMaxWidth: 'medium',
-			sidebarGrouping: 'project-and-activity',
+			sidebarGroupingFields: migrateSidebarGrouping('project-and-activity'),
 			sidebarInactivityDuration: '2-weeks',
 			sidebarGroupNestedProjectPaths: true,
 			sidebarChatItemLayout: 'compact',
@@ -1376,7 +1549,7 @@ describe('LocalSettingsStore', () => {
 				overlayBackdropEffects: false,
 				highlightActiveWindow: false,
 				fullscreenCoversSidebar: false,
-				sidebarGrouping: 'project',
+				sidebarGroupingFields: migrateSidebarGrouping('project'),
 				sidebarInactivityDuration: '1-month',
 				sidebarGroupNestedProjectPaths: true,
 				sidebarChatItemLayout: 'compact',
@@ -1406,7 +1579,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.highlightActiveWindow).toBe(false);
 		expect(secondStore.fullscreenCoversSidebar).toBe(false);
-		expect(secondStore.sidebarGrouping).toBe('project');
+		expect(secondStore.sidebarGroupingFields).toEqual(migrateSidebarGrouping('project'));
 		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarChatItemLayout).toBe('compact');

@@ -176,10 +176,12 @@ describe('Codex history modes', () => {
         threadId: sourceAgentSessionId,
         cwd: fixture.executionDirs.project,
         model: 'gpt-5.6-sol',
+        serviceTier: 'default',
         ephemeral: false,
         excludeTurns: true,
         path: sourceNativePath,
         lastTurnId: 'turn-1',
+        modelProvider: 'openai',
       }]);
       expect(await readFile(sourceNativePath, 'utf8')).toBe(sourceBefore);
     }, {

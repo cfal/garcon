@@ -411,18 +411,20 @@ describe('persistence lifecycle', () => {
       });
       expect(fullFork.chat).toMatchObject({
         id: fullChatId,
-        parentChat: {
-          chatId: sourceChatId,
-          relation: 'fork',
+        parentChatId: null,
+        lineage: {
+          sourceChatId,
+          kind: 'fork',
           transcriptViewId: sourceBefore.transcriptViewId,
           ordinal: sourceBefore.lastOrdinal,
         },
       });
       expect(boundedFork.chat).toMatchObject({
         id: boundedChatId,
-        parentChat: {
-          chatId: sourceChatId,
-          relation: 'fork',
+        parentChatId: null,
+        lineage: {
+          sourceChatId,
+          kind: 'fork',
           transcriptViewId: sourceBefore.transcriptViewId,
           ordinal: firstAssistantSeq,
         },
@@ -470,23 +472,23 @@ describe('persistence lifecycle', () => {
 
       await fixture.restartGarcon();
       const restartedChats = (await fixture.client.listChats()).sessions;
-      expect(restartedChats.find((chat) => chat.id === fullChatId)?.parentChat)
-        .toEqual(fullFork.chat.parentChat);
-      expect(restartedChats.find((chat) => chat.id === boundedChatId)?.parentChat)
-        .toEqual(boundedFork.chat.parentChat);
+      expect(restartedChats.find((chat) => chat.id === fullChatId)?.lineage)
+        .toEqual(fullFork.chat.lineage);
+      expect(restartedChats.find((chat) => chat.id === boundedChatId)?.lineage)
+        .toEqual(boundedFork.chat.lineage);
 
       expect(await fixture.client.deleteChat(sourceChatId)).toEqual({ success: true });
       const afterParentDeletion = (await fixture.client.listChats()).sessions;
-      expect(afterParentDeletion.find((chat) => chat.id === fullChatId)?.parentChat)
-        .toEqual(fullFork.chat.parentChat);
-      expect(afterParentDeletion.find((chat) => chat.id === boundedChatId)?.parentChat)
-        .toEqual(boundedFork.chat.parentChat);
+      expect(afterParentDeletion.find((chat) => chat.id === fullChatId)?.lineage)
+        .toEqual(fullFork.chat.lineage);
+      expect(afterParentDeletion.find((chat) => chat.id === boundedChatId)?.lineage)
+        .toEqual(boundedFork.chat.lineage);
 
       expect(await fixture.client.deleteChat(fullChatId)).toEqual({ success: true });
       const afterChildDeletion = (await fixture.client.listChats()).sessions;
       expect(afterChildDeletion.map((chat) => chat.id)).not.toContain(fullChatId);
-      expect(afterChildDeletion.find((chat) => chat.id === boundedChatId)?.parentChat)
-        .toEqual(boundedFork.chat.parentChat);
+      expect(afterChildDeletion.find((chat) => chat.id === boundedChatId)?.lineage)
+        .toEqual(boundedFork.chat.lineage);
     });
   });
 });

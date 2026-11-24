@@ -4,6 +4,9 @@ import type { Locator, Page } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { createSidebarDelegationFixture } from '../../support/sidebar-delegation-fixture.js';
+import { parseChatListResponse } from '../../../common/chat-list.js';
 
 async function openSidebar(page: Page): Promise<void> {
   const mobile = page.viewportSize()!.width <= 768;
@@ -18,17 +21,29 @@ async function openSidebar(page: Page): Promise<void> {
 
 async function chooseMenuOption(page: Page, name: string): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitemradio', { name, exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+  if (name === 'No grouping' || name === 'Project') {
+    for (const field of ['Executor', 'Project path', 'Activity', 'Status']) {
+      await dialog
+        .getByRole('checkbox', { name: field, exact: true })
+        .setChecked(name === 'Project' && ['Executor', 'Project path'].includes(field));
+    }
+  } else {
+    await dialog.getByRole('radio', { name, exact: true }).check();
+    await browserExpect(dialog.locator('[data-slot="sidebar-chat-summary"]')).toHaveCount(4);
+  }
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
 }
 
 async function setProjectPathVisibility(page: Page, enabled: boolean): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
-  const toggle = page.getByRole('menuitemcheckbox', { name: 'Show project path', exact: true });
-  if ((await toggle.getAttribute('aria-checked')) !== String(enabled)) {
-    await toggle.click();
-  } else {
-    await page.keyboard.press('Escape');
-  }
+  await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+  await dialog
+    .getByRole('checkbox', { name: 'Show project path', exact: true })
+    .setChecked(enabled);
+  await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
 }
 
 async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promise<void> {
@@ -60,6 +75,174 @@ async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promis
     matchingPillHeight: true,
   });
 }
+
+test('inherited groups omit headers while differing groups retain full internal indentation', async () => {
+  await withChromiumFixture('sidebar-inherited-groups', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { a, a1 } = await createSidebarDelegationFixture(integration);
+    const snapshot = await integration.client.listChats();
+    let differing = false;
+    await page.route(url => url.pathname === '/api/v1/chats', async route => {
+      const sessions = snapshot.sessions.filter(chat => chat.id === a || chat.id === a1).map(chat => ({
+        ...chat,
+        executorId: differing && chat.id === a1 ? '00000000-0000-4000-8000-000000000001' : 'local',
+        projectPath: differing && chat.id === a1 ? '/synthetic/other' : chat.projectPath,
+        isPinned: false,
+        isArchived: differing && chat.id === a1,
+        orderGroup: differing && chat.id === a1 ? 'archived' : 'normal',
+        isUnread: differing && chat.id === a1,
+      }));
+      await route.fulfill({ json: parseChatListResponse({ ...snapshot, sessions, total: sessions.length }) });
+    });
+    await page.addInitScript(seedLocalSettings, {
+      sidebarSortMode: 'manual', sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
+      sidebarGroupingFields: ['executor', 'project', 'activity', 'status'].map(field => ({ field, enabled: true })),
+    });
+    for (const mixed of [false, true]) {
+      differing = mixed;
+      await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await openSidebar(page);
+        const parent = page.locator(`[data-sidebar-virtual-row="${a}"] .chat-item-root button`).first();
+        const child = page.locator(`[data-sidebar-virtual-row="${a1}"] .chat-item-root button`).first();
+        const childPaddingLeft = mixed ? 120 : 72;
+        await browserExpect(parent).toHaveCSS('padding-left', '60px');
+        await browserExpect(child).toHaveCSS('padding-left', `${childPaddingLeft}px`);
+        await browserExpect(child).toHaveCSS('padding-right', '8px');
+        const bounds = await child.boundingBox();
+        const parentBounds = await parent.boundingBox();
+        expect(bounds!.x).toBe(parentBounds!.x);
+        expect(bounds!.width).toBe(parentBounds!.width);
+        await expectRowGeometry(page.locator(`[data-sidebar-virtual-row="${a1}"]`), false);
+        const guide = child.locator('xpath=ancestor::*[@data-sidebar-virtual-item]').locator('[data-sidebar-tree-guides]');
+        const incoming = guide.locator('[data-sidebar-tree-incoming]');
+        await browserExpect(guide).toHaveCount(1);
+        await browserExpect(guide).toHaveCSS('pointer-events', 'none');
+        await browserExpect(guide).toHaveAttribute('aria-hidden', 'true');
+        await browserExpect(incoming).toHaveAttribute('data-sidebar-tree-incoming', 'end');
+        const guideBounds = await guide.boundingBox();
+        const incomingBounds = await incoming.boundingBox();
+        expect(incomingBounds!.y).toBe(guideBounds!.y);
+        expect(incomingBounds!.x).toBe(guideBounds!.x + childPaddingLeft - 12);
+        const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+        await mkdir(artifacts, { recursive: true });
+        await page.screenshot({ path: join(artifacts, `sidebar-inherited-${mixed ? 'mixed' : 'same'}-${width}.png`) });
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 120_000);
+
+test('archive separation preserves archived subtrees through dialog apply and reload', async () => {
+  await withChromiumFixture('sidebar-archive-separation', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { a, a1, a2, b, b1 } = await createSidebarDelegationFixture(integration);
+    await integration.client.toggleArchive(a1);
+    await integration.client.toggleArchive(b);
+    const before = await integration.client.listChats();
+    await page.addInitScript(seedLocalSettings, {
+      sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
+      sidebarGroupingFields: [],
+      sidebarSortMode: 'manual',
+    });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+    const rowButton = (id: string) => page.locator(`[data-sidebar-virtual-row="${id}"] .chat-item-root button`).first();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await openSidebar(page);
+      for (const separate of [false, true]) {
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+        const separation = dialog.getByRole('checkbox', { name: 'Separate archived branches', exact: true });
+        await separation.setChecked(separate);
+        await dialog.getByRole('checkbox', { name: 'Nest delegated chats', exact: true }).uncheck();
+        await browserExpect(separation).toBeDisabled();
+        await browserExpect(separation).toBeChecked({ checked: separate });
+        await dialog.getByRole('checkbox', { name: 'Nest delegated chats', exact: true }).check();
+        await browserExpect(separation).toBeEnabled();
+        await browserExpect(dialog.locator('[data-sidebar-tree-guides]')).toHaveCount(separate ? 1 : 2);
+        await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
+        await browserExpect(rowButton(a1)).toHaveCSS('padding-left', separate ? '12px' : '24px');
+        await browserExpect(rowButton(a2)).toHaveCSS('padding-left', '24px');
+        await browserExpect(rowButton(b)).toHaveCSS('padding-left', '12px');
+        await browserExpect(rowButton(b1)).toHaveCSS('padding-left', '24px');
+      }
+      const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+      await mkdir(artifacts, { recursive: true });
+      await page.screenshot({ path: join(artifacts, `sidebar-separated-archives-${width}.png`) });
+    }
+    await page.reload();
+    await openSidebar(page);
+    await browserExpect(rowButton(a1)).toHaveCSS('padding-left', '12px');
+    await browserExpect(rowButton(b1)).toHaveCSS('padding-left', '24px');
+    const after = await integration.client.listChats();
+    const identities = (snapshot: typeof before) => snapshot.sessions.map(({ id, parentChatId, lineage, orderGroup }) => ({ id, parentChatId, lineage, orderGroup }));
+    expect(identities(after)).toEqual(identities(before));
+    await integration.client.toggleArchive(a);
+    await browserExpect(rowButton(a1)).toHaveCSS('padding-left', '24px');
+    await browserExpect(rowButton(a2)).toHaveCSS('padding-left', '24px');
+    await integration.client.toggleArchive(a);
+    await browserExpect(rowButton(a1)).toHaveCSS('padding-left', '12px');
+    await browserExpect(rowButton(a2)).toHaveCSS('padding-left', '24px');
+    assertNoBrowserErrors();
+  });
+}, 120_000);
+
+test('multi-line delegation arrows align with titles while single-line keeps tree guides', async () => {
+  await withChromiumFixture('sidebar-delegation-layouts', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { a, a1 } = await createSidebarDelegationFixture(integration);
+    await page.addInitScript(seedLocalSettings, {
+      sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
+      sidebarGroupingFields: [],
+      chatListFontSize: '16',
+    });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+    const child = page.locator(`[data-sidebar-virtual-row="${a1}"]`);
+    const wrapper = child.locator('xpath=ancestor::*[@data-sidebar-virtual-item]');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const label of ['Compact', 'Detailed', 'Single-line']) {
+        await openSidebar(page);
+        await chooseMenuOption(page, label);
+        const singleLine = label === 'Single-line';
+        await browserExpect(wrapper.locator('[data-sidebar-tree-guides]')).toHaveCount(singleLine ? 1 : 0);
+        const arrow = child.locator('[data-sidebar-delegation-arrow]');
+        await browserExpect(arrow).toHaveCount(singleLine ? 0 : 1);
+        await browserExpect(child.locator('[data-slot="chat-summary-header"]')).toHaveCSS('font-size', '16px');
+        await browserExpect(child.locator('.chat-item-root button').first()).toHaveCSS('padding-left', singleLine ? '24px' : '12px');
+        if (singleLine) continue;
+        await browserExpect(arrow).toHaveText('\u21b3');
+        await browserExpect(arrow).toHaveAttribute('aria-hidden', 'true');
+        await browserExpect(arrow).toHaveCSS('pointer-events', 'none');
+        await browserExpect.poll(() => arrow.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          const header = element.closest('[data-slot="chat-summary-header"]')!.getBoundingClientRect();
+          const title = element.nextElementSibling!.getBoundingClientRect();
+          const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+          return {
+            beforeTitle: bounds.right <= title.left,
+            centered: Math.abs(bounds.y + bounds.height / 2 - header.y - header.height / 2) < 0.51,
+            hitsRow: !element.contains(hit) && hit?.closest('[data-sidebar-virtual-row]') === element.closest('[data-sidebar-virtual-row]'),
+          };
+        })).toEqual({ beforeTitle: true, centered: true, hitsRow: true });
+        if (width === 390 && label === 'Compact') {
+          await child.locator('[data-slot="chat-summary-header"]').click({ modifiers: ['Control'] });
+          const selection = child.getByRole('checkbox');
+          await browserExpect(selection).toBeVisible();
+          const checkboxBounds = await selection.locator(':scope > div').first().boundingBox();
+          const arrowBounds = await arrow.boundingBox();
+          expect(arrowBounds!.x).toBeGreaterThanOrEqual(checkboxBounds!.x + checkboxBounds!.width);
+          await page.keyboard.press('Escape');
+          await browserExpect(selection).toHaveCount(0);
+        }
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 120_000);
 
 for (const executionBackend of ['in-process', 'remote-controller-dials'] as const) {
   test(`sidebar layouts extend the single-line header (${executionBackend})`, async () => {
@@ -95,6 +278,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
           for (const showPath of [false, true]) {
             await setProjectPathVisibility(page, showPath);
             await expectRowGeometry(row, showPath);
+            await browserExpect(row.locator('xpath=ancestor::*[@data-sidebar-virtual-item]').locator('[data-sidebar-tree-guides]')).toHaveCount(0);
             const header = row.locator('[data-slot="chat-summary-header"]');
             await browserExpect(header.locator('[data-slot="sidebar-chat-timestamp-badge"]')).toHaveCount(1);
             // Project grouping places remote chats beneath an executor header, which replaces the pill.
@@ -108,7 +292,31 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
         }
         const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
         await mkdir(artifacts, { recursive: true });
-        await page.screenshot({ path: join(artifacts, `shared-sidebar-${executionBackend}-${width}.png`) });
+        await page.screenshot({
+          path: join(artifacts, `shared-sidebar-${executionBackend}-${width}.png`),
+        });
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+        await browserExpect(page.locator('[data-sidebar-display-preview]')).toBeVisible();
+        await page.screenshot({
+          path: join(artifacts, `sidebar-display-${executionBackend}-${width}.png`),
+        });
+        await page
+          .getByRole('dialog', { name: 'Sidebar display', exact: true })
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .click();
+        const menuTrigger = page.getByRole('button', { name: 'More actions', exact: true });
+        await browserExpect(menuTrigger).toBeFocused();
+        for (const action of ['Apply', 'Close', 'Escape']) {
+          await menuTrigger.click();
+          await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+          const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+          await dialog.getByRole('checkbox', { name: 'Project path', exact: true }).focus();
+          if (action === 'Escape') await page.keyboard.press('Escape');
+          else await dialog.getByRole('button', { name: action, exact: true }).click();
+          await browserExpect(dialog).toHaveCount(0);
+          await browserExpect(menuTrigger).toBeFocused();
+        }
       }
 
       phase('restoring persisted layout and path visibility');

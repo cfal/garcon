@@ -27,7 +27,8 @@ modules:
   quarantine, native missing/read-failure/valid-empty behavior, and the
   Direct/OpenCode source constraints represented by its registered drivers;
 - `native-forking.test.ts` covers native point-fork fidelity for providers with
-  that facet;
+  that facet. For providers without native forking, it checks the selected ledger
+  prefix reaches the model in a fresh session and excludes later source turns;
 - `executor-disconnect.test.ts` runs only in remote lanes and holds the
   encrypted link down with both processes alive. It covers the reconnecting
   phase, the resumed turn delivering its reply once, and an explicit followup
@@ -58,8 +59,11 @@ creation, deterministic model scripting, request observation, and cleanup. A
 driver establishes provider-native barriers and translates provider requests;
 it does not choose an oracle.
 
-The reference scripted drivers are Claude, Codex, OpenCode, Pi, and the three
-Direct integrations. OpenCode's real-binary tier is Linux-only. New
+The reference scripted drivers are Claude, Codex, OpenCode, Pi, Antigravity,
+and the three Direct integrations. OpenCode's real-binary tier is Linux-only.
+Antigravity registers only when `ANTIGRAVITY_BIN` names the pinned `agy`
+binary, which CI installs; it has no history import facets, since it postdates
+the ledger and its native history cannot be parsed. New
 reference-tier integrations register in `drivers.ts`, after which every shared
 case runs automatically.
 

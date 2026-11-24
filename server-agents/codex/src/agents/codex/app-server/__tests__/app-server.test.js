@@ -274,7 +274,7 @@ class FakeClient extends EventEmitter {
     this.steerTurn = mock(script.steerTurn ?? (async ({ expectedTurnId }) => ({ turnId: expectedTurnId })));
     this.interruptTurn = mock(script.interruptTurn ?? (async () => ({})));
     this.compactThread = mock(script.compactThread ?? (async () => ({})));
-    this.connect = mock(script.connect ?? (async () => ({ userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
+    this.connect = mock(script.connect ?? (async () => ({ userAgent: 'garcon/0.171.0', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' })));
     this.respond = mock();
     this.reject = mock();
     this.shutdown = mock(script.shutdown ?? (() => undefined));
@@ -351,7 +351,7 @@ function createRpcClientFixture(responder, options = {}) {
     env: options.env,
     config: options.config,
     modelCatalogPath: options.modelCatalogPath,
-    resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'bundled' })),
+    resolveCli: options.resolveCli ?? (async () => ({ command: '/tmp/codex', source: 'path' })),
     shutdownGraceMs: options.shutdownGraceMs,
     shutdownTerminateMs: options.shutdownTerminateMs,
     shutdownKillMs: options.shutdownKillMs,
@@ -371,13 +371,21 @@ function createRpcClientFixture(responder, options = {}) {
 }
 
 const initializeResponse = {
-  userAgent: 'codex',
+  userAgent: 'garcon/0.171.0',
   codexHome: '/tmp/codex-home',
   platformFamily: 'unix',
   platformOs: 'linux',
 };
 
 describe('CodexAppServerClient lifecycle RPCs', () => {
+  it('expires a stalled discovery read without blocking the client on a late reply', async () => {
+    const { client, writes, sendResult } = createRpcClientFixture((message) =>
+      message.method === 'model/list' ? undefined : initializeResponse, { allowMissingResponse: true });
+    await expect(client.request('model/list', {}, 5)).rejects.toMatchObject({ code: 'TIMEOUT', retryable: true });
+    sendResult(writes.find((message) => message.method === 'model/list').id, { data: [] });
+    await expect(client.request('config/read', {})).resolves.toEqual(initializeResponse);
+    await client.shutdown();
+  });
   it('does not advertise human-only approval support', async () => {
     const { client, writes } = createRpcClientFixture(() => initializeResponse);
     await client.connect();
@@ -473,7 +481,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
     );
     const connecting = client.connect();
     await client.shutdown();
-    resolved.resolve({ command: '/tmp/codex', source: 'bundled' });
+    resolved.resolve({ command: '/tmp/codex', source: 'path' });
     try {
       await expect(connecting).rejects.toThrow('Codex app-server client is shut down');
       expect(spawn).not.toHaveBeenCalled();
@@ -879,7 +887,7 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
       params: { threadId: 'thread-1' },
     }));
     expect(metrics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'codex.app_server.startup', commandSource: 'bundled' }),
+      expect.objectContaining({ name: 'codex.app_server.startup', commandSource: 'path' }),
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/loaded/list', success: true }),
       expect.objectContaining({ name: 'codex.app_server.request', method: 'thread/unsubscribe', success: true }),
     ]));
@@ -1030,6 +1038,17 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
 });
 
 describe('Codex app-server request builders', () => {
+  it.each([[undefined, 'default'], ['standard', 'default'], ['fast', 'priority'], ['ultrafast', 'ultrafast']])(
+    'applies %s without changing model or effort', (speed, serviceTier) => {
+      const request = makeRequest({ speed, model: 'model-a', thinkingMode: 'high' });
+      expect(buildThreadStartParams(request)).toMatchObject({ model: 'model-a', serviceTier });
+      expect(buildThreadResumeParams({ ...request, agentSessionId: 'source' })).toMatchObject({ serviceTier });
+      expect(buildThreadForkParams({ ...request, agentSessionId: 'source' })).toMatchObject({ serviceTier });
+      expect(buildTurnStartParams({ ...request, threadId: 'child' })).toMatchObject({ model: 'model-a', effort: 'high', serviceTier });
+      expect(buildThreadSettingsUpdateParams('child', codexThreadSettingsTarget(request))).not.toHaveProperty('serviceTier');
+    },
+  );
+
   it('builds durable thread/start params with sandbox and config', () => {
     const params = buildThreadStartParams(makeRequest({
       permissionMode: 'bypassPermissions',
@@ -1081,7 +1100,8 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('max', 'gpt-5.5')).toBe('xhigh');
     for (const model of [
       'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
-      'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna',
+      'gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna',
+      'acme-openai:gpt-6.2-sol', 'acme-openai:gpt-6.2-astra',
       'acme-openai:gpt-6.1-terra',
     ]) {
       expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
@@ -1093,7 +1113,8 @@ describe('Codex app-server request builders', () => {
   });
 
   it.each([
-    'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna',
+    'gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna',
+    'acme-openai:gpt-6.2-sol', 'acme-openai:gpt-6.2-astra',
     'acme-openai:gpt-6.1-terra',
     'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
     'gpt-5.5', 'gpt-5.4', 'custom-model',
@@ -1210,6 +1231,7 @@ describe('Codex app-server request builders', () => {
       cwd: '/repo',
       model: 'gpt-5.4-codex',
       ephemeral: false,
+      serviceTier: 'default',
       excludeTurns: true,
       path: '/tmp/jsonl.jsonl',
     });
@@ -2340,8 +2362,9 @@ describe('CodexAppServerRuntime', () => {
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
     });
+    const createClient = mock(() => fake);
     const provider = createRuntime({
-      createClient: () => fake,
+      createClient,
       materializationTimeoutMs: 20,
       ...runtimeOptions,
     });
@@ -2350,7 +2373,7 @@ describe('CodexAppServerRuntime', () => {
       ...requestOverrides,
       operation: published.operation,
     }));
-    return { fake, provider, published, started };
+    return { fake, createClient, provider, published, started };
   }
 
   function emitThreadSettings(fake, overrides = {}, threadId = 'thread-1') {
@@ -2362,6 +2385,45 @@ describe('CodexAppServerRuntime', () => {
       },
     });
   }
+
+  it('rejects an ineffective premium tier before activation, admission or inference', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const markStarted = mock(async () => {});
+    const onSessionActivated = mock();
+    const request = makeRequest({ speed: 'ultrafast', onSessionActivated,
+      executionAdmission: { signal: new AbortController().signal, markStarted } });
+    await expect(provider.startSession(request)).rejects.toThrow('Ultrafast speed is unavailable');
+    const resume = { ...request, agentSessionId: 'thread-1', nativePath: null };
+    await expect(provider.runTurn(resume)).rejects.toThrow('Ultrafast speed is unavailable');
+    await expect(provider.compact(resume)).rejects.toThrow('Ultrafast speed is unavailable');
+    expect(onSessionActivated).not.toHaveBeenCalled();
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(fake.startTurn).not.toHaveBeenCalled();
+    expect(fake.compactThread).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('reports an ineffective fork tier even if archiving the child fails (cleanup success: %s)', async (success) => {
+    const fake = new FakeClient();
+    fake.request = mock(async () => { if (!success) throw new Error('archive unavailable'); });
+    const provider = createRuntime({ createClient: () => fake });
+    await expect(provider.forkSession({ sourceSession: { agentSessionId: 'parent', projectPath: '/repo', model: 'model-a' },
+      speed: 'ultrafast' })).rejects.toThrow('Ultrafast speed is unavailable');
+    expect(fake.forkThread.mock.calls[0][0]).toMatchObject({ threadId: 'parent', serviceTier: 'ultrafast' });
+    expect(fake.request).toHaveBeenCalledWith('thread/archive', { threadId: 'thread-1' }, expect.any(Number));
+  });
+
+  it('reopens a retained Standard source with the requested tier before compacting', async () => {
+    const next = new FakeClient({ resumeThread: async () => ({ thread: makeThread(), model: 'gpt-5.4-codex', serviceTier: 'ultrafast' }) });
+    const { fake, createClient, provider, published } = await startSettingsSession();
+    createClient.mockReturnValue(next);
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() } });
+    await published.waitForEvent((event) => event.type === 'run-ended');
+    await provider.compact(makeRequest({ agentSessionId: 'thread-1', speed: 'ultrafast' }));
+    expect(next.resumeThread.mock.calls[0][0]).toMatchObject({ serviceTier: 'ultrafast' });
+    expect(next.compactThread).toHaveBeenCalledWith('thread-1');
+    expect(fake.compactThread).not.toHaveBeenCalled();
+  });
 
   it('starts a turn and waits for the app-server transcript path before resolving', async () => {
     const nativePath = path.join(tmpDir, 'thread.jsonl');
@@ -2727,7 +2789,7 @@ describe('CodexAppServerRuntime', () => {
       connect: async () => {
         connectStarted.resolve();
         await connected.promise;
-        return { userAgent: 'codex', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' };
+        return { userAgent: 'garcon/0.171.0', codexHome: '/tmp', platformFamily: 'unix', platformOs: 'linux' };
       },
     });
     const provider = createRuntime({ createClient: () => fake });
@@ -3309,7 +3371,7 @@ describe('CodexAppServerRuntime', () => {
     let resolveRetryStarted;
     const retryStarted = new Promise((resolve) => { resolveRetryStarted = resolve; });
     const fake = new FakeClient({
-      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', modelProvider: 'openai', serviceTier: null, cwd: '/repo' }),
+      startThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt-5.4-codex', modelProvider: 'openai', serviceTier: 'default', cwd: '/repo' }),
       startTurn: async (params) => {
         await fs.writeFile(nativePath, '{}\n');
         turnNumber += 1;
@@ -3327,7 +3389,7 @@ describe('CodexAppServerRuntime', () => {
 
     emitCapacityFailure(fake, 'turn-1');
 
-    await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [] });
+    await expect(retryStarted).resolves.toEqual({ threadId: 'thread-1', input: [], serviceTierForTurn: 'default' });
     expect(provider.isRunning('thread-1')).toBe(true);
     expect(failureMessages(published.events)).toEqual([]);
 
@@ -3341,6 +3403,54 @@ describe('CodexAppServerRuntime', () => {
     await finished;
     expect(fake.startTurn).toHaveBeenCalledTimes(2);
     expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { model: 'gpt-5.4-codex', serviceTier: 'ultrafast' },
+    { model: 'another-model', serviceTier: 'default' },
+  ])('does not retry after the native model or tier changes (%o)', async (change) => {
+    const { provider, fake, published } = await startSettingsSession({ capacityRetryDelaysMs: [0] });
+    emitThreadSettings(fake, change);
+    emitCapacityFailure(fake, 'turn-1');
+    await published.waitForEvent((event) => event.type === 'run-ended' && event.outcome === 'failed');
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    expect(failureMessages(published.events)).toEqual(['Selected model is at capacity. Please try a different model.']);
+    await provider.shutdown();
+  });
+
+  it('holds capacity retry admission behind an unconfirmed native model update', async () => {
+    const backoff = createControlledDelay();
+    const { fake, provider, published } = await startSettingsSession({ capacityRetryDelay: backoff.wait });
+    const update = provider.updateSessionSettings('thread-1', makeRequest({ model: 'standard-only', speed: 'standard' }));
+    await waitForCondition(() => fake.updateThreadSettings.mock.calls.length === 1);
+    emitCapacityFailure(fake, 'turn-1');
+    await backoff.started;
+    backoff.release();
+    await Bun.sleep(0);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+    emitThreadSettings(fake, { model: 'standard-only', serviceTier: 'default' });
+    await update;
+    await published.waitForEvent((event) => event.type === 'run-ended');
+    expect(failureMessages(published.events)).toEqual(['Selected model is at capacity. Please try a different model.']);
+    expect(fake.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds later native settings writes until the admitted retry has its own turn', async () => {
+    const { fake, provider } = await startSettingsSession({ capacityRetryDelaysMs: [0] });
+    const retryAck = createControlledDelay();
+    fake.startTurn.mockImplementation(async () => {
+      await retryAck.wait(0);
+      return { turn: makeTurn({ id: 'retried', status: 'inProgress' }) };
+    });
+    emitCapacityFailure(fake, 'turn-1');
+    await retryAck.started;
+    fake.updateThreadSettings.mockImplementation(async () => { emitThreadSettings(fake, { effort: 'high' }); return {}; });
+    const update = provider.updateSessionSettings('thread-1', makeRequest({ thinkingMode: 'high' }));
+    await Bun.sleep(0);
+    expect(fake.updateThreadSettings).not.toHaveBeenCalled();
+    retryAck.release();
+    await update;
+    expect(fake.updateThreadSettings).toHaveBeenCalledTimes(1);
   });
 
   it('retries when the initial unmanaged turn fails before its start response resolves', async () => {
@@ -3541,7 +3651,7 @@ describe('CodexAppServerRuntime', () => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       emitCapacityFailure(fake, `turn-${attempt + 1}`);
       if (attempt < 3) {
-        await expect(retryStarts[attempt]).resolves.toEqual({ threadId: 'thread-1', input: [] });
+        await expect(retryStarts[attempt]).resolves.toEqual({ threadId: 'thread-1', input: [], serviceTierForTurn: 'default' });
       }
     }
 
@@ -4105,11 +4215,12 @@ describe('CodexAppServerRuntime', () => {
       threadId: 'thread-1',
       config: { model_provider: 'custom-openai' },
     }));
+    expect(operationClient.forkThread.mock.calls[0][0]).not.toHaveProperty('modelProvider');
     expect(operationClient.unsubscribeThread).toHaveBeenCalledWith('forked-thread');
     expect(operationClient.shutdown).toHaveBeenCalledTimes(1);
   });
 
-  it('passes the fork turn boundary to thread/fork for a point fork', async () => {
+  it.each([undefined, null, 'synthetic-provider'])('passes the fork turn boundary and saved provider to thread/fork (%j)', async (modelProvider) => {
     const nativePath = path.join(tmpDir, 'point-forked-thread.jsonl');
     const forkParams = [];
     const operationClient = new FakeClient({
@@ -4134,10 +4245,13 @@ describe('CodexAppServerRuntime', () => {
         projectPath: '/repo',
       },
       lastTurnId: 'turn-1',
+      modelProvider,
     });
 
     expect(forked).toEqual({ agentSessionId: 'point-forked-thread', nativePath });
     expect(forkParams[0]).toMatchObject({ threadId: 'thread-1', lastTurnId: 'turn-1' });
+    if (modelProvider) expect(forkParams[0]).toHaveProperty('modelProvider', modelProvider);
+    else expect(forkParams[0]).not.toHaveProperty('modelProvider');
   });
 
   it('clears thread/list native path caches when a session finishes', async () => {
@@ -5050,6 +5164,7 @@ describe('CodexAppServerRuntime', () => {
       method: 'turn/completed',
       params: { threadId: 'thread-1', turn: makeTurn({ id: 'turn-a' }) },
     });
+    fake.emit('notification', { method: 'thread/closed', params: { threadId: 'thread-1' } });
     fake.emit('notification', {
       method: 'item/completed',
       params: {

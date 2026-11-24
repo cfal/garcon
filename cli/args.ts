@@ -106,6 +106,7 @@ export const CLI_HELP = `Usage:
   garcon-cli [connection options] archive|unarchive|pin|unpin <chat-id> [--json]
   garcon-cli [connection options] rename <chat-id> <title> [--json]
   garcon-cli [connection options] set-tags <chat-id> (--tag <tag>... | --clear) [--json]
+  garcon-cli [connection options] set-parent <chat-id> (<parent-chat-id> | --clear) [--json]
   garcon-cli [connection options] add-row <chat-id> (--type <info|notice|error> | --color <light[,dark]>) [--title <title>] [--markdown] [--collapsible] [--json] <content>
   garcon-cli [connection options] status <chat-id> [--messages <count>] [--json]
   garcon-cli [connection options] chats [--filter <expression>] [--limit <count>] [--offset <count>] [--json]
@@ -212,7 +213,8 @@ Chat research:
   conversation spine; use --include tools for tool calls and results.
   Search coverage warnings are diagnostics. A truncated or partially indexed
   result cannot establish that no other matching chat exists.
-  Metadata filters include exact id:<chat-id> and direct parent:<chat-id>, plus
+  Metadata filters include exact id:<chat-id>, delegation parent:<chat-id>, and
+  lineage source:<chat-id>, plus
   created-before/after and updated-before/after. Date-only values use midnight
   UTC; timestamps require an RFC3339 timezone. updated means transcript/list
   activity, not title, tag, pin, or archive modification time.
@@ -242,7 +244,7 @@ Options:
   --run <run-id>               Exact permission request run fence
   --server-instance <id>       Exact permission request server-instance fence
   --answers <json>             Structured question answers as typed JSON rows
-  --clear                      Replace the complete tag set with no tags
+  --clear                      Clear all tags (set-tags) or the delegation parent (set-parent)
   --messages <count>           Status transcript entries, 0-${CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT} (default: ${CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT})
   --turn <turn-id>             Exact accepted turn to wait for
   --type <style>               Add-row style: info, notice, error, or custom
@@ -442,6 +444,13 @@ export interface SetTagsCliCommand extends CliConnectionOptions {
   readonly json: boolean;
 }
 
+export interface SetParentCliCommand extends CliConnectionOptions {
+  readonly kind: 'set-parent';
+  readonly chatId: ChatId;
+  readonly parentChatId: ChatId | null;
+  readonly json: boolean;
+}
+
 export interface AddRowCliCommand extends CliConnectionOptions {
   readonly kind: 'add-row';
   readonly chatId: ChatId;
@@ -536,6 +545,7 @@ export type ParsedCliCommand =
   | ChatOrderMutationCliCommand
   | RenameCliCommand
   | SetTagsCliCommand
+  | SetParentCliCommand
   | AddRowCliCommand
   | StatusCliCommand
   | WaitCliCommand
@@ -711,7 +721,8 @@ type ControlCommandKind =
   | 'permission-answer'
   | ChatOrderMutationKind
   | 'rename'
-  | 'set-tags';
+  | 'set-tags'
+  | 'set-parent';
 
 const CONNECTION_OPTION_KEYS = ['config-dir', 'runtime', 'server'] as const;
 
@@ -747,6 +758,7 @@ const TRANSCRIPT_SEARCH_OPTIONS = optionSet('json');
 const CHAT_ORDER_MUTATION_OPTIONS = optionSet('json');
 const RENAME_OPTIONS = optionSet('json');
 const SET_TAGS_OPTIONS = optionSet('tag', 'clear', 'json');
+const SET_PARENT_OPTIONS = optionSet('clear', 'json');
 const ADD_ROW_OPTIONS = optionSet('title', 'type', 'color', 'markdown', 'collapsible', 'json');
 const WAIT_OPTIONS = optionSet('turn', 'json');
 const STATUS_OPTIONS = optionSet('messages', 'json');
@@ -1044,6 +1056,25 @@ function parseRename(
     ...connection,
     chatId: parseControlChatId(parsed.positionals[1]!, 'rename'),
     title,
+    json: values.json === true,
+  };
+}
+
+function parseSetParent(
+  parsed: ReturnType<typeof parseArgs>,
+  values: Record<string, ParsedOptionValue>,
+  connection: CliConnectionOptions,
+): SetParentCliCommand {
+  rejectOptionsExcept(values, SET_PARENT_OPTIONS, 'set-parent');
+  const clear = values.clear === true;
+  if (parsed.positionals.length !== (clear ? 2 : 3)) {
+    throw argumentError('set-parent requires a chat ID and either a parent chat ID or --clear');
+  }
+  return {
+    kind: 'set-parent',
+    ...connection,
+    chatId: parseControlChatId(parsed.positionals[1]!, 'set-parent'),
+    parentChatId: clear ? null : parseControlChatId(parsed.positionals[2]!, 'set-parent'),
     json: values.json === true,
   };
 }
@@ -1667,6 +1698,7 @@ export function parseCliArgs(
   }
   if (commandName === 'rename') return parseRename(parsed, values, connection);
   if (commandName === 'set-tags') return parseSetTags(parsed, values, connection);
+  if (commandName === 'set-parent') return parseSetParent(parsed, values, connection);
   if (commandName === 'add-row') return parseAddRow(parsed, values, connection);
   if (commandName === 'wait') return parseWait(parsed, values, connection);
   if (commandName === 'status') return parseStatus(parsed, values, connection);

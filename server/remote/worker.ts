@@ -16,6 +16,8 @@ import { acquireWorkspaceLease } from '../common/workspace-lease.js';
 import { loadListenerSecret } from './listener-secret.js';
 import { monitorEventLoopStalls } from '../common/event-loop-stalls.js';
 import { reportSlowSteps } from '@garcon/server-agent-common/shared/event-loop';
+import { installUnhandledRejectionPolicy } from '../common/unhandled-rejection-policy.js';
+import { createLogger } from '../common/log.js';
 
 export interface ExecutorWorkerOptions {
   readonly configDir: string;
@@ -83,6 +85,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     } finally { stopped.resolve(); }
   })();
   const onSignal = () => { void stop().catch((error: unknown) => { console.error('Executor cleanup failed:', error); }); };
+  const stopRejectionPolicy = installUnhandledRejectionPolicy(createLogger('executor'));
   try {
     gateway = await startCliGateway({ dataDir, currentConnection: () => currentConnection }).catch((error: unknown) => {
       console.warn(JSON.stringify({ type: 'executor-cli-unavailable',
@@ -99,7 +102,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
       if (shouldLogLinkFailure(failure)) console.warn(JSON.stringify({ type: 'executor-unavailable', ...failure }));
     });
     link.onSession((transport) => {
-      void serving?.dispose();
+      void serving?.dispose().catch((error: unknown) => { console.error('Executor session cleanup failed:', error); });
       if (runtime && transport.executorId !== runtime.id) {
         const rpc = new ExecutorRpc(transport);
         currentConnection = null;
@@ -150,6 +153,6 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   } finally {
     process.off('SIGTERM', onSignal);
     process.off('SIGINT', onSignal);
-    await stop();
+    try { await stop(); } finally { stopRejectionPolicy(); }
   }
 }

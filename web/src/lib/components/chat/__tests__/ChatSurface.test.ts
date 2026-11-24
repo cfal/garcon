@@ -7,6 +7,7 @@ import * as m from '$lib/paraglide/messages.js';
 import ChatSurface from '../ChatSurface.svelte';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import type { WorkspaceChatActions } from '$lib/context';
 
 const { sessions, executors, workspace } = vi.hoisted(() => ({
 	executors: {
@@ -52,7 +53,8 @@ vi.mock('$lib/components/chat/ConversationWorkspace.svelte', async () => ({
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Chat',
@@ -69,6 +71,7 @@ function chat(): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,
@@ -123,6 +126,17 @@ function props(
 }
 
 describe('ChatSurface mobile toolbar', () => {
+	it('opens parent editing for the mobile toolbar chat without native reload support', async () => {
+		sessions.selectedChat = { ...chat(), status: 'running' };
+		const chatActions = {
+			requestParent: vi.fn(), requestDelete: vi.fn(), requestRename: vi.fn(), requestDetails: vi.fn(),
+			requestShare: vi.fn(), requestProjectPath: vi.fn(), configurePreambles: vi.fn(), fork: vi.fn(), reload: vi.fn(),
+		} satisfies WorkspaceChatActions;
+		render(ChatSurface, { ...props(new SubagentToolbarState()), chatActions });
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_parent_title() }));
+		expect(chatActions.requestParent).toHaveBeenCalledWith(sessions.selectedChat);
+	});
 	afterEach(() => {
 		cleanup();
 		sessions.selectedChat = null;

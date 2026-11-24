@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest';
 import ChatSummary from '../ChatSummary.svelte';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 
+const currentTime = new Date('2026-09-07T12:00:00.000Z');
+
 function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id: 'chat-summary',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Polished board card',
@@ -23,6 +26,7 @@ function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 		isArchived: false,
 		isProcessing: true,
 		processingPhase: 'running',
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: true,
 		status: 'running',
@@ -34,15 +38,89 @@ function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 
 describe('ChatSummary', () => {
 	it.each(['single-line', 'compact', 'detailed'] as const)(
-		'builds the %s sidebar layout on the same title and optional path line',
+		'keeps the title first and shows only the applicable trailing metadata in %s rows',
 		async (chatItemLayout) => {
 			const view = render(ChatSummary, {
-				session: chat({ isProcessing: false }),
+				session: chat(),
+				variant: 'sidebar',
+				chatItemLayout,
+				showTimestamp: true,
+				currentTime,
+			});
+			const title = screen.getByText('Polished board card');
+			const header = title.parentElement!;
+			for (const { activityStatus, isProcessing, expectedMetadata } of [
+				{ activityStatus: null, isProcessing: false, expectedMetadata: ['1h ago'] },
+				{ activityStatus: 'working', isProcessing: true, expectedMetadata: ['Chat is processing'] },
+				{
+					activityStatus: 'pending-user-action',
+					isProcessing: true,
+					expectedMetadata: ['Pending user action'],
+				},
+				{
+					activityStatus: 'error',
+					isProcessing: false,
+					expectedMetadata: ['1h ago', 'Chat error'],
+				},
+				{ activityStatus: 'complete', isProcessing: false, expectedMetadata: ['1h ago'] },
+			] as const) {
+				await view.rerender({ session: chat({ activityStatus, isProcessing }) });
+				expect(header.firstElementChild).toBe(title);
+				const trailing = header.lastElementChild!;
+				expect(trailing.classList.contains('ml-auto')).toBe(true);
+				const metadata = Array.from(trailing.children, (item) => item.textContent?.trim());
+				expect(metadata).toEqual(expectedMetadata);
+			}
+		},
+	);
+
+	it('keeps a completed title bold until read without changing its timestamp', async () => {
+		const session = chat({ activityStatus: 'complete', isProcessing: false });
+		const view = render(ChatSummary, {
+			session,
+			variant: 'sidebar',
+			showTimestamp: true,
+			currentTime,
+		});
+		const title = screen.getByText('Polished board card');
+		expect(title.classList.contains('font-bold')).toBe(true);
+		expect(screen.getByText('Unread')).toBeTruthy();
+		await view.rerender({ session: { ...session, isUnread: false } });
+		expect(title.classList.contains('font-bold')).toBe(false);
+		expect(screen.queryByText('Unread')).toBeNull();
+		expect(screen.getByText('1h ago')).toBeTruthy();
+	});
+
+	it('uses processing authority and never reserves space for a stale or absent status', async () => {
+		const view = render(ChatSummary, {
+			session: chat({ activityStatus: 'error', isUnread: false }),
+			variant: 'sidebar',
+		});
+		const title = screen.getByText('Polished board card');
+		const header = title.parentElement!;
+		expect(header.querySelector('[data-status="working"]')).toBeTruthy();
+		expect(screen.queryByText('Chat error')).toBeNull();
+		for (const activityStatus of ['working', 'pending-user-action', 'complete', null] as const) {
+			await view.rerender({
+				session: chat({ activityStatus, isProcessing: false, isUnread: false }),
+			});
+			expect(Array.from(header.children)).toEqual([title]);
+		}
+		await view.rerender({ session: chat({ activityStatus: 'error', isProcessing: false }) });
+		expect(screen.getByText('Chat error')).toBeTruthy();
+	});
+
+	it.each(['single-line', 'compact', 'detailed'] as const)(
+		'builds the %s sidebar layout on the same title and optional path line',
+		async (chatItemLayout) => {
+			const session = chat({ isProcessing: false });
+			const view = render(ChatSummary, {
+				session,
 				variant: 'sidebar',
 				chatItemLayout,
 				showTimestamp: true,
 				showProjectPath: false,
-				currentTime: new Date('2026-09-07T12:00:00.000Z'),
+				currentTime,
 			});
 			const summary = view.container.querySelector('[data-slot="sidebar-chat-summary"]')!;
 			expect(summary.className).toContain('flex-col gap-1');
@@ -62,10 +140,9 @@ describe('ChatSummary', () => {
 			if (chatItemLayout === 'detailed') {
 				expect(summary.lastElementChild?.getAttribute('data-slot')).toBe('chat-preview');
 			}
-			await view.rerender({ session: chat({ projectPath: '   ' }) });
+			await view.rerender({ session: { ...session, projectPath: '   ' } });
 			expect(summary.querySelector('[data-slot="chat-project-path"]')).toBeNull();
-			expect(summary.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeNull();
-			expect(header.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+			expect(header.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();
 		},
 	);
 
@@ -75,13 +152,15 @@ describe('ChatSummary', () => {
 			variant: 'board',
 			chatItemLayout: 'detailed',
 			showTimestamp: true,
-			currentTime: new Date('2026-09-07T12:00:00.000Z'),
+			currentTime,
 		});
 
 		const summary = document.querySelector('[data-slot="chat-summary"]');
+		expect(summary?.querySelector('[data-slot="chat-activity-indicator"]')).toBeNull();
 		expect(summary?.getAttribute('data-layout')).toBe('detailed');
 		expect(screen.getByText(/A longer preview/).className).toContain('line-clamp-2');
 		expect(screen.getByText('sonnet')).toBeTruthy();
+		expect(screen.getByText('1h ago')).toBeTruthy();
 		expect(screen.getByText('Chat is processing')).toBeTruthy();
 		expect(document.querySelector('[data-slot="chat-board-processing-indicator"]')).toBeTruthy();
 	});

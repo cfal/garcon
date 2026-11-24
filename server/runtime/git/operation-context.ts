@@ -3,6 +3,7 @@ import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import { GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import { resolveRealWithinBase } from '../../common/path-boundary.js';
+import { GitDomainError } from './git-domain-error.js';
 import type { GitCommandOptions } from './types.js';
 
 interface GitOperation {
@@ -29,6 +30,7 @@ export async function withGitOperation<T>(root: string, options: (ExecutorCallOp
       signal.throwIfAborted();
       try { return await operation(signal); }
       catch (error) {
+        if (error instanceof GitDomainError && error.code === 'MUTATION_OUTCOME_UNKNOWN') throw error;
         if (options?.mutation && current.mutationDispatched && (signal.aborted || isGitCancellation(error))) {
           throw new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation was interrupted after dispatch. Inspect the repository before trying again.');
         }
@@ -53,6 +55,8 @@ export function markGitMutationDispatched(): void {
   const current = operations.getStore();
   if (current) current.mutationDispatched = true;
 }
+
+export function gitMutationDispatched(): boolean { return operations.getStore()?.mutationDispatched === true; }
 
 // Parallel native commands must settle before their repository lock can be released.
 export async function settleGitProcesses(): Promise<void> {

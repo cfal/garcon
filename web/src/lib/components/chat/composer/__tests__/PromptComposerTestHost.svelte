@@ -290,7 +290,8 @@
 	const selectedChat = $derived<ChatSessionRecord>({
 		executorId: selectedExecutorId,
 		id: selectedChatId,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath,
 		orderGroup: 'normal',
 		title: selectedChatId,
@@ -307,6 +308,7 @@
 		isProcessing: selectedIsProcessing,
 		processingPhase: selectedIsProcessing ? 'running' : null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: selectedStatus,
 		agentOwnershipEpoch: selectedStatus === 'draft' ? null : 'epoch-1',

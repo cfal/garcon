@@ -103,6 +103,7 @@ Executor-side validation covers more than the initial directory:
 
 - Constrain the canonical project and resolved worktree root to the executor's project base. A project inside an allowed subdirectory does not authorize an ancestor repository outside that base.
 - Validate explicit worktree destinations and removal targets, including the closest existing ancestor of a not-yet-created path. Recheck at mutation dispatch, not only during the picker request.
+- Under the repository lock, reject registered or occupied destinations before `git worktree add`: Git can create a branch before reporting a path conflict. A missing worktree remains registered under the repository's `core.ignoreCase` rule. An unregistered destination may be absent or an empty directory. This preflight does not protect against external writers or undo Git side effects.
 - Never traverse or return selectable sibling worktrees outside the allowed base. Validate candidates before filesystem enrichment; omit outside-base candidates rather than statting them through the controller or treating Git output as permission.
 - File-content reads and direct file writes must enforce the selected root's containment and symlink policy. Checking `projectPath` alone does not authorize reading an arbitrary symlink target.
 - Git administrative paths may legitimately live outside a linked worktree. Resolve them from Git's validated repository layout, not caller-supplied `.git` paths. They are trusted repository implementation data, not an arbitrary file-read API. Do not claim this prevents hooks/configuration or the executor OS user from accessing other paths.
@@ -130,7 +131,25 @@ Keep domain operations rather than exposing `git(args)` or serializing arbitrary
 
 `initialCommit` preserves today's operation on an already initialized repository; this is not a new `git init` or clone workflow. `push` preserves its current remote/branch restrictions and does not acquire force-push or upstream-setting behavior. PR operations are read-only except the two comment writes, which the controller alone calls when it posts a review; the browser has no route to them.
 
-Illustrative calls:
+### Workbench Push
+
+Push reads the attached local branch from symbolic HEAD, not a display label. When the caller supplies `remoteBranch`, the executor rejects a mismatch before dispatch. An unborn branch or a name that cannot round-trip through UTF-8 is not pushed. Full status shows the unborn branch name with `hasCommits: false`; remote status returns `GIT_INVALID_INPUT` until that branch has a commit. For a tracking branch, the counts and remote name come from Git's configured upstream; the abbreviation is for display only.
+
+Upgrade the controller and remote workers together. The [executor handshake](./transport.md) rejects older workers: their push replies have the same shape but do not confirm which branch was updated.
+
+The refspec uses the full branch ref on both sides and negative refspecs (Git 2.29+) to exclude writable namespace aliases. Git can still reject an ambiguous source (such as a tag named `refs/heads/release`) or two competing destinations (such as `refs/heads/release` and `refs/refs/heads/release`). Workbench does not retry with a shorter name.
+
+Push has three outcomes:
+
+- **Not dispatched:** request, repository, branch, admission, or process-start validation fails before the push process starts. Return the specific error.
+- **Confirmed:** Git exits zero, porcelain stdout is complete and untruncated, and every reported destination confirms the exact branch pair as created, fast-forwarded, or already up to date. There must be at least one report. Confirmation describes what Git reported, not an atomic update across remotes.
+- **Not confirmed:** every other outcome after dispatch returns HTTP 503 / `GIT_MUTATION_OUTCOME_UNKNOWN`. The message says to inspect the remote before pushing again. It can also report an interruption, truncated stdout, or a recognized rejection such as `non-fast-forward` from a complete report. It never quotes free-form output from Git, hooks, or receivers. A single rejection does not become an aggregate HTTP 409. A lost executor reply also requires inspection; the push is not automatically repeated.
+
+A report starts with Git's `To` header on its own line and ends with a newline-terminated `Done` line. A bare `Done`, an unframed row, or hook output mixed into the header or ending in `Done` can leave an update unconfirmed. Hook logs written to stderr do not interfere with the report. A receiver can apply the update and then disconnect. Errors do not roll back other refs or earlier push URLs; tag-following and submodule recursion remain Git configuration.
+
+Confirmation identifies the advertised remote ref. If the receiving repository makes that branch a symbolic ref to a tag or another branch, Git can update its referent and still report the requested name. Enforcing direct branch refs is a receive-side policy; a client lookup before pushing is not atomic with the update.
+
+### Example Calls
 
 ```text
 git.getWorkbenchSnapshot({ projectPath, mode, context, selectedFile }, callOptions)
@@ -230,7 +249,7 @@ Bound admission before queueing, check cancellation while waiting, and revalidat
 | --- | --- |
 | Invalid target, unavailable executor, unsupported service, or rejected admission before dispatch | Typed rejection; no controller-local fallback or queued retry. |
 | Confirmed mutation result | Return the exact result; invalidate views for the captured executor/repository. Preserve warnings such as `indexSynchronized: false`. |
-| Git exits with an error after starting | Preserve the operation-specific error and refresh state. Pull/stash/conflict/multi-step failures can leave real changes; failure does not mean unchanged. |
+| Git exits with an error after starting | [Workbench Push](#workbench-push) returns `GIT_MUTATION_OUTCOME_UNKNOWN`, even for a reported rejection. Other operations retain their specific errors. Refresh state; failure does not mean unchanged. |
 | Connection/deadline lost after possible dispatch, or mutation reply cannot be validated | Return an explicit `GIT_MUTATION_OUTCOME_UNKNOWN`-class error. Keep drafts, invalidate captured repository views, and require inspection before another deliberate mutation. |
 | Connection loss | The RPC fails; a mutation may have applied. Refresh before an explicit retry. There is no transport replay. |
 | Fresh session or worker/controller restart | Reads may be requested again from a fresh snapshot. Never replay Git mutations from disk or browser recovery. |
@@ -298,7 +317,7 @@ Acceptance includes independent views on different executors, chat switching aft
 - [Review drafts](../../web/src/lib/git/review/git-review-drafts.svelte.ts) and commit text remain browser-owned. Preserve current context-change protection; don't combine comments or selections from two executors. Global presentation preferences such as tree width and branch sort can remain global.
 - Replace Local-only Git gates in workspace context, portable surfaces, chat quick actions, New Chat, and sidebar worktree controls with executor readiness plus Git capability. `gh` actions additionally use the selected executor's gh status. Files and Terminal capabilities remain independent.
 - Git file links carry the owning executor/root into the already executor-qualified Files interface. A review from a remote executor must never open a controller-local same-path file.
-- Worktree creation/listing captures the draft/dialog executor and directory. Recheck before installing the returned path. A successfully created worktree remains on its original executor if selection changes before the reply; discard stale UI publication, not the newly created worktree through an automatic destructive compensation.
+- Worktree pickers share a screen-owned [picker session](../../web/src/lib/git/targets/worktree-picker-session.svelte.ts). Catalog reads belong to the current visit and serving instance. Check the reply's `instanceId`: the executor snapshot can lag behind HTTP. A dispatched create belongs to its captured executor and exact project path until it settles; closing or reconnecting never retries it. Only the original visit on the same serving instance auto-selects the created path. Otherwise, report the result for its original target and refresh the catalog if this screen still shows that target.
 - Show executor context in target selectors and unavailable/error states. Current branch/worktree labels alone do not identify a host. Do not add a redundant host picker to every Git button; actions use their surface's captured target.
 - Keep the existing visible-demand/freshness-polling lifecycle. On reconnect refresh affected visible surfaces even if browser `/ws` never disconnected. Do not poll offline executors, remount heavy review components, or discard unrelated Local state.
 

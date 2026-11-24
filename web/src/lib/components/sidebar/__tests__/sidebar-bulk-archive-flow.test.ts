@@ -4,6 +4,7 @@ import * as chatsApi from '$lib/api/chats';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import type { ChatListEntry } from '$shared/chat-list';
 import SidebarHost from './SidebarHost.svelte';
+import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte';
 
 vi.mock('$lib/api/chats', async () => {
 	const actual = await vi.importActual<typeof import('$lib/api/chats')>('$lib/api/chats');
@@ -33,9 +34,11 @@ function makeServerChat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		tags: [],
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentOwnershipEpoch: 'epoch-1',
 	};
 }
@@ -57,6 +60,60 @@ afterEach(() => {
 });
 
 describe('sidebar bulk archive flow', () => {
+	it('navigates to a context parent without including it in a filtered bulk archive', async () => {
+		const entries = [
+			makeServerChat('parent'),
+			{
+				...makeServerChat('child'),
+				parentChatId: 'parent',
+				lineage: null,
+			},
+		];
+		const chatSessions = new ChatSessionsStore({
+			setChatArchived: chatsApi.setChatArchived,
+			listChats: async () => ({ sessions: entries, total: 2, lastSelectedChatId: 'parent' }),
+		});
+		await chatSessions.refreshChats();
+		vi.mocked(chatsApi.setChatArchived).mockResolvedValue({
+			success: true,
+			chatId: 'child',
+			isArchived: true,
+			isPinned: false,
+			orderGroup: 'archived',
+			changed: true,
+		});
+		const sidebarSearch = createSidebarSearchStore({
+			getTranscriptSearchEnabled: () => false,
+			getSearchResultSort: () => 'relevance',
+			getChats: () => chatSessions.orderedChats,
+			getSelectedChatId: () => 'child',
+			notifyError: vi.fn(),
+		});
+		sidebarSearch.activeQuery = 'child';
+		const onChatSelect = vi.fn();
+		const onNewChat = vi.fn();
+		const { container } = render(SidebarHost, {
+			chatSessions,
+			sidebarSearch,
+			selectedChatId: 'child',
+			autoLoadSavedSearches: false,
+			sidebarNestDelegatedChats: true,
+			sidebarGroupingFields: [],
+			onChatSelect,
+			onNewChat,
+		});
+		const child = container.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
+		await fireEvent.click(within(child).getByRole('button', { name: 'Chat actions' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Archive' }));
+		await waitFor(() => expect(onChatSelect).toHaveBeenCalledWith('parent'));
+		expect(onNewChat).not.toHaveBeenCalled();
+		expect(chatsApi.setChatArchived).toHaveBeenCalledExactlyOnceWith({
+			chatId: 'child',
+			isArchived: true,
+		});
+	});
+
 	it('moves selected chats ahead of archived rows before the requests complete', async () => {
 		const archive = deferred<Awaited<ReturnType<typeof chatsApi.setChatArchived>>>();
 		vi.mocked(chatsApi.setChatArchived).mockReturnValueOnce(archive.promise);
@@ -74,12 +131,19 @@ describe('sidebar bulk archive flow', () => {
 			setChatArchived: chatsApi.setChatArchived,
 			listChats,
 		});
-		chatSessions.upsertFromServer([
+		const initialEntries = [
 			makeServerChat('selected', false, '2026-02-01T00:00:00.000Z'),
 			makeServerChat('manual-order-neighbor', false, '2026-03-01T00:00:00.000Z'),
 			makeServerChat('recent-order-neighbor', false, '2026-01-01T00:00:00.000Z'),
 			makeServerChat('archived', true, '2026-03-01T00:00:00.000Z'),
-		]);
+		];
+		listChats.mockResolvedValueOnce({
+			sessions: initialEntries,
+			total: initialEntries.length,
+			lastSelectedChatId: 'selected',
+		});
+		await chatSessions.refreshChats();
+		listChats.mockClear();
 		const onChatSelect = vi.fn();
 		const { container } = render(SidebarHost, {
 			chatSessions,
@@ -109,7 +173,14 @@ describe('sidebar bulk archive flow', () => {
 		expect(screen.getByRole('button', { name: 'Unarchive' }).hasAttribute('disabled')).toBe(true);
 		expect(chatsApi.setChatArchived).toHaveBeenCalledOnce();
 
-		archive.resolve({ success: true, chatId: 'selected', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
+		archive.resolve({
+			success: true,
+			chatId: 'selected',
+			isArchived: true,
+			isPinned: false,
+			orderGroup: 'archived',
+			changed: true,
+		});
 		await waitFor(() => expect(listChats).toHaveBeenCalledOnce());
 		expect(onChatSelect).toHaveBeenCalledOnce();
 		expect(chatSessions.isArchiveMutationPending('selected')).toBe(false);

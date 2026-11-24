@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { resolveCodexCli } from '../cli.js';
-import { resolveCodexCliCommand, runSingleQuery } from '../run-single-query.js';
+import { runSingleQuery } from '../run-single-query.js';
 
 const originalSpawn = Bun.spawn;
 const originalCodexCli = process.env.GARCON_CODEX_CLI;
@@ -45,13 +45,14 @@ describe('Codex runSingleQuery', () => {
   });
 
   it('passes custom provider config and API key env to codex exec', async () => {
-    const expectedCodexCommand = await resolveCodexCliCommand();
+    const expectedCodexCommand = resolveCodexCli().command;
 
     await runSingleQuery('hello', {
       model: 'acme-code',
       codexConfig: {
         modelCatalogPath: '/opt/garcon/codex-models.json',
         config: {
+          service_tier: 'ultrafast',
           model_provider: 'garcon_acme_openai',
           model_providers: {
             garcon_acme_openai: {
@@ -72,7 +73,8 @@ describe('Codex runSingleQuery', () => {
 
     const [command, options] = spawnMock.mock.calls[0];
     expect(command[0]).toBe(expectedCodexCommand);
-    expect(command).toContain('--config');
+    expect(command).toContain('service_tier="ultrafast"');
+    expect(command.slice(-3)).toEqual(['--config', 'service_tier="default"', '-']);
     expect(command).toContain('model_catalog_json="/opt/garcon/codex-models.json"');
     expect(command).toContain('model_provider="garcon_acme_openai"');
     expect(Bun.TOML.parse(command.find((arg) => arg.startsWith('model_providers=')))).toEqual({
@@ -113,26 +115,7 @@ describe('Codex runSingleQuery', () => {
   it('honors an explicit codex CLI override', async () => {
     process.env.GARCON_CODEX_CLI = '/custom/codex';
 
-    expect(await resolveCodexCliCommand()).toBe('/custom/codex');
-  });
-
-  it('prefers the bundled codex CLI before PATH fallback', async () => {
-    await expect(resolveCodexCli({
-      env: {},
-      bundledCommand: '/repo/server/node_modules/.bin/codex',
-      isExecutable: async () => true,
-    })).resolves.toEqual({
-      command: '/repo/server/node_modules/.bin/codex',
-      source: 'bundled',
-    });
-
-    await expect(resolveCodexCli({
-      env: {},
-      bundledCommand: '/repo/server/node_modules/.bin/codex',
-      isExecutable: async () => false,
-    })).resolves.toEqual({
-      command: 'codex',
-      source: 'path',
-    });
+    await runSingleQuery('hello', { projectPath: '/workspace' });
+    expect(spawnMock.mock.calls[0][0][0]).toBe('/custom/codex');
   });
 });

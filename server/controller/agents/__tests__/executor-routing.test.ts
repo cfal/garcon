@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentProducerBinding } from '@garcon/server-agent-interface';
+import type { AgentExecutionAdmission, AgentProducerBinding } from '@garcon/server-agent-interface';
 import { effectiveExecutorId } from '../../../../common/executors.js';
 import { AssistantMessage, BashToolUseMessage } from '../../../../common/chat-types.js';
 import { ChatRegistry } from '../../chats/store.js';
@@ -17,6 +17,9 @@ import { IntegrationRegistry } from '../../../runtime/agents/integration-registr
 import { AgentEventBus } from '../event-bus.js';
 import { AgentRuntimeRouter } from '../runtime-router.js';
 import { DomainError } from '../../../common/domain-error.js';
+import { interactiveDeadline } from '../../../common/interactive-deadline.js';
+import { KeyedPromiseLock } from '../../../common/keyed-lock.js';
+import { AgentSessionSettingsService } from '../session-settings-service.js';
 
 const FIRST = '22222222-2222-4222-8222-222222222222';
 const SECOND = '33333333-3333-4333-8333-333333333333';
@@ -25,7 +28,7 @@ const CHAT_IDS = ['1783725900000400', '1783725900000401', '1783725900000402'];
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture(chatExecutors: readonly string[] = IDS) {
+async function fixture(chatExecutors: readonly string[] = IDS, mentionGate?: () => Promise<void>) {
   const root = await mkdtemp(join(homedir(), 'garcon-executor-routing-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const chats = new ChatRegistry(root);
@@ -43,7 +46,7 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     knownIntegration: ({ executorId, agentId }) => registries.get(executorId)?.get(agentId) ?? null,
     requireIntegration({ executorId, agentId }) { return this.integrationsFor(executorId).require(agentId); },
   } satisfies ExecutionIntegrationDirectory;
-  const directory = new AgentDirectory(registries.get('local')!, executors);
+  const directory = new AgentDirectory(executors);
   const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(join(root, 'ledger')), { serverInstanceId: 'synthetic-server' });
   cleanups.push(async () => { ledger.close(); });
   const adoption = new TranscriptAdoptionService({
@@ -52,7 +55,8 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
   for (const [index, executorId] of chatExecutors.entries()) {
     chats.addChat({
       id: CHAT_IDS[index]!, executorId, agentId: 'test', model: 'synthetic-model', projectPath: root,
-      parentChat: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
+      parentChatId: null,
+      lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
     });
     ledger.initializeChat(CHAT_IDS[index]!);
   }
@@ -62,10 +66,61 @@ async function fixture(chatExecutors: readonly string[] = IDS) {
     endpointResolver: new ApiProviderEndpointResolver(() => [], () => []),
     getCarryOverRevision: () => '', createCarriedContext: async () => ({ kind: 'no-history' }),
     hasPendingOwnershipTransfer: () => false,
-    async resolveFileMentions(prompt, _projectPath, executorId) { mentions.push(effectiveExecutorId(executorId)); return prompt; },
+    async resolveFileMentions(prompt, _projectPath, executorId) {
+      mentions.push(effectiveExecutorId(executorId));
+      await mentionGate?.();
+      return prompt;
+    },
   });
   return { root, chats, providers, directory, ledger, router, mentions, ready, registries };
 }
+
+test.each(['default', 'bypassPermissions'] as const)('a permission reset from saved %s waits for provider admission', async savedMode => {
+  const preparing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const f = await fixture([FIRST], () => { preparing.resolve(); return release.promise; });
+  const chatId = CHAT_IDS[0]!;
+  const provider = f.providers.find(p => p.scope.executorId === FIRST)!;
+  const providerAdmission = Promise.withResolvers<AgentExecutionAdmission>();
+  provider.hooks.resume = async request => { providerAdmission.resolve(request.admission); };
+  const apply = mock(async () => {});
+  f.registries.set(FIRST, new IntegrationRegistry({ instances: [{
+    ...provider.integration,
+    descriptor: { ...provider.integration.descriptor, supportedPermissionModes: ['default', 'bypassPermissions'] },
+    sessionConfiguration: { apply },
+  }] }));
+  await f.chats.updateChat(chatId, { agentSessionId: 'bound-session', permissionMode: savedMode });
+  f.router.publishSessionFact(chatId, { agentSessionId: 'bound-session', nativeSession: null, nativeSeedReceipt: null });
+  const unused = () => { throw new Error('Unexpected queue operation'); };
+  const settings = new AgentSessionSettingsService({
+    registry: f.chats, directory: f.directory, endpointResolver: new ApiProviderEndpointResolver(() => [], () => []),
+    chatMutationLock: new KeyedPromiseLock(), selectionAdmissionLock: new KeyedPromiseLock(),
+    hasAdmittedProviderTurn: id => f.router.hasAdmittedProviderTurn(id),
+    execution: { ownsExecution: id => id === chatId, reserveTranscriptSnapshot: unused, releaseTranscriptSnapshot: unused,
+      readChatExecutionControl: unused, withChatExecutionControl: unused },
+  });
+  const downgrade = () => settings.updateSessionSettings(chatId, { permissionMode: 'default' });
+  const expectBusy = async () => {
+    await expect(downgrade()).rejects.toMatchObject({ code: 'SESSION_BUSY', status: 409, retryable: true });
+    expect(apply).not.toHaveBeenCalled();
+    expect(f.chats.getChat(chatId)?.permissionMode).toBe(savedMode);
+  };
+  const turn = f.router.runAgentTurn(chatId, 'Synthetic input', { permissionMode: 'bypassPermissions' });
+  try {
+    await preparing.promise;
+    await expectBusy();
+  } finally {
+    release.resolve();
+    await turn;
+  }
+  expect(provider.calls.resume).toBe(1);
+  await expectBusy();
+  const admission = await providerAdmission.promise;
+  await admission.markStarted();
+  await downgrade();
+  expect(apply).toHaveBeenCalledTimes(1);
+  expect(f.chats.getChat(chatId)?.permissionMode).toBe('default');
+});
 
 test('same-agent execution, expansion, Stop, and one-shot queries resolve the selected executor', async () => {
   const f = await fixture();
@@ -119,7 +174,7 @@ test('an offline known integration without native forking needs only retained co
     sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
   })).toBeNull();
   f.registries.set(FIRST, new IntegrationRegistry({ instances: [{ ...f.providers[1]!.integration,
-    forking: { fork: mock(async () => ({ kind: 'unmaterialized' })), discard: mock(async () => undefined) },
+    forking: { fork: mock(async () => ({ kind: 'unmaterialized' as const })), discard: mock(async () => undefined) },
   }] }));
   await expect(f.router.forkAgentSession({ sourceSession: f.chats.getChat(CHAT_IDS[1]!)!,
     sourceChatId: CHAT_IDS[1]!, targetChatId: '1783725900000403', signal: new AbortController().signal,
@@ -204,11 +259,11 @@ test('a permission reply remains actionable while its executor is reconnecting',
     runId, permissionOccurrenceId: occurrence,
   };
   f.ready.delete(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control))
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, interactiveDeadline()))
     .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
   expect(respond).not.toHaveBeenCalled();
   f.ready.add(FIRST);
-  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control)).resolves.toBeUndefined();
+  await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control, interactiveDeadline())).resolves.toBeUndefined();
   expect(respond).toHaveBeenCalledTimes(1);
   expect(f.ledger.currentRows(chatId).filter(row => row.kind === 'permission-resolved')).toHaveLength(1);
 });

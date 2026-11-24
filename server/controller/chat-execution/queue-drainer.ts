@@ -32,6 +32,7 @@ export interface QueueDispatchCallbacks {
   publishIdle(chatId: string): void;
   publishProjectUnavailable(chatId: string, error: ProjectUnavailableError): void;
   publishTurnFailed(chatId: string, message: string, options: RunAgentTurnOptions): void;
+  publishTurnStarted(chatId: string, runId: string): void;
   retireAttempt(chatId: string, attempt: QueueExecutionAttempt): void;
 }
 
@@ -138,6 +139,7 @@ export class QueueDrainer {
           () => controls.dequeueNextTurn(chatId, (input) => {
             if (this.#shouldHalt(chatId)) throw halted;
             options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
+            callbacks.publishTurnStarted(chatId, options.turnId!);
             if (input.kind === 'control') {
               if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
                 logger.debug('queue: discarded stale control input', {
@@ -145,11 +147,11 @@ export class QueueDrainer {
                   entryId: input.entry.id,
                   transcriptViewId: input.entry.transcriptViewId,
                 });
-                return false;
+                return 'discarded';
               }
               callbacks.appendControlReceipt(chatId, input.entry);
               inputInserted = true;
-              return true;
+              return 'inserted';
             }
             // The selection may have changed since enqueue. Throwing aborts the
             // dequeue uncommitted, so the entry and its attachments stay queued.
@@ -163,9 +165,9 @@ export class QueueDrainer {
             } catch (error) {
               if (!isRecoverablePreambleAdmissionError(error)) throw error;
               admission.failure = error;
-              return false;
+              return 'discarded';
             }
-            return inputInserted;
+            return inputInserted ? 'inserted' : 'already-committed';
           }),
         );
       } catch (error) {

@@ -1,6 +1,6 @@
 {
   "name": "garcon",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "A cross-platform agentic coding UI for Claude Code, Codex, and Opencode",
   "type": "module",
   "main": "server/main.ts",
@@ -31,6 +31,7 @@
   },
   "scripts": {
     "setup": "bun scripts/setup.js",
+    "setup:integration": "bun install --cwd integration-tests --frozen-lockfile",
     "setup:tunnel": "bun scripts/setup-tunnel.js",
     "build": "bun scripts/build-web.js",
     "build-exe:compile": "bun scripts/build-exe.js",
@@ -57,15 +58,18 @@
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",
     "test:integration:chromium": "bun run --cwd integration-tests test:chromium",
     "test:integration:webkit": "bun run --cwd integration-tests test:webkit",
+    "test:bombadil": "bun run --cwd integration-tests test:bombadil",
     "test:search-gate": "bun run --cwd integration-tests test:search-gate",
     "test:search-endurance": "bun run --cwd integration-tests test:search-endurance",
     "test:live": "bun run --cwd integration-tests test:live",
     "test:live:claude": "bun run --cwd integration-tests test:live:claude",
     "test:live:codex": "bun run --cwd integration-tests test:live:codex",
     "test:live:opencode": "bun run --cwd integration-tests test:live:opencode",
-    "lint": "bun run --cwd web lint",
+    "lint:runtime": "eslint server/remote server-agents --no-warn-ignored --max-warnings=0",
+    "lint": "bun run lint:runtime && bun run --cwd web lint",
     "check": "bun run lint && bun run typecheck",
-    "typecheck:server": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck",
+    "typecheck:tests": "bun scripts/test-debt-gate.ts && bunx tsc -p tsconfig.tests.json",
+    "typecheck:server": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck && bun run typecheck:tests",
     "typecheck": "bun run typecheck:server && bun run --cwd cli typecheck && bun run --cwd web check && bun run --cwd integration-tests typecheck",
     "help": "bun run server --help"
   },
@@ -96,6 +100,8 @@
   },
   "devDependencies": {
     "@xyflow/system": "0.0.83",
-    "typescript": "^6.0.3"
+    "eslint": "^10.12.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2"
   }
 }

@@ -79,7 +79,8 @@ describe('chats API contract', () => {
 	function chatEntry(id: string) {
 		return {
 			id,
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			agentId: 'claude',
 			agentOwnershipEpoch: 'epoch-1',
 			model: 'opus',
@@ -98,6 +99,7 @@ describe('chats API contract', () => {
 			isProcessing: true,
 			processingPhase: 'running',
 			isUnread: false,
+			activityStatus: null,
 			canReloadFromNativeHistory: false,
 		};
 	}
@@ -154,7 +156,8 @@ describe('chats API contract', () => {
 			sessions: [
 				{
 					id: chatId,
-					parentChat: null,
+					parentChatId: null,
+					lineage: null,
 					agentId: 'claude',
 					agentOwnershipEpoch: 'epoch-1',
 					model: 'opus',
@@ -173,6 +176,7 @@ describe('chats API contract', () => {
 					isProcessing: false,
 					processingPhase: null,
 					isUnread: false,
+					activityStatus: null,
 					canReloadFromNativeHistory: false,
 				},
 			],

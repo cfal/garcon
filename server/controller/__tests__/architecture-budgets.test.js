@@ -29,7 +29,10 @@ const MAX_LINES = 1000;
 // Compensated startup failures release direct ownership even when their chat no longer exists.
 // Conversational replies add exact source validation and run/steer ownership fences,
 // without a pending-question registry or another scheduler.
-const EXECUTION_FOOTPRINT_BUDGET = 9340;
+// Sidebar activity status adds input-acceptance and turn-start notifications; outcome
+// tracking stays in chat metadata.
+// Reserved-steer guards and honest discard receipts stay with execution ownership.
+const EXECUTION_FOOTPRINT_BUDGET = 9349;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

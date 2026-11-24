@@ -1,6 +1,7 @@
+import { ChatSettingsMutations } from '$lib/chat/sessions/chat-settings-mutations.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -27,6 +28,7 @@ vi.mock('$lib/api/chats', () => ({
 	setChatArchived: vi.fn(),
 	togglePinned: vi.fn(),
 	updateChatProjectPath: vi.fn(),
+	setChatParent: vi.fn(),
 }));
 
 vi.mock('$shared/client-chat-id', () => ({
@@ -52,11 +54,13 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch:
 			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
@@ -82,9 +86,11 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch:
 			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
@@ -123,7 +129,9 @@ function createHarness(
 	const chats = options.chats ?? [makeChat()];
 	let selectedChatId =
 		options.selectedChatId === undefined ? (chats[0]?.id ?? null) : options.selectedChatId;
+	const settings = new ChatSettingsMutations();
 	const callbacks = {
+		pendingSettings: (id: string) => settings.pendingFor(id),
 		projectPathRevision: vi.fn(() => 0),
 		onQuietRefresh: vi.fn(async () => undefined),
 		onSelectChat: vi.fn(),
@@ -179,6 +187,7 @@ function createHarness(
 
 	return {
 		controller: new ChatActionController(deps),
+		settings,
 		callbacks,
 		chats,
 		setSelectedChatId(chatId: string | null) {
@@ -194,6 +203,26 @@ beforeEach(() => {
 });
 
 describe('ChatActionController', () => {
+	it('refreshes a parent edit without retargeting or patching the roster from its acknowledgement', async () => {
+		const harness = createHarness();
+		const saved = Promise.withResolvers<Awaited<ReturnType<typeof chatsApi.setChatParent>>>();
+		vi.mocked(chatsApi.setChatParent).mockReturnValueOnce(saved.promise);
+		const pending = harness.controller.setParent('chat-1', 'parent');
+		harness.setSelectedChatId('other');
+		saved.resolve({ success: true, chatId: 'chat-1', parentChatId: 'parent', changed: true });
+		await pending;
+		expect(chatsApi.setChatParent).toHaveBeenCalledWith({ chatId: 'chat-1', parentChatId: 'parent' });
+		expect(harness.callbacks.onQuietRefresh).toHaveBeenCalledOnce();
+		expect(harness.callbacks.onUpsertServerChat).not.toHaveBeenCalled();
+		expect(harness.callbacks.requestComposerFocus).not.toHaveBeenCalled();
+	});
+
+	it('refreshes unknown parent outcomes without hiding the original error', async () => {
+		const { controller, callbacks } = createHarness();
+		vi.mocked(chatsApi.setChatParent).mockRejectedValueOnce(new ApiMutationOutcomeUnknownError('Unconfirmed'));
+		await expect(controller.setParent('chat-1', null)).rejects.toThrow('Unconfirmed');
+		expect(callbacks.onQuietRefresh).toHaveBeenCalledOnce();
+	});
 	it('reports a failed pin without refreshing or recentering', async () => {
 		const { controller, callbacks } = createHarness();
 		vi.mocked(chatsApi.togglePinned).mockRejectedValueOnce(new Error('Pin failed'));
@@ -632,6 +661,34 @@ describe('ChatActionController', () => {
 		expect(callbacks.onUpsertServerChat).toHaveBeenCalledWith(fork);
 		expect(callbacks.onOpenForkedChat).toHaveBeenCalledWith('fork-chat-id', 'chat-1');
 		expect(callbacks.onSelectChat).not.toHaveBeenCalled();
+	});
+
+	it.each(['accepted', 'rejected', 'owner-changed'] as const)('waits for the source’s last settings write before a menu fork: %s', async (outcome) => {
+		const { controller, settings, chats, setSelectedChatId } = createHarness();
+		const source = chats[0];
+		const sessions = { byId: { [source.id]: source }, quietRefreshChats: async () => {} };
+		const first = deferred<void>();
+		const second = deferred<void>();
+		const save = (wait: Promise<void>, speed: string) => {
+			const patch = { agentSettings: { ...source.agentSettings, values: { speed } } };
+			settings.change(source.id, 'agentSettings', patch, {
+				sessions, apply: (next) => Object.assign(source, next), onFailure: vi.fn(),
+				request: async () => { await wait; return patch; },
+			});
+		};
+		save(first.promise, 'fast');
+		save(second.promise, 'ultrafast');
+		vi.mocked(chatsApi.forkChat).mockResolvedValueOnce({ success: true, chat: makeServerChat() });
+		setSelectedChatId('other');
+		const fork = controller.forkChat(source.id);
+		first.resolve();
+		await first.promise;
+		expect(chatsApi.forkChat).not.toHaveBeenCalled();
+		if (outcome === 'owner-changed') source.agentOwnershipEpoch = 'new-owner';
+		if (outcome === 'rejected') second.reject(new Error('Unsupported speed'));
+		else second.resolve();
+		await fork;
+		expect(chatsApi.forkChat).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0);
 	});
 
 	it('shows fork progress until the fork settles and ignores a repeated fork meanwhile', async () => {

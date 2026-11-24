@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
+import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+import { projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
+import type { ReorderChatRequest, ReorderChatResponse } from '$shared/chat-order-contracts';
 import {
 	ConversationSlashCommandService,
 	type ConversationSlashCommandDeps,
@@ -68,11 +71,13 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -80,7 +85,8 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 function createServerEntry(id: string) {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentId: 'claude',
 		agentOwnershipEpoch: 'epoch-1',
 		model: 'sonnet',
@@ -100,6 +106,7 @@ function createServerEntry(id: string) {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 	};
 }
@@ -160,12 +167,6 @@ function createDeps(chat = createChat()) {
 		selectedChatId: chat.id,
 		byId: { [chat.id]: chat },
 		renameChat: vi.fn().mockResolvedValue(true),
-		moveChatToBoundary: vi.fn().mockResolvedValue({
-			success: true,
-			chatId: chat.id,
-			orderGroup: 'normal',
-			changed: true,
-		}),
 		tagReconciliationKind: vi.fn((_chatId: string): ChatTagReconciliationKind => null),
 		applyChatTagDelta: vi.fn(
 			async (request: {
@@ -209,6 +210,13 @@ function createDeps(chat = createChat()) {
 		supportsSteering: vi.fn(() => false),
 	};
 	const deps = {
+		pendingSettings: vi.fn<ConversationSlashCommandDeps['pendingSettings']>(() => null),
+		moveChatToBoundary: vi.fn<ConversationSlashCommandDeps['moveChatToBoundary']>().mockResolvedValue({
+			success: true,
+			chatId: chat.id,
+			orderGroup: 'normal',
+			changed: true,
+		}),
 		sessions,
 		chatState: {
 			activeChatId: chat.id,
@@ -248,6 +256,31 @@ function createDeps(chat = createChat()) {
 }
 
 describe('ConversationSlashCommandService', () => {
+	it('does not let /move bypass pending sidebar recovery', async () => {
+		const chat = createChat();
+		const peer = createChat({ id: 'peer' });
+		const { deps, composerState } = createDeps(chat);
+		const write = vi.fn<(request: ReorderChatRequest) => Promise<ReorderChatResponse>>()
+			.mockResolvedValue({ success: true, chatId: chat.id, orderGroup: 'normal', changed: true });
+		const order = new SidebarOrderController({
+			input: projectionInput([chat, peer]), write, refresh: async () => false,
+			sort: async () => ({ changed: false }), onError: vi.fn(),
+		});
+		order.begin('normal', chat.id, { ids: [chat.id, peer.id] });
+		order.preview({ list: 'normal', sourceChatId: chat.id, targetChatId: peer.id, closestEdge: 'bottom' });
+		order.submit(order.finish('normal')!);
+		await vi.waitFor(() => expect(order.recoveryRequired).toBe(true));
+		deps.moveChatToBoundary.mockImplementation((id, boundary) => order.moveChatToBoundary(id, boundary));
+		composerState.inputText = '/move bottom';
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text: '/move bottom', images: [], ownsComposer: true,
+		});
+		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
+		expect(await dispatch.outcome).toBe('rejected');
+		expect(write).toHaveBeenCalledOnce();
+		expect(order.orders.normal).toEqual([peer.id, chat.id]);
+		expect(composerState.inputText).toBe('/move bottom');
+	});
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -270,6 +303,101 @@ describe('ConversationSlashCommandService', () => {
 		});
 
 		expect(result).toEqual({ kind: 'steer', content: 'Focus on the failing assertion' });
+	});
+
+	it.each(['/fork Continue', '/fork', '/handoff Continue', '/compact'])('does not dispatch %s past a rejected setting', async (text) => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const chat = deps.sessions.byId['chat-1'];
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text, images: [], ownsComposer: true,
+		});
+		if (result.kind !== 'handled') throw new Error('Expected an execution command');
+		expect(deps.pendingSettings).toHaveBeenCalledWith(chat.id);
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(mockSelfHandoffRunChat).not.toHaveBeenCalled();
+		expect(mockCompactChat).not.toHaveBeenCalled();
+		gate.resolve(false);
+		expect(await result.outcome).toBe('rejected');
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(mockSelfHandoffRunChat).not.toHaveBeenCalled();
+		expect(mockCompactChat).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['/fork Continue', 'submitForkCommand'],
+		['/fork', 'submitForkCommand'],
+		['/handoff Continue', 'submitHandoffCommand'],
+		['/compact', 'submitCompactCommand'],
+	] as const)('dispatches %s with the settled settings and preserves the immediate path', async (text, method) => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const service = new ConversationSlashCommandService(deps);
+		const submit = vi.spyOn(service, method).mockResolvedValue('accepted');
+		const chat = deps.sessions.byId['chat-1'];
+		const input = { chatId: chat.id, chat, text, images: [], ownsComposer: true };
+		const immediate = service.dispatchSubmission(input);
+		expect(submit).toHaveBeenCalledOnce();
+		if (immediate.kind !== 'handled') throw new Error('Expected an execution command');
+		expect(await immediate.outcome).toBe('accepted');
+		submit.mockClear();
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const waiting = service.dispatchSubmission(input);
+		expect(submit).not.toHaveBeenCalled();
+		const current = { ...chat, agentSettings: { ...chat.agentSettings, values: { speed: 'ultrafast' } } };
+		deps.sessions.byId[chat.id] = current;
+		gate.resolve(true);
+		if (waiting.kind !== 'handled') throw new Error('Expected an execution command');
+		expect(await waiting.outcome).toBe('accepted');
+		expect(submit).toHaveBeenCalledOnce();
+		expect(submit.mock.calls[0][1]).toBe(current);
+	});
+
+	it.each(['deleted', 'owner', 'executor', 'agent', 'selection', 'text'] as const)(
+		'does not submit a pending fork after its source changes: %s', async (change) => {
+			const { deps } = createDeps(createChat({ agentOwnershipEpoch: 'epoch-1', executorId: 'local' }));
+			deps.modelCatalog.supportsFork.mockReturnValue(true);
+			const gate = deferred<boolean>();
+			deps.pendingSettings.mockReturnValue(gate.promise);
+			const chat = deps.sessions.byId['chat-1'];
+			const result = new ConversationSlashCommandService(deps).dispatchSubmission({
+				chatId: chat.id, chat, text: '/fork Continue', images: [], ownsComposer: true,
+			});
+			if (result.kind !== 'handled') throw new Error('Expected a fork command');
+			if (change === 'deleted') delete deps.sessions.byId[chat.id];
+			if (change === 'owner') deps.sessions.byId[chat.id] = { ...chat, agentOwnershipEpoch: 'epoch-2' };
+			if (change === 'executor') deps.sessions.byId[chat.id] = { ...chat, executorId: '22222222-2222-4222-8222-222222222222' };
+			if (change === 'agent') deps.sessions.byId[chat.id] = { ...chat, agentId: 'codex' };
+			if (change === 'selection') deps.sessions.selectedChatId = 'chat-2';
+			if (change === 'text') deps.composerState.inputText = 'New draft';
+			gate.resolve(true);
+			expect(await result.outcome).toBe(change === 'selection' || change === 'text' ? 'no-op' : 'rejected');
+			expect(mockForkRunChat).not.toHaveBeenCalled();
+			expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
+		},
+	);
+
+	it('preserves new attachments while a fork is waiting for settings', async () => {
+		const { deps } = createDeps();
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		const chat = deps.sessions.byId['chat-1'];
+		const text = '/fork Continue';
+		deps.composerState.inputText = text;
+		const result = new ConversationSlashCommandService(deps).dispatchSubmission({ chatId: chat.id, chat, text, images: [], ownsComposer: true });
+		if (result.kind !== 'handled') throw new Error('Expected a fork command');
+		deps.composerState.images = [new File([], 'attachment.txt')];
+		gate.resolve(true);
+		expect(await result.outcome).toBe('no-op');
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
 
 	it('rejects steering when the capability is absent or attachments are present', () => {
@@ -399,8 +527,8 @@ describe('ConversationSlashCommandService', () => {
 		const chat = createChat({ isProcessing: true, processingPhase: 'running' });
 		const { deps, composerState, appendLocalNotice } = createDeps(chat);
 		composerState.inputText = '/move top';
-		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const pending = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		deps.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 
 		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
 			chatId: chat.id,
@@ -413,7 +541,7 @@ describe('ConversationSlashCommandService', () => {
 		expect(dispatch.kind).toBe('handled');
 		expect(composerState.clearAfterSubmit).toHaveBeenCalledWith(chat.id);
 		expect(composerState.inputText).toBe('');
-		expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith(chat.id, 'top');
+		expect(deps.moveChatToBoundary).toHaveBeenCalledWith(chat.id, 'top');
 		pending.resolve({ success: true, chatId: chat.id, orderGroup: 'normal', changed: true });
 		if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
 		await expect(dispatch.outcome).resolves.toBe('accepted');
@@ -429,7 +557,7 @@ describe('ConversationSlashCommandService', () => {
 
 	it('reports an unchanged bottom boundary without sending the command onward', async () => {
 		const { deps, appendLocalNotice } = createDeps();
-		deps.sessions.moveChatToBoundary.mockResolvedValueOnce({
+		deps.moveChatToBoundary.mockResolvedValueOnce({
 			success: true,
 			chatId: 'chat-1',
 			orderGroup: 'archived',
@@ -476,14 +604,14 @@ describe('ConversationSlashCommandService', () => {
 			if (dispatch.kind !== 'handled') throw new Error('move command was not handled');
 			await expect(dispatch.outcome).resolves.toBe('rejected');
 			expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
-			expect(deps.sessions.moveChatToBoundary).not.toHaveBeenCalled();
+			expect(deps.moveChatToBoundary).not.toHaveBeenCalled();
 		}
 	});
 
 	it('restores a failed move only while the source composer remains untouched', async () => {
 		const { deps, composerState } = createDeps();
 		composerState.inputText = '/move top';
-		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+		deps.moveChatToBoundary.mockResolvedValueOnce(null);
 
 		const result = await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
 			'chat-1',
@@ -502,7 +630,7 @@ describe('ConversationSlashCommandService', () => {
 		const { deps, composerState } = createDeps();
 		composerState.inputText = '/move top';
 		const pending = deferred<null>();
-		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		deps.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 		const submission = new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
 			'chat-1',
 			deps.sessions.byId['chat-1'],
@@ -521,9 +649,9 @@ describe('ConversationSlashCommandService', () => {
 
 	it('does not restore an older failed command after a newer submission clears the composer', async () => {
 		const { deps, composerState } = createDeps();
-		const first = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		const second = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		deps.sessions.moveChatToBoundary
+		const first = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		const second = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		deps.moveChatToBoundary
 			.mockReturnValueOnce(first.promise)
 			.mockReturnValueOnce(second.promise);
 		const service = new ConversationSlashCommandService(deps);
@@ -558,8 +686,8 @@ describe('ConversationSlashCommandService', () => {
 	it('does not restore or append a notice after switching away from the source chat', async () => {
 		const { deps, composerState, appendLocalNotice } = createDeps();
 		composerState.inputText = '/move bottom';
-		const pending = deferred<Awaited<ReturnType<typeof deps.sessions.moveChatToBoundary>>>();
-		deps.sessions.moveChatToBoundary.mockReturnValueOnce(pending.promise);
+		const pending = deferred<Awaited<ReturnType<typeof deps.moveChatToBoundary>>>();
+		deps.moveChatToBoundary.mockReturnValueOnce(pending.promise);
 		const service = new ConversationSlashCommandService(deps);
 		const submission = service.submitMoveChatBoundaryCommand(
 			'chat-1',
@@ -582,7 +710,7 @@ describe('ConversationSlashCommandService', () => {
 	it('does not clear or restore a composer the source submission does not own', async () => {
 		const { deps, composerState } = createDeps();
 		composerState.inputText = 'other chat draft';
-		deps.sessions.moveChatToBoundary.mockResolvedValueOnce(null);
+		deps.moveChatToBoundary.mockResolvedValueOnce(null);
 
 		await new ConversationSlashCommandService(deps).submitMoveChatBoundaryCommand(
 			'chat-1',
@@ -993,6 +1121,22 @@ describe('ConversationSlashCommandService', () => {
 		);
 	});
 
+	it('keeps an unconfirmed schedule command as a notice, not a resubmittable draft, across chat switches', async () => {
+		const { deps, composerState, appendLocalNoticeForChat } = createDeps();
+		const pending = deferred<Awaited<ReturnType<typeof scheduleChatPrompt>>>();
+		mockScheduleChatPrompt.mockReturnValueOnce(pending.promise);
+		const service = new ConversationSlashCommandService(deps);
+		const submitted = service.submitScheduleInCommand('chat-1', deps.sessions.byId['chat-1'],
+			{ kind: 'valid', duration: '1m', delayMinutes: 1, prompt: 'Continue' }, [], true);
+		deps.chatState.activeChatId = 'chat-2';
+		pending.reject(new ApiMutationOutcomeUnknownError('Unknown'));
+		expect(await submitted).toBe('unknown');
+		expect(composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
+		expect(composerState.inputText).toBe('');
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith('chat-1', 'error', expect.stringContaining('/in 1m Continue'));
+		expect(mockScheduleChatPrompt).toHaveBeenCalledOnce();
+	});
+
 	it('reports a successful schedule only in its still-active chat', async () => {
 		const { deps, appendLocalNotice } = createDeps();
 		mockScheduleChatPrompt.mockResolvedValueOnce({
@@ -1043,8 +1187,13 @@ describe('ConversationSlashCommandService', () => {
 		);
 	});
 
-	it('forks and runs in a view beside the source chat without replacing it', async () => {
-		const { deps } = createDeps();
+	it('forks and runs with confirmed settings beside the source chat after settlement', async () => {
+		const chat = createChat({ agentId: 'codex', model: 'previous-model',
+			agentSettings: { ownerId: 'codex', schemaVersion: 1, values: { speed: 'fast' } } });
+		const { deps } = createDeps(chat);
+		deps.modelCatalog.supportsFork.mockReturnValue(true);
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
 		const forked = createServerEntry('chat-2');
 		mockForkRunChat.mockResolvedValueOnce({
 			success: true,
@@ -1057,16 +1206,20 @@ describe('ConversationSlashCommandService', () => {
 			chat: forked,
 		});
 
-		await new ConversationSlashCommandService(deps).submitForkCommand(
-			'chat-1',
-			deps.sessions.byId['chat-1'],
-			'continue here',
-			[],
-			true,
-		);
+		const dispatch = new ConversationSlashCommandService(deps).dispatchSubmission({
+			chatId: chat.id, chat, text: '/fork continue here', images: [], ownsComposer: true,
+		});
+		expect(mockForkRunChat).not.toHaveBeenCalled();
+		const confirmed = { ...chat, model: 'confirmed-model',
+			agentSettings: { ...chat.agentSettings, values: { speed: 'ultrafast' } } };
+		deps.sessions.byId[chat.id] = confirmed;
+		gate.resolve(true);
+		if (dispatch.kind !== 'handled') throw new Error('Expected a fork command');
+		expect(await dispatch.outcome).toBe('accepted');
 
 		expect(mockForkRunChat).toHaveBeenCalledWith(
-			expect.objectContaining({ sourceChatId: 'chat-1', command: 'continue here' }),
+			expect.objectContaining({ sourceChatId: 'chat-1', command: 'continue here',
+			model: confirmed.model, agentSettings: confirmed.agentSettings }),
 		);
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(forked);
 		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
@@ -1445,6 +1598,21 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.navigation.openForkedChat).toHaveBeenCalledWith('chat-2', 'chat-1');
 		expect(deps.navigation.navigateToChat).not.toHaveBeenCalled();
 		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
+	});
+
+	it.each([true, false])('settles pending settings before a point fork: %s', async (accepted) => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		const gate = deferred<boolean>();
+		deps.pendingSettings.mockReturnValue(gate.promise);
+		if (accepted) mockForkChat.mockResolvedValueOnce({ success: true, chat: createServerEntry('chat-2') });
+		const pending = new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+		expect(mockForkChat).not.toHaveBeenCalled();
+		expect(clearLocalNoticesForChat).not.toHaveBeenCalled();
+		gate.resolve(accepted);
+		await pending;
+		expect(mockForkChat).toHaveBeenCalledTimes(accepted ? 1 : 0);
+		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
 	});
 
 	it('shows fork progress on the source chat until the fork settles', async () => {

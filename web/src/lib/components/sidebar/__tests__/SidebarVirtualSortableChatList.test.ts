@@ -14,10 +14,16 @@ import {
 	type SidebarVirtualChatRow,
 	type SidebarVirtualProjectHeaderRow,
 	type SidebarVirtualRow,
-} from '../sidebar-virtual-chat-list';
-import { sidebarProjectKey } from '../sidebar-row-model';
+} from '../../../sidebar/display/sidebar-virtual-chat-list';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
-import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svelte';
+import {
+	buildSidebarRowModel,
+	sidebarGroupCollapseKey,
+	sidebarProjectKey,
+} from '$lib/sidebar/display/sidebar-row-model';
+import { chat, delegated, projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
+import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
+import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
@@ -71,13 +77,15 @@ function makeChat(index: number, overrides: Partial<ChatSessionRecord> = {}): Ch
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: `Chat ${index} preview`,
 		tags: [],
 		firstMessage: `Chat ${index} first`,
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -94,9 +102,6 @@ function makeRows(count: number): SidebarVirtualChatRow[] {
 			list: 'normal' as const,
 			isPinned: false,
 			isArchived: false,
-			projectPath: chat.projectPath,
-			groupProjectKey: sidebarProjectKey(chat.projectPath),
-			groupProjectPath: chat.projectPath,
 			reorderScopeKey: 'normal:all',
 			reorderScopeIds,
 		};
@@ -117,9 +122,6 @@ function makeScopedRow(
 		list: 'normal',
 		isPinned: false,
 		isArchived: false,
-		projectPath: chat.projectPath,
-		groupProjectKey: sidebarProjectKey(projectPath),
-		groupProjectPath: projectPath,
 		reorderScopeKey: `normal:project:${projectPath}`,
 		reorderScopeIds: scopeIds,
 	};
@@ -139,7 +141,7 @@ function makeProjectHeader(
 		collapseKey: sidebarProjectKey(projectPath),
 		projectPath,
 		count,
-		chatIds,
+		containsChat: (chatId) => chatIds.includes(chatId),
 		isCollapsed,
 	};
 }
@@ -220,6 +222,11 @@ beforeEach(() => {
 			value: () => [],
 		});
 	}
+	vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+		this: HTMLElement,
+	) {
+		return this.hasAttribute('data-sidebar-virtual-list') || isSidebarViewport(this) ? 320 : 0;
+	});
 	vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
 		this: HTMLElement,
 	) {
@@ -249,6 +256,118 @@ beforeEach(() => {
 	});
 });
 
+it('resumes a touch drag after blocked context and outside hits', async () => {
+	vi.useFakeTimers();
+	const rows = buildSidebarRowModel(
+		projectionInput(
+			[chat('context'), delegated('match', 'context'), chat('source'), chat('target')],
+			{ matchingChatIds: new Set(['match', 'source', 'target']) },
+		),
+	).rows;
+	const registered = { reorder: null as SidebarOrderController | null };
+	const persist = vi.fn();
+	render(SidebarVirtualSortableChatListHost, {
+		rows,
+		isMobile: true,
+		isFiltered: true,
+		displayOptions: { nestDelegatedChats: true },
+		onRegisterReorder: (value) => (registered.reorder = value),
+		onPersistReorder: persist,
+	});
+	await tick();
+	const viewport = screen.getByTestId('virtual-sidebar-viewport');
+	vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(
+		rect({ left: 0, top: 0, width: 320, height: 640 }),
+	);
+	const element = (id: string) =>
+		document.querySelector<HTMLElement>(`[data-sidebar-virtual-row="${id}"]`)!;
+	const source = element('source');
+	let hit = source;
+	vi.spyOn(document, 'elementFromPoint').mockImplementation(() => hit);
+	for (const id of ['source', 'target', 'context'])
+		vi.spyOn(element(id), 'getBoundingClientRect').mockReturnValue(
+			rect({ left: 0, top: 0, width: 320, height: 88 }),
+		);
+	await fireEvent.touchStart(source, {
+		touches: [touchAt(1, 20, 44)],
+		changedTouches: [touchAt(1, 20, 44)],
+	});
+	vi.advanceTimersByTime(370);
+	await tick();
+	expect(registered.reorder?.activeChatId).toBe('source');
+	const move = async (id: string, x = 20) => {
+		hit = element(id);
+		await fireEvent.touchMove(window, {
+			touches: [touchAt(1, x, 80)],
+			changedTouches: [touchAt(1, x, 80)],
+		});
+		vi.advanceTimersByTime(17);
+		await tick();
+	};
+	await move('target');
+	expect(registered.reorder?.orders.normal.at(-1)).toBe('source');
+	await move('context');
+	expect(registered.reorder?.activeChatId).toBe('source');
+	expect(registered.reorder?.orders.normal).toEqual(['context', 'match', 'source', 'target']);
+	await move('target');
+	await move('target', 400);
+	expect(registered.reorder?.activeChatId).toBe('source');
+	expect(registered.reorder?.orders.normal).toEqual(['context', 'match', 'source', 'target']);
+	await move('target');
+	await fireEvent.touchEnd(window, { touches: [], changedTouches: [touchAt(1, 20, 80)] });
+	vi.advanceTimersByTime(17);
+	await tick();
+	expect(persist).toHaveBeenCalledWith(
+		expect.objectContaining({
+			chatId: 'source',
+			placement: { kind: 'relative', referenceChatId: 'target', position: 'after' },
+		}),
+	);
+});
+
+it.each([false, true])(
+	'retains native workspace ownership after scope change until end or removal=%s',
+	async (remove) => {
+		vi.useFakeTimers();
+		const input = projectionInput([chat('source'), chat('target')]);
+		const registered = { windowDnd: null as WorkspaceWindowDndController | null };
+		const ended = vi.fn();
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows: buildSidebarRowModel(input).rows,
+			displayOptions: { nestDelegatedChats: true },
+			onRegisterWindowDnd: (value) => (registered.windowDnd = value),
+			onWorkspaceDragEnd: ended,
+		});
+		await tick();
+		const source = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="source"]')!;
+		await fireEvent.dragStart(source, {
+			clientX: 20,
+			clientY: 44,
+			dataTransfer: new DataTransfer(),
+		});
+		vi.advanceTimersByTime(17);
+		await tick();
+		expect(registered.windowDnd?.payload?.kind).toBe('chat');
+		await view.rerender({
+			rows: buildSidebarRowModel(
+				projectionInput([chat('source', { isPinned: true }), chat('target')]),
+			).rows,
+		});
+		expect(registered.windowDnd?.payload?.kind).toBe('chat');
+		expect(ended).not.toHaveBeenCalled();
+		if (remove) {
+			await view.rerender({ rows: buildSidebarRowModel(projectionInput([chat('target')])).rows });
+			expect(registered.windowDnd?.payload).toBeNull();
+			expect(ended).toHaveBeenCalledWith('source');
+		}
+		await fireEvent.dragEnd(document.body, { dataTransfer: new DataTransfer() });
+		vi.advanceTimersByTime(17);
+		await tick();
+		expect(registered.windowDnd?.payload).toBeNull();
+		expect(ended).toHaveBeenCalledWith('source');
+	},
+);
+
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
@@ -263,7 +382,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			const chats = [makeChat(1, { status: 'running' }), makeChat(2, { status: 'running' })];
 			const view = render(SidebarChatListHost, {
 				chats,
-				displayOptions: { sortMode, grouping: 'none' },
+				displayOptions: { sortMode, groupingFields: [], nestDelegatedChats: false },
 			});
 			const row = view.container.querySelector('[data-sidebar-virtual-row="chat-1"]');
 			expect(screen.getByText('Chat 1')).toBeTruthy();
@@ -339,7 +458,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(1),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode,
@@ -349,7 +469,7 @@ describe('SidebarVirtualSortableChatList', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 
-		expect(Boolean(screen.queryByRole('menuitem', { name: 'Reorder chats' }))).toBe(isVisible);
+		expect(Boolean(screen.queryByRole('menuitem', { name: 'Reorder all chats' }))).toBe(isVisible);
 	});
 
 	it('renders mixed project header rows inside the virtual list', () => {
@@ -358,7 +478,8 @@ describe('SidebarVirtualSortableChatList', () => {
 				makeChat(index, { projectPath: `/tmp/project-${index % 20}` }),
 			),
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -388,7 +509,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					executorId: remoteExecutor.id,
 					collapseKey: 'executor:removed',
 					count: 1,
-					chatIds: ['hidden-chat'],
+					containsChat: (chatId) => chatId === 'hidden-chat',
 					isCollapsed: true,
 				},
 			],
@@ -415,16 +536,22 @@ describe('SidebarVirtualSortableChatList', () => {
 			chats: [localChat, removedChat],
 			filteredChats: [localChat],
 			searchFilter: 'local',
-			collapsedProjectKeys: new Set(['executor:local']),
-			displayOptions: { grouping: 'project' },
+			collapsedProjectKeys: new Set([sidebarGroupCollapseKey(null, [['executor', 'local']])]),
+			displayOptions: {
+				groupingFields: [
+					{ field: 'executor', enabled: true },
+					{ field: 'project', enabled: true },
+				],
+				nestDelegatedChats: false,
+			},
 		});
 
-		expect(screen.getByRole('button', { name: 'Local 1' }).getAttribute('aria-expanded')).toBe(
-			'false',
+		expect(screen.getByRole('button', { name: 'Local' }).getAttribute('aria-expanded')).toBe(
+			'true',
 		);
-		expect(screen.queryByText('Chat 0')).toBeNull();
+		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(document.querySelector('[data-sidebar-executor-header="local"]')).toBeTruthy();
-		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBe(0);
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBe(1);
 	});
 
 	it('renders compact executor headers with executor-header geometry', () => {
@@ -438,7 +565,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					executorId: 'local',
 					collapseKey: 'executor:local',
 					count: 2,
-					chatIds: ['chat-0', 'chat-1'],
+					containsChat: (chatId) => ['chat-0', 'chat-1'].includes(chatId),
 					isCollapsed: false,
 				},
 			],
@@ -459,7 +586,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			depth: 0,
 			section: 'inactive',
 			count: 3,
-			chatIds: ['chat-1', 'chat-2', 'chat-3'],
+			containsChat: (chatId) => ['chat-1', 'chat-2', 'chat-3'].includes(chatId),
 			isCollapsed: true,
 		};
 
@@ -497,7 +624,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					executorId: 'local',
 					collapseKey: 'executor:local',
 					count: 1,
-					chatIds: ['chat-0'],
+					containsChat: (chatId) => chatId === 'chat-0',
 					isCollapsed: false,
 				},
 				{ ...makeProjectHeader(projectPath, 1, ['chat-0']), depth: 1, executorGrouped: true },
@@ -593,12 +720,15 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
 			},
-			collapsedProjectKeys: new Set([sidebarProjectKey('/tmp/project-a')]),
+			collapsedProjectKeys: new Set([
+				sidebarGroupCollapseKey(null, [['project', sidebarProjectKey('/tmp/project-a')]]),
+			]),
 		});
 
 		const collapsedHeader = document.querySelector<HTMLElement>(
@@ -620,7 +750,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -642,7 +773,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: true,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -666,7 +798,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: true,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -712,7 +845,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'recent',
@@ -740,7 +874,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'recent',
@@ -785,7 +920,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				sortMode: 'recent',
 				pinnedInsertPosition: 'bottom',
 			},
@@ -818,7 +954,11 @@ describe('SidebarVirtualSortableChatList', () => {
 			makeChat(2, { status: 'running', projectPath: '/tmp/project-a', isArchived: true }),
 		];
 		const displayOptions = {
-			grouping: 'project-and-activity',
+			groupingFields: [
+				{ field: 'activity' as const, enabled: true },
+				{ field: 'project' as const, enabled: true },
+			],
+			nestDelegatedChats: false,
 			inactivityDuration: '3-days',
 			groupNestedProjectPaths: false,
 			chatItemLayout: 'detailed',
@@ -854,6 +994,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			'/tmp/project-b',
 			'chat-1',
 			'archived',
+			'/tmp/project-a',
 			'chat-2',
 		]);
 
@@ -864,7 +1005,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			collapsedProjectKeys,
 			onToggleProjectCollapsed: toggleCollapsed,
 		});
-		expect(readVirtualRowOrder()).toEqual(['inactive', 'archived', 'chat-2']);
+		expect(readVirtualRowOrder()).toEqual(['inactive', 'archived', '/tmp/project-a', 'chat-2']);
 
 		await fireEvent.click(sectionHeader('archived'));
 		await view.rerender({
@@ -890,6 +1031,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			'/tmp/project-b',
 			'chat-1',
 			'archived',
+			'/tmp/project-a',
 			'chat-2',
 		]);
 	});
@@ -920,7 +1062,8 @@ describe('SidebarVirtualSortableChatList', () => {
 			}),
 		];
 		const displayOptions = {
-			grouping: 'activity',
+			groupingFields: [{ field: 'activity' as const, enabled: true }],
+			nestDelegatedChats: false,
 			inactivityDuration: '3-days',
 			showProjectPath: true,
 		} as const;
@@ -1005,7 +1148,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					}),
 				],
 				displayOptions: {
-					grouping,
+					groupingFields: migrateSidebarGrouping(grouping),
 					inactivityDuration: '3-days',
 					chatItemLayout: 'single-line',
 				},
@@ -1031,7 +1174,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'recent',
@@ -1052,7 +1196,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -1078,7 +1223,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarChatListHost, {
 			chats,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -1124,7 +1270,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'compact',
 				sortMode: 'manual',
@@ -1142,7 +1289,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1160,7 +1308,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1178,7 +1327,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -1193,7 +1343,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: makeRows(20),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1209,7 +1360,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(60),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -1228,7 +1380,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: makeRows(60),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1255,7 +1408,8 @@ describe('SidebarVirtualSortableChatList', () => {
 	it('preserves the normalized reading anchor when chat typography grows', async () => {
 		const rows = makeRows(60);
 		const displayOptions = {
-			grouping: 'none' as const,
+			groupingFields: [],
+			nestDelegatedChats: false,
 			groupNestedProjectPaths: false,
 			chatItemLayout: 'single-line' as const,
 			sortMode: 'manual' as const,
@@ -1283,7 +1437,8 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(60),
 			rowHeight: 88,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -1303,7 +1458,8 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(60),
 			rowHeight: 88,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1369,7 +1525,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: groupedRows(),
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -1389,7 +1546,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: groupedRows(),
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1413,7 +1571,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		const view = render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(60),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -1432,7 +1591,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		await view.rerender({
 			rows: makeRows(60),
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'single-line',
 				sortMode: 'manual',
@@ -1641,18 +1801,13 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 		await tick();
 
-		expect(persist).toHaveBeenCalledWith({
-			kind: 'relative',
-			list: 'normal',
-			chatId: 'chat-0',
-			placement: { kind: 'relative', referenceChatId: 'chat-1', position: 'after' },
-			visibleOrder: [
-				'chat-1',
-				'chat-0',
-				...Array.from({ length: 18 }, (_, index) => `chat-${index + 2}`),
-			],
-			sequence: 1,
-		});
+		expect(persist).toHaveBeenCalledWith(
+			expect.objectContaining({
+				list: 'normal',
+				chatId: 'chat-0',
+				placement: { kind: 'relative', referenceChatId: 'chat-1', position: 'after' },
+			}),
+		);
 	});
 
 	it('preserves the dragged row element while optimistic order changes', async () => {
@@ -1712,7 +1867,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		const persist = vi.fn();
 		const workspaceDragEnd = vi.fn();
 		const registered = {
-			reorder: null as SidebarChatReorderState | null,
+			reorder: null as SidebarOrderController | null,
 			windowDnd: null as WorkspaceWindowDndController | null,
 		};
 
@@ -1720,7 +1875,8 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(20),
 			rowHeight,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'recent',
@@ -1766,7 +1922,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		const persist = vi.fn();
 		const workspaceDragEnd = vi.fn();
 		const registered = {
-			reorder: null as SidebarChatReorderState | null,
+			reorder: null as SidebarOrderController | null,
 			windowDnd: null as WorkspaceWindowDndController | null,
 		};
 
@@ -1774,7 +1930,8 @@ describe('SidebarVirtualSortableChatList', () => {
 			rows: makeRows(500),
 			rowHeight,
 			displayOptions: {
-				grouping: 'none',
+				groupingFields: [],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'recent',
@@ -1818,11 +1975,11 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(persist).not.toHaveBeenCalled();
 	});
 
-	it('cancels a native drag when virtualization unmounts its source', async () => {
+	it('keeps a native drag when virtualization unmounts its source', async () => {
 		vi.useFakeTimers();
 		const persist = vi.fn();
 		const workspaceDragEnd = vi.fn();
-		const registered = { reorder: null as SidebarChatReorderState | null };
+		const registered = { reorder: null as SidebarOrderController | null };
 
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(500),
@@ -1849,17 +2006,20 @@ describe('SidebarVirtualSortableChatList', () => {
 		await tick();
 
 		expect(row0.isConnected).toBe(false);
-		expect(registered.reorder?.activeList).toBeNull();
-		expect(workspaceDragEnd).toHaveBeenCalledWith('chat-0');
+		expect(registered.reorder?.activeList).toBe('normal');
+		expect(workspaceDragEnd).not.toHaveBeenCalled();
 		expect(persist).not.toHaveBeenCalled();
 
-		await fireEvent.dragEnd(window, { dataTransfer });
+		await fireEvent.drop(window, { dataTransfer });
+		vi.advanceTimersByTime(17);
+		await tick();
+		expect(registered.reorder?.activeList).toBeNull();
 	});
 
 	it('ignores a touch start while another chat owns a native drag', async () => {
 		vi.useFakeTimers();
 		const workspaceDragEnd = vi.fn();
-		const registered = { reorder: null as SidebarChatReorderState | null };
+		const registered = { reorder: null as SidebarOrderController | null };
 
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(500),
@@ -1899,7 +2059,7 @@ describe('SidebarVirtualSortableChatList', () => {
 
 	it('cancels a pending touch gesture before starting a native drag', async () => {
 		vi.useFakeTimers();
-		const registered = { reorder: null as SidebarChatReorderState | null };
+		const registered = { reorder: null as SidebarOrderController | null };
 
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(20),
@@ -1930,7 +2090,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		await fireEvent.dragEnd(row5, { dataTransfer });
 	});
 
-	it('cancels an active touch drag when virtualization unmounts its source', async () => {
+	it('keeps an active touch drag when virtualization unmounts its source', async () => {
 		vi.useFakeTimers();
 		const persist = vi.fn();
 
@@ -1962,6 +2122,8 @@ describe('SidebarVirtualSortableChatList', () => {
 
 		expect(row0.isConnected).toBe(false);
 		expect(document.querySelector('.opacity-45')).toBeNull();
+		expect(document.body.style.getPropertyValue('user-select')).toBe('none');
+		await fireEvent.touchCancel(window);
 		expect(document.body.style.getPropertyValue('user-select')).toBe('');
 		expect(document.documentElement.style.getPropertyValue('user-select')).toBe('');
 		expect(persist).not.toHaveBeenCalled();
@@ -2110,7 +2272,8 @@ describe('SidebarVirtualSortableChatList', () => {
 			isMobile: true,
 			rowHeight,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -2155,7 +2318,8 @@ describe('SidebarVirtualSortableChatList', () => {
 			isMobile: true,
 			rowHeight,
 			displayOptions: {
-				grouping: 'project',
+				groupingFields: [{ field: 'project' as const, enabled: true }],
+				nestDelegatedChats: false,
 				groupNestedProjectPaths: false,
 				chatItemLayout: 'detailed',
 				sortMode: 'manual',
@@ -2385,6 +2549,275 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
 		expect(screen.getByText('Chat 0')).toBeTruthy();
 		expect(screen.queryByText('Chat 119')).toBeNull();
+	});
+
+	it.each(['plain', 'context', 'cycle'] as const)(
+		'moves to the nearest reachable menu position across %s siblings',
+		async (kind) => {
+			for (const direction of ['up', 'down'] as const) {
+				let chats = [chat('a'), chat('b')];
+				let position: 'before' | 'after' = direction === 'up' ? 'before' : 'after';
+				let expected = ['b', 'a'];
+				if (kind !== 'plain') {
+					chats = [
+						chat('a'),
+						kind === 'context' ? chat('x') : delegated('x', 'y'),
+						delegated('y', 'x'),
+						chat('b'),
+					];
+					position = direction === 'up' ? 'after' : 'before';
+					expected = direction === 'up' ? ['a', 'b', 'x', 'y'] : ['x', 'y', 'a', 'b'];
+				}
+				const onQuickMove = vi.fn();
+				const view = render(SidebarChatListHost, {
+					chats,
+					filteredChats: kind === 'context' ? chats.filter((chat) => chat.id !== 'x') : chats,
+					searchFilter: kind === 'context' ? 'matching' : '',
+					displayOptions: { nestDelegatedChats: true },
+					onQuickMove,
+				});
+				const source = direction === 'up' ? 'b' : 'a';
+				const target = direction === 'up' ? 'a' : 'b';
+				const row = document.querySelector<HTMLElement>(`[data-sidebar-virtual-row="${source}"]`)!;
+				await fireEvent.click(
+					row.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')!,
+				);
+				await fireEvent.click(await screen.findByRole('menuitem', { name: `Move ${direction}` }));
+				expect(onQuickMove).toHaveBeenCalledExactlyOnceWith(
+					'normal',
+					source,
+					{ kind: 'relative', referenceChatId: target, position },
+					expect.any(Function),
+					expect.any(Function),
+				);
+				await waitFor(() =>
+					expect(
+						[...document.querySelectorAll('[data-sidebar-virtual-row]')].map((row) =>
+							row.getAttribute('data-sidebar-virtual-row'),
+						),
+					).toEqual(expected),
+				);
+				view.unmount();
+			}
+		},
+	);
+
+	it.each(['single-line', 'compact', 'detailed'] as const)(
+		'decorates delegation without changing standalone markup or row sizes in %s layout',
+		async (layout) => {
+			const chats = [chat('plain'), chat('parent'), delegated('child', 'parent')];
+			const view = render(SidebarChatListHost, {
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: false },
+			});
+			const plain = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="plain"]')!;
+			const content = plain.querySelector('.chat-item-root')!;
+			const markup = content.outerHTML;
+			const height = plain.parentElement!.style.height;
+			expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(document.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			await view.rerender({
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			expect(content.isConnected).toBe(true);
+			expect(content.outerHTML).toBe(markup);
+			expect(plain.parentElement!.style.height).toBe(height);
+			expect(plain.parentElement!.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(plain.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
+			expect(child.parentElement!.style.height).toBe(height);
+			expect(child.querySelector<HTMLElement>('.chat-item-root button')!.style.paddingLeft).toBe(
+				layout === 'single-line' ? '24px' : '12px',
+			);
+			if (layout === 'single-line') {
+				const overlay = child.parentElement!.querySelector('[data-sidebar-tree-guides]')!;
+				expect(overlay.getAttribute('aria-hidden')).toBe('true');
+				expect(overlay.classList.contains('pointer-events-none')).toBe(true);
+				expect(
+					overlay.querySelector<HTMLElement>('[data-sidebar-tree-incoming="end"]')!.style.height,
+				).toBe('21px');
+				expect(overlay.querySelector<HTMLElement>('[data-sidebar-tree-arm]')!.style.top).toBe(
+					'20px',
+				);
+				expect(child.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			} else {
+				expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+				const arrow = child.querySelector('[data-sidebar-delegation-arrow]')!;
+				expect(arrow.textContent).toBe('\u21b3');
+				expect(arrow.getAttribute('aria-hidden')).toBe('true');
+				expect(arrow.classList.contains('pointer-events-none')).toBe(true);
+				expect(arrow.closest('[data-slot="chat-summary-header"]')).not.toBeNull();
+				expect(arrow.parentElement!.firstElementChild).toBe(arrow);
+			}
+			await view.rerender({
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: false },
+			});
+			expect(document.querySelector('[data-sidebar-tree-guides]')).toBeNull();
+			expect(document.querySelector('[data-sidebar-delegation-arrow]')).toBeNull();
+			expect(content.isConnected).toBe(true);
+			expect(content.outerHTML).toBe(markup);
+		},
+	);
+
+	it.each(['compact', 'detailed'] as const)(
+		'uses display depth for %s separators and structural depth for branch drops',
+		async (layout) => {
+			vi.useFakeTimers();
+			render(SidebarChatListHost, {
+				chats: [chat('parent'), delegated('child', 'parent'), chat('peer')],
+				isMobile: true,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			const parent = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="parent"]')!;
+			const child = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="child"]')!;
+			const peer = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="peer"]')!;
+			expect(
+				document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="chat:child"]')!
+					.style.left,
+			).toBe('12px');
+			vi.spyOn(document, 'elementFromPoint').mockReturnValue(parent);
+			await fireEvent.touchStart(peer, {
+				touches: [touchAt(1, 20, 44)],
+				changedTouches: [touchAt(1, 20, 44)],
+			});
+			vi.advanceTimersByTime(370);
+			await tick();
+			await fireEvent.touchMove(window, {
+				touches: [touchAt(1, 20, 80)],
+				changedTouches: [touchAt(1, 20, 80)],
+			});
+			vi.advanceTimersByTime(17);
+			await tick();
+			const indicator = document.querySelector('[data-sidebar-branch-drop-indicator]')!;
+			expect(indicator).not.toBeNull();
+			expect(indicator.parentElement).toBe(child.closest('[data-sidebar-virtual-item]'));
+			expect(indicator.classList.contains('bottom-0')).toBe(true);
+			await fireEvent.touchCancel(window, { touches: [], changedTouches: [touchAt(1, 20, 80)] });
+		},
+	);
+
+	it.each(['compact', 'detailed'] as const)(
+		'prefixes %s titles by delegation depth, not grouping depth',
+		(layout) => {
+			render(SidebarChatListHost, {
+				chats: [
+					chat('parent'),
+					delegated('child', 'parent', { projectPath: '/other' }),
+					delegated('grandchild', 'child', { projectPath: '/other' }),
+				],
+				displayOptions: {
+					chatItemLayout: layout,
+					nestDelegatedChats: true,
+					groupingFields: [{ field: 'project', enabled: true }],
+				},
+			});
+			for (const [id, prefix] of [
+				['child', '\u21b3'],
+				['grandchild', '\u21b3\u21b3'],
+			]) {
+				const row = document.querySelector(`[data-sidebar-virtual-row="${id}"]`)!;
+				expect(row.querySelector('[data-sidebar-delegation-arrow]')!.textContent).toBe(prefix);
+				expect(row.querySelector<HTMLElement>('.chat-item-root button')!.style.paddingLeft).toBe(
+					'36px',
+				);
+			}
+		},
+	);
+
+	it('switches delegation decoration without remounting chat content', async () => {
+		const chats = [chat('parent'), delegated('child', 'parent')];
+		const view = render(SidebarChatListHost, {
+			chats,
+			displayOptions: { nestDelegatedChats: true },
+		});
+		const child = document.querySelector('[data-sidebar-virtual-row="child"] .chat-item-root')!;
+		for (const layout of ['compact', 'detailed', 'single-line'] as const) {
+			await view.rerender({
+				chats,
+				displayOptions: { chatItemLayout: layout, nestDelegatedChats: true },
+			});
+			expect(child.isConnected).toBe(true);
+			expect(document.querySelectorAll('[data-sidebar-tree-guides]')).toHaveLength(
+				layout === 'single-line' ? 1 : 0,
+			);
+			expect(document.querySelectorAll('[data-sidebar-delegation-arrow]')).toHaveLength(
+				layout === 'single-line' ? 0 : 1,
+			);
+		}
+	});
+
+	it('retains tree continuations when parents are unmounted by virtualization', async () => {
+		const chats = [
+			chat('root'),
+			delegated('parent', 'root'),
+			...Array.from({ length: 500 }, (_, index) => delegated(`child-${index}`, 'parent')),
+			delegated('tail', 'root'),
+		];
+		const rows = buildSidebarRowModel(projectionInput(chats)).rows;
+		render(SidebarVirtualSortableChatListHost, { rows, rowHeight });
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		viewport.scrollTop = rowHeight * 250;
+		await fireEvent.scroll(viewport);
+		await tick();
+		expect(screen.queryByText('parent')).toBeNull();
+		expect(screen.queryByText('root')).toBeNull();
+		const child = screen.getByText('child-249').closest('[data-sidebar-virtual-item]')!;
+		expect(child.querySelector('[data-sidebar-tree-incoming="tee"]')).not.toBeNull();
+		expect(child.querySelector('[data-sidebar-tree-continuation="0"]')).not.toBeNull();
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(document.querySelectorAll('[data-sidebar-tree-guides]').length).toBeLessThan(40);
+	});
+
+	it('keeps inherited delegated rows virtualized', () => {
+		const chats = [
+			chat('parent'),
+			...Array.from({ length: 500 }, (_, index) => delegated(`child-${index}`, 'parent')),
+		];
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				nestDelegatedChats: true,
+				groupingFields: (['executor', 'project', 'activity', 'status'] as const).map((field) => ({
+					field,
+					enabled: true,
+				})),
+			},
+		});
+		expect(document.querySelectorAll('[data-sidebar-virtual-row]').length).toBeLessThan(40);
+		expect(screen.getByText('child-0')).toBeTruthy();
+		expect(screen.queryByText('child-499')).toBeNull();
+	});
+
+	it('keeps every non-inherited group inset inside deeply nested chat buttons', () => {
+		const chats = [
+			chat('parent', { createdAt: '2024-01-01', lastActivityAt: '2024-01-01' }),
+			delegated('child', 'parent', {
+				executorId: 'remote',
+				projectPath: '/other',
+				isUnread: true,
+				isPinned: true,
+			}),
+		];
+		render(SidebarChatListHost, {
+			chats,
+			displayOptions: {
+				nestDelegatedChats: true,
+				groupingFields: (['executor', 'project', 'activity', 'status'] as const).map((field) => ({
+					field,
+					enabled: true,
+				})),
+			},
+		});
+		const parent = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-row="parent"] .chat-item-root button',
+		);
+		const child = document.querySelector<HTMLElement>(
+			'[data-sidebar-virtual-row="child"] .chat-item-root button',
+		);
+		expect(parent?.style.paddingLeft).toBe('60px');
+		expect(child?.style.paddingLeft).toBe('120px');
 	});
 
 	it('uses virtual rendering for filtered chat lists', () => {

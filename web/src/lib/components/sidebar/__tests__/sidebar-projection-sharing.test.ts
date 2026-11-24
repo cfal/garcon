@@ -1,3 +1,4 @@
+import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
@@ -5,8 +6,9 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import SidebarHost from './SidebarHost.svelte';
 
 const builds = vi.hoisted(() => ({ count: 0 }));
-vi.mock('../sidebar-row-model', async (importOriginal) => {
-	const original = await importOriginal<typeof import('../sidebar-row-model')>();
+vi.mock('../../../sidebar/display/sidebar-row-model', async (importOriginal) => {
+	const original =
+		await importOriginal<typeof import('../../../sidebar/display/sidebar-row-model')>();
 	return {
 		...original,
 		buildSidebarChatListProjection: (
@@ -40,12 +42,14 @@ const chat = {
 	isProcessing: false,
 	processingPhase: null,
 	isUnread: true,
+	activityStatus: null,
 	canReloadFromNativeHistory: false,
 	status: 'draft',
 	lastMessage: '',
 	firstMessage: '',
 	tags: [],
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	agentOwnershipEpoch: null,
 } satisfies ChatSessionRecord;
 
@@ -54,7 +58,7 @@ afterEach(cleanup);
 it('shares one row projection after a chat is created or deleted', async () => {
 	const view = render(SidebarHost, {
 		chats: [chat],
-		sidebarGrouping: 'none',
+		sidebarGroupingFields: migrateSidebarGrouping('none'),
 		autoLoadSavedSearches: false,
 	});
 	expect(screen.getByText(chat.title)).toBeTruthy();

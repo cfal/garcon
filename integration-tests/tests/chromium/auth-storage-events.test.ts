@@ -1,6 +1,38 @@
 import { expect, test } from 'bun:test';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+
+test('a different verified owner at the same origin starts with a fresh model catalog', async () => {
+  await withChromiumFixture('model-catalog-owner', async ({ page, integration }, phase) => {
+    const url = integration.garcon.baseUrl;
+    const cacheOwner = () => page.evaluate(() =>
+      JSON.parse(localStorage.getItem('pref_model_catalog_v4') ?? '{}').owner ?? null);
+    await page.goto(url);
+    await browserExpect.poll(cacheOwner).toBe(JSON.stringify(['authenticated', 'integration']));
+
+    phase('replacing the controller account without clearing browser storage');
+    await page.goto('about:blank');
+    const nextOwner = 'replacement-fixture-owner';
+    await integration.crashAndRestartGarcon({
+      reusePort: true,
+      beforeStart: () => writeFile(join(integration.dirs.config, 'auth.json'), JSON.stringify({ ownerKey: nextOwner })),
+    });
+    expect(integration.garcon.baseUrl).toBe(url);
+    const token = integration.garcon.authToken;
+    if (!token) throw new Error('Missing replacement fixture session');
+    await page.addInitScript(token => {
+      localStorage.setItem('bearer-token', JSON.stringify({ token, epoch: null }));
+    }, token);
+    const requested = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/models');
+    await page.goto(url);
+    const response = await requested;
+    expect(response.status()).toBe(200);
+    expect(await response.request().headerValue('if-none-match')).toBeNull();
+    await browserExpect.poll(cacheOwner).toBe(JSON.stringify(['authenticated', nextOwner]));
+  });
+}, 120_000);
 
 test('unrelated cross-tab writes skip auth probes while storage-only peer logout still propagates', async () => {
   await withChromiumFixture('auth-storage-events', async ({ page, context, integration, assertNoBrowserErrors }, phase) => {

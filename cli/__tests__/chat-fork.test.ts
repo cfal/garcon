@@ -23,9 +23,10 @@ const TIMESTAMP = '2026-09-18T12:00:00.000Z';
 function chat(id = TARGET_CHAT_ID): ChatListEntry {
   return {
     id,
-    parentChat: {
-      chatId: SOURCE_CHAT_ID,
-      relation: 'fork',
+    parentChatId: null,
+    lineage: {
+      sourceChatId: SOURCE_CHAT_ID,
+      kind: 'fork',
       transcriptViewId: 'view-1',
       ordinal: 4,
     },
@@ -49,6 +50,7 @@ function chat(id = TARGET_CHAT_ID): ChatListEntry {
     isActive: true,
     isProcessing: true,
     processingPhase: 'running',
+    activityStatus: null,
     canReloadFromNativeHistory: false,
     isUnread: false,
   };
@@ -77,7 +79,8 @@ function accepted(
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: TIMESTAMP,
-    parentChat: forked.parentChat,
+    parentChatId: forked.parentChatId,
+    lineage: forked.lineage,
     chat: forked,
   };
 }

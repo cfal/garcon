@@ -171,20 +171,8 @@
 	}
 </script>
 
-{#if isOpen && projectPathDialogState.worktreePickerOpen}
-	<GitWorktreePickerModal
-		worktrees={projectPathDialogState.worktrees}
-		isLoading={projectPathDialogState.isLoadingWorktrees}
-		isCreating={projectPathDialogState.isCreatingWorktree}
-		errorMessage={projectPathDialogState.worktreeError}
-		onSelect={(path) => projectPathDialogState.selectWorktree(path)}
-		onCreate={(path, branch, baseRef) =>
-			projectPathDialogState.createWorktree(path, branch, baseRef)}
-		onRefresh={() => {
-			void projectPathDialogState.loadWorktrees();
-		}}
-		onClose={() => projectPathDialogState.closeWorktreePicker()}
-	/>
+{#if isOpen && projectPathDialogState.worktreePicker.isOpen}
+	<GitWorktreePickerModal session={projectPathDialogState.worktreePicker} />
 {:else}
 	<Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
 		<Dialog.Content

@@ -27,7 +27,7 @@
 	import { contextMenuPrimitives } from '$lib/components/ui/menu-primitives.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
-	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
+	import ChatActivityIndicator from '$lib/components/chat/ChatActivityIndicator.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import {
 		DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
@@ -35,6 +35,11 @@
 	} from './workspace-window-chrome.js';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
+
+	interface TabMenuTarget {
+		surfaceId: string;
+		chatId: string | null;
+	}
 
 	let {
 		windowId,
@@ -76,6 +81,8 @@
 	let closeFocusReturnTarget: HTMLElement | null = null;
 	let singleTabMenuOpen = $state(false);
 	let singleTabMenuShouldRestoreTabFocus = true;
+	let singleTabMenuTarget: TabMenuTarget | null = null;
+	let tabMenuTarget = $state.raw<TabMenuTarget | null>(null);
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
 	const singleTabMenuSurfaceId = $derived.by(() => {
@@ -119,6 +126,40 @@
 	$effect(() => {
 		onVisibleChange?.(displayedSurfaceIds);
 	});
+
+	$effect(() => {
+		if (singleTabMenuOpen && singleTabMenuTarget && !isMenuTargetCurrent(singleTabMenuTarget)) {
+			singleTabMenuShouldRestoreTabFocus = false;
+			singleTabMenuOpen = false;
+		}
+		if (
+			tabMenuTarget &&
+			(singleTabMenuSurfaceId !== null ||
+				!displayedSurfaceIds.includes(tabMenuTarget.surfaceId) ||
+				!isMenuTargetCurrent(tabMenuTarget))
+		) {
+			tabMenuTarget = null;
+		}
+	});
+
+	function captureMenuTarget(surfaceId: string): TabMenuTarget {
+		const surface = workspace.layout.surface(surfaceId);
+		return { surfaceId, chatId: surface?.type === 'chat' ? surface.chatId : null };
+	}
+
+	function isMenuTargetCurrent(target: TabMenuTarget): boolean {
+		const surface = workspace.layout.surface(target.surfaceId);
+		return Boolean(
+			surface &&
+			tabs.order.includes(target.surfaceId) &&
+			(surface.type === 'chat' ? surface.chatId : null) === target.chatId,
+		);
+	}
+
+	function handleTabMenuOpenChange(surfaceId: string, open: boolean): void {
+		if (open) tabMenuTarget = captureMenuTarget(surfaceId);
+		else if (tabMenuTarget?.surfaceId === surfaceId) tabMenuTarget = null;
+	}
 
 	function surfaceKind(surfaceId: string): ActiveSurfaceKind {
 		const surface = workspace.layout.surface(surfaceId);
@@ -365,7 +406,10 @@
 	}
 
 	function handleSingleTabMenuOpenChange(open: boolean): void {
-		if (open) singleTabMenuShouldRestoreTabFocus = true;
+		if (open && singleTabMenuSurfaceId) {
+			singleTabMenuTarget = captureMenuTarget(singleTabMenuSurfaceId);
+			singleTabMenuShouldRestoreTabFocus = true;
+		}
 	}
 
 	function restoreSingleTabMenuFocus(event: Event): void {
@@ -482,9 +526,10 @@
 			></span>
 		{/if}
 		{#if chatIsProcessing}
-			<WorkspaceChatProcessingIndicator
-				statusId={processingStatusId}
-				sizePx={titlebarMetrics.iconSizePx}
+			<ChatActivityIndicator
+				status="working"
+				descriptionId={processingStatusId}
+				spinnerSizePx={titlebarMetrics.iconSizePx}
 			/>
 		{:else}
 			<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} size={titlebarMetrics.iconSizePx} />
@@ -524,7 +569,10 @@
 		{#if measurement || singleTabMenuSurfaceId || !hasContextMenu(surfaceId)}
 			{@render tabButton(surfaceId, measurement, {})}
 		{:else}
-			<ContextMenu>
+			<ContextMenu
+				open={tabMenuTarget?.surfaceId === surfaceId}
+				onOpenChange={(open) => handleTabMenuOpenChange(surfaceId, open)}
+			>
 				<ContextMenuTrigger>
 					{#snippet child({ props })}
 						{@render tabButton(surfaceId, false, props)}

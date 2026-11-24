@@ -28,7 +28,8 @@ const accepted: StartChatCommandResponse = {
   turnId: 'turn-1',
   status: 'accepted',
   acceptedAt: new Date().toISOString(),
-  parentChat: null,
+  parentChatId: null,
+  lineage: null,
   chat: null,
 };
 const receipt: AgentTurnReceipt = {

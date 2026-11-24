@@ -7,13 +7,15 @@ import type {
   ChatTransientFeedSnapshot,
   TransientFeedRow,
 } from '../../../common/chat-transient-feed.js';
-import type { RetiredPermissionControl, TranscriptCommitEvent } from '../ledger/service.js';
+import type { PermissionActionabilityChange, RetiredPermissionControl, TranscriptCommitEvent } from '../ledger/service.js';
 
 interface TransientFeedRecord {
   readonly chatId: string;
   transcriptViewId: string;
   transientRevision: number;
   rows: Map<string, TransientFeedRow>;
+  // Rows whose decision is in flight stay visible but no longer await the user.
+  claimed: Set<string>;
 }
 
 export type AppliedTransientFeedEvent =
@@ -34,6 +36,7 @@ export class ChatTransientFeedStore {
         transcriptViewId: event.view.viewId,
         transientRevision: 0,
         rows: new Map(),
+        claimed: new Set(),
       });
       return { kind: 'unchanged' };
     }
@@ -44,7 +47,10 @@ export class ChatTransientFeedStore {
       const removed = [...record.rows.values()].some((row) => row.runId === event.runId);
       if (!removed) return { kind: 'unchanged' };
       for (const [id, row] of record.rows) {
-        if (row.runId === event.runId) record.rows.delete(id);
+        if (row.runId === event.runId) {
+          record.rows.delete(id);
+          record.claimed.delete(id);
+        }
       }
       mutation = { kind: 'clear-run', runId: event.runId };
     } else if (event.row.lifecycle.kind === 'requested') {
@@ -69,6 +75,7 @@ export class ChatTransientFeedStore {
       mutation = { kind: 'upsert', row };
     } else {
       const lifecycle = event.row.lifecycle;
+      record.claimed.delete(lifecycle.permissionOccurrenceId);
       if (!record.rows.delete(lifecycle.permissionOccurrenceId)) return { kind: 'unchanged' };
       mutation = {
         kind: 'remove',
@@ -85,9 +92,23 @@ export class ChatTransientFeedStore {
       || record.rows.get(control.permissionOccurrenceId)?.runId !== control.runId
     ) return { kind: 'unchanged' };
     record.rows.delete(control.permissionOccurrenceId);
+    record.claimed.delete(control.permissionOccurrenceId);
     return this.#mutation(record, {
       kind: 'remove', permissionOccurrenceId: control.permissionOccurrenceId,
     });
+  }
+
+  // Reports whether pending-user-action status changed; the visible row is unaffected.
+  applyPermissionActionability({ control, actionability }: PermissionActionabilityChange): boolean {
+    const record = this.#records.get(control.chatId);
+    if (
+      !record || record.transcriptViewId !== control.viewId
+      || record.rows.get(control.permissionOccurrenceId)?.runId !== control.runId
+    ) return false;
+    const claimed = record.claimed.has(control.permissionOccurrenceId);
+    if (actionability === 'claimed') record.claimed.add(control.permissionOccurrenceId);
+    else record.claimed.delete(control.permissionOccurrenceId);
+    return claimed !== (actionability === 'claimed');
   }
 
   snapshot(input: {
@@ -109,6 +130,11 @@ export class ChatTransientFeedStore {
   currentSnapshot(chatId: string): ChatTransientFeedSnapshot | null {
     const record = this.#records.get(chatId);
     return record ? snapshotOf(this.serverInstanceId, record) : null;
+  }
+
+  hasPendingUserAction(chatId: string): boolean {
+    const record = this.#records.get(chatId);
+    return record !== undefined && record.rows.size > record.claimed.size;
   }
 
   validateAction(action: ChatTransientControlAction): TransientFeedRow {
@@ -159,6 +185,7 @@ export class ChatTransientFeedStore {
       transcriptViewId,
       transientRevision: 0,
       rows: new Map(),
+      claimed: new Set(),
     };
     this.#records.set(chatId, created);
     return created;

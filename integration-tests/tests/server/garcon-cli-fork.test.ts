@@ -49,14 +49,15 @@ describe('garcon-cli fork', () => {
       expect(bare).toMatchObject({ exitCode: 0, stderr: '' });
       const bareJson = JSON.parse(bare.stdout);
       expect(bareJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'fork',
         workspace: WORKSPACE,
         sourceChatId,
         chat: {
-          parentChat: {
-            chatId: sourceChatId,
-            relation: 'fork',
+          parentChatId: null,
+          lineage: {
+            sourceChatId,
+            kind: 'fork',
             transcriptViewId: sourceTranscript.transcriptViewId,
             ordinal: sourceTranscript.lastOrdinal,
           },
@@ -71,7 +72,7 @@ describe('garcon-cli fork', () => {
       expect(synchronous).toMatchObject({ exitCode: 0, stderr: '' });
       const synchronousJson = JSON.parse(synchronous.stdout);
       expect(synchronousJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'fork',
         sourceChatId,
         receipt: {
@@ -80,7 +81,8 @@ describe('garcon-cli fork', () => {
           turnId: synchronousJson.turnReceipt.turnId,
           status: 'accepted',
         },
-        parentChat: { chatId: sourceChatId, relation: 'fork' },
+        parentChatId: null,
+        lineage: { sourceChatId, kind: 'fork' },
         turnReceipt: {
           state: 'completed',
           chatId: synchronousJson.chat.id,
@@ -101,7 +103,7 @@ describe('garcon-cli fork', () => {
       expect(asynchronous).toMatchObject({ exitCode: 0, stderr: '' });
       const asynchronousJson = JSON.parse(asynchronous.stdout);
       expect(asynchronousJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'fork-async',
         sourceChatId,
         receipt: {
@@ -109,7 +111,8 @@ describe('garcon-cli fork', () => {
           chatId: asynchronousJson.chat.id,
           status: 'accepted',
         },
-        parentChat: { chatId: sourceChatId, relation: 'fork' },
+        parentChatId: null,
+        lineage: { sourceChatId, kind: 'fork' },
       });
       expect(asynchronousJson).not.toHaveProperty('turnReceipt');
       await held.received;

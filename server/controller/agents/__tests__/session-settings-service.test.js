@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../__tests__/safety-dependencies.js";
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
@@ -45,13 +46,16 @@ function makeService(thinkingMode = 'high') {
   const onCommitted = mock(() => undefined);
   const control = { entries: [], controlEntries: [], pause: null };
   const execution = {
+    ownsExecution: mock(() => false),
     reserveTranscriptSnapshot: mock(chatId => ({ chatId, reservationId: 'settings-reservation' })),
     releaseTranscriptSnapshot: mock(async () => {}),
     readChatExecutionControl: mock(async () => control),
     withChatExecutionControl: mock(async (_chatId, operation) => operation(control)),
   };
-  const service = new AgentSessionSettingsService({
+  const locks = controllerSafetyDependencies();
+  const service = new AgentSessionSettingsService({ ...locks,
     execution,
+    hasAdmittedProviderTurn: () => false,
     onCommitted,
     registry: {
       getChat: () => entry,
@@ -60,10 +64,43 @@ function makeService(thinkingMode = 'high') {
     directory: { require: () => integration },
     endpointResolver,
   });
-  return { service, updateChat, entry, integration, endpointResolver, onCommitted, execution, control };
+  return { service, locks, updateChat, entry, integration, endpointResolver, onCommitted, execution, control };
 }
 
 describe('AgentSessionSettingsService', () => {
+  it('serializes queue admission with native confirmation and durable settings publication', async () => {
+    const f = makeService();
+    f.entry.agentSessionId = 'native-1';
+    const applying = Promise.withResolvers();
+    const confirmed = Promise.withResolvers();
+    const persisting = Promise.withResolvers();
+    const saved = Promise.withResolvers();
+    f.integration.sessionConfiguration = { apply: async () => { applying.resolve(); await confirmed.promise; } };
+    f.updateChat.mockImplementation(async (_chatId, patch) => {
+      persisting.resolve();
+      await saved.promise;
+      return { ...f.entry, ...patch };
+    });
+    const patch = f.service.updateSessionSettings('chat-1', { permissionMode: 'default' });
+    await applying.promise;
+    let admitted = false;
+    const admission = f.locks.selectionAdmissionLock.runExclusive('chat:chat-1', async () => {
+      admitted = true;
+      return f.onCommitted.mock.calls.length;
+    });
+    await Bun.sleep(0);
+    expect(admitted).toBe(false);
+    expect(f.updateChat).not.toHaveBeenCalled();
+    confirmed.resolve();
+    await persisting.promise;
+    await Bun.sleep(0);
+    expect(admitted).toBe(false);
+    expect(f.onCommitted).not.toHaveBeenCalled();
+    saved.resolve();
+    expect(await admission).toBe(1);
+    await patch;
+  });
+
   it.each(['entries', 'controlEntries'])('rejects literal mode changes with pending %s', async lane => {
     const f = makeService('none');
     f.integration.literalExecution = { selectionLabel: 'Mode', inputFormatByModel: {} };
@@ -138,7 +175,7 @@ describe('AgentSessionSettingsService', () => {
   });
 
   it('publishes settings only after their durable write succeeds', async () => {
-    const { service, updateChat, entry, onCommitted } = makeService('none');
+    const { service, locks, updateChat, entry, onCommitted } = makeService('none');
     const saved = Promise.withResolvers();
     updateChat.mockImplementationOnce(() => saved.promise);
     const updating = service.updateSessionSettings('chat-1', { model: 'new-model' });
@@ -152,6 +189,7 @@ describe('AgentSessionSettingsService', () => {
     updateChat.mockRejectedValueOnce(new Error('disk full'));
     await expect(service.updateSessionSettings('chat-1', { model: 'another' })).rejects.toThrow('disk full');
     expect(onCommitted).not.toHaveBeenCalled();
+    expect(await locks.selectionAdmissionLock.runExclusive('chat:chat-1', async () => 'released')).toBe('released');
   });
   it('rejects settings from a superseded owner before touching the integration or registry', async () => {
     const { service, entry, integration, updateChat } = makeService();
@@ -268,6 +306,7 @@ describe('AgentSessionSettingsService', () => {
       {
         model: 'large',
         permissionMode: 'manualBypass',
+        permissionModeExplicit: true,
         thinkingMode: 'medium',
         settings: { ownerId: 'amp', schemaVersion: 2, values: {} },
         endpoint: null,

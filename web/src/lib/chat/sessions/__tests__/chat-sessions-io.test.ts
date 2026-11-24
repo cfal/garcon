@@ -13,7 +13,6 @@ vi.mock('$lib/api/chats.js', async (importOriginal) => ({
 	deleteChat: vi.fn(),
 	setLastSelectedChat: vi.fn(),
 	generateChatTitle: vi.fn(),
-	reorderChat: vi.fn(),
 	replaceChatTags: vi.fn(),
 	applyChatTagDelta: vi.fn(),
 	transitionChatTags: vi.fn(),
@@ -29,7 +28,6 @@ import {
 	deleteChat,
 	generateChatTitle,
 	listChats,
-	reorderChat,
 	replaceChatTags,
 	setLastSelectedChat,
 	setChatArchived,
@@ -40,7 +38,6 @@ const mockListChats = vi.mocked(listChats);
 const mockDeleteChat = vi.mocked(deleteChat);
 const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
 const mockGenerateChatTitle = vi.mocked(generateChatTitle);
-const mockReorderChat = vi.mocked(reorderChat);
 const mockReplaceChatTags = vi.mocked(replaceChatTags);
 const mockSetChatArchived = vi.mocked(setChatArchived);
 const mockUpdateSessionName = vi.mocked(updateSessionName);
@@ -84,10 +81,12 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
 	};
 }
@@ -122,6 +121,112 @@ describe('ChatSessionsStore IO', () => {
 
 		expect(store.byId['chat-2']?.title).toBe('Quiet');
 		expect(store.isLoadingChats).toBe(false);
+	});
+
+	it('reports quiet refresh failures without rejecting a successful mutation caller', async () => {
+		const notifyError = vi.fn();
+		const store = new ChatSessionsStore({ notifyError });
+		mockListChats.mockRejectedValueOnce(new Error('Offline'));
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			await expect(store.quietRefreshChats()).resolves.toBeUndefined();
+			expect(notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
+			expect(store.chatListError).toBe('Offline');
+		} finally {
+			log.mockRestore();
+		}
+	});
+
+	it.each([false, true])(
+		'requires an applied post-request order snapshot (follow-up succeeds: %s)',
+		async (succeeds) => {
+			const oldFetch = deferred<Awaited<ReturnType<typeof listChats>>>();
+			const freshFetch = deferred<Awaited<ReturnType<typeof listChats>>>();
+			const fetchChats = vi
+				.fn<typeof listChats>()
+				.mockReturnValueOnce(oldFetch.promise)
+				.mockReturnValueOnce(freshFetch.promise);
+			const store = new ChatSessionsStore({ listChats: fetchChats });
+			const oldRefresh = store.quietRefreshChats();
+			const confirmation = store.refreshOrderSnapshot();
+			oldFetch.resolve({
+				sessions: [makeServerSession({ id: 'old' })],
+				total: 1,
+				lastSelectedChatId: null,
+			});
+			await flushMicrotasks();
+			expect(fetchChats).toHaveBeenCalledTimes(2);
+			if (succeeds)
+				freshFetch.resolve({
+					sessions: [makeServerSession({ id: 'new' })],
+					total: 1,
+					lastSelectedChatId: null,
+				});
+			else freshFetch.reject(new Error('Offline'));
+			expect(await confirmation).toBe(succeeds);
+			await oldRefresh;
+			expect(store.order).toEqual([succeeds ? 'new' : 'old']);
+		},
+	);
+
+	it('does not confirm order using a superseded fetch whose replacement fails', async () => {
+		const discarded = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const fetchChats = vi
+			.fn<typeof listChats>()
+			.mockReturnValueOnce(discarded.promise)
+			.mockRejectedValueOnce(new Error('Offline'));
+		const store = new ChatSessionsStore({ listChats: fetchChats });
+		const confirmation = store.refreshOrderSnapshot();
+		store.applyStartEntry(makeServerSession({ id: 'created' }));
+		discarded.resolve({ sessions: [], total: 0, lastSelectedChatId: null });
+		expect(await confirmation).toBe(false);
+		expect(store.byId.created).toBeDefined();
+		expect(fetchChats).toHaveBeenCalledTimes(2);
+	});
+
+	it('converges on changed parentage after an older roster fetch without changing selection', async () => {
+		const store = new ChatSessionsStore();
+		const first = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const original = makeServerSession({ id: 'child' });
+		store.upsertFromServer([original]);
+		store.setSelectedChatId('child');
+		mockListChats.mockReturnValueOnce(first.promise).mockResolvedValueOnce({
+			sessions: [{ ...original, parentChatId: '1783725900000201', lineage: null }],
+			total: 1,
+			lastSelectedChatId: null,
+		});
+		const stale = store.quietRefreshChats();
+		const invalidated = store.quietRefreshChats();
+		first.resolve({ sessions: [original], total: 1, lastSelectedChatId: null });
+		await Promise.all([stale, invalidated]);
+		expect(mockListChats).toHaveBeenCalledTimes(2);
+		expect(store.byId.child?.parentChatId).toBe('1783725900000201');
+		expect(store.selectedChatId).toBe('child');
+	});
+
+	it('catches up after a delayed creation acknowledgement overwrites newer delegation', async () => {
+		const child = makeServerSession({
+			id: 'child',
+			lineage: {
+				sourceChatId: '1783725900000201',
+				kind: 'fork',
+				transcriptViewId: 'source-view',
+				ordinal: 3,
+			},
+		});
+		const assigned = { ...child, parentChatId: '1783725900000202' };
+		const refresh = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const fetchChats = vi.fn<typeof listChats>().mockReturnValueOnce(refresh.promise);
+		const store = new ChatSessionsStore({ listChats: fetchChats });
+		store.upsertFromServer([assigned]);
+		store.setSelectedChatId('child');
+		store.upsertServerChat(child);
+		expect(fetchChats).toHaveBeenCalledOnce();
+		refresh.resolve({ sessions: [assigned], total: 1, lastSelectedChatId: null });
+		await flushMicrotasks();
+		expect(store.byId.child?.parentChatId).toBe(assigned.parentChatId);
+		expect(store.byId.child?.lineage).toEqual(child.lineage);
+		expect(store.selectedChatId).toBe('child');
 	});
 
 	it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {
@@ -848,73 +953,6 @@ describe('ChatSessionsStore IO', () => {
 		expect(mockListChats).not.toHaveBeenCalled();
 	});
 
-	it('moves a chat to a boundary and quietly refreshes changed order', async () => {
-		const response = {
-			success: true as const,
-			chatId: 'chat-1',
-			orderGroup: 'normal' as const,
-			changed: true,
-		};
-		mockReorderChat.mockResolvedValue(response);
-		mockListChats.mockResolvedValue({ sessions: [], total: 0, lastSelectedChatId: null });
-		const store = new ChatSessionsStore();
-
-		await expect(store.moveChatToBoundary('chat-1', 'top')).resolves.toEqual(response);
-
-		expect(mockReorderChat).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			placement: { kind: 'boundary', boundary: 'top' },
-		});
-		expect(mockListChats).toHaveBeenCalledTimes(1);
-	});
-
-	it('quietly refreshes an unchanged boundary result', async () => {
-		mockReorderChat.mockResolvedValue({
-			success: true,
-			chatId: 'chat-1',
-			orderGroup: 'archived',
-			changed: false,
-		});
-		mockListChats.mockResolvedValue({ sessions: [], total: 0, lastSelectedChatId: null });
-		const store = new ChatSessionsStore();
-
-		await store.moveChatToBoundary('chat-1', 'bottom');
-
-		expect(mockReorderChat).toHaveBeenCalledWith({
-			chatId: 'chat-1',
-			placement: { kind: 'boundary', boundary: 'bottom' },
-		});
-		expect(mockListChats).toHaveBeenCalledTimes(1);
-	});
-
-	it('notifies and skips refresh when boundary mutation fails', async () => {
-		const notifyError = vi.fn();
-		mockReorderChat.mockRejectedValue(new Error('reorder failed'));
-		const store = new ChatSessionsStore({ notifyError });
-
-		await expect(store.moveChatToBoundary('chat-1', 'top')).resolves.toBeNull();
-
-		expect(notifyError).toHaveBeenCalledWith('Failed to reorder chats.');
-		expect(mockListChats).not.toHaveBeenCalled();
-	});
-
-	it('preserves mutation success when the quiet refresh fails', async () => {
-		const notifyError = vi.fn();
-		const response = {
-			success: true as const,
-			chatId: 'chat-1',
-			orderGroup: 'pinned' as const,
-			changed: true,
-		};
-		mockReorderChat.mockResolvedValue(response);
-		mockListChats.mockRejectedValue(new Error('refresh failed'));
-		const store = new ChatSessionsStore({ notifyError });
-
-		await expect(store.moveChatToBoundary('chat-1', 'bottom')).resolves.toEqual(response);
-
-		expect(notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
-	});
-
 	it('persists tags and patches the server response into the chat record', async () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
@@ -1232,7 +1270,7 @@ describe('ChatSessionsStore IO', () => {
 		mutation.reject(conflict);
 
 		await expect(pending).rejects.toBe(conflict);
-		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(listChats).toHaveBeenCalledTimes(2));
 		expect(store.byId['chat-1'].tags).toEqual(['newer']);
 		expect(store.tagReconciliationKind('chat-1')).toBe('conflict-refresh');
 	});

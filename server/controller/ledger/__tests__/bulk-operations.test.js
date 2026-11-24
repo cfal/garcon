@@ -6,6 +6,7 @@ import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage } from '../../../../common/chat-types.ts';
+import { getTransactionRollbackFailure } from '../sqlite-operations.ts';
 import {
   LedgerBulkOperationAbandonedError,
   LedgerFencedError,
@@ -76,6 +77,94 @@ function viewRows(chatId) {
 }
 
 describe('bounded transcript bulk operations', () => {
+  it.each([
+    ['staging', false], ['staging', true], ['seed promotion', false], ['seed promotion', true],
+  ])('preserves %s failures and visibility (rollback fails: %s)', async (operation, rollbackFails) => {
+    const chatId = 'failed-write';
+    const current = operation === 'staging'
+      ? store.initializeCurrentView(chatId, { contentStartOrdinal: 1 })
+      : store.currentView(chatId);
+    const failure = new Error('synthetic commit failure');
+    const rollbackFailure = new Error('synthetic rollback failure');
+    const failureAt = operation === 'staging' ? 2 : 4;
+    let commits = 0;
+    let time = 0;
+    const clock = spyOn(performance, 'now').mockImplementation(() => time);
+    const warning = spyOn(console, 'warn').mockImplementation(() => {});
+    const exec = Database.prototype.exec;
+    const execution = spyOn(Database.prototype, 'exec').mockImplementation(function (sql) {
+      if (sql === 'COMMIT' && ++commits === failureAt) { time += 600; throw failure; }
+      if (sql === 'ROLLBACK') {
+        time += 10;
+        if (rollbackFails) throw rollbackFailure;
+      }
+      return exec.call(this, sql);
+    });
+    try {
+      let caught;
+      try {
+        const input = { viewId: transcriptViewId('failed-view'), contentStartOrdinal: 1, rows: rows(LARGE, 'synthetic') };
+        if (operation === 'staging') await store.stageView(chatId, input);
+        else await store.seedCurrentView(chatId, input);
+      } catch (error) { caught = error; }
+      expect(caught).toBeInstanceOf(LedgerFencedError);
+      expect(caught.cause).toBe(failure);
+      expect(getTransactionRollbackFailure(caught.cause)).toBe(rollbackFails ? rollbackFailure : null);
+      const reports = warning.mock.calls.filter(call => call[0] === '[ledger:write]').map(call => JSON.parse(call[2]));
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toMatchObject({
+        operation: operation === 'staging' ? 'ledger staging batch' : 'ledger seed promotion',
+        phases: { commit: { wallMs: 600 }, rollback: { wallMs: 10 } },
+      });
+      expect(viewRows(chatId).filter(view => view.status === 'current').map(view => view.viewId))
+        .toEqual(current ? [current.viewId] : []);
+      if (rollbackFails) expect(() => store.currentView(chatId)).toThrow(LedgerFencedError);
+      else expect(store.currentView(chatId)).toEqual(current);
+      expect(() => store.initializeCurrentView(chatId, { contentStartOrdinal: 1 })).toThrow(LedgerFencedError);
+    } finally {
+      execution.mockRestore(); warning.mockRestore(); clock.mockRestore();
+    }
+  });
+
+  it('reports slow staging and promotion commits with their batch sizes', async () => {
+    const current = store.initializeCurrentView('timed', { contentStartOrdinal: 1 });
+    let time = 0;
+    const clock = spyOn(performance, 'now').mockImplementation(() => time);
+    const warning = spyOn(console, 'warn').mockImplementation(() => {});
+    const exec = Database.prototype.exec;
+    const execution = spyOn(Database.prototype, 'exec').mockImplementation(function (sql) {
+      if (sql === 'COMMIT') time += 600;
+      return exec.call(this, sql);
+    });
+    try {
+      const staged = await store.stageView('timed', {
+        viewId: transcriptViewId('timed-replacement'), contentStartOrdinal: 1, rows: rows(LARGE, 'synthetic'),
+      });
+      expect(store.currentView('timed').viewId).toBe(current.viewId);
+      const reports = warning.mock.calls.map(call => JSON.parse(call[2]));
+      expect(reports.map(report => [report.firstOrdinal, report.rows])).toEqual([[1, 500], [501, 500], [1001, 200]]);
+      for (const report of reports) {
+        expect(report).toMatchObject({ operation: 'ledger staging batch', phases: {
+          encode: { wallMs: 0 }, validate: { wallMs: 0 }, statements: { wallMs: 0 }, commit: { wallMs: 600 },
+        } });
+        expect(report.payloadCodeUnits).toBeGreaterThan(0);
+      }
+      store.replaceCurrentView('timed', current.viewId, staged.viewId);
+      expect(JSON.parse(warning.mock.calls[3][2])).toMatchObject({
+        operation: 'ledger replacement promotion', phases: { commit: { wallMs: 600 } },
+      });
+      expect(store.currentView('timed').viewId).toBe(staged.viewId);
+      expect(store.currentRows('timed')).toHaveLength(LARGE);
+      warning.mockClear();
+      await store.seedCurrentView('seed-timed', { contentStartOrdinal: 1, rows: rows(LARGE, 'synthetic') });
+      expect(JSON.parse(warning.mock.calls.at(-1)[2])).toMatchObject({
+        operation: 'ledger seed promotion', phases: { commit: { wallMs: 600 } },
+      });
+    } finally {
+      execution.mockRestore(); warning.mockRestore(); clock.mockRestore();
+    }
+  });
+
   it('streams a pinned prefix in bounded pages and rechecks the view after the final page', async () => {
     const view = store.initializeCurrentView('paged', { contentStartOrdinal: 1, rows: rows(2500, 'row') });
     const observer = observeTurns();

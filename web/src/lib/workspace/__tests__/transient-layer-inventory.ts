@@ -13,13 +13,10 @@ export const CUSTOM_TRANSIENT_SOURCES = [
 	'components/chat/composer/PromptComposer.svelte',
 	'components/chat/composer/SlashCommandMenu.svelte',
 	'components/layout/AppShell.svelte',
-	'components/shared/CommandMenu.svelte',
 ] as const;
 
 export const TRANSIENT_BACKDROP_SOURCES = [
 	'components/ui/dialog/dialog-overlay.svelte',
-	'components/shared/CommandMenu.svelte',
-	'components/git/GitPushModal.svelte',
 	'components/layout/AppShell.svelte',
 ] as const;
 

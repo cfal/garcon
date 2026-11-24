@@ -104,6 +104,11 @@ or network bandwidth.
 
 ## HTTP Transparency
 
+Chat list entries and snapshot chat summaries include nullable `activityStatus`
+(`working`, `complete`, `error`, or `pending-user-action`). Direct controller
+HTTP and the executor gateway return the same field through the existing
+allowlisted bulk reads. No new forwarding route or authority is introduced.
+
 Both endpoints serve the same application request. For example:
 
 ```text
@@ -270,6 +275,18 @@ not forwarded. Title writes are bounded to 4 KiB UTF-8 at the common parser and
 persistence boundary; legacy oversized values remain readable but can still
 exceed reply bounds until renamed. Protocol revision 12 requires matched
 controller and worker builds for these forwarded-contract changes.
+
+Delegation parent editing forwards exactly `PUT /api/v1/chats/parent`, using bulk,
+the short pool, a 30-second deadline, and ordinary workspace CLI authority
+(`mutation:true`, `management:false`). The controller owns the relation; the
+origin executor does not restrict either chat's executor. The desired-state
+setter reconciles earlier uncertain persistence inline and is never automatically
+retried. It edits only `parentChatId`, including on fork/handoff chats; immutable
+`lineage` remains separate and grants no delegation authority. Revision 45 changes
+chat-list and command projections to those two fields, and the setter reply to a
+scalar `parentChatId`. Fork acknowledgement correlation uses lineage, not the
+mutable parent. CLI automation schema 2 makes the same split. Matched controller,
+worker, CLI, and browser builds are required.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 

@@ -40,7 +40,7 @@ export async function settleSubmissionFailure(
 		options.refreshOnAdmissionConflict === true && isExecutionControlAdmissionConflict(error);
 
 	if (options.clientMessageId && !outcomeUnknown) {
-		deps.chatState.clearOptimisticUserInput(options.clientMessageId);
+		deps.chatState.clearOptimisticUserInput(context.chatId, options.clientMessageId);
 		if (admissionConflict && options.refreshControl) await options.refreshControl();
 	}
 

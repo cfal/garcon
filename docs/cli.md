@@ -23,11 +23,19 @@ Common options and environment variables:
 - `GARCON_PROJECT_BASE_DIR` / `--project-base-dir`: filesystem access boundary.
 - `GARCON_TERMINAL_SHELL`: shell used by terminal sessions.
 - `CLAUDE_BINARY`, `AMP_BINARY`, `FACTORY_BINARY`: native CLI overrides.
-- `GARCON_CODEX_CLI`: Codex CLI override. By default Garcon runs the native binary from its bundled `@openai/codex` platform package, then falls back to `codex` on `PATH`.
+- `GARCON_CODEX_CLI`: Codex executable on this executor, including device login. Defaults to `codex` on the service's `PATH` (`codex.exe` on Windows). App-server requires Codex 0.171.0 or newer.
 - `GARCON_CURSOR_BINARY`: Cursor Agent CLI override.
 - `CURSOR_API_KEY`: Cursor Agent API key for native sessions.
-- `GARCON_PI_BINARY` / `PI_BINARY`: Pi CLI override.
-- `PI_CODING_AGENT_SESSION_DIR`: optional Pi session directory override.
+- `GARCON_ANTIGRAVITY_BINARY`: Antigravity CLI (`agy`) override; defaults to `agy` on `PATH`.
+- `GARCON_ANTIGRAVITY_AUTH_METHOD`: Antigravity sign-in method: `oauth-personal`, `oauth-business`, `gemini-api-key`, or `agent-platform`. Defaults to `gemini-api-key` when `GEMINI_API_KEY` is set, otherwise `oauth-personal`.
+- `GEMINI_API_KEY`: Gemini API key for Antigravity sessions. See [Antigravity](antigravity.md).
+- `GARCON_PI_BINARY` / `PI_BINARY`: Pi executable on this executor. Chat, single queries, and model discovery all use the same override or `pi` on the service's `PATH`. The reference CLI is Pi 1.6.0; Garcon does not install the Pi SDK.
+- `PI_CODING_AGENT_DIR`: Pi's configuration and data directory on this executor (default: `~/.pi/agent`).
+- `PI_CODING_AGENT_SESSION_DIR`: optional override for the session directory only.
+
+For Codex and Pi, a bare executable name uses `PATH`. A relative path such as `./tools/codex` is relative to the executor service's working directory, not the chat project or login directory.
+
+Pi wrappers must wait for `pi --list-models` to finish before exiting. Wrappers and extensions should stop their helpers before returning. On POSIX, Garcon stops Pi's process group, but not helpers that have left it. On Windows, Garcon cannot reliably stop a helper after its parent exits. On either platform, a surviving helper that keeps Pi's stdout or stderr open can make discovery time out after 20 seconds.
 
 Run `bun run help` for the complete server option list.
 
@@ -519,9 +527,9 @@ bun cli/main.ts --runtime controller start-async \
 ```
 
 `start-async` prints the accepted chat and turn IDs, then returns. `--json` emits
-one versioned envelope containing the exact receipt, parent relationship, server
-instance, workspace, and title-update outcome. Use the turn ID with `wait` when
-exact completion identity matters.
+one versioned envelope containing the exact receipt, delegation parent, lineage,
+server instance, workspace, and title-update outcome. Use the turn ID with `wait`
+when exact completion identity matters.
 
 Synchronous `start --json` and `resume --json` buffer one versioned document
 until the turn settles. They reuse the matching async acceptance fields and add
@@ -540,11 +548,12 @@ repaired. Fork-derived titles reserve room for their numeric suffix. Generated
 titles retain their stricter 120-character bound.
 
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
-for example when one agent starts another for review. Garcon records an immutable
-`delegation` relationship and shows it in Chat Map. The parent must exist in the
-same workspace. Declaring it does not copy transcript content, inherit execution
-settings, or make either chat wait for the other. `--parent` is creation-only and
-cannot be used with `resume`.
+for example when one agent starts another for review. Garcon records a
+delegation parent in `parentChatId` and nests the child in the sidebar. The parent
+must exist in the same workspace. Declaring it does not copy transcript content,
+inherit execution settings, or make either chat wait for the other. `--parent` is
+creation-only and cannot be used with `resume`. Use `set-parent` to edit delegation
+later.
 
 New chats resolve matching preambles from their own project, agent, and tags.
 Use `--no-preamble` to send an explicit empty selection, or repeat
@@ -673,7 +682,7 @@ bun cli/main.ts --runtime controller chats \
 ```
 
 Supported metadata operators are `title:`, `tag:`, `agent:`, `model:`,
-`project:`, exact `id:`, direct-parent `parent:`, `created-before:`,
+`project:`, exact `id:`, direct delegation `parent:`, direct lineage `source:`, `created-before:`,
 `created-after:`, `updated-before:`, `updated-after:`, `status:active|unread`,
 and `is:pinned|normal|archived`. Negate an
 order group with `is:!pinned`, `is:!normal`, or `is:!archived`. Pipe-separated
@@ -682,6 +691,11 @@ clauses are ANDed. Repeated title and tag groups are also ANDed; agent,
 model, and project values accumulate as alternatives. Bare terms are ANDed and
 match chat title, project path, first and last previews, and tags. `chats` sorts
 by effective activity descending and uses the chat ID as a stable tie-breaker.
+
+`parent:<chat-id>` lists direct delegated children; `source:<chat-id>` lists
+forks and handoff continuations created from that source. Neither follows
+ancestors. A chat can match both with different IDs. JSON summaries expose
+`parentChatId` and immutable `lineage` independently, not `parentRelation`.
 
 Date-only filter values mean `00:00:00.000Z`. Datetimes must be RFC3339 with an
 explicit `Z` or numeric offset and at most millisecond precision. Before and
@@ -896,6 +910,10 @@ executor is ready delivers it.
 
 ## Chat Metadata
 
+Chat-list and chat-snapshot API summaries include nullable `activityStatus`:
+`working`, `complete`, `error`, or `pending-user-action`. The controller and
+executor CLI gateway return the same status; this does not change CLI syntax.
+
 Set lifecycle and metadata to explicit desired values:
 
 ```bash
@@ -906,6 +924,8 @@ bun cli/main.ts unpin 1785337200123456
 bun cli/main.ts rename 1785337200123456 "Review complete"
 bun cli/main.ts set-tags 1785337200123456 --tag review --tag complete
 bun cli/main.ts set-tags 1785337200123456 --clear
+bun cli/main.ts set-parent 1785337200123456 1785337200123457
+bun cli/main.ts set-parent 1785337200123456 --clear
 ```
 
 These commands are desired-state setters, not wrappers around toggle routes.
@@ -922,6 +942,33 @@ The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
 uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
 its compare-and-set baseline. Upgrade controller and workers together for this
 forwarded API change (executor protocol revision 12).
+
+`set-parent` sets, replaces, or clears a delegation parent by exact chat ID.
+Forks and handoff continuations can be assigned without changing their ancestry.
+Both chats may be running, archived, or on
+different executors; target executor readiness is irrelevant. Self-parenting
+and delegation cycles are rejected; lineage does not participate in that check.
+The parent's agent gains eligibility for future
+delegated resume, stop, and remove commands; the old parent loses that eligibility.
+Already-admitted work and its result recipient remain unchanged. Setting a
+parent does not execute work, copy context, or subscribe to completion notices.
+Open webapps refresh nesting and parent filters automatically. Chat Map shows
+only immutable fork/handoff lineage, so assignment does not change its topology.
+
+Ordinary forks and `/handoff` continuations start without a delegation parent.
+Agent-command `fork="true"` starts explicitly record both their delegation parent
+and the copied source watermark. Lineage alone grants no delegated controls.
+
+Browser and CLI parent edits are last-writer-wins. An uncertain save may already
+have changed the live relation and delegated authority. Inspect the roster before
+explicitly retrying; the next `PUT chats/parent` reconciles any unconfirmed save
+before applying its desired value. There is no automatic retry or separate
+recovery endpoint. Parent deletion remains non-cascading. Executor protocol
+revision 45 separates delegation and lineage in forwarded chat payloads; upgrade
+controller, workers, browser, and CLI together. CLI automation envelopes use
+schema 2. Workspace migration 10 converts registry schema 5 to 6 without rewriting
+transcripts. Legacy delegation records retain their parent but cannot recover
+unrecorded snapshot lineage. The upgrade is incompatible with older binaries.
 
 ## Export
 
@@ -996,8 +1043,9 @@ bun cli/main.ts --runtime controller resume-async 1785337200123456 \
 
 Successful output identifies `delivery: new-turn|steer` and the accepted turn
 ID. `--json` emits one versioned envelope with the exact receipt, delivery,
-parent relationship, server instance, and workspace. Garcon bounds run/steer
-race retries and reports ambiguity rather than risking duplicate delivery.
+delegation parent, lineage, server instance, and workspace. Garcon bounds
+run/steer race retries and reports ambiguity rather than risking duplicate
+delivery.
 
 Codex's asynchronous questions are conversational messages, not pending
 permissions. In the browser, each inline question can be answered independently

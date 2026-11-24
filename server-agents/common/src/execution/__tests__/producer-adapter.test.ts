@@ -586,6 +586,24 @@ describe('createAgentProducerAdapter', () => {
   });
 });
 
+it('publishes one terminal event when a resume reports its failure and then rejects', async () => {
+  const fixture = await createFixture();
+  fixture.runtime.resume = async (_request, publish) => {
+    publish({ type: 'run-ended', runId: 'run-1', outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: 'quota' } });
+    throw new Error('quota');
+  };
+
+  await fixture.adapter.execution.resume({
+    ...fixture.request,
+    agentSessionId: 'session-1',
+    nativeSession: null,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(fixture.events.filter((event) => event.type === 'run-ended')).toHaveLength(1);
+});
+
 // Compaction reaches the transcript through runExisting, which must hand the
 // operation the same capability start and resume get rather than a path of its own.
 it('publishes a runExisting operation through the same capability as a run', async () => {

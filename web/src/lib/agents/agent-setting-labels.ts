@@ -10,6 +10,7 @@ import * as m from '$lib/paraglide/messages.js';
 const SETTING_LABELS = {
 	thinking: m.chat_composer_agent_setting_thinking,
 	mode: m.chat_composer_agent_setting_mode,
+	speed: m.chat_composer_agent_setting_speed,
 } satisfies Record<AgentSettingLabelKey, () => string>;
 
 const OPTION_LABELS = {

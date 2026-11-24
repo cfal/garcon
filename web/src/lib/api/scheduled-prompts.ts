@@ -1,4 +1,5 @@
-import { apiDelete, apiGet, apiPost, apiPut, type ApiFetchOptions } from './client.js';
+import { apiDelete, apiGet, apiPost, apiPut, ApiError, ApiMutationOutcomeUnknownError, type ApiFetchOptions } from './client.js';
+import * as m from '$lib/paraglide/messages.js';
 import {
 	parseRenderScheduledPromptResponse,
 	type RenderScheduledPromptRequest,
@@ -49,9 +50,7 @@ export async function getScheduledPrompts(): Promise<ScheduledPromptsSnapshot> {
 export async function createScheduledPrompt(
 	request: CreateScheduledPromptRequest,
 ): Promise<CreateScheduledPromptResponse> {
-	const result = normalizeCreateScheduledPromptResponse(await apiPost('/api/v1/scheduled-prompts', request));
-	if (!result) throw new Error('Invalid scheduled prompt creation response');
-	return result;
+	return createPrompt('/api/v1/scheduled-prompts', request);
 }
 
 export async function updateScheduledPrompt(
@@ -81,8 +80,17 @@ export async function reorderScheduledPrompts(
 export async function scheduleChatPrompt(
 	request: ScheduleInPromptRequest,
 ): Promise<ScheduleInPromptResponse> {
-	const raw = await apiPost<unknown>('/api/v1/scheduled-prompts/in', request);
-	const result = normalizeCreateScheduledPromptResponse(raw);
-	if (!result) throw new Error('Invalid schedule-in response');
-	return result;
+	return createPrompt('/api/v1/scheduled-prompts/in', request);
+}
+
+async function createPrompt(url: string, request: CreateScheduledPromptRequest | ScheduleInPromptRequest): Promise<CreateScheduledPromptResponse> {
+	try {
+		const result = normalizeCreateScheduledPromptResponse(await apiPost<unknown>(url, request));
+		if (!result) throw new Error('Invalid scheduled prompt creation response');
+		return result;
+	} catch (error) {
+		// Even a coded 500 can follow a committed schedule whose durability is uncertain.
+		if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.errorCode) throw error;
+		throw new ApiMutationOutcomeUnknownError(m.scheduled_prompts_creation_unconfirmed(), { cause: error });
+	}
 }

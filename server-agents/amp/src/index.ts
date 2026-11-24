@@ -60,6 +60,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration = null;
   readonly projectPathUpdates = null;
   readonly usageHistory = null;
+  readonly cliUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;

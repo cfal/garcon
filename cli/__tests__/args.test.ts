@@ -691,6 +691,22 @@ describe('parseCliArgs', () => {
     });
   });
 
+  test('parses setting and explicitly clearing a delegation parent', () => {
+    expect(CLI_HELP).toContain('Clear all tags (set-tags) or the delegation parent (set-parent)');
+    const parent = '1785337200123457';
+    expect(parseCliArgs(['set-parent', CHAT_ID, parent, '--json'], ENV)).toMatchObject({
+      kind: 'set-parent', chatId: CHAT_ID, parentChatId: parent, json: true,
+    });
+    expect(parseCliArgs(['--runtime', 'executor', 'set-parent', CHAT_ID, '--clear'], ENV)).toMatchObject({
+      kind: 'set-parent', runtime: 'executor', parentChatId: null,
+    });
+    for (const args of [
+      ['set-parent', CHAT_ID], ['set-parent', CHAT_ID, parent, '--clear'],
+      ['set-parent', CHAT_ID, parent, 'extra'], ['set-parent', CHAT_ID, 'title'],
+      ['set-parent', 'title', parent], ['set-parent', CHAT_ID, parent, '--executor', 'local'],
+    ]) expect(() => parseCliArgs(args, ENV)).toThrow();
+  });
+
   test('parses a free-text question answer', () => {
     expect(parseCliArgs([
       'permission-answer', CHAT_ID, 'permission-text', '--answers',

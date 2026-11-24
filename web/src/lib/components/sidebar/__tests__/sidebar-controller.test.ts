@@ -6,24 +6,14 @@ vi.mock('$lib/api/chats.js', () => ({
 	togglePinned: vi.fn(),
 	setChatArchived: vi.fn(),
 	deleteChat: vi.fn(),
-	reorderChat: vi.fn(),
-	sortChatOrder: vi.fn(),
 	getChatDetails: vi.fn(),
 	setChatTags: vi.fn(),
 }));
 
-import {
-	togglePinned,
-	setChatArchived,
-	reorderChat,
-	sortChatOrder,
-
-} from '$lib/api/chats.js';
+import { togglePinned, setChatArchived } from '$lib/api/chats.js';
 
 const mockTogglePinned = vi.mocked(togglePinned);
 const mockSetChatArchived = vi.mocked(setChatArchived);
-const mockReorderChat = vi.mocked(reorderChat);
-const mockSortChatOrder = vi.mocked(sortChatOrder);
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -44,11 +34,13 @@ function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		tags: [],
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -63,7 +55,9 @@ describe('SidebarController', () => {
 		quietRefresh = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 		const startArchiveMutation = (chatIds: readonly string[]) => ({
 			chatIds: [...chatIds],
-			completion: Promise.all(chatIds.map((chatId) => mockSetChatArchived({ chatId, isArchived: true }))).then(async () => {
+			completion: Promise.all(
+				chatIds.map((chatId) => mockSetChatArchived({ chatId, isArchived: true })),
+			).then(async () => {
 				await quietRefresh();
 			}),
 		});
@@ -82,67 +76,6 @@ describe('SidebarController', () => {
 			},
 		};
 		controller = new SidebarController(deps);
-	});
-
-	describe('reorderChat', () => {
-		it('passes an after placement and refreshes', async () => {
-			mockReorderChat.mockResolvedValue({
-				success: true,
-				chatId: 'c-2',
-				orderGroup: 'normal',
-				changed: true,
-			});
-
-			await controller.reorderChat('c-2', {
-				kind: 'relative',
-				referenceChatId: 'c-1',
-				position: 'after',
-			});
-
-			expect(mockReorderChat).toHaveBeenCalledWith({
-				chatId: 'c-2',
-				placement: { kind: 'relative', referenceChatId: 'c-1', position: 'after' },
-			});
-			expect(quietRefresh).toHaveBeenCalledOnce();
-		});
-
-		it('does not refresh after a mutation failure', async () => {
-			mockReorderChat.mockRejectedValue(new Error('reorder failed'));
-
-			await expect(
-				controller.reorderChat('c-2', {
-					kind: 'relative',
-					referenceChatId: 'c-3',
-					position: 'before',
-				}),
-			).rejects.toThrow('reorder failed');
-
-			expect(quietRefresh).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('sortChatOrder', () => {
-		it('returns the typed response after refreshing', async () => {
-			const response = {
-				success: true as const,
-				sortKey: 'created' as const,
-				changed: true,
-			};
-			mockSortChatOrder.mockResolvedValue(response);
-
-			await expect(controller.sortChatOrder('created')).resolves.toEqual(response);
-
-			expect(mockSortChatOrder).toHaveBeenCalledWith({ sortKey: 'created' });
-			expect(quietRefresh).toHaveBeenCalledOnce();
-		});
-
-		it('does not refresh after an API failure', async () => {
-			mockSortChatOrder.mockRejectedValue(new Error('sort failed'));
-
-			await expect(controller.sortChatOrder('activity')).rejects.toThrow('sort failed');
-
-			expect(quietRefresh).not.toHaveBeenCalled();
-		});
 	});
 
 	describe('bulk operations', () => {
@@ -173,7 +106,14 @@ describe('SidebarController', () => {
 		});
 
 		it('plans the next visible chat before archiving the selected chat', async () => {
-			mockSetChatArchived.mockResolvedValue({ success: true, chatId: 'c-1', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
+			mockSetChatArchived.mockResolvedValue({
+				success: true,
+				chatId: 'c-1',
+				isArchived: true,
+				isPinned: false,
+				orderGroup: 'archived',
+				changed: true,
+			});
 			const operation = controller.startBulkOperation('archive', {
 				selectedChats: [makeChat({ id: 'c-1', isArchived: false })],
 				allChats: [
@@ -210,7 +150,14 @@ describe('SidebarController', () => {
 		});
 
 		it('plans an adjacent survivor from the displayed recent-activity order', async () => {
-			mockSetChatArchived.mockResolvedValue({ success: true, chatId: 'c-1', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
+			mockSetChatArchived.mockResolvedValue({
+				success: true,
+				chatId: 'c-1',
+				isArchived: true,
+				isPinned: false,
+				orderGroup: 'archived',
+				changed: true,
+			});
 			const operation = controller.startBulkOperation('archive', {
 				selectedChats: [makeChat({ id: 'selected', isArchived: false })],
 				allChats: [

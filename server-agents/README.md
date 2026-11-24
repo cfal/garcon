@@ -222,7 +222,10 @@ Each provider package contains `package.json`, `tsconfig.json`, and
 executables. Paths are package-relative, begin with `./`, and remain inside the
 package.
 
-Provider SDKs, CLI wrappers, parsers, and native dependencies belong to the
+Agent executables belong to the executor. Resolve an override or its service
+`PATH`; do not add a workspace dependency to install a CLI. Provision the
+Docker image separately and pin real binaries in `integration-tests/`.
+Libraries used at runtime, such as the OpenCode HTTP SDK, belong to the
 provider package. Run `bun install` after changing workspace dependencies.
 
 ## Registration and Validation
@@ -240,8 +243,10 @@ Do not add another provider registry, search switch, endpoint switch, or
 build-script provider special case. Build contributions come from package
 metadata and runtime behavior comes through the registered aggregate.
 
-Run the provider's strongest non-live tier. Claude, Codex, OpenCode, and Pi
-have scripted real-binary coverage; Cursor remains unit-only by policy. The
+Run the provider's strongest non-live tier. Claude, Codex, OpenCode, Pi, and
+Antigravity have scripted real-binary coverage; Cursor remains unit-only by
+policy. Cursor and Antigravity share the ACP client and runtime in
+`server-agents/common/src/acp`. The
 repository gate is:
 
 ```sh

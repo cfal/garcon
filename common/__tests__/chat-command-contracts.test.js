@@ -112,7 +112,7 @@ describe('chat command request parsers', () => {
     }
   });
 
-  it('rejects storage-shaped parentage on start requests', () => {
+  it.each(['parentChat', 'lineage'])('rejects storage-shaped %s on start requests', (field) => {
     expect(() => parseStartChatCommandRequest({
       origin: 'cli',
       clientRequestId: 'request-parent',
@@ -125,8 +125,9 @@ describe('chat command request parsers', () => {
       thinkingMode: 'none',
       agentSettings: agentSettings(),
       command: 'hello',
-      parentChat: { chatId: SOURCE_CHAT_ID, relation: 'delegation' },
-    })).toThrow('parentChat is not supported; use parentChatId');
+      parentChatId: SOURCE_CHAT_ID,
+      [field]: null,
+    })).toThrow('Storage relationships are not supported; use parentChatId');
 
     expect(() => parseStartChatCommandRequest({
       origin: 'cli',

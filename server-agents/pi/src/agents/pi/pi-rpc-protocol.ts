@@ -2,8 +2,6 @@ import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { CompactionMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
 import { parseAttachmentDataUrl } from '@garcon/server-agent-common/shared/attachments';
-import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
-import type { RpcResponse } from '@earendil-works/pi-coding-agent';
 import {
   AgentIntegrationError,
   type AgentSteerResult,
@@ -12,7 +10,7 @@ import { buildPiPrompt } from './pi-cli.js';
 import { PiRpcCommandError, PiRpcTransportError, type PiRpcResponse } from './pi-rpc-client.js';
 import type { PiResumeRequest, PiStartRequest } from './runtime-types.js';
 
-const PI_THINKING_LEVELS: readonly ModelThinkingLevel[] = [
+const PI_THINKING_LEVELS = [
   'off',
   'minimal',
   'low',
@@ -20,9 +18,10 @@ const PI_THINKING_LEVELS: readonly ModelThinkingLevel[] = [
   'high',
   'xhigh',
   'max',
-];
+] as const;
 
-type PiInputDisposition = Extract<RpcResponse, { command: 'prompt'; success: true }>['data']['disposition'];
+export type PiThinkingLevel = typeof PI_THINKING_LEVELS[number];
+type PiInputDisposition = 'handled' | 'queued' | 'started';
 
 export function piInputDisposition(response: PiRpcResponse, command: 'prompt' | 'steer'): PiInputDisposition {
   const disposition = response.data?.disposition;
@@ -100,18 +99,18 @@ function isPiTokenCount(value: unknown): value is number {
 // https://github.com/earendil-works/pi/blob/d981de1229ef899957bbe968bc8dcda02a21f477/packages/ai/src/models.ts#L913-L945
 export function resolvePiThinkingLevel(
   model: Readonly<Record<string, unknown>>,
-  requested: ModelThinkingLevel,
-): ModelThinkingLevel {
+  requested: PiThinkingLevel,
+): PiThinkingLevel {
   const levelMap = model.thinkingLevelMap && typeof model.thinkingLevelMap === 'object'
     ? model.thinkingLevelMap as Readonly<Record<string, unknown>>
     : null;
-  const supported = model.reasoning === true
+  const supported: PiThinkingLevel[] = model.reasoning === true
     ? PI_THINKING_LEVELS.filter((level) => {
       const mapped = levelMap?.[level];
       if (mapped === null) return false;
       return (level !== 'xhigh' && level !== 'max') || mapped !== undefined;
     })
-    : ['off'] satisfies ModelThinkingLevel[];
+    : ['off'];
   if (supported.includes(requested)) return requested;
 
   const requestedIndex = PI_THINKING_LEVELS.indexOf(requested);

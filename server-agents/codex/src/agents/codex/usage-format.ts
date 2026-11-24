@@ -8,8 +8,8 @@ import {
   type UsageSpeed,
 } from '@garcon/server-agent-common/usage/usage-record';
 
-// Mirrors codex-rs TokenUsage at the pinned 0.167.0:
-// https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/protocol/src/protocol.rs#L2481-L2501
+// Mirrors codex-rs TokenUsage at the pinned 0.169.0:
+// https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/protocol.rs#L2545-L2565
 interface CodexTokenUsage {
   readonly input_tokens: number;
   readonly cached_input_tokens: number;
@@ -28,16 +28,23 @@ const USAGE_FIELDS = [
   'total_tokens',
 ] as const satisfies readonly (keyof CodexTokenUsage)[];
 
-// Forks copy and restamp parent history in a burst (0-40ms gaps); genuine child
-// usage follows a model turn (5s+ observed).
+// Native forks restamp inherited usage in a burst.
 const FORK_COPY_MAX_GAP_MS = 1000;
+const NATIVE_THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+interface UsageTurn {
+  readonly id: string;
+  model: string;
+  speed: UsageSpeed | null;
+  hasContext: boolean;
+}
 
 /**
- * Usage events carry neither model nor service tier, so both carry forward
- * from the latest `turn_context` and `thread_settings_applied`. Codex writes a
+ * Usage events carry neither model nor service tier. Turn start freezes the settings
+ * before compaction or live edits; `turn_context` supplies the confirmed model. Codex writes a
  * `token_usage_record` for every billed response, including remote compaction,
  * before that response's `token_count`:
- * https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/session/turn.rs#L3348-L3366
+ * https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/core/src/session/mod.rs#L5697-L5719
  * Once a session has records they alone are billed; `token_count` then reports
  * context size, which after compaction is an estimate rather than a request.
  * Rollouts written before records existed bill `token_count` deltas, validated
@@ -45,26 +52,30 @@ const FORK_COPY_MAX_GAP_MS = 1000;
  */
 export interface CodexUsageState {
   model: string;
-  speed: UsageSpeed;
+  threadModel: string | null;
+  threadSpeed: UsageSpeed | null;
+  turn: UsageTurn | null;
   sessionId: string;
   sawSessionMeta: boolean;
   lastUsageSignature: string | null;
   lastCumulativeUsage: CodexTokenUsage | null;
-  suppressingForkCopies: boolean;
-  forkCopyAnchorMs: number;
+  forkThreadId: string | null;
+  forkCopyAnchorMs: number | null;
   sawUsageRecord: boolean;
 }
 
 export function createCodexUsageState(): CodexUsageState {
   return {
     model: '',
-    speed: 'standard',
+    threadModel: null,
+    threadSpeed: null,
+    turn: null,
     sessionId: '',
     sawSessionMeta: false,
     lastUsageSignature: null,
     lastCumulativeUsage: null,
-    suppressingForkCopies: false,
-    forkCopyAnchorMs: 0,
+    forkThreadId: null,
+    forkCopyAnchorMs: null,
     sawUsageRecord: false,
   };
 }
@@ -120,32 +131,37 @@ function isForkedSessionMeta(payload: Record<string, unknown>): boolean {
   return typeof spawn?.parent_thread_id === 'string';
 }
 
-// Missing, default, and standard tiers bill as standard; `fast` aliases priority.
-// Mirrors codex-rs ServiceTier at the pinned 0.167.0:
-// https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/protocol/src/config_types.rs#L528-L531
-function codexSpeed(serviceTier: unknown): UsageSpeed {
+// An omitted tier or the native `default` sentinel means Standard; `fast` aliases priority.
+// Mirrors codex-rs ServiceTier at the pinned 0.169.0:
+// https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/config_types.rs#L528-L531
+function usageSpeedFromServiceTier(serviceTier: unknown): UsageSpeed {
   if (serviceTier === 'priority' || serviceTier === 'fast') return 'fast';
-  return serviceTier === 'flex' ? 'flex' : 'standard';
+  if (serviceTier == null || serviceTier === 'default') return 'standard';
+  return serviceTier === 'flex' || serviceTier === 'ultrafast' ? serviceTier : 'unknown';
 }
 
-// Forks copy and restamp parent history in a burst right after their session_meta;
-// those copies were billed in the parent. Advances the burst, or ends it at the first gap.
-function consumeForkCopyBurst(state: CodexUsageState, timestampMs: number): boolean {
-  if (!state.suppressingForkCopies) return false;
-  if (timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
+function consumeForkCopy(state: CodexUsageState, timestampMs: number, threadId?: unknown): boolean {
+  if (state.forkCopyAnchorMs === null) return false;
+  // Verbatim forks retain the original response's thread ID and dedupe by response ID;
+  // a mismatch alone does not identify a restamped copy.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/protocol/src/protocol.rs#L2568-L2576
+  const belongsToChild = state.forkThreadId !== null && threadId === state.forkThreadId;
+  if (!belongsToChild && timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
     state.forkCopyAnchorMs = timestampMs;
     return true;
   }
-  state.suppressingForkCopies = false;
+  state.forkCopyAnchorMs = null;
   state.lastUsageSignature = null;
   return false;
 }
 
-function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTokenUsage, dedupeKey: string): UsageRecord {
+function usageRecord(
+  sessionId: string, model: string, timestampMs: number, usage: CodexTokenUsage, speed: UsageSpeed | null, dedupeKey: string,
+): UsageRecord {
   return {
     timestampMs,
-    model: state.model,
-    sessionId: state.sessionId,
+    model,
+    sessionId,
     totals: {
       // Codex reports input_tokens inclusive of cache reads and writes.
       uncachedInputTokens: usage.input_tokens - usage.cached_input_tokens - usage.cache_write_input_tokens,
@@ -155,7 +171,7 @@ function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTo
       reasoningTokens: usage.reasoning_output_tokens,
     },
     cacheWrite1hTokens: 0,
-    speed: state.speed,
+    speed: speed ?? 'standard',
     dedupeKey,
   };
 }
@@ -163,16 +179,21 @@ function usageRecord(state: CodexUsageState, timestampMs: number, usage: CodexTo
 // Bills one response. Its id identifies the request across verbatim and restamped fork copies.
 function parseUsageRecord(entry: Record<string, unknown>, payload: Record<string, unknown>, state: CodexUsageState): UsageRecord | MalformedUsage | null {
   const timestampMs = parseTimestampMs(entry.timestamp);
-  if (timestampMs !== null && consumeForkCopyBurst(state, timestampMs)) return null;
+  // Even a skipped copy makes its delayed token_count context-only.
   state.sawUsageRecord = true;
+  if (timestampMs !== null && consumeForkCopy(state, timestampMs, payload.thread_id)) return null;
   const usage = readTokenUsage(payload.usage);
   const responseId = payload.response_id;
-  if (timestampMs === null || state.model.length === 0 || usage === null
+  const turn = state.turn?.id === payload.turn_id ? state.turn : null;
+  const model = turn?.model ?? state.model;
+  if (timestampMs === null || model.length === 0 || usage === null
     || typeof responseId !== 'string' || responseId.length === 0) {
     return { malformed: true, timestampMs };
   }
   if (usage.input_tokens + usage.output_tokens === 0) return null;
-  return usageRecord(state, timestampMs, usage, `codex-response:${responseId}`);
+  let speed = state.threadSpeed;
+  if (state.turn) speed = turn?.speed ?? 'unknown';
+  return usageRecord(state.sessionId, model, timestampMs, usage, speed, `codex-response:${responseId}`);
 }
 
 export function parseCodexUsageLine(line: string, state: CodexUsageState): UsageRecord | MalformedUsage | null {
@@ -193,18 +214,39 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
     if (typeof id === 'string') state.sessionId = id;
     const metaTimestampMs = parseTimestampMs(entry.timestamp);
     if (metaTimestampMs !== null && isForkedSessionMeta(payload)) {
-      state.suppressingForkCopies = true;
+      if (typeof payload.id === 'string' && NATIVE_THREAD_ID.test(payload.id)) state.forkThreadId = payload.id;
       state.forkCopyAnchorMs = metaTimestampMs;
     }
     return null;
   }
   if (entry.type === 'token_usage_record') return parseUsageRecord(entry, payload, state);
+  if (entry.type === 'event_msg' && (payload.type === 'task_started' || payload.type === 'turn_started')
+    && typeof payload.turn_id === 'string') {
+    // Pre-context compaction on a model switch can use either the old model or its replacement.
+    const modelChanged = state.model && state.threadModel && state.model !== state.threadModel;
+    state.turn = { id: payload.turn_id, speed: state.threadSpeed, hasContext: false,
+      model: modelChanged ? 'unknown' : state.threadModel ?? state.model };
+    return null;
+  }
   if (entry.type === 'turn_context') {
     if (typeof payload.model === 'string') state.model = payload.model;
+    if (typeof payload.turn_id !== 'string') {
+      state.turn = null;
+    } else if (state.turn?.id === payload.turn_id) {
+      state.turn.model = state.model;
+      state.turn.hasContext = true;
+    } else {
+      state.turn = { id: payload.turn_id, model: state.model, speed: state.threadSpeed, hasContext: true };
+    }
     return null;
   }
   if (payload.type === 'thread_settings_applied') {
-    if (isRecord(payload.thread_settings)) state.speed = codexSpeed(payload.thread_settings.service_tier);
+    if (isRecord(payload.thread_settings)) {
+      if (typeof payload.thread_settings.model === 'string') state.threadModel = payload.thread_settings.model;
+      state.threadSpeed = usageSpeedFromServiceTier(payload.thread_settings.service_tier);
+      // The initial checkpoint follows context. A setting between admission and context may be a live edit.
+      if (state.turn && state.turn.speed === null) state.turn.speed = state.turn.hasContext ? state.threadSpeed : 'unknown';
+    }
     return null;
   }
   if (payload.type !== 'token_count' || !isRecord(payload.info)) return null;
@@ -217,22 +259,19 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
   const rawCumulative = payload.info.total_token_usage;
   const hasCumulative = rawCumulative !== undefined && rawCumulative !== null;
   const cumulative = hasCumulative ? readTokenUsage(rawCumulative) : null;
+  const previous = state.lastCumulativeUsage;
+  // Even a copied or malformed request can carry a valid baseline for the next counter.
+  if (cumulative !== null) state.lastCumulativeUsage = cumulative;
 
-  if (consumeForkCopyBurst(state, timestampMs)) {
-    // Copied history is billed in the parent but sets the child's baseline.
+  if (consumeForkCopy(state, timestampMs)) {
     const signature = last === null ? null : JSON.stringify(last);
-    if (cumulative !== null) state.lastCumulativeUsage = cumulative;
-    else if (!hasCumulative && last !== null && signature !== state.lastUsageSignature) {
-      state.lastCumulativeUsage = combineUsage(state.lastCumulativeUsage, last, 1);
+    if (!hasCumulative && last !== null && signature !== state.lastUsageSignature) {
+      state.lastCumulativeUsage = combineUsage(previous, last, 1);
     }
     state.lastUsageSignature = signature;
     return null;
   }
 
-  const previous = state.lastCumulativeUsage;
-  // A valid snapshot stays the next baseline even when its paired request is malformed.
-  if (cumulative !== null) state.lastCumulativeUsage = cumulative;
-  // The session's usage records already billed this response.
   if (state.sawUsageRecord) return null;
   const malformed: MalformedUsage = { malformed: true, timestampMs };
   if (last === null || (hasCumulative && cumulative === null)) return malformed;
@@ -266,15 +305,14 @@ export function parseCodexUsageLine(line: string, state: CodexUsageState): Usage
 
   // Garcon's JSONL fork copies these events verbatim under a new session id, so the
   // event's time and counters, not its session, identify the request across copies.
-  return usageRecord(state, timestampMs, last,
+  return usageRecord(state.sessionId, state.model, timestampMs, last, state.threadSpeed,
     `codex:${timestampMs}:${state.model}:${signature}:${cumulative === null ? '' : JSON.stringify(cumulative)}`);
 }
 
 export const codexUsageFormat: TranscriptUsageFormat<CodexUsageState> = {
   // Metadata lines carry model, tier, and session even without usage.
-  lineMarkers: ['"token_usage_record"', '"token_count"', '"turn_context"', '"thread_settings_applied"', '"session_meta"'],
+  lineMarkers: ['"token_usage_record"', '"token_count"', '"turn_context"', '"task_started"', '"turn_started"', '"thread_settings_applied"', '"session_meta"'],
   createState: createCodexUsageState,
-  // Usage snapshots are replaced, never mutated, so a shallow copy is independent.
-  cloneState: (state) => ({ ...state }),
+  cloneState: (state) => ({ ...state, turn: state.turn && { ...state.turn } }),
   parseLine: parseCodexUsageLine,
 };

@@ -145,8 +145,7 @@ describe('Pi single-query and spawn helpers', () => {
     process.env.PI_OFFLINE = '0';
     process.env.PI_SKIP_VERSION_CHECK = '0';
     process.env.PI_TELEMETRY = '1';
-    process.env.PI_PACKAGE_DIR = path.join(tempRoot, 'garcon-pi-package');
-    process.env.GARCON_EMBEDDED_PI_PACKAGE_DIR = process.env.PI_PACKAGE_DIR;
+    process.env.PI_PACKAGE_DIR = path.join(tempRoot, 'external-pi-package');
 
     const env = buildPiCliEnv({
       PI_OFFLINE: '0',
@@ -165,8 +164,6 @@ describe('Pi single-query and spawn helpers', () => {
       'PI_MODEL',
       'PI_REASONING_LEVEL',
       'PI_CODING_AGENT_SESSION_DIR',
-      'PI_PACKAGE_DIR',
-      'GARCON_EMBEDDED_PI_PACKAGE_DIR',
     ]) {
       expect(env[name]).toBeUndefined();
     }
@@ -174,6 +171,7 @@ describe('Pi single-query and spawn helpers', () => {
     expect(env.PI_OFFLINE).toBe('1');
     expect(env.PI_SKIP_VERSION_CHECK).toBe('1');
     expect(env.PI_TELEMETRY).toBe('0');
+    expect(env.PI_PACKAGE_DIR).toBe(process.env.PI_PACKAGE_DIR);
     expect(env.PI_MODELS_DEV_OVERRIDE_PROVIDERS).toBe('all');
   });
 

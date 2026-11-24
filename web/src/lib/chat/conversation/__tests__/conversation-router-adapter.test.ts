@@ -41,11 +41,13 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -88,7 +90,7 @@ function depsFor(selectedChat: ChatSessionRecord | null): ConversationRouterStor
 			patchActivity: vi.fn(),
 			patchChat: vi.fn(),
 			patchLastReadAt: vi.fn(),
-			removeChat: vi.fn(),
+			applyServerDeletion: vi.fn(),
 			setSelectedChatId: vi.fn(),
 			isChatProcessing: (chatId) => chatId === selectedChat?.id && selectedChat.isProcessing,
 			applyProcessingEvent: vi.fn(),
@@ -316,7 +318,7 @@ describe('buildRouterStores', () => {
 			deps.panels.reconcile([]);
 			deps.chatState.activateChat(null);
 			stores.chatState.markChatTranscriptStale('chat-1');
-			deps.chatState.clearOptimisticUserInput('input-1');
+			deps.chatState.clearOptimisticUserInput('chat-1', 'input-1');
 			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
 			deps.panels.reconcile(panels);
 			await stores.chatState.loadRenderedChat('chat-1');

@@ -1,3 +1,4 @@
+import { controllerSafetyDependencies } from "../../../server/controller/__tests__/safety-dependencies.js";
 import { describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -49,7 +50,7 @@ async function withPipeline(run) {
     nativeSession: null, nativeSeedReceipt: null, agentSessionId: '', projectPath: root,
     model: 'initial-model', permissionMode: 'default', thinkingMode: 'none', tags: [],
     agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } },
-    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChat: null,
+    preambleSelection: { revision: 0, orderedPreambleIds: [] }, parentChatId: null, lineage: null,
   });
   const view = ledger.initializeChat(CHAT);
   const publisher = ledger.openProducer(CHAT, 'test');
@@ -78,7 +79,7 @@ async function withPipeline(run) {
   };
   const execution = new ChatExecutionCoordinator(runner, admission,
     () => ({ model: registry.getChat(CHAT).model, permissionMode: registry.getChat(CHAT).permissionMode, thinkingMode: 'none' }),
-    (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('synthetic-server'), {
+    (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('synthetic-server'), { ...controllerSafetyDependencies(),
       projectAdmission: { assertAvailable: async () => {} },
       attachmentAdmission: { assertSupported: () => {} },
       appendControlReceipt: () => {},

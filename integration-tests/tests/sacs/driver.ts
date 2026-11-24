@@ -80,6 +80,11 @@ export interface SacsHeldTurn {
   release(): void;
 }
 
+export interface SacsModelRequest {
+  readonly body: unknown;
+  readonly userTexts: readonly string[];
+}
+
 export interface SacsDriverEnvironment {
   readonly id: string;
   readonly label: string;
@@ -97,8 +102,7 @@ export interface SacsDriverEnvironment {
   holdInterruptibleAssistant(fixture: IntegrationFixture, content: string): SacsHeldTurn;
   scriptAssistant(fixture: IntegrationFixture, content: string): void;
   markRequests(fixture: IntegrationFixture): number;
-  requestCountSince(fixture: IntegrationFixture, cursor: number): number;
-  userTextsSince(fixture: IntegrationFixture, cursor: number): readonly string[];
+  requestsSince(fixture: IntegrationFixture, cursor: number): readonly SacsModelRequest[];
   assertSettled(fixture: IntegrationFixture): void;
   reset(): void;
   dispose(): void | Promise<void>;

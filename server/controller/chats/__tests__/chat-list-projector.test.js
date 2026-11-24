@@ -19,7 +19,8 @@ function makeSession(overrides = {}) {
     thinkingMode: 'none',
     carryOverSegments: [],
     carryOverMigrationQuarantine: null,
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
     ...overrides,
   };
 }
@@ -37,6 +38,7 @@ function makeDeps() {
         getChatName: mock(() => null),
       },
       metadata: {
+        getRunOutcome: mock(() => null),
         listAllChatMetadata: mock(
           () =>
             new Map([
@@ -59,12 +61,27 @@ function makeDeps() {
         })),
       },
       processing: { phase: mock(() => 'running') },
+      transientFeeds: { hasPendingUserAction: mock(() => false) },
       canReloadFromNativeHistory: mock(() => true),
     },
   };
 }
 
 describe('ChatListProjector', () => {
+  it('projects pending action before working and terminal results only while idle', () => {
+    const { deps } = makeDeps();
+    const projector = new ChatListProjector(deps);
+    deps.metadata.getRunOutcome.mockReturnValue('failed');
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBe('working');
+    deps.transientFeeds.hasPendingUserAction.mockReturnValue(true);
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBe('pending-user-action');
+    deps.processing.phase.mockReturnValue(null);
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBe('error');
+    deps.metadata.getRunOutcome.mockReturnValue('finished');
+    expect(projector.buildSummary(CHAT_ID).chat.activityStatus).toBe('complete');
+    deps.metadata.getRunOutcome.mockReturnValue('interrupted');
+    expect(projector.buildOne(CHAT_ID).activityStatus).toBeNull();
+  });
   it('projects the complete canonical list entry for list and command paths', async () => {
     const { deps, session } = makeDeps();
     const projector = new ChatListProjector(deps);
@@ -74,7 +91,8 @@ describe('ChatListProjector', () => {
     expect(one).toEqual(many.get(CHAT_ID));
     expect(one).toMatchObject({
       id: CHAT_ID,
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       orderGroup: 'normal',
       isPinned: false,
       isArchived: false,
@@ -86,22 +104,24 @@ describe('ChatListProjector', () => {
     });
   });
 
-  it('projects immutable child parentage without changing the summary', () => {
-    const parentChat = Object.freeze({
-      chatId: '1783725900000800',
-      relation: 'fork',
+  it('projects independent delegation and lineage without changing the summary', () => {
+    const lineage = Object.freeze({
+      sourceChatId: '1783725900000800',
+      kind: 'fork',
       transcriptViewId: 'view-a',
       ordinal: 4,
     });
     const { deps, session } = makeDeps();
-    session.parentChat = parentChat;
+    session.lineage = lineage;
+    session.parentChatId = '1783725900000801';
 
     const projector = new ChatListProjector(deps);
     const many = projector.buildMany([[CHAT_ID, session]]);
 
-    expect(projector.buildOne(CHAT_ID)?.parentChat).toBe(parentChat);
-    expect(many.get(CHAT_ID)?.parentChat).toBe(parentChat);
-    expect(projector.buildSummary(CHAT_ID)?.chat).not.toHaveProperty('parentChat');
+    expect(projector.buildOne(CHAT_ID)?.lineage).toBe(lineage);
+    expect(many.get(CHAT_ID)?.lineage).toBe(lineage);
+    expect(many.get(CHAT_ID)?.parentChatId).toBe(session.parentChatId);
+    expect(projector.buildSummary(CHAT_ID)?.chat).not.toHaveProperty('lineage');
   });
 
   it('builds a path-independent normalized summary', () => {
@@ -113,6 +133,7 @@ describe('ChatListProjector', () => {
     expect(projector.buildSummary(CHAT_ID)).toEqual({
       chat: {
         id: CHAT_ID,
+        activityStatus: 'working',
         agentId: 'claude',
         agentOwnershipEpoch: 'epoch-1',
         carryOverRevision: 'carry-v1:0',

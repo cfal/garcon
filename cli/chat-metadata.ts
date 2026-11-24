@@ -15,11 +15,14 @@ import type {
   ChatOrderMutationCliCommand,
   RenameCliCommand,
   SetTagsCliCommand,
+  SetParentCliCommand,
 } from './args.js';
 import type { CliOutput } from './output.js';
+import type { SetChatParentRequest, SetChatParentResponse } from '@garcon/common/chat-parent-contracts';
 import { terminalLine } from './terminal-output.js';
 
 export interface ChatMetadataClient {
+  setChatParent(request: SetChatParentRequest, signal?: AbortSignal): Promise<SetChatParentResponse>;
   setChatPinned(
     request: SetChatPinnedRequest,
     signal?: AbortSignal,
@@ -102,6 +105,23 @@ export async function runSetTags(
   writeMetadataResult(output, command.json, response, [
     `chat id: ${response.chatId}`,
     `tags: ${response.tags.length > 0 ? response.tags.join(', ') : 'none'}`,
+    `changed: ${response.changed ? 'yes' : 'no'}`,
+  ]);
+}
+
+export async function runSetParent(
+  command: SetParentCliCommand,
+  client: ChatMetadataClient,
+  output: CliOutput,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await client.setChatParent({
+    chatId: command.chatId,
+    parentChatId: command.parentChatId,
+  }, signal);
+  writeMetadataResult(output, command.json, response, [
+    `chat id: ${response.chatId}`,
+    `parent chat id: ${response.parentChatId ?? 'none'}`,
     `changed: ${response.changed ? 'yes' : 'no'}`,
   ]);
 }

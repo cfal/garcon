@@ -11,13 +11,13 @@ import {
 	listChats,
 	recoverChatTags as recoverChatTagsApi,
 	replaceChatTags as replaceChatTagsApi,
-	reorderChat as reorderChatApi,
-	setLastSelectedChat,
 	transitionChatTags as transitionChatTagsApi,
 	setChatArchived as setChatArchivedApi,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { ChatTitleController } from './chat-title-controller.js';
+import { ChatSettingsMutations } from './chat-settings-mutations.js';
+import { ChatSelectionWriter } from './chat-selection-writer.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -31,10 +31,6 @@ import type {
 	ReplaceChatTagsRequest,
 	TransitionChatTagsRequest,
 } from '$shared/chat-tag-mutations';
-import type {
-	ChatOrderBoundary,
-	ReorderChatResponse,
-} from '$shared/chat-order-contracts';
 import {
 	ChatArchiveProjectionState,
 	type ArchiveMutationSettlement,
@@ -71,8 +67,8 @@ import {
 	toRecord,
 } from './chat-session-records.js';
 
-
 export class ChatSessionsStore implements ChatSessionsPort {
+	readonly settingsMutations = new ChatSettingsMutations();
 	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
 	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);
@@ -84,6 +80,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	chatListError = $state<string | null>(null);
 	#deps: ChatSessionsStoreDeps;
 	#inFlightFetch: Promise<void> | null = null;
+	#fetchActivityUpdates: Map<string, ChatSessionRecord['activityStatus']> | null = null;
+	#fetchRemovedChatIds: Set<string> | null = null;
 	#needsFollowUpFetch = false;
 	#nextFetchGeneration = 0;
 	#latestSuccessfulFetchGeneration = 0;
@@ -93,9 +91,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	readonly #serverEntryFetchGenerationByChatId = new Map<string, number>();
 	readonly #tagRecoveryByChatId = new Map<string, Promise<RecoverChatTagsResponse>>();
 	readonly #tagReconciliation = new ChatTagReconciliationState();
-	#selectionWriteInFlight = false;
-	#selectionWritePending: string | null | undefined = undefined;
-	#selectionWriteAcked: string | null = null;
+	readonly #selectionWriter: ChatSelectionWriter;
 	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
 	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
 	readonly #archiveProjection = new ChatArchiveProjectionState();
@@ -117,6 +113,10 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	constructor(deps: ChatSessionsStoreDeps = {}) {
 		this.#deps = deps;
+		this.#selectionWriter = new ChatSelectionWriter({
+			deps,
+			onConfirmed: (chatId) => { this.lastSelectedChatId = chatId; },
+		});
 		this.#titles = new ChatTitleController({
 			sessions: this,
 			deps,
@@ -171,6 +171,10 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 	async #runFetch(showLoading: boolean): Promise<void> {
 		const fetchGeneration = ++this.#nextFetchGeneration;
+		const activityUpdates = new Map<string, ChatSessionRecord['activityStatus']>();
+		this.#fetchActivityUpdates = activityUpdates;
+		const removedChatIds = new Set<string>();
+		this.#fetchRemovedChatIds = removedChatIds;
 		const initial = this.chatListStatus !== 'ready';
 		if (showLoading) this.isLoadingChats = true;
 		if (showLoading && initial) this.chatListStatus = 'loading';
@@ -190,7 +194,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			}
 			this.lastSelectedChatId =
 				typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
-			this.#upsertFromServer(res.sessions ?? [], projectPathRevisions, fetchGeneration);
+			this.#upsertFromServer((res.sessions ?? []).filter(entry => !removedChatIds.has(entry.id)), projectPathRevisions, fetchGeneration, activityUpdates);
 			this.#tagReconciliation.settleFetch(fetchGeneration);
 			this.#latestSuccessfulFetchGeneration = fetchGeneration;
 			this.chatListStatus = 'ready';
@@ -202,6 +206,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			this.chatListError = err instanceof Error ? err.message : String(err);
 			if (initial) this.chatListStatus = 'error';
 		} finally {
+			this.#fetchActivityUpdates = null;
+			this.#fetchRemovedChatIds = null;
 			if (showLoading) this.isLoadingChats = false;
 		}
 	}
@@ -235,6 +241,12 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	/** Refreshes the chat list without changing sidebar loading state. */
 	async quietRefreshChats(): Promise<void> {
 		return this.#refresh(false);
+	}
+
+	async refreshOrderSnapshot(): Promise<boolean> {
+		const startedBefore = this.#nextFetchGeneration;
+		await this.#refresh(false);
+		return this.#latestSuccessfulFetchGeneration > startedBefore;
 	}
 
 	isArchiveMutationPending(chatId: string): boolean {
@@ -368,25 +380,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	renameChat(chatId: string, newTitle: string): Promise<boolean> {
 		return this.#titles.renameChat(chatId, newTitle);
-	}
-
-	async moveChatToBoundary(
-		chatId: string,
-		boundary: ChatOrderBoundary,
-	): Promise<ReorderChatResponse | null> {
-		try {
-			const reorderRemoteChat = this.#deps.reorderChat ?? reorderChatApi;
-			const result = await reorderRemoteChat({
-				chatId,
-				placement: { kind: 'boundary', boundary },
-			});
-			await this.quietRefreshChats();
-			return result;
-		} catch (err) {
-			console.error('[ChatSessionsStore] Reorder failed:', err);
-			this.#deps.notifyError?.(m.notifications_reorder_chats_failed());
-			return null;
-		}
 	}
 
 	async replaceChatTags(request: ReplaceChatTagsRequest): Promise<ChatTagsMutationResponse> {
@@ -604,34 +597,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	rememberSelectedChat(chatId: string | null): void {
-		const normalized = typeof chatId === 'string' ? chatId.trim() : '';
-		this.#selectionWritePending = normalized || null;
-		void this.#flushSelectionWrite();
-	}
-
-	async #flushSelectionWrite(): Promise<void> {
-		if (this.#selectionWriteInFlight) return;
-		const writeSelection = this.#deps.setLastSelectedChat ?? setLastSelectedChat;
-
-		while (this.#selectionWritePending !== undefined) {
-			const nextChatId = this.#selectionWritePending;
-			this.#selectionWritePending = undefined;
-			if (nextChatId === this.#selectionWriteAcked) continue;
-
-			this.#selectionWriteInFlight = true;
-			try {
-				const response = await writeSelection(nextChatId);
-				this.#selectionWriteAcked = response.lastSelectedChatId;
-				this.lastSelectedChatId = response.lastSelectedChatId;
-			} catch (err) {
-				console.warn(
-					'[ChatSessionsStore] Failed to remember selected chat:',
-					err instanceof Error ? err.message : String(err),
-				);
-			} finally {
-				this.#selectionWriteInFlight = false;
-			}
-		}
+		this.#selectionWriter.remember(chatId);
 	}
 
 	/** Returns true if the store contains a record for the given chat ID. */
@@ -655,6 +621,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		sessions: ChatListEntry[],
 		requestProjectPathRevisions?: ReadonlyMap<string, number>,
 		fetchGeneration?: number,
+		activityUpdates?: ReadonlyMap<string, ChatSessionRecord['activityStatus']>,
 	): void {
 		const nextById: Record<string, ChatSessionRecord> = {};
 		const nextOrder: string[] = [];
@@ -675,6 +642,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 		for (const session of sessions) {
 			let next = toRecord(session);
+			if (activityUpdates?.has(next.id)) {
+				next.activityStatus = activityUpdates.get(next.id) ?? null;
+			}
 			next.processingPhase = this.#resolveProcessing(next.id, next.processingPhase);
 			next.isProcessing = next.processingPhase !== null;
 			const prev = this.#baseById[next.id];
@@ -770,11 +740,14 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	upsertServerChat(entry: ChatListEntry): void {
 		this.#mergeServerEntry(entry, false);
+		void this.quietRefreshChats();
 	}
 
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
+		// Existing activity belongs to live events and list refreshes; command replies can lag both.
+		if (previous?.status === 'running') next.activityStatus = previous.activityStatus;
 		this.#projectBindings.publishIfChanged(
 			entry.id,
 			previous?.projectPath,
@@ -804,8 +777,15 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		}
 	}
 
+	applyServerDeletion(chatId: string): void {
+		this.removeChat(chatId);
+		this.#deps.onChatDeleted?.(chatId);
+	}
+
 	removeChat(chatId: string): void {
 		this.#recentHistory.remove(chatId);
+		this.#fetchActivityUpdates?.delete(chatId);
+		this.#fetchRemovedChatIds?.add(chatId);
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
@@ -835,6 +815,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			if (records[chatId]) continue;
 			this.#serverEntryGenerationByChatId.delete(chatId);
 			this.#serverEntryFetchGenerationByChatId.delete(chatId);
+		}
+		for (const chatId of this.#fetchActivityUpdates?.keys() ?? []) {
+			if (!records[chatId]) this.#fetchActivityUpdates?.delete(chatId);
 		}
 		this.#tagReconciliation.pruneSettlements(records);
 	}
@@ -874,6 +857,10 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	/** Updates a chat record field, such as title after rename. */
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
+		// Only the activity field supersedes a list requested before the event, including initial hydration.
+		if ('activityStatus' in patch) {
+			this.#fetchActivityUpdates?.set(chatId, patch.activityStatus ?? null);
+		}
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
 		this.#projectBindings.publishIfChanged(

@@ -34,7 +34,8 @@ const board: ChatBoard = {
 function chat(id = 'chat-1', title = 'Polish onboarding'): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title,
@@ -50,6 +51,7 @@ function chat(id = 'chat-1', title = 'Polish onboarding'): ChatSessionRecord {
 		isArchived: false,
 		isProcessing: true,
 		processingPhase: 'running',
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: true,
 		status: 'running',

@@ -143,7 +143,7 @@ describe('TransientLayerRegistry', () => {
 		menu.remove();
 	});
 
-	it('leaves composing Escape to the active input method', () => {
+	it.each([{ isComposing: true }, { keyCode: 229 }])('leaves composing Escape to the active input method (%j)', (composition) => {
 		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');
 		document.body.append(dialog);
@@ -157,7 +157,7 @@ describe('TransientLayerRegistry', () => {
 			onEscape: closeDialog,
 			restoreFocus: () => undefined,
 		});
-		const event = keyboardEscape({ isComposing: true });
+		const event = keyboardEscape(composition);
 
 		expect(layers.handleEscape(event)).toBe(false);
 		expect(event.defaultPrevented).toBe(false);

@@ -43,10 +43,15 @@ export interface AgentConfigurationValidation {
   validate(configuration: AgentSessionConfiguration, options?: ExecutorCallOptions): Promise<void>;
 }
 
+export interface AgentSessionConfigurationUpdate extends AgentSessionConfiguration {
+  // An explicit save also replaces a turn-local override when the saved value is unchanged.
+  readonly permissionModeExplicit: boolean;
+}
+
 export interface AgentSessionConfigurationUpdates {
   apply(
     agentSessionId: string,
-    configuration: AgentSessionConfiguration,
+    configuration: AgentSessionConfigurationUpdate,
     previousConfiguration: AgentSessionConfiguration,
     options?: ExecutorCallOptions,
   ): Promise<void>;

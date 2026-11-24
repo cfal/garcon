@@ -54,7 +54,7 @@ export class AgentOwnershipJournal {
     releaseTimeoutMs?: number;
     retainExecutorReferences?: RetainExecutorReferences;
     retainProviderReferences?: RetainProviderReferences;
-    isExecutorConfigured?: (executorId: string) => boolean;
+    isExecutorConfigured: (executorId: string) => boolean;
   }) {
     this.#filePath = path.join(options.workspaceDir, 'agent-ownership-journal.json');
     this.#registry = options.registry;
@@ -63,7 +63,8 @@ export class AgentOwnershipJournal {
     this.#releaseTimeoutMs = options.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS;
     this.#retainExecutorReferences = options.retainExecutorReferences;
     this.#providerReferences = new ApiProviderDurableReferences(options.retainProviderReferences);
-    this.#isExecutorConfigured = options.isExecutorConfigured ?? (() => true);
+    if (typeof options.isExecutorConfigured !== 'function') throw new Error('AgentOwnershipJournal requires executor configuration policy');
+    this.#isExecutorConfigured = options.isExecutorConfigured;
     if (!Number.isSafeInteger(this.#releaseTimeoutMs) || this.#releaseTimeoutMs < 1) {
       throw new Error('Ownership cleanup release timeout must be a positive integer');
     }

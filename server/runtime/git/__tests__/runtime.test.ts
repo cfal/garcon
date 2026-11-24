@@ -455,5 +455,15 @@ describe('with a disposable bare remote', () => {
     await git.push({ projectPath });
     expect((await runGit(remote, ['show', 'main:outgoing.txt'])).stdout).toBe('outgoing\n');
   });
+
+  test('refuses a Workbench push after checkout without updating the remote', async () => {
+    const { git, projectPath } = repository;
+    const refs = (await runGit(remote, ['show-ref'])).stdout;
+    await runGit(projectPath, ['checkout', '-b', 'next']);
+    await runGit(projectPath, ['commit', '--allow-empty', '-m', 'on next']);
+    await expect(git.push({ projectPath, remote: 'origin', remoteBranch: 'main' }))
+      .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
+    expect((await runGit(remote, ['show-ref'])).stdout).toBe(refs);
+  });
 });
 });

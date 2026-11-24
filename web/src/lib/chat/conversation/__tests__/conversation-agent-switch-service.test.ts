@@ -33,11 +33,13 @@ function harness() {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 	};
 	const agentState: ConversationAgentSwitchDeps['agentState'] = {
 		...model,

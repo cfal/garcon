@@ -15,7 +15,9 @@ import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import type { PreamblesSnapshot } from '$shared/preambles';
-import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { localExecutor, remoteExecutor, localScope } from '$lib/executors/__tests__/fixtures';
+import { ModelCatalogStore, type ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import { nativeCatalogAgent } from '../../../../../test/model-catalog';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
@@ -215,6 +217,12 @@ function previewResponse(
 			unavailable: [],
 		},
 	};
+}
+
+function setAntigravityModels(catalog: ModelCatalogStore, models: ModelOption[]): void {
+	catalog.agentMetadata = { antigravity: nativeCatalogAgent('antigravity', models) };
+	catalog.agentModels = { antigravity: models };
+	catalog.lastValidatedAt = Date.now();
 }
 
 describe('NewChatForm', () => {
@@ -979,6 +987,7 @@ describe('NewChatForm', () => {
 			isGitRepo: true,
 		});
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			...localScope,
 			worktrees: [
 				{
 					name: 'main',
@@ -1005,6 +1014,68 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull();
 		});
+	});
+
+	it.each([
+		{ initial: 'default', model: 'default', discovered: false },
+		{ initial: 'default', model: 'sample-model-high', discovered: true },
+		{ initial: 'sample-model-high', model: 'default', discovered: true },
+	])('starts a remote Antigravity chat with $model from $initial', async ({ initial, model, discovered }) => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		const catalog = new ModelCatalogStore();
+		setAntigravityModels(catalog.forExecutor(remoteExecutor.id), [
+			{ value: 'default', label: 'Default' },
+			...(discovered ? [{ value: 'sample-model-high', label: 'Sample model (High)' }] : []),
+		]);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			recentAgentSettings: [{
+				executorId: remoteExecutor.id, agentId: 'antigravity', model: initial,
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			}],
+			paths: { byExecutor: { [remoteExecutor.id]: { recentPaths: ['/worker/project'], pinnedPaths: [] } } },
+			executionDefaults: { byAgent: { antigravity: { permissionMode: 'plan' } } },
+		}));
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { catalog, executorSnapshots: [localExecutor, remoteExecutor], onStartChat });
+		const picker = await screen.findByRole('button', {
+			name: initial === 'default' ? /Antigravity .* Default/ : /Antigravity .* Sample model \(High\)/,
+		});
+		await fireEvent.click(picker);
+		await fireEvent.click(await screen.findByRole('option', { name: model === 'default' ? 'Default' : 'Sample model (High)' }));
+		expect(screen.queryByRole('button', { name: /Thinking effort:/ })).toBeNull();
+		const prompt = screen.getByPlaceholderText('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Synthetic prompt' } });
+		const start = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		await waitFor(() => expect(start.disabled).toBe(false));
+		await fireEvent.click(start);
+		expect(onStartChat).toHaveBeenCalledWith(expect.objectContaining({
+			executorId: remoteExecutor.id, agentId: 'antigravity', model, permissionMode: 'plan',
+			thinkingMode: 'none', modelEndpointId: null, apiProviderId: null, projectPath: '/worker/project',
+		}), expect.any(String));
+	});
+
+	it('selects native Default when the new executor does not offer the previous Antigravity model', async () => {
+		stubMatchMedia(false);
+		const catalog = new ModelCatalogStore();
+		setAntigravityModels(catalog, [{ value: 'local-only', label: 'Local model' }]);
+		setAntigravityModels(catalog.forExecutor(remoteExecutor.id), [
+			{ value: 'default', label: 'Default' },
+			{ value: 'worker-model', label: 'Worker model' },
+		]);
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			recentAgentSettings: [{
+				executorId: localExecutor.id, agentId: 'antigravity', model: 'local-only',
+				apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+			}],
+			paths: { byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/project'] } } },
+		}));
+		render(NewChatFormTestHost, { catalog, executorSnapshots: [localExecutor, remoteExecutor] });
+		await screen.findByRole('button', { name: /Antigravity .* Local model/ });
+		await fireEvent.click(screen.getByRole('button', { name: 'Other executors…' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Worker: /worker/project' }));
+		expect(await screen.findByRole('button', { name: /Antigravity .* Default/ })).toBeTruthy();
 	});
 
 	it('opens the model selector at recents when multiple recent targets exist', async () => {

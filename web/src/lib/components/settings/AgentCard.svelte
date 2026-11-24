@@ -11,14 +11,7 @@
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { DeviceAuthInfo, AgentReadiness } from '$lib/api/agents.js';
-
-	interface AuthStatus {
-		authenticated: boolean;
-		canReauth: boolean;
-		label: string;
-		loading: boolean;
-		error: string | null;
-	}
+	import type { AuthStatus } from './settings-auth-state.svelte.js';
 
 	type AgentId = string;
 
@@ -93,6 +86,7 @@
 		amp: 'border-l-provider-amp-border',
 		factory: 'border-l-provider-factory-border',
 		pi: 'border-l-provider-pi-border',
+		antigravity: 'border-l-provider-antigravity-border',
 		'direct-openai-compatible': 'border-l-border',
 		'direct-openai-responses-compatible': 'border-l-border',
 		'direct-anthropic-compatible': 'border-l-border',
@@ -295,6 +289,8 @@
 					<div role="alert" class="text-sm text-destructive">
 						{m.settings_agents_error({ error: auth.error })}
 					</div>
+				{:else if !auth.authenticated && !deviceAuth && auth.detail}
+					<p class="break-words text-sm text-muted-foreground">{auth.detail}</p>
 				{/if}
 			</div>
 		</Collapsible.Content>

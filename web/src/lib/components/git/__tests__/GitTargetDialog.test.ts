@@ -8,6 +8,8 @@ import { flushSync } from 'svelte';
 import {
 	localExecutor,
 	remoteExecutor,
+	localScope,
+	remoteScope,
 } from '$lib/executors/__tests__/fixtures.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -60,16 +62,6 @@ function makeTarget(path: string, branch: string): GitTargetCandidate {
 	};
 }
 
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	let reject!: (reason?: unknown) => void;
-	const promise = new Promise<T>((res, rej) => {
-		resolve = res;
-		reject = rej;
-	});
-	return { promise, resolve, reject };
-}
-
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
@@ -79,9 +71,10 @@ describe('GitTargetDialog', () => {
 	it('notifies creation uncertainty after the selected executor disconnects', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			...remoteScope,
 			worktrees: [makeWorktree('/workspace/repo', 'main', true)],
 		});
-		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		const creation = Promise.withResolvers<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
 		const remote = {
 			...remoteExecutor,
@@ -105,10 +98,8 @@ describe('GitTargetDialog', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
 			target: { value: 'feature' },
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-		expect((screen.getByRole('button', { name: 'Refresh worktrees' }) as HTMLButtonElement).disabled).toBe(
-			true,
-		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
+		expect(screen.queryByRole('button', { name: 'Refresh worktrees' })).toBeNull();
 		flushSync(() =>
 			executors.applySnapshot([localExecutor, { ...remote, availability: 'offline' }]),
 		);
@@ -119,15 +110,16 @@ describe('GitTargetDialog', () => {
 		expect(notifications.items[0].message).toBe(
 			`${remote.label}: /workspace/repo: Worktree creation outcome unknown`,
 		);
-		expect(screen.queryByText('Worktree creation outcome unknown')).toBeNull();
+		expect(screen.getByRole('alert').textContent).toBe('Worktree creation outcome unknown');
 	});
 
 	it('retains remote worktree creation through unrelated executor snapshot changes', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			...remoteScope,
 			worktrees: [makeWorktree('/workspace/repo', 'main', true)],
 		});
-		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
+		const creation = Promise.withResolvers<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
 		const remote = {
 			...remoteExecutor,
@@ -149,13 +141,13 @@ describe('GitTargetDialog', () => {
 		await fireEvent.input(screen.getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
 			target: { value: 'feature' },
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Create worktree' }));
 		expect(gitApi.gitCreateWorktree).toHaveBeenCalledOnce();
 		const validations = vi.mocked(chatsApi.validateStart).mock.calls.length;
 		flushSync(() =>
 			executors.applySnapshot([{ ...localExecutor, availability: 'offline' }, remote]),
 		);
-		creation.resolve({ success: true, worktreePath: '/workspace/repo/.worktrees/feature' });
+		creation.resolve({ ...remoteScope, success: true, worktreePath: '/workspace/repo/.worktrees/feature' });
 		await screen.findByRole('dialog', { name: 'Git target' });
 		expect((screen.getByLabelText('Project Path') as HTMLInputElement).value).toBe(
 			'/workspace/repo/.worktrees/feature',
@@ -181,6 +173,7 @@ describe('GitTargetDialog', () => {
 		const target = makeTarget(selectedPath, 'feature');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			...localScope,
 			worktrees: [
 				makeWorktree('/workspace/repo', 'main', true),
 				makeWorktree(selectedPath, 'feature'),
@@ -245,7 +238,7 @@ describe('GitTargetDialog', () => {
 	});
 
 	it('shows a loading indicator while the pin update is pending', async () => {
-		const pending = deferred<void>();
+		const pending = Promise.withResolvers<void>();
 		const onTogglePinnedProjectPath = vi.fn(() => pending.promise);
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 

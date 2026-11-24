@@ -1,4 +1,4 @@
-import type { ConversationSettingsController } from './conversation-settings-controller.svelte.js';
+import type { ChatSettingsMutations } from '../sessions/chat-settings-mutations.js';
 import type { ConversationQueueController } from './conversation-queue-controller.svelte.js';
 
 export interface DirectAdmissionBarrier {
@@ -10,7 +10,7 @@ export class ConversationAdmissionController {
 	#pending = $state.raw<ReadonlyMap<string, DirectAdmissionBarrier>>(new Map());
 
 	constructor(
-		private readonly settings: Pick<ConversationSettingsController, 'hasPending' | 'settlePending'>,
+		private readonly settings: Pick<ChatSettingsMutations, 'pendingFor'>,
 		private readonly queue: Pick<ConversationQueueController, 'pendingControlRefresh' | 'settleControlRefresh'>,
 	) {}
 
@@ -40,7 +40,7 @@ export class ConversationAdmissionController {
 	}
 
 	settleSettings(chatId: string): Promise<boolean> | undefined {
-		return this.settings.hasPending(chatId) ? this.settings.settlePending(chatId) : undefined;
+		return this.settings.pendingFor(chatId) ?? undefined;
 	}
 
 	settleQueueControl(chatId: string): Promise<void> | undefined {

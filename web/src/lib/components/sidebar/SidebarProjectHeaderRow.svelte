@@ -1,14 +1,16 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getExecutors } from '$lib/context';
 	import Plus from '@lucide/svelte/icons/plus';
 	import { effectiveExecutorId } from '$shared/executors';
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { splitProjectPath } from '$lib/project-paths/compact-project-path';
-	import type { SidebarVirtualProjectHeaderRow } from './sidebar-virtual-chat-list';
+	import type { SidebarVirtualProjectHeaderRow } from '../../sidebar/display/sidebar-virtual-chat-list';
 	import SidebarGroupHeader from './SidebarGroupHeader.svelte';
 
 	interface SidebarProjectHeaderRowProps {
+		preview?: boolean;
 		row: SidebarVirtualProjectHeaderRow;
 		containsSelectedChat?: boolean;
 		onToggle?: (projectKey: string) => void;
@@ -20,11 +22,13 @@
 		containsSelectedChat = false,
 		onToggle,
 		onNewProjectChat,
+		preview = false,
 	}: SidebarProjectHeaderRowProps = $props();
-	const executors = getExecutors();
-	const executorLabel = $derived(
-		(row.executorId ?? 'local') === 'local' ? '' : executors.label(row.executorId),
-	);
+	const executors = untrack(() => preview) ? null : getExecutors();
+	const executorLabel = $derived.by(() => {
+		if ((row.executorId ?? 'local') === 'local') return '';
+		return preview ? 'Remote' : executors?.label(row.executorId);
+	});
 	const pathParts = $derived(
 		row.projectPath
 			? splitProjectPath(row.projectPath)
@@ -62,6 +66,7 @@
 	isCollapsed={row.isCollapsed}
 	{containsSelectedChat}
 	title={fullLabel}
+	disabled={!onToggle}
 	onToggle={handleToggle}
 	data-sidebar-project-header={row.projectPath || fullLabel}
 	data-sidebar-project-key={row.projectKey}

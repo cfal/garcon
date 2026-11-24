@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import type { LedgerWriteTimings } from './write-timings.js';
 
 export function nextOrdinal(db: Database, viewId: string): number {
   return runQuery(() => {
@@ -9,16 +10,20 @@ export function nextOrdinal(db: Database, viewId: string): number {
   });
 }
 
-export function runTransaction<T>(db: Database, work: () => T): T {
+export function runTransaction<T>(db: Database, work: () => T, timings?: LedgerWriteTimings): T {
   try {
+    timings?.phase('begin');
     db.exec('BEGIN IMMEDIATE');
+    timings?.phase('statements');
     const result = work();
+    timings?.phase('commit');
     db.exec('COMMIT');
     return result;
   } catch (error) {
     const failure = asError(error);
     if (db.inTransaction) {
       try {
+        timings?.phase('rollback');
         db.exec('ROLLBACK');
       } catch (rollbackError) {
         Object.defineProperty(failure, ROLLBACK_FAILURE_PROPERTY, {
@@ -28,6 +33,8 @@ export function runTransaction<T>(db: Database, work: () => T): T {
       }
     }
     throw failure;
+  } finally {
+    timings?.phase('complete');
   }
 }
 

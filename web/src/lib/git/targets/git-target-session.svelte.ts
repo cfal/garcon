@@ -126,6 +126,14 @@ export class GitTargetSessionController implements PortableSingletonController {
 		return this.#appliedIdentity;
 	}
 
+	get projectReady(): boolean {
+		return (
+			this.projectSelection.projectState.kind === 'available' &&
+			!this.projectIdentityPending &&
+			this.identity === this.#appliedIdentity
+		);
+	}
+
 	get canChangeTarget(): boolean {
 		return !this.branchChangePending && this.#targetChangeAllowed();
 	}
@@ -538,10 +546,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 
 	#targetChangeAllowed(): boolean {
 		return (
-			this.projectSelection.projectState.kind === 'available' &&
+			this.projectReady &&
 			this.activeProjectPath !== null &&
-			!this.projectIdentityPending &&
-			this.identity === this.#appliedIdentity &&
 			this.deps.canChangeTarget()
 		);
 	}

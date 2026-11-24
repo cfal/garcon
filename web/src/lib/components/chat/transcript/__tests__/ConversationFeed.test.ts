@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -571,7 +572,7 @@ describe('ConversationFeed', () => {
 		const messages = [1, 2, 3].map(ordinal => ({
 			ordinal, message: new AssistantMessage('2026-01-01T00:00:00.000Z', `Synthetic row ${ordinal}`),
 		}));
-		transcript.replaceGeneration('chat-1', 'generation-1', messages.slice(0, 1), {
+		seedTranscript(transcript, 'chat-1', 'generation-1', messages.slice(0, 1), {
 			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
 		});
 		const project = vi.spyOn(ConversationFeedProjectionState.prototype, 'reconcile');

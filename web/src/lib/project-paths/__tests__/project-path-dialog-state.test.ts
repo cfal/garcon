@@ -3,7 +3,7 @@ import { ApiError } from '$lib/api/client';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
-import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { localExecutor, remoteExecutor, remoteScope } from '$lib/executors/__tests__/fixtures';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { ProjectPathDialogState } from '$lib/project-paths/project-path-dialog-state.svelte.js';
 
@@ -63,29 +63,31 @@ describe('ProjectPathDialogState', () => {
 		const dialog = new ProjectPathDialogState(executors);
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		dialog.open('/worker/project', remote.id);
-		const listing = Promise.withResolvers<{ worktrees: GitWorktreeItem[] }>();
+		const listing = Promise.withResolvers<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
-		const loading = dialog.loadWorktrees();
+		const loading = dialog.worktreePicker.open();
 		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
 			expect.any(Object),
 		);
 		executors.applySnapshot([localExecutor, { ...remote, instanceId: 'replacement' }]);
-		listing.resolve({ worktrees: [makeWorktree('/worker/old', 'old')] });
+		listing.resolve({ ...remoteScope, worktrees: [makeWorktree('/worker/old', 'old')] });
 		await loading;
-		expect(dialog.worktrees).toEqual([]);
+		expect(dialog.worktreePicker.worktrees).toEqual([]);
 
 		const creation = Promise.withResolvers<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		const creating = dialog.createWorktree('/worker/feature', 'feature');
+		const replacement = { ...remoteScope, instanceId: 'replacement' };
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValueOnce({ ...replacement, worktrees: [] });
+		await dialog.worktreePicker.syncCatalog();
+		const creating = dialog.worktreePicker.create({ worktreePath: '/worker/feature', branch: 'feature' });
 		dialog.open('/local/project', 'local');
-		creation.resolve({ success: true, worktreePath: '/worker/feature' });
+		creation.resolve({ ...replacement, success: true, worktreePath: '/worker/feature' });
 		await creating;
 		expect(dialog.candidatePath).toBe('/local/project');
 		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
-			'/worker/feature',
-			{ branch: 'feature', baseRef: undefined },
+			{ worktreePath: '/worker/feature', branch: 'feature' },
 		);
 		dialog.close();
 	});

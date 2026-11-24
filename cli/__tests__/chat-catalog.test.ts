@@ -80,7 +80,8 @@ describe('chat catalog', () => {
   test('applies shared direct-parent, identity, and transcript-activity date semantics', () => {
     const directChild = chat({
       id: CHAT_ID,
-      parentChat: { chatId: OTHER_CHAT_ID, relation: 'delegation' },
+      parentChatId: OTHER_CHAT_ID,
+      lineage: null,
       activity: {
         createdAt: '2026-09-01T00:00:00.000Z',
         lastActivityAt: '2026-09-03T12:00:00.000Z',

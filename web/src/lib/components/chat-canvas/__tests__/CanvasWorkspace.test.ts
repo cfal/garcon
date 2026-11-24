@@ -29,7 +29,8 @@ afterEach(() => {
 
 const chat: ChatSessionRecord = {
 	id: '1780000000000001',
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	projectPath: '/workspace/project',
 	orderGroup: 'normal',
 	title: 'Synthetic original chat',
@@ -45,6 +46,7 @@ const chat: ChatSessionRecord = {
 	isArchived: false,
 	isProcessing: false,
 	processingPhase: null,
+	activityStatus: null,
 	canReloadFromNativeHistory: false,
 	isUnread: false,
 	status: 'running',
@@ -123,7 +125,8 @@ describe('CanvasWorkspace retention', () => {
 			vi.setSystemTime(new Date('2026-09-07T00:01:00Z'));
 			const chat: ChatSessionRecord = {
 				id: '1780000000000001',
-				parentChat: null,
+				parentChatId: null,
+				lineage: null,
 				projectPath: '/workspace/project',
 				orderGroup: 'normal',
 				title: 'Research chat',
@@ -139,6 +142,7 @@ describe('CanvasWorkspace retention', () => {
 				isArchived: false,
 				isProcessing: false,
 				processingPhase: null,
+				activityStatus: null,
 				canReloadFromNativeHistory: false,
 				isUnread: false,
 				status: 'running',

@@ -40,6 +40,32 @@ for (const lane of ['local', 'controller', 'worker'] as const) {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`a lost push reply directs the caller to the remote with ${dialer} dialing`, async () => {
+    const fixture = await gitRpcFixture(dialer);
+    const { root, projectPath } = fixture;
+    const remote = path.join(root, 'published.git');
+    const abort = new AbortController();
+    const service = await fixture.local.getGitService();
+    const push = service.push.bind(service);
+    const dispatched = spyOn(service, 'push').mockImplementation(async (request, options) => {
+      const result = await push(request, options);
+      await fixture.controller.dispose();
+      abort.abort();
+      return result;
+    });
+    try {
+      await runGit(root, ['init', '--bare', remote]);
+      await runGit(projectPath, ['remote', 'add', 'origin', remote]);
+      const git = await fixture.executor.getGitService();
+      await expect(git.push({ projectPath }, { signal: abort.signal })).rejects.toMatchObject({
+        code: 'GIT_MUTATION_OUTCOME_UNKNOWN', message: expect.stringContaining('Inspect the remote before pushing again'),
+      });
+      expect(dispatched).toHaveBeenCalledTimes(1);
+      const ref = ['show-ref', '--verify', '--hash', 'refs/heads/main'];
+      expect((await runGit(remote, ref)).stdout).toBe((await runGit(projectPath, ref)).stdout);
+    } finally { dispatched.mockRestore(); await fixture.dispose(); }
+  }, 15_000);
+
   test(`incomplete review summaries fail at the remote boundary with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);
     const local = await fixture.local.getGitService();

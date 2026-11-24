@@ -3,12 +3,10 @@ import os from 'os';
 import path from 'path';
 import type { CodexProviderConfig } from '../runtime-types.js';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import { resolveCodexCliCommand } from './cli.js';
+import { resolveCodexCli } from './cli.js';
 import { appendCodexConfigArgs } from './config-overrides.js';
 import { buildCodexEnv, codexSandboxSettings } from './request-builders.js';
 import { withSingleQueryControl } from '@garcon/server-agent-common/shared/single-query-control';
-
-export { resolveCodexCliCommand } from './cli.js';
 
 interface CodexSingleQueryOptions {
   cwd?: string;
@@ -36,7 +34,7 @@ async function runCodexExec(
   signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string }> {
   const env = buildCodexExecEnv(envOverrides, codexConfig);
-  const codexCommand = await resolveCodexCliCommand();
+  const codexCommand = resolveCodexCli(env).command;
   const proc = Bun.spawn([codexCommand, ...args], {
     stdin: new Blob([input]),
     stdout: 'pipe',
@@ -107,7 +105,8 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
     appendCodexConfigArgs(args, codexConfig?.config);
     if (reasoningEffort) args.push('--config', `model_reasoning_effort="${reasoningEffort}"`);
     if (approvalPolicy) args.push('--config', `approval_policy="${approvalPolicy}"`);
-    args.push('-');
+    // Background generation has no chat speed selection and must not inherit the host tier.
+    args.push('--config', 'service_tier="default"', '-');
 
     try {
       const { stdout } = await runCodexExec(args, prompt, envOverrides, codexConfig, querySignal);

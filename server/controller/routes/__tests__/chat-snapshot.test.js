@@ -39,6 +39,7 @@ function fixture(overrides = {}) {
           projectPath: '/missing/project',
           tags: ['cli'],
           canReloadFromNativeHistory: true,
+          activityStatus: 'working',
           activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
         },
         processingPhase: 'running',

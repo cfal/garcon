@@ -234,17 +234,8 @@
 				</Button>
 			</Dialog.Footer>
 		</form>
-		{#if destination.worktreePickerOpen}
-			<GitWorktreePickerModal
-				worktrees={destination.worktrees}
-				isLoading={destination.isLoadingWorktrees}
-				isCreating={destination.isCreatingWorktree}
-				errorMessage={destination.worktreeError}
-				onSelect={(path) => destination.selectWorktree(path)}
-				onCreate={(path, branch, baseRef) => destination.createWorktree(path, branch, baseRef)}
-				onRefresh={() => void destination.loadWorktrees()}
-				onClose={() => destination.closeWorktreePicker()}
-			/>
+		{#if destination.worktreePicker.isOpen}
+			<GitWorktreePickerModal session={destination.worktreePicker} />
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

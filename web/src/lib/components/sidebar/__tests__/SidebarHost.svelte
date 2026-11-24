@@ -1,11 +1,21 @@
 <script lang="ts">
+	import { sidebarOrderErrorMessage } from '../sidebar-order-notifications';
+	import {
+		normalizeSidebarGroupingFields,
+		type SidebarGroupingSelection,
+	} from '$lib/sidebar/display/sidebar-preferences';
+
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
+	import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 	import Sidebar from '../Sidebar.svelte';
-	import { buildSidebarChatListProjection } from '../sidebar-row-model';
+	import SidebarDisplayDialog from '../SidebarDisplayDialog.svelte';
+	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+	import type { SidebarDisplayPreferences } from '$lib/sidebar/display/sidebar-display-options';
+	import * as api from '$lib/api/chats';
 	import { TYPOGRAPHY_DEFAULTS } from '$lib/theme/typography.js';
 	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
@@ -26,8 +36,8 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte';
 	import type {
-		SidebarChatGrouping,
 		SidebarInactivityDuration,
 		SidebarSortMode,
 	} from '$lib/stores/local-settings.svelte';
@@ -41,12 +51,15 @@
 		executors?: readonly ExecutorSnapshot[];
 		chats?: ChatSessionRecord[];
 		chatSessions?: ChatSessionsStore;
+		projectCollapse?: SidebarProjectCollapseStore;
 		isMobile?: boolean;
 		notifications?: unknown;
 		selectedChatId?: string | null;
 		sidebarSearch?: SidebarSearchStore;
 		autoLoadSavedSearches?: boolean;
-		sidebarGrouping?: SidebarChatGrouping;
+		sidebarGroupingFields?: SidebarGroupingSelection[];
+		sidebarNestDelegatedChats?: boolean;
+		sidebarSeparateArchivedBranches?: boolean;
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: ChatItemLayout;
@@ -55,7 +68,7 @@
 		chatListAutohideAvailable?: boolean;
 		chatListDock?: ChatListDock;
 		reduceMotion?: boolean;
-		collapsedProjectKeys?: Set<string>;
+		collapseDelegatedChatsByDefault?: boolean;
 		sidebarSortMode?: SidebarSortMode;
 		sidebarSearchResultSort?: ChatSearchSort;
 		onQuietRefresh?: () => Promise<void> | void;
@@ -69,12 +82,15 @@
 		executors,
 		chats = [],
 		chatSessions,
+		projectCollapse,
 		isMobile = false,
 		notifications,
 		selectedChatId = null,
 		sidebarSearch,
 		autoLoadSavedSearches = true,
-		sidebarGrouping = 'project',
+		sidebarGroupingFields = [{ field: 'project', enabled: true }],
+		sidebarNestDelegatedChats = false,
+		sidebarSeparateArchivedBranches = false,
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'detailed',
@@ -83,7 +99,7 @@
 		chatListAutohideAvailable = false,
 		chatListDock = 'left',
 		reduceMotion = false,
-		collapsedProjectKeys = new Set<string>(),
+		collapseDelegatedChatsByDefault = false,
 		sidebarSortMode = 'manual',
 		sidebarSearchResultSort = 'relevance',
 		onQuietRefresh = () => Promise.resolve(),
@@ -92,6 +108,8 @@
 		onNewChat = () => {},
 		onNewProjectChat = () => {},
 	}: SidebarHostProps = $props();
+	let displayOpen = $state(false);
+	let displayReturnFocus = $state<(() => void) | undefined>();
 	let displayedChats = $derived(chatSessions?.orderedChats ?? chats);
 	untrack(() => setExecutorsTestContext(executors ?? [localExecutor]));
 
@@ -141,8 +159,27 @@
 	} as never);
 	setLocalSettings({
 		...TYPOGRAPHY_DEFAULTS,
-		get sidebarGrouping() {
-			return sidebarGrouping;
+		sidebarWidth: 320,
+		get sidebarNestDelegatedChats() {
+			return sidebarNestDelegatedChats;
+		},
+		get collapseDelegatedChatsByDefault() {
+			return collapseDelegatedChatsByDefault;
+		},
+		get sidebarSeparateArchivedBranches() {
+			return sidebarSeparateArchivedBranches;
+		},
+		setSidebarDisplay(value: SidebarDisplayPreferences) {
+			sidebarGroupingFields = value.sidebarGroupingFields;
+			sidebarNestDelegatedChats = value.sidebarNestDelegatedChats;
+			sidebarSeparateArchivedBranches = value.sidebarSeparateArchivedBranches;
+			sidebarInactivityDuration = value.sidebarInactivityDuration;
+			sidebarGroupNestedProjectPaths = value.sidebarGroupNestedProjectPaths;
+			sidebarChatItemLayout = value.sidebarChatItemLayout;
+			sidebarShowProjectPath = value.sidebarShowProjectPath;
+		},
+		get sidebarGroupingFields() {
+			return normalizeSidebarGroupingFields(sidebarGroupingFields);
 		},
 		get sidebarInactivityDuration() {
 			return sidebarInactivityDuration;
@@ -171,28 +208,14 @@
 		get reduceMotion() {
 			return reduceMotion;
 		},
-		toggle(key: 'sidebarGroupNestedProjectPaths' | 'sidebarShowProjectPath') {
-			if (key === 'sidebarShowProjectPath') sidebarShowProjectPath = !sidebarShowProjectPath;
-			else sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
-		},
 		set(
 			key:
-				| 'sidebarGrouping'
-				| 'sidebarChatItemLayout'
 				| 'sidebarSortMode'
 				| 'sidebarSearchResultSort'
 				| 'chatListAutohide'
 				| 'chatListDock',
 			value: string | boolean,
 		) {
-			if (key === 'sidebarGrouping') {
-				sidebarGrouping = value as SidebarChatGrouping;
-				return;
-			}
-			if (key === 'sidebarChatItemLayout') {
-				sidebarChatItemLayout = value as ChatItemLayout;
-				return;
-			}
 			if (key === 'sidebarSortMode') {
 				sidebarSortMode = value as SidebarSortMode;
 				return;
@@ -208,23 +231,15 @@
 
 	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
 
-	setSidebarProjectCollapse({
-		get collapsedProjectKeys() {
-			return collapsedProjectKeys;
-		},
-		toggle(projectKey: string) {
-			const next = new Set(collapsedProjectKeys);
-			if (next.has(projectKey)) next.delete(projectKey);
-			else next.add(projectKey);
-			collapsedProjectKeys = next;
-		},
-		pruneToProjectKeys(projectKeys: Iterable<string>) {
-			const allowed = new Set(projectKeys);
-			collapsedProjectKeys = new Set(
-				Array.from(collapsedProjectKeys).filter((projectKey) => allowed.has(projectKey)),
-			);
-		},
-	} as never);
+	const providedCollapse = untrack(() => projectCollapse);
+	const collapse = providedCollapse ?? new SidebarProjectCollapseStore();
+	if (!providedCollapse) {
+		onDestroy(() => {
+			collapse.destroy();
+			localStorage.removeItem(LOCAL_STORAGE_KEYS.sidebarProjectCollapse);
+		});
+	}
+	setSidebarProjectCollapse(collapse);
 
 	function createSidebarSearchContext(): SidebarSearchStore {
 		return sidebarSearch ?? createDefaultSidebarSearchContext();
@@ -246,7 +261,9 @@
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({
-		forExecutor() { return this; },
+		forExecutor() {
+			return this;
+		},
 		supportsFork() {
 			return true;
 		},
@@ -273,28 +290,53 @@
 		if (!autoLoadSavedSearches) return;
 		void sidebarSearchContext.loadSavedSearches();
 	});
-	const projection = $derived(
-		buildSidebarChatListProjection({
-			displayedChats: sidebarSearchContext.filteredChats,
-			optimisticArchiveOrder: displayedChats,
-			grouping: sidebarGrouping,
-			currentTime: new Date('2025-01-02T00:00:00.000Z'),
-			inactivityDuration: sidebarInactivityDuration,
-			sortMode: sidebarSortMode,
-			pinnedInsertPosition: 'top',
-			groupNestedProjectPaths: sidebarGroupNestedProjectPaths,
-			collapsedProjectKeys,
-			isChatOptimisticallyArchived: (chatId) =>
-				chatSessions?.isChatOptimisticallyArchived(chatId) ?? false,
-		}),
-	);
+	const projectionInput = $derived({
+		allChats: displayedChats,
+		matchingChatIds: sidebarSearchContext.isFiltered
+			? new Set(sidebarSearchContext.filteredChats.map((chat) => chat.id))
+			: undefined,
+		groupingFields: sidebarGroupingFields,
+		nestDelegatedChats: sidebarNestDelegatedChats,
+		separateArchivedBranches: sidebarSeparateArchivedBranches,
+		currentTime: new Date('2025-01-02T00:00:00.000Z'),
+		inactivityDuration: sidebarInactivityDuration,
+		sortMode: sidebarSortMode,
+		pinnedInsertPosition: 'top' as const,
+		groupNestedProjectPaths: sidebarGroupNestedProjectPaths,
+		collapsedProjectKeys: collapse.collapsedProjectKeys,
+		expandedDelegationKeys: collapse.expandedDelegationKeys,
+		collapseDelegatedChatsByDefault,
+		isChatOptimisticallyArchived: (chatId: string) =>
+			chatSessions?.isChatOptimisticallyArchived(chatId) ?? false,
+	});
+	const reorder = new SidebarOrderController({
+		get input() {
+			return projectionInput;
+		},
+		write: (request) => api.reorderChat(request),
+		refresh: async () => {
+			await onQuietRefresh();
+			return true;
+		},
+		sort: (sortKey) => api.sortChatOrder({ sortKey }),
+		onError: (_error, outcome) =>
+			(getNotificationsContext() as { error: (message: string) => void }).error(
+				sidebarOrderErrorMessage(outcome),
+			),
+	});
 </script>
 
 <Sidebar
-	{projection}
+	{reorder}
+	onShowDisplay={(returnFocus) => {
+		displayReturnFocus = returnFocus;
+		displayOpen = true;
+	}}
+	projection={reorder.projection}
 	chats={displayedChats}
 	{selectedChatId}
-	isLoading={false}
+	isLoading={chatSessions?.isLoadingChats ?? false}
+	rosterReady={chatSessions ? chatSessions.chatListStatus === 'ready' : true}
 	{isMobile}
 	{onChatSelect}
 	{onNewChat}
@@ -332,3 +374,8 @@
 	chats={displayedChats}
 	onSelectResult={({ chatId }) => onChatSelect(chatId)}
 />
+
+{#if displayOpen}<SidebarDisplayDialog
+		returnFocus={displayReturnFocus}
+		onClose={() => (displayOpen = false)}
+	/>{/if}

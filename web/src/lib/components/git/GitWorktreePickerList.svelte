@@ -23,7 +23,8 @@
 		totalWorktreeCount: number;
 		selectedIndex: number;
 		selectedPath: string | undefined;
-		isLoading: boolean;
+		isBusy: boolean;
+		disabled?: boolean;
 		hasLoadError: boolean;
 		onActivate: (worktreePath: string) => void;
 		onSelect: (worktreePath: string) => void;
@@ -36,7 +37,8 @@
 		totalWorktreeCount,
 		selectedIndex,
 		selectedPath,
-		isLoading,
+		isBusy,
+		disabled = false,
 		hasLoadError,
 		onActivate,
 		onSelect,
@@ -92,7 +94,7 @@
 		!useVirtualRows || visibleRows.some((entry) => entry.index === selectedIndex),
 	);
 	let activeOptionId = $derived(
-		!isLoading && selectedPath && selectedIsMounted
+		!isBusy && selectedPath && selectedIsMounted
 			? worktreeOptionId(listboxId, selectedPath)
 			: undefined,
 	);
@@ -135,7 +137,7 @@
 	$effect(() => {
 		worktrees;
 		const index = selectedIndex;
-		const busy = isLoading;
+		const busy = isBusy;
 		const virtualized = useVirtualRows;
 		const viewport = viewportRef;
 		const frame = requestAnimationFrame(() => {
@@ -196,16 +198,18 @@
 	bind:this={viewportRef}
 	id={listboxId}
 	class="min-h-0 min-w-0 flex-1 overflow-y-auto px-1.5"
+	style:scrollbar-gutter="stable"
 	role="listbox"
 	aria-label={m.workspace_worktree_select()}
-	aria-busy={isLoading}
+	aria-busy={isBusy}
+	aria-disabled={disabled}
 	data-worktree-list-viewport
 >
-	{#if isLoading}
+	{#if isBusy}
 		<div class="flex items-center justify-center py-10">
 			<LoaderCircle class="h-5 w-5 animate-spin text-muted-foreground" />
 		</div>
-	{:else if totalWorktreeCount === 0 && !hasLoadError}
+	{:else if totalWorktreeCount === 0 && !hasLoadError && !disabled}
 		<div class="flex flex-col items-center justify-center gap-2 py-10">
 			<GitBranch class="h-5 w-5 text-muted-foreground/50" />
 			<span class="text-sm text-muted-foreground">{m.git_worktree_none()}</span>

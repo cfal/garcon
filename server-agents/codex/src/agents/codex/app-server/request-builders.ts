@@ -1,8 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import { GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_1_TERRA_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL } from '@garcon/common/models';
-import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
+import {
+  GPT_6_2_SOL_MODEL,
+  GPT_6_2_ASTRA_MODEL,
+  GPT_6_ASTRA_MODEL,
+  GPT_6_1_SOL_MODEL,
+  GPT_6_1_TERRA_MODEL,
+  GPT_6_SOL_MODEL,
+  GPT_6_LUNA_MODEL,
+} from '@garcon/common/models';
+import type { CodexProviderConfig, CodexStartRequest, CodexThreadConfiguration } from '../runtime-types.js';
+import { codexServiceTier, normalizeCodexServiceTier, type CodexSpeed } from '../service-tier.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type {
   CodexThreadSettings,
@@ -65,6 +74,7 @@ export interface CodexThreadSettingsTarget {
 
 export interface CodexConfirmedThreadSettings {
   readonly model: string;
+  readonly serviceTier: string;
   readonly effort: string | null;
   readonly approvalPolicy: unknown;
   readonly approvalsReviewer: string;
@@ -84,11 +94,7 @@ export function codexSandboxSettings(permissionMode: PermissionMode): CodexSandb
   return CODEX_SANDBOX[effectivePermissionMode] ?? CODEX_SANDBOX.default;
 }
 
-export function codexThreadSettingsTarget(configuration: {
-  readonly model: string;
-  readonly permissionMode: PermissionMode;
-  readonly thinkingMode: ThinkingMode;
-}): CodexThreadSettingsTarget {
+export function codexThreadSettingsTarget(configuration: CodexThreadConfiguration): CodexThreadSettingsTarget {
   const { sandbox, approvalPolicy } = codexSandboxSettings(configuration.permissionMode);
   return {
     model: configuration.model,
@@ -112,6 +118,8 @@ export function buildThreadSettingsUpdateParams(
   threadId: string,
   target: CodexThreadSettingsTarget,
 ): ThreadSettingsUpdateParams {
+  // Omitting the tier preserves the source's selection until the next admission.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L271-L280
   return {
     threadId,
     model: target.model,
@@ -141,6 +149,7 @@ export function threadSettingsTargetFromSnapshot(
   const permissionMode = permissionModeFromSettings(settings, currentPermissionMode);
   return {
     model: settings.model,
+    serviceTier: normalizeCodexServiceTier(settings.serviceTier),
     effort: settings.effort,
     approvalPolicy: settings.approvalPolicy,
     approvalsReviewer: settings.approvalsReviewer,
@@ -184,7 +193,10 @@ function sandboxPolicyMatches(
 }
 
 function codexModelSupportsMaxEffort(model: string | undefined): boolean {
-  const maxEffortModels = [GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_1_TERRA_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL, 'gpt-5.6'];
+  const maxEffortModels = [
+    GPT_6_2_SOL_MODEL, GPT_6_2_ASTRA_MODEL, GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL,
+    GPT_6_1_TERRA_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL, 'gpt-5.6',
+  ];
   return maxEffortModels.some(value => model === value || model?.endsWith(`:${value}`) === true)
     || model?.startsWith('gpt-5.6-') === true;
 }
@@ -219,12 +231,19 @@ export function buildCodexEnv(
   return Object.keys(env).length > 0 ? env : undefined;
 }
 
+type ThreadActivationSettings = Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig' | 'speed'>;
+
 function appendCommonThreadParams(
   params: Record<string, unknown>,
-  request: Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>,
+  request: ThreadActivationSettings,
 ): Record<string, unknown> {
   const { sandbox, approvalPolicy } = codexSandboxSettings(request.permissionMode);
   params.model = request.model;
+  // Explicit Standard overrides executor config and previously persisted premium settings.
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L74-L81
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L394-L401
+  // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L603-L610
+  params.serviceTier = codexServiceTier(request.speed);
   params.cwd = request.projectPath;
   params.sandbox = sandbox;
   params.approvalPolicy = approvalPolicy;
@@ -240,10 +259,10 @@ export function buildThreadStartParams(request: CodexStartRequest): Record<strin
   }, request);
 }
 
-export function buildThreadResumeParams(request: {
+export function buildThreadResumeParams(request: ThreadActivationSettings & {
   agentSessionId: string;
   nativePath?: string | null;
-} & Pick<CodexStartRequest, 'model' | 'projectPath' | 'permissionMode' | 'codexConfig'>): Record<string, unknown> {
+}): Record<string, unknown> {
   const params = appendCommonThreadParams({
     threadId: request.agentSessionId,
     excludeTurns: true,
@@ -256,20 +275,24 @@ export function buildThreadForkParams(sourceSession: {
   agentSessionId: string;
   nativePath?: string | null;
   model?: string | null;
+  speed?: CodexSpeed;
   projectPath: string;
   codexConfig?: CodexProviderConfig;
   lastTurnId?: string | null;
+  modelProvider?: string | null;
 }): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId: sourceSession.agentSessionId,
     cwd: sourceSession.projectPath,
     model: sourceSession.model ?? null,
+    serviceTier: codexServiceTier(sourceSession.speed),
     ephemeral: false,
     excludeTurns: true,
   };
   if (sourceSession.nativePath) params.path = sourceSession.nativePath;
   if (sourceSession.codexConfig?.config) params.config = sourceSession.codexConfig.config;
   if (sourceSession.lastTurnId) params.lastTurnId = sourceSession.lastTurnId;
+  if (sourceSession.modelProvider) params.modelProvider = sourceSession.modelProvider;
   return params;
 }
 
@@ -282,6 +305,7 @@ export function buildTurnStartParams(request: {
   projectPath: string;
   permissionMode: PermissionMode;
   thinkingMode?: ThinkingMode;
+  speed?: CodexSpeed;
   clientMessageId?: string;
   skills?: CodexSkillRef[];
 }): Record<string, unknown> {
@@ -293,6 +317,7 @@ export function buildTurnStartParams(request: {
     approvalPolicy,
     approvalsReviewer: 'user',
     model: request.model,
+    serviceTier: codexServiceTier(request.speed),
   };
   if (request.clientMessageId) params.clientUserMessageId = request.clientMessageId;
   const effort = mapThinkingModeToCodexEffort(request.thinkingMode, request.model);

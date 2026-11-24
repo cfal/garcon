@@ -1,4 +1,5 @@
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import { parseSetChatParentResponse, type SetChatParentRequest, type SetChatParentResponse } from '@garcon/common/chat-parent-contracts';
 import type {
   CreateScheduledPromptRequest,
   CreateScheduledPromptResponse,
@@ -43,7 +44,8 @@ import {
 } from '@garcon/common/chat-tag-mutations';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import { parseChatListResponse, type ChatListResponse } from '@garcon/common/chat-list';
-import { parseParentChatRef, type ParentChatRef } from '@garcon/common/chat-parentage';
+import { chatLineagesEqual, parseChatLineage, type ChatRelationships } from '@garcon/common/chat-parentage';
+import { parseChatId } from '@garcon/common/chat-id';
 import {
   parseChatHistoryResponse,
   type ChatHistoryResponse,
@@ -261,31 +263,21 @@ function parseAcceptedResponse(value: unknown): AgentTurnCommandResponse {
     ...accepted,
     chatId: accepted.chatId,
     turnId: accepted.turnId,
-    parentChat: parseRequiredParentChat(raw),
+    ...parseRelationships(raw),
   };
 }
 
-function parseRequiredParentChat(raw: Record<string, unknown> | null): ParentChatRef | null {
-  if (!raw || !Object.hasOwn(raw, 'parentChat')) {
-    throw new CliError('submission', 'server returned an invalid command parent relation', 3);
+function parseRelationships(raw: Record<string, unknown> | null): ChatRelationships {
+  try {
+    if (!raw || 'parentChat' in raw) throw new Error('Missing current relationship fields');
+    const parentChatId = raw.parentChatId === null ? null : parseChatId(raw.parentChatId);
+    const lineage = raw.lineage === null ? null : parseChatLineage(raw.lineage);
+    if (raw.lineage !== null && !lineage) throw new Error('Invalid lineage');
+    if (parentChatId === raw.chatId || lineage?.sourceChatId === raw.chatId) throw new Error('Self relationship');
+    return { parentChatId, lineage };
+  } catch (error) {
+    throw new CliError('submission', 'server returned invalid chat relationships', 3, { cause: error });
   }
-  if (raw.parentChat === null) return null;
-  const parsed = parseParentChatRef(raw.parentChat);
-  if (!parsed) {
-    throw new CliError('submission', 'server returned an invalid command parent relation', 3);
-  }
-  return parsed;
-}
-
-function parentChatRefsEqual(
-  left: ParentChatRef | null,
-  right: ParentChatRef | null,
-): boolean {
-  if (left === null || right === null) return left === right;
-  if (left.chatId !== right.chatId || left.relation !== right.relation) return false;
-  if (left.relation === 'delegation' || right.relation === 'delegation') return true;
-  return left.transcriptViewId === right.transcriptViewId
-    && left.ordinal === right.ordinal;
 }
 
 function parseStartResponse(value: unknown): StartChatCommandResponse {
@@ -335,14 +327,14 @@ function parseForkRunResponse(value: unknown): ForkRunCommandResponse {
     throw new CliError('submission', 'server returned an invalid forked chat', 3);
   }
   const chat = parseCommandChat(raw.chat, 'server returned an invalid forked chat');
-  const responseParentChat = Object.hasOwn(raw, 'parentChat')
-    ? parseRequiredParentChat(raw)
-    : undefined;
+  const relationships = Object.hasOwn(raw, 'lineage') || Object.hasOwn(raw, 'parentChatId') || Object.hasOwn(raw, 'parentChat')
+    ? parseRelationships(raw)
+    : { parentChatId: chat.parentChatId, lineage: chat.lineage };
   return {
     ...accepted,
     chatId: accepted.chatId,
     turnId: accepted.turnId,
-    parentChat: responseParentChat === undefined ? chat.parentChat : responseParentChat,
+    ...relationships,
     chat,
   };
 }
@@ -373,7 +365,7 @@ function parseStopResponse(value: unknown): AgentStopResponse {
     acceptedAt: raw.acceptedAt,
     outcome: raw.outcome as ChatStopOutcome,
     control,
-    parentChat: parseRequiredParentChat(raw),
+    ...parseRelationships(raw),
   };
 }
 
@@ -789,8 +781,8 @@ export class GarconClient {
       ));
       if (
         response.chat.id !== request.chatId
-        || response.chat.parentChat?.chatId !== request.sourceChatId
-        || response.chat.parentChat.relation !== 'fork'
+        || response.chat.lineage?.sourceChatId !== request.sourceChatId
+        || response.chat.lineage.kind !== 'fork'
       ) {
         throw new CliError('submission', 'server returned an uncorrelated forked chat', 3);
       }
@@ -821,15 +813,13 @@ export class GarconClient {
       null,
       (value) => {
         const response = parseForkRunResponse(value);
-        const responseParentChat = response.parentChat ?? null;
-        const chatParentChat = response.chat.parentChat ?? null;
+        const responseLineage = response.lineage ?? null;
+        const chatLineage = response.chat.lineage;
         if (
           response.chat.id !== request.chatId
-          || responseParentChat?.chatId !== request.sourceChatId
-          || responseParentChat.relation !== 'fork'
-          || chatParentChat?.chatId !== request.sourceChatId
-          || chatParentChat.relation !== 'fork'
-          || !parentChatRefsEqual(responseParentChat, chatParentChat)
+          || chatLineage?.sourceChatId !== request.sourceChatId
+          || chatLineage.kind !== 'fork'
+          || !chatLineagesEqual(responseLineage, chatLineage)
         ) {
           throw new CliError('submission', 'server returned an uncorrelated fork-run response', 3);
         }
@@ -995,6 +985,21 @@ export class GarconClient {
       const response = parseSetChatOrderStateResponse(value);
       if (!response || response.chatId !== request.chatId || response.isArchived !== request.isArchived) {
         throw new CliError('submission', 'server returned an invalid archived-state response', 3);
+      }
+      return response;
+    }, signal);
+  }
+
+  async setChatParent(
+    request: SetChatParentRequest,
+    signal?: AbortSignal,
+  ): Promise<SetChatParentResponse> {
+    return oneShotMutation('submission', async () => {
+      const value = await this.#request('submission', 'PUT', '/api/v1/chats/parent', request, signal);
+      const response = parseSetChatParentResponse(value);
+      if (!response || response.chatId !== request.chatId
+        || response.parentChatId !== request.parentChatId) {
+        throw new CliError('submission', 'server returned an invalid parent-state response', 3);
       }
       return response;
     }, signal);

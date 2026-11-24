@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
+import { GitWorkbenchStore } from '$lib/git/workbench/git-workbench.svelte.js';
 import type { GitWorkbenchTarget } from '$lib/git/workbench/git-workbench-types.js';
 import { emptyGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 import GitWorkbenchTestHost from './GitWorkbenchTestHost.svelte';
@@ -287,5 +287,35 @@ describe('GitWorkbench', () => {
 		ResizeObserverHarness.emit(mobileWorkbench, 1_100);
 		await waitFor(() => expect(mobileWorkbench.dataset.gitLayout).toBe('narrow'));
 		expect(mobile.container.querySelector('[data-workspace-fullscreen-toggle]')).toBeNull();
+	});
+
+	it('resumes the mobile comment draft only on its active workbench and target', async () => {
+		const target = makeTarget();
+		const wb = new GitWorkbenchStore();
+		vi.spyOn(wb, 'refresh').mockResolvedValue();
+		await wb.setTarget(target);
+		wb.drafts.openCommentComposer('first.ts', 'after', 1);
+		const props = { target, presentation: 'mobile' as const, wb, diffFontSize: 12 };
+		const view = render(GitWorkbenchTestHost, { props });
+		const textarea = within(await screen.findByRole('dialog')).getByRole('textbox');
+		await fireEvent.input(textarea, { target: { value: 'Synthetic draft' } });
+		await view.rerender({ ...props, active: false });
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(wb.drafts.commentComposer.body).toBe('Synthetic draft');
+		await view.rerender({ ...props, active: true });
+		const restored = within(await screen.findByRole('dialog')).getByRole<HTMLTextAreaElement>(
+			'textbox',
+		);
+		expect(restored.value).toBe('Synthetic draft');
+		expect(document.activeElement).toBe(restored);
+		const replacement = {
+			...target,
+			projectPath: '/other',
+			repoRoot: '/other',
+			worktreePath: '/other',
+		};
+		await wb.setTarget(replacement);
+		await view.rerender({ ...props, target: replacement });
+		expect(screen.queryByRole('dialog')).toBeNull();
 	});
 });

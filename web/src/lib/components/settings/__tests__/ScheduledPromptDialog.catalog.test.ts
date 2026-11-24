@@ -11,6 +11,7 @@ import type { ChatListEntry } from '$shared/chat-list';
 import type { ScheduledPrompt } from '$shared/scheduled-prompts';
 import ScheduledPromptDialog from '../ScheduledPromptDialog.svelte';
 import { expandSnippet } from '$lib/api/snippets';
+import { ApiMutationOutcomeUnknownError } from '$lib/api/client';
 
 vi.mock('$lib/api/snippets', () => ({ expandSnippet: vi.fn() }));
 
@@ -50,7 +51,7 @@ function renderExistingSchedule() {
 		orderGroup: 'normal', tags: [], permissionMode: 'default', thinkingMode: 'none',
 		activity: { createdAt: null, lastActivityAt: null, lastReadAt: null }, preview: { lastMessage: '' },
 		isPinned: false, isArchived: false, isActive: false, isProcessing: false, processingPhase: null,
-		isUnread: false, canReloadFromNativeHistory: false, parentChat: null, agentOwnershipEpoch: 'epoch-1',
+		isUnread: false, activityStatus: null, canReloadFromNativeHistory: false, parentChatId: null, lineage: null, agentOwnershipEpoch: 'epoch-1',
 	} satisfies ChatListEntry;
 	sessions.upsertFromServer([chat]);
 	const prompt: ScheduledPrompt = {
@@ -105,4 +106,20 @@ it('cancels pending scheduled snippets when the same target changes execution po
 	const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Prompt' });
 	expect(input.value).toBe(prompt.prompt);
 	expect(input.readOnly).toBe(false);
+});
+
+it('retains fields but blocks click and keyboard retries after unknown creation', async () => {
+	const { prompt, onSave } = renderExistingSchedule();
+	onSave.mockRejectedValue(new ApiMutationOutcomeUnknownError('Check Scheduled prompts before creating another.'));
+	const save = await screen.findByRole<HTMLButtonElement>('button', { name: 'Save Prompt' });
+	await waitFor(() => expect(save.disabled).toBe(false));
+	await fireEvent.click(save);
+	await waitFor(() => expect(save.disabled).toBe(true));
+	const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Prompt' });
+	expect(input.value).toBe(prompt.prompt);
+	await fireEvent.click(save);
+	await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+	await fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+	expect(onSave).toHaveBeenCalledOnce();
+	expect(screen.getByText('Check Scheduled prompts before creating another.')).toBeTruthy();
 });

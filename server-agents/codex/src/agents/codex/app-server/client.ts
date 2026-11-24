@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexConfigObject } from '../runtime-types.js';
-import { resolveCodexCli, type ResolvedCodexCli } from './cli.js';
+import { assertCompatibleCodex, resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import { appendCodexConfigArgs } from './config-overrides.js';
 import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from './protocol.js';
 import type {
@@ -186,7 +187,7 @@ export class CodexAppServerClient extends EventEmitter {
     this.#resolveCli = options.resolveCli
       ?? (resolveCommand
         ? async () => ({ command: await resolveCommand(), source: 'path' })
-        : resolveCodexCli);
+        : async () => resolveCodexCli(this.#env));
     this.#env = mergedEnv(options.env);
     this.#config = options.config;
     this.#modelCatalogPath = options.modelCatalogPath;
@@ -206,9 +207,9 @@ export class CodexAppServerClient extends EventEmitter {
     return this.#ready;
   }
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     await this.connect();
-    return this.#withRequestMetric(method, () => this.#sendRequest<T>(method, params));
+    return this.#withRequestMetric(method, () => this.#sendRequest<T>(method, params, timeoutMs));
   }
 
   async #withRequestMetric<T>(method: string, operation: () => Promise<T>): Promise<T> {
@@ -328,8 +329,6 @@ export class CodexAppServerClient extends EventEmitter {
     const resolved = await this.#resolveCli();
     if (this.#shutdownRequested) throw new Error('Codex app-server client is shut down');
     const args = ['app-server', '--listen', 'stdio://'];
-    // Provider admission compares saved routes with launch configuration, not thread overrides.
-    // https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/app-server/src/config_manager.rs#L434-L452
     appendCodexConfigArgs(args, this.#config);
     // Keeps turn ownership in Garcon while enabling its synchronous question response UI.
     args.push(
@@ -357,6 +356,12 @@ export class CodexAppServerClient extends EventEmitter {
         requestAttestation: false,
       },
     });
+    try {
+      assertCompatibleCodex(initialized.userAgent);
+    } catch (error) {
+      await this.shutdown();
+      throw error;
+    }
     this.#emitMetric({
       name: 'codex.app_server.startup',
       durationMs: Math.round(performance.now() - startedAt),
@@ -370,16 +375,20 @@ export class CodexAppServerClient extends EventEmitter {
     this.emit('metric', metric);
   }
 
-  #sendRequest<T>(method: string, params?: unknown): Promise<T> {
+  #sendRequest<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     const id = this.#nextId++;
     const payload = params === undefined ? { id, method } : { id, method, params };
     const promise = new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      const timeout = timeoutMs === undefined ? undefined : setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new AgentIntegrationError('TIMEOUT', `Codex ${method} timed out`, true));
+      }, timeoutMs);
+      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeout });
     });
     try {
       this.#write(payload);
     } catch (error) {
-      this.#pending.delete(id);
+      this.#clearPendingRequest(id);
       throw error;
     }
     return promise;

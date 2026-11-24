@@ -1,6 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import NewBranchModalTestHost from './NewBranchModalTestHost.svelte';
+import { ApiError } from '$lib/api/client.js';
+import { generateGitName } from '$lib/api/git-name.js';
+
+vi.mock('$lib/api/git-name.js', () => ({ generateGitName: vi.fn() }));
 
 function renderModal(overrides: Record<string, unknown> = {}) {
 	return render(NewBranchModalTestHost, {
@@ -36,6 +40,35 @@ function renderModal(overrides: Record<string, unknown> = {}) {
 describe('NewBranchModal', () => {
 	afterEach(() => {
 		cleanup();
+		vi.clearAllMocks();
+	});
+
+	it('can suggest a branch name without creating a branch', async () => {
+		const onNameChange = vi.fn();
+		const onCreateBranch = vi.fn();
+		vi.mocked(generateGitName).mockResolvedValue({ name: 'release-tools' });
+		renderModal({ newBranchName: '', onNameChange, onCreateBranch });
+		expect(generateGitName).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Generate name' }));
+		expect(onNameChange).toHaveBeenCalledWith('release-tools');
+		expect(onCreateBranch).not.toHaveBeenCalled();
+	});
+
+	it('keeps keyboard focus and does not duplicate a pending name request', async () => {
+		const reply = Promise.withResolvers<{ name: string }>();
+		vi.mocked(generateGitName).mockReturnValueOnce(reply.promise);
+		renderModal();
+		const generate = screen.getByRole<HTMLButtonElement>('button', { name: 'Generate name' });
+		generate.focus();
+		await fireEvent.click(generate);
+		expect(generate.disabled).toBe(false);
+		expect(generate.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(generate);
+		expect(generateGitName).toHaveBeenCalledTimes(1);
+		reply.reject(new ApiError(422, 'Unsupported', 'UNSUPPORTED_AGENT'));
+		expect((await screen.findByRole('alert')).textContent).toContain('Choose a different agent');
+		expect(document.activeElement).toBe(generate);
+		expect(generate.getAttribute('aria-disabled')).toBe('false');
 	});
 
 	it('searches refs for the branch base selector and selects the full ref', async () => {

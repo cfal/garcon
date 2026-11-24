@@ -711,7 +711,7 @@
 						error: form.validationStatus === 'invalid' ? form.validationError : null,
 						worktree:
 							form.gitAvailable && form.gitRepoStatus === 'git'
-								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.openWorktreeModal() }
+								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.worktreePicker.open() }
 								: undefined,
 					}}
 				>
@@ -839,6 +839,7 @@
 						<AgentSettingsControls
 							descriptors={form.agentSettingDescriptors}
 							envelope={form.agentSettings}
+							defaults={modelCatalog.getDefaultAgentSettings(form.agentId)}
 							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}
@@ -952,21 +953,8 @@
 	</div>
 </div>
 
-{#if form.worktreeModalOpen}
-	<GitWorktreePickerModal
-		worktrees={form.worktreeItems}
-		isLoading={form.isLoadingWorktrees}
-		isCreating={form.isCreatingWorktree}
-		errorMessage={form.worktreeError}
-		onSelect={(path) => form.selectWorktree(path)}
-		onCreate={async (path, branch, baseRef) => {
-			await form.createWorktree(path, branch, baseRef);
-		}}
-		onRefresh={() => {
-			void form.loadWorktrees();
-		}}
-		onClose={() => form.closeWorktreeModal()}
-	/>
+{#if form.worktreePicker.isOpen}
+	<GitWorktreePickerModal session={form.worktreePicker} description={form.firstMessage} />
 {/if}
 
 {#if composerEditor.open}

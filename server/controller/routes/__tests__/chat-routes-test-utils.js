@@ -3,6 +3,7 @@ import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { createForkedChat } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
+import { controllerSafetyDependencies } from '../../__tests__/safety-dependencies.js';
 import { BashToolUseMessage, PermissionRequestMessage } from '../../../../common/chat-types.js';
 
 export function createRouteCommandLedger() {
@@ -21,8 +22,9 @@ export function createRouteChatListProjector({ registry, settings, metadata, age
   return new ChatListProjector({
     registry,
     settings,
-    metadata,
+    metadata: { getRunOutcome: () => null, ...metadata },
     processing,
+    transientFeeds: { hasPendingUserAction: () => false },
     canReloadFromNativeHistory: () => false,
   });
 }
@@ -62,6 +64,7 @@ export function createRouteCommandService({
     }),
   };
   return new ChatCommandService({
+    chatMutationLock: controllerSafetyDependencies().chatMutationLock,
     inspectProject: inspectProjectDirectory,
     chats: registry,
     queue,

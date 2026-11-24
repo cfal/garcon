@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./acp/*": "./src/acp/*.ts",
     "./shared/*": "./src/shared/*.ts",
     "./lib/*": "./src/lib/*.ts",
     "./chats/*": "./src/chats/*.ts",
@@ -13,6 +14,7 @@
     "./direct/*": "./src/direct/*.ts",
     "./search/*": "./src/search/*.ts",
     "./catalog/*": "./src/catalog/*.ts",
+    "./cli-update/*": "./src/cli-update/*.ts",
     "./environment/*": "./src/environment/*.ts",
     "./execution/*": "./src/execution/*.ts",
     "./forking/*": "./src/forking/*.ts",

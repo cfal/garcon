@@ -10,7 +10,8 @@ import type {
 	ChatActionDialogsState,
 	ChatProjectPathDialog,
 } from './chat-action-dialogs-state.svelte';
-import { getChatDetails, togglePinned, updateChatProjectPath } from '$lib/api/chats.js';
+import { getChatDetails, togglePinned, updateChatProjectPath, setChatParent } from '$lib/api/chats.js';
+import { ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { resolveProject } from '$lib/api/project-resolution.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -21,6 +22,7 @@ export interface ChatActionControllerDeps {
 	get displayedChatIds(): readonly string[];
 	get selectedChatId(): string | null;
 	projectPathRevision: (chatId: string) => number;
+	pendingSettings: (chatId: string) => Promise<boolean> | null;
 	onQuietRefresh: () => Promise<void> | void;
 	isArchiveMutationPending: (chatId: string) => boolean;
 	startArchivingChats: (chatIds: readonly string[]) => ChatArchiveMutation;
@@ -195,12 +197,32 @@ export class ChatActionController {
 		});
 	}
 
+	async setParent(chatId: string, parentChatId: string | null): Promise<void> {
+		try {
+			await setChatParent({ chatId, parentChatId });
+		} catch (error) {
+			if (error instanceof ApiMutationOutcomeUnknownError) await this.deps.onQuietRefresh();
+			throw error;
+		}
+		await this.deps.onQuietRefresh();
+	}
+
 	async forkChat(sourceChatId: string): Promise<void> {
 		// A long fork would otherwise look idle and invite a duplicate fork.
 		if (this.#pendingForks.has(sourceChatId)) return;
 		this.#pendingForks.add(sourceChatId);
 		const dismiss = this.deps.showProgress(`fork:${sourceChatId}`, m.chat_notice_forking_chat());
 		try {
+			const pending = this.deps.pendingSettings(sourceChatId);
+			if (pending) {
+				const source = this.deps.chats.find((chat) => chat.id === sourceChatId);
+				if (!source) return;
+				const { agentId, executorId, agentOwnershipEpoch } = source;
+				if (!(await pending)) return;
+				const current = this.deps.chats.find((chat) => chat.id === sourceChatId);
+				if (!current || current.agentId !== agentId || current.executorId !== executorId
+					|| current.agentOwnershipEpoch !== agentOwnershipEpoch) return;
+			}
 			const result = await requestChatFork(
 				{ sourceChatId, chatId: createClientChatId() },
 				() => this.handoffForkConfirmation.ask(),

@@ -53,6 +53,7 @@
 	import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 	import {
 		getChatSessions,
+		getSidebarOrder,
 		getLocalSettings,
 		getAppShell,
 		getWs,
@@ -194,6 +195,7 @@
 				lastOrdinal,
 			});
 			if (applied.status !== 'applied') return false;
+			conversationPanels.observeRecoveredMessages(chatId, messages);
 			applyChatMessageBatchActivity(
 				sessions,
 				chatId,
@@ -274,8 +276,10 @@
 		void currentPanel()?.scroll.scrollToLatestAndFill();
 	}
 
+	const sidebarOrder = getSidebarOrder();
 	const controller = new ConversationSessionController({
 		sessions,
+		moveChatToBoundary: (chatId, boundary) => sidebarOrder.moveChatToBoundary(chatId, boundary),
 		chatState,
 		composerState,
 		agentState,
@@ -656,7 +660,7 @@
 	): Promise<ChatReloadOutcome> {
 		const panel = panelForChat(chatId);
 		if (!panel) throw new Error(m.sidebar_chats_reload_requires_open_chat());
-		const outcome = await reloadChatFromNative(ws, panel.transcript, chatId, options);
+		const outcome = await reloadChatFromNative(ws, conversationPanels, chatId, options);
 		if (
 			outcome === 'reloaded' &&
 			chatId === sessions.selectedChatId &&

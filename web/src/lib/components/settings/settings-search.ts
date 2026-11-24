@@ -32,6 +32,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_ui_style(),
 			m.settings_typography(),
 			m.settings_highlight_active_window(),
+			m.settings_collapse_delegated_chats_by_default(),
 			m.settings_fullscreen_covers_sidebar(),
 			m.settings_workspace_titlebar_size(),
 			m.settings_chat_max_width(),
@@ -52,7 +53,6 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 		...[
 			m.settings_tab_behavior(),
 			m.settings_image_cache_size(),
-			m.settings_sidebar_inactivity_duration(),
 			m.settings_chat_auto_expand_tools(),
 			m.settings_chat_combine_tool_use_messages(),
 			m.settings_chat_always_expand_cli_messages(),
@@ -112,6 +112,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 			m.settings_tab_automation(),
 			m.settings_chat_generate_titles(),
 			m.settings_chat_title_model(),
+			m.settings_chat_title_model_hint(),
 			m.settings_agent_switch_compaction_enabled(),
 			m.settings_agent_switch_compaction_model(),
 			m.settings_commit_message_model(),

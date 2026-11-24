@@ -630,7 +630,7 @@ export class SessionCommands {
 
     const reservation = this.reserveProjectPathUpdate(input.chatId);
     try {
-      await this.assertChatIdleForProjectPathUpdate(chat);
+      await this.assertChatIdleForProjectPathUpdate(input.chatId, chat);
       await this.deps.agents.currentTranscriptViewId(input.chatId);
       const refreshedChat = this.deps.chats.getChat(input.chatId);
       if (!refreshedChat) {
@@ -699,16 +699,15 @@ export class SessionCommands {
     }
   }
 
-  private async assertChatIdleForProjectPathUpdate(chat: ChatRegistryEntry): Promise<void> {
+  private async assertChatIdleForProjectPathUpdate(chatId: string, chat: ChatRegistryEntry): Promise<void> {
     if (chat.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId, chat.executorId)) {
-      throw new CommandValidationError(
-        'CHAT_NOT_IDLE',
-        'Cannot update project path while a turn is running',
-        409,
-        true,
-      );
+      throw new CommandValidationError('CHAT_NOT_IDLE', 'Cannot update project path while a turn is running', 409, true);
     }
-
+    // Stop can retire the turn before an admitted steer's delivery settles.
+    const control = await this.deps.queue.readChatExecutionControl(chatId);
+    if (control.entries.some(entry => entry.status === 'steering')) {
+      throw new CommandValidationError('CHAT_NOT_IDLE', 'Cannot update project path while queued guidance is being delivered', 409, true);
+    }
   }
 
   private reserveProjectPathUpdate(chatId: string): TranscriptSnapshotReservation {
