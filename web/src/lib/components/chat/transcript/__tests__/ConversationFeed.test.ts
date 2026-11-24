@@ -14,6 +14,8 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import { AssistantMessage, BashToolUseMessage, ThinkingMessage } from '$shared/chat-types';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
 import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
@@ -310,25 +312,36 @@ describe('ConversationFeed', () => {
 		expect(screen.queryByRole('button', { name: 'Load earlier messages' })).toBeNull();
 	});
 
-	it('restores a collapsed summary but reveals exact durable members for row navigation', async () => {
+	it('restores the summary or the revealed member at its saved offset, according to the target kind', async () => {
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
-		const { container } = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
+		const ready = Promise.withResolvers<ConversationViewportPort>();
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'tool-run',
+			onViewportPortChange(port) { if (port) ready.resolve(port); },
+		});
+		const viewport = await ready.promise;
 		const group = await screen.findByRole('button', { name: 'Execute 3 commands' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Restore group summary' }));
-		await waitFor(() => expect(screen.getByTestId('tool-navigation-result').textContent).toBe('completed'));
+		const seek = vi.spyOn(VirtualListController.prototype, 'scrollToAnchor');
+		const id = 'generation-1:2';
+		const keyOf = (element: Element) =>
+			element.closest<HTMLElement>('[data-chat-virtual-item]')!.dataset.chatVirtualItem;
+		expect(await viewport.scrollToTarget(
+			{ kind: 'presentation-row', id }, { viewportOffset: -8.25 },
+		)).toBe('completed');
+		expect(seek).toHaveBeenCalledWith(keyOf(group), -8.25);
 		expect(group.getAttribute('aria-expanded')).toBe('false');
-		for (const [name, ordinal] of [
-			['Navigate first tool', 1],
-			['Navigate middle tool', 2],
-			['Navigate last tool', 3],
-		] as const) {
-			await fireEvent.click(screen.getByRole('button', { name }));
-			await waitFor(() => {
-				expect(screen.getByTestId('tool-navigation-result').textContent).toBe('completed');
-				expect(container.querySelector(`[data-chat-row-id="generation-1:${ordinal}"]`)).toBeTruthy();
-			});
-		}
+		expect(container.querySelector(`[data-chat-row-id="${id}"]`)).toBeNull();
+
+		expect(await viewport.scrollToTarget({ kind: 'row', id }, { viewportOffset: 6.5 })).toBe('completed');
+		const member = container.querySelector(`[data-chat-row-id="${id}"]`);
+		expect(member).not.toBeNull();
+		expect(seek).toHaveBeenCalledWith(keyOf(member!), 6.5);
 		expect(group.getAttribute('aria-expanded')).toBe('true');
+		for (const ordinal of [1, 3]) {
+			const memberId = `generation-1:${ordinal}`;
+			expect(await viewport.scrollToTarget({ kind: 'row', id: memberId })).toBe('completed');
+			expect(container.querySelector(`[data-chat-row-id="${memberId}"]`)).not.toBeNull();
+		}
 	});
 
 	it('keeps simultaneous message and permission file links bound to their panel executor', async () => {

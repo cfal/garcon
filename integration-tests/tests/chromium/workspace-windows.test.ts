@@ -93,6 +93,23 @@ async function createChat(fixture: ChromiumFixture, content: string): Promise<st
   return chatId;
 }
 
+function scrollableTurn(label: string, index: number): string {
+  return `${label}-turn-${index} ${Array.from(
+    { length: 60 }, (_, wordIndex) => `${label}-wrapping-word-${wordIndex + 1}`,
+  ).join(' ')}`;
+}
+
+async function createScrollableChat(fixture: ChromiumFixture, label: string): Promise<string> {
+  const chatId = await createChat(fixture, scrollableTurn(label, 0));
+  for (let index = 1; index < 8; index++) {
+    const turn = await fixture.integration.client.runDirectChat({
+      chatId, content: scrollableTurn(label, index), agent: fixture.integration.directAgents.openAi,
+    });
+    await fixture.integration.client.waitForTurnTerminal(chatId, turn.turnId);
+  }
+  return chatId;
+}
+
 async function openChat(fixture: ChromiumFixture, chatId: string): Promise<void> {
   const response = await fixture.page.goto(
     `${fixture.integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`,
@@ -1837,6 +1854,7 @@ describe('Chromium workspace windows', () => {
               offset: row.getBoundingClientRect().top - element.getBoundingClientRect().top,
             };
           });
+          expect(reading.offset).toBeLessThan(-3);
 
           if (hiddenSource) {
             await openWindowTab(page, source, 'Open Chat Map');
@@ -2840,31 +2858,71 @@ describe('Chromium workspace windows', () => {
     );
   });
 
+  test('restores a partially visible row without showing its start when moving Chat to a pane below', async () => {
+    await withChromiumFixture('workspace-reader-split', async (fixture, markPhase) => {
+      const { page } = fixture;
+      const chatId = await createScrollableChat(fixture, 'reader');
+      await openChat(fixture, chatId);
+      const source = await page.locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!source) throw new Error('Missing source Chat window');
+      // A second tab keeps the source pane open when its Chat moves below it.
+      await openWindowTab(page, source, 'Open Chat Map');
+      await page.locator(`[id="${source}-tab-chat-view:${source}"]`).click();
+      const sourceFeed = `[data-conversation-panel="chat-view:${source}"] [data-chat-scroll-viewport]`;
+      const feed = page.locator(sourceFeed);
+      await feed.getByText(`echo:${scrollableTurn('reader', 7)}`, { exact: true }).waitFor();
+
+      markPhase('detaching the reader on a clipped row');
+      await feed.evaluate(element => {
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
+      });
+      const clipped = await page.waitForFunction(selector => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (element?.dataset.chatPinnedToBottom !== 'false') return null;
+        const view = element.getBoundingClientRect();
+        const row = [...element.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(item => {
+          const rect = item.getBoundingClientRect();
+          return rect.top >= view.top && rect.top < view.bottom && rect.height > 8;
+        });
+        if (!row) return null;
+        element.scrollTop += row.getBoundingClientRect().top - view.top + 8;
+        return { rowId: row.dataset.chatRowId!, offset: row.getBoundingClientRect().top - view.top };
+      }, sourceFeed);
+      const reading = (await clipped.jsonValue())!;
+      expect(Math.abs(reading.offset + 8)).toBeLessThanOrEqual(1);
+      await waitForChatReadingPosition(page, source, reading);
+      await page.locator(`[data-workspace-window-menu-trigger="${source}"]`).click();
+
+      markPhase('checking the first readable position in the new pane');
+      const movedPanel = `[data-conversation-panel-chat-id="${chatId}"]:not([data-conversation-panel="chat-view:${source}"])`;
+      const [first] = await Promise.all([
+        // Polls for the row, not the correct offset: a later correction must not hide a bad frame.
+        page.waitForFunction(({ movedPanel, rowId }) => {
+          const feed = document.querySelector(`${movedPanel} [data-chat-scroll-viewport]`);
+          if (!feed) return null;
+          const view = feed.getBoundingClientRect();
+          const hit = document.elementFromPoint(view.left + view.width / 2, view.top + 1);
+          const row = hit?.closest<HTMLElement>('[data-chat-row-id]');
+          if (row?.dataset.chatRowId !== rowId || !feed.contains(row)) return null;
+          return { offset: row.getBoundingClientRect().top - view.top };
+        }, { movedPanel, rowId: reading.rowId }),
+        page.locator(`[data-workspace-window-menu="${source}"] [data-workspace-window-tab-action="move-new-bottom"]`)
+          .click(),
+      ]);
+      const { offset } = (await first.jsonValue())!;
+      expect(Math.abs(offset - reading.offset), `first: ${offset}px, saved: ${reading.offset}px`).toBeLessThanOrEqual(1);
+    });
+  });
+
   test('keeps two bottom-pinned Chats at the end while the composer changes windows', async () => {
     await withChromiumFixture(
       'workspace-window-two-chat-bottom-handoff',
       async (fixture, markPhase) => {
-        const turnContent = (chatLabel: string, index: number) =>
-          `${chatLabel}-turn-${index} ${Array.from(
-            { length: 60 },
-            (_, wordIndex) => `${chatLabel}-wrapping-word-${wordIndex + 1}`,
-          ).join(' ')}`;
-        const createScrollableChat = async (chatLabel: string): Promise<string> => {
-          const chatId = await createChat(fixture, turnContent(chatLabel, 0));
-          for (let index = 1; index < 8; index += 1) {
-            const accepted = await fixture.integration.client.runDirectChat({
-              chatId,
-              content: turnContent(chatLabel, index),
-              agent: fixture.integration.directAgents.openAi,
-            });
-            await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId);
-          }
-          return chatId;
-        };
-
         markPhase('creating two scrollable Chat panels');
-        const firstChatId = await createScrollableChat('first-window');
-        const secondChatId = await createScrollableChat('second-window');
+        const firstChatId = await createScrollableChat(fixture, 'first-window');
+        const secondChatId = await createScrollableChat(fixture, 'second-window');
         await openChat(fixture, firstChatId);
         await fixture.page
           .locator(`[data-sidebar-virtual-row="${secondChatId}"]`)
@@ -2882,7 +2940,7 @@ describe('Chromium workspace windows', () => {
           expectedLabel: 'Add as tab',
         });
         await conversationPanel(fixture.page, secondWindowId)
-          .getByText(`echo:${turnContent('second-window', 7)}`, { exact: true })
+          .getByText(`echo:${scrollableTurn('second-window', 7)}`, { exact: true })
           .waitFor();
 
         const surfaceIds = [`chat-view:${firstWindowId}`, `chat-view:${secondWindowId}`];

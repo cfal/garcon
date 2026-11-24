@@ -321,6 +321,32 @@ describe('ConversationFeedVirtualController', () => {
 		expect(writes).toEqual([]);
 	});
 
+	it('centers ordinary navigation but preserves an explicit zero reader offset', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, writes } = observeReadingTarget(exposure, 3);
+		const target = { kind: 'row', id: 'row-3' } as const;
+		expect(await exposure.controller.scrollToTarget(target)).toBe('completed');
+		const centered = node.getBoundingClientRect();
+		expect(centered.top + centered.height / 2).toBe(view.clientHeight / 2);
+		writes.length = 0;
+		expect(await exposure.controller.scrollToTarget(target, { viewportOffset: 0 })).toBe('completed');
+		expect(writes).toEqual([exposure.controller.snapshot.positions.itemAt(3)!.start]);
+	});
+
+	it('leaves the reader in control when they scroll after the first restore write', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, writes, firstWrite } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -8.25 });
+		await firstWrite;
+		expect(exposure.controller.cancelForUserIntent('later')).toBe('cancelled');
+		view.scrollTop = 200;
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('cancelled');
+		expect(writes).toEqual([start + 8.25, 200]);
+	});
+
 	it('restores summary focus after an intervening same-surface publication', async () => {
 		const { exposure } = await renderController({ groupFocusMode: true });
 		await exposure.setPinned(false);
