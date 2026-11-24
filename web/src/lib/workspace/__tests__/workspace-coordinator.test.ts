@@ -298,11 +298,16 @@ describe('tiling chats', () => {
 		expect(layout.revision).toBe(revision + 1);
 		expect(coordinator.focusedChatId).toBe('retained');
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
-		expect(collectWindowNodes(layout.snapshot.desktopRoot).map((w) => [w.id, layout.surface(w.tabs.activeId)])).toMatchObject([
+		const visible = collectWindowNodes(layout.snapshot.desktopRoot).map((window) => [
+			window.id, layout.surface(window.tabs.activeId),
+		]);
+		expect(visible).toMatchObject([
 			['window-files', { type: 'chat', chatId: 'retained' }],
 			['window-main', { type: 'chat', chatId: 'new' }],
 		]);
-		expect(windowTabs(layout.snapshot, 'window-files').order).toEqual(expect.arrayContaining([CANONICAL_FILES_SURFACE_ID, fileSurfaceId('edited')]));
+		expect(windowTabs(layout.snapshot, 'window-files').order).toEqual(
+			expect.arrayContaining([CANONICAL_FILES_SURFACE_ID, fileSurfaceId('edited')]),
+		);
 		expect(files.destroy).not.toHaveBeenCalled();
 	});
 

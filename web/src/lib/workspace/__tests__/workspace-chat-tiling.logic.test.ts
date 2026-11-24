@@ -8,17 +8,21 @@ import { computeWindowRects } from '../window-tree';
 const chats = Array.from({ length: 30 }, (_, i) => `chat-${i}`);
 
 it('prioritizes chats waiting for input while respecting processing authority and roster order', () => {
-	expect(workingChatIdsForTiling([
-		{ id: 'one', isProcessing: true, activityStatus: 'working' },
-		{ id: 'stale', isProcessing: false, activityStatus: 'pending-user-action' },
-		{ id: 'two', isProcessing: true, activityStatus: null },
-		{ id: 'waiting', isProcessing: true, activityStatus: 'pending-user-action' },
-	])).toEqual(['waiting', 'one', 'two']);
+	expect(
+		workingChatIdsForTiling([
+			{ id: 'one', isProcessing: true, activityStatus: 'working' },
+			{ id: 'stale', isProcessing: false, activityStatus: 'pending-user-action' },
+			{ id: 'two', isProcessing: true, activityStatus: null },
+			{ id: 'waiting', isProcessing: true, activityStatus: 'pending-user-action' },
+		]),
+	).toEqual(['waiting', 'one', 'two']);
 });
 
 describe('chat tile geometry', () => {
 	it.each([
 		{ width: 1080, height: 480, count: 6, rowLengths: [3, 3] },
+		{ width: 1080, height: 720, count: 6, rowLengths: [3, 3] },
+		{ width: 1080, height: 960, count: 6, rowLengths: [2, 2, 2] },
 		{ width: 1080, height: 480, count: 5, rowLengths: [3, 2] },
 		{ width: 360, height: 720, count: 4, rowLengths: [1, 1, 1] },
 		{ width: 1500, height: 240, count: 5, rowLengths: [4] },
@@ -28,7 +32,8 @@ describe('chat tile geometry', () => {
 		const snapshot = canonicalWorkspaceSnapshot();
 		const rows = planChatTiles(snapshot, chats.slice(0, count), { width, height });
 		expect(rows.map((row) => row.length)).toEqual(rowLengths);
-		expect(rows.flat().map((tile) => tile.chatId)).toEqual(chats.slice(0, rows.flat().length));
+		const tiledChatIds = rows.flat().map((tile) => tile.chatId);
+		expect(tiledChatIds).toEqual(chats.slice(0, tiledChatIds.length));
 		const { desktopRoot } = reduceWorkspaceLayout(snapshot, [{ type: 'tile-chats', rows }]);
 		const rects = computeWindowRects(desktopRoot).windows;
 		for (const [y, row] of rows.entries()) {

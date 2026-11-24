@@ -118,28 +118,25 @@ export class WorkspaceChatPlacementService {
 		await this.#commitPlacement((latest) => {
 			if (this.deps.isMobile()) {
 				tiled = 1;
-				return (
-					this.#existingPlacementPlan(latest, chatIds[0]) ??
-					this.#setWindowChatPlan(
-						this.deps.resolveWindowId(latest, this.deps.lastFocusedWindowId()),
-						chatIds[0],
-					)
-				);
+				const firstChatId = chatIds[0];
+				const existing = this.#existingPlacementPlan(latest, firstChatId);
+				if (existing) return existing;
+				const windowId = this.deps.resolveWindowId(latest, this.deps.lastFocusedWindowId());
+				return this.#setWindowChatPlan(windowId, firstChatId);
 			}
-			if (
-				collectWindowNodes(latest.desktopRoot).some(
-					(window) =>
-						this.deps.windowReservations.has(window.id) ||
-						window.tabs.order.some((id) => this.deps.surfaceReservations.has(id)),
-				)
-			) {
-				throw new Error(m.workspace_tile_busy());
+			for (const window of collectWindowNodes(latest.desktopRoot)) {
+				if (
+					this.deps.windowReservations.has(window.id) ||
+					window.tabs.order.some((id) => this.deps.surfaceReservations.has(id))
+				) {
+					throw new Error(m.workspace_tile_busy());
+				}
 			}
 			const rows = planChatTiles(latest, chatIds, getHostSize());
 			const tiles = rows.flat();
 			tiled = tiles.length;
-			const { windowId } =
-				tiles.find((tile) => tile.windowId === this.deps.lastFocusedWindowId()) ?? tiles[0];
+			const focused = this.deps.lastFocusedWindowId();
+			const { windowId } = tiles.find((tile) => tile.windowId === focused) ?? tiles[0];
 			return {
 				destination: { windowId, surfaceId: chatViewSurfaceId(windowId) },
 				mutations: [{ type: 'tile-chats', rows }],

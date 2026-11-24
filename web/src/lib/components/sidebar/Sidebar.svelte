@@ -152,8 +152,9 @@
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id),
 	);
-	let actionableChatIds = $derived(projection.rowModel.actionableChatIds);
 	const workingChatIds = $derived(workingChatIdsForTiling(chats));
+	const canTileWorkingChats = $derived(rosterReady && !isLoading && workingChatIds.length > 0);
+	let actionableChatIds = $derived(projection.rowModel.actionableChatIds);
 	let actionableChatIdSet = $derived(new Set(actionableChatIds));
 
 	function handleChatClick(chatId: string) {
@@ -309,8 +310,8 @@
 	}
 
 	async function handleTileWorkingChats(): Promise<void> {
+		if (!canTileWorkingChats || !onTileWorkingChats) return;
 		const chatIds = workingChatIds;
-		if (!chatIds.length || !onTileWorkingChats || isLoading || !rosterReady) return;
 		if (isMobile) appShell.setSidebarOpen(false);
 		await tick();
 		try {
@@ -395,9 +396,7 @@
 			activeQuery={sidebarSearch.activeQuery}
 			onOpenSearchDialog={() => sidebarSearch.openSearchDialog()}
 			onCreateChat={handlePrimaryAction}
-			onTileWorkingChats={onTileWorkingChats && rosterReady && workingChatIds.length > 0
-				? handleTileWorkingChats
-				: undefined}
+			onTileWorkingChats={canTileWorkingChats && onTileWorkingChats ? handleTileWorkingChats : undefined}
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}

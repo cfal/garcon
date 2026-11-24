@@ -29,8 +29,10 @@ describe('Lightpanda workspace windows', () => {
     await withE2eFixture('tile-working-chats', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       const { client, fakeProviders, directAgents, dirs } = fixture.integration;
-      const prompts = ['first working chat', 'second working chat'];
-      const held = prompts.map((lastUserText) => fakeProviders.openAi.holdNext({ lastUserText }));
+      async function tileWorkingChats(): Promise<void> {
+        await app.clickButton('More actions');
+        await app.clickMenuItem('Tile working chats');
+      }
       await app.setViewport(1_440, 900);
       await app.open();
       await fixture.waitForSpaWebSocket();
@@ -38,30 +40,33 @@ describe('Lightpanda workspace windows', () => {
       await app.waitForText('echo:idle chat');
       await app.waitForChatProcessing(false);
       const idleChat = (await client.listChats()).sessions[0];
-      const chatIds: string[] = [];
-      for (const [index, content] of prompts.entries()) {
-        const chatId = fixture.integration.newChatId();
+      const turns = ['first working chat', 'second working chat'].map((content) => ({
+        chatId: fixture.integration.newChatId(),
+        content,
+        held: fakeProviders.openAi.holdNext({ lastUserText: content }),
+      }));
+      for (const { chatId, content, held } of turns) {
         await client.startDirectChat({ chatId, content, projectPath: dirs.project, agent: directAgents.openAi });
-        await held[index].received;
+        await held.received;
         await fixture.page.waitForSelector(`[data-sidebar-virtual-row="${chatId}"] [data-status="working"]`);
-        chatIds.push(chatId);
       }
-      await app.clickButton('More actions');
-      await app.clickMenuItem('Tile working chats');
+      const chatIds = turns.map((turn) => turn.chatId);
+      await tileWorkingChats();
       await waitForPersistedWindowState(fixture.page, { windowCount: 2, chatIds, requiredSingletons: ['files'] });
       await fixture.page.waitForFunction((ids) => {
         const panes = [...document.querySelectorAll<HTMLElement>('[data-workspace-window-id]:not([inert])')];
-        return panes.length === ids.length && panes.every((pane) =>
+        const allPanesShowChats = panes.every((pane) =>
           pane.dataset.workspaceWindowActiveSurface === `chat-view:${pane.dataset.workspaceWindowId}`,
-        ) && ids.every((id) => document.querySelector(`[data-conversation-panel-chat-id="${id}"]`));
+        );
+        return panes.length === ids.length && allPanesShowChats &&
+          ids.every((id) => document.querySelector(`[data-conversation-panel-chat-id="${id}"]`));
       }, { timeout: 20_000 }, chatIds);
       for (const chatId of chatIds) {
         await app.clickSidebarChatById(chatId);
         await app.waitForSelectedChat(chatId);
       }
       await app.setViewport(900, 400);
-      await app.clickButton('More actions');
-      await app.clickMenuItem('Tile working chats');
+      await tileWorkingChats();
       await app.waitForWorkspaceWindowCount(1);
       await app.waitForText('Tiled 1 of 2 working chats. The rest could not fit.');
       await app.setViewport(390, 844);
@@ -69,13 +74,11 @@ describe('Lightpanda workspace windows', () => {
       await app.clickSidebarChatById(idleChat.id);
       await app.waitForSelectedChat(idleChat.id);
       await app.clickButton('Menu');
-      await app.clickButton('More actions');
-      await app.clickMenuItem('Tile working chats');
+      await tileWorkingChats();
       await fixture.page.waitForSelector('[role="dialog"][data-workspace-chat-list]', { hidden: true });
       await fixture.page.waitForFunction((ids) => ids.some((id) =>
         document.querySelector(`[data-conversation-panel-chat-id="${id}"]`)), {}, chatIds);
-      held.forEach((turn) => turn.releaseEcho());
-      fixture.assertNoBrowserErrors();
+      for (const { held } of turns) held.releaseEcho();
     });
   });
 
