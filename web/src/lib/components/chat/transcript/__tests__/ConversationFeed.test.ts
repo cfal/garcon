@@ -94,6 +94,7 @@ describe('ConversationFeed', () => {
 	afterAll(() => restoreResizeObserver());
 
 	beforeEach(() => {
+		localStorage.clear();
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: false }));
 		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
 			this: HTMLElement,
@@ -395,7 +396,7 @@ describe('ConversationFeed', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
-		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
+		localStorage.clear();
 		if (originalOffsetHeight) {
 			Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
 		}
