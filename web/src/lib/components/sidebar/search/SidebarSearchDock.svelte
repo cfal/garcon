@@ -1,98 +1,38 @@
 <script lang="ts">
 	import SidebarControlsRow from '../SidebarControlsRow.svelte';
-	import type { SidebarSortMode } from '$lib/stores/local-settings.svelte';
+	import type { ComponentProps } from 'svelte';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
-	interface SidebarSearchDockProps {
-		isLoading: boolean;
+	interface SidebarSearchDockProps extends Omit<
+		ComponentProps<typeof SidebarControlsRow>,
+		'hasAdjacentSearchContext'
+	> {
 		visibleUnreadCount: number;
-		onShowDisplay?: (returnFocus: () => void) => void;
-		sortMode?: SidebarSortMode;
-		chatListAutohide?: boolean;
-		chatListAutohideAvailable?: boolean;
-		dockOnRight?: boolean;
-		sidebarMenuSearches?: SavedChatSearch[];
 		sidebarPillSearches: SavedChatSearch[];
 		activeQuery: string;
-		onOpenSearchDialog: () => void;
-		onCreateChat: () => void;
-		onMarkAllRead?: () => void;
-		onSetSortMode?: (mode: SidebarSortMode) => void;
-		onToggleChatListAutohide?: () => void;
-		onSetDockOnRight?: (enabled: boolean) => void;
-		onApplySidebarMenuSearch?: (query: string) => void;
 		onApplyPillSearch: (search: SavedChatSearch) => void;
 		onClearActiveQuery: () => void;
-		onShowScheduledPrompts: () => void;
-		onShowPreambles: () => void;
-		onShowSnippets: () => void;
-		onShowUsage: () => void;
-		onShowSettings: () => void;
 	}
 
 	let {
-		isLoading,
-		visibleUnreadCount,
-		onShowDisplay,
-		sortMode = 'recent',
-		chatListAutohide = false,
-		chatListAutohideAvailable = false,
-		dockOnRight = false,
-		sidebarMenuSearches = [],
 		sidebarPillSearches,
 		activeQuery,
-		onOpenSearchDialog,
-		onCreateChat,
-		onMarkAllRead,
-		onSetSortMode,
-		onToggleChatListAutohide,
-		onSetDockOnRight,
-		onApplySidebarMenuSearch,
 		onApplyPillSearch,
 		onClearActiveQuery,
-		onShowScheduledPrompts,
-		onShowPreambles,
-		onShowSnippets,
-		onShowUsage,
-		onShowSettings,
+		...controls
 	}: SidebarSearchDockProps = $props();
 
 	let hasSearchContext = $derived(sidebarPillSearches.length > 0 || activeQuery.trim().length > 0);
-	// The controls row drops its own bottom border whenever the search context
-	// renders directly beneath it.
-	let hasContentBelowControls = $derived(hasSearchContext);
 </script>
 
 <div data-slot="sidebar-search-dock">
-	<SidebarControlsRow
-		{isLoading}
-		{visibleUnreadCount}
-		{onShowDisplay}
-		{sortMode}
-		{chatListAutohide}
-		{chatListAutohideAvailable}
-		{dockOnRight}
-		{sidebarMenuSearches}
-		hasAdjacentSearchContext={hasContentBelowControls}
-		{onOpenSearchDialog}
-		{onCreateChat}
-		{onMarkAllRead}
-		{onSetSortMode}
-		{onToggleChatListAutohide}
-		{onSetDockOnRight}
-		{onApplySidebarMenuSearch}
-		{onShowScheduledPrompts}
-		{onShowPreambles}
-		{onShowSnippets}
-		{onShowUsage}
-		{onShowSettings}
-	/>
+	<SidebarControlsRow {...controls} hasAdjacentSearchContext={hasSearchContext} />
 	<SidebarSearchContext
 		hasAdjacentControlsRow={true}
 		{sidebarPillSearches}
 		{activeQuery}
-		{onOpenSearchDialog}
+		onOpenSearchDialog={controls.onOpenSearchDialog}
 		{onApplyPillSearch}
 		{onClearActiveQuery}
 	/>

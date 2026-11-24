@@ -484,6 +484,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		surfaceFrames,
 		resolveSplitAdmission,
 		windowsFitHost,
+		getHostSize: () => hostGeometry.measureHostSize(),
 		resolvePartitionRatioBounds,
 		onLayoutChanged: (snapshot) => {
 			hostGeometry.layoutPublished();

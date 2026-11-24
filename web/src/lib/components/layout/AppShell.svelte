@@ -180,6 +180,7 @@
 			return chatListAutohideActive;
 		},
 	});
+	const desktopChatListHidden = $derived(hideChatList || chatListAutohide.collapsed);
 	let desktopChatListPanelElement = $state<HTMLElement | null>(null);
 	let chatListRevealTrigger = $state<HTMLButtonElement | null>(null);
 	const mobileActiveDescriptor = $derived(
@@ -238,9 +239,7 @@
 		navigateToBareRoute: () => goto(resolve('/')),
 		requestComposerFocus: (selection) => appShell.requestComposerFocus(selection),
 		requestSidebarRecenter: () => appShell.requestSidebarRecenterToSelected(),
-		reportOpenError: (error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		},
+		reportOpenError: reportWorkspaceOpenError,
 		reportDeleteError: (error) => {
 			notifications.error(
 				error instanceof Error ? error.message : m.notifications_delete_chat_failed(),
@@ -418,18 +417,18 @@
 		await port.open(selection);
 	}
 
+	function reportWorkspaceOpenError(error: unknown): void {
+		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+	}
+
 	function handleOpenChatInNewWindow(chatId: string, edge?: WorkspaceWindowEdge): void {
-		void workspace.openChatInNewWindow(chatId, undefined, edge).catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-		});
+		void workspace.openChatInNewWindow(chatId, undefined, edge).catch(reportWorkspaceOpenError);
 	}
 
 	function handleOpenForkedChat(chatId: string, sourceChatId: string): void {
 		void workspace
 			.openForkedChat(chatId, sourceChatId, localSettings.forkOpenPlacement)
-			.catch((error) => {
-				notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
-			});
+			.catch(reportWorkspaceOpenError);
 	}
 
 	function handleNewChat() {
@@ -661,6 +660,7 @@
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
 	<Sidebar
+		actionsHidden={!isMobile && desktopChatListHidden}
 		projection={sidebarOrder.projection}
 		reorder={sidebarOrder}
 		onShowDisplay={(returnFocus) => {
@@ -689,6 +689,7 @@
 		onShareChat={requestShareChat}
 		onManageTags={requestTagsChat}
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
+		onTileWorkingChats={(chatIds) => workspace.tileChats(chatIds)}
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
@@ -708,7 +709,6 @@
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}
-	{@const panelHidden = hideChatList || chatListAutohide.collapsed}
 	<div
 		data-workspace-chat-list
 		onfocusin={handleDesktopChatListFocus}
@@ -761,8 +761,8 @@
 			class:border-e={dividerEdge === 'end' && !hideChatList}
 			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
 			tabindex="-1"
-			aria-hidden={panelHidden}
-			inert={panelHidden}
+			aria-hidden={desktopChatListHidden}
+			inert={desktopChatListHidden}
 		>
 			{@render sidebarContent(false, handleChatSelect)}
 			{#if !hideChatList}

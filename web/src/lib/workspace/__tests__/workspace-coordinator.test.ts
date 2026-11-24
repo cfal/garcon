@@ -110,6 +110,7 @@ function createHarness(
 		includePortableTabs?: boolean;
 		resolveSplitAdmission?: WorkspaceSplitAdmissionResolver;
 		windowsFitHost?: WorkspaceWindowsFitResolver;
+		hostSize?: WorkspaceHostSize;
 		resolvePartitionRatioBounds?: WorkspacePartitionRatioBoundsResolver;
 		currentProjectTarget?: ProjectTarget | null;
 		projectResolution?: ProjectResolver;
@@ -265,6 +266,7 @@ function createHarness(
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
 		windowsFitHost: options.windowsFitHost ?? (() => true),
+		getHostSize: () => options.hostSize ?? null,
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
@@ -282,6 +284,93 @@ function createHarness(
 		transientLayers,
 	};
 }
+
+describe('tiling chats', () => {
+	it('replaces the visible grid in one publication without losing chat bindings or other tabs', async () => {
+		const { coordinator, layout, files } = createHarness({ hostSize: { width: 720, height: 240 } });
+		await coordinator.showChatInWindow('retained', 'window-files');
+		await coordinator.placeFileSession('open', { type: 'window', windowId: 'window-files' });
+		await coordinator.openChatInNewWindow('idle', 'window-main');
+		const extra = coordinator.currentWindowId;
+		await coordinator.placeFileSession('edited', { type: 'window', windowId: extra });
+		await coordinator.enterWindowFullscreen(extra);
+		const revision = layout.revision;
+		expect(await coordinator.tileChats(['retained', 'new', 'omitted'])).toBe(2);
+		expect(layout.revision).toBe(revision + 1);
+		expect(coordinator.focusedChatId).toBe('retained');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		const visible = collectWindowNodes(layout.snapshot.desktopRoot).map((window) => [
+			window.id, layout.surface(window.tabs.activeId),
+		]);
+		expect(visible).toMatchObject([
+			['window-main', { type: 'chat', chatId: 'new' }],
+			['window-files', { type: 'chat', chatId: 'retained' }],
+		]);
+		const retainedChat = chatViewSurfaceId('window-files');
+		const openFile = fileSurfaceId('open');
+		const movedFile = fileSurfaceId('edited');
+		expect(windowTabs(layout.snapshot, 'window-files')).toEqual({
+			activeId: retainedChat,
+			order: [retainedChat, CANONICAL_FILES_SURFACE_ID, openFile],
+			mru: [retainedChat, openFile, CANONICAL_FILES_SURFACE_ID],
+		});
+		expect(windowTabs(layout.snapshot, 'window-main').order.at(-1)).toBe(movedFile);
+		expect(files.destroy).not.toHaveBeenCalled();
+	});
+
+	it('leaves all panes alone while a file is being closed', async () => {
+		const guard = deferred<boolean>();
+		const { coordinator, layout } = createHarness({ confirmDestructive: () => guard.promise });
+		await coordinator.placeFileSession('edited', { type: 'window', windowId: 'window-files' });
+		const closing = coordinator.closeSurface(fileSurfaceId('edited'));
+		const revision = layout.revision;
+		await expect(coordinator.tileChats(['working'])).rejects.toThrow('Try tiling again');
+		expect(layout.revision).toBe(revision);
+		guard.resolve(false);
+		expect(await closing).toBe(false);
+	});
+
+	it('fits the current host at publication time and keeps focus on a surviving pane', async () => {
+		const options = { hostSize: { width: 360, height: 240 } };
+		const { coordinator } = createHarness(options);
+		await coordinator.showChatInWindow('focused', 'window-files');
+		const tiling = coordinator.tileChats(['one', 'focused', 'three', 'four']);
+		options.hostSize = { width: 1440, height: 240 };
+		expect(await tiling).toBe(4);
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(coordinator.focusedChatId).toBe('focused');
+	});
+
+	it('focuses the priority chat when the previously focused pane gets a different chat', async () => {
+		const { coordinator } = createHarness({ hostSize: { width: 720, height: 240 } });
+		await coordinator.showChatInWindow('waiting', 'window-main');
+		await coordinator.showChatInWindow('previous', 'window-files');
+		expect(await coordinator.tileChats(['waiting', 'running', 'previous'])).toBe(2);
+		expect(coordinator.focusedChatId).toBe('waiting');
+		expect(coordinator.currentWindowId).toBe('window-main');
+	});
+
+	it('does nothing for an empty list and presents only the first chat on mobile', async () => {
+		const { coordinator, layout } = createHarness();
+		const revision = layout.revision;
+		expect(await coordinator.tileChats([])).toBe(0);
+		expect(layout.revision).toBe(revision);
+		await coordinator.enterMobilePresentation();
+		expect(await coordinator.tileChats(['first', 'second'])).toBe(1);
+		expect(coordinator.focusedChatId).toBe('first');
+		expect(coordinator.windowCount).toBe(2);
+	});
+
+	it('presents an already placed chat on mobile without replacing the focused chat', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInWindow('working', 'window-files');
+		await coordinator.showChatInWindow('focused', 'window-main');
+		await coordinator.enterMobilePresentation();
+		expect(await coordinator.tileChats(['working', 'other'])).toBe(1);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(chatViewSurfaceId('window-files'));
+		expect(layout.surface(CANONICAL_CHAT_SURFACE_ID)).toMatchObject({ chatId: 'focused' });
+	});
+});
 
 async function populateWindowLimitFixture(coordinator: WorkspaceCoordinator): Promise<void> {
 	await coordinator.openSingletonInNewWindow('git-history');

@@ -22,6 +22,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import SquareCheck from '@lucide/svelte/icons/square-check';
+	import PanelsTopLeft from '@lucide/svelte/icons/panels-top-left';
 	import PanelLeftClose from '@lucide/svelte/icons/panel-left-close';
 	import PanelRight from '@lucide/svelte/icons/panel-right';
 	import type { SidebarSortMode } from '$lib/stores/local-settings.svelte';
@@ -30,6 +31,7 @@
 	import NativeTitlebarItem from './NativeTitlebarItem.svelte';
 
 	interface SidebarControlsRowProps {
+		actionsHidden?: boolean;
 		isLoading: boolean;
 		visibleUnreadCount?: number;
 		onShowDisplay?: (returnFocus: () => void) => void;
@@ -42,6 +44,7 @@
 		onOpenSearchDialog: () => void;
 		onCreateChat: () => void;
 		onMarkAllRead?: () => void;
+		onTileWorkingChats?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -54,6 +57,7 @@
 	}
 
 	let {
+		actionsHidden = false,
 		isLoading,
 		visibleUnreadCount = 0,
 		onShowDisplay,
@@ -66,6 +70,7 @@
 		onOpenSearchDialog,
 		onCreateChat,
 		onMarkAllRead,
+		onTileWorkingChats,
 		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
@@ -83,6 +88,19 @@
 	let showDockDivider = $derived(!hasAdjacentSearchContext);
 	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
 	let menuTrigger = $state<HTMLButtonElement | null>(null);
+	let menuOpen = $state(false);
+	let selectedTileAction = false;
+	function handleMenuCloseFocus(event: Event): void {
+		const focused = document.activeElement;
+		if (selectedTileAction && focused && focused !== document.body && !focused.closest('[role="menu"]')) {
+			event.preventDefault();
+		}
+		selectedTileAction = false;
+	}
+	$effect(() => {
+		// The portaled menu otherwise remains interactive outside the inert sidebar.
+		if (actionsHidden) menuOpen = false;
+	});
 	function showDisplay(): void {
 		const target = menuTrigger;
 		onShowDisplay?.(() => {
@@ -138,7 +156,7 @@
 			<Search class="h-4 w-4" />
 		</Button>
 
-		<DropdownMenu>
+		<DropdownMenu bind:open={menuOpen}>
 			<DropdownMenuTrigger
 				bind:ref={menuTrigger}
 				class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-muted/50 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
@@ -147,7 +165,7 @@
 			>
 				<EllipsisVertical class="h-3.5 w-3.5" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end">
+			<DropdownMenuContent align="end" inert={actionsHidden} onCloseAutoFocus={handleMenuCloseFocus}>
 				{#if sidebarMenuSearches.length > 0}
 					{#each sidebarMenuSearches as search (search.id)}
 						<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.(search.query)}>
@@ -158,6 +176,16 @@
 				{#if showQuickSearchSeparator}
 					<DropdownMenuSeparator />
 				{/if}
+				<DropdownMenuItem
+					onclick={() => {
+						selectedTileAction = true;
+						onTileWorkingChats?.();
+					}}
+					disabled={!onTileWorkingChats || isLoading}
+				>
+					<PanelsTopLeft class="h-3.5 w-3.5" />
+					{m.sidebar_chats_tile_working()}
+				</DropdownMenuItem>
 				<DropdownMenuItem onclick={onMarkAllRead} disabled={!showMarkAllRead || isLoading}>
 					<SquareCheck class="h-3.5 w-3.5" />
 					{m.sidebar_chats_mark_all_read()}
