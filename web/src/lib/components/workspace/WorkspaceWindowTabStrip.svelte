@@ -84,6 +84,8 @@
 	let singleTabMenuShouldRestoreTabFocus = true;
 	let singleTabMenuTarget: TabMenuTarget | null = null;
 	let tabMenuTarget = $state.raw<TabMenuTarget | null>(null);
+	// Keeps unrelated roster updates from reattaching the tab width observer.
+	const measurementTabKey = $derived(JSON.stringify(tabs.order.map((id) => [id, labelFor(id)])));
 	const displayedSurfaceIds = $derived(tabPresentation?.visibleIds ?? tabs.order);
 	const labelMode = $derived(tabPresentation?.labelMode ?? 'full');
 	const singleTabMenuSurfaceId = $derived.by(() => {
@@ -103,7 +105,7 @@
 	});
 
 	$effect(() => {
-		tabs.order.map((surfaceId) => `${surfaceId}:${labelFor(surfaceId)}`).join('|');
+		void measurementTabKey;
 		void titlebarMetrics.controlSizePx;
 		const viewport = tabViewport;
 		const rail = measurementRail;
