@@ -70,7 +70,7 @@ Two independent costs grow with history or catalog size. On a [visible append](q
 
 For a different typing delay, [the long-draft comparison](qa/webkit-spa-responsiveness/composer-labels.md) isolates repeated Markdown label searches. On a 24,000-character paragraph with many unfinished labels, the paired production builds took 85.5 versus 49 ms to the second callback. The same run did not improve ordinary prose.
 
-[Google's Modern Web Guidance applied to these measurements](qa/webkit-spa-responsiveness/google-modern-web-guidance.md) identifies two follow-ups: separate visible recipient rendering from socket delivery in the same desktop layout, and compare native `scrollend` with Garcon's touch-settlement timer on a physical iPhone. Neither requires changing how the product handles input or scrolling to take the measurement.
+[Google's Modern Web Guidance applied to these measurements](qa/webkit-spa-responsiveness/google-modern-web-guidance.md) suggested separating receiving-pane rendering from socket delivery. In the [four-tile scheduling experiment](qa/webkit-spa-responsiveness/receiver-study.md), moving one assistant row to the next task let the foreground reach its first animation callback earlier but delayed the recipient's DOM update. The product keeps immediate publication. Comparing native `scrollend` with Garcon's touch-settlement timer still needs a physical iPhone.
 
 ## Alternatives not shipped
 
