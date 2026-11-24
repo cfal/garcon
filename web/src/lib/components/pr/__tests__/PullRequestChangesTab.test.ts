@@ -7,6 +7,7 @@ import { createGitPatchIndex, getGitSplitPatchIndex } from '$lib/git/review/git-
 import { gitReviewWorker } from '$lib/git/review/git-review-worker-client.js';
 import { installGitVirtualDiffTestLayout } from '$lib/components/git/__tests__/git-virtual-diff-test-layout.js';
 import PullRequestChangesTab from '../PullRequestChangesTab.svelte';
+import { PullRequestFileProgress } from '$lib/git/pull-requests/pull-request-file-progress.svelte';
 
 vi.mock('$lib/context', () => ({ getLocalSettings: vi.fn() }));
 
@@ -90,7 +91,7 @@ describe('PR refresh identity', () => {
 			original.fileBodies = Object.fromEntries([
 				[path, { ...original.fileBodies['synthetic.ts'], path }],
 			]);
-			const rendered = render(PullRequestChangesTab, { detail: original });
+			const rendered = render(PullRequestChangesTab, { detail: original, progress: new PullRequestFileProgress() });
 			await waitFor(() =>
 				expect(rendered.container.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
 			);
@@ -104,15 +105,17 @@ describe('PR refresh identity', () => {
 		'preserves progress across metadata refresh but resets for %s',
 		async (reviewId) => {
 			const original = detail();
-			const rendered = render(PullRequestChangesTab, { detail: original });
+			const progress = new PullRequestFileProgress();
+			const initial = render(PullRequestChangesTab, { detail: original, progress });
 			await fireEvent.click(await screen.findByRole('button', { name: 'Viewed' }));
+			await initial.unmount();
 			const refreshed = {
 				...original,
 				documentId: 'revision:2',
 				updatedAt: '2026-01-02',
 				title: 'Updated title',
 			};
-			await rendered.rerender({ detail: refreshed });
+			const rendered = render(PullRequestChangesTab, { detail: refreshed, progress });
 			expect(screen.getByRole('button', { name: 'Viewed' }).getAttribute('aria-pressed')).toBe(
 				'true',
 			);
@@ -133,7 +136,7 @@ describe('PR refresh identity', () => {
 
 	it('keeps deep rows mounted without reindexing an unchanged refresh', async () => {
 		const original = detail(3000);
-		const rendered = render(PullRequestChangesTab, { detail: original });
+		const rendered = render(PullRequestChangesTab, { detail: original, progress: new PullRequestFileProgress() });
 		await waitFor(() =>
 			expect(rendered.container.querySelector('[data-git-diff-review-row]')).not.toBeNull(),
 		);

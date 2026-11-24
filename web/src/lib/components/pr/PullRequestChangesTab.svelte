@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import { PullRequestDiffController } from '$lib/git/pull-requests/pull-request-diff.svelte.js';
+	import type { PullRequestFileProgress } from '$lib/git/pull-requests/pull-request-file-progress.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
@@ -12,9 +13,10 @@
 
 	interface Props {
 		detail: PullRequestDetail;
+		progress: PullRequestFileProgress;
 	}
 
-	let { detail }: Props = $props();
+	let { detail, progress }: Props = $props();
 	const diff = new PullRequestDiffController();
 	$effect(() => {
 		const current = detail;
@@ -23,19 +25,9 @@
 	onDestroy(() => diff.close());
 	const documentId = $derived(diff.documentId ?? detail.documentId);
 
-	let viewedFiles = $state<Set<string>>(new Set());
-	let collapsedFiles = $state<Set<string>>(new Set());
-
-	// Resets per-PR view state whenever the shown pull request changes.
-	let trackedReview = $state<string | null>(null);
-	$effect(() => {
-		const current = detail.reviewId;
-		if (current !== trackedReview) {
-			trackedReview = current;
-			viewedFiles = new Set();
-			collapsedFiles = new Set();
-		}
-	});
+	const viewedFiles = $derived(progress.viewed);
+	const collapsedFiles = $derived(progress.collapsed);
+	$effect(() => progress.selectReview(detail.reviewId));
 
 	const filePaths = $derived(detail.files.map((file) => file.path));
 	const allCollapsed = $derived(filePaths.length > 0 && collapsedFiles.size >= filePaths.length);
@@ -78,30 +70,8 @@
 		});
 	});
 
-	// Marking a file viewed also collapses it; un-viewing re-expands it.
-	function toggleViewed(path: string): void {
-		const nextViewed = new Set(viewedFiles);
-		const nextCollapsed = new Set(collapsedFiles);
-		if (nextViewed.has(path)) {
-			nextViewed.delete(path);
-			nextCollapsed.delete(path);
-		} else {
-			nextViewed.add(path);
-			nextCollapsed.add(path);
-		}
-		viewedFiles = nextViewed;
-		collapsedFiles = nextCollapsed;
-	}
-
-	function toggleCollapsed(path: string): void {
-		const next = new Set(collapsedFiles);
-		if (next.has(path)) next.delete(path);
-		else next.add(path);
-		collapsedFiles = next;
-	}
-
 	function toggleCollapseAll(): void {
-		collapsedFiles = allCollapsed ? new Set() : new Set(filePaths);
+		progress.collapsed = allCollapsed ? new Set() : new Set(filePaths);
 	}
 </script>
 
@@ -148,8 +118,8 @@
 		{collapsedFiles}
 		{threadsById}
 		{threadCountByFile}
-		onToggleViewed={toggleViewed}
-		onToggleCollapsed={toggleCollapsed}
+		onToggleViewed={(path) => progress.toggleViewed(path)}
+		onToggleCollapsed={(path) => progress.toggleCollapsed(path)}
 		onBodyDemand={(demand) =>
 			diff.handleDemand({
 				...demand,

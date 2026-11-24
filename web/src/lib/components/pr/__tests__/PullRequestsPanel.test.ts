@@ -171,11 +171,11 @@ function setup(
 	});
 	controller.setPresentationVisible(true);
 	const onOpenChat = vi.fn();
-	render(PullRequestsPanel, {
+	const panel = render(PullRequestsPanel, {
 		controller,
 		onOpenChat,
 	});
-	return { api, onOpenChat, controller, getDetail, getRuns, getRun, notifyError };
+	return { api, onOpenChat, controller, getDetail, getRuns, getRun, notifyError, panel };
 }
 
 describe('PullRequestsPanel', () => {
@@ -969,6 +969,21 @@ describe('PullRequestsPanel', () => {
 		await screen.findByText('No actionable findings.');
 		await fireEvent.click(screen.getByRole('button', { name: 'Post to GitHub' }));
 		await waitFor(() => expect(api.post).toHaveBeenCalledWith('run-1'));
+	});
+
+	it('retains an in-flight post and its error when the panel moves to another window', async () => {
+		const { controller, onOpenChat, api, panel } = setup();
+		const request = Promise.withResolvers<typeof snapshot>();
+		api.post.mockImplementationOnce(() => request.promise);
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+		await panel.unmount();
+		render(PullRequestsPanel, { controller, onOpenChat });
+		expect(screen.getByRole('button', { name: /Posting/ })).toHaveProperty('disabled', true);
+		request.reject(new Error('Posting failed'));
+		await screen.findByText('Posting failed');
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', false);
+		expect(api.post).toHaveBeenCalledTimes(1);
 	});
 
 	for (const status of ['unknown', 'posted'] as const) {

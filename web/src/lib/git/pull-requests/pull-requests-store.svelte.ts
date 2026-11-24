@@ -11,6 +11,7 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { errorMessage } from '$lib/utils/error-message.js';
+import { SvelteMap } from 'svelte/reactivity';
 import { effectiveExecutorId } from '$shared/executors';
 import { ghRepositoryIdentity } from '$shared/gh-identity';
 import type {
@@ -21,8 +22,10 @@ import type {
 } from '$shared/pull-request-reviews';
 import { groupInbox, inboxEntryKey, type PullRequestInboxGroup } from './pull-request-inbox.js';
 import type { PullRequestReviewsStore } from './pull-request-reviews-store.svelte.js';
+import { PullRequestFileProgress } from './pull-request-file-progress.svelte.js';
 
 export type PullRequestDetailTab = 'review' | 'changes' | 'checks';
+type ReviewAction = 'review' | 'stop' | 'post';
 
 export interface PullRequestsStoreDeps {
 	reviews: PullRequestReviewsStore;
@@ -34,6 +37,7 @@ export interface PullRequestsStoreDeps {
 
 export class PullRequestsStore implements PortableSingletonController {
 	readonly reviews: PullRequestReviewsStore;
+	readonly fileProgress = new PullRequestFileProgress();
 	readonly #deps: PullRequestsStoreDeps;
 	#visible = false;
 	#detailController: AbortController | null = null;
@@ -43,6 +47,8 @@ export class PullRequestsStore implements PortableSingletonController {
 	#runsController: AbortController | null = null;
 	#runController: AbortController | null = null;
 	#runsVersion: number | null = null;
+	readonly #pendingActions = new SvelteMap<string, ReviewAction>();
+	reviewActionError = $state<string | null>(null);
 
 	query = $state('');
 	repositoryFilter = $state<string | null>(null);
@@ -85,6 +91,33 @@ export class PullRequestsStore implements PortableSingletonController {
 
 	get hasSelection(): boolean {
 		return this.selectedKey !== null;
+	}
+
+	get pendingReviewAction(): ReviewAction | null {
+		return this.selectedKey ? this.#pendingActions.get(this.selectedKey) ?? null : null;
+	}
+
+	async performReviewAction(kind: ReviewAction): Promise<void> {
+		const entry = this.selectedEntry;
+		if (!entry) return;
+		const key = inboxEntryKey(entry);
+		if (this.#pendingActions.has(key)) return;
+		const run = kind === 'stop' ? entry.latestRun : this.shownRun;
+		if (kind !== 'review' && !run) return;
+
+		this.#pendingActions.set(key, kind);
+		this.reviewActionError = null;
+		try {
+			if (kind === 'review') await this.reviews.review(entry.repositoryId, entry.pull.number);
+			else if (kind === 'stop') await this.reviews.stop(run!.id);
+			else await this.reviews.post(run!.id);
+		} catch (error) {
+			const message = errorMessage(error, m.pull_request_review_action_failed());
+			if (key === this.selectedKey) this.reviewActionError = message;
+			else this.#deps.notifyError?.(message);
+		} finally {
+			this.#pendingActions.delete(key);
+		}
 	}
 
 	get shownRun(): PullRequestReviewRunDetail | null {
@@ -150,6 +183,8 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.#runController = null;
 		this.#runsVersion = null;
 		this.selectedKey = null;
+		this.fileProgress.selectReview(null);
+		this.reviewActionError = null;
 		this.selectedRunId = null;
 		this.detail = null;
 		this.detailError = null;
