@@ -20,6 +20,8 @@ test('Settings updates an outdated Claude Code CLI and reports the result', asyn
     await mkdir(artifacts, { recursive: true });
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });

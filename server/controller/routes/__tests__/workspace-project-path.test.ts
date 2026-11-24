@@ -1,23 +1,57 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import createWorkspaceRoutes from '../workspace.js';
 import { SettingsStore } from '../../settings/store.js';
-import { createWorkspaceFixture, makeRequest, remoteSettingsSource } from './workspace-route-fixture.js';
+import type { AgentRegistryServiceContract } from '../../agents/registry.js';
+import type { RouteMap, RouteHandler } from '../../lib/http-route-types.js';
+
+type ProjectPathSettings = Pick<SettingsStore, 'getRemoteSettingsSnapshotSource' | 'removeProjectPathFromList' | 'setPathSettings'>;
+type SnapshotAgents = Pick<AgentRegistryServiceContract, 'getAgentAuthStatusMap' | 'getAgentReadinessMap' | 'getAgentCatalogEntries'>;
+
+// Exercises only the settings routes; unrelated route dependencies are never invoked.
+const projectPathRoutes = createWorkspaceRoutes as (
+  settings: ProjectPathSettings, agents: SnapshotAgents, telegramNotifier: Parameters<typeof createWorkspaceRoutes>[2] | undefined,
+  telegramSettings: Parameters<typeof createWorkspaceRoutes>[3] | undefined, projectBasePath: string,
+) => RouteMap;
+
+function remoteSettingsSource(overrides: Partial<ReturnType<SettingsStore['getRemoteSettingsSnapshotSource']>> = {}): ReturnType<SettingsStore['getRemoteSettingsSnapshotSource']> {
+  return { ...new SettingsStore(join(tmpdir(), 'garcon-project-path-defaults')).getRemoteSettingsSnapshotSource(), ...overrides };
+}
+
+function createWorkspaceFixture() {
+  return {
+    settings: {
+      getRemoteSettingsSnapshotSource: mock<SettingsStore['getRemoteSettingsSnapshotSource']>(() => remoteSettingsSource()),
+      removeProjectPathFromList: mock<SettingsStore['removeProjectPathFromList']>(async () => {}),
+      setPathSettings: mock<SettingsStore['setPathSettings']>(async () => remoteSettingsSource().paths),
+    } satisfies ProjectPathSettings,
+    agents: {
+      getAgentAuthStatusMap: mock<AgentRegistryServiceContract['getAgentAuthStatusMap']>(async () => ({})),
+      getAgentReadinessMap: mock<AgentRegistryServiceContract['getAgentReadinessMap']>(async () => ({})),
+      getAgentCatalogEntries: mock<AgentRegistryServiceContract['getAgentCatalogEntries']>(async () => []),
+    } satisfies SnapshotAgents,
+  };
+}
+
+function makeRequest(url: string, method: string, body: unknown): Request {
+  return new Request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+}
+
 
 const REMOTE = '22222222-2222-4222-8222-222222222222';
 const OTHER = '33333333-3333-4333-8333-333333333333';
 const ROUTE = '/api/v1/app/settings/project-path';
-const roots = [];
+const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
 describe('DELETE project path preferences', () => {
-  let ctx;
-  let handler;
+  let ctx: ReturnType<typeof createWorkspaceFixture>;
+  let handler: RouteHandler;
   beforeEach(() => {
     ctx = createWorkspaceFixture();
-    handler = createWorkspaceRoutes(ctx.settings, ctx.agents, undefined, undefined, '/projects')[ROUTE].DELETE;
+    handler = projectPathRoutes(ctx.settings, ctx.agents, undefined, undefined, '/projects')[ROUTE]!.DELETE!;
   });
 
   it('passes only the explicit identity to the domain and returns its canonical snapshot', async () => {
@@ -27,7 +61,7 @@ describe('DELETE project path preferences', () => {
       }));
     });
     const request = { executorId: REMOTE, projectPath: '/projects/atlas ' };
-    const response = await handler(makeRequest(`http://localhost${ROUTE}`, 'DELETE', request));
+    const response = await handler(makeRequest(`http://localhost${ROUTE}`, 'DELETE', request), new URL(`http://localhost${ROUTE}`));
     expect(response.status).toBe(200);
     expect(ctx.settings.removeProjectPathFromList).toHaveBeenCalledTimes(1);
     expect(ctx.settings.removeProjectPathFromList).toHaveBeenCalledWith(request);
@@ -41,7 +75,7 @@ describe('DELETE project path preferences', () => {
     { executorId: 'invalid', projectPath: '/project' }, { executorId: 'local', projectPath: '' },
     { executorId: 'local', projectPath: '/project', pinnedPaths: [] },
   ].map(request => ({ request })))('rejects invalid identity before mutation: %j', async ({ request }) => {
-    const response = await handler(makeRequest(`http://localhost${ROUTE}`, 'DELETE', request));
+    const response = await handler(makeRequest(`http://localhost${ROUTE}`, 'DELETE', request), new URL(`http://localhost${ROUTE}`));
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ success: false, errorCode: 'INVALID_PROJECT_PATH_REMOVAL' });
     expect(ctx.settings.removeProjectPathFromList).not.toHaveBeenCalled();
@@ -49,7 +83,7 @@ describe('DELETE project path preferences', () => {
 
   it('reports persistence failure instead of returning optimistic success', async () => {
     ctx.settings.removeProjectPathFromList.mockRejectedValueOnce(new Error('Synthetic save failure'));
-    const response = await handler(makeRequest(`http://localhost${ROUTE}`, 'DELETE', { executorId: 'local', projectPath: '/project' }));
+    const response = await handler(makeRequest(`http://localhost${ROUTE}`, 'DELETE', { executorId: 'local', projectPath: '/project' }), new URL(`http://localhost${ROUTE}`));
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ success: false });
   });
@@ -71,7 +105,7 @@ it.each(['local', REMOTE])('HTTP removal preserves changes made after a stale cl
   });
   await settings.recordChatStartup({ executorId: REMOTE, agentId: 'test', model: 'synthetic', projectPath: 'D:/projects/atlas' });
   const { agents } = createWorkspaceFixture();
-  const routes = createWorkspaceRoutes(settings, agents, undefined, undefined, '/projects');
+  const routes = projectPathRoutes(settings, agents, undefined, undefined, '/projects');
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch(request, server) {
     const url = new URL(request.url);
     const handler = routes[url.pathname]?.[request.method];
