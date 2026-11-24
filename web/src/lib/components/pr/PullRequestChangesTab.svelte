@@ -27,7 +27,7 @@
 
 	const viewedFiles = $derived(progress.viewed);
 	const collapsedFiles = $derived(progress.collapsed);
-	$effect(() => progress.selectReview(detail.reviewId));
+	$effect.pre(() => progress.selectReview(detail));
 
 	const filePaths = $derived(detail.files.map((file) => file.path));
 	const allCollapsed = $derived(filePaths.length > 0 && collapsedFiles.size >= filePaths.length);

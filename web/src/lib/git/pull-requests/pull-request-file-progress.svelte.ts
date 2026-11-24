@@ -1,11 +1,17 @@
+import type { PullRequestDetail } from '$lib/api/pull-requests.js';
+
 export class PullRequestFileProgress {
 	viewed = $state<Set<string>>(new Set());
 	collapsed = $state<Set<string>>(new Set());
 	#reviewId: string | null = null;
+	#head: string | null = null;
 
-	selectReview(reviewId: string | null): void {
-		if (this.#reviewId === reviewId) return;
+	selectReview(detail: Pick<PullRequestDetail, 'reviewId' | 'headRefOid'> | null): void {
+		const reviewId = detail?.reviewId ?? null;
+		const head = detail?.headRefOid ?? null;
+		if (this.#reviewId === reviewId && this.#head === head) return;
 		this.#reviewId = reviewId;
+		this.#head = head;
 		this.viewed = new Set();
 		this.collapsed = new Set();
 	}

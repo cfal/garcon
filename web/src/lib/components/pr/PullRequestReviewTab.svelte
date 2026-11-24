@@ -96,7 +96,7 @@
 						onclick={() => void controller.performReviewAction('post')}
 					>
 						<Send class="h-3.5 w-3.5" />
-						{pending === 'post'
+						{pending?.kind === 'post' && pending.runId === run.id
 							? m.pull_request_review_posting()
 							: run.post.status === 'posted'
 								? m.pull_request_review_retry_cleanup()

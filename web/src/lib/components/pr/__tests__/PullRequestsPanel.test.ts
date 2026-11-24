@@ -242,6 +242,21 @@ describe('PullRequestsPanel', () => {
 			};
 		}
 
+		it('clears Viewed and collapsed marks when the accepted head changes', async () => {
+			const first = diffDetail();
+			const getDetail = vi.fn<() => Promise<PullRequestDetail>>()
+				.mockResolvedValueOnce(first)
+				.mockResolvedValue({ ...first, headRefOid: 'b'.repeat(40), documentId: 'revision:b' });
+			const { controller } = setup({ getDetail });
+			await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+			await fireEvent.click(screen.getByRole('tab', { name: /Changes/ }));
+			await fireEvent.click(await screen.findByRole('button', { name: 'Viewed' }));
+			controller.reviews.apply(refreshedSnapshot(2, { headRefOid: 'b'.repeat(40) }));
+			await waitFor(() => expect(controller.detail?.headRefOid).toBe('b'.repeat(40)));
+			expect(screen.getByRole('button', { name: 'Viewed' }).getAttribute('aria-pressed')).toBe('false');
+			expect(screen.getByRole('button', { name: /synthetic.ts/ }).getAttribute('aria-expanded')).toBe('true');
+		});
+
 		function refreshedSnapshot(
 			revision: number,
 			metadata: Partial<PullRequestSummary>,
@@ -984,6 +999,32 @@ describe('PullRequestsPanel', () => {
 		await screen.findByText('Posting failed');
 		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', false);
 		expect(api.post).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(['run', 'pull request'] as const)('does not attribute a post to another %s', async (target) => {
+		const older = { ...run, id: 'older', review: 'Older run' };
+		const { controller, onOpenChat, api, panel, notifyError } = setup({
+			getPage: async (_repository, number) => ({
+				runs: number === 7 ? [run, older] : [], nextCursor: null, revision: 1,
+			}),
+			getRun: async (id) => id === older.id ? older : run,
+		});
+		const request = Promise.withResolvers<typeof snapshot>();
+		api.post.mockImplementationOnce(() => request.promise);
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+		if (target === 'run') controller.selectRun(older.id);
+		else controller.select(snapshot.inbox[1]);
+		await panel.unmount();
+		render(PullRequestsPanel, { controller, onOpenChat });
+		await waitFor(() => expect(controller.isRunsLoading || controller.isRunLoading).toBe(false));
+		expect(screen.queryByRole('button', { name: /Posting/ })).toBeNull();
+		const button = target === 'run' ? 'Post to GitHub' : 'Review';
+		expect(screen.getByRole('button', { name: button, exact: true })).toHaveProperty('disabled', target === 'run');
+		request.reject(new Error('Original post failed'));
+		await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Original post failed'));
+		expect(screen.queryByText('Original post failed')).toBeNull();
+		expect(api.post).toHaveBeenCalledExactlyOnceWith(run.id);
 	});
 
 	for (const status of ['unknown', 'posted'] as const) {
