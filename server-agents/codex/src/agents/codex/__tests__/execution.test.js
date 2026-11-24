@@ -9,6 +9,7 @@ import { CodexExecution } from '../execution.ts';
 // so a test names the operation an event came from rather than the chat it landed in.
 function createRuntime(host = createHost()) {
   const runtime = {};
+  runtime.admitNativeRoot = () => () => {};
   const routes = new Map();
   const capture = (request) => {
     const operation = request.operation;

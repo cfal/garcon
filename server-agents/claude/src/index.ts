@@ -87,7 +87,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
-  readonly nativeChildObservation = null;
+  readonly nativeChildObservation: NonNullable<AgentIntegration['nativeChildObservation']>;
   readonly nativeActivity;
   readonly nativeSessions;
   readonly configurationValidation: NonNullable<AgentIntegration['configurationValidation']> = {
@@ -121,6 +121,7 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       logger,
       versionProbe,
     });
+    this.nativeChildObservation = { loadHistory: request => runtime.loadChildHistory(request) };
     const login = new CliLoginController({
       validateCode: validateClaudeAuthCode,
       parseOutputError: parseClaudeAuthLoginError,

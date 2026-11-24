@@ -155,16 +155,19 @@ export class CodexExecution implements AgentRuntimeExecution {
     publish: AgentRuntimePublisher,
     action: (runtimeRequest: CodexResumeRequest) => Promise<void>,
   ): Promise<void> {
-    assertCodexSessionEndpoint(
-      this.nativeSessions.decode(request.nativeSession).modelEndpointId,
-      request.endpoint?.endpointId ?? null,
-    );
-    await action(prepareResumeRequest(
-      request,
-      await this.#runtimeConfiguration(request),
-      this.nativeSessions,
-      publish,
-    ));
+    const release = this.runtime.admitNativeRoot(request.agentSessionId);
+    try {
+      assertCodexSessionEndpoint(
+        this.nativeSessions.decode(request.nativeSession).modelEndpointId,
+        request.endpoint?.endpointId ?? null,
+      );
+      await action(prepareResumeRequest(
+        request,
+        await this.#runtimeConfiguration(request),
+        this.nativeSessions,
+        publish,
+      ));
+    } finally { release(); }
   }
 
   async #runtimeConfiguration(
@@ -213,6 +216,7 @@ function executionFields(
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
+    publicationSignal: request.publicationSignal,
   };
 }
 

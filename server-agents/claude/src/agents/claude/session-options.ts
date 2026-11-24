@@ -38,3 +38,11 @@ export function normalizeClaudeThinkingModeForState(
 ): ClaudeThinkingMode {
   return claudeThinkingMode ?? 'auto';
 }
+
+export function claudeEnvironmentChanged(a?: Record<string, string>, b?: Record<string, string>): boolean {
+  const keysA = Object.keys(a ?? {});
+  const keysB = Object.keys(b ?? {});
+  if (keysA.length !== keysB.length) return true;
+  for (const key of keysA) if (a![key] !== b?.[key]) return true;
+  return false;
+}

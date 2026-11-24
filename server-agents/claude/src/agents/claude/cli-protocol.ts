@@ -18,6 +18,16 @@ export interface ClaudeCLIMessage {
   isReplay?: boolean;
   session_id?: string;
   parent_tool_use_id?: string | null;
+  agent_id?: string;
+  task_id?: string;
+  task_type?: string;
+  run_id?: string;
+  parent_task_id?: string;
+  tool_use_id?: string;
+  description?: string;
+  timestamp?: string;
+  event?: unknown;
+  patch?: unknown;
   new_conversation_id?: string;
   model?: string;
   is_error?: boolean;
@@ -361,8 +371,8 @@ export class ClaudeTurnState {
 // https://github.com/anthropics/claude-agent-sdk-python/blob/a39c96edf8cc414e640620ff3360f17475db0bd9/src/claude_agent_sdk/_internal/sessions.py#L1328-L1344
 export function isClaudeSubagentContent(message: ClaudeCLIMessage): boolean {
   return (message.type === 'assistant' || message.type === 'user')
-    && typeof message.parent_tool_use_id === 'string'
-    && message.parent_tool_use_id.length > 0;
+    && ((typeof message.parent_tool_use_id === 'string' && message.parent_tool_use_id.length > 0)
+      || (typeof message.agent_id === 'string' && message.agent_id.length > 0));
 }
 
 // Converts user-visible CLI content to canonical messages.

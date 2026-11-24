@@ -10,6 +10,7 @@ import type { AgentLogger } from '@garcon/server-agent-interface';
 import { ClaudeCliVersionProbe } from './cli-version.js';
 import { resolveClaudeModel } from './model-context.js';
 import { runClaudeSingleQueryProcess } from './single-query-process.js';
+import type { ClaudeSessionOptions } from './session-options.js';
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -46,6 +47,15 @@ interface ClaudeSingleQueryOptions {
   envOverrides?: Record<string, string>;
   timeoutMs?: number;
   signal?: AbortSignal;
+}
+
+export function buildClaudeSessionArgs(sessionId: string, options: ClaudeSessionOptions, resume: boolean): string[] {
+  return buildClaudeCLIArgs({
+    model: options.model, permissionMode: options.permissionMode,
+    thinkingMode: options.thinkingMode, claudeThinkingMode: options.claudeThinkingMode,
+    prompt: '', streamJson: true,
+    sessionId: resume ? undefined : sessionId, resumeSessionId: resume ? sessionId : undefined,
+  });
 }
 
 export interface ClaudeCliDependencies {

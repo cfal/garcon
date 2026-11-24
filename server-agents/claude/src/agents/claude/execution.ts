@@ -52,6 +52,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     const runtimeRequest = {
       ...executionFields(request),
       agentSessionId,
+      nativePath,
       command: `${request.carriedContext?.prefix ?? ''}${request.prompt}`,
       images: request.attachments,
       envOverrides,
@@ -99,16 +100,19 @@ export class ClaudeExecution implements AgentRuntimeExecution {
     request: Parameters<AgentRuntimeExecution['resume']>[0],
     publish: AgentRuntimePublisher,
   ): Promise<void> {
-    resolveClaudeModel(request.model);
-    await this.runtime.runClaudeTurn({
-      ...executionFields(request),
-      agentSessionId: request.agentSessionId,
-      command: request.prompt,
-      images: request.attachments,
-      nativePath: this.nativeSessions.decode(request.nativeSession).path,
-      envOverrides: await this.#endpointEnvironment(request),
-      operation: runtimeOperation(request.runId, publish),
-    });
+    const release = this.runtime.admitNativeRoot(request.agentSessionId);
+    try {
+      resolveClaudeModel(request.model);
+      await this.runtime.runClaudeTurn({
+        ...executionFields(request),
+        agentSessionId: request.agentSessionId,
+        command: request.prompt,
+        images: request.attachments,
+        nativePath: this.nativeSessions.decode(request.nativeSession).path,
+        envOverrides: await this.#endpointEnvironment(request),
+        operation: runtimeOperation(request.runId, publish),
+      });
+    } finally { release(); }
   }
 
   async abort(agentSessionId: string): Promise<boolean> {
@@ -210,6 +214,7 @@ function executionFields(request: AgentRuntimeExecutionContext) {
       signal: request.admission.signal,
       markStarted: () => request.admission.markStarted(),
     },
+    publicationSignal: request.publicationSignal,
   };
 }
 

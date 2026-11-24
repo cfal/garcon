@@ -4,6 +4,10 @@ import type { ClaudeCLIMessage } from './cli-protocol.js';
 
 const DEFAULT_CONTROL_TIMEOUT_MS = 10_000;
 
+export function claudeControlResponse(requestId: string | undefined, response: Record<string, unknown>): string {
+  return JSON.stringify({ type: 'control_response', response: { request_id: requestId, ...response } });
+}
+
 interface ClaudeControlRequestOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;

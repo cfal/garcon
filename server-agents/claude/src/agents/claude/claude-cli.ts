@@ -8,9 +8,12 @@ import { buildClaudeCLIEnvironment } from './cli-environment.js';
 import { resolveClaudeModel } from './model-context.js';
 import { configureClaudeSessionModel } from './session-model.js';
 import type { AgentRuntimeOperation } from '@garcon/server-agent-common/execution/runtime-events';
+import { ClaudeNativeChildSources } from './native-child-sources.js';
+import { isVersionBefore } from './cli-version.js';
 import {
   AgentIntegrationError,
   type AgentSteerResult,
+  type AgentNativeChildHistoryRequest,
 } from '@garcon/server-agent-interface';
 import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import type { ClaudeThinkingMode, PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
@@ -26,15 +29,17 @@ import { isRecord } from '@garcon/common/json';
 import { isManualBypassMode, providerStartupPermissionMode } from '@garcon/server-agent-common/execution/permission-modes';
 import { IdleSessionPurger } from '@garcon/server-agent-common/shared/idle-session-purger';
 import { ClaudeProcessRetirementTracker } from './process-retirements.js';
-import { ClaudeControlBroker } from './cli-control.js';
+import { ClaudeControlBroker, claudeControlResponse } from './cli-control.js';
 import {
   buildClaudeCLIArgs,
+  buildClaudeSessionArgs,
   runSingleQuery,
   type ClaudeCliDependencies,
 } from './cli-invocation.js';
 import { buildClaudePermissionApprovalResponse, isClaudeAskUserQuestionTool } from './permission-response.js';
 import {
   mergeClaudeSessionOptions,
+  claudeEnvironmentChanged,
   normalizeClaudeThinkingModeForState,
   type ClaudeSessionOptions,
 } from './session-options.js';
@@ -88,6 +93,13 @@ class ClaudeCliRuntime {
   #turnPublisher: ClaudeTurnPublisher;
   #idlePurger: IdleSessionPurger<ClaudeRunningSession>;
   #shuttingDown = false;
+  readonly #nativeChildren = new ClaudeNativeChildSources({
+    session: id => this.#runningSessions.get(id),
+    isShuttingDown: () => this.#shuttingDown,
+    hasResumeOwner: session => this.#resumeOwners.has(session),
+    hasRetiringWriter: id => this.#processRetirements.has(id),
+    hasPendingPermission: id => [...this.#pendingPermissions].some(pending => pending.agentSessionId === id),
+  });
   readonly #dependencies: ClaudeCliDependencies;
 
   constructor(dependencies: ClaudeCliDependencies = defaultClaudeCliDependencies()) {
@@ -109,22 +121,15 @@ class ClaudeCliRuntime {
     });
     this.#idlePurger = new IdleSessionPurger({
       sessions: () => this.#runningSessions.entries(),
-      isRunning: (session) => session.activeTurn !== null,
+      isRunning: (session) => this.#nativeChildren.hasNativeWork(session),
       lastActivityAt: (session) => session.lastActivityAt,
       purge: (id, session) => this.#evictIdleSession(id, session),
     });
   }
 
-  /** Shallow comparison of env override maps; treats undefined and {} as equal. */
-  #envOverridesChanged(a?: Record<string, string>, b?: Record<string, string>): boolean {
-    const keysA = Object.keys(a ?? {});
-    const keysB = Object.keys(b ?? {});
-    if (keysA.length !== keysB.length) return true;
-    for (const k of keysA) {
-      if (a![k] !== b?.[k]) return true;
-    }
-    return false;
-  }
+  admitNativeRoot(rootId: string): () => void { return this.#nativeChildren.admit(rootId); }
+
+  loadChildHistory(request: AgentNativeChildHistoryRequest) { return this.#nativeChildren.loadHistory(request); }
 
   #beginTurn(
     session: ClaudeRunningSession,
@@ -157,20 +162,17 @@ class ClaudeCliRuntime {
     });
   }
 
-  #controlResponse(requestId: string | undefined, response: Record<string, unknown>): string {
-    return JSON.stringify({
-      type: 'control_response',
-      response: { request_id: requestId, ...response },
-    });
-  }
-
   #routeCLIMessage(
     session: ClaudeRunningSession,
     proc: ReturnType<typeof Bun.spawn>,
     msg: ClaudeCLIMessage,
   ): void {
     if (this.#runningSessions.get(session.id) !== session || session.process !== proc) return;
-    if (isClaudeSubagentContent(msg)) return;
+    const observer = this.#nativeChildren.activity(session);
+    if (isClaudeSubagentContent(msg)) {
+      observer?.acceptContentSafely(msg);
+      return;
+    }
     const activeTurn = session.activeTurn;
     const inputEvent = activeTurn?.protocol.observeInput(msg) ?? null;
     if (inputEvent?.type === 'started') {
@@ -188,6 +190,7 @@ class ClaudeCliRuntime {
       this.#handleInputTerminalBeforeStart(session, inputEvent.state);
       return;
     }
+    observer?.observeRootFrameSafely(msg, activeTurn?.protocol.inputStarted ? activeTurn.operation : null);
     const steeringEvent = activeTurn?.steering.observe(msg) ?? null;
     if (steeringEvent) this.#steering.handleObservation(session, activeTurn!, steeringEvent);
 
@@ -455,7 +458,7 @@ class ClaudeCliRuntime {
       this.#dependencies.logger.warn('Claude CLI emitted a result for another user input', resultDetails);
       return;
     }
-
+    this.#nativeChildren.activity(session)?.abandonInvocations();
     const resultText = typeof msg.result === 'string' ? msg.result.trim() : '';
     if (!msg.is_error && !protocol.assistantContentSinceLastResult && resultText) {
       protocol.addOutputMessages(1, true);
@@ -534,7 +537,7 @@ class ClaudeCliRuntime {
     const request = msg.request;
     const subtype = request?.subtype;
     if (!request || subtype !== 'can_use_tool') {
-      this.#trySendToCLI(session.id, this.#controlResponse(msg.request_id, {
+      this.#trySendToCLI(session.id, claudeControlResponse(msg.request_id, {
         subtype: 'error',
         error: `Unsupported control request subtype: ${subtype || 'missing'}`,
       }));
@@ -547,7 +550,7 @@ class ClaudeCliRuntime {
         eventType: 'permission',
         reason: 'missing active operation',
       });
-      this.#trySendToCLI(session.id, this.#controlResponse(msg.request_id, {
+      this.#trySendToCLI(session.id, claudeControlResponse(msg.request_id, {
         subtype: 'error',
         error: 'Claude tool permission arrived outside the active Garcon turn',
       }));
@@ -564,7 +567,7 @@ class ClaudeCliRuntime {
         { toolName, toolInput, toolUseId },
         { allow: true, alwaysAllow: false },
       );
-      this.#trySendToCLI(session.id, this.#controlResponse(msg.request_id, {
+      this.#trySendToCLI(session.id, claudeControlResponse(msg.request_id, {
         subtype: 'success',
         response,
       }));
@@ -628,6 +631,7 @@ class ClaudeCliRuntime {
   }
 
   async #retireSessionProcess(session: ClaudeRunningSession): Promise<void> {
+    this.#nativeChildren.retire(session);
     this.#clearAbortTimer(session);
     this.#controlBroker.rejectSession(session.id, 'Claude CLI process was retired');
     const proc = session.process;
@@ -788,7 +792,7 @@ class ClaudeCliRuntime {
       throw new Error('Claude permission occurrence is no longer pending');
     }
     const response = buildClaudePermissionApprovalResponse(pending, decision);
-    await this.#writeToCLI(pending.agentSessionId, this.#controlResponse(pending.cliRequestId, {
+    await this.#writeToCLI(pending.agentSessionId, claudeControlResponse(pending.cliRequestId, {
       subtype: 'success',
       response,
     }));
@@ -818,23 +822,6 @@ class ClaudeCliRuntime {
 
   #waitForTurnComplete(activeTurn: ClaudeActiveTurn): Promise<void> {
     return activeTurn.completion;
-  }
-
-  #buildCLIArgs(
-    session: ClaudeRunningSession,
-    options: ClaudeSessionOptions,
-    resume: boolean,
-  ): string[] {
-    return buildClaudeCLIArgs({
-      model: options.model,
-      permissionMode: options.permissionMode,
-      thinkingMode: options.thinkingMode,
-      claudeThinkingMode: options.claudeThinkingMode,
-      prompt: '',
-      streamJson: true,
-      sessionId: resume ? undefined : session.id,
-      resumeSessionId: resume ? session.id : undefined,
-    });
   }
 
   #handleTransportFailure(
@@ -898,6 +885,7 @@ class ClaudeCliRuntime {
     }
 
     const { exitCode } = exit;
+    this.#nativeChildren.retire(session);
     session.process = null;
     session.transport = null;
     session.lastActivityAt = Date.now();
@@ -927,7 +915,8 @@ class ClaudeCliRuntime {
       throw new Error(`Claude session ${session.id} already has a process`);
     }
     const claudeBinary = this.#dependencies.binary();
-    const args = this.#buildCLIArgs(session, options, resume);
+    const args = buildClaudeSessionArgs(session.id, options, resume);
+    this.#nativeChildren.configureInvocation(session, args, cliVersion);
 
     this.#dependencies.logger.info('Spawning Claude CLI', {
       binary: claudeBinary,
@@ -1016,6 +1005,12 @@ class ClaudeCliRuntime {
   }
 
   async startClaudeCliSession(request: ClaudeStartRequest): Promise<string> {
+    const release = this.admitNativeRoot(request.agentSessionId);
+    try { return await this.#startClaudeCliSession(request); }
+    finally { release(); }
+  }
+
+  async #startClaudeCliSession(request: ClaudeStartRequest): Promise<string> {
     assertClaudeExecutionOpen(request);
     resolveClaudeModel(request.model || '');
     const {
@@ -1077,6 +1072,7 @@ class ClaudeCliRuntime {
     const previous = this.#runningSessions.get(agentSessionId);
     // Fences pending reconfiguration on the old session before its retirement can yield.
     this.#runningSessions.set(agentSessionId, session);
+    this.#nativeChildren.bind(session, request);
 
     let cliVersion: readonly [number, number, number];
     try {
@@ -1121,6 +1117,12 @@ class ClaudeCliRuntime {
   }
 
   async runClaudeTurn(request: ClaudeResumeRequest): Promise<void> {
+    const release = this.admitNativeRoot(request.agentSessionId);
+    try { await this.#runClaudeTurn(request); }
+    finally { release(); }
+  }
+
+  async #runClaudeTurn(request: ClaudeResumeRequest): Promise<void> {
     assertClaudeExecutionOpen(request);
     resolveClaudeModel(request.model || '');
     const {
@@ -1227,7 +1229,7 @@ class ClaudeCliRuntime {
           previousProviderPermissionMode === 'bypassPermissions'
           || desiredProviderPermissionMode === 'bypassPermissions'
         );
-      const envChanged = this.#envOverridesChanged(
+      const envChanged = claudeEnvironmentChanged(
         session.currentEnvOverrides,
         session.options.envOverrides,
       );
@@ -1248,8 +1250,12 @@ class ClaudeCliRuntime {
           && this.#runningSessions.get(agentSessionId) === session
           && this.#resumeOwners.get(session) === resumeOwner,
         retireProcess: () => this.#retireSessionProcess(session),
-        resumeProcess: () => this.#spawnCLI(session, session.options, true, cliVersion),
+        resumeProcess: () => {
+          this.#nativeChildren.bind(session, request);
+          return this.#spawnCLI(session, session.options, true, cliVersion);
+        },
       });
+      if (!isVersionBefore(cliVersion, [2, 1, 330])) this.#nativeChildren.bind(session, request);
 
       if (
         session.currentPermissionMode
@@ -1303,6 +1309,7 @@ class ClaudeCliRuntime {
     if (!session?.process || !activeTurn) return false;
 
     activeTurn.protocol.markAbortRequested();
+    this.#nativeChildren.activity(session)?.abandonInvocations();
     this.#armAbortFallback(
       session,
       activeTurn,

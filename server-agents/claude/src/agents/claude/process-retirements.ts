@@ -6,6 +6,10 @@ interface ProcessRetirementGroup {
 export class ClaudeProcessRetirementTracker {
   readonly #processExits = new Map<string, ProcessRetirementGroup>();
 
+  has(agentSessionId: string): boolean {
+    return this.#processExits.has(agentSessionId);
+  }
+
   track(
     agentSessionId: string,
     chatId: string,

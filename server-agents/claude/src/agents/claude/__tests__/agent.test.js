@@ -22,6 +22,7 @@ function createClaudeStub(startError) {
       return Promise.reject(startError);
     }),
     runClaudeTurn: mock(() => Promise.resolve(undefined)),
+    admitNativeRoot: () => () => {},
     abortClaudeInternalSession: mock(() => Promise.resolve(false)),
     isClaudeInternalSessionRunning: mock(() => false),
     getRunningClaudeInternalSessions: mock(() => []),

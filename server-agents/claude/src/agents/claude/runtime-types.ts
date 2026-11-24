@@ -23,6 +23,8 @@ export interface ClaudeExecutionRequest {
   readonly images?: readonly AgentAttachment[];
   readonly envOverrides?: Record<string, string>;
   readonly operation: AgentRuntimeOperation;
+  readonly publicationSignal?: AbortSignal;
+  readonly nativePath?: string | null;
 }
 
 export interface ClaudeStartRequest extends ClaudeExecutionRequest {
@@ -32,7 +34,6 @@ export interface ClaudeStartRequest extends ClaudeExecutionRequest {
 
 export interface ClaudeResumeRequest extends ClaudeExecutionRequest {
   readonly agentSessionId: string;
-  readonly nativePath?: string | null;
 }
 
 export interface ClaudeProjectPathUpdate {

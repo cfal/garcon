@@ -3,9 +3,10 @@ import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { CodexConfigObject } from '../runtime-types.js';
 import { assertCompatibleCodex, resolveCodexCli, type ResolvedCodexCli } from './cli.js';
 import { appendCodexConfigArgs } from './config-overrides.js';
-import { parseThreadItemsListResponse, parseThreadTurnsListResponse } from './protocol.js';
+import { parseThreadItemsListResponse, parseThreadTurnsListResponse, parseThreadMetadata } from './protocol.js';
 import type {
   InitializeResponse,
+  CodexThreadMetadata,
   JsonRpcFailure,
   JsonRpcId,
   JsonRpcNotification,
@@ -37,6 +38,7 @@ export interface CodexAppServerProcess {
   stderr?: ReadableStream<Uint8Array> | null;
   exited: Promise<number>;
   kill(signal?: 'SIGTERM' | 'SIGKILL'): void;
+  readonly writerScopeExited?: () => boolean;
 }
 
 export type SpawnCodexAppServer = (
@@ -127,6 +129,13 @@ function defaultSpawnCodexAppServer(
     stdout: child.stdout,
     stderr: child.stderr,
     exited: child.exited,
+    writerScopeExited: () => {
+      if (!detached) return true;
+      // The npm fallback launcher and native writer share this detached group.
+      // https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/codex-cli/bin/codex.js#L245-L297
+      try { process.kill(-child.pid, 0); return false; }
+      catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+    },
     kill: (signal = 'SIGTERM') => {
       if (signal !== 'SIGKILL' || !detached) {
         child.kill(signal);
@@ -179,6 +188,14 @@ export class CodexAppServerClient extends EventEmitter {
   #shutdownKillMs: number;
   #shutdownPromise: Promise<void> | null = null;
   #shutdownRequested = false;
+  #processExit: Promise<number> | null = null;
+  #processExited = false;
+  #writerScopeExited: (() => boolean) | null = null;
+
+  get exited(): Promise<number> | null { return this.#processExit; }
+  get nativeWritersExited(): boolean {
+    return this.#processExited && (this.#writerScopeExited?.() ?? false);
+  }
 
   constructor(options: CodexAppServerClientOptions = {}) {
     super();
@@ -266,6 +283,10 @@ export class CodexAppServerClient extends EventEmitter {
     return this.request<ThreadListResponse>('thread/list', params);
   }
 
+  async readThreadMetadata(threadId: string): Promise<CodexThreadMetadata> {
+    return parseThreadMetadata(await this.request<unknown>('thread/read', { threadId, includeTurns: false }));
+  }
+
   async listThreadTurns(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
     const response = await this.request<unknown>('thread/turns/list', params);
     return parseThreadTurnsListResponse(response);
@@ -340,6 +361,9 @@ export class CodexAppServerClient extends EventEmitter {
       args.push('--config', `model_catalog_json=${JSON.stringify(this.#modelCatalogPath)}`);
     }
     this.#proc = this.#spawn(resolved.command, args, { env: this.#env });
+    this.#processExit = this.#proc.exited;
+    this.#writerScopeExited = this.#proc.writerScopeExited ?? null;
+    void this.#processExit.then(() => { this.#processExited = true; }, () => undefined);
 
     void this.#readStdout(this.#proc.stdout ?? null);
     void this.#readStderr(this.#proc.stderr ?? null);

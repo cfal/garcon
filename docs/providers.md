@@ -1,5 +1,14 @@
 # Custom Providers On Executors
 
+Native-child observation is a separate nullable integration facet, currently
+implemented by Claude and Codex. Observers retain the owning executor and
+immutable provider locator but have no executable native binding and cannot
+change endpoint, model, permissions, preambles, or execution settings. They do
+not grant additional credentials or provider authority. History Reload always
+uses the recorded executor and native namespace, never a controller-local
+fallback. The transcript-ledger observation amendment describes provider
+coverage and the process-local native-writer proof required for Reload.
+
 Status: implemented architecture, 2026-09-24. One controller owns its configuration directory and workspace. Executor-specific assignments, legacy-seed migration, mutation invalidation, and explicit shared-deletion acknowledgement are implemented. Original design research used [9f0020dc9d25f3f7d354df8d8e34baae8c477e26](https://github.com/cfal/garcon/tree/9f0020dc9d25f3f7d354df8d8e34baae8c477e26); the decisions below describe the resulting implementation.
 
 This extends [Executors In The App](./executor/app-integration.md) and the [executor interface](./executor/interface.md). It changes custom-provider availability policy, not where agents execute or how the controller connects to a worker.

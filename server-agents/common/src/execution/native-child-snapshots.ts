@@ -4,7 +4,7 @@ const KNOWN_CHILDREN = 1024;
 
 interface NativeRead { readonly rootId: string; changed: boolean }
 
-// Positive source evidence is process-local. Eviction and restart mean unknown, never idle.
+// Positive source evidence is process-local. Proof-cache eviction and restart mean unknown.
 export class NativeChildSnapshots {
   readonly #known = new Map<string, { readonly rootId: string }>();
   readonly #admissions = new Map<string, number>();
@@ -38,7 +38,7 @@ export class NativeChildSnapshots {
   capture(childKey: string): { assertUnchanged(): void; release(): void } {
     const known = this.#known.get(childKey);
     if (!known) throw new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE',
-      'Native child writer exit cannot be verified after executor restart or source eviction', false);
+      'Native child writer exit cannot be verified after executor restart or proof-cache eviction', false);
     const read: NativeRead = { rootId: known.rootId, changed: false };
     const assertUnchanged = () => {
       if (read.changed || this.#admissions.has(known.rootId)) {
