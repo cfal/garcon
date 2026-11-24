@@ -1189,7 +1189,7 @@ describe('PromptComposer focus', () => {
 		expect(focus.mock.calls.length).toBeGreaterThanOrEqual(2);
 	});
 
-	it('cancels focus retries when the user starts another interaction', async () => {
+	it.each(['pointer', 'keyboard'] as const)('cancels focus retries when the user starts a %s interaction', async (interaction) => {
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-focus-cancel',
 			focusRequestToken: 0,
@@ -1208,7 +1208,8 @@ describe('PromptComposer focus', () => {
 			focusRequestToken: 1,
 		});
 		await nextAnimationFrame();
-		await fireEvent.pointerDown(outsideButton);
+		if (interaction === 'pointer') await fireEvent.pointerDown(outsideButton);
+		else await fireEvent.keyDown(outsideButton, { key: 'Tab', shiftKey: true });
 		const callsAfterCancellation = focus.mock.calls.length;
 		await nextAnimationFrame();
 		await nextAnimationFrame();

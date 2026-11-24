@@ -121,9 +121,11 @@ for (const executionBackend of [
           await browserExpect(dock).toHaveCount(selected === chatId ? 1 : 0);
         }
         phase("keyboard selection sends slash-prefixed labels as text");
-        await dock.getByRole('button', { name: '/compact', exact: true }).focus();
+        const slashChoice = dock.getByRole('button', { name: '/compact', exact: true });
+        await editor.click();
+        await browserExpect(slashChoice).toBeEnabled();
         const slashReplyEvents = client.markEvents();
-        await page.keyboard.press("Enter");
+        await slashChoice.press("Enter");
         await fakeProviders.openAi.waitForRequest({ lastUserText: "/compact" });
         await client.waitForTurnTerminal(chatId, undefined, { afterIndex: slashReplyEvents });
         await browserExpect(page.locator('[data-chat-feed-content]')).toContainText('echo:/compact');
