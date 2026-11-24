@@ -232,6 +232,23 @@ printf '%s\\tModel\\n' "$(cat model)"
     }
   });
 
+  it('waits for a fresh listing when the last status check is older than the reuse window', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-expired-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    const status = () => getAntigravityAuthStatus(config(), { ...probes, headlessAuthenticate: false });
+    const start = Date.now();
+    try {
+      setSystemTime(start);
+      expect((await status()).authenticated).toBe(true);
+      await writeFile(join(dir.path, 'fail'), '');
+      setSystemTime(start + MODEL_LISTING_REUSE_MS);
+      expect((await status()).authenticated).toBe(false);
+      expect(await runs()).toBe(2);
+    } finally {
+      setSystemTime();
+    }
+  });
+
   it('publishes a listing before another caller can start a duplicate run', async () => {
     const runs: Array<PromiseWithResolvers<{ stdout: string; stderr: string; exitCode: number | null }>> = [];
     const probes = createAntigravityProbes(config(), () => {

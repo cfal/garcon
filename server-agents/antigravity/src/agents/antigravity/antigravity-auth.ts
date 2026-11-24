@@ -42,23 +42,25 @@ export function createAntigravityProbes(
       throw error;
     }
   });
-  const runModels = () => {
-    const key = modelsKey();
-    const listing = listings.get(key);
-    const refreshed = refreshListing(key);
-    if (!listing) return refreshed;
-    refreshed.catch(() => {});
-    return Promise.resolve(listing.result);
-  };
+  const isRecent = (listing: { readonly listedAt: number }) => Date.now() - listing.listedAt < MODEL_LISTING_REUSE_MS;
   return {
     lastProbed: null,
     authenticate: () => sharedProbe(authentication, JSON.stringify([config.binary(), config.authMethod()]),
       () => authenticateOnce(config)),
-    runModels,
+    runModels: () => {
+      const key = modelsKey();
+      const listing = listings.get(key);
+      const refreshed = refreshListing(key);
+      if (!listing || !isRecent(listing)) return refreshed;
+      refreshed.catch(() => {});
+      return Promise.resolve(listing.result);
+    },
     listModels: () => {
-      const listing = listings.get(modelsKey());
-      if (listing && Date.now() - listing.listedAt < MODEL_LISTING_REUSE_MS) return Promise.resolve(listing.result);
-      return runModels();
+      const key = modelsKey();
+      const listing = listings.get(key);
+      if (!listing) return refreshListing(key);
+      if (!isRecent(listing)) refreshListing(key).catch(() => {});
+      return Promise.resolve(listing.result);
     },
   };
 }
