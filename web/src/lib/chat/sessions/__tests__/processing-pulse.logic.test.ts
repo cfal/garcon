@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { processingPulsePhaseMs } from '../processing-pulse.js';
 
 describe('processing pulse', () => {
-	it('defines the shared pulse duration', () => {
+	it('uses a shared phase duration and steps the working indicators', () => {
 		const appCss = readFileSync(new URL('../../../../app.css', import.meta.url), 'utf8');
 
 		expect(appCss).toContain('--processing-pulse-duration: 2.4s;');
+		expect(appCss).toContain('--processing-motion-timing: steps(12, end);');
+		expect(appCss).toMatch(
+			/\.chat-processing-spinner\s*\{[^}]*animation-timing-function: var\(--processing-motion-timing\)/,
+		);
 	});
 
 	it('maps timestamps onto a shared looping phase', () => {

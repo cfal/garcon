@@ -1381,7 +1381,7 @@ describe('PromptComposer focus', () => {
 			'--composer-thinking-status-border: hsl(var(--composer-thinking-static-start));',
 		);
 		expect(motionAllowedRule?.groups?.body).toMatch(
-			/--composer-thinking-animation: composer-thinking-border-pulse var\(--processing-pulse-duration\)\s+ease-in-out infinite;/,
+			/--composer-thinking-animation: composer-thinking-border-pulse var\(--processing-pulse-duration\)\s+var\(--processing-motion-timing\) infinite;/,
 		);
 		expect(motionAllowedRule?.groups?.body).not.toContain('composer-thinking-static-start');
 	});

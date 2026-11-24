@@ -267,6 +267,7 @@
 	--app-viewport-offset-top: 0px;
 	--app-viewport-center-y: 50dvh;
 	--processing-pulse-duration: 2.4s;
+	--processing-motion-timing: steps(12, end);
 }
 
 .dark {
@@ -751,7 +752,7 @@
 @media (prefers-reduced-motion: no-preference) {
 	.composer-thinking-active:not(.composer-reduce-motion) {
 		--composer-thinking-animation: composer-thinking-border-pulse var(--processing-pulse-duration)
-			ease-in-out infinite;
+			var(--processing-motion-timing) infinite;
 		--composer-thinking-composer-background: hsl(var(--card));
 		--composer-thinking-composer-border: hsl(var(--border));
 		--composer-thinking-status-border: hsl(var(--border));
@@ -761,6 +762,7 @@
 @media (prefers-reduced-motion: no-preference) {
 	.chat-processing-spinner {
 		animation: var(--animate-spin);
+		animation-timing-function: var(--processing-motion-timing);
 	}
 
 	.sidebar-reduce-motion .chat-processing-spinner {
