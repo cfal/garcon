@@ -56,14 +56,14 @@ describe('PromptComposer prompt refinement', () => {
 		localStorage.clear();
 	});
 
-	it('places Refine between expanded composer and Send and enforces draft limits', async () => {
+	it('places Refine before expanded composer and Send and enforces draft limits', async () => {
 		render(PromptComposerTestHost, { selectedChatId: 'chat-refine-order' });
 		const open = screen.getByRole('button', { name: 'Open expanded composer' });
 		const refine = screen.getByRole('button', { name: 'Refine prompt' });
 		const send = screen.getByRole('button', { name: 'Send message' });
 
-		expect(open.compareDocumentPosition(refine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-		expect(refine.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(refine.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(open.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 		expect((refine as HTMLButtonElement).disabled).toBe(true);
 
 		await typeDraft('A draft to improve');

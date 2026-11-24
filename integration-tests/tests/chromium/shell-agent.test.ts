@@ -25,6 +25,14 @@ test('Shell composer preserves literal commands and stable chat switching on des
     const composer = page.locator('[data-composer]');
     const editor = composer.locator('textarea');
     await browserExpect(editor).toBeVisible();
+    phase('reading the unsupported attachment reason without a pointer');
+    const add = composer.getByRole('button', { name: 'Add to prompt', exact: true });
+    await add.press('Enter');
+    const image = page.getByRole('menuitem', { name: /Add image/ });
+    await browserExpect(image).toBeDisabled();
+    await browserExpect(image.getByText('The selected agent does not support file attachments.')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await browserExpect(add).toBeFocused();
     await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: '**plain output**' })).toBeVisible();
     await browserExpect(page.getByText('Completed', { exact: true })).toHaveCount(0);
     await browserExpect(page.getByText('text', { exact: true })).toHaveCount(0);

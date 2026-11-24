@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { openDialogModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,12 +140,9 @@ test('normal app onboarding supports both directions and sends remote chat input
         return dialog && !dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]');
       });
       await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Inbound Worker');
-      await openDialogModelSelector(fixture.page);
-      await app.waitForButton('Chat Completions', { timeout: 20_000 });
-      await app.clickButton('Chat Completions');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
-      await fixture.page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some((button) => button.getAttribute('aria-label')?.startsWith('Direct (Chat Completions) /')));
+      await app.openAgentModels('Chat Completions');
+      await selectModelOption(fixture.page, 'Integration Echo');
+      await fixture.page.waitForSelector('[role="dialog"] [data-slot="model-selector-trigger"][title^="Direct (Chat Completions) /"]');
       await app.fill('[role="dialog"] input[aria-label="Project Path"]', inboundDirs.project);
       const browsing = fixture.page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/files/browse' && new URL(response.url()).searchParams.get('executorId') === inbound.id);
       await fixture.page.$eval('input[aria-label="Project Path"]', (element) => (element as HTMLInputElement).focus());
@@ -195,9 +192,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForButton('Automation');
       await app.clickButton('Automation');
       const commitModel = '[role="group"][aria-label="Commit message model"]';
-      const modelTrigger = `${commitModel} button:not(:disabled):has([data-slot="model-selector-trigger-secondary"])`;
-      await fixture.page.waitForSelector(modelTrigger);
-      await fixture.page.$eval(modelTrigger, button => (button as HTMLButtonElement).click());
+      await openModelSelector(fixture.page, commitModel);
       await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[data-slot="model-selector-executors"] button')]
         .some((button) => button.textContent?.trim() === 'Inbound Worker' && !button.disabled));
       await fixture.page.evaluate(() => {
@@ -210,9 +205,9 @@ test('normal app onboarding supports both directions and sends remote chat input
         .some((button) => button.textContent?.trim() === 'Inbound Worker' && button.getAttribute('aria-pressed') === 'true'));
       await app.waitForButton('Chat Completions');
       await app.clickButton('Chat Completions');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
+      await selectModelOption(fixture.page, 'Integration Echo');
       await app.clickButton('Default Provider default effort');
+      await fixture.page.waitForSelector(`${commitModel} [data-slot="model-selector-trigger"][title*="Inbound Worker"][title*="Integration Echo"]`);
       const testModel = `${commitModel} button[aria-label="Test model"]:not(:disabled)`;
       await fixture.page.waitForSelector(testModel);
       await fixture.page.$eval(testModel, button => (button as HTMLButtonElement).click());
@@ -227,7 +222,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForDialogButtonEnabled('Use This Executor');
       await app.clickDialogButton('Use This Executor');
       await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"]') === null);
-      await app.waitForButton('Direct (Chat Completions) / Integration Fake OpenAI / Integration Echo');
+      await fixture.page.waitForSelector('[data-slot="model-selector-trigger"][title="Direct (Chat Completions) / Integration Fake OpenAI / Integration Echo"]');
       await app.waitForButton('Executor: Local');
       const committedLocal = (await fixture.integration.client.getChatSnapshot(chatId)).chat;
       expect(effectiveExecutorId(committedLocal.executorId)).toBe('local');

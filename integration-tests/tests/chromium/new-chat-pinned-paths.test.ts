@@ -77,20 +77,44 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         phase('selecting identical path on the real worker');
         await trigger.click();
         const workerPin = picker.getByRole('button', { name: `Integration worker: ${sharedPath}`, exact: true });
+        await picker.locator('button:enabled').last().focus();
+        await page.keyboard.press('Tab');
+        await browserExpect(picker.locator('button:enabled').first()).toBeFocused();
         await workerPin.focus();
-        const validated = page.waitForResponse(response => {
-          const url = new URL(response.url());
+        const validation = Promise.withResolvers<void>();
+        const request = page.waitForRequest(request => {
+          const url = new URL(request.url());
           return url.pathname === '/api/v1/chats/validate-start'
-            && url.searchParams.get('executorId') === client.executorId && response.ok();
+            && url.searchParams.get('executorId') === client.executorId;
         });
+        await page.route('**/api/v1/chats/validate-start?**', async route => {
+          await validation.promise;
+          await route.continue();
+        }, { times: 1 });
+        const checkMovedFocus = executionBackend === 'remote-controller-dials';
+        const executorPicker = dialog.getByRole('button', { name: 'Executor: Integration worker', exact: true });
         await page.clock.pauseAt(new Date());
-        await page.keyboard.press('Enter');
-        await validated;
-        await page.clock.resume();
+        try {
+          await page.keyboard.press('Enter');
+          await request;
+          await page.clock.resume();
+          await browserExpect(picker).toHaveCount(0);
+          await browserExpect(prompt).toBeFocused();
+          await browserExpect(dialog.getByRole('button', { name: 'Start session' })).toBeDisabled();
+          if (checkMovedFocus) {
+            await executorPicker.press('Enter');
+            await browserExpect(page.getByRole('menuitemradio', { name: 'Local', exact: true })).toBeVisible();
+            await page.keyboard.press('Escape');
+            await browserExpect(executorPicker).toBeFocused();
+          }
+        } finally {
+          validation.resolve();
+        }
         await browserExpect(page.getByText('Loading models...', { exact: true })).toHaveCount(0, { timeout: 20_000 });
-        await browserExpect(picker).toHaveCount(0);
         await browserExpect(pins.getByRole('button', { name: sharedPath, exact: true })).toHaveAttribute('aria-pressed', 'true');
         await browserExpect(prompt).toHaveValue('Synthetic retained draft');
+        await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
+        await browserExpect(checkMovedFocus ? executorPicker : prompt).toBeFocused();
       }
 
       for (const width of [1440, 390, 360]) {

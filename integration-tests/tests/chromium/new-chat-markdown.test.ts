@@ -132,7 +132,7 @@ test('New Chat keeps its 300px input cap in Source and formatted modes on deskto
       await browserExpect(source).toHaveValue(longDraft);
       await page.screenshot({ path: join(artifacts, `new-chat-markdown-sizing-${width}.png`) });
       // Keeps focus inside the dialog while the storage event replaces the focused editor.
-      await composer.getByRole('button', { name: 'Add to prompt', exact: true }).focus();
+      await composer.locator('[data-composer-group="prompt"] button:enabled').first().focus();
       await setFormat(page, 'source');
       await browserExpect(source).toBeVisible();
       await page.locator('#project-path-input').focus();

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { untrack } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import { getModelCatalog, getExecutors } from '$lib/context';
@@ -11,6 +11,8 @@
 	import ModelSelectorColumnsLayout from './ModelSelectorColumnsLayout.svelte';
 	import ModelSelectorCompactLayout from './ModelSelectorCompactLayout.svelte';
 	import { composerSelectionTriggerClass } from '$lib/components/shared/selection-trigger';
+	import ModelSelectorTrigger from './ModelSelectorTrigger.svelte';
+	import type { ModelTriggerDisplay, ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -28,7 +30,9 @@
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
-		triggerClass?: string;
+		toolbarDisplay?: ModelTriggerDisplay;
+		onMeasure?: (widths: ModelTriggerWidths) => void;
+		overflowAnchor?: HTMLElement | null;
 		contentClass?: string;
 	}
 
@@ -42,7 +46,9 @@
 		disabled = false,
 		align = 'end',
 		side = 'bottom',
-		triggerClass,
+		toolbarDisplay,
+		onMeasure,
+		overflowAnchor: toolbarAnchor = null,
 		contentClass,
 	}: Props = $props();
 
@@ -69,15 +75,28 @@
 		onChange: (next) => onChange(next),
 	});
 
-	let isCompactLayout = $state(false);
 	let triggerNode = $state<HTMLElement | null>(null);
 	let contentNode = $state<HTMLElement | null>(null);
+	let closingFromOutside = false;
+	let triggerFrame = $state<ModelSelectorTrigger>();
+	const pickerAnchor = $derived(toolbarAnchor ?? triggerFrame?.standaloneAnchor() ?? triggerNode);
+	const committed = $derived(selector.committedSelection);
 
 	const showAgent = $derived(mode.agent === 'select');
 	const sourceSelectionEnabled = $derived(mode.source === 'select');
 	const showSource = $derived(selector.shouldShowSourcePicker);
 	const showEffort = $derived(selector.effortSelectionEnabled);
 	const showExecutor = $derived(selector.showExecutorPicker);
+	const compactMaxWidth = $derived(
+		(showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) +
+			(showExecutor ? 176 : 0),
+	);
+	const compactViewport = $derived(
+		typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+			? new MediaQuery(`(max-width: ${compactMaxWidth}px)`)
+			: undefined,
+	);
+	const isCompactLayout = $derived(compactViewport?.current ?? false);
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
 		if (showExecutor) {
@@ -95,50 +114,70 @@
 		return !showAgent && !sourceSelectionEnabled ? 'h-[18rem]' : 'h-[26rem]';
 	});
 	const triggerBaseClass = $derived(
-		surfaceIsSettings
-			? 'inline-flex min-h-9 min-w-0 max-w-[18rem] items-center justify-between gap-2 overflow-hidden rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
-			: cn(composerSelectionTriggerClass, 'max-w-[11rem] sm:max-w-[15rem]'),
-	);
-	const showTriggerSecondaryLine = $derived(
-		surfaceIsSettings || mode.agent === 'select' || Boolean(selector.triggerSecondary),
+		cn(
+			surfaceIsSettings
+				? 'inline-flex min-h-9 min-w-0 items-center rounded-md border border-border bg-muted px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
+				: composerSelectionTriggerClass,
+			'whitespace-nowrap font-medium',
+		),
 	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
-
-	$effect(() => {
-		if (typeof window.matchMedia !== 'function') return;
-		const compactMaxWidth = (showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) + (showExecutor ? 176 : 0);
-		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
-		const updateLayout = () => {
-			isCompactLayout = mediaQuery.matches;
-		};
-		updateLayout();
-		mediaQuery.addEventListener('change', updateLayout);
-		return () => mediaQuery.removeEventListener('change', updateLayout);
-	});
 
 	$effect(() => {
 		void selector.committedExecutorId;
 		untrack(() => selector.reconcileExecutor());
 	});
 
+	export function menuSelection() {
+		return {
+			summary: [committed.agentLabel, committed.modelLabel].filter(Boolean).join(' / '),
+			title: selector.triggerTitle,
+		};
+	}
+
+	export function openPicker(): void {
+		if (!disabled && !selector.open) handleOpenChange(true);
+	}
+
+	export function dismissPicker(): void {
+		if (selector.open) {
+			closingFromOutside = true;
+			handleOpenChange(false);
+		}
+	}
+
+	function isLayoutResize(event: Event): boolean {
+		return event.target instanceof Element && !!event.target.closest('[data-layout-resizer]');
+	}
+
+	function restoreTriggerFocus(event: Event): void {
+		if (!pickerAnchor?.isConnected) return;
+		event.preventDefault();
+		pickerAnchor.focus({ preventScroll: true });
+	}
+
+	function closeDraft(compact: boolean): void {
+		if (compact) selector.discardAndClose();
+		else selector.commitAndClose();
+	}
+
 	function handleOpenChange(open: boolean): void {
 		if (open) {
+			closingFromOutside = false;
 			void executors.refresh();
 			selector.openDraft();
 			return;
 		}
-		if (isCompactLayout) {
-			selector.discardAndClose();
-			return;
-		}
-		selector.commitAndClose();
+		closeDraft(isCompactLayout);
 	}
 
 	$effect(() => {
 		if (!selector.open || !selector.executorReady) return;
 		const catalog = selector.modelCatalog;
 		void catalog.version;
-		untrack(() => { void catalog.refreshIfStale(); });
+		untrack(() => {
+			void catalog.refreshIfStale();
+		});
 	});
 
 	$effect(() => {
@@ -155,12 +194,15 @@
 		function handleDocumentPointerDown(event: PointerEvent): void {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
-			if (trigger.contains(target) || content.contains(target)) return;
-			if (compactLayout) {
-				selector.discardAndClose();
+			if (
+				isLayoutResize(event) ||
+				trigger.contains(target) ||
+				pickerAnchor?.contains(target) ||
+				content.contains(target)
+			)
 				return;
-			}
-			selector.commitAndClose();
+			closingFromOutside = true;
+			closeDraft(compactLayout);
 		}
 
 		return () => {
@@ -171,24 +213,6 @@
 		};
 	});
 </script>
-
-{#snippet triggerContent()}
-	<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
-		<span class="truncate font-medium"
-			>{selector.executorSelectionEnabled && selector.committedExecutorId !== 'local' ? `${selector.executorLabel} / ` : ''}{selector.triggerPrimary || m.model_selector_unavailable()}</span
-		>
-		{#if showTriggerSecondaryLine}
-			<span
-				data-slot="model-selector-trigger-secondary"
-				aria-hidden={!selector.triggerSecondary}
-				class="min-h-4 truncate text-xs text-muted-foreground"
-			>
-				{selector.triggerSecondary}
-			</span>
-		{/if}
-	</span>
-	<ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
-{/snippet}
 
 {#snippet catalogError()}
 	{#if selector.modelCatalog.error}
@@ -203,66 +227,91 @@
 	{/if}
 {/snippet}
 
-{#if isCompactLayout}
-	<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
-		<Dialog.Trigger
-			bind:ref={triggerNode}
+<ModelSelectorTrigger
+	bind:this={triggerFrame}
+	agent={committed.agentLabel}
+	model={committed.modelLabel}
+	menuSelection={menuSelection()}
+	buttonClass={triggerBaseClass}
+	{toolbarDisplay}
+	{onMeasure}
+	{triggerNode}
+	{disabled}
+	{side}
+	{align}
+	{openPicker}
+	{dismissPicker}
+>
+	{#snippet children(label, hidden)}
+		<!-- The enclosing dialog keeps this focus anchor when the picker changes surfaces. -->
+		<button
+			bind:this={triggerNode}
+			type="button"
 			{disabled}
+			{hidden}
 			title={selector.triggerTitle}
-			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
-			class={cn(triggerBaseClass, triggerClass)}
+			aria-haspopup="dialog"
+			aria-expanded={selector.open}
+			aria-controls={selector.open ? contentNode?.id : undefined}
+			data-state={selector.open ? 'open' : 'closed'}
+			data-slot="model-selector-trigger"
+			data-composer-control={toolbarDisplay === undefined ? undefined : 'model'}
+			onclick={() => handleOpenChange(!selector.open)}
+			class="{triggerBaseClass} col-start-1 row-start-1">{label}</button
 		>
-			{@render triggerContent()}
-		</Dialog.Trigger>
-		<Dialog.Content
-			bind:ref={contentNode}
-			class={cn(
-				'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
-				contentClass,
-			)}
-			showCloseButton={false}
-		>
-			{@render catalogError()}
-			<div class="min-h-0 flex-1">
-			<ModelSelectorCompactLayout
-				{selector}
-				{showAgent}
-				showSource={sourceSelectionEnabled}
-				{modelListId}
-				onCancel={() => selector.discardAndClose()}
-				onDone={() => selector.commitAndClose()}
-			/>
-			</div>
-		</Dialog.Content>
-	</Dialog.Root>
-{:else}
-	<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
-		<Popover.Trigger
-			bind:ref={triggerNode}
-			{disabled}
-			title={selector.triggerTitle}
-			aria-label={selector.triggerTitle || m.model_selector_unavailable()}
-			class={cn(triggerBaseClass, triggerClass)}
-		>
-			{@render triggerContent()}
-		</Popover.Trigger>
-		<Popover.Content
-			bind:ref={contentNode}
-			{align}
-			{side}
-			sideOffset={8}
-			collisionPadding={8}
-			class={cn(
-				contentWidthClass,
-				contentHeightClass,
-				'flex max-h-(--bits-popover-content-available-height) flex-col overflow-hidden p-0',
-				contentClass,
-			)}
-		>
-			{@render catalogError()}
-			<div class="min-h-0 flex-1">
-			<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
-			</div>
-		</Popover.Content>
-	</Popover.Root>
-{/if}
+		{#if isCompactLayout}
+			<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
+				<Dialog.Content
+					onCloseAutoFocus={restoreTriggerFocus}
+					bind:ref={contentNode}
+					class={cn(
+						'safe-viewport-dialog top-[var(--app-viewport-center-y)] flex h-[min(36rem,calc(var(--app-height)-1rem))] flex-col gap-0 overflow-hidden p-0',
+						contentClass,
+					)}
+					showCloseButton={false}
+				>
+					{@render catalogError()}
+					<div class="min-h-0 flex-1">
+						<ModelSelectorCompactLayout
+							{selector}
+							{showAgent}
+							showSource={sourceSelectionEnabled}
+							{modelListId}
+							onCancel={() => selector.discardAndClose()}
+							onDone={() => selector.commitAndClose()}
+						/>
+					</div>
+				</Dialog.Content>
+			</Dialog.Root>
+		{:else}
+			<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
+				<Popover.Content
+					customAnchor={pickerAnchor}
+					onInteractOutside={(event) => {
+						if (isLayoutResize(event)) event.preventDefault();
+					}}
+					getFocusReturnTarget={() => pickerAnchor}
+					onCloseAutoFocus={(event) => {
+						if (!closingFromOutside) restoreTriggerFocus(event);
+					}}
+					bind:ref={contentNode}
+					{align}
+					{side}
+					sideOffset={8}
+					collisionPadding={8}
+					class={cn(
+						contentWidthClass,
+						contentHeightClass,
+						'flex max-h-(--bits-popover-content-available-height) flex-col overflow-hidden p-0',
+						contentClass,
+					)}
+				>
+					{@render catalogError()}
+					<div class="min-h-0 flex-1">
+						<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
+					</div>
+				</Popover.Content>
+			</Popover.Root>
+		{/if}
+	{/snippet}
+</ModelSelectorTrigger>

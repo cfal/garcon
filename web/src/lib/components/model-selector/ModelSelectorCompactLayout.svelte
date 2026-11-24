@@ -87,17 +87,19 @@
 
 	$effect(() => {
 		if (!selector.open || pane !== 'model') return;
-		requestAnimationFrame(() => inputRef?.focus());
+		const frame = requestAnimationFrame(() => inputRef?.focus());
+		return () => cancelAnimationFrame(frame);
 	});
 
 	$effect(() => {
 		if (!selector.open || pane !== 'effort') return;
-		requestAnimationFrame(() => {
+		const frame = requestAnimationFrame(() => {
 			const selectedOption = effortPaneRef?.querySelector<HTMLButtonElement>(
 				'button[aria-pressed="true"]',
 			);
 			selectedOption?.focus();
 		});
+		return () => cancelAnimationFrame(frame);
 	});
 
 	$effect(() => {
@@ -106,12 +108,13 @@
 	});
 
 	function firstPane(): CompactPane {
+		if (selector.query) return 'model';
 		if (selector.showExecutorPicker && !selector.currentModelValue) return 'executor';
 		return firstModelPane();
 	}
 
 	function firstModelPane(): CompactPane {
-		if (selector.shouldStartFromRecentsOnOpen) return 'recent';
+		if (selector.isRecentsPaneActive && selector.recentOptions.length > 0) return 'recent';
 		if (selector.currentModelValue) return 'model';
 		if (selector.recentOptions.length > 0 && showAgent) return 'menu';
 		if (showAgent) return 'agent';
@@ -144,7 +147,14 @@
 	}
 
 	function handleBack(): void {
-		if (previousPane) pane = previousPane;
+		if (!previousPane) return;
+		selector.showBrowsePane();
+		pane = previousPane;
+	}
+
+	function showRecents(): void {
+		selector.showRecentsPane();
+		pane = 'recent';
 	}
 
 	function handleModelInputKeydown(event: KeyboardEvent): void {
@@ -244,7 +254,7 @@
 					<button
 						type="button"
 						class="flex min-h-11 w-full touch-pan-y items-center gap-2 rounded-sm px-2 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
-						onclick={() => (pane = 'recent')}
+						onclick={showRecents}
 					>
 						<span class="min-w-0 flex-1 truncate font-medium">
 							{m.model_selector_recents()}

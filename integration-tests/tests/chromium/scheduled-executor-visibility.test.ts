@@ -62,6 +62,20 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(editor.getByRole('button', { name: 'Save Prompt', exact: true })).toBeEnabled({ timeout: 20_000 });
       await capture('desktop-editor');
 
+      phase('fitting the scheduled model without duplicating the project executor');
+      const toolbar = editor.locator('[data-slot="composer-bottom-bar"]');
+      const model = toolbar.locator('[data-slot="model-selector-trigger"]');
+      await browserExpect(model).toHaveText('Direct (Chat Completions) Integration Echo');
+      await toolbar.evaluate(node => { node.style.width = '96px'; });
+      await browserExpect(model).toBeHidden();
+      await toolbar.getByRole('button', { name: 'More model settings' }).click();
+      const popup = page.getByRole('menu');
+      await browserExpect(popup.getByRole('menuitem', { name: /Agent \/ model/ })).toContainText('Integration Echo');
+      await browserExpect(popup.getByRole('menuitem', { name: /Executor/ })).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await toolbar.evaluate(node => { node.style.removeProperty('width'); });
+      await browserExpect(model).toBeVisible();
+
       phase('mobile executor context and owning filesystem');
       const cdp = await context.newCDPSession(page);
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });

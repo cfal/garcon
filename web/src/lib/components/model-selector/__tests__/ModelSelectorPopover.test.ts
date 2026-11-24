@@ -184,8 +184,10 @@ describe('ModelSelectorPopover', () => {
 				onChange,
 				executors: [localExecutor, remoteExecutor],
 			});
-			const trigger = screen.getByRole('button', { name: /Claude .* Model 0/ });
+			const trigger = screen.getByRole('button', { name: 'Claude Model 0' });
 			const label = trigger.textContent;
+			expect(label).toBe('Claude Model 0');
+			expect(trigger.querySelector('svg')).toBeNull();
 			await fireEvent.click(trigger);
 			const destination = committedExecutor.id === 'local' ? remoteExecutor : localExecutor;
 			await fireEvent.click(await screen.findByRole('button', { name: destination.label }));
@@ -207,7 +209,7 @@ describe('ModelSelectorPopover', () => {
 			catalogError: 'Failed to fetch model catalog: 502',
 			onRetryCatalog,
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const alert = await screen.findByRole('alert');
 		expect(alert.textContent).toContain('Failed to fetch model catalog: 502');
 		await fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
@@ -223,7 +225,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const input = await screen.findByPlaceholderText('Filter models...');
 		await fireEvent.input(input, { target: { value: 'model-119' } });
 		await fireEvent.click(await screen.findByText('Model 119'));
@@ -251,7 +253,7 @@ describe('ModelSelectorPopover', () => {
 			mode: { executor: 'fixed', agent: 'select', source: 'select', surface: 'composer' },
 			onChange, executors: [localExecutor, remoteExecutor],
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		expect(document.querySelector('[data-slot="model-selector-executors"]')).toBeNull();
 		await view.rerender({ value: { executorId: remoteExecutor.id, agentId: 'claude', model: 'model-0' } });
 		await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull());
@@ -270,7 +272,7 @@ describe('ModelSelectorPopover', () => {
 			onFormSubmit: onSubmit,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
 
@@ -287,7 +289,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0 .* Default/ }));
+		await fireEvent.click(screen.getByRole('button', { description: /Claude .* Model 0 .* Default/ }));
 		const input = await screen.findByPlaceholderText('Filter models...');
 		await fireEvent.input(input, { target: { value: 'model-119' } });
 		await fireEvent.click(await screen.findByText('Model 119'));
@@ -320,7 +322,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Amp .* Amp Medium/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Amp Amp Medium' }));
 
 		expect(screen.queryByText('Effort')).toBeNull();
 		expect(screen.queryByRole('button', { name: /Default Provider default effort/ })).toBeNull();
@@ -344,7 +346,7 @@ describe('ModelSelectorPopover', () => {
 		});
 
 		await fireEvent.click(
-			screen.getByRole('button', { name: /Claude .* endpoint-model .* Default/ }),
+			screen.getByRole('button', { description: /Claude .* endpoint-model .* Default/ }),
 		);
 		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
 
@@ -380,7 +382,7 @@ describe('ModelSelectorPopover', () => {
 		});
 
 		await fireEvent.click(
-			screen.getByRole('button', { name: /Claude .* endpoint-model .* Default/ }),
+			screen.getByRole('button', { description: /Claude .* endpoint-model .* Default/ }),
 		);
 		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
 
@@ -406,7 +408,7 @@ describe('ModelSelectorPopover', () => {
 			mode: { executor: 'fixed', agent: 'select', source: 'select', surface: 'composer' },
 			onChange,
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .*model-0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude model-0' }));
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		await fireEvent.click(within(listbox).getByText('Model 0'));
 		await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
@@ -424,7 +426,7 @@ describe('ModelSelectorPopover', () => {
 			mode: { agent: 'select', source: 'select', surface: 'settings' },
 			includeEndpointModel: true, onChange,
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Endpoint Model/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Endpoint Model' }));
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
 		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
@@ -440,7 +442,7 @@ describe('ModelSelectorPopover', () => {
 			mode: { agent: 'select', source: 'select', surface: 'settings' },
 			includeEndpointModel: true, onChange,
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Endpoint Model/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Endpoint Model' }));
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		await fireEvent.click(within(listbox).getByText('Endpoint Model'));
 		expect(onChange).not.toHaveBeenCalled();
@@ -464,7 +466,7 @@ describe('ModelSelectorPopover', () => {
 		});
 
 		await fireEvent.click(
-			screen.getByRole('button', { name: /Claude .* endpoint-model .* Default/ }),
+			screen.getByRole('button', { description: /Claude .* endpoint-model .* Default/ }),
 		);
 		await fireEvent.click(await screen.findByRole('button', { name: 'Acme' }));
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
@@ -503,7 +505,7 @@ describe('ModelSelectorPopover', () => {
 
 		await fireEvent.click(
 			screen.getByRole('button', {
-				name: /Direct \(Anthropic\) .* removed-from-catalog .* Default/,
+				description: /Direct \(Anthropic\) .* removed-from-catalog .* Default/,
 			}),
 		);
 		await fireEvent.click(screen.getByRole('button', { name: /High Thorough reasoning/ }));
@@ -531,7 +533,7 @@ describe('ModelSelectorPopover', () => {
 			executors: [localExecutor, remoteExecutor],
 			onChange,
 		});
-		const trigger = screen.getByRole('button', { name: /Claude .* Model 0/ });
+		const trigger = screen.getByRole('button', { name: 'Claude Model 0' });
 		await fireEvent.click(trigger);
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		expect(screen.getByRole('button', { name: 'Local' })).toBeTruthy();
@@ -542,7 +544,7 @@ describe('ModelSelectorPopover', () => {
 			expect(document.querySelector('[data-slot="model-selector-executors"]')).toBeNull();
 		});
 		expect(screen.getByPlaceholderText('Filter models...')).toBeTruthy();
-		expect(trigger.getAttribute('aria-label')).toMatch(/Unavailable executor.*Claude.*Model 0/);
+		expect(screen.getByRole('button', { description: /Unavailable executor.*Claude.*Model 0/ })).toBe(trigger);
 		expect(onChange).not.toHaveBeenCalled();
 	});
 
@@ -554,7 +556,7 @@ describe('ModelSelectorPopover', () => {
 			mode: { executor: 'select', agent: 'select', source: 'select', surface: 'settings', effort: 'select' },
 			executors: [localExecutor, remoteExecutor], onChange,
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(within(await screen.findByRole('listbox', { name: 'Model' })).getByText('Model 1'));
 		expect(screen.getByRole('button', { name: /Ultra Highest available reasoning effort/ })).toBeTruthy();
 		for (let i = 0; i < 3; i++) await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -575,7 +577,7 @@ describe('ModelSelectorPopover', () => {
 			executors: [localExecutor, remoteExecutor], recents: [claudeRecent(), codexRecent()],
 			preferRecentsOnOpen: true, onChange: vi.fn(),
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -594,7 +596,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0 .* Low/ }));
+		await fireEvent.click(screen.getByRole('button', { description: /Claude .* Model 0 .* Low/ }));
 		await chooseCodexModelInCompactLayout();
 
 		expect(onChange).not.toHaveBeenCalled();
@@ -641,7 +643,7 @@ describe('ModelSelectorPopover', () => {
 			executors,
 			onChange,
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const dialog = screen.getByRole('dialog');
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Amp' }));
@@ -664,7 +666,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 
 		expect(within(listbox).getByText('Model 0')).toBeTruthy();
@@ -681,7 +683,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const input = await screen.findByPlaceholderText('Filter models...');
 
 		expect(input.className).toContain('text-[16px]');
@@ -697,7 +699,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(await screen.findByRole('button', { name: /Codex/ }));
 
 		expect(onChange).not.toHaveBeenCalled();
@@ -733,12 +735,12 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(await screen.findByRole('button', { name: /Codex/ }));
 
 		expect(onChange).not.toHaveBeenCalled();
-		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
-		expect(screen.queryByRole('button', { name: /Codex .* Codex Model 0/ })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Claude Model 0' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Codex Codex Model 0' })).toBeNull();
 	});
 
 	it('does not commit agent navigation without a model selection', async () => {
@@ -750,13 +752,13 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(await screen.findByRole('button', { name: /Codex/ }));
 
 		await closePopoverByOutsideClick();
 
 		expect(onChange).not.toHaveBeenCalled();
-		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude Model 0' })).toBeTruthy();
 	});
 
 	it('keeps provider source navigation draft-only until a model is selected', async () => {
@@ -769,7 +771,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Acme' }));
 
 		expect(onChange).not.toHaveBeenCalled();
@@ -807,7 +809,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Acme' }));
 
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
@@ -817,7 +819,7 @@ describe('ModelSelectorPopover', () => {
 		await closePopoverByOutsideClick();
 
 		expect(onChange).not.toHaveBeenCalled();
-		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude Model 0' })).toBeTruthy();
 	});
 
 	it('hides the desktop provider column for a single agent-managed source', async () => {
@@ -828,7 +830,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		expect(await screen.findByText('Provider')).toBeTruthy();
 		expect(document.querySelector('[data-popover-content]')?.getAttribute('class')).toContain(
 			'w-[min(50rem,calc(100vw-1rem))]',
@@ -854,7 +856,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		expect(
 			screen.getByRole('button', { name: 'Claude' }).querySelector('.lucide-check'),
@@ -908,7 +910,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const recentsButton = await screen.findByRole('button', { name: 'Recents' });
 		const agentHeader = screen.getByText('Agents');
 
@@ -950,7 +952,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		const recentsButton = await screen.findByRole('button', { name: 'Recents' });
 		const groupHeaders = Array.from(
@@ -995,7 +997,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		expect(
 			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
@@ -1014,7 +1016,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		const currentRecent = screen.getByRole('button', {
@@ -1037,7 +1039,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(within(listbox).getByText('Model 0')).toBeTruthy();
@@ -1055,7 +1057,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Recents' }));
 		await fireEvent.click(
 			await screen.findByRole('button', { name: 'Claude · Acme · Endpoint Model' }),
@@ -1072,7 +1074,7 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
-	it('reserves the trigger subtitle row when the committed subtitle is empty', () => {
+	it('shows only the agent when no model is available', () => {
 		render(ModelSelectorPopoverHost, {
 			value: { agentId: 'claude', model: '' },
 			mode: { agent: 'fixed', source: 'hidden', surface: 'settings' },
@@ -1081,11 +1083,9 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		const subtitle = document.querySelector('[data-slot="model-selector-trigger-secondary"]');
-
-		expect(subtitle).toBeTruthy();
-		expect(subtitle?.textContent).toBe('');
-		expect(subtitle?.getAttribute('aria-hidden')).toBe('true');
+		const trigger = screen.getByRole('button', { name: /Claude/ });
+		expect(trigger.textContent).toBe('Claude');
+		expect(trigger.childElementCount).toBe(0);
 	});
 
 	it('uses a compact drill-down layout on narrow screens starting from the selected model', async () => {
@@ -1098,7 +1098,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		expect(document.querySelector('[data-slot="model-selector-compact"]')).toBeTruthy();
 		expect(document.querySelector('[data-popover-content]')).toBeNull();
@@ -1154,7 +1154,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
 		const groupHeaders = Array.from(
@@ -1174,7 +1174,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
 		expect(screen.getByText('Agent')).toBeTruthy();
@@ -1193,7 +1193,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		expect(await screen.findByRole('listbox', { name: 'Model' })).toBeTruthy();
 
@@ -1239,7 +1239,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		expect(await screen.findByRole('listbox', { name: 'Model' })).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
@@ -1276,7 +1276,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(
@@ -1323,7 +1323,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Endpoint Model/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Endpoint Model' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		const currentRecent = screen.getByRole('button', { name: 'Claude · Acme · Endpoint Model' });
@@ -1351,7 +1351,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Codex .* Codex Model 1/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex Codex Model 1' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(
@@ -1387,7 +1387,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await chooseCodexModelInCompactLayout();
 
 		await waitFor(() => {
@@ -1414,7 +1414,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Codex' }));
 
@@ -1436,21 +1436,21 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(onChange).not.toHaveBeenCalled();
-		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude Model 0' })).toBeTruthy();
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
 		await closePopoverByOutsideClick();
 
 		expect(onChange).not.toHaveBeenCalled();
-		expect(screen.getByRole('button', { name: /Claude .* Model 0/ })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude Model 0' })).toBeTruthy();
 	});
 
 	it('renders matching model rows as a single visible label', async () => {
@@ -1460,7 +1460,7 @@ describe('ModelSelectorPopover', () => {
 			onChange: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const input = await screen.findByPlaceholderText('Filter models...');
 		await fireEvent.input(input, { target: { value: 'same-model' } });
 
@@ -1478,7 +1478,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const input = await screen.findByPlaceholderText('Filter models...');
 		await fireEvent.input(input, { target: { value: 'model-599' } });
 		await fireEvent.click(await screen.findByText('Model 599'));
@@ -1508,7 +1508,7 @@ describe('ModelSelectorPopover', () => {
 			onChange,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Model 0' }));
 		const input = await screen.findByPlaceholderText('Filter models...');
 
 		await fireEvent.keyDown(input, { key: 'End' });

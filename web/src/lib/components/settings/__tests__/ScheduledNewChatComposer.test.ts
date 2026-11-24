@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
-import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { AppShellStore } from '$lib/stores/app-shell.svelte';
@@ -89,9 +89,7 @@ function renderComposer(
 	const onPromptChange = vi.fn();
 	const onPromptKeydown = vi.fn();
 	const startup = makeStartup(overrides.modelSelectionError, overrides.executorId);
-	const modelCatalog = {
-		getSelectableAgents: () => [],
-	} as unknown as ModelCatalogStore;
+	const modelCatalog = new ModelCatalogStore();
 	const remoteSettings = {
 		snapshot: { recentAgentSettings: [] },
 	} as unknown as RemoteSettingsStore;
@@ -129,7 +127,7 @@ describe('ScheduledNewChatComposer', () => {
 		const { container, startup } = renderComposer();
 		const configuration = container.querySelector('[data-slot="scheduled-new-chat-configuration"]');
 		const composer = container.querySelector('[data-slot="scheduled-new-chat-composer"]');
-		const controls = container.querySelector('[data-slot="scheduled-new-chat-composer-controls"]');
+		const controls = composer?.querySelector('[data-slot="composer-bottom-bar"]');
 		const prompt = screen.getByRole('textbox', { name: 'Prompt' });
 		const projectPath = screen.getByRole('textbox', { name: 'Project Path' });
 		const selectWorktree = screen.getByRole('button', { name: 'Select a different worktree' });
@@ -140,7 +138,7 @@ describe('ScheduledNewChatComposer', () => {
 		expect(composer).toBeTruthy();
 		expect(composer?.className).not.toContain('pb-1.5');
 		expect(composer?.contains(prompt)).toBe(true);
-		expect(composer?.contains(controls)).toBe(true);
+		expect(controls).toBeTruthy();
 		const modelSelector = screen.getByRole('button', { name: 'Model selector' });
 		expect(controls?.contains(modelSelector)).toBe(true);
 		expect(modelSelector.dataset.selectableAgentIds).toBe('claude,codex');

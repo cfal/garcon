@@ -82,9 +82,7 @@ for (const overflowing of [false, true]) {
         const input = page.locator('#project-path-input');
         await browserExpect(input).toBeVisible();
         const dialog = page.getByRole('dialog');
-        const trigger = dialog
-          .locator('[data-slot="composer-bottom-bar"] button')
-          .filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') });
+        const trigger = dialog.locator('[data-slot="model-selector-trigger"]');
         await trigger.click();
         const columns = page.locator('[data-slot="model-selector-columns"]');
         const codex = columns.getByRole('button', { name: /^Codex\b/ });

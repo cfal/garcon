@@ -11,6 +11,7 @@ import {
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 const HEAD = '3f9c2ab41d6e0c7b8a5f2e1d9c4b3a2f1e0d9c8b';
 
@@ -56,6 +57,7 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     phase('open Pull Requests from Github before connecting');
     // Wide enough for the inbox list and detail to stay side by side next to the review chat.
     await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.addInitScript(seedLocalSettings, { modelControlsLeft: true });
     await page.goto(integration.garcon.baseUrl);
     await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().waitFor({ timeout: 30_000 });
     await collapseCanonicalFilesWindow(page);
@@ -70,6 +72,10 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     await panel.locator('[data-pr-inbox-connect]').click();
     const connectForm = page.locator('[data-pr-repository-dialog]');
     await connectForm.getByText('Review automatically', { exact: true }).waitFor();
+    const modelControls = connectForm.locator('[data-composer-group="settings"]');
+    await browserExpect.poll(() => modelControls.evaluate(group =>
+      Math.abs(group.getBoundingClientRect().left - group.parentElement!.getBoundingClientRect().left),
+    )).toBeLessThan(1);
     // Review prompts offer their own tokens, not the scheduled-prompt chat ID.
     await connectForm.getByRole('button', { name: 'Insert variable', exact: true }).click();
     await browserExpect(page.getByRole('menuitem', { name: /\{\{pull_request_number\}\}/ })).toBeVisible();

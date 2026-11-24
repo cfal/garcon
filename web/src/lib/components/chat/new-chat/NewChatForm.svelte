@@ -23,10 +23,7 @@
 		applySnippetTriggerReplacement,
 		findSnippetTrigger,
 	} from '$lib/chat/composer/snippet-trigger.js';
-	import {
-		buildPermissionOptions,
-		buildThinkingOptions,
-	} from '$lib/chat/composer/composer-controls.js';
+	import { newChatToolbarSettings } from './new-chat-toolbar-settings';
 	import {
 		promptEditorSelectionFromTextarea,
 		restorePromptEditorSelection,
@@ -37,7 +34,6 @@
 	import ComposerAttachmentBadge from '../composer/ComposerAttachmentBadge.svelte';
 	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from '../composer/ComposerSnippetPalette.svelte';
-	import AgentSettingsControls from '../composer/AgentSettingsControls.svelte';
 	import NewChatPreambleControls from '../../preambles/NewChatPreambleControls.svelte';
 	import ChatTagEditor from '../ChatTagEditor.svelte';
 	import ChatTagToggleButton from '../ChatTagToggleButton.svelte';
@@ -65,13 +61,8 @@
 	import FileVideo from '@lucide/svelte/icons/file-video';
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
-	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-	} from '$lib/components/model-selector/model-selector-types';
-	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
+	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 	import {
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
@@ -123,6 +114,7 @@
 			return newChatAgentIds;
 		},
 		promptDraft,
+		onWorktreeSelected: () => void tick().then(returnTextareaFocus),
 	});
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
 	const executionAgent = $derived(modelCatalog.getAgent(form.agentId));
@@ -290,17 +282,7 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
-	// Focus textarea when path validates successfully, but not while browsing.
-	$effect(() => {
-		if (
-			initialContentReady &&
-			form.validationStatus === 'valid' &&
-			!form.showBrowser &&
-			canFocusTextarea()
-		) {
-			untrack(returnTextareaFocus);
-		}
-	});
+	let pathInput: HTMLInputElement | null = $state(null);
 
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
@@ -604,25 +586,13 @@
 		onCancel?.();
 	}
 
-	const permissionOptions = $derived(buildPermissionOptions(form.permissionModes));
-	const thinkingOptions = $derived(buildThinkingOptions(form.thinkingModes, form.modelValue));
-	const modelSelectorMode: ModelSelectorMode = {
-		agent: 'select',
-		source: 'select',
-		surface: 'composer',
-	};
-	const modelSelectorValue = $derived({
-		executorId: form.executorId,
-		agentId: form.agentId,
-		model: form.modelValue,
-		...(form.modelSelectionTarget ?? {}),
-	});
-	function getRecents(executorId: string) {
-		return buildModelSelectorRecents(
-			rootModelCatalog.forExecutor(executorId),
-			remoteSettings.snapshot?.recentAgentSettings ?? [],
-		);
-	}
+	const toolbarSettings = $derived(newChatToolbarSettings({
+		form,
+		modelCatalog: rootModelCatalog,
+		remoteSettings,
+		getSelectableAgentIds: selectableAgentsForExecutor,
+		onModelChange: handleModelSelectorChange,
+	}));
 	const displayedFormError = $derived(
 		form.modelSelectionError ??
 			form.agentSelectionError ??
@@ -630,8 +600,6 @@
 			form.attachmentError ??
 			form.error,
 	);
-	const sendButtonClass =
-		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
 		if (!localSettings.allowDirectChats && nonDirectAgentIds([next.agentId]).length === 0) return;
@@ -659,8 +627,10 @@
 				<ProjectPathField
 					id="project-path-input"
 					aria-label={m.chat_new_chat_project_path()}
+					bind:ref={pathInput}
 					bind:value={form.projectPath}
 					readonly={form.isUpdatingPinnedPath}
+					inputmode={isMobile && form.filesAvailable ? 'none' : undefined}
 					placeholder={form.projectBasePath}
 					class="h-[42px] sm:pointer-fine:h-[38px]"
 					validationStatus={form.validationStatus}
@@ -669,6 +639,9 @@
 						if (isMobile && form.filesAvailable) event.currentTarget.blur();
 						if (form.isUpdatingPinnedPath) return;
 						form.handlePathFocus();
+					}}
+					onclick={() => {
+						if (isMobile && !form.isUpdatingPinnedPath) form.handlePathFocus();
 					}}
 					oninput={() => {
 						form.clearError();
@@ -683,7 +656,7 @@
 						if (event.key === 'Enter') {
 							event.preventDefault();
 							form.showBrowser = false;
-							textareaRef?.focus();
+							returnTextareaFocus();
 						}
 					}}
 					pin={{
@@ -704,14 +677,19 @@
 							// Rechecks a newly created directory even when the field's path is unchanged.
 							form.selectProjectPath(path);
 						},
-						onClose: () => (form.showBrowser = false),
+						onClose: async (reason) => {
+							form.showBrowser = false;
+							await tick();
+							if (reason === 'select') returnTextareaFocus();
+							else pathInput?.focus({ preventScroll: true });
+						},
 					}}
 					feedback={{
 						class: '-mt-1',
 						error: form.validationStatus === 'invalid' ? form.validationError : null,
 						worktree:
 							form.gitAvailable && form.gitRepoStatus === 'git'
-								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.worktreePicker.open() }
+								? { disabled: form.isUpdatingPinnedPath, onOpen: () => void form.worktreePicker.open() }
 								: undefined,
 					}}
 				>
@@ -742,7 +720,7 @@
 					{/if}
 				</ProjectPathField>
 
-				<NewChatPinnedPaths {form} />
+				<NewChatPinnedPaths {form} onPathSelected={returnTextareaFocus} />
 
 				<ChatTagEditor
 					tags={form.chatTags}
@@ -810,52 +788,26 @@
 				/>
 
 				<ComposerBottomBar
-					canAttachImages={canAttachAttachments}
-					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
-					onAddImage={openImagePicker}
+					{...toolbarSettings}
+					modelControlsLeft={localSettings.modelControlsLeft}
+					image={{
+						supported: canAttachAttachments,
+						unavailableReason: m.chat_composer_image_attachments_unavailable(),
+						onSelect: openImagePicker,
+					}}
 					onOpenSnippetPalette={() => void markdown.openSnippets()}
 					onOpenExpandedEditor={openExpandedEditor}
-					onRefinePrompt={() => promptRefinement.handleAction()}
+					onRefinePrompt={() => {
+						returnTextareaFocus();
+						promptRefinement.handleAction();
+					}}
 					canRefinePrompt={promptRefinement.canStart}
 					isPromptRefinementPending={promptRefinement.pending}
 					isPromptTransformPending={promptTransformPending}
 					{promptTransformStatus}
-					{permissionOptions}
-					selectedPermission={form.permissionMode}
-					onPermissionSelect={(mode) => {
-						form.setPermissionMode(mode);
-					}}
-					{thinkingOptions}
-					selectedThinking={form.thinkingMode}
-					onThinkingSelect={(mode) => {
-						form.setThinkingMode(mode);
-					}}
-					canSend={form.canSubmit && !promptTransformPending}
-					onSend={handleSubmit}
-					sendTitle={m.chat_new_chat_start_session()}
-					{sendButtonClass}
-				>
-					{#snippet agentSettings()}
-						<AgentSettingsControls
-							descriptors={form.agentSettingDescriptors}
-							envelope={form.agentSettings}
-							defaults={modelCatalog.getDefaultAgentSettings(form.agentId)}
-							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
-						/>
-					{/snippet}
-					{#snippet modelSelector()}
-						<ComposerModelSelector
-							value={modelSelectorValue}
-							mode={modelSelectorMode}
-							onChange={handleModelSelectorChange}
-							{getRecents}
-							preferRecentsOnOpen
-							getSelectableAgentIds={selectableAgentsForExecutor}
-							align="end"
-							side="bottom"
-						/>
-					{/snippet}
-				</ComposerBottomBar>
+					send={{ enabled: form.canSubmit, title: m.chat_new_chat_start_session(), onSend: handleSubmit }}
+					side="bottom"
+				/>
 
 				<ComposerSnippetPalette
 					open={snippetPalette.isOpen}

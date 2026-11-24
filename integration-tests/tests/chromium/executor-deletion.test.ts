@@ -57,8 +57,22 @@ test('executor deletion confirmation and unavailable chat remain usable on deskt
       await browserExpect(page.locator('[data-project-availability-notice]')).toHaveCount(0);
       await browserExpect(page.getByRole('listbox')).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const picker = page.locator('[data-slot="composer-bottom-bar"] [data-executor-picker]');
-      await browserExpect(picker).toHaveCount(0);
+      const toolbar = page.locator('[data-composer-toolbar]');
+      const name = `Executor: Unavailable executor: ${client.executorId}`;
+      const picker = toolbar.getByRole('button', { name, exact: true });
+      const folded = !await picker.isVisible();
+      if (folded) {
+        await toolbar.getByRole('button', { name: /More model settings/ }).click();
+        await page.getByRole('menuitem', { name, exact: true }).press('ArrowRight');
+      } else {
+        await picker.click();
+      }
+      const missing = page.getByRole('menuitemradio', { name: `Unavailable executor: ${client.executorId}` });
+      await browserExpect(missing).toBeChecked();
+      await browserExpect(missing).toBeDisabled();
+      await browserExpect(page.getByRole('menuitemradio', { name: 'Local' })).not.toBeChecked();
+      await page.keyboard.press('Escape');
+      if (folded) await page.keyboard.press('Escape');
       await page.screenshot({ path: join(artifacts, `executor-deleted-chat-${width}.png`) });
     }
     expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);

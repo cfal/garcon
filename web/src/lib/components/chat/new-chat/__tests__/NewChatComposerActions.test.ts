@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RefinePromptResponse } from '$shared/prompt-refinement';
 import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
@@ -117,27 +117,21 @@ async function settleExpandedDialogOpen(): Promise<void> {
 
 async function constrainComposerActions(container: HTMLElement): Promise<void> {
 	await Promise.resolve();
-	const root = container.querySelector<HTMLElement>('[data-responsive-surface-actions]');
-	if (!root) throw new Error('Missing responsive composer actions');
-	Object.defineProperty(root, 'clientWidth', { configurable: true, get: () => 36 });
-	for (const element of container.querySelectorAll<HTMLElement>('[data-surface-action-measure]')) {
-		element.getBoundingClientRect = () => ({ width: 36 }) as DOMRect;
-	}
-	const menuMeasure = container.querySelector<HTMLElement>(
-		'[data-surface-action-overflow-measure]',
-	);
-	if (!menuMeasure) throw new Error('Missing composer action menu measurement');
-	menuMeasure.getBoundingClientRect = () => ({ width: 36 }) as DOMRect;
-
-	ResizeObserverHarness.emit(root, 36);
+	const root = container.querySelector<HTMLElement>('[data-composer-toolbar]');
+	if (!root) throw new Error('Missing composer toolbar');
+	ResizeObserverHarness.emit(root, 190);
 	await Promise.resolve();
 }
 
 describe('NewChatForm composer actions', () => {
 	let restoreResizeObserver: () => void;
 
-	beforeEach(() => {
+	beforeAll(() => {
 		restoreResizeObserver = installResizeObserverHarness();
+	});
+	afterAll(() => restoreResizeObserver());
+
+	beforeEach(() => {
 		vi.stubGlobal(
 			'matchMedia',
 			vi.fn().mockImplementation(() => ({
@@ -154,7 +148,6 @@ describe('NewChatForm composer actions', () => {
 	afterEach(() => {
 		cleanup();
 		localStorage.clear();
-		restoreResizeObserver();
 		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();
 		vi.unstubAllGlobals();
@@ -179,14 +172,14 @@ describe('NewChatForm composer actions', () => {
 		expect(screen.getByRole('button', { name: 'Refine prompt' })).toBeTruthy();
 	});
 
-	it('places Refine between expanded composer and Start and enforces draft limits', async () => {
+	it('places Refine before expanded composer and Start and enforces draft limits', async () => {
 		const { messageInput } = await renderReady();
 		const open = screen.getByRole('button', { name: 'Open expanded composer' });
 		const refine = screen.getByRole('button', { name: 'Refine prompt' });
 		const start = screen.getByRole('button', { name: 'Start session' });
 
-		expect(open.compareDocumentPosition(refine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-		expect(refine.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(refine.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(open.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 		expect((refine as HTMLButtonElement).disabled).toBe(true);
 
 		await fireEvent.input(messageInput, { target: { value: 'A draft to improve' } });

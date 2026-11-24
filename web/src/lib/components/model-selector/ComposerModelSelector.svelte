@@ -1,46 +1,18 @@
 <script lang="ts">
+	import type { ComponentProps } from 'svelte';
 	import ModelSelectorPopover from './ModelSelectorPopover.svelte';
-	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-		ModelSelectorRecentOption,
-		ModelSelectorValue,
-	} from './model-selector-types';
-
-	interface Props {
-		value: ModelSelectorValue;
-		mode: ModelSelectorMode;
-		onChange: (next: ModelSelectorChange) => void | Promise<void>;
-		getRecents?: (executorId: string) => ModelSelectorRecentOption[];
-		preferRecentsOnOpen?: boolean;
-		getSelectableAgentIds?: (executorId: string) => readonly SessionAgentId[];
-		disabled?: boolean;
-		align?: 'start' | 'center' | 'end';
-		side?: 'top' | 'right' | 'bottom' | 'left';
-	}
 
 	let {
-		value,
+		picker = $bindable(),
 		mode,
-		onChange,
-		getRecents,
-		preferRecentsOnOpen = false,
-		getSelectableAgentIds,
-		disabled = false,
-		align = 'end',
-		side = 'bottom',
-	}: Props = $props();
+		...props
+	}: Omit<ComponentProps<typeof ModelSelectorPopover>, 'contentClass'> & {
+		picker?: ModelSelectorPopover;
+	} = $props();
 </script>
 
 <ModelSelectorPopover
-	{value}
+	bind:this={picker}
+	{...props}
 	mode={{ ...mode, executor: 'fixed', surface: 'composer' }}
-	{onChange}
-	{getRecents}
-	{preferRecentsOnOpen}
-	{getSelectableAgentIds}
-	{disabled}
-	{align}
-	{side}
 />

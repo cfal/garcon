@@ -1,4 +1,6 @@
 import type { Page } from 'puppeteer-core';
+import { clickInlineComposerButton } from './composer-actions.js';
+import { openModelSelector, selectModelOption } from './executor-ui.js';
 import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
 import type { IntegrationFixture } from './integration-fixture.js';
@@ -105,11 +107,8 @@ export class SpaDriver {
   }): Promise<void> {
     const directProviderSelected = await this.#page.evaluate(
       ({ selectedAgentLabel, modelLabel }) => {
-        const dialog = document.querySelector('[role="dialog"]');
-        return [...(dialog?.querySelectorAll('button') ?? [])].some((element) => {
-          const name = element.getAttribute('aria-label') || element.textContent?.trim() || '';
-          return name.includes(selectedAgentLabel) && name.includes(modelLabel);
-        });
+        const details = document.querySelector('[role="dialog"] [data-slot="model-selector-trigger"]')?.getAttribute('title');
+        return details?.includes(selectedAgentLabel) && details.includes(modelLabel);
       },
       {
         selectedAgentLabel: input.selectedAgentLabel,
@@ -118,11 +117,14 @@ export class SpaDriver {
     );
     if (directProviderSelected) return;
 
-    await this.#clickNewChatModelSelector();
-    await this.waitForButton(input.optionAgentLabel, { timeout: 30_000 });
-    await this.clickButton(input.optionAgentLabel);
-    await this.waitForButton(input.modelLabel, { timeout: 30_000 });
-    await this.clickButton(input.modelLabel);
+    await this.openAgentModels(input.optionAgentLabel, { timeout: 30_000 });
+    await selectModelOption(this.#page, input.modelLabel);
+  }
+
+  async openAgentModels(label: string, options: { scope?: string; timeout?: number } = {}): Promise<void> {
+    await openModelSelector(this.#page, options.scope);
+    await this.waitForButton(label, { timeout: options.timeout });
+    await this.clickButton(label);
   }
 
   async #startDirectChat<TRequest>(input: {
@@ -181,32 +183,6 @@ export class SpaDriver {
       { timeout: 20_000 },
     );
     return request;
-  }
-
-  async #clickNewChatModelSelector(): Promise<void> {
-    await this.#page.waitForFunction(
-      () => {
-        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-        const button = dialog
-          ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
-              (element.getAttribute('aria-label') ?? '').includes(' / '),
-            )
-          : null;
-        return button !== null && button !== undefined && !button.disabled;
-      },
-      { timeout: 20_000 },
-    );
-    await this.#page.evaluate(() => {
-      const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-      const button = dialog
-        ? [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((element) =>
-            (element.getAttribute('aria-label') ?? '').includes(' / '),
-          )
-        : null;
-      if (!button) throw new Error('Missing new chat model selector.');
-      if (button.disabled) throw new Error('New chat model selector is disabled.');
-      button.click();
-    });
   }
 
   async openChatSearch(): Promise<void> {
@@ -890,6 +866,15 @@ export class SpaDriver {
         throw error;
       }
     }
+  }
+
+  async refinePrompt(within: string): Promise<void> {
+    const toolbar = `${within} [data-composer-toolbar]`;
+    const selector = `${toolbar} button[data-composer-control="refine"][aria-label="Refine prompt"]:enabled`;
+    if (await clickInlineComposerButton(this.#page, selector)) return;
+    await this.#page.$eval(`${toolbar} [data-composer-overflow="prompt"]:not([hidden])`, element => (element as HTMLElement).click());
+    await this.waitForMenuItemEnabled('Refine prompt');
+    await this.clickMenuItem('Refine prompt');
   }
 
   async clickResponsiveAction(

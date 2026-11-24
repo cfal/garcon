@@ -25,7 +25,8 @@
 	$effect(() => {
 		if (!selector.open) return;
 		if (selector.isRecentsPaneActive) return;
-		requestAnimationFrame(() => inputRef?.focus());
+		const frame = requestAnimationFrame(() => inputRef?.focus());
+		return () => cancelAnimationFrame(frame);
 	});
 
 	$effect(() => {

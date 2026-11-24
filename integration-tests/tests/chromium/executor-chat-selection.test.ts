@@ -1,12 +1,52 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
-import type { Request } from 'playwright';
+import type { Locator, Page, Request } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { Deferred } from '../../support/deferred.js';
+
+async function checkStandaloneModelFit(page: Page, trigger: Locator, align: 'start' | 'end'): Promise<void> {
+  await browserExpect(trigger).toBeEnabled();
+  const combined = await trigger.innerText();
+  const combinedWidth = (await trigger.boundingBox())!.width;
+  const constrain = (width: number | null) => trigger.evaluate((node, max) => {
+    node.parentElement!.style.maxWidth = max === null ? '' : `${max}px`;
+  }, width);
+  await constrain(36);
+  const more = page.getByRole('dialog').getByRole('button', { name: 'More model settings', exact: true });
+  await browserExpect(trigger).toBeHidden();
+  await more.click();
+  const rows = page.getByRole('menu').getByRole('menuitem');
+  await browserExpect(rows).toHaveCount(1);
+  const [agent, model] = (await rows.locator('[data-menu-description]').innerText()).split(' / ');
+  expect(combined).toBe(`${agent} ${model}`);
+  const desktop = page.viewportSize()!;
+  await rows.focus();
+  await page.setViewportSize({ width: 600, height: desktop.height });
+  await browserExpect(rows).toBeFocused();
+  await page.setViewportSize(desktop);
+  await browserExpect(rows).toBeFocused();
+  await rows.click();
+  const picker = page.locator('[data-slot="model-selector-columns"]');
+  await browserExpect(picker).toBeVisible();
+  await page.keyboard.press('Escape');
+  await browserExpect(picker).toHaveCount(0);
+  await browserExpect(more).toBeFocused();
+  await constrain(combinedWidth - 1);
+  await browserExpect(trigger).toHaveText(model!);
+  await browserExpect(trigger).toBeFocused();
+  expect(await trigger.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  expect(await trigger.evaluate((node, side) => {
+    const button = node.getBoundingClientRect();
+    const field = node.parentElement!.getBoundingClientRect();
+    return Math.abs(side === 'start' ? button.left - field.left : button.right - field.right);
+  }, align)).toBeLessThan(1);
+  await constrain(null);
+  await browserExpect(trigger).toHaveText(combined);
+}
 
 test('chat host selectors fit narrow containers and commit cancellable handoffs without sending', async () => {
   const failedResponses: Promise<{ url: string; status: number; body: string; beforeHandoff: boolean }>[] = [];
@@ -76,6 +116,7 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
     await host().click();
     await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
     await browserExpect(page.getByRole('heading', { name: 'Move to Local' })).toBeVisible();
+    await checkStandaloneModelFit(page, page.getByRole('dialog').locator('[data-slot="model-selector-trigger"]'), 'start');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await browserExpect(composer).toHaveValue('Synthetic retained handoff input');
     await browserExpect(host()).toBeVisible();
@@ -125,7 +166,7 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
       await page.screenshot({ path: join(artifacts, `new-chat-host-${width}.png`) });
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    const modelTrigger = dialog.locator('[data-slot="composer-bottom-bar"] button').filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') });
+    const modelTrigger = dialog.locator('[data-slot="model-selector-trigger"]');
     await modelTrigger.click();
     expect(await page.locator('[data-slot="model-selector-executors"]').count()).toBe(0);
     await page.keyboard.press('Escape');
@@ -134,7 +175,8 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Automation', exact: true }).click();
-    const generation = page.getByRole('dialog').locator('button').filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') }).first();
+    const generation = page.getByRole('dialog').locator('[data-slot="model-selector-trigger"]').first();
+    await checkStandaloneModelFit(page, generation, 'end');
     await generation.click();
     const columns = page.locator('[data-slot="model-selector-columns"]');
     await browserExpect(columns.locator('[data-slot="model-selector-executors"]')).toBeVisible();
@@ -164,6 +206,54 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
   }, async () => ({ failedResponses: await Promise.all(failedResponses) }),
   { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 180_000);
+
+test('a long generation executor name leaves room for every model field control', async () => {
+  await withChromiumFixture('generation-executor-field', async ({ page, integration }) => {
+    const { client, directAgents } = integration;
+    const { agentId, provider } = directAgents.openAi;
+    const label = 'Generation-'.padEnd(100, 'W');
+    await client.patch(`/api/v1/executors/${client.executorId}`, { label });
+    await client.updateSettings({ ui: { commitMessage: {
+      executorId: client.executorId, agentId, model: provider.model,
+      apiProviderId: provider.providerId, modelEndpointId: provider.endpointId, modelProtocol: provider.protocol,
+    } } });
+    const card = page.getByRole('group', { name: 'Commit message model', exact: true });
+    const selector = card.locator('[data-slot="model-selector-trigger"]');
+    const discovery = new Deferred<void>();
+    await page.route('**/api/v1/executors', async route => {
+      await discovery.promise;
+      await route.continue();
+    });
+    try {
+      await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+      await page.getByRole('tab', { name: 'Automation', exact: true }).click();
+      await browserExpect(card.getByText('Remote executor', { exact: true })).toBeVisible();
+      await browserExpect(selector).toBeVisible();
+      await browserExpect(selector).not.toHaveAccessibleDescription(new RegExp(client.executorId));
+    } finally {
+      discovery.resolve();
+    }
+    const host = card.getByText(label, { exact: true });
+    await browserExpect(host).toBeVisible();
+    await browserExpect(selector).toHaveAccessibleDescription(new RegExp(label));
+    for (const width of [640, 680, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await browserExpect.poll(() => host.evaluate(node => {
+        const card = node.closest('[role="group"]')!;
+        const field = card.getBoundingClientRect();
+        const name = node.getBoundingClientRect();
+        return [...card.querySelectorAll('button')].filter(button => {
+          const rect = button.getBoundingClientRect();
+          const overlapsName = rect.left < name.right && rect.right > name.left
+            && rect.top < name.bottom && rect.bottom > name.top;
+          return rect.width > 0 && (overlapsName || rect.left < field.left || rect.right > field.right);
+        }).map(button => button.getAttribute('aria-label') ?? button.textContent?.trim());
+      }), { message: `Overlapping or out-of-bounds field controls at ${width}px` }).toEqual([]);
+    }
+  }, undefined, { executionBackend: 'remote-controller-dials' });
+}, 60_000);
 
 test('accepted executor handoffs update the Files target before background chat refresh', async () => {
   await withChromiumFixture('chat-host-handoff-project', async ({ page, integration, assertNoBrowserErrors }) => {

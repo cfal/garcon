@@ -7,6 +7,7 @@ import * as settingsApi from '$lib/api/settings';
 import * as gitApi from '$lib/api/git';
 import * as filesApi from '$lib/api/files';
 import { ApiError } from '$lib/api/client';
+import { validateStart, type ValidateStartResponse } from '$lib/api/chats';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import * as snippetsApi from '$lib/api/snippets';
 import * as clientChatId from '$shared/client-chat-id';
@@ -28,6 +29,7 @@ vi.mock('../../composer/composer-markdown-editor-loader.js', () => ({
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
+const validate = vi.mocked(validateStart);
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn(),
@@ -165,8 +167,7 @@ async function renderSubmittableForm(
 		preambleSnapshot?: PreamblesSnapshot;
 	} = {},
 ): Promise<HTMLTextAreaElement> {
-	const chatsApi = await import('$lib/api/chats');
-	vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+	validate.mockResolvedValue({ valid: true, isGitRepo: false });
 	vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 		makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 	);
@@ -230,8 +231,7 @@ describe('NewChatForm', () => {
 		'submits a project-only seed on $id with the retained prompt',
 		async (executor) => {
 			stubMatchMedia(false);
-			const chatsApi = await import('$lib/api/chats');
-			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+			validate.mockResolvedValue({ valid: true, isGitRepo: false });
 			vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
 			const onStartChat = vi.fn();
 			render(NewChatFormTestHost, {
@@ -273,8 +273,7 @@ describe('NewChatForm', () => {
 
 	it('explains why a copied direct agent cannot start when direct chats are disabled', async () => {
 		stubMatchMedia(false);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
 		const onStartChat = vi.fn();
 		render(NewChatFormTestHost, { allowDirectChats: false, onStartChat, seed: {
@@ -311,8 +310,7 @@ describe('NewChatForm', () => {
 
 	it('retains cached selection and text while catalog failure blocks click and Enter until retry', async () => {
 		stubMatchMedia(false);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }));
 		const onStartChat = vi.fn();
 		const onRetryCatalog = vi.fn(async () => {});
@@ -378,9 +376,8 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		const validation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
-		vi.mocked(chatsApi.validateStart).mockReturnValue(validation.promise);
+		const validation = deferred<ValidateStartResponse>();
+		validate.mockReturnValue(validation.promise);
 		const catalog = deferred<PreamblesSnapshot>();
 		const preview = deferred<PreambleSelectionPreviewResponse>();
 		const loadPreambles = vi.fn(() => catalog.promise);
@@ -403,7 +400,7 @@ describe('NewChatForm', () => {
 		expect(loadPreambles).not.toHaveBeenCalled();
 		expect(preamblesApi.preambleSelectionPreview).not.toHaveBeenCalled();
 
-		await waitFor(() => expect(chatsApi.validateStart).toHaveBeenCalledOnce());
+		await waitFor(() => expect(validate).toHaveBeenCalledOnce());
 		validation.resolve({ valid: true, isGitRepo: false });
 		await waitFor(() => expect(preamblesApi.preambleSelectionPreview).toHaveBeenCalledOnce());
 		expect(content.classList.contains('invisible')).toBe(false);
@@ -429,8 +426,7 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(preamblesApi.preambleSelectionPreview)
 			.mockResolvedValueOnce(previewResponse(1, '3502b645-222b-49d2-ac39-1c91f9fb1174', 'First'))
 			.mockResolvedValueOnce(previewResponse(2, 'e767feba-8cbf-4ec4-9b16-f907bcb40836', 'Second'))
@@ -459,8 +455,7 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		const firstPreview = deferred<PreambleSelectionPreviewResponse>();
 		vi.mocked(preamblesApi.preambleSelectionPreview)
 			.mockReturnValueOnce(firstPreview.promise)
@@ -487,8 +482,7 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		const firstId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 		const secondId = 'e767feba-8cbf-4ec4-9b16-f907bcb40836';
 		vi.mocked(preamblesApi.preambleSelectionPreview)
@@ -521,8 +515,7 @@ describe('NewChatForm', () => {
 		stubMatchMedia(isMobile);
 		const projectPath = `${executor.projectBasePath}/fresh`;
 		let created = false;
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockImplementation(async (path) =>
+		validate.mockImplementation(async (path) =>
 			path === projectPath && !created
 				? { valid: false, errorCode: 'path_not_found' }
 				: { valid: true, isGitRepo: false },
@@ -570,7 +563,7 @@ describe('NewChatForm', () => {
 		expect(pathInput.value).toBe(projectPath);
 		await waitFor(() => expect(submit.disabled).toBe(false));
 		expect(screen.queryByText('Path does not exist.')).toBeNull();
-		expect(chatsApi.validateStart).toHaveBeenLastCalledWith(projectPath, { executorId: executor.id });
+		expect(validate).toHaveBeenLastCalledWith(projectPath, { executorId: executor.id });
 		if (isMobile) await fireEvent.click(submit);
 		else await fireEvent.keyDown(messageInput, { key: 'Enter' });
 		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
@@ -583,8 +576,7 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart)
+		validate
 			.mockResolvedValue({
 				valid: false,
 				error: 'Path does not exist',
@@ -622,8 +614,7 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		const projectedPreambles = [
 			{
 				id: '3502b645-222b-49d2-ac39-1c91f9fb1174',
@@ -671,8 +662,7 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		const preambleId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 		const clearedPreview = deferred<PreambleSelectionPreviewResponse>();
 		vi.mocked(preamblesApi.preambleSelectionPreview)
@@ -719,8 +709,7 @@ describe('NewChatForm', () => {
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		const preambleId = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 		vi.mocked(preamblesApi.preambleSelectionPreview)
 			.mockRejectedValueOnce(new Error('preview unavailable'))
@@ -794,8 +783,7 @@ describe('NewChatForm', () => {
 
 	it('blocks click and Enter after the selected endpoint disappears', async () => {
 		stubMatchMedia(false);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
@@ -919,10 +907,61 @@ describe('NewChatForm', () => {
 		expect(screen.getByRole('button', { name: 'Thinking: On' })).toBeTruthy();
 	});
 
+	it('lets a pin start drafting immediately without admitting a pending or invalid path', async () => {
+		stubMatchMedia(false);
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: ['/workspace/project'], pinnedProjectPaths: ['/workspace/other'] },
+		}));
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { onStartChat });
+		const prompt = await screen.findByPlaceholderText('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Synthetic first message' } });
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		await waitFor(() => expect(send.disabled).toBe(false));
+		const validation = deferred<ValidateStartResponse>();
+		validate.mockReturnValue(validation.promise);
+		const pin = screen.getByRole('button', { name: '/workspace/other' });
+		pin.focus();
+		await fireEvent.click(pin);
+		expect(pin.getAttribute('aria-pressed')).toBe('true');
+		expect(document.activeElement).toBe(prompt);
+		const expectSubmitBlocked = async () => {
+			expect(send.disabled).toBe(true);
+			await fireEvent.click(send);
+			await fireEvent.keyDown(prompt, { key: 'Enter' });
+			expect(onStartChat).not.toHaveBeenCalled();
+		};
+		await expectSubmitBlocked();
+		validation.resolve({ valid: false, errorCode: 'path_not_found' });
+		await screen.findByText('Path does not exist.');
+		await expectSubmitBlocked();
+		expect(document.activeElement).toBe(prompt);
+	});
+
+	it('does not treat a focused pin as a selection when executor discovery revalidates the path', async () => {
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: ['/workspace/project'], pinnedProjectPaths: ['/workspace/other'] },
+		}));
+		let executors!: ExecutorsStore;
+		render(NewChatFormTestHost, { onExecutors: (store) => { executors = store; } });
+		const marker = '[data-slot="project-path-field"] .text-status-success-foreground';
+		await waitFor(() => expect(document.querySelector(marker)).toBeTruthy());
+		const pin = screen.getByRole('button', { name: '/workspace/other' });
+		const validation = deferred<ValidateStartResponse>();
+		validate.mockClear().mockReturnValue(validation.promise);
+		pin.focus();
+		executors.applySnapshot([{ ...localExecutor, instanceId: 'discovered-instance' }]);
+		await waitFor(() => expect(validate).toHaveBeenCalledWith('/workspace/project', { executorId: 'local' }));
+		validation.resolve({ valid: true, isGitRepo: false });
+		await waitFor(() => expect(document.querySelector(marker)).toBeTruthy());
+		expect(document.activeElement).toBe(pin);
+	});
+
 	it('shows a spinner while pinned project path persistence is pending', async () => {
 		stubMatchMedia(false);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
@@ -976,13 +1015,12 @@ describe('NewChatForm', () => {
 	});
 
 	it('opens the worktree picker as a separate dialog when the project is a git repo', async () => {
-		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 			}),
 		);
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({
+		validate.mockResolvedValue({
 			valid: true,
 			isGitRepo: true,
 		});
@@ -1022,8 +1060,7 @@ describe('NewChatForm', () => {
 		{ initial: 'sample-model-high', model: 'default', discovered: true },
 	])('starts a remote Antigravity chat with $model from $initial', async ({ initial, model, discovered }) => {
 		stubMatchMedia(false);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		const catalog = new ModelCatalogStore();
 		setAntigravityModels(catalog.forExecutor(remoteExecutor.id), [
 			{ value: 'default', label: 'Default' },
@@ -1040,7 +1077,7 @@ describe('NewChatForm', () => {
 		const onStartChat = vi.fn();
 		render(NewChatFormTestHost, { catalog, executorSnapshots: [localExecutor, remoteExecutor], onStartChat });
 		const picker = await screen.findByRole('button', {
-			name: initial === 'default' ? /Antigravity .* Default/ : /Antigravity .* Sample model \(High\)/,
+			name: initial === 'default' ? 'Antigravity Default' : 'Antigravity Sample model (High)',
 		});
 		await fireEvent.click(picker);
 		await fireEvent.click(await screen.findByRole('option', { name: model === 'default' ? 'Default' : 'Sample model (High)' }));
@@ -1072,10 +1109,10 @@ describe('NewChatForm', () => {
 			paths: { byExecutor: { [remoteExecutor.id]: { recentPaths: [], pinnedPaths: ['/worker/project'] } } },
 		}));
 		render(NewChatFormTestHost, { catalog, executorSnapshots: [localExecutor, remoteExecutor] });
-		await screen.findByRole('button', { name: /Antigravity .* Local model/ });
+		await screen.findByRole('button', { name: 'Antigravity Local model' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Other executors…' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Worker: /worker/project' }));
-		expect(await screen.findByRole('button', { name: /Antigravity .* Default/ })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'Antigravity Default' })).toBeTruthy();
 	});
 
 	it('opens the model selector at recents when multiple recent targets exist', async () => {
@@ -1105,7 +1142,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Claude · Claude OAuth · Opus' })).toBeTruthy();
@@ -1141,7 +1178,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(
 			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
@@ -1223,7 +1260,7 @@ describe('NewChatForm', () => {
 		await view.rerender({ allowDirectChats: false });
 
 		await waitFor(() => {
-			expect(screen.getByRole('button', { name: /Claude .* Opus/ })).toBeTruthy();
+			expect(screen.getByRole('button', { name: 'Claude Opus' })).toBeTruthy();
 		});
 		expect(
 			screen.queryByRole('button', {
@@ -1240,7 +1277,7 @@ describe('NewChatForm', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(listbox).toBeTruthy();
@@ -1658,14 +1695,32 @@ describe('NewChatForm', () => {
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
+	it('keeps the focused composer action when path validation finishes', async () => {
+		stubMatchMedia(false);
+		await renderSubmittableForm(vi.fn());
+		const validation = deferred<ValidateStartResponse>();
+		validate.mockClear().mockReturnValueOnce(validation.promise);
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Project Path' }), {
+			target: { value: '/workspace/next' },
+		});
+		await waitFor(() => expect(validate).toHaveBeenCalled());
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		const snippets = await screen.findByRole('menuitem', { name: /Snippets/ });
+		snippets.focus();
+		validation.resolve({ valid: true, isGitRepo: false });
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Start session' })).toHaveProperty('disabled', false),
+		);
+		expect(document.activeElement).toBe(snippets);
+	});
+
 	it('does not let late path validation steal focus from argument entry', async () => {
 		stubMatchMedia(false);
 		const onStartChat = vi.fn();
 		await renderSubmittableForm(onStartChat);
-		const chatsApi = await import('$lib/api/chats');
-		const pendingValidation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
-		const validationCallCount = vi.mocked(chatsApi.validateStart).mock.calls.length;
-		vi.mocked(chatsApi.validateStart).mockReturnValueOnce(pendingValidation.promise);
+		const pendingValidation = deferred<ValidateStartResponse>();
+		const validationCallCount = validate.mock.calls.length;
+		validate.mockReturnValueOnce(pendingValidation.promise);
 		await fireEvent.input(screen.getByRole('textbox', { name: 'Project Path' }), {
 			target: { value: '/workspace/next' },
 		});
@@ -1674,7 +1729,7 @@ describe('NewChatForm', () => {
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await waitFor(() =>
-			expect(chatsApi.validateStart).toHaveBeenCalledTimes(validationCallCount + 1),
+			expect(validate).toHaveBeenCalledTimes(validationCallCount + 1),
 		);
 
 		pendingValidation.resolve({ valid: true, isGitRepo: false });
@@ -1688,8 +1743,7 @@ describe('NewChatForm', () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
 		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
@@ -1712,8 +1766,7 @@ describe('NewChatForm', () => {
 	it.each(['conversation', 'literal'] as const)('blocks unsupported attachments regardless of input policy: %s', async (executionPolicy) => {
 		const source = 'printf command';
 		stubMatchMedia(false);
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
 		);
@@ -1908,7 +1961,7 @@ describe('NewChatForm', () => {
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 
-		const permissionButton = screen.getAllByTitle('Default')[0];
+		const permissionButton = screen.getByRole('button', { name: 'Permission mode: Default' });
 		expect(permissionButton).toBeTruthy();
 		if (!permissionButton) throw new Error('Missing permission control');
 		permissionButton.focus();
@@ -1954,8 +2007,7 @@ describe('New Chat executor pin scope', () => {
 			}
 		}
 		try {
-			const chatsApi = await import('$lib/api/chats');
-			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+			validate.mockResolvedValue({ valid: true, isGitRepo: false });
 			vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 				makeSnapshot({
 					paths: {
@@ -1987,7 +2039,7 @@ describe('New Chat executor pin scope', () => {
 				expect(document.activeElement).toBe(intendedPin);
 				await fireEvent.click(intendedPin);
 				expect(screen.getByRole('button', { name: '/same' }).getAttribute('aria-pressed')).toBe('true');
-				await waitFor(() => expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', { executorId: remoteExecutor.id }));
+				await waitFor(() => expect(validate).toHaveBeenLastCalledWith('/same', { executorId: remoteExecutor.id }));
 			} else if (mobile) {
 				expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }));
 			} else {
@@ -2003,9 +2055,8 @@ describe('New Chat executor pin scope', () => {
 		}
 	});
 
-	it('keeps the current compact view and selects both owner and path from all executors', async () => {
-		const chatsApi = await import('$lib/api/chats');
-		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+	it('focuses the prompt on a remote pin choice, not on its later validation', async () => {
+		validate.mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
 			makeSnapshot({
 				paths: {
@@ -2028,13 +2079,21 @@ describe('New Chat executor pin scope', () => {
 		expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull();
 		const remotePin = screen.getByRole('button', { name: 'Worker: /same' });
 		expect(remotePin.getAttribute('aria-pressed')).toBe('false');
+		const validation = deferred<ValidateStartResponse>();
+		validate.mockReturnValue(validation.promise);
 		await fireEvent.click(remotePin);
-		await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
+		await waitFor(() => expect(document.activeElement).toBe(prompt));
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		const executor = screen.getByRole('button', { name: 'Executor: Worker' });
+		executor.focus();
+		validation.resolve({ valid: true, isGitRepo: false });
+		await waitFor(() => expect(document.querySelector('[data-slot="project-path-field"] .text-status-success-foreground')).toBeTruthy());
+		expect(document.activeElement).toBe(executor);
 		expect(screen.queryByRole('button', { name: 'Worker: /same' })).toBeNull();
 		expect(screen.getByRole('button', { name: '/same' }).getAttribute('aria-pressed')).toBe('true');
 		expect(prompt.value).toBe('Synthetic retained draft');
 		await waitFor(() =>
-			expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/same', {
+			expect(validate).toHaveBeenLastCalledWith('/same', {
 				executorId: remoteExecutor.id,
 			}),
 		);

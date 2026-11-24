@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { openDialogModelSelector, selectExecutor } from '../../support/executor-ui.js';
+import { selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
@@ -155,11 +155,8 @@ test('late remote catalog discovery preserves a schedule retargeted to Local', a
     await fixture.page.waitForFunction(() => document.documentElement.dataset.remoteCatalogPending === 'true');
     await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Local');
     await app.fill('#scheduled-project-path', dirs.project);
-    await openDialogModelSelector(fixture.page);
-    await app.waitForButton('Chat Completions');
-    await app.clickButton('Chat Completions');
-    await app.waitForButton('Integration Echo');
-    await app.clickButton('Integration Echo');
+    await app.openAgentModels('Chat Completions');
+    await selectModelOption(fixture.page, 'Integration Echo');
     await fixture.page.evaluate(() => document.dispatchEvent(new Event('release-remote-catalog')));
     await fixture.page.waitForFunction(() => document.documentElement.dataset.remoteCatalogReleased === 'true');
     await app.waitForDialogButtonEnabled('Save Prompt');
@@ -201,13 +198,10 @@ test('new and scheduled chats retain input and require Retry after cached remote
         await app.waitForButtonEnabled('Add Prompt');
         await app.clickButton('Add Prompt');
       }
-      await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].some((button) => !button.disabled && button.getAttribute('aria-label')?.includes(' / ')));
+      await fixture.page.waitForSelector('[role="dialog"] [data-slot="model-selector-trigger"]:not(:disabled)');
       await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Integration worker');
-      await openDialogModelSelector(fixture.page);
-      await app.waitForButton('Chat Completions');
-      await app.clickButton('Chat Completions');
-      await app.waitForButton('Integration Echo');
-      await app.clickButton('Integration Echo');
+      await app.openAgentModels('Chat Completions');
+      await selectModelOption(fixture.page, 'Integration Echo');
       const pathSelector = kind === 'new' ? '[role="dialog"] input[aria-label="Project Path"]' : '#scheduled-project-path';
       const promptSelector = kind === 'new' ? '[role="dialog"] textarea[placeholder="How can I help you today?"]' : '[data-slot="scheduled-prompt-field"] textarea';
       const submitLabel = kind === 'new' ? 'Start session' : 'Save Prompt';

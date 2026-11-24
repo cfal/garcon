@@ -237,13 +237,13 @@ describe('PromptComposer focus', () => {
 		},
 	);
 
-	it('hides the composer executor selector for a removed remote when only Local remains', () => {
+	it('keeps a removed remote identifiable without falling back to Local', () => {
 		render(PromptComposerTestHost, {
 			executors: [localExecutor],
 			selectedExecutorId: remoteExecutor.id,
 		});
 
-		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		expect(screen.getByRole('button', { name: `Executor: Unavailable executor: ${remoteExecutor.id}` })).toBeTruthy();
 	});
 
 	it('updates executor visibility without remounting or clearing the composer draft', async () => {
@@ -263,7 +263,7 @@ describe('PromptComposer focus', () => {
 		expect(document.activeElement).toBe(textarea);
 
 		await rerender({ selectedChatId: 'remote-chat', selectedExecutorId: remoteExecutor.id });
-		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		expect(screen.getByRole('button', { name: /Executor: Unavailable executor/ })).toBeTruthy();
 		await rerender({ selectedChatId: 'chat-1', selectedExecutorId: 'local' });
 		await waitFor(() => expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull());
 		expect(screen.getByRole('textbox')).toBe(textarea);
@@ -997,6 +997,8 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'queue this next' } });
 
+		const model = screen.getByRole<HTMLButtonElement>('button', { name: 'Claude Opus' });
+		expect(model.disabled).toBe(true);
 		expect(textarea.disabled).toBe(false);
 		expect(
 			(screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled,
@@ -1009,6 +1011,7 @@ describe('PromptComposer focus', () => {
 			selectedIsProcessing: true,
 		});
 		const queueButton = screen.getByRole('button', { name: 'Queue message' }) as HTMLButtonElement;
+		expect(model.disabled).toBe(false);
 		expect(queueButton.disabled).toBe(false);
 		await fireEvent.click(queueButton);
 		expect(onsubmit).toHaveBeenCalledOnce();
@@ -1509,7 +1512,7 @@ describe('PromptComposer focus', () => {
 			],
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(await screen.findByText('Recent models')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
@@ -1529,7 +1532,7 @@ describe('PromptComposer focus', () => {
 		const view = render(PromptComposerTestHost, {
 			catalog, selectedChatId: 'chat-1', selectedAgentId: 'claude', selectedStatus: 'running',
 		});
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 		expect(await screen.findByRole('button', { name: 'Codex' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Claude' })).toBeTruthy();
 		await view.rerender({ selectedAgentId: 'codex' });
@@ -1566,7 +1569,7 @@ describe('PromptComposer focus', () => {
 			],
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		expect(
 			document.querySelector('[data-slot="model-selector-agent-group"][data-group="direct"]'),
@@ -1591,7 +1594,7 @@ describe('PromptComposer focus', () => {
 			],
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
 
 		const groupHeaders = Array.from(
 			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
@@ -1917,7 +1920,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 		await screen.findByRole('button', { name: 'Expanding snippet' });
 
-		const permissionButton = screen.getAllByTitle('Default')[0];
+		const permissionButton = screen.getByRole('button', { name: 'Permission mode: Default' });
 		expect(permissionButton).toBeTruthy();
 		if (!permissionButton) throw new Error('Missing permission control');
 		permissionButton.focus();

@@ -39,6 +39,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await input.fill(project);
       const prompt = page.getByPlaceholder('How can I help you today?');
       await browserExpect(field.locator('.text-status-success-foreground')).toBeVisible();
+      await browserExpect(input).toBeFocused();
       await input.press('Enter');
       await browserExpect(prompt).toBeFocused();
       const inputBounds = (await input.boundingBox())!;
@@ -66,12 +67,16 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await assertExactPreambleScope();
 
       phase('nested picker Escape leaves the new-chat form open');
-      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
+      const worktreeButton = field.getByRole('button', { name: 'Select a different worktree', exact: true });
+      await prompt.focus();
+      // Activates the opener without the implicit mouse focus some browsers supply.
+      await worktreeButton.dispatchEvent('click');
       const picker = page.getByRole('dialog', { name: 'Select worktree', exact: true });
       await browserExpect(picker.getByRole('option', { name: /feature/ })).toBeVisible();
       await page.keyboard.press('Escape');
       await browserExpect(picker).toHaveCount(0);
       await browserExpect(input).toHaveValue(project);
+      await browserExpect(worktreeButton).toBeFocused();
 
       phase('worktree selection updates only the draft');
       await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
@@ -84,10 +89,19 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await resize.dispose();
         await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
       }
-      await picker.getByRole('option', { name: /feature/ }).click();
-      await browserExpect(input).toHaveValue(worktree);
-      await input.press('Enter');
-      await browserExpect(prompt).toBeFocused();
+      const validation = Promise.withResolvers<void>();
+      await page.route('**/api/v1/chats/validate-start?**', async route => {
+        await validation.promise;
+        await route.continue();
+      }, { times: 1 });
+      try {
+        await picker.getByRole('option', { name: /feature/ }).click();
+        await browserExpect(input).toHaveValue(worktree);
+        await browserExpect(picker).toHaveCount(0);
+        await browserExpect(prompt).toBeFocused();
+      } finally {
+        validation.resolve();
+      }
       expect((await integration.client.listChats()).sessions).toEqual([]);
       await assertExactPreambleScope();
 
@@ -190,6 +204,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       }
       await create.getByRole('button', { name: 'Create worktree' }).click();
       await browserExpect(input).toHaveValue(join(project, '.worktrees', 'picker-review'));
+      await browserExpect(prompt).toBeFocused();
       expect(requests).toBe(1);
       assertNoBrowserErrors();
     }, undefined, { executionBackend, projectRoots: 'separate' });

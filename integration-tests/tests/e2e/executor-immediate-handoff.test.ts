@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
-import { selectExecutor } from '../../support/executor-ui.js';
+import { openModelSelector, selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
@@ -59,12 +59,9 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       expect(runRequests).toEqual([]);
 
       const beforeAgent = (await client.getChatSnapshot(chatId)).chat;
-      await fixture.page.$eval('[data-slot="composer-bottom-bar"] button:has([data-slot="model-selector-trigger-secondary"])', element => (element as HTMLButtonElement).click());
-      await app.waitForButton('Anthropic');
-      await app.clickButton('Anthropic');
-      await app.waitForButton('Integration Anthropic Echo');
+      await app.openAgentModels('Anthropic', { scope: '[data-slot="composer-bottom-bar"]' });
       const agentSaved = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
-      await app.clickButton('Integration Anthropic Echo');
+      await selectModelOption(fixture.page, 'Integration Anthropic Echo');
       expect((await agentSaved).status()).toBe(200);
       const afterAgent = (await client.getChatSnapshot(chatId)).chat;
       expect(afterAgent).toMatchObject({ agentId: directAgents.anthropic.agentId, executorId: client.executorId, projectPath: executionDirs.project });
@@ -188,10 +185,9 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         expect(runRequests).toEqual([]);
       }
       const beforeModel = (await client.getChatSnapshot(chatId)).chat;
-      await fixture.page.$eval('[data-slot="composer-bottom-bar"] button:has([data-slot="model-selector-trigger-secondary"])', element => (element as HTMLButtonElement).click());
-      await app.waitForButton('Alternate Echo');
+      await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
       const modelSaved = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/model' && response.request().method() === 'PATCH');
-      await app.clickButton('Alternate Echo');
+      await selectModelOption(fixture.page, 'Alternate Echo');
       expect((await modelSaved).status()).toBe(200);
       expect((await client.getChatSnapshot(chatId)).chat).toMatchObject({ model: 'integration-alternate', agentOwnershipEpoch: beforeModel.agentOwnershipEpoch });
       expect(runRequests).toEqual([]);
@@ -211,8 +207,8 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           },
         });
       });
-      await fixture.page.$eval('[data-slot="composer-bottom-bar"] button:has([data-slot="model-selector-trigger-secondary"])', element => (element as HTMLButtonElement).click());
-      await app.clickButton('Integration Echo');
+      await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
+      await selectModelOption(fixture.page, 'Integration Echo');
       await fixture.page.waitForFunction(() => typeof (globalThis as SettingsGateGlobal).releaseSettings === 'function');
       await app.clickButton('Send message');
       await fixture.page.waitForFunction(() => (document.querySelector('[data-composer] textarea') as HTMLTextAreaElement).value === '');
@@ -286,11 +282,8 @@ test('a same-executor agent switch chooses a new folder when the current one is 
     await app.waitForText('Project folder unavailable');
     await app.fill('[data-composer] textarea', 'Retained folder recovery draft');
 
-    await fixture.page.$eval('[data-slot="composer-bottom-bar"] button[aria-label^="Direct (Chat Completions)"]', element => (element as HTMLButtonElement).click());
-    await app.waitForButton('Anthropic');
-    await app.clickButton('Anthropic');
-    await app.waitForButton('Integration Anthropic Echo');
-    await app.clickButton('Integration Anthropic Echo');
+    await app.openAgentModels('Anthropic', { scope: '[data-slot="composer-bottom-bar"]' });
+    await selectModelOption(fixture.page, 'Integration Anthropic Echo');
     await app.waitForText('Choose a project folder');
     expect(await fixture.page.$eval('[role="dialog"] input', element => (element as HTMLInputElement).value)).toBe(missing);
     await app.fill('[role="dialog"] input', recovered);

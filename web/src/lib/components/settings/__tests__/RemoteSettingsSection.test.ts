@@ -11,6 +11,7 @@ import {
 } from '$lib/api/settings.js';
 import { ApiError } from '$lib/api/client.js';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import RemoteSettingsSectionTestHost from './RemoteSettingsSectionTestHost.svelte';
 import { setTestRemoteSettingsStore } from './remote-settings-test-context';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';
@@ -41,6 +42,32 @@ vi.mock('$lib/api/settings.js', () => ({
 describe('remote settings sections', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+	});
+
+	it.each(['ready', 'offline'] as const)('identifies a %s generation executor beside the model field', (availability) => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeRemoteSettingsSnapshot({
+			ui: { chatTitle: { enabled: true, executorId: remoteExecutor.id, model: 'opus' } },
+		}));
+		setTestRemoteSettingsStore(store);
+		render(RemoteSettingsSectionTestHost, { executors: [localExecutor, { ...remoteExecutor, availability }] });
+		expect(screen.getByText(availability === 'ready' ? remoteExecutor.label : new RegExp(`${remoteExecutor.label} \\(.+\\)`)).getAttribute('role')).toBe('status');
+	});
+
+	it('waits for executor discovery before naming a saved remote target', () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeRemoteSettingsSnapshot({
+			ui: { chatTitle: { enabled: true, executorId: remoteExecutor.id, model: 'opus' } },
+		}));
+		setTestRemoteSettingsStore(store);
+		render(RemoteSettingsSectionTestHost, { executors: null });
+		const field = within(screen.getByRole('group', { name: 'Title model' }));
+		expect(field.queryByText(remoteExecutor.id)).toBeNull();
+		expect(field.getByRole('button', {
+			name: 'Claude Opus', description: 'Claude / Claude OAuth / Opus / Default',
+		})).toBeTruthy();
+		expect(field.getByText('Remote executor').getAttribute('role')).toBe('status');
+		expect(field.getByRole('button', { name: 'Auto (Local)' }).getAttribute('aria-pressed')).toBe('false');
 	});
 
 	it.each(['not-a-executor', '', '22222222-2222-4222-8222-222222222222'])(
@@ -407,7 +434,7 @@ describe('remote settings sections', () => {
 		const card = screen.getByText('Compaction model').closest('.rounded-lg');
 		expect(card).toBeTruthy();
 		await fireEvent.click(
-			within(card as HTMLElement).getByRole('button', { name: /Claude .* Opus .* Default/ }),
+			within(card as HTMLElement).getByRole('button', { name: 'Claude Opus', description: /Default/ }),
 		);
 		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
 		await waitFor(() => {
@@ -491,7 +518,7 @@ describe('remote settings sections', () => {
 		render(RemoteSettingsSectionTestHost);
 
 		const [titleTrigger] = screen.getAllByRole('button', {
-			name: /Claude .* Opus .* Default/,
+			name: 'Claude Opus', description: /Default/,
 		});
 		await fireEvent.click(titleTrigger);
 		let groupHeaders = Array.from(
@@ -507,7 +534,7 @@ describe('remote settings sections', () => {
 			expect(document.querySelectorAll('[data-slot="model-selector-agent-group"]')).toHaveLength(0);
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: /Codex .* GPT-5.4 .* Default/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex GPT-5.4', description: /Default/ }));
 		groupHeaders = Array.from(
 			document.querySelectorAll<HTMLElement>('[data-slot="model-selector-agent-group"]'),
 		);
@@ -657,7 +684,7 @@ describe('remote settings sections', () => {
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost);
 
-		await fireEvent.click(screen.getAllByRole('button', { name: /Claude .* Opus .* Default/ })[0]);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Claude Opus', description: /Default/ })[0]);
 		await fireEvent.click(await screen.findByRole('button', { name: /High Thorough reasoning/ }));
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenCalledWith({
@@ -668,7 +695,7 @@ describe('remote settings sections', () => {
 		});
 
 		vi.mocked(updateRemoteSettings).mockClear();
-		await fireEvent.click(screen.getByRole('button', { name: /Codex .* GPT-5.4 .* Low/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Codex GPT-5.4', description: /Low/ }));
 		await fireEvent.click(
 			await screen.findByRole('button', { name: /Ultra Highest available reasoning effort/ }),
 		);

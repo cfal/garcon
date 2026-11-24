@@ -50,7 +50,7 @@ it('selects file-capable executors and keeps unavailable executors visible but d
 	expect(onSelect).toHaveBeenLastCalledWith('local');
 });
 
-for (const presentation of ['toolbar', 'composer', 'field'] as const) {
+for (const presentation of ['toolbar', 'inline', 'field'] as const) {
 	it.each(['files', 'git', 'agents'] as const)(
 		`hides the %s ${presentation} selector for a Local-only inventory`,
 		(service) => {
@@ -73,6 +73,29 @@ it('hides the selector before executor discovery completes', () => {
 	const executors = new ExecutorsStore();
 	render(ExecutorSelector, { executors, executorId: 'local', service: 'agents', onSelect: vi.fn() });
 	expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+});
+
+it('retains a missing chat executor without presenting Local as the selected host', async () => {
+	const executors = new ExecutorsStore(async () => [localExecutor]);
+	executors.applySnapshot([localExecutor]);
+	const onSelect = vi.fn();
+	render(ExecutorSelector, { executors, executorId: remoteExecutor.id, service: 'agents', presentation: 'inline', onSelect });
+	await fireEvent.click(screen.getByRole('button', { name: `Executor: Unavailable executor: ${remoteExecutor.id}` }));
+	const missing = screen.getByRole('menuitemradio', { name: /Unavailable executor/ });
+	expect(missing.getAttribute('aria-disabled')).toBe('true');
+	expect(missing.getAttribute('aria-checked')).toBe('true');
+	expect(screen.getByRole('menuitemradio', { name: 'Local' }).getAttribute('aria-checked')).toBe('false');
+	expect(onSelect).not.toHaveBeenCalled();
+});
+
+it('labels a committed remote neutrally until discovery resolves its identity', async () => {
+	const executors = new ExecutorsStore(async () => [localExecutor, remoteExecutor]);
+	render(ExecutorSelector, { executors, executorId: remoteExecutor.id, presentation: 'inline', service: 'agents', onSelect: vi.fn() });
+	const trigger = screen.getByRole('button', { name: 'Executor: Remote executor' });
+	expect(trigger.textContent?.trim()).toBe('Remote executor');
+	expect(trigger.title).toBe('Remote executor');
+	await fireEvent.click(trigger);
+	await waitFor(() => expect(trigger.title).toBe('Worker'));
 });
 
 it.each(['files', 'git', 'agents'] as const)(
@@ -106,7 +129,7 @@ it('selects execution hosts without requiring Files or Git and retains missing s
 	const executors = new ExecutorsStore(async () => snapshot);
 	executors.applySnapshot(snapshot);
 	const onSelect = vi.fn();
-	render(ExecutorSelector, { executors, executorId: 'missing', service: 'agents', presentation: 'composer', onSelect });
+	render(ExecutorSelector, { executors, executorId: 'missing', service: 'agents', presentation: 'inline', onSelect });
 	const trigger = screen.getByRole('button', { name: /Executor:/ });
 	expect(trigger.classList.contains('composer-executor-trigger')).toBe(true);
 	await fireEvent.click(trigger);

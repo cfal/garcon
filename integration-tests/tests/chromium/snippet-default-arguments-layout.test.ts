@@ -1,3 +1,4 @@
+import { openComposerSnippets } from '../../support/composer-actions.js';
 import { describe, expect, test } from 'bun:test';
 import type { CDPSession, Locator, Page } from 'playwright';
 import type { SnippetsMutationResponse, SnippetsSnapshot } from '../../../common/snippets.js';
@@ -53,10 +54,7 @@ async function openSnippetPalette(page: Page, newChat: Locator): Promise<Locator
     }
     await directoryBrowser.waitFor({ state: 'detached' });
   }
-  await newChat
-    .getByRole('button', { name: 'Add to prompt' })
-    .evaluate((element) => (element as HTMLButtonElement).click());
-  await page.getByRole('menuitem', { name: /Snippets/ }).click();
+  await openComposerSnippets(page, newChat);
   const palette = page.getByRole('dialog', { name: 'Insert Snippet' });
   await palette.waitFor();
   return palette;

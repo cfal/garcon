@@ -6,7 +6,8 @@
 	import type { ModelSelectorMode } from '$lib/components/model-selector/model-selector-types';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import { getModelCatalog, getRemoteSettings } from '$lib/context';
+	import { getExecutors, getModelCatalog, getRemoteSettings } from '$lib/context';
+	import { executorStatus } from '$lib/executors/executors-store.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		DEFAULT_COMMIT_MESSAGE_PROMPT,
@@ -41,6 +42,7 @@
 	let promptDialogOpen = $state(false);
 
 	const remoteSettings = getRemoteSettings();
+	const executors = getExecutors();
 	const modelCatalog = getModelCatalog();
 	const selectorMode: ModelSelectorMode = {
 		executor: 'select',
@@ -60,6 +62,19 @@
 		get enabledLabel() {
 			return enabledLabel;
 		},
+	});
+
+	const remoteExecutor = $derived.by(() => {
+		const id = cardState.executorId;
+		if (id === 'local') return null;
+		if (!executors.hasSnapshot) return { label: m.executors_remote(), unavailable: false };
+		const host = executors.get(id);
+		const unavailable = !executors.isReady(id);
+		const label = executors.label(id);
+		return {
+			label: host && unavailable ? `${label} (${executorStatus(host)})` : label,
+			unavailable,
+		};
 	});
 
 	let defaultPrompt = $derived(
@@ -84,7 +99,7 @@
 	}
 </script>
 
-<div role="group" aria-label={modelLabel} class="bg-muted/50 border border-border rounded-lg px-4">
+<div role="group" aria-label={modelLabel} class="@container bg-muted/50 border border-border rounded-lg px-4">
 	{#if cardState.saveError}
 		<div
 			class="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -126,9 +141,16 @@
 			</div>
 		{/if}
 
-		<div class="flex flex-col items-start justify-between gap-3 pb-1 pt-2 sm:flex-row">
-			<div class="pt-1.5 text-sm font-medium text-foreground">{modelLabel}</div>
-			<div class="flex min-w-0 max-w-full flex-col items-start sm:items-end">
+		<div class="grid items-start gap-3 pb-1 pt-2 @sm:grid-cols-[minmax(8rem,1fr)_auto]">
+			<div class="min-w-0 pt-1.5 text-sm font-medium text-foreground">
+				{modelLabel}
+				{#if remoteExecutor}
+					<p role="status" class="wrap-anywhere text-xs font-normal {remoteExecutor.unavailable ? 'text-destructive' : 'text-muted-foreground'}">
+						{remoteExecutor.label}
+					</p>
+				{/if}
+			</div>
+			<div class="flex min-w-0 flex-col items-start @sm:items-end @sm:[--model-trigger-justify:end]">
 				<Button
 					variant={cardState.isAuto ? 'secondary' : 'ghost'}
 					size="sm"
@@ -162,7 +184,7 @@
 					{/if}
 				</Button>
 				<div
-					class="mt-1 min-h-4 max-w-full break-words text-xs leading-4 sm:max-w-sm sm:text-right"
+					class="mt-1 min-h-4 max-w-[min(100%,24rem)] wrap-anywhere text-xs leading-4 @sm:text-right"
 					role="status"
 					aria-live="polite"
 				>

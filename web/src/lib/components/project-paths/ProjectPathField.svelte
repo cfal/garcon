@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import type { Snippet } from 'svelte';
+	import type { ComponentProps, Snippet } from 'svelte';
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import Check from '@lucide/svelte/icons/check';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
@@ -30,7 +30,7 @@
 			basePath: string;
 			isMobile: boolean;
 			onSelect: (path: string) => void;
-			onClose: () => void;
+			onClose: ComponentProps<typeof DirectoryBrowser>['onClose'];
 			button?: { label: string; disabled: boolean; onclick: () => void };
 		};
 		feedback?: {
@@ -71,15 +71,15 @@
 		onPathFocus?.(event);
 	};
 
-	function handleBrowserClose(): void {
+	const handleBrowserClose: typeof browser.onClose = (reason) => {
 		suppressNextFocus = true;
-		browser.onClose();
+		browser.onClose(reason);
 		if (clearSuppressedFocusTimer) clearTimeout(clearSuppressedFocusTimer);
 		clearSuppressedFocusTimer = setTimeout(() => {
 			clearSuppressedFocusTimer = null;
 			suppressNextFocus = false;
 		}, 0);
-	}
+	};
 
 	onDestroy(() => {
 		if (clearSuppressedFocusTimer) clearTimeout(clearSuppressedFocusTimer);
@@ -175,10 +175,15 @@
 				{#if feedback.error}
 					<p class="text-xs text-destructive">{feedback.error}</p>
 				{:else if feedback.worktree}
+					{@const worktree = feedback.worktree}
 					<button
 						type="button"
-						disabled={feedback.worktree.disabled}
-						onclick={feedback.worktree.onOpen}
+						disabled={worktree.disabled}
+						onclick={(event) => {
+							// The dialog restores the focused opener, including on browsers that don't focus clicked buttons.
+							event.currentTarget.focus({ preventScroll: true });
+							worktree.onOpen();
+						}}
 						class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
 					>
 						{m.chat_new_chat_select_different_worktree()}

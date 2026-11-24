@@ -175,6 +175,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	showThinking: boolean;
 	allowDirectChats: boolean;
 	reduceMotion: boolean;
+	modelControlsLeft: boolean;
 	autoScrollToBottom: boolean;
 	sendByShiftEnter: boolean;
 	composerInputMode: ComposerInputMode;
@@ -241,6 +242,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	showThinking: true,
 	allowDirectChats: false,
 	reduceMotion: false,
+	modelControlsLeft: false,
 	...COMPOSER_STATUS_BAR_DEFAULTS,
 	autoScrollToBottom: true,
 	sendByShiftEnter: false,
@@ -463,6 +465,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
 		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
+		modelControlsLeft: parseBoolean(parsed.modelControlsLeft, DEFAULTS.modelControlsLeft),
 		composerStatusBarGitProjects: parseBoolean(
 			parsed.composerStatusBarGitProjects,
 			DEFAULTS.composerStatusBarGitProjects,
@@ -642,6 +645,7 @@ export class LocalSettingsStore {
 	showThinking = $state(DEFAULTS.showThinking);
 	allowDirectChats = $state(DEFAULTS.allowDirectChats);
 	reduceMotion = $state(DEFAULTS.reduceMotion);
+	modelControlsLeft = $state(DEFAULTS.modelControlsLeft);
 	composerStatusBarGitProjects = $state(DEFAULTS.composerStatusBarGitProjects);
 	composerStatusBarNonGitProjects = $state(DEFAULTS.composerStatusBarNonGitProjects);
 	composerStatusBarProjectPath = $state(DEFAULTS.composerStatusBarProjectPath);
@@ -837,6 +841,7 @@ export class LocalSettingsStore {
 			showThinking: this.showThinking,
 			allowDirectChats: this.allowDirectChats,
 			reduceMotion: this.reduceMotion,
+			modelControlsLeft: this.modelControlsLeft,
 			composerStatusBarGitProjects: this.composerStatusBarGitProjects,
 			composerStatusBarNonGitProjects: this.composerStatusBarNonGitProjects,
 			composerStatusBarProjectPath: this.composerStatusBarProjectPath,
@@ -920,6 +925,7 @@ export class LocalSettingsStore {
 		this.showThinking = snap.showThinking;
 		this.allowDirectChats = snap.allowDirectChats;
 		this.reduceMotion = snap.reduceMotion;
+		this.modelControlsLeft = snap.modelControlsLeft;
 		this.composerStatusBarGitProjects = snap.composerStatusBarGitProjects;
 		this.composerStatusBarNonGitProjects = snap.composerStatusBarNonGitProjects;
 		this.composerStatusBarProjectPath = snap.composerStatusBarProjectPath;

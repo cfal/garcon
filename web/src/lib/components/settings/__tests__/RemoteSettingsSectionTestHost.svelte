@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
-	setExecutorsTestContext();
+	import type { ExecutorSnapshot } from '$shared/executors';
 	import AutomationSettingsSection from '../AutomationSettingsSection.svelte';
 	import GeneralSettingsSection from '../GeneralSettingsSection.svelte';
 	import NotificationsSettingsSection from '../NotificationsSettingsSection.svelte';
@@ -16,13 +16,15 @@
 	import { THINKING_MODE_VALUES } from '$shared/chat-modes';
 	import { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { setTestLocalSettingsStore } from './local-settings-test-context';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 
 	interface Props {
 		section?: 'all' | 'general' | 'automation' | 'notifications';
+		executors?: ExecutorSnapshot[] | null;
 	}
 
-	let { section = 'all' }: Props = $props();
+	let { section = 'all', executors }: Props = $props();
+	setExecutorsTestContext(untrack(() => executors));
 
 	setRemoteSettings(getTestRemoteSettingsStore());
 

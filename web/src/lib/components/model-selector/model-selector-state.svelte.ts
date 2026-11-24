@@ -155,8 +155,10 @@ export class ModelSelectorState {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
 	}
 
-	get executorLabel(): string {
-		return this.#options.executors?.label(this.value.executorId) ?? 'Local';
+	get executorLabel(): string | null {
+		const executors = this.#options.executors;
+		if (this.committedExecutorId !== 'local' && !executors?.hasSnapshot) return null;
+		return executors?.label(this.committedExecutorId) ?? 'Local';
 	}
 
 	get draftExecutorLabel(): string {
@@ -210,10 +212,6 @@ export class ModelSelectorState {
 
 	get isRecentsPaneActive(): boolean {
 		return this.contentPane === 'recents';
-	}
-
-	get shouldStartFromRecentsOnOpen(): boolean {
-		return this.#options.preferRecentsOnOpen && this.recentOptions.length > 1;
 	}
 
 	isRecentSelected(recent: ModelSelectorRecentOption): boolean {
@@ -377,29 +375,6 @@ export class ModelSelectorState {
 		return this.draftSelection.modelLabelSource;
 	}
 
-	get triggerPrimary(): string {
-		const committed = this.committedSelection;
-		if (this.mode.surface === 'settings') return committed.agentLabel;
-		if (this.mode.agent === 'select') return committed.agentLabel;
-		return committed.modelLabel;
-	}
-
-	get triggerSecondary(): string {
-		const committed = this.committedSelection;
-		if (this.mode.surface === 'settings') {
-			const source = this.#visibleSourceFor(committed);
-			return [
-				source?.label,
-				committed.modelLabel,
-				this.effortSelectionEnabled ? this.selectedThinkingModeLabel : '',
-			]
-				.filter(Boolean)
-				.join(' / ');
-		}
-		if (this.mode.agent === 'select') return committed.modelLabel;
-		return '';
-	}
-
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
 		return [
@@ -445,7 +420,7 @@ export class ModelSelectorState {
 		if (this.open) return;
 		this.open = true;
 		this.query = '';
-		this.contentPane = this.shouldStartFromRecentsOnOpen ? 'recents' : 'browse';
+		this.contentPane = this.#options.preferRecentsOnOpen && this.recentOptions.length > 1 ? 'recents' : 'browse';
 		this.#startDraftFromValue();
 		this.resetActiveModelIndex();
 		if (this.executorReady) void this.modelCatalog.refreshIfStale();

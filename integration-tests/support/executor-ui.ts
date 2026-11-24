@@ -1,12 +1,26 @@
 import type { Page } from 'puppeteer-core';
+import { clickInlineComposerButton } from './composer-actions.js';
 
-export async function openDialogModelSelector(page: Page): Promise<void> {
-  const selector = '[role="dialog"] [data-slot="model-selector-trigger-secondary"]';
-  await page.waitForFunction((query) => {
-    const button = document.querySelector(query)?.closest('button');
-    return button && !button.disabled;
-  }, {}, selector);
-  await page.$eval(selector, (element) => element.closest('button')!.click());
+export async function openModelSelector(page: Page, scope = '[role="dialog"]'): Promise<void> {
+  const selector = `${scope} button[data-slot="model-selector-trigger"]:not(:disabled)`;
+  if (await clickInlineComposerButton(page, selector)) return;
+
+  const menu = `${scope} :is([data-composer-overflow="settings"], [data-slot="model-selector-overflow"]):not([hidden])`;
+  await page.$eval(menu, (button) => (button as HTMLButtonElement).click());
+  const model = '[role="menuitem"][data-composer-control="model"]';
+  await page.waitForSelector(model);
+  await page.$eval(model, (item) => (item as HTMLElement).click());
+}
+
+export async function selectModelOption(page: Page, label: string): Promise<void> {
+  const option = await page.waitForFunction(name =>
+    [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"] button[role="option"]')]
+      .find(button => !button.disabled && button.textContent?.trim() === name)!, {}, label);
+  try {
+    await option.evaluate(button => button.click());
+  } finally {
+    await option.dispose();
+  }
 }
 
 export async function selectExecutor(page: Page, trigger: string, label: string): Promise<void> {

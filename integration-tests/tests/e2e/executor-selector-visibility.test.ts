@@ -4,7 +4,7 @@ import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`executor selectors hide for a Local-only inventory (${executionBackend})`, async () => {
+  test(`executor selectors preserve the chat target after the last remote is removed (${executionBackend})`, async () => {
     await withE2eFixture(`executor-selector-visibility-${executionBackend}`, async fixture => {
       const { client, directAgents, executionDirs } = fixture.integration;
       const chatId = fixture.integration.newChatId();
@@ -44,10 +44,27 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       }
       await fixture.page.waitForSelector('[data-slot="composer-bottom-bar"] [data-executor-picker]');
       await client.delete(`/api/v1/executors/${remoteId}`);
-      await fixture.page.waitForFunction(() => !document.querySelector('[data-executor-picker]'));
+      const localChat = executionBackend === 'in-process';
+      const picker = '[data-composer-toolbar] [data-executor-picker]';
+      await fixture.page.waitForFunction((selector, id, local) => {
+        const button = document.querySelector(selector);
+        return local ? !button : button?.getAttribute('aria-label') === `Executor: Unavailable executor: ${id}`;
+      }, {}, picker, remoteId, localChat);
+      if (!localChat) {
+        await fixture.page.$eval(picker, button => (button as HTMLElement).click());
+        const selected = '[role="menuitemradio"][aria-checked="true"][aria-disabled="true"]';
+        await fixture.page.waitForSelector(selected);
+        expect(await fixture.page.$eval(selected, item => item.textContent)).toContain(remoteId);
+        await fixture.page.keyboard.press('Escape');
+      }
       for (const [width, height] of [[1_440, 900], [390, 844]] as const) {
         await app.setViewport(width, height);
-        expect(await fixture.page.$('[data-executor-picker]')).toBeNull();
+        if (localChat) {
+          expect(await fixture.page.$(picker)).toBeNull();
+        } else {
+          expect(await fixture.page.$eval(picker, button => button.getAttribute('aria-label')))
+            .toBe(`Executor: Unavailable executor: ${remoteId}`);
+        }
         expect(await editor.evaluate(element => document.querySelector('[data-composer] textarea') === element)).toBe(true);
         expect(await editor.evaluate(element => element.value)).toBe(draft);
       }

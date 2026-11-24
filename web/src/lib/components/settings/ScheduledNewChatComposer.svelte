@@ -1,32 +1,23 @@
 <script lang="ts">
 	import ComposerBottomBar from '$lib/components/chat/composer/ComposerBottomBar.svelte';
-	import AgentSettingsControls from '$lib/components/chat/composer/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
 	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
-	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import NewChatPreambleControls from '$lib/components/preambles/NewChatPreambleControls.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import type { PromptTemplateVariables } from './prompt-template-variables';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
-	import {
-		buildPermissionOptions,
-		buildThinkingOptions,
-	} from '$lib/chat/composer/composer-controls.js';
-	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
-	import type {
-		ModelSelectorChange,
-		ModelSelectorMode,
-	} from '$lib/components/model-selector/model-selector-types';
+	import { newChatToolbarSettings } from '$lib/components/chat/new-chat/new-chat-toolbar-settings';
+	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell, getExecutors } from '$lib/context';
+	import { getAppShell, getExecutors, getLocalSettings } from '$lib/context';
 
 	interface Props {
 		startup: NewChatFormState;
@@ -68,26 +59,15 @@
 	let textarea: HTMLTextAreaElement | null = $state(null);
 	const appShell = getAppShell();
 	const executors = getExecutors();
+	const localSettings = getLocalSettings();
 
-	const permissionOptions = $derived(buildPermissionOptions(startup.permissionModes));
-	const thinkingOptions = $derived(buildThinkingOptions(startup.thinkingModes, startup.modelValue));
-	const modelSelectorMode: ModelSelectorMode = {
-		agent: 'select',
-		source: 'select',
-		surface: 'composer',
-	};
-	const modelSelectorValue = $derived({
-		executorId: startup.executorId,
-		agentId: startup.agentId,
-		model: startup.modelValue,
-		...(startup.modelSelectionTarget ?? {}),
-	});
-	function getRecents(executorId: string) {
-		return buildModelSelectorRecents(
-			modelCatalog.forExecutor(executorId),
-			remoteSettings.snapshot?.recentAgentSettings ?? [],
-		);
-	}
+	const toolbarSettings = $derived(newChatToolbarSettings({
+		form: startup,
+		modelCatalog,
+		remoteSettings,
+		getSelectableAgentIds,
+		onModelChange: handleModelChange,
+	}));
 
 	function handlePathKeydown(event: KeyboardEvent): void {
 		if (event.key === 'Tab' && startup.filesAvailable) {
@@ -244,47 +224,7 @@
 		onEditSnippets={(returnFocus) => appShell.openSnippetsOverScheduledPrompts(returnFocus)}
 	>
 		{#snippet controls()}
-			<div data-slot="scheduled-new-chat-composer-controls">
-				<ComposerBottomBar
-					canAttachImages={false}
-					attachImagesTooltip=""
-					onAddImage={() => {}}
-					{permissionOptions}
-					selectedPermission={startup.permissionMode}
-					onPermissionSelect={(mode) => startup.setPermissionMode(mode)}
-					{thinkingOptions}
-					selectedThinking={startup.thinkingMode}
-					onThinkingSelect={(mode) => startup.setThinkingMode(mode)}
-					canSend={false}
-					onSend={() => {}}
-					sendTitle=""
-					sendButtonClass=""
-					showAddMenu={false}
-					showSendButton={false}
-					mobileRightGroupFullRow={true}
-				>
-					{#snippet agentSettings()}
-						<AgentSettingsControls
-							descriptors={startup.agentSettingDescriptors}
-							envelope={startup.agentSettings}
-							defaults={modelCatalog.forExecutor(startup.executorId).getDefaultAgentSettings(startup.agentId)}
-							onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
-						/>
-					{/snippet}
-					{#snippet modelSelector()}
-						<ComposerModelSelector
-							value={modelSelectorValue}
-							mode={modelSelectorMode}
-							onChange={handleModelChange}
-							{getRecents}
-							preferRecentsOnOpen
-							{getSelectableAgentIds}
-							align="end"
-							side="bottom"
-						/>
-					{/snippet}
-				</ComposerBottomBar>
-			</div>
+			<ComposerBottomBar {...toolbarSettings} modelControlsLeft={localSettings.modelControlsLeft} side="bottom" />
 		{/snippet}
 	</ScheduledPromptField>
 </div>

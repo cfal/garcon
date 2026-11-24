@@ -61,6 +61,7 @@ export interface NewChatFormStateOptions {
 	get selectableAgentIds(): readonly SessionAgentId[];
 	/** Retains the unsent prompt across reseeds. Omitted where the prompt is persisted elsewhere. */
 	promptDraft?: NewChatPromptDraft;
+	onWorktreeSelected?: () => void;
 }
 
 export class NewChatFormState {
@@ -117,7 +118,10 @@ export class NewChatFormState {
 		target: () => ({ executorId: this.executorId, projectPath: this.nonblankPath }),
 		servingContext: () => this.gitAvailable ? (this.#options.executors?.gitContextKey(this.executorId) ?? this.executorId) : null,
 		servingInstanceId: () => this.#options.executors?.get(this.executorId)?.instanceId ?? null,
-		select: (path) => this.selectProjectPath(path),
+		select: (path) => {
+			this.selectProjectPath(path);
+			this.#options.onWorktreeSelected?.();
+		},
 	});
 	// Images (delegated to shared ImageAttachmentState)
 	readonly #images = new ImageAttachmentState();

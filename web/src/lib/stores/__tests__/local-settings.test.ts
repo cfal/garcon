@@ -238,11 +238,12 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	const composerDefaults = { ...COMPOSER_STATUS_BAR_DEFAULTS, modelControlsLeft: false };
 	it.each(
-		Object.keys(COMPOSER_STATUS_BAR_DEFAULTS) as (keyof typeof COMPOSER_STATUS_BAR_DEFAULTS)[],
+		Object.keys(composerDefaults) as (keyof typeof composerDefaults)[],
 	)('persists, synchronizes, validates and resets %s independently', (key) => {
 		const store = createLocalSettingsStore();
-		const initial = COMPOSER_STATUS_BAR_DEFAULTS[key];
+		const initial = composerDefaults[key];
 		expect(store[key]).toBe(initial);
 		store.toggle(key);
 		const restored = createLocalSettingsStore();
@@ -264,7 +265,7 @@ describe('LocalSettingsStore', () => {
 		window.dispatchEvent(
 			new StorageEvent('storage', { key: null, newValue: null, storageArea: localStorage }),
 		);
-		expect(restored.snapshot()).toMatchObject(COMPOSER_STATUS_BAR_DEFAULTS);
+		expect(restored.snapshot()).toMatchObject(composerDefaults);
 		store.destroy();
 		restored.destroy();
 		invalid.destroy();
