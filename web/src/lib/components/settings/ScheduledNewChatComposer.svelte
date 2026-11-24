@@ -17,10 +17,9 @@
 	import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell, getExecutors } from '$lib/context';
+	import { getAppShell, getExecutors, getLocalSettings } from '$lib/context';
 
 	interface Props {
-		modelControlsLeft: boolean;
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
@@ -40,7 +39,6 @@
 	}
 
 	let {
-		modelControlsLeft,
 		startup,
 		modelCatalog,
 		remoteSettings,
@@ -61,6 +59,7 @@
 	let textarea: HTMLTextAreaElement | null = $state(null);
 	const appShell = getAppShell();
 	const executors = getExecutors();
+	const localSettings = getLocalSettings();
 
 	const toolbarSettings = $derived(newChatToolbarSettings({
 		form: startup,
@@ -225,7 +224,7 @@
 		onEditSnippets={(returnFocus) => appShell.openSnippetsOverScheduledPrompts(returnFocus)}
 	>
 		{#snippet controls()}
-			<ComposerBottomBar {...toolbarSettings} {modelControlsLeft} side="bottom" />
+			<ComposerBottomBar {...toolbarSettings} modelControlsLeft={localSettings.modelControlsLeft} side="bottom" />
 		{/snippet}
 	</ScheduledPromptField>
 </div>

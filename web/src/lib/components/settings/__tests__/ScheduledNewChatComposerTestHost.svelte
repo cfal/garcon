@@ -1,13 +1,14 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { scheduledPromptVariables } from '../prompt-template-variables';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
-	import { setAppShell, setPreambles } from '$lib/context';
+	import { setAppShell, setLocalSettings, setPreambles } from '$lib/context';
 	import { createAppShellStore, type AppShellStore } from '$lib/stores/app-shell.svelte';
+	import { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 	import ScheduledNewChatComposer from '../ScheduledNewChatComposer.svelte';
 
@@ -46,10 +47,11 @@
 	setAppShell(appShell);
 	setPreambles(preambles);
 	setExecutorsTestContext();
+	const localSettings = setLocalSettings(new LocalSettingsStore());
+	onDestroy(() => localSettings.destroy());
 </script>
 
 <ScheduledNewChatComposer
-	modelControlsLeft={false}
 	{conversationInput}
 	{startup}
 	{modelCatalog}
