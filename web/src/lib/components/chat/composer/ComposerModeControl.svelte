@@ -46,6 +46,7 @@
 		{#each options as option (option.value)}
 			<DropdownMenuRadioItem
 				value={option.value}
+				{disabled}
 				onSelect={() => onSelect(option.value)}
 				data-thinking-mode={id === 'effort' ? option.value : undefined}
 				data-rainbow={option.rainbow || undefined}

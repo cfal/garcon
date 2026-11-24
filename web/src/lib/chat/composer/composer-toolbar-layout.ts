@@ -14,12 +14,12 @@ export interface ComposerToolbarControls {
 	send: boolean;
 	refining: boolean;
 	bypass: boolean;
+	explainUnavailableImage?: boolean;
 }
 
 // Widths are in rem, matching the toolbar's size-9 controls and gap-1 spacing.
 const icon = 2.25;
 const gap = 0.25;
-const labelledExecutor = 9;
 
 function retention(id: ComposerControlId, controls: ComposerToolbarControls): number {
 	switch (id) {
@@ -48,6 +48,7 @@ export function fitComposerToolbar(
 	controls: ComposerToolbarControls,
 	widthRem: number,
 	modelWidthsRem: ModelTriggerWidths = { model: icon, combined: icon },
+	executorWidthRem?: number,
 ) {
 	const inline = new Set<ComposerControlId>();
 	const hidden = (group: readonly ComposerControlId[]) => group.some((id) => !inline.has(id));
@@ -70,6 +71,7 @@ export function fitComposerToolbar(
 	if (widthRem > 0) {
 		// A model too wide to promote must not displace smaller controls that still fit.
 		for (const id of ids.sort((a, b) => retention(b, controls) - retention(a, controls))) {
+			if (id === 'image' && controls.explainUnavailableImage) continue;
 			const previous = minimumWidth();
 			inline.add(id);
 			const budget = id === 'model' ? widthRem : Math.max(widthRem, previous);
@@ -84,11 +86,12 @@ export function fitComposerToolbar(
 		? fitModelTrigger(modelWidthsRem, modelWidthsRem.model + spare)
 		: 'overflow';
 	const prefixWidth = modelDisplay === 'combined' ? modelWidthsRem.combined - modelWidthsRem.model : 0;
-	const fullExecutor = inline.has('executor') && spare - prefixWidth >= labelledExecutor - icon;
+	const fullExecutor = inline.has('executor') &&
+		(widthRem <= 0 || (executorWidthRem !== undefined && spare - prefixWidth >= executorWidthRem - icon));
 	return {
 		inline,
-		promptMenu: hidden(controls.prompt),
-		settingsMenu: hidden(controls.settings),
+		foldedPrompt: controls.prompt.filter((id) => !inline.has(id)),
+		foldedSettings: controls.settings.filter((id) => !inline.has(id)),
 		fullExecutor,
 		modelDisplay,
 	};

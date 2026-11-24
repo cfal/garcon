@@ -28,6 +28,28 @@ test('the live composer follows tile width and local group order without changin
     await expect(settingsMenu).toHaveCount(0);
     await expect(groups.first()).toHaveAttribute('data-composer-group', 'prompt');
 
+    phase('fitting each host name at its actual width');
+    const { client } = integration;
+    for (const label of ['VM', 'Integration build server']) {
+      await client.patch(`/api/v1/executors/${client.executorId}`, { label });
+      const named = toolbar.getByRole('button', { name: `Executor: ${label}`, exact: true });
+      await expect(named).toHaveText(label);
+      await expect.poll(() => named.locator('.executor-label').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await toolbar.evaluate(async row => {
+        const [left, right] = row.querySelectorAll('[data-composer-group]');
+        const space = right.getBoundingClientRect().left - left.getBoundingClientRect().right;
+        const gap = parseFloat(getComputedStyle(row).columnGap);
+        row.style.maxWidth = `${Math.ceil(row.getBoundingClientRect().width - space + gap)}px`;
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
+      await expect(named).toHaveText(label);
+      await expect(settingsMenu).toHaveCount(0);
+      await expect(promptMenu).toHaveCount(0);
+      await toolbar.evaluate(row => row.style.removeProperty('max-width'));
+    }
+    await client.patch(`/api/v1/executors/${client.executorId}`, { label: 'Integration worker' });
+    await expect(executor).toHaveText('Integration worker');
+
     phase('swapping whole groups in Appearance');
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
@@ -88,7 +110,10 @@ test('the live composer follows tile width and local group order without changin
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('menuitemradio', { name: 'Integration worker' })).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
-    if (await host.isVisible()) await page.keyboard.press('Escape');
+    await expect(host).toBeFocused();
+    await expect(page.getByRole('menuitemradio')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(settingsMenu).toBeFocused();
 
     phase('switching chats without moving the dock or losing the draft');
     const top = (await toolbar.boundingBox())!.y;

@@ -26,6 +26,7 @@
 		executor,
 		model,
 		onModelMeasure,
+		onExecutorMeasure,
 		agentSettings,
 		permission,
 		effort,
@@ -37,6 +38,7 @@
 		ids: readonly ComposerSettingId[];
 		layout: ReturnType<typeof fitComposerToolbar>;
 		onModelMeasure: (widths: ModelTriggerWidths) => void;
+		onExecutorMeasure: (width: number) => void;
 		bypass: boolean;
 		disabled: boolean;
 		align: 'start' | 'end';
@@ -46,7 +48,7 @@
 	let picker = $state<ComposerModelSelector>();
 	const menu = new OverflowMenuState(() => picker?.dismissPicker());
 	export const closeOverflow = menu.closeThen;
-	const folded = $derived(ids.filter((id) => !layout.inline.has(id)));
+	const folded = $derived(layout.foldedSettings);
 	const hiddenBypass = $derived(
 		bypass && folded.includes('permission')
 			? permission.options.find(({ value }) => value === permission.selected)
@@ -70,6 +72,7 @@
 			presentation={placement === 'menu' ? 'composer-menu' : 'composer'}
 			hidden={placement === 'hidden'}
 			compact={!layout.fullExecutor}
+			onMeasure={placement === 'menu' ? undefined : onExecutorMeasure}
 			{align}
 			{side}
 		/>
@@ -98,7 +101,7 @@
 			<ModelSelectorMenuItem
 				onSelect={() => closeOverflow(() => picker?.openPicker())}
 				disabled={model.disabled || disabled}
-				summary={picker?.selectionSummary() ?? ''}
+				selection={picker?.menuSelection()}
 			/>
 		{:else}
 			<ComposerModelSelector

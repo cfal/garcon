@@ -137,9 +137,11 @@
 		untrack(() => selector.reconcileExecutor());
 	});
 
-	export function selectionSummary(): string {
-		const { agentLabel, modelLabel } = committed;
-		return [agentLabel, modelLabel].filter(Boolean).join(' / ');
+	export function menuSelection() {
+		return {
+			summary: [committed.agentLabel, committed.modelLabel].filter(Boolean).join(' / '),
+			title: selector.triggerTitle,
+		};
 	}
 
 	export function openPicker(): void {
@@ -256,6 +258,7 @@
 	bind:this={triggerFrame}
 	agent={committed.agentLabel}
 	model={committed.modelLabel}
+	menuSelection={menuSelection()}
 	buttonClass={triggerBaseClass}
 	{toolbarDisplay}
 	{onMeasure}

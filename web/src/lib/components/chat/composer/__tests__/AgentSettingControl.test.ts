@@ -17,9 +17,10 @@ describe('AgentSettingControl', () => {
 		} as const;
 		const onChange = vi.fn();
 		const defaults = { ownerId: 'sample-agent', schemaVersion: 1, values: { limit: 1 } };
-		render(AgentSettingControl, {
+		const settings = { descriptors: [descriptor], defaults, envelope: defaults, onChange };
+		const { rerender } = render(AgentSettingControl, {
 			descriptor,
-			settings: { descriptors: [descriptor], defaults, envelope: defaults, onChange },
+			settings,
 			placement: 'inline',
 			align: 'end',
 			side: 'top',
@@ -43,6 +44,10 @@ describe('AgentSettingControl', () => {
 		}
 		await fireEvent.change(input, { target: { value: '4' } });
 		expect(onChange).toHaveBeenCalledWith(descriptor, 4);
+		await rerender({ settings: { ...settings, disabled: true } });
+		expect((input as HTMLInputElement).disabled).toBe(true);
+		await fireEvent.change(input, { target: { value: '6' } });
+		expect(onChange).toHaveBeenCalledTimes(1);
 	});
 
 	it('renders runtime descriptors and reports provider-neutral changes', async () => {

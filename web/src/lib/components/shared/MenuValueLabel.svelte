@@ -13,6 +13,6 @@
 		class="block text-xs text-muted-foreground group-data-[highlighted]:text-accent-foreground {wrapValue
 			? 'whitespace-normal wrap-anywhere'
 			: 'truncate'}"
-		title={value}>{value}</span
+		title={wrapValue ? undefined : value}>{value}</span
 	>
 </span>

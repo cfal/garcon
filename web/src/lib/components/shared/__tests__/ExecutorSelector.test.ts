@@ -88,6 +88,16 @@ it('retains a missing chat executor without presenting Local as the selected hos
 	expect(onSelect).not.toHaveBeenCalled();
 });
 
+it('labels a committed remote neutrally until discovery resolves its identity', async () => {
+	const executors = new ExecutorsStore(async () => [localExecutor, remoteExecutor]);
+	render(ExecutorSelector, { executors, executorId: remoteExecutor.id, presentation: 'composer', service: 'agents', onSelect: vi.fn() });
+	const trigger = screen.getByRole('button', { name: 'Executor: Remote executor' });
+	expect(trigger.textContent?.trim()).toBe('Remote executor');
+	expect(trigger.title).toBe('Remote executor');
+	await fireEvent.click(trigger);
+	await waitFor(() => expect(trigger.title).toBe('Worker'));
+});
+
 it.each(['files', 'git', 'agents'] as const)(
 	'shows the themed executor icon with an offline remote (%s)',
 	(service) => {

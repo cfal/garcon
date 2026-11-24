@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { AgentSettingDescriptor } from '$shared/agent-integration';
+	import type { JsonValue } from '$shared/json';
 	import { settingValue } from '$shared/agent-settings';
 	import {
 		agentSettingLabel,
@@ -45,6 +46,11 @@
 	const inputId = $props.id();
 	let input = $state<HTMLInputElement>();
 
+	function changeValue(next: JsonValue): void {
+		// Disabling a focused native input can fire change as it blurs.
+		if (!settings.disabled) settings.onChange(descriptor, next);
+	}
+
 	function focusInput(event: Event): void {
 		event.preventDefault();
 		queueMicrotask(() => input?.focus({ preventScroll: true }));
@@ -77,11 +83,11 @@
 	{#if descriptor.type === 'enum'}
 		<DropdownMenuRadioGroup
 			value={typeof value === 'string' ? value : ''}
-			onValueChange={(next) => settings.onChange(descriptor, next)}
+			onValueChange={changeValue}
 		>
 			{#each options as option (option.value)}
 				{@const description = agentSettingOptionDescription(option)}
-				<DropdownMenuRadioItem value={option.value} class="items-start">
+				<DropdownMenuRadioItem value={option.value} disabled={settings.disabled} class="items-start">
 					<div class="min-w-0">
 						<div class="font-medium">{agentSettingOptionLabel(option)}</div>
 						{#if description}<div data-menu-description class="text-xs text-muted-foreground">
@@ -94,12 +100,12 @@
 	{:else if descriptor.type === 'boolean'}
 		<DropdownMenuRadioGroup
 			value={String(value === true)}
-			onValueChange={(next) => settings.onChange(descriptor, next === 'true')}
+			onValueChange={(next) => changeValue(next === 'true')}
 		>
-			<DropdownMenuRadioItem value="true"
+			<DropdownMenuRadioItem value="true" disabled={settings.disabled}
 				>{m.chat_composer_agent_setting_enabled()}</DropdownMenuRadioItem
 			>
-			<DropdownMenuRadioItem value="false"
+			<DropdownMenuRadioItem value="false" disabled={settings.disabled}
 				>{m.chat_composer_agent_setting_disabled()}</DropdownMenuRadioItem
 			>
 		</DropdownMenuRadioGroup>
@@ -112,6 +118,7 @@
 					bind:this={input}
 					onkeydown={keepEditingKeys}
 					type="number"
+					disabled={settings.disabled}
 					min={descriptor.min}
 					max={descriptor.max}
 					step={descriptor.step}
@@ -122,7 +129,7 @@
 							event.currentTarget.validity.valid &&
 							Number.isFinite(event.currentTarget.valueAsNumber)
 						)
-							settings.onChange(descriptor, event.currentTarget.valueAsNumber);
+							changeValue(event.currentTarget.valueAsNumber);
 					}}
 				/>
 			{:else}
@@ -131,9 +138,10 @@
 					bind:this={input}
 					onkeydown={keepEditingKeys}
 					type="text"
+					disabled={settings.disabled}
 					value={summary}
 					class="h-9 rounded border border-input bg-background px-2 text-base"
-					onchange={(event) => settings.onChange(descriptor, event.currentTarget.value)}
+					onchange={(event) => changeValue(event.currentTarget.value)}
 				/>
 			{/if}
 		</label>

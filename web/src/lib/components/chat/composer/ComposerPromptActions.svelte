@@ -14,11 +14,13 @@
 
 	let {
 		actions,
+		explainUnavailableImage,
 		inline,
 		align,
 		side,
 	}: {
 		actions: readonly ComposerPromptAction[];
+		explainUnavailableImage: boolean;
 		inline: ReadonlySet<ComposerControlId>;
 		align: 'start' | 'end';
 		side: 'top' | 'bottom';
@@ -49,7 +51,7 @@
 <DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
 	<DropdownMenuTrigger
 		hidden={!folded.length}
-		disabled={folded.every((action) => action.disabled)}
+		disabled={!explainUnavailableImage && folded.every((action) => action.disabled)}
 		aria-label={label}
 		title={label}
 		data-composer-overflow={folded.length ? 'prompt' : undefined}
@@ -72,7 +74,7 @@
 				data-composer-control={action.id}
 			>
 				<action.icon class="mt-0.5 size-4" />
-				{#if action.description}<MenuValueLabel label={action.label} value={action.description} />
+				{#if action.description}<MenuValueLabel label={action.label} value={action.description} wrapValue />
 				{:else}{action.label}{/if}
 			</DropdownMenuItem>
 		{/each}

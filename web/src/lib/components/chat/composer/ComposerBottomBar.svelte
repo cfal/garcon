@@ -40,6 +40,7 @@
 	let rowWidth = $state(0);
 	let rem = $state(16);
 	let modelWidths = $state<ModelTriggerWidths>();
+	let executorWidth = $state<number>();
 	$effect(() => {
 		const toolbar = row;
 		const ruler = unit;
@@ -57,6 +58,10 @@
 		return () => observer.disconnect();
 	});
 	const actions = $derived(composerPromptActions(prompt));
+	// The menu can explain an unsupported attachment without relying on hover.
+	const explainUnavailableImage = $derived(
+		prompt.image?.supported === false && !prompt.editingDisabled && !prompt.isPromptTransformPending,
+	);
 	const settings = $derived.by(() => {
 		const ids: ComposerSettingId[] = [];
 		if (executor?.executors.showComposerExecutor(executor.executorId)) ids.push('executor');
@@ -77,11 +82,13 @@
 				send: Boolean(send),
 				refining: Boolean(prompt.isPromptRefinementPending),
 				bypass,
+				explainUnavailableImage,
 			},
 			rowWidth / rem,
 			modelWidths
 				? { combined: modelWidths.combined / rem, model: modelWidths.model / rem }
 				: undefined,
+			executorWidth === undefined ? undefined : executorWidth / rem,
 		),
 	);
 	const groups = $derived(modelControlsLeft ? ['settings', 'prompt'] : ['prompt', 'settings']);
@@ -114,6 +121,7 @@
 						<ComposerPromptActions
 							bind:this={promptGroup}
 							{actions}
+							{explainUnavailableImage}
 							inline={layout.inline}
 							align={first ? 'start' : 'end'}
 							{side}
@@ -127,6 +135,9 @@
 							{model}
 							onModelMeasure={(widths) => {
 								modelWidths = widths;
+							}}
+							onExecutorMeasure={(width) => {
+								executorWidth = width;
 							}}
 							{agentSettings}
 							{permission}

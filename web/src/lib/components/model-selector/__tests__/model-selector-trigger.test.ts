@@ -37,6 +37,7 @@ it('keeps the full model name or offers the same picker through one Settings men
 		const items = screen.getAllByRole('menuitem');
 		expect(items).toHaveLength(1);
 		expect(items[0].textContent).toContain('Claude / Model 0');
+		expect(screen.getByRole('menuitem', { description: trigger.title })).toBe(items[0]);
 		await fireEvent.click(items[0]);
 		expect(await screen.findByRole('listbox', { name: 'Model' })).toBeTruthy();
 	} finally {

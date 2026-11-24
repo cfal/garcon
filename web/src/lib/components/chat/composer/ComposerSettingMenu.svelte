@@ -1,15 +1,11 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { MediaQuery } from 'svelte/reactivity';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuTrigger,
-		DropdownMenuSub,
-		DropdownMenuSubContent,
-		DropdownMenuSubTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import MenuValueLabel from '$lib/components/shared/MenuValueLabel.svelte';
+	import ComposerSettingSubmenu from '$lib/components/shared/ComposerSettingSubmenu.svelte';
 	import type { ComposerControlPlacement } from './composer-toolbar-types';
 
 	let {
@@ -42,7 +38,6 @@
 		onOpenAutoFocus?: (event: Event) => void;
 	} = $props();
 	const name = $derived(value ? `${label}: ${value}` : label);
-	const narrowViewport = new MediaQuery('(max-width: 640px)');
 	let open = $state(false);
 	$effect.pre(() => {
 		if (placement === 'hidden') open = false;
@@ -50,27 +45,9 @@
 </script>
 
 {#if placement === 'menu'}
-	<DropdownMenuSub>
-		<DropdownMenuSubTrigger
-			{disabled}
-			class="group"
-			textValue={label}
-			aria-label={name}
-			data-composer-control={id}
-		>
-			{@render icon()}
-			<MenuValueLabel {label} {value} />
-		</DropdownMenuSubTrigger>
-		<DropdownMenuSubContent
-			{onOpenAutoFocus}
-			side={narrowViewport.current ? side : 'right'}
-			{align}
-			collisionPadding={8}
-			class="max-h-(--bits-dropdown-menu-content-available-height) w-64 max-w-[calc(100vw-1rem)] overflow-y-auto"
-		>
-			{@render children()}
-		</DropdownMenuSubContent>
-	</DropdownMenuSub>
+	<ComposerSettingSubmenu
+		{id} {name} {label} {value} {icon} {children} {disabled} {align} {side} {onOpenAutoFocus} contentClass="w-64"
+	/>
 {:else}
 	<DropdownMenu bind:open>
 		<DropdownMenuTrigger

@@ -30,7 +30,7 @@ function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 
 export async function retainComposerToolbarFocus(
 	root: HTMLElement,
-	layout: Pick<ReturnType<typeof fitComposerToolbar>, 'inline' | 'promptMenu' | 'settingsMenu'>,
+	layout: ReturnType<typeof fitComposerToolbar>,
 	closeOverflow: (group: string, afterClose: () => void) => void,
 ): Promise<void> {
 	const previous = document.activeElement;
@@ -52,10 +52,10 @@ export async function retainComposerToolbarFocus(
 		)?.focus({ preventScroll: true });
 	};
 	const inline: ReadonlySet<string> = layout.inline;
-	const overflowDisappears = origin.group === 'prompt' ? !layout.promptMenu : !layout.settingsMenu;
+	const folded: readonly string[] = origin.group === 'prompt' ? layout.foldedPrompt : layout.foldedSettings;
 	if (
 		origin.overflow?.getAttribute('aria-expanded') === 'true' &&
-		(overflowDisappears || (origin.control && inline.has(origin.control)))
+		(!folded.length || (origin.control && !folded.includes(origin.control)))
 	) {
 		closeOverflow(origin.group, focusReplacement);
 		return;

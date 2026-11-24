@@ -9,7 +9,7 @@ Reuse the [executor selector](../../web/src/lib/components/shared/ExecutorSelect
 - Keep the existing Network icon and semantic theme color.
 - For the chat composer, match the model selector's height, spacing, rounding, and hover treatment.
 - Use available container width for responsive behavior, including narrow desktop panels.
-- Hide executor selectors whenever Local is the only configured executor, including retained unavailable selections. Configured offline or disabled remote executors still count. Hiding a selector must not change the selected executor or fall back to Local.
+- Hide executor selectors when Local is the only configured executor. The existing-chat composer is the exception: it keeps a non-local selection accessible after that executor is removed, so the user can explicitly move the chat to Local. Configured offline or disabled remotes still count. Hiding a selector never changes its selection.
 - Keep availability specific to the operation. Selecting an execution target must not require Files or Git support. Offline or unsupported targets must never silently fall back to Local.
 
 ## New Chat And Scheduled New Chat
@@ -31,7 +31,7 @@ The scheduled prompts list shows each prompt's executor as a pill: the executor 
 
 A separate executor selector sits immediately to the left of the model selector. The composer's model picker does not select executors, and its trigger carries no executor prefix.
 
-In narrow composers the executor trigger collapses to its icon. Pressing it opens a menu containing full executor names, availability, and the selected item. The trigger keeps an accessible selected-executor label and a desktop tooltip.
+The composer fits the full executor name, then its icon, then an Executor row in the settings overflow. All three open the same choices, with the current host checked and unavailable hosts disabled. The name expands only after fitting the other buttons and the optional agent prefix on the model trigger.
 
 Handoff behavior:
 

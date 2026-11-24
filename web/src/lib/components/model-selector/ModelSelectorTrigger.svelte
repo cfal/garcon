@@ -18,6 +18,7 @@
 	let {
 		agent,
 		model,
+		menuSelection,
 		buttonClass,
 		toolbarDisplay,
 		onMeasure,
@@ -31,6 +32,7 @@
 	}: {
 		agent: string;
 		model: string;
+		menuSelection: { summary: string; title: string };
 		buttonClass: string;
 		toolbarDisplay?: ModelTriggerDisplay;
 		onMeasure?: (widths: ModelTriggerWidths) => void;
@@ -127,7 +129,7 @@
 			>
 				<ModelSelectorMenuItem
 					{disabled}
-					summary={[agent, model].filter(Boolean).join(' / ')}
+					selection={menuSelection}
 					onSelect={() => menu.closeThen(openPicker)}
 				/>
 			</DropdownMenuContent>

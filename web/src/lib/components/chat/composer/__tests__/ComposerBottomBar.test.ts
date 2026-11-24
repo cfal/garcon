@@ -78,6 +78,27 @@ describe('ComposerBottomBar', () => {
 		expect(props.onOpenSnippetPalette).toHaveBeenCalledOnce();
 	});
 
+	it('keeps the image explanation reachable when every actionable button fits', async () => {
+		const props = controls();
+		const { container, rerender } = render(ComposerBottomBar, {
+			...props,
+			image: { ...props.image, supported: false, unavailableReason: 'Attachments are unavailable.' },
+		});
+		await resize(container, 800);
+		expect(screen.queryByRole('button', { name: 'Add image' })).toBeNull();
+		const add = screen.getByRole('button', { name: 'Add to prompt' });
+		await fireEvent.keyDown(add, { key: 'Enter' });
+		const image = await screen.findByRole('menuitem', { name: /Add image.*Attachments are unavailable/ });
+		expect(image.getAttribute('aria-disabled')).toBe('true');
+		expect(screen.getAllByRole('menuitem')).toEqual([image]);
+		await fireEvent.click(image);
+		expect(props.image.onSelect).not.toHaveBeenCalled();
+
+		await rerender({ image: props.image });
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(screen.getByRole('button', { name: 'Add image' })).toBeTruthy();
+	});
+
 	it('keeps both group orders and Send last when the local preference changes', async () => {
 		const { container, rerender } = render(ComposerBottomBar, controls());
 		const row = await resize(container, 800);
@@ -127,7 +148,7 @@ describe('ComposerBottomBar', () => {
 		const executors = new ExecutorsStore(read);
 		executors.applySnapshot([localExecutor, offline]);
 		const onSelect = vi.fn();
-		const { container } = render(ComposerBottomBar, {
+		const { container, rerender } = render(ComposerBottomBar, {
 			...controls(),
 			executor: { executors, executorId: offline.id, onSelect },
 		});
@@ -147,9 +168,54 @@ describe('ComposerBottomBar', () => {
 		const selected = await screen.findByRole('menuitemradio', { name: /Worker/ });
 		expect(selected.getAttribute('aria-checked')).toBe('true');
 		expect(selected.getAttribute('aria-disabled')).toBe('true');
-		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Local' }));
+		const local = screen.getByRole('menuitemradio', { name: 'Local' });
+		await rerender({ settingsDisabled: true });
+		expect(local.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(local);
+		expect(onSelect).not.toHaveBeenCalled();
+		await rerender({ settingsDisabled: false });
+		await fireEvent.click(local);
 		expect(read).toHaveBeenCalledOnce();
 		expect(onSelect).toHaveBeenCalledExactlyOnceWith('local');
+	});
+
+	it('restores keyboard focus when the last remote disappears from the open Executor submenu', async () => {
+		const snapshot = [localExecutor, remoteExecutor];
+		const executors = new ExecutorsStore(async () => snapshot);
+		executors.applySnapshot(snapshot);
+		const { container } = render(ComposerBottomBar, {
+			...controls(),
+			executor: { executors, executorId: 'local', onSelect: vi.fn() },
+		});
+		await resize(container, 115);
+		const more = screen.getByRole('button', { name: 'More model settings' });
+		await fireEvent.click(more);
+		const host = screen.getByRole('menuitem', { name: 'Executor: Local' });
+		await fireEvent.keyDown(host, { key: 'ArrowRight' });
+		(await screen.findByRole('menuitemradio', { name: 'Local' })).focus();
+		executors.applySnapshot([localExecutor]);
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(document.activeElement).toBe(more);
+	});
+
+	it.each(['inline', 'overflow'])('locks an open %s permission menu during admission', async (placement) => {
+		const props = controls();
+		const { container, rerender } = render(ComposerBottomBar, props);
+		await resize(container, placement === 'inline' ? 800 : 115);
+		if (placement === 'inline') {
+			await fireEvent.click(screen.getByRole('button', { name: /^Permission mode:/ }));
+		} else {
+			await fireEvent.click(screen.getByRole('button', { name: 'More model settings' }));
+			await fireEvent.keyDown(screen.getByRole('menuitem', { name: /^Permission mode:/ }), { key: 'ArrowRight' });
+		}
+		const choice = await screen.findByRole('menuitemradio', { name: /Bypass Permissions/ });
+		await rerender({ settingsDisabled: true });
+		expect(choice.getAttribute('aria-disabled')).toBe('true');
+		await fireEvent.click(choice);
+		expect(props.permission.onSelect).not.toHaveBeenCalled();
+		await rerender({ settingsDisabled: false });
+		await fireEvent.click(choice);
+		expect(props.permission.onSelect).toHaveBeenCalledExactlyOnceWith('bypassPermissions');
 	});
 
 	it('exposes hidden bypass and allows cancellation even when other prompt actions are blocked', async () => {

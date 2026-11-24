@@ -4,8 +4,8 @@
 
 	let { mode, ...props }: Omit<ComponentProps<typeof ModelSelectorPopover>, 'contentClass'> = $props();
 	let picker = $state<ModelSelectorPopover>();
-	export function selectionSummary(): string {
-		return picker?.selectionSummary() ?? '';
+	export function menuSelection() {
+		return picker?.menuSelection();
 	}
 	export function openPicker(): void {
 		picker?.openPicker();
