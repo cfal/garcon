@@ -135,7 +135,7 @@ test('New Chat keeps its 300px input cap in Source and formatted modes on deskto
       await composer.getByRole('button', { name: 'Add to prompt', exact: true }).focus();
       await setFormat(page, 'source');
       await browserExpect(source).toBeVisible();
-      await page.locator('#project-path-input').focus();
+      await page.getByRole('dialog', { name: 'New Chat', exact: true }).getByRole('button', { name: 'Choose folder', exact: true }).click();
       await browserExpect(page.getByRole('dialog', { name: 'Select Directory', exact: true })).toBeVisible();
       await dismissDirectoryBrowser(page);
       await source.fill('');
