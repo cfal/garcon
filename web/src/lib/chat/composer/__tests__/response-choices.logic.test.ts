@@ -63,6 +63,13 @@ describe('parseResponseChoices', () => {
 		).toBe('Which option do you prefer?');
 	});
 
+	it.each([
+		'Available features:\n- Outline\n- Diagram\n\nWhich format do you prefer?\nShort',
+		'echo:Which features do you want? Select all that apply.\n- Outline\n- Diagram\n\nWhich format do you prefer?\nShort',
+	])('rejects a trailing question followed by an answer: %s', (content) => {
+		expect(parseChoiceSet(content)).toBeNull();
+	});
+
 	it('retains each clearly marked question and its own choice list', () => {
 		const result = parseChoiceSet(
 			'Which format should we use?\n- Text\n- JSON\n\nWhich layout do you prefer?\nA) Compact\nB) Spacious',

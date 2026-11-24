@@ -122,8 +122,11 @@ for (const executionBackend of [
         }
         phase("keyboard selection sends slash-prefixed labels as text");
         await dock.getByRole('button', { name: '/compact', exact: true }).focus();
+        const slashReplyEvents = client.markEvents();
         await page.keyboard.press("Enter");
         await fakeProviders.openAi.waitForRequest({ lastUserText: "/compact" });
+        await client.waitForTurnTerminal(chatId, undefined, { afterIndex: slashReplyEvents });
+        await browserExpect(page.locator('[data-chat-feed-content]')).toContainText('echo:/compact');
         await browserExpect(editor).toHaveValue(draft);
         await browserExpect(dock).toHaveCount(0);
         await page.evaluate(() => {
@@ -161,9 +164,12 @@ for (const executionBackend of [
         await browserExpect(dock.getByText('2/2', { exact: true })).toBeVisible();
         await browserExpect(dock.getByText('Question - Select one answer', { exact: true })).toBeVisible();
         await browserExpect(dock.getByRole('button', { name: 'Send answer', exact: true })).toHaveCount(0);
+        const multiReplyEvents = client.markEvents();
         await dock.getByRole('button', { name: 'Short', exact: true }).click();
         const multiRequest = await fakeProviders.openAi.waitForRequest({ lastUserText: 'Which features do you want? Select all that apply.\n- Outline\n- Diagram\n\nWhich format do you prefer?\nShort' });
         browserExpect(multiRequest).toBeDefined();
+        await client.waitForTurnTerminal(multiChatId, undefined, { afterIndex: multiReplyEvents });
+        await browserExpect(page.locator('[data-chat-feed-content]')).toContainText('echo:Which features do you want? Select all that apply.');
         await browserExpect(dock).toHaveCount(0);
         assertNoBrowserErrors();
         console.log(

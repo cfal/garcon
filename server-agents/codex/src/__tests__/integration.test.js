@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import CodexAgentIntegration from '../index.js';
@@ -24,6 +24,51 @@ function createHost(root = '/tmp/garcon-codex-integration-test') {
 }
 
 describe('CodexAgentIntegration', () => {
+  it('disables timestamp-based drift detection while preserving manual native history import', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-native-activity-'));
+    const nativePath = join(root, 'rollout.jsonl');
+    const timestamp = '2026-08-16T00:00:09.000Z';
+    const integration = new CodexAgentIntegration(createHost(root));
+    try {
+      await writeFile(nativePath, [
+        JSON.stringify({
+          type: 'session_meta', timestamp: '2026-08-16T00:00:00.000Z',
+          payload: { id: 'thread-1', history_mode: 'legacy' },
+        }),
+        JSON.stringify({
+          type: 'response_item', timestamp,
+          payload: {
+            type: 'message', role: 'assistant',
+            content: [{ type: 'output_text', text: 'Synthetic native answer.' }],
+          },
+        }),
+      ].join('\n') + '\n');
+
+      expect(integration.nativeActivity).toBeNull();
+      const rows = await importedRows(integration.nativeHistoryImport, nativeChat(integration, nativePath));
+      expect(rows.map((row) => row.message)).toEqual([{
+        type: 'assistant-message', timestamp, content: 'Synthetic native answer.',
+      }]);
+
+      const laterTimestamp = '2026-08-16T00:00:10.000Z';
+      await appendFile(nativePath, `${JSON.stringify({
+        type: 'response_item', timestamp: laterTimestamp,
+        payload: {
+          type: 'message', role: 'assistant',
+          content: [{ type: 'output_text', text: 'Synthetic later native answer.' }],
+        },
+      })}\n`);
+      const reloaded = await importedRows(integration.nativeHistoryImport, nativeChat(integration, nativePath));
+      expect(reloaded.map((row) => row.message)).toEqual([
+        { type: 'assistant-message', timestamp, content: 'Synthetic native answer.' },
+        { type: 'assistant-message', timestamp: laterTimestamp, content: 'Synthetic later native answer.' },
+      ]);
+    } finally {
+      await integration.lifecycle.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps an empty whole-fork source unmaterialized without accepting invalid history', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-codex-empty-fork-'));
     const nativePath = join(root, 'rollout.jsonl');

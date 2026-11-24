@@ -151,6 +151,7 @@ function adjacentPrompt(lines: readonly string[], block: ChoiceBlock, before: Ne
 		return null;
 	const trailingQuestion = after.findLast((line) => /[?？]/.test(line));
 	if (trailingQuestion) {
+		if (trailingQuestion !== after.at(-1)) return null;
 		const prompt = displayText(trailingQuestion);
 		return isChoicePrompt(prompt) ? { index: lines.indexOf(trailingQuestion, block.end + 1), prompt } : null;
 	}

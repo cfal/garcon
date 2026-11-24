@@ -55,7 +55,6 @@ import { CodexAppServerClient } from './agents/codex/app-server/client.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
-import { createCodexNativeActivityProbe } from './agents/codex/native-activity.js';
 import { codexUsageFormat } from './agents/codex/usage-format.js';
 
 const CODEX_DESCRIPTOR = {
@@ -93,7 +92,10 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
-  readonly nativeActivity;
+  // Codex publishes completed items before stamping their persisted native records.
+  // https://github.com/openai/codex/blob/cb41599ccbe371272892f156286a236aa097bada/codex-rs/core/src/stream_events_utils.rs#L397-L408
+  // https://github.com/openai/codex/blob/cb41599ccbe371272892f156286a236aa097bada/codex-rs/rollout/src/recorder.rs#L2136-L2154
+  readonly nativeActivity = null;
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates = null;
@@ -166,7 +168,6 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.permissions = producer.permissions;
     this.legacyHistoryImport = createHistoryImport({ load: nativeEvidence.loadLegacy });
     this.nativeHistoryImport = createNativeHistoryImport(nativeEvidence);
-    this.nativeActivity = createCodexNativeActivityProbe(nativeSessions);
     // Archived threads move their rollouts out of sessions/ but still carry usage.
     this.usageHistory = createTranscriptUsageHistory({
       operation: 'codex-usage-history',

@@ -2664,8 +2664,17 @@ relevant-entry definition under the 10.2 obligation.
 - **Codex**: the live app-server stream is the display truth and does
   not match the rollout row-for-row; the rollout is resume state and the
   reload source for the current binding. Item ids dedupe redelivery at
-  the edge; native-fidelity fork retained. Probe: last
-  conversation-relevant rollout entry, excluding turn markers. Note the
+  the edge; native-fidelity fork retained. `nativeActivity` is null: Codex
+  publishes completed items before persisting their native records, whose
+  timestamps are assigned at write time. Those timestamps can therefore be
+  newer than the ledger's observed output without any external activity and
+  cannot satisfy the section 10.2 obligation. Paginated imports also timestamp
+  items from their turn shell rather than individual rollout entries. Manual
+  Reload remains available through `nativeHistoryImport`; ordinary activation
+  does not attempt a Codex drift comparison. The pinned upstream
+  [completion-before-persistence ordering](https://github.com/openai/codex/blob/cb41599ccbe371272892f156286a236aa097bada/codex-rs/core/src/stream_events_utils.rs#L397-L408)
+  and [write-time timestamps](https://github.com/openai/codex/blob/cb41599ccbe371272892f156286a236aa097bada/codex-rs/rollout/src/recorder.rs#L2136-L2154)
+  establish the limitation. Note the
   stateful Responses API can itself desync from the rollout across a
   crash — the same accepted risk class this design carries.
   Garcon starts app-server with `features.goals=false` before loading threads,
