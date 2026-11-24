@@ -5,6 +5,7 @@ import {
 	type WorkspaceChatTile,
 	type WorkspaceLayoutSnapshot,
 	type WorkspacePartitionDirection,
+	type WorkspacePartitionId,
 	type WorkspaceWindowId,
 	type WorkspaceWindowNode,
 } from './surface-types.js';
@@ -93,18 +94,19 @@ export function mergeWindow(
 function evenlyPartition(
 	nodes: readonly DesktopWorkspaceNode[],
 	direction: WorkspacePartitionDirection,
+	id: WorkspacePartitionId,
 ): DesktopWorkspaceNode {
 	if (!nodes.length) throw new Error('A workspace tile group cannot be empty');
 	if (nodes.length === 1) return nodes[0];
 	const middle = Math.ceil(nodes.length / 2);
 	return {
 		type: 'partition',
-		id: `partition-tile-${direction}-${nodes[middle].id}`,
+		id,
 		direction,
 		ratio: middle / nodes.length,
 		children: [
-			evenlyPartition(nodes.slice(0, middle), direction),
-			evenlyPartition(nodes.slice(middle), direction),
+			evenlyPartition(nodes.slice(0, middle), direction, `${id}-0`),
+			evenlyPartition(nodes.slice(middle), direction, `${id}-1`),
 		],
 	};
 }
@@ -112,6 +114,7 @@ function evenlyPartition(
 export function tileChats(
 	snapshot: WorkspaceLayoutSnapshot,
 	rows: readonly (readonly WorkspaceChatTile[])[],
+	partitionId: WorkspacePartitionId,
 ): WorkspaceLayoutSnapshot {
 	const tiledWindowIds = new Set(rows.flat().map((tile) => tile.windowId));
 	const removedChatViews: string[] = [];
@@ -136,10 +139,12 @@ export function tileChats(
 		if (tile === firstTile) order = [...order, ...retainedTabs];
 		return { ...window, tabs: activateTab(tabsWithOrder(window.tabs, order), surfaceId) };
 	}
-	const rowNodes = rows.map((row) => evenlyPartition(row.map(windowForTile), 'horizontal'));
+	const rowNodes = rows.map((row, index) =>
+		evenlyPartition(row.map(windowForTile), 'horizontal', `${partitionId}-row-${index}`),
+	);
 	return replaceWindowTree(
 		{ ...snapshot, surfaces },
-		evenlyPartition(rowNodes, 'vertical'),
+		evenlyPartition(rowNodes, 'vertical', partitionId),
 		removedChatViews,
 	);
 }

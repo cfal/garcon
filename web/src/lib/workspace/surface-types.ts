@@ -130,7 +130,7 @@ export interface WorkspaceLayoutCommitPort {
 }
 
 export type WorkspaceLayoutMutation =
-	| { type: 'tile-chats'; rows: readonly (readonly WorkspaceChatTile[])[] }
+	| { type: 'tile-chats'; partitionId: WorkspacePartitionId; rows: readonly (readonly WorkspaceChatTile[])[] }
 	| {
 			type: 'merge-window';
 			sourceWindowId: WorkspaceWindowId;

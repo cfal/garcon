@@ -34,7 +34,9 @@ describe('chat tile geometry', () => {
 		expect(rows.map((row) => row.length)).toEqual(rowLengths);
 		const tiledChatIds = rows.flat().map((tile) => tile.chatId);
 		expect(tiledChatIds).toEqual(chats.slice(0, tiledChatIds.length));
-		const { desktopRoot } = reduceWorkspaceLayout(snapshot, [{ type: 'tile-chats', rows }]);
+		const { desktopRoot } = reduceWorkspaceLayout(snapshot, [
+			{ type: 'tile-chats', partitionId: 'partition-grid', rows },
+		]);
 		const rects = computeWindowRects(desktopRoot).windows;
 		for (const [y, row] of rows.entries()) {
 			for (const [x, { windowId }] of row.entries()) {
@@ -51,7 +53,9 @@ describe('chat tile geometry', () => {
 		const snapshot = canonicalWorkspaceSnapshot();
 		const rows = planChatTiles(snapshot, chats, { width: 10000, height: 10000 });
 		expect(rows.flat()).toHaveLength(WORKSPACE_WINDOW_RESOURCE_CEILING);
-		expect(() => reduceWorkspaceLayout(snapshot, [{ type: 'tile-chats', rows }])).not.toThrow();
+		expect(() => reduceWorkspaceLayout(snapshot, [
+			{ type: 'tile-chats', partitionId: 'partition-grid', rows },
+		])).not.toThrow();
 		expect(planChatTiles(snapshot, chats, null).flat()).toHaveLength(1);
 	});
 });

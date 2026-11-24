@@ -572,7 +572,7 @@ function applyMutation(
 ): WorkspaceLayoutSnapshot {
 	switch (mutation.type) {
 		case 'tile-chats':
-			return tileChats(snapshot, mutation.rows);
+			return tileChats(snapshot, mutation.rows, mutation.partitionId);
 		case 'register-surface':
 			return registerSurface(snapshot, mutation);
 		case 'register-surface-in-new-window':

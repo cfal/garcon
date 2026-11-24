@@ -48,6 +48,23 @@ test('retains transcript scroll and keyboard focus when tiling already open chat
     expect(await Promise.all(panels.map(panel => panel.evaluate(node => node.scrollTop)))).toEqual([300, 300]);
     await browserExpect(composer).toBeFocused();
     expect(new URL(page.url()).pathname).toBe(`/chat/${second.id}`);
+
+    const divider = page.getByRole('separator', { name: 'Resize windows' });
+    const handle = divider.locator('[data-workspace-window-resize-hit-area]');
+    const box = (await handle.boundingBox())!;
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    try {
+      await page.mouse.move(x + 150, y, { steps: 3 });
+      await browserExpect(divider).not.toHaveAttribute('aria-valuenow', '50');
+      await page.getByRole('button', { name: 'More actions' }).press('Enter');
+      await page.getByRole('menuitem', { name: 'Tile working chats' }).press('Enter');
+      await browserExpect(divider).toHaveAttribute('aria-valuenow', '50');
+    } finally {
+      await page.mouse.up();
+    }
+    await browserExpect(divider).toHaveAttribute('aria-valuenow', '50');
   });
 }, 60_000);
 
