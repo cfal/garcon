@@ -1487,37 +1487,42 @@ describe('WorkspaceWindowTitleBar', () => {
 
 	it('keeps the tab width observer when a roster update leaves the labels unchanged', async () => {
 		const restore = installResizeObserverHarness();
-		const updates = writable({ title: 'Chat A', working: true });
-		const record = fromStore(updates);
-		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]), true, () => record.current.title);
+		const record = fromStore(writable({ title: 'Chat A', working: true }));
+		const { container, rerender, unmount } = renderTitleBar(
+			workspaceWindow([chatSurface.id]),
+			true,
+			() => record.current.title,
+		);
+		const measuredTab = () => container.querySelector<HTMLElement>('[data-window-tab-measure-id]')!;
+		const observerFor = (element: Element) =>
+			ResizeObserverHarness.instances.find((observer) => observer.observed.has(element));
 		try {
-			const tab = rendered.container.querySelector<HTMLElement>('[data-window-tab-measure-id]')!;
-			const observer = () => ResizeObserverHarness.instances.find(item => item.observed.has(tab));
-			const initial = observer();
+			const tab = measuredTab();
+			const initial = observerFor(tab);
 			expect(initial).toBeDefined();
 			await tick();
 			const read = vi.spyOn(tab, 'getBoundingClientRect');
-			updates.set({ title: 'Chat A', working: false });
+			record.current = { title: 'Chat A', working: false };
 			await tick();
-			expect(observer()).toBe(initial);
+			expect(observerFor(tab)).toBe(initial);
 			expect(read).not.toHaveBeenCalled();
 
 			ResizeObserverHarness.emit(tab, 160);
 			expect(read).toHaveBeenCalled();
 			read.mockClear();
-			updates.set({ title: 'Renamed Chat', working: false });
+			record.current = { title: 'Renamed Chat', working: false };
 			await tick();
 			expect(tab.textContent).toContain('Renamed Chat');
 			expect(read).toHaveBeenCalled();
 
-			await rendered.rerender({ workspaceWindow: workspaceWindow([gitSurface.id]) });
-			const replacement = rendered.container.querySelector<HTMLElement>('[data-window-tab-measure-id]')!;
+			await rerender({ workspaceWindow: workspaceWindow([gitSurface.id]) });
+			const replacement = measuredTab();
 			expect(replacement).not.toBe(tab);
 			expect(replacement.textContent).toContain('Renamed Chat');
-			expect(ResizeObserverHarness.instances.some(item => item.observed.has(replacement))).toBe(true);
-			expect(observer()).toBeUndefined();
+			expect(observerFor(replacement)).toBeDefined();
+			expect(observerFor(tab)).toBeUndefined();
 		} finally {
-			rendered.unmount();
+			unmount();
 			restore();
 		}
 	});
