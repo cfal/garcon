@@ -29,7 +29,7 @@
 		/** Confines browsing to this subtree. */
 		basePath: string;
 		onSelect: (path: string) => void;
-		onClose: () => void;
+		onClose: (reason: 'select' | 'dismiss') => void;
 		/**
 		 * Moves keyboard focus from the open popover back to its field. Defaults to
 		 * the element that was focused when the browser opened.
@@ -62,6 +62,7 @@
 		else openedFrom?.focus();
 	}
 	const creationErrorId = $props.id();
+	let lastChosenPath: string | undefined;
 
 	const browser = new DirectoryBrowserState({
 		get executorId() {
@@ -82,8 +83,11 @@
 		get supportsCreation() {
 			return supportsCreation;
 		},
-		onSelect: (path) => onSelect(path),
-		onClose: () => onClose(),
+		onSelect: (path) => {
+			lastChosenPath = path;
+			onSelect(path);
+		},
+		onClose: () => onClose('select'),
 	});
 
 	let newDirectoryButton = $state<HTMLButtonElement | null>(null);
@@ -131,7 +135,7 @@
 	// Backs out of the innermost step: the creation form, then the browser.
 	function dismiss(): void {
 		if (browser.creation) void cancelCreation();
-		else onClose();
+		else onClose('dismiss');
 	}
 
 	function handlePopoverKeydown(event: KeyboardEvent): void {
@@ -356,7 +360,7 @@
 				</div>
 				<button
 					type="button"
-					onclick={onClose}
+					onclick={() => onClose('dismiss')}
 					class="min-h-12 shrink-0 rounded px-2 text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 				>
 					{m.chat_directory_browser_cancel()}
@@ -457,7 +461,7 @@
 		type="button"
 		data-slot="directory-browser-dismiss"
 		class="fixed inset-0 z-20 border-0 bg-transparent p-0"
-		onclick={onClose}
+		onclick={() => onClose(lastChosenPath === currentPath ? 'select' : 'dismiss')}
 		aria-label={m.editor_actions_close()}
 	></button>
 	<div

@@ -25,6 +25,8 @@ Executor selection sits beside the project directory rather than in the model pi
 
 Changing the executor chooses the destination's saved default or most recent directory, falling back to its advertised project base. Prompt text and attachments are preserved. An agent/model selection is kept only when valid on the destination, and submission requires a validated destination catalog.
 
+In New Chat, typing a path, executor discovery, and path validation never move focus. Committing a pin, worktree, or directory returns focus to the prompt as soon as the picker closes. Escape or Cancel returns to the opener. Drafting does not require a valid path; sending still does.
+
 The scheduled prompts list shows each prompt's executor as a pill: the executor a new chat will start on, or the current executor of an existing chat. The Local pill remains visible when it is the only executor. A prompt whose chat no longer exists shows no pill.
 
 ## Chat Composer

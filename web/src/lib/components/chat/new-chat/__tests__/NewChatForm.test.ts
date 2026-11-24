@@ -919,6 +919,60 @@ describe('NewChatForm', () => {
 		expect(screen.getByRole('button', { name: 'Thinking: On' })).toBeTruthy();
 	});
 
+	it('lets a pin start drafting immediately without admitting a pending or invalid path', async () => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		const validate = vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: ['/workspace/project'], pinnedProjectPaths: ['/workspace/other'] },
+		}));
+		const onStartChat = vi.fn();
+		render(NewChatFormTestHost, { onStartChat });
+		const prompt = await screen.findByPlaceholderText('How can I help you today?');
+		await fireEvent.input(prompt, { target: { value: 'Synthetic first message' } });
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		await waitFor(() => expect(send.disabled).toBe(false));
+		const validation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		validate.mockReturnValue(validation.promise);
+		const pin = screen.getByRole('button', { name: '/workspace/other' });
+		pin.focus();
+		await fireEvent.click(pin);
+		expect(pin.getAttribute('aria-pressed')).toBe('true');
+		expect(document.activeElement).toBe(prompt);
+		const expectSubmitBlocked = async () => {
+			expect(send.disabled).toBe(true);
+			await fireEvent.click(send);
+			await fireEvent.keyDown(prompt, { key: 'Enter' });
+			expect(onStartChat).not.toHaveBeenCalled();
+		};
+		await expectSubmitBlocked();
+		validation.resolve({ valid: false, errorCode: 'path_not_found' });
+		await screen.findByText('Path does not exist.');
+		await expectSubmitBlocked();
+		expect(document.activeElement).toBe(prompt);
+	});
+
+	it('does not treat a focused pin as a selection when executor discovery revalidates the path', async () => {
+		const chatsApi = await import('$lib/api/chats');
+		const validate = vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot({
+			paths: { recentProjectPaths: ['/workspace/project'], pinnedProjectPaths: ['/workspace/other'] },
+		}));
+		let executors!: ExecutorsStore;
+		render(NewChatFormTestHost, { onExecutors: (store) => { executors = store; } });
+		const marker = '[data-slot="project-path-field"] .text-status-success-foreground';
+		await waitFor(() => expect(document.querySelector(marker)).toBeTruthy());
+		const pin = screen.getByRole('button', { name: '/workspace/other' });
+		const validation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		validate.mockClear().mockReturnValue(validation.promise);
+		pin.focus();
+		executors.applySnapshot([{ ...localExecutor, instanceId: 'discovered-instance' }]);
+		await waitFor(() => expect(validate).toHaveBeenCalledWith('/workspace/project', { executorId: 'local' }));
+		validation.resolve({ valid: true, isGitRepo: false });
+		await waitFor(() => expect(document.querySelector(marker)).toBeTruthy());
+		expect(document.activeElement).toBe(pin);
+	});
+
 	it('shows a spinner while pinned project path persistence is pending', async () => {
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');
@@ -2023,7 +2077,7 @@ describe('New Chat executor pin scope', () => {
 		}
 	});
 
-	it('keeps the current compact view and selects both owner and path from all executors', async () => {
+	it('focuses the prompt on a remote pin choice, not on its later validation', async () => {
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
 		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
@@ -2048,8 +2102,16 @@ describe('New Chat executor pin scope', () => {
 		expect(screen.queryByRole('button', { name: 'Local: /same' })).toBeNull();
 		const remotePin = screen.getByRole('button', { name: 'Worker: /same' });
 		expect(remotePin.getAttribute('aria-pressed')).toBe('false');
+		const validation = deferred<Awaited<ReturnType<typeof chatsApi.validateStart>>>();
+		vi.mocked(chatsApi.validateStart).mockReturnValue(validation.promise);
 		await fireEvent.click(remotePin);
-		await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
+		await waitFor(() => expect(document.activeElement).toBe(prompt));
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		const executor = screen.getByRole('button', { name: 'Executor: Worker' });
+		executor.focus();
+		validation.resolve({ valid: true, isGitRepo: false });
+		await waitFor(() => expect(document.querySelector('[data-slot="project-path-field"] .text-status-success-foreground')).toBeTruthy());
+		expect(document.activeElement).toBe(executor);
 		expect(screen.queryByRole('button', { name: 'Worker: /same' })).toBeNull();
 		expect(screen.getByRole('button', { name: '/same' }).getAttribute('aria-pressed')).toBe('true');
 		expect(prompt.value).toBe('Synthetic retained draft');

@@ -10,7 +10,13 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { form }: { form: NewChatFormState } = $props();
+	let {
+		form,
+		onPathSelected,
+	}: {
+		form: NewChatFormState;
+		onPathSelected: () => void;
+	} = $props();
 	const id = $props.id();
 	const executors = getExecutors();
 	const pins = new NewChatPinnedPathsController(() => form, executors, getRemoteSettings());
@@ -18,7 +24,8 @@
 	let open = $state(false);
 	let trigger = $state<HTMLElement | null>(null);
 	let content = $state<HTMLElement | null>(null);
-	let restoreOnClose = true;
+	const focusTrigger = () => trigger?.focus({ preventScroll: true });
+	let focusOnClose: () => void = focusTrigger;
 	// Keeps the focus return target mounted after selection or live pin removal.
 	let pickerVisited = $state(false);
 	const groups = $derived(pins.groups);
@@ -30,21 +37,39 @@
 		'min-h-7 shrink-0 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 	function select(executorId: string, path: string): void {
-		if (pins.select(executorId, path)) open = false;
+		if (!pins.select(executorId, path)) return;
+		if (open) {
+			focusOnClose = onPathSelected;
+			open = false;
+		} else {
+			onPathSelected();
+		}
 	}
 
 	async function restoreFocus(event: Event): Promise<void> {
 		event.preventDefault();
-		if (!restoreOnClose) return;
+		const focus = focusOnClose;
 		await tick();
-		// Restores focus after the enclosing form's reactive autofocus has settled.
-		requestAnimationFrame(() => {
-			if (!open && restoreOnClose) trigger?.focus({ preventScroll: true });
+		if (!open) focus();
+	}
+
+	function rememberOutsideTarget(event: PointerEvent): void {
+		const target =
+			event.target instanceof Element
+				? event.target.closest<HTMLElement>(
+						'button, input, textarea, select, a[href], [tabindex], [contenteditable="true"]',
+					)
+				: null;
+		// An outside click can leave focus trapped in the closing content until it detaches.
+		focusOnClose = () => requestAnimationFrame(() => {
+			if (!open && target?.isConnected && document.activeElement === document.body) {
+				target.focus({ preventScroll: true });
+			}
 		});
 	}
 
 	async function focusPicker(event: Event): Promise<void> {
-		restoreOnClose = true;
+		focusOnClose = focusTrigger;
 		event.preventDefault();
 		await tick();
 		requestAnimationFrame(() => {
@@ -90,7 +115,11 @@
 	</div>
 {/snippet}
 
-<section aria-label={m.chat_new_chat_pinned_paths()} class="min-w-0">
+<section
+	data-slot="new-chat-pinned-paths"
+	aria-label={m.chat_new_chat_pinned_paths()}
+	class="min-w-0"
+>
 	<div class="flex min-w-0 flex-wrap items-center gap-2">
 		{#if current}
 			{#if !currentReady}
@@ -106,7 +135,7 @@
 				selectedPath={form.projectPath}
 				statusId={!currentReady ? id + '-current-status' : undefined}
 				disabled={!currentReady || form.isUpdatingPinnedPath}
-				onSelect={(path) => pins.select(form.executorId, path)}
+				onSelect={(path) => select(form.executorId, path)}
 			/>
 		{:else if otherGroups.length === 0}
 			<p
@@ -155,7 +184,7 @@
 						}}>{m.chat_new_chat_pinned_paths_other_executors()}</Popover.Trigger
 					>
 					<Popover.Content
-						onInteractOutside={() => { restoreOnClose = false; }}
+						onInteractOutside={rememberOutsideTarget}
 						bind:ref={content}
 						onOpenAutoFocus={focusPicker}
 						getFocusReturnTarget={() => trigger}

@@ -114,6 +114,7 @@
 			return newChatAgentIds;
 		},
 		promptDraft,
+		onWorktreeSelected: () => void tick().then(returnTextareaFocus),
 	});
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
 	const executionAgent = $derived(modelCatalog.getAgent(form.agentId));
@@ -281,18 +282,7 @@
 		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
 	});
 
-	// Late path validation must not take focus from a menu or another form control.
-	$effect(() => {
-		if (
-			initialContentReady &&
-			form.validationStatus === 'valid' &&
-			!form.showBrowser &&
-			(document.activeElement === document.body || document.activeElement?.id === 'project-path-input') &&
-			untrack(canFocusTextarea)
-		) {
-			untrack(returnTextareaFocus);
-		}
-	});
+	let pathInput: HTMLInputElement | null = $state(null);
 
 	// Defers initial textarea focus until startup defaults have loaded and the
 	// input is visible.
@@ -637,8 +627,10 @@
 				<ProjectPathField
 					id="project-path-input"
 					aria-label={m.chat_new_chat_project_path()}
+					bind:ref={pathInput}
 					bind:value={form.projectPath}
 					readonly={form.isUpdatingPinnedPath}
+					inputmode={isMobile && form.filesAvailable ? 'none' : undefined}
 					placeholder={form.projectBasePath}
 					class="h-[42px] sm:pointer-fine:h-[38px]"
 					validationStatus={form.validationStatus}
@@ -647,6 +639,9 @@
 						if (isMobile && form.filesAvailable) event.currentTarget.blur();
 						if (form.isUpdatingPinnedPath) return;
 						form.handlePathFocus();
+					}}
+					onclick={() => {
+						if (!form.isUpdatingPinnedPath) form.handlePathFocus();
 					}}
 					oninput={() => {
 						form.clearError();
@@ -661,7 +656,7 @@
 						if (event.key === 'Enter') {
 							event.preventDefault();
 							form.showBrowser = false;
-							textareaRef?.focus();
+							returnTextareaFocus();
 						}
 					}}
 					pin={{
@@ -682,14 +677,19 @@
 							// Rechecks a newly created directory even when the field's path is unchanged.
 							form.selectProjectPath(path);
 						},
-						onClose: () => (form.showBrowser = false),
+						onClose: async (reason) => {
+							form.showBrowser = false;
+							await tick();
+							if (reason === 'select') returnTextareaFocus();
+							else pathInput?.focus({ preventScroll: true });
+						},
 					}}
 					feedback={{
 						class: '-mt-1',
 						error: form.validationStatus === 'invalid' ? form.validationError : null,
 						worktree:
 							form.gitAvailable && form.gitRepoStatus === 'git'
-								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.worktreePicker.open() }
+								? { disabled: form.isUpdatingPinnedPath, onOpen: () => void form.worktreePicker.open() }
 								: undefined,
 					}}
 				>
@@ -720,7 +720,7 @@
 					{/if}
 				</ProjectPathField>
 
-				<NewChatPinnedPaths {form} />
+				<NewChatPinnedPaths {form} onPathSelected={returnTextareaFocus} />
 
 				<ChatTagEditor
 					tags={form.chatTags}
