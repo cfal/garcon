@@ -9,6 +9,13 @@ import {
 const LONG_MODEL_LABEL =
   "Integration Echo With An Extended Mobile Display Name";
 
+async function configureLongModel({ integration }: ChromiumFixture): Promise<void> {
+  const { model, providerId } = integration.directAgents.openAi.provider;
+  await integration.client.put(`/api/v1/api-providers?id=${encodeURIComponent(providerId)}`, {
+    endpoint: { models: [{ value: model, label: LONG_MODEL_LABEL }] },
+  });
+}
+
 async function openNewChat(fixture: ChromiumFixture): Promise<Locator> {
   const response = await fixture.page.goto(fixture.integration.garcon.baseUrl, {
     waitUntil: "domcontentloaded",
@@ -55,23 +62,7 @@ describe("Chromium New Chat composer layout", () => {
       async (fixture, markPhase) => {
         markPhase("opening New Chat at phone width");
         await fixture.page.setViewportSize({ width: 390, height: 844 });
-        const directProvider = fixture.integration.directAgents.openAi.provider;
-        const modelUpdate = await fixture.page.request.put(
-          `${fixture.integration.garcon.baseUrl}/api/v1/api-providers?id=${encodeURIComponent(directProvider.providerId)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${fixture.integration.garcon.authToken}`,
-            },
-            data: {
-              endpoint: {
-                models: [
-                  { value: directProvider.model, label: LONG_MODEL_LABEL },
-                ],
-              },
-            },
-          },
-        );
-        expect(modelUpdate.ok()).toBe(true);
+        await configureLongModel(fixture);
         const dialog = await openNewChat(fixture);
         const bottomBar = dialog.locator('[data-slot="composer-bottom-bar"]');
         await fixture.page.evaluate(() => {
@@ -314,9 +305,7 @@ test("resizing an open New Chat picker to a compact dialog keeps focus in the pi
   await withChromiumFixture("new-chat-model-picker-breakpoint", async (fixture) => {
     const { page, integration } = fixture;
     const agent = integration.directAgents.openAi;
-    await integration.client.put(`/api/v1/api-providers?id=${encodeURIComponent(agent.provider.providerId)}`, {
-      endpoint: { models: [{ value: agent.provider.model, label: LONG_MODEL_LABEL }] },
-    });
+    await configureLongModel(fixture);
     for (const recent of [integration.directAgents.anthropic, agent]) {
       const chatId = integration.newChatId();
       const turn = await integration.client.startDirectChat({
