@@ -73,6 +73,7 @@
 		onQuietRefresh?: () => Promise<void> | void;
 		onRequestRecenter?: () => void;
 		onChatSelect?: (chatId: string) => void;
+		onTileWorkingChats?: (chatIds: readonly string[]) => Promise<number>;
 		onNewChat?: () => void;
 		onNewProjectChat?: (project: NewChatProjectTarget) => void;
 	}
@@ -104,6 +105,7 @@
 		onQuietRefresh = () => Promise.resolve(),
 		onRequestRecenter = () => {},
 		onChatSelect = () => {},
+		onTileWorkingChats,
 		onNewChat = () => {},
 		onNewProjectChat = () => {},
 	}: SidebarHostProps = $props();
@@ -336,6 +338,7 @@
 	rosterReady={chatSessions ? chatSessions.chatListStatus === 'ready' : true}
 	{isMobile}
 	{onChatSelect}
+	{onTileWorkingChats}
 	{onNewChat}
 	{onNewProjectChat}
 	{onQuietRefresh}

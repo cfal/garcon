@@ -64,6 +64,7 @@
 		onManageTags: (chat: ChatSessionRecord) => void;
 		onOpenChatInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		onTileWorkingChats?: (chatIds: readonly string[]) => Promise<number>;
+		actionsHidden?: boolean;
 		chatListAutohideAvailable?: boolean;
 		onChatListAutohideChange?: (enabled: boolean) => void;
 		onShowScheduledPrompts: () => void;
@@ -101,6 +102,7 @@
 		onManageTags,
 		onOpenChatInNewWindow,
 		onTileWorkingChats,
+		actionsHidden = false,
 		chatListAutohideAvailable = false,
 		onChatListAutohideChange,
 		onShowScheduledPrompts,
@@ -384,6 +386,7 @@
 >
 	<div class="order-1 flex-shrink-0">
 		<SidebarSearchDock
+			{actionsHidden}
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{onShowDisplay}

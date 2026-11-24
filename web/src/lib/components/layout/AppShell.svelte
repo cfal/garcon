@@ -707,6 +707,7 @@
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
 	<Sidebar
+		actionsHidden={!isMobile && (hideChatList || chatListAutohide.collapsed)}
 		projection={sidebarOrder.projection}
 		reorder={sidebarOrder}
 		onShowDisplay={(returnFocus) => {
