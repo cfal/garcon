@@ -52,6 +52,7 @@ export function createExecutorStartupFixture() {
 	}
 	const remoteSettings = new RemoteSettingsStore();
 	remoteSettings.applySnapshot(executorStartupSnapshot());
+	vi.spyOn(remoteSettings, 'refreshLatest').mockImplementation(async () => remoteSettings.snapshot!);
 	const executors = new ExecutorsStore();
 	executors.applySnapshot([localExecutor, remoteExecutor]);
 	return { modelCatalog, remoteCatalog, remoteSettings, executors };

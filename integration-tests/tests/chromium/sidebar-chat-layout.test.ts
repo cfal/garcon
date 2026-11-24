@@ -31,7 +31,7 @@ async function chooseMenuOption(page: Page, name: string): Promise<void> {
     }
   } else {
     await dialog.getByRole('radio', { name, exact: true }).check();
-    await browserExpect(dialog.locator('[data-slot="sidebar-chat-summary"]')).toHaveCount(3);
+    await browserExpect(dialog.locator('[data-slot="sidebar-chat-summary"]')).toHaveCount(4);
   }
   await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
 }
@@ -95,6 +95,7 @@ test('inherited groups omit headers while differing groups retain full internal 
     });
     await page.addInitScript(seedLocalSettings, {
       sidebarSortMode: 'manual', sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
       sidebarGroupingFields: ['executor', 'project', 'activity', 'status'].map(field => ({ field, enabled: true })),
     });
     for (const mixed of [false, true]) {
@@ -133,11 +134,68 @@ test('inherited groups omit headers while differing groups retain full internal 
   });
 }, 120_000);
 
+test('archive separation preserves archived subtrees through dialog apply and reload', async () => {
+  await withChromiumFixture('sidebar-archive-separation', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { a, a1, a2, b, b1 } = await createSidebarDelegationFixture(integration);
+    await integration.client.toggleArchive(a1);
+    await integration.client.toggleArchive(b);
+    const before = await integration.client.listChats();
+    await page.addInitScript(seedLocalSettings, {
+      sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
+      sidebarGroupingFields: [],
+      sidebarSortMode: 'manual',
+    });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+    const rowButton = (id: string) => page.locator(`[data-sidebar-virtual-row="${id}"] .chat-item-root button`).first();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await openSidebar(page);
+      for (const separate of [false, true]) {
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Sidebar display', exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: 'Sidebar display', exact: true });
+        const separation = dialog.getByRole('checkbox', { name: 'Separate archived branches', exact: true });
+        await separation.setChecked(separate);
+        await dialog.getByRole('checkbox', { name: 'Nest delegated chats', exact: true }).uncheck();
+        await browserExpect(separation).toBeDisabled();
+        await browserExpect(separation).toBeChecked({ checked: separate });
+        await dialog.getByRole('checkbox', { name: 'Nest delegated chats', exact: true }).check();
+        await browserExpect(separation).toBeEnabled();
+        await browserExpect(dialog.locator('[data-sidebar-tree-guides]')).toHaveCount(separate ? 1 : 2);
+        await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
+        await browserExpect(rowButton(a1)).toHaveCSS('padding-left', separate ? '12px' : '24px');
+        await browserExpect(rowButton(a2)).toHaveCSS('padding-left', '24px');
+        await browserExpect(rowButton(b)).toHaveCSS('padding-left', '12px');
+        await browserExpect(rowButton(b1)).toHaveCSS('padding-left', '24px');
+      }
+      const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
+      await mkdir(artifacts, { recursive: true });
+      await page.screenshot({ path: join(artifacts, `sidebar-separated-archives-${width}.png`) });
+    }
+    await page.reload();
+    await openSidebar(page);
+    await browserExpect(rowButton(a1)).toHaveCSS('padding-left', '12px');
+    await browserExpect(rowButton(b1)).toHaveCSS('padding-left', '24px');
+    const after = await integration.client.listChats();
+    const identities = (snapshot: typeof before) => snapshot.sessions.map(({ id, parentChatId, lineage, orderGroup }) => ({ id, parentChatId, lineage, orderGroup }));
+    expect(identities(after)).toEqual(identities(before));
+    await integration.client.toggleArchive(a);
+    await browserExpect(rowButton(a1)).toHaveCSS('padding-left', '24px');
+    await browserExpect(rowButton(a2)).toHaveCSS('padding-left', '24px');
+    await integration.client.toggleArchive(a);
+    await browserExpect(rowButton(a1)).toHaveCSS('padding-left', '12px');
+    await browserExpect(rowButton(a2)).toHaveCSS('padding-left', '24px');
+    assertNoBrowserErrors();
+  });
+}, 120_000);
+
 test('multi-line delegation arrows align with titles while single-line keeps tree guides', async () => {
   await withChromiumFixture('sidebar-delegation-layouts', async ({ page, integration, assertNoBrowserErrors }) => {
     const { a, a1 } = await createSidebarDelegationFixture(integration);
     await page.addInitScript(seedLocalSettings, {
       sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
       sidebarGroupingFields: [],
       chatListFontSize: '16',
     });

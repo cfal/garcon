@@ -39,8 +39,11 @@ test.each([
     expect(await autoButton.evaluate(button => button.getAttribute('aria-pressed'))).toBe('false');
     await autoButton.evaluate(button => button.click());
     await fixture.page.waitForFunction(() => !document.querySelector('[role="dialog"]')?.textContent?.includes('Unavailable executor'));
-    if (preferences.enabled) expect(await autoButton.evaluate(button => button.getAttribute('aria-pressed'))).toBe('true');
-    else await fixture.page.waitForFunction(button => !button.isConnected, {}, autoButton);
+    if (key === 'chatTitle' || preferences.enabled) {
+      await fixture.page.waitForFunction(button => button.isConnected && button.getAttribute('aria-pressed') === 'true', {}, autoButton);
+    } else {
+      await fixture.page.waitForFunction(button => !button.isConnected, {}, autoButton);
+    }
     const repaired = await fixture.integration.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings');
     expect(repaired.ui[key]).toEqual(key === 'agentSwitchCompaction' ? undefined : preferences);
     expect(repaired.uiEffective[key]?.executorId).toBe('local');

@@ -47,8 +47,11 @@ project on its owning executor, including the primary checkout. Worktrees use sm
 flat rows with titles on the left and muted, root-abbreviated paths such as
 `…/garcon-ui` on the right. Full paths remain in hover titles and accessible labels.
 Selecting a row changes the new chat's target without clearing its prompt.
-The worktree header offers creation through the existing worktree modal;
-successful creation selects the new worktree on the current executor.
+The worktree header opens the shared worktree picker and its creation form.
+Creation retains the picker's name generation, reconnect handling and executor
+instance checks. Successful creation selects the new worktree on the current
+executor while retaining the selected parent project and prompt. The inline
+catalog owns discovery and selection; the shared picker owns creation outcomes.
 A muted Choose folder action sits at the top right of the saved-projects heading,
 at the same visual level. It reveals a manual path field and Garcon's executor-owned
 folder browser. Each opening lists the configured project root's subfolders;

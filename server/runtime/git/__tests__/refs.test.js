@@ -483,9 +483,8 @@ describe("git ref checkout and branch creation", () => {
         "--is-inside-work-tree",
       ]);
       expect(defaultQuery.commands).toContainEqual([
-        "rev-parse",
-        "HEAD",
-        "--symbolic-full-name",
+        "symbolic-ref",
+        "--quiet",
         "HEAD",
       ]);
       expect(
@@ -810,7 +809,7 @@ describe("porcelain ref validation", () => {
         git.push({ projectPath, remoteBranch: "-x" }),
       ).rejects.toMatchObject({
         code: "INVALID_INPUT",
-        message: "Invalid remote branch name.",
+        message: "Remote branch must match the current local branch.",
       });
       await runGitCommand(projectPath, ["branch", "-M", "feature"]);
       await expect(

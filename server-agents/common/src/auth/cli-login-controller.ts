@@ -44,6 +44,7 @@ export interface CliLoginControllerOptions {
   readonly mode: 'browser-code' | 'device-code';
   readonly logger: AgentLogger;
   readonly validateCode?: (code: string) => string | null;
+  readonly onSucceeded?: () => void;
   readonly parseOutputError?: (line: string) => CliLoginOutputError | null;
   readonly cwd?: string;
   readonly environment?: () => Record<string, string>;
@@ -308,6 +309,7 @@ export class CliLoginController {
     }, this.options.terminalStatusTtlMs ?? TERMINAL_STATUS_TTL_MS);
     cleanup.unref?.();
     this.#terminal.set(session.id, { status, cleanup });
+    if (status.state === 'succeeded') this.options.onSucceeded?.();
   }
 }
 

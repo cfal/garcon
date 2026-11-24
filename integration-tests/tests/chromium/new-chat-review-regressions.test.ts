@@ -66,15 +66,17 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await worktrees.getByRole('button', { name: 'New worktree', exact: true }).click();
       const picker = page.getByRole('dialog', { name: 'Select worktree', exact: true });
       await picker.getByRole('button', { name: 'New worktree', exact: true }).click();
-      await picker.getByPlaceholder('Branch name (e.g. fix/login-bug)').fill('review-created');
+      const creation = page.getByRole('dialog', { name: 'New worktree', exact: true });
+      await creation.getByRole('textbox', { name: /branch name/i }).fill('review-created');
       const createRequest = page.waitForRequest(request => request.method() === 'POST'
         && new URL(request.url()).pathname === '/api/v1/git/worktrees/create');
-      await picker.getByRole('button', { name: 'Create', exact: true }).click();
+      await creation.getByRole('button', { name: 'Create worktree', exact: true }).click();
       const payload = (await createRequest).postDataJSON();
       expect(payload.executorId ?? 'local').toBe(client.executorId);
       expect(payload.projectPath).toBe(toExecutorPath(project));
       expect(payload.branch).toBe('review-created');
       await browserExpect(picker).toHaveCount(0);
+      await browserExpect(creation).toHaveCount(0);
       await browserExpect(worktrees.getByRole('radio', { name: /review-created/ })).toBeChecked();
       await browserExpect(landing.getByRole('textbox', { name: 'Project Path', exact: true })).toHaveValue(payload.worktreePath);
       await browserExpect(activeCard).toHaveAttribute('aria-pressed', 'true');

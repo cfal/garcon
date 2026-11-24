@@ -14,6 +14,7 @@ import type {
   AgentResourceRef,
   AgentResourceScope,
   AgentSessionConfiguration,
+  AgentSessionConfigurationUpdate,
   ExecutorInfo,
   ExecutionRuntimeApi,
   ExecutionProjectService,
@@ -32,13 +33,13 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 44;
+export const EXECUTOR_PROTOCOL_REVISION = 60;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
   'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',
-  'configurationValidation', 'sessionConfiguration', 'projectPathUpdates', 'usageHistory',
+  'configurationValidation', 'sessionConfiguration', 'projectPathUpdates', 'usageHistory', 'cliUpdates',
 ] as const satisfies readonly (keyof AgentIntegration)[];
 
 export interface IntegrationManifest {
@@ -77,7 +78,7 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'execution.resume': Call<Request<'execution', 'resume'>, Result<'execution', 'resume'>>;
   'execution.abort': Call<Request<'execution', 'abort'>, boolean>;
   'execution.runningSessions': Call<null, Result<'execution', 'runningSessions'>>;
-  'catalog.snapshot': Call<{ readonly strict: boolean }, Result<'catalog', 'snapshot'>>;
+  'catalog.snapshot': Call<Pick<Request<'catalog', 'snapshot'>, 'strict' | 'requireNativeDiscovery'>, Result<'catalog', 'snapshot'>>;
   'settings.migrate': Call<AgentSettingsEnvelope, AgentSettingsEnvelope>;
   'lifecycle.start': Call<null, void>;
   'lifecycle.stop': Call<null, void>;
@@ -108,12 +109,14 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'nativeSessions.release': Call<WithoutSignal<Request<'nativeSessions', 'release'>>, void>;
   'configurationValidation.validate': Call<Request<'configurationValidation', 'validate'>, void>;
   'sessionConfiguration.apply': Call<{
-    readonly args: readonly [agentSessionId: string, configuration: AgentSessionConfiguration, previousConfiguration: AgentSessionConfiguration];
+    readonly args: readonly [agentSessionId: string, configuration: AgentSessionConfigurationUpdate, previousConfiguration: AgentSessionConfiguration];
   }, void>;
   'projectPathUpdates.prepare': Call<Request<'projectPathUpdates', 'prepare'>, Result<'projectPathUpdates', 'prepare'>>;
   'projectPathUpdates.commit': Call<Request<'projectPathUpdates', 'commit'>, void>;
   'projectPathUpdates.rollback': Call<Request<'projectPathUpdates', 'rollback'>, void>;
   'usageHistory.read': Call<WithoutSignal<Request<'usageHistory', 'read'>>, Result<'usageHistory', 'read'>>;
+  'cliUpdates.status': Call<WithoutSignal<Request<'cliUpdates', 'status'>>, Result<'cliUpdates', 'status'>>;
+  'cliUpdates.startUpdate': Call<null, Result<'cliUpdates', 'startUpdate'>>;
   'credentials.resolve': Call<WithoutSignal<Parameters<AgentHost['apiProviders']['resolveCredential']>[0]>, Awaited<ReturnType<AgentHost['apiProviders']['resolveCredential']>>>;
   // Settles the journaled calls lost sessions left outstanding; see `RpcContinuity`.
   'calls.reconcile': Call<{ readonly calls: readonly OutstandingCall[] }, { readonly states: readonly OutstandingCallState[] }>;
@@ -196,6 +199,10 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'projectPathUpdates.commit': 'journaled',
   'projectPathUpdates.rollback': 'journaled',
   'usageHistory.read': 'journaled',
+  // The update runs on the worker and outlives the call; a repeated start
+  // while it runs reports that run instead of starting another.
+  'cliUpdates.status': 'journaled',
+  'cliUpdates.startUpdate': 'journaled',
   'credentials.resolve': 'session',
   'calls.reconcile': 'session',
   'terminals.list': 'session',

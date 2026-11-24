@@ -47,7 +47,8 @@ test('recent-activity sidebar renders active and background renames without relo
     const waitForTitle = async (chatId: string, title: string) => {
       await fixture.page.waitForFunction(({ chatId, title }) => {
         const row = document.querySelector(`[data-sidebar-virtual-row="${chatId}"]`);
-        return row?.querySelector('[data-slot="chat-summary-header"] [title]')?.textContent?.trim() === title;
+        return Array.from(row?.querySelectorAll('[data-slot="chat-summary-header"] [title]') ?? [])
+          .some(element => element.getAttribute('title') === title && element.textContent?.trim() === title);
       }, {}, { chatId, title });
     };
 

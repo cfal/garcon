@@ -1,8 +1,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import type { CodexConfig } from '../../config.js';
-import { resolveCodexCli } from './app-server/cli.js';
+import { CODEX_CLI_NOT_FOUND, resolveCodexCli } from './app-server/cli.js';
 
 export interface CodexAuthStatus {
   authenticated: boolean;
@@ -83,15 +84,18 @@ async function runCodexLoginStatus(
   await fs.mkdir(config.home(), { recursive: true });
   signal.throwIfAborted();
   const env = effectiveCodexEnvironment(config);
-  const resolved = await resolveCodexCli({ env });
-  signal.throwIfAborted();
-  const proc = Bun.spawn([resolved.command, 'login', 'status'], {
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env,
-    signal,
-  });
+  const resolved = resolveCodexCli(env);
+  let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+  try {
+    proc = Bun.spawn([resolved.command, 'login', 'status'], {
+      stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', env, signal,
+    });
+  } catch (error) {
+    if (hasNodeErrorCode(error, 'ENOENT')) {
+      throw new AgentIntegrationError('PROVIDER_FAILURE', CODEX_CLI_NOT_FOUND, false);
+    }
+    throw error;
+  }
 
   const abort = () => {
     if (!proc.killed) proc.kill();

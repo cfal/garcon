@@ -4,6 +4,12 @@ import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { selectExecutor } from '../../support/executor-ui.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
+interface StartupSettingsGate {
+  hold: boolean;
+  pending: Array<() => void>;
+  release(): void;
+}
+
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`new chats restore the last started executor without learning cancelled selections (${executionBackend})`, async () => {
     await withE2eFixture(`executor-startup-recents-${executionBackend}`, async fixture => {
@@ -15,6 +21,41 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         executorId: 'local',
       });
       await client.waitForTurnTerminal(localChatId, started.turnId);
+      await fixture.page.evaluateOnNewDocument(() => {
+        const scope = window as typeof window & { __startupSettingsGate: StartupSettingsGate };
+        const gate: StartupSettingsGate = {
+          hold: false,
+          pending: [],
+          release() {
+            this.hold = false;
+            for (const deliver of this.pending.splice(0)) deliver();
+          },
+        };
+        scope.__startupSettingsGate = gate;
+        const NativeWebSocket = window.WebSocket;
+        window.WebSocket = new Proxy(NativeWebSocket, {
+          construct(Target, args: ConstructorParameters<typeof WebSocket>) {
+            const socket = new Target(...args);
+            if (new URL(String(args[0]), location.href).pathname !== '/ws') return socket;
+            let handler: typeof socket.onmessage = null;
+            Object.defineProperty(socket, 'onmessage', {
+              get: () => handler,
+              set: (value: typeof handler) => { handler = value; },
+            });
+            socket.addEventListener('message', (event) => {
+              const payload = JSON.parse(String(event.data));
+              if (gate.hold && payload.type === 'settings-changed') {
+                // Copies the payload before Lightpanda releases the event's backing storage.
+                const data = JSON.stringify(payload);
+                gate.pending.push(() => handler?.call(socket, new MessageEvent('message', { data })));
+              } else {
+                handler?.call(socket, event);
+              }
+            });
+            return socket;
+          },
+        });
+      });
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.open();
       await app.dismissEmptyWorkspaceLanding();
@@ -39,7 +80,12 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await app.enterNewChatProjectPath(executionDirs.project);
       await app.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', 'Synthetic remote startup');
       await app.waitForDialogButtonEnabled('Start session');
+      await fixture.page.evaluate(() => {
+        (window as typeof window & { __startupSettingsGate: StartupSettingsGate }).__startupSettingsGate.hold = true;
+      });
+      const startResponse = fixture.page.waitForResponse(response => response.url().endsWith('/api/v1/chats/start') && response.request().method() === 'POST');
       await app.clickButton('Start session', { last: true });
+      expect((await startResponse).status()).toBe(202);
       await app.waitForAssistantMessageContaining('echo:Synthetic remote startup');
       await app.waitForChatProcessing(false);
       const snapshot = await client.get<RemoteSettingsSnapshot>('/api/v1/app/settings');
@@ -52,6 +98,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         await expectTarget('[data-new-chat-landing="true"] input[aria-label="Project Path"]', 'Integration worker', executionDirs.project);
         await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"] [data-slot="model-selector-trigger-secondary"]')?.textContent?.includes('Integration Echo'));
         await selectExecutor(fixture.page, executorPicker, 'Local');
+        if (!reload) {
+          await fixture.page.waitForFunction(() => (window as typeof window & { __startupSettingsGate: StartupSettingsGate }).__startupSettingsGate.pending.length > 0);
+          await fixture.page.evaluate(() => {
+            (window as typeof window & { __startupSettingsGate: StartupSettingsGate }).__startupSettingsGate.release();
+          });
+          await expectTarget('#project-path-input', 'Local', dirs.project);
+        }
         await closeNewChat();
       }
 

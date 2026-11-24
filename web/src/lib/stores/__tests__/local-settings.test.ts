@@ -20,6 +20,29 @@ describe('LocalSettingsStore', () => {
 		localStorage.clear();
 	});
 
+	it.each([undefined, null, 'false', 0])(
+		'defaults delegated trees to collapsed for %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ collapseDelegatedChatsByDefault: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.collapseDelegatedChatsByDefault).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('remembers opting out of collapsed delegated trees', () => {
+		const store = createLocalSettingsStore();
+		expect(store.collapseDelegatedChatsByDefault).toBe(true);
+		store.toggle('collapseDelegatedChatsByDefault');
+		const restored = createLocalSettingsStore();
+		expect(restored.collapseDelegatedChatsByDefault).toBe(false);
+		store.destroy();
+		restored.destroy();
+	});
+
 	it('applies only dialog-owned preferences against the latest settings', () => {
 		const store = createLocalSettingsStore();
 		store.set('sidebarNestDelegatedChats', false);
@@ -29,6 +52,7 @@ describe('LocalSettingsStore', () => {
 		store.set('chatListDock', 'right');
 		store.setSidebarDisplay({
 			...draft,
+			sidebarSeparateArchivedBranches: true,
 			sidebarGroupingFields: [
 				{ field: 'status', enabled: false },
 				{ field: 'project', enabled: true },
@@ -42,6 +66,7 @@ describe('LocalSettingsStore', () => {
 		expect(restored.snapshot()).toMatchObject({
 			sidebarSortMode: 'manual',
 			sidebarNestDelegatedChats: false,
+			sidebarSeparateArchivedBranches: true,
 			chatListDock: 'right',
 			sidebarInactivityDuration: '1-week',
 			sidebarGroupNestedProjectPaths: true,
@@ -54,6 +79,32 @@ describe('LocalSettingsStore', () => {
 			{ field: 'executor', enabled: false },
 			{ field: 'activity', enabled: false },
 		]);
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([undefined, null, 'true', 1, {}, false])(
+		'defaults archive separation off for %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ sidebarSeparateArchivedBranches: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.sidebarSeparateArchivedBranches).toBe(false);
+			expect(DEFAULT_SIDEBAR_DISPLAY_OPTIONS.separateArchivedBranches).toBe(false);
+			store.destroy();
+		},
+	);
+
+	it.each([false, true])('persists archive separation independently of nesting (%s)', (enabled) => {
+		const store = createLocalSettingsStore();
+		store.set('sidebarSeparateArchivedBranches', enabled);
+		store.set('sidebarNestDelegatedChats', false);
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarSeparateArchivedBranches).toBe(enabled);
+		restored.set('sidebarNestDelegatedChats', true);
+		expect(restored.sidebarSeparateArchivedBranches).toBe(enabled);
 		store.destroy();
 		restored.destroy();
 	});
@@ -306,7 +357,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
-		expect(store.userMessageAlignment).toBe('right');
+		expect(store.userMessageAlignment).toBe('left');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.imageCacheSizeMiB).toBe(64);
 		expect(store.inlineMermaidThumbnailSize).toBe('medium');
@@ -358,15 +409,15 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it.each(['center', 'RIGHT', '', null, 1, {}])(
-		'defaults malformed user message alignment %j to right',
+	it.each([undefined, 'center', 'RIGHT', '', null, 1, {}])(
+		'defaults missing or malformed user message alignment %j to left',
 		(value) => {
 			localStorage.setItem(
 				LOCAL_STORAGE_KEYS.localSettings,
-				JSON.stringify({ userMessageAlignment: value }),
+				JSON.stringify({ chatListDock: 'left', userMessageAlignment: value }),
 			);
 			const store = createLocalSettingsStore();
-			expect(store.userMessageAlignment).toBe('right');
+			expect(store.userMessageAlignment).toBe('left');
 			store.destroy();
 		},
 	);

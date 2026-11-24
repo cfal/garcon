@@ -33,13 +33,13 @@ test('root and child moves persist single-ID priorities without rewriting delega
     await fixture.restartGarcon();
     const after = (await fixture.client.listChats()).sessions;
     expect(idsForGroup(after, 'normal')).toEqual(expected);
-    expect(after.filter((chat) => !chat.parentChat).map((chat) => chat.id)).toEqual([a, b]);
-    expect(after.filter((chat) => chat.parentChat?.chatId === a).map((chat) => chat.id)).toEqual([
+    expect(after.filter((chat) => !chat.parentChatId).map((chat) => chat.id)).toEqual([a, b]);
+    expect(after.filter((chat) => chat.parentChatId === a).map((chat) => chat.id)).toEqual([
       a2,
       a1,
     ]);
     for (const entry of before)
-      expect(after.find((chat) => chat.id === entry.id)?.parentChat).toEqual(entry.parentChat);
+      expect(after.find((chat) => chat.id === entry.id)?.parentChatId).toEqual(entry.parentChatId);
   });
 }, 60_000);
 

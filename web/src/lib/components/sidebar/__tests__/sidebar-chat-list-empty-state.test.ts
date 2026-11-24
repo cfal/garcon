@@ -23,12 +23,14 @@ function makeChat(index: number): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: `Chat ${index} preview`,
 		tags: [],
 		firstMessage: `Chat ${index} first`,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentOwnershipEpoch: null,
 	};
 }

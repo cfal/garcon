@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import * as settingsApi from '$lib/api/settings';
-import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { localExecutor, localScope, remoteExecutor, remoteScope } from '$lib/executors/__tests__/fixtures';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 
@@ -26,6 +26,10 @@ vi.mock('$lib/api/chat-preambles', () => ({
 		projection: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
 	})),
 }));
+
+function scope(executorId: string) {
+	return executorId === 'local' ? localScope : remoteScope;
+}
 
 const targets = [
 	{ executorId: 'local', projectPath: '/workspace/project' },
@@ -80,7 +84,8 @@ beforeEach(() => {
 	HTMLElement.prototype.scrollIntoView = vi.fn();
 	vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 	vi.mocked(settingsApi.getRemoteSettings).mockResolvedValue(makeRemoteSettingsSnapshot());
-	vi.mocked(gitApi.getGitWorktrees).mockImplementation(async ({ projectPath }) => ({
+	vi.mocked(gitApi.getGitWorktrees).mockImplementation(async ({ executorId, projectPath }) => ({
+		...scope(executorId),
 		worktrees: [worktree(projectPath)],
 	}));
 });
@@ -94,19 +99,20 @@ afterEach(() => {
 describe('New Chat worktree creation', () => {
 	it.each(targets)('creates and selects a worktree on $executorId without submitting the draft', async ({ executorId, projectPath }) => {
 		const createdPath = projectPath + '/.worktrees/feature-preview';
-		vi.mocked(gitApi.getGitWorktrees).mockImplementation(async ({ projectPath: requestedPath }) => ({
+		vi.mocked(gitApi.getGitWorktrees).mockImplementation(async ({ executorId: requestedExecutorId, projectPath: requestedPath }) => ({
+			...scope(requestedExecutorId),
 			worktrees: [worktree(projectPath), ...(requestedPath === createdPath ? [worktree(createdPath, 'feature/preview')] : [])],
 		}));
-		vi.mocked(gitApi.gitCreateWorktree).mockResolvedValue({ success: true, worktreePath: createdPath });
+		vi.mocked(gitApi.gitCreateWorktree).mockResolvedValue({ ...scope(executorId), success: true, worktreePath: createdPath });
 		const { modal, onStartChat } = await openWorktrees(executorId, projectPath);
 		await waitFor(() => expect(within(modal).getByRole('option', { name: /main/ })).toBeTruthy());
 		await fireEvent.click(within(modal).getByRole('button', { name: 'New worktree' }));
 		await fireEvent.input(within(modal).getByPlaceholderText('Branch name (e.g. fix/login-bug)'), {
 			target: { value: 'feature/preview' },
 		});
-		await fireEvent.click(within(modal).getByRole('button', { name: 'Create' }));
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Create worktree' }));
 		await waitFor(() => expect(gitApi.gitCreateWorktree).toHaveBeenCalledWith(
-			{ executorId, projectPath }, createdPath, { branch: 'feature/preview', baseRef: undefined },
+			{ executorId, projectPath }, { worktreePath: createdPath, branch: 'feature/preview', baseRef: undefined },
 		));
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull());
 		await waitFor(() => expect((screen.getByRole('radio', { name: /^feature\/preview/ }) as HTMLInputElement).checked).toBe(true));
@@ -125,7 +131,7 @@ describe('New Chat worktree creation', () => {
 	it.each(targets)('cancels a mid-load modal without restarting discovery on $executorId', async ({ executorId, projectPath }) => {
 		const pending = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		vi.mocked(gitApi.getGitWorktrees)
-			.mockResolvedValueOnce({ worktrees: [worktree(projectPath)] })
+			.mockResolvedValueOnce({ ...scope(executorId), worktrees: [worktree(projectPath)] })
 			.mockReturnValueOnce(pending.promise);
 		const { trigger, modal } = await openWorktrees(executorId, projectPath);
 		expect(gitApi.getGitWorktrees).toHaveBeenCalledTimes(2);
@@ -133,7 +139,7 @@ describe('New Chat worktree creation', () => {
 		await fireEvent.click(within(modal).getByRole('button', { name: 'Close' }));
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull());
 		expect(signal?.aborted).toBe(true);
-		pending.resolve({ worktrees: [worktree(projectPath + '/stale', 'stale')] });
+		pending.resolve({ ...scope(executorId), worktrees: [worktree(projectPath + '/stale', 'stale')] });
 		await pending.promise;
 		await waitFor(() => expect(document.activeElement).toBe(trigger));
 		expect(screen.queryByRole('radio', { name: /^stale/ })).toBeNull();

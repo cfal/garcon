@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createScheduledPrompt, getScheduledPrompts, updateScheduledPrompt, scheduleChatPrompt, setScheduledPromptEnabled, renderScheduledPrompt } from '../scheduled-prompts';
 import { parseChatId } from '$shared/chat-id';
+import { ApiMutationOutcomeUnknownError } from '../client';
 import {
 	SCHEDULED_PROMPT_LABEL_MAX_LENGTH,
 	normalizeScheduledPromptTarget,
@@ -38,6 +39,27 @@ describe('scheduled prompts API contract', () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+	});
+
+	it.each(['dialog', 'slash'])('does not report uncertain %s creation as a definite failure or retry', async (source) => {
+		const create = () => source === 'slash'
+			? scheduleChatPrompt({ chatId: '123', duration: '1m', prompt: 'Continue' })
+			: createScheduledPrompt({ expectedRevision: 0, scheduledPrompt: {
+				schedule: { type: 'once', runAtUtc: scheduledPrompt.schedule.nextRunAt },
+				target: scheduledPrompt.target, prompt: scheduledPrompt.prompt,
+			} });
+		for (const response of [
+			() => Promise.reject(new TypeError('Lost reply')),
+			() => Promise.reject(new DOMException('Timeout', 'TimeoutError')),
+			async () => new Response('Gateway timeout', { status: 504 }),
+			async () => Response.json({ error: 'Write outcome unknown', errorCode: 'INTERNAL_ERROR' }, { status: 500 }),
+			async () => new Response('{', { status: 200 }),
+			async () => Response.json({ success: true }),
+		]) {
+			fetchMock.mockReset().mockImplementation(response);
+			await expect(create()).rejects.toBeInstanceOf(ApiMutationOutcomeUnknownError);
+			expect(fetchMock).toHaveBeenCalledOnce();
+		}
 	});
 
 	it('renders a template for the prospective chat and rejects mismatched or malformed replies', async () => {
@@ -141,7 +163,7 @@ describe('scheduled prompts API contract', () => {
 		await expect(createScheduledPrompt({ expectedRevision: 0, scheduledPrompt: {
 			schedule: { type: 'once', runAtUtc: scheduledPrompt.schedule.nextRunAt },
 			target: scheduledPrompt.target, prompt: scheduledPrompt.prompt,
-		} })).rejects.toThrow('Invalid scheduled prompt creation response');
+		} })).rejects.toBeInstanceOf(ApiMutationOutcomeUnknownError);
 	});
 
 	it('rejects malformed responses and snapshots that omit the scheduled prompt', async () => {
@@ -154,7 +176,7 @@ describe('scheduled prompts API contract', () => {
 		);
 		await expect(
 			scheduleChatPrompt({ chatId: '123', duration: '1m', prompt: 'Continue' }),
-		).rejects.toThrow('Invalid schedule-in response');
+		).rejects.toBeInstanceOf(ApiMutationOutcomeUnknownError);
 
 		fetchMock.mockResolvedValueOnce(
 			Response.json({
@@ -165,7 +187,7 @@ describe('scheduled prompts API contract', () => {
 		);
 		await expect(
 			scheduleChatPrompt({ chatId: '123', duration: '1m', prompt: 'Continue' }),
-		).rejects.toThrow('Invalid schedule-in response');
+		).rejects.toBeInstanceOf(ApiMutationOutcomeUnknownError);
 	});
 
 	it('preserves typed API errors', async () => {

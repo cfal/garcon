@@ -356,7 +356,7 @@ describe('garcon-cli', () => {
       expect(startTurnId).toBeString();
       expect(serverInstanceId).toBeString();
       expect(startJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'start-async',
         workspace: WORKSPACE,
         serverInstanceId,
@@ -366,7 +366,8 @@ describe('garcon-cli', () => {
           turnId: startTurnId,
           status: 'accepted',
         },
-        parentChat: null,
+        parentChatId: null,
+        lineage: null,
         titleUpdate: { status: 'not-requested' },
       });
       await startHeld.received;
@@ -386,7 +387,7 @@ describe('garcon-cli', () => {
       const resumeTurnId: string = resumeJson.receipt.turnId;
       expect(resumeTurnId).toBeString();
       expect(resumeJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'resume-async',
         workspace: WORKSPACE,
         serverInstanceId,
@@ -396,7 +397,8 @@ describe('garcon-cli', () => {
           turnId: resumeTurnId,
           status: 'accepted',
         },
-        parentChat: null,
+        parentChatId: null,
+        lineage: null,
         delivery: 'new-turn',
       });
       await resumeHeld.received;
@@ -408,7 +410,7 @@ describe('garcon-cli', () => {
       expect(stopped).toMatchObject({ exitCode: 0, stderr: '' });
       const stopJson = JSON.parse(stopped.stdout);
       expect(stopJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'stop',
         workspace: WORKSPACE,
         serverInstanceId,
@@ -417,7 +419,8 @@ describe('garcon-cli', () => {
           chatId: startChatId,
           status: 'accepted',
         },
-        parentChat: null,
+        parentChatId: null,
+        lineage: null,
         outcome: 'interrupt-requested',
         control: {
           serverInstanceId,
@@ -438,7 +441,7 @@ describe('garcon-cli', () => {
       expect(started).toMatchObject({ exitCode: 0, stderr: '' });
       const startJson = JSON.parse(started.stdout);
       expect(startJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'start',
         workspace: WORKSPACE,
         receipt: {
@@ -447,7 +450,8 @@ describe('garcon-cli', () => {
           turnId: startJson.turnReceipt.turnId,
           status: 'accepted',
         },
-        parentChat: null,
+        parentChatId: null,
+        lineage: null,
         titleUpdate: { status: 'not-requested' },
         turnReceipt: {
           state: 'completed',
@@ -465,7 +469,7 @@ describe('garcon-cli', () => {
       expect(resumed).toMatchObject({ exitCode: 0, stderr: '' });
       const resumeJson = JSON.parse(resumed.stdout);
       expect(resumeJson).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: 'resume',
         workspace: WORKSPACE,
         serverInstanceId: startJson.serverInstanceId,
@@ -475,7 +479,8 @@ describe('garcon-cli', () => {
           turnId: resumeJson.turnReceipt.turnId,
           status: 'accepted',
         },
-        parentChat: null,
+        parentChatId: null,
+        lineage: null,
         delivery: 'new-turn',
         titleUpdate: { status: 'not-requested' },
         turnReceipt: {
@@ -606,7 +611,8 @@ describe('garcon-cli', () => {
       expect(childRequest?.lastUserText).not.toContain('SYNTHETIC_PUCK_ONLY');
       expect((await fixture.client.listChats()).sessions.find((chat) => chat.id === childChatId))
         .toMatchObject({
-          parentChat: { chatId: parentChatId, relation: 'delegation' },
+          parentChatId,
+          lineage: null,
           tags: ['cli'],
         });
 
@@ -640,15 +646,16 @@ describe('garcon-cli', () => {
       );
       expect(childEntry).toMatchObject({
         title: 'Delegated review',
-        parentChat: { chatId: parentChatId, relation: 'delegation' },
+        parentChatId,
+        lineage: null,
       });
-      expect(childEntry?.parentChat).not.toHaveProperty('transcriptViewId');
-      expect(childEntry?.parentChat).not.toHaveProperty('ordinal');
+      expect(childEntry?.parentChatId).toBe(parentChatId);
+      expect(childEntry?.lineage).toBeNull();
 
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.find(
         (chat) => chat.id === childChatId,
-      )?.parentChat).toEqual({ chatId: parentChatId!, relation: 'delegation' });
+      )?.parentChatId).toEqual(parentChatId!);
 
       const missingParentId = '1785337200999999';
       const missingArguments = startArguments(fixture, 'review-missing-parent');

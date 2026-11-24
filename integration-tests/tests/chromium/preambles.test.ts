@@ -576,10 +576,7 @@ describe('Chromium preambles', () => {
         const started = await startedPromise;
         turnId = started.turnId;
         const targetRow = fixture.page.locator(`[data-sidebar-virtual-row="${targetChatId}"]`);
-        await targetRow.waitFor();
-        const processingIndicator = targetRow.locator(
-          '[data-slot="sidebar-chat-processing-indicator"]',
-        );
+        const processingIndicator = targetRow.getByTitle('Chat is processing');
         await processingIndicator.waitFor();
         held.releaseText('chromium preamble background response');
         heldReleased = true;

@@ -42,12 +42,14 @@ const chat = {
 	isProcessing: false,
 	processingPhase: null,
 	isUnread: true,
+	activityStatus: null,
 	canReloadFromNativeHistory: false,
 	status: 'draft',
 	lastMessage: '',
 	firstMessage: '',
 	tags: [],
-	parentChat: null,
+	parentChatId: null,
+	lineage: null,
 	agentOwnershipEpoch: null,
 } satisfies ChatSessionRecord;
 

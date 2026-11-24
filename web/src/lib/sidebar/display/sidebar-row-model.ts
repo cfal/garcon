@@ -9,6 +9,11 @@ import { splitProjectPath } from '$lib/project-paths/compact-project-path';
 import { isSidebarChatInactive } from './chat-inactivity';
 import { buildSidebarDelegationForest } from './sidebar-delegation';
 import {
+	DELEGATION_KEY_PREFIX,
+	isSidebarKeyCollapsed,
+	type SidebarCollapseChoices,
+} from './sidebar-collapse';
+import {
 	enabledSidebarGroupingFields,
 	type SidebarGroupingSelection,
 	type SidebarGroupingField,
@@ -32,18 +37,19 @@ const sections: SidebarChatSection[] = [
 	'caught-up',
 ];
 
-export interface SidebarRowModelInput {
+export interface SidebarRowModelInput extends SidebarCollapseChoices {
 	allChats: readonly ChatSessionRecord[];
 	matchingChatIds?: ReadonlySet<string>;
 	orders: SidebarChatOrderMap;
 	groupingFields: readonly SidebarGroupingSelection[];
 	nestDelegatedChats: boolean;
+	separateArchivedBranches?: boolean;
 	currentTime: Date;
 	inactivityDuration: SidebarInactivityDuration;
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
 	groupNestedProjectPaths?: boolean;
-	collapsedProjectKeys?: ReadonlySet<string>;
+	collapseDelegatedChatsByDefault?: boolean;
 	executorOrder?: readonly string[];
 	isChatOptimisticallyArchived?: (chatId: string) => boolean;
 }
@@ -141,7 +147,7 @@ function childTreeScope(
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
-	const forest = buildSidebarDelegationForest(input.allChats, input.nestDelegatedChats);
+	const forest = buildSidebarDelegationForest(input.allChats, input);
 	const matches = input.matchingChatIds ?? new Set(byId.keys());
 	const filtered = input.matchingChatIds !== undefined;
 	const matchCounts = new Map<string, number>();
@@ -357,7 +363,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			const chat = byId.get(id)!;
 			const branch = forest.branches.get(id)!;
 			const list = chatOrderGroupFor(chat);
-			const collapseKey = `delegation:${id}`;
+			const collapseKey = DELEGATION_KEY_PREFIX + id;
 			const contextOnly = !matches.has(id);
 			const row: SidebarVirtualChatRow = {
 				type: 'chat',
@@ -369,7 +375,13 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				isPinned: list === 'pinned',
 				isArchived: list === 'archived',
 				executorGrouped: task.executorGrouped,
-				reorderScopeKey: JSON.stringify([input.nestDelegatedChats, task.parentId, list, task.path]),
+				reorderScopeKey: JSON.stringify([
+					input.nestDelegatedChats,
+					input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
+					task.parentId,
+					list,
+					task.path,
+				]),
 				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
 				contextOnly,
 				section: task.path.find(([field]) => field === 'activity')?.[1] as
@@ -377,7 +389,9 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				branch: branch.descendants
 					? {
 							collapseKey,
-							isCollapsed: !filtered && Boolean(input.collapsedProjectKeys?.has(collapseKey)),
+							isCollapsed:
+								!filtered &&
+								isSidebarKeyCollapsed(collapseKey, input, input.collapseDelegatedChatsByDefault),
 							descendants: branch.descendants,
 							unread: branch.unread - Number(chat.isUnread),
 							processing: branch.processing - Number(chat.isProcessing),

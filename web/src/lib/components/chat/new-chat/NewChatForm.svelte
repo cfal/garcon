@@ -764,6 +764,7 @@
 						<AgentSettingsControls
 							descriptors={form.agentSettingDescriptors}
 							envelope={form.agentSettings}
+							defaults={modelCatalog.getDefaultAgentSettings(form.agentId)}
 							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}

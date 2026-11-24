@@ -41,18 +41,20 @@ export function jsonErrorFromUnknown(
   retryable = defaultRetryableForStatus(status),
 ): Response {
   if (error instanceof AgentCallError) {
+    if (error.outcome === 'not-dispatched' && error.code === 'EXECUTOR_BUSY') return jsonError(error.message, 429, error.code, true);
     return jsonError(error.message, error.code === 'OPERATION_UNSUPPORTED' ? 501 : 503, error.code, false);
   }
-  if (error instanceof AgentIntegrationError && error.code === 'TRANSCRIPT_UNAVAILABLE') {
-    return jsonError(
-      transcriptUnavailableMessage(error.retryable),
-      503,
-      error.code,
-      error.retryable,
-    );
-  }
-  if (error instanceof AgentIntegrationError && (error.code === 'INVALID_SETTINGS' || error.code === 'INVALID_ENDPOINT')) {
-    return jsonError(error.message, 422, error.code, false);
+  if (error instanceof AgentIntegrationError) {
+    switch (error.code) {
+      case 'BINARY_NOT_FOUND':
+        return jsonError(error.message, 503, error.code, false);
+      case 'TRANSCRIPT_UNAVAILABLE':
+        return jsonError(transcriptUnavailableMessage(error.retryable), 503, error.code, error.retryable);
+      case 'INVALID_SETTINGS':
+      case 'INVALID_ENDPOINT':
+      case 'OPERATION_UNSUPPORTED':
+        return jsonError(error.message, 422, error.code, false);
+    }
   }
   if (isDomainError(error)) {
     return jsonError(error.message, error.status, error.code, error.retryable);

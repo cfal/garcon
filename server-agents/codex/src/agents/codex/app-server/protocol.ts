@@ -76,6 +76,7 @@ export type CodexErrorInfo =
   | 'policyCapacityUnavailable'
   | 'inferenceHookDenied'
   | 'cyberPolicy'
+  | 'bioPolicy'
   | 'misalignmentPolicyViolation'
   | 'tooManyDenials'
   | 'internalServerError'
@@ -193,14 +194,27 @@ export type CodexFunctionCallOutputContentItem =
 
 export type CodexMessagePhase = 'commentary' | 'partial_answer' | 'final_answer';
 
+// Preserves native display metadata without imposing Chat-owned presentation instructions.
+// https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/codex-rs/protocol/src/items/display.rs#L50-L124
+export type CodexAgentMessageDisplay =
+  | {
+      mode: 'show';
+      version: 1;
+      trustedContacts: 'check' | 'skip';
+      annotation?: { kind: 'wellbeingHelpline'; subject: 'answer' | 'prompt' } | null;
+    }
+  | { mode: 'hide'; version: 1; replacement: { kind: 'wellbeingPromptHelpline' } }
+  | {
+      mode: 'block';
+      version: 1;
+      reason:
+        | { kind: 'protection'; protectionType: string }
+        | { kind: 'cyber'; trustedAccess?: boolean | null };
+    };
+
 export interface CodexAgentMessageModeration {
   moderated: boolean;
-  display?: {
-    action: string;
-    blockType?: string | null;
-    cyberTrustedAccess?: boolean | null;
-    checkTrustedContacts?: boolean | null;
-  } | null;
+  display?: CodexAgentMessageDisplay | null;
 }
 
 export type CodexThreadItem = {
@@ -333,6 +347,7 @@ const CODEX_ERROR_INFO_STRINGS = new Set<Extract<CodexErrorInfo, string>>([
   'policyCapacityUnavailable',
   'inferenceHookDenied',
   'cyberPolicy',
+  'bioPolicy',
   'misalignmentPolicyViolation',
   'tooManyDenials',
   'internalServerError',
@@ -615,12 +630,44 @@ function validateAgentMessageModeration(value: unknown, label: string): void {
   if (typeof moderation.moderated !== 'boolean') throw new Error(`Invalid ${label} moderated`);
   if (moderation.display === undefined || moderation.display === null) return;
   const display = protocolRecord(moderation.display, `${label} display`);
-  protocolString(display.action, `${label} display action`);
-  nullableProtocolString(display.blockType, `${label} display blockType`);
-  for (const field of ['cyberTrustedAccess', 'checkTrustedContacts']) {
-    if (display[field] !== undefined && display[field] !== null && typeof display[field] !== 'boolean') {
-      throw new Error(`Invalid ${label} display ${field}`);
+  if (display.version !== 1) throw new Error(`Invalid ${label} display version`);
+  switch (display.mode) {
+    case 'show': {
+      if (display.trustedContacts !== 'check' && display.trustedContacts !== 'skip') {
+        throw new Error(`Invalid ${label} display trustedContacts`);
+      }
+      if (display.annotation === undefined || display.annotation === null) return;
+      const annotation = protocolRecord(display.annotation, `${label} display annotation`);
+      if (annotation.kind !== 'wellbeingHelpline') {
+        throw new Error(`Invalid ${label} display annotation kind`);
+      }
+      if (annotation.subject !== 'answer' && annotation.subject !== 'prompt') {
+        throw new Error(`Invalid ${label} display annotation subject`);
+      }
+      return;
     }
+    case 'hide': {
+      const replacement = protocolRecord(display.replacement, `${label} display replacement`);
+      if (replacement.kind !== 'wellbeingPromptHelpline') {
+        throw new Error(`Invalid ${label} display replacement kind`);
+      }
+      return;
+    }
+    case 'block': {
+      const reason = protocolRecord(display.reason, `${label} display reason`);
+      if (reason.kind === 'protection') {
+        protocolString(reason.protectionType, `${label} display reason protectionType`);
+        return;
+      }
+      if (reason.kind !== 'cyber') throw new Error(`Invalid ${label} display reason kind`);
+      if (reason.trustedAccess !== undefined && reason.trustedAccess !== null
+        && typeof reason.trustedAccess !== 'boolean') {
+        throw new Error(`Invalid ${label} display reason trustedAccess`);
+      }
+      return;
+    }
+    default:
+      throw new Error(`Invalid ${label} display mode`);
   }
 }
 

@@ -1,0 +1,49 @@
+name: Bombadil Exploration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bombadil-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  explore:
+    name: Bombadil / ${{ matrix.backend }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        backend: [in-process, remote-controller-dials, remote-executor-dials]
+    env:
+      GARCON_TEST_EXECUTION_BACKEND: ${{ matrix.backend }}
+      BOMBADIL_NO_SANDBOX: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: integration-tests
+      - run: bunx playwright install --with-deps chromium
+        working-directory: integration-tests
+      - run: bun run i18n:compile
+        working-directory: web
+      - run: bun run build
+      - run: bun run --cwd integration-tests typecheck
+      - run: bun run test:bombadil
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() || cancelled() }}
+        with:
+          name: bombadil-${{ matrix.backend }}
+          path: integration-tests/artifacts/bombadil/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -22,6 +22,7 @@ Thanks for contributing to Garcon.
 
 ```bash
 bun run setup
+bun run setup:integration
 bun run start
 ```
 

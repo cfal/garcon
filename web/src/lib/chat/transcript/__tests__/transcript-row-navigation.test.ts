@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { getChatMessages } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
@@ -28,7 +29,7 @@ function page(): CompleteChatHistoryResponse {
 }
 function fixture() {
 	const transcript = new ActiveTranscriptState();
-	transcript.replaceGeneration(target.chatId, target.transcriptViewId, [row(1000)], {
+	seedTranscript(transcript, target.chatId, target.transcriptViewId, [row(1000)], {
 		lastOrdinal: 1000,
 		pageOldestOrdinal: 1000,
 		nextBeforeOrdinal: 951,
@@ -116,7 +117,7 @@ it('does not relabel a replaced-view ordinal or page a replacement view', async 
 	);
 	expect(transcript.entries.map((entry) => entry.ordinal)).toEqual([1000]);
 	expect(getChatMessages).toHaveBeenCalledOnce();
-	transcript.replaceGeneration(target.chatId, 'replacement', [row(100)], {
+	seedTranscript(transcript, target.chatId, 'replacement', [row(100)], {
 		lastOrdinal: 100,
 		pageOldestOrdinal: 100,
 		nextBeforeOrdinal: 51,

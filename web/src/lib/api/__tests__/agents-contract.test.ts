@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { completeAgentAuthLogin, getAgentAuthLoginStatus } from '../agents';
+import { completeAgentAuthLogin, getAgentAuthLoginStatus, getAgentAuthStatus } from '../agents';
+import { fetchModelCatalogResponse } from '../model-catalog';
 
 vi.stubGlobal('localStorage', {
 	getItem: (key: string) =>
@@ -60,6 +61,22 @@ describe('agent login API contract', () => {
 			sessionId: 'session-a',
 			code: 'auth-code',
 		});
+	});
+
+	it('qualifies confirmation and model refresh with the instance that reported CLI success', async () => {
+		const success = { state: 'succeeded', sessionId: 'session-a', running: false, instanceId: 'worker-a' } as const;
+		fetchMock.mockResolvedValueOnce(jsonResponse(success))
+			.mockResolvedValueOnce(jsonResponse({ codex: { authenticated: true } }))
+			.mockResolvedValueOnce(jsonResponse({ catalog: {} }));
+		const status = await getAgentAuthLoginStatus('codex', 'session-a', 'worker');
+		expect(status).toEqual(success);
+		if (status.state !== 'succeeded') throw new Error('Expected a terminal login');
+		await getAgentAuthStatus('codex', 'worker', status.instanceId);
+		await fetchModelCatalogResponse('worker', null, status.instanceId);
+		expect(fetchMock.mock.calls.slice(1).map(([url]) => url)).toEqual([
+			'/api/v1/agents/auth?agent=codex&executorId=worker&loginInstance=worker-a',
+			'/api/v1/models?executorId=worker&loginInstance=worker-a',
+		]);
 	});
 
 	it('receives authoritative pending and retryable-error status without changing session ownership', async () => {

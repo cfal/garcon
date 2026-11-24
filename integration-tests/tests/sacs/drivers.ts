@@ -22,6 +22,13 @@ import {
   scriptedPiStartRequest,
   startScriptedPiTestEnvironment,
 } from '../../support/scripted-pi.js';
+import { geminiText } from '../../support/fake-gemini-model.js';
+import {
+  ANTIGRAVITY_BINARY,
+  scriptedAntigravityRunRequest,
+  scriptedAntigravityStartRequest,
+  startScriptedAntigravityTestEnvironment,
+} from '../../support/scripted-antigravity.js';
 import {
   waitForPersistedChat,
   waitForPersistedNativeSession,
@@ -35,6 +42,7 @@ import type {
   SacsHeldTurn,
   SacsLegacyHistoryImportFacet,
   SacsLegacyTranscriptRow,
+  SacsModelRequest,
   SacsNativeForkingFacet,
   SacsNativeHistoryImportFacet,
   SacsPreparedHistorySource,
@@ -433,6 +441,20 @@ const piHistorySource = filesystemHistorySource('pi', (original) => (
   ].map((entry) => JSON.stringify(entry)).join('\n')}\n`
 ));
 
+function scriptedModelControls(model: {
+  markRequests(): number;
+  requestsSince(cursor: number): readonly SacsModelRequest[];
+  assertSettled(): void;
+  reset(): void;
+}) {
+  return {
+    markRequests: () => model.markRequests(),
+    requestsSince: (_fixture: IntegrationFixture, cursor: number) => model.requestsSince(cursor),
+    assertSettled: () => model.assertSettled(),
+    reset: () => model.reset(),
+  };
+}
+
 const claudeDriver: SacsDriverFactory = {
   id: 'claude',
   label: 'Claude',
@@ -456,12 +478,7 @@ const claudeDriver: SacsDriverFactory = {
         environment.model.scriptHeldTurn([claudeText(content)]),
       ),
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([claudeText(content)]),
-      markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -495,12 +512,7 @@ const codexDriver: SacsDriverFactory = {
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([
         codexAssistantMessage(content),
       ]),
-      markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -539,12 +551,38 @@ const piDriver: SacsDriverFactory = {
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([
         chatCompletionsText(content),
       ]),
-      markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
+      dispose: () => environment.dispose(),
+    } satisfies SacsDriverEnvironment;
+  },
+};
+
+// Antigravity has no pre-ledger chats to adopt and no parseable native history,
+// so it registers neither import facet; native forking is unavailable over ACP.
+const antigravityDriver: SacsDriverFactory = {
+  id: 'antigravity',
+  label: 'Antigravity',
+  steering: null,
+  nativeSessions: NATIVE_SESSIONS,
+  nativeHistoryImport: null,
+  legacyHistoryImport: null,
+  forking: null,
+  async start() {
+    const environment = startScriptedAntigravityTestEnvironment();
+    return {
+      id: 'antigravity',
+      label: 'Antigravity',
+      fixtureOptions: {
+        serverEnvironment: environment.serverEnvironment,
+        prepareWorkspace: environment.prepareWorkspace,
+      },
+      startRequest: (_fixture, input) => scriptedAntigravityStartRequest(input),
+      runRequest: (_fixture, input) => scriptedAntigravityRunRequest(input),
+      holdAssistant: (_fixture, content) => heldTurn(environment.model.scriptHeldTurn([geminiText(content)])),
+      // A cooperative cancel abandons the held model request, so no tool step is needed.
+      holdInterruptibleAssistant: (_fixture, content) => heldTurn(environment.model.scriptHeldTurn([geminiText(content)])),
+      scriptAssistant: (_fixture, content) => environment.model.scriptTurn([geminiText(content)]),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -580,12 +618,7 @@ const openCodeDriver: SacsDriverFactory = {
       scriptAssistant: (_fixture, content) => environment.model.scriptTurn([
         chatCompletionsText(content),
       ]),
-      markRequests: () => environment.model.markRequests(),
-      requestCountSince: (_fixture, cursor) => environment.model.requestsSince(cursor).length,
-      userTextsSince: (_fixture, cursor) => environment.model.requestsSince(cursor)
-        .flatMap((request) => request.userTexts),
-      assertSettled: () => environment.model.assertSettled(),
-      reset: () => environment.model.reset(),
+      ...scriptedModelControls(environment.model),
       dispose: () => environment.dispose(),
     } satisfies SacsDriverEnvironment;
   },
@@ -593,6 +626,7 @@ const openCodeDriver: SacsDriverFactory = {
 
 interface DirectRequest {
   readonly id: number;
+  readonly rawBody: unknown;
   readonly lastUserText: string;
 }
 
@@ -657,11 +691,9 @@ function directDriver(
           held.releaseText(content);
         },
         markRequests: (fixture) => selectProvider(fixture).requests().at(-1)?.id ?? 0,
-        requestCountSince: (fixture, cursor) => selectProvider(fixture).requests()
-          .filter((request) => request.id > cursor).length,
-        userTextsSince: (fixture, cursor) => selectProvider(fixture).requests()
+        requestsSince: (fixture, cursor) => selectProvider(fixture).requests()
           .filter((request) => request.id > cursor)
-          .map((request) => request.lastUserText),
+          .map((request) => ({ body: request.rawBody, userTexts: [request.lastUserText] })),
         assertSettled: (fixture) => selectProvider(fixture).assertNoProtocolViolations(),
         reset: () => {},
         dispose: () => {},
@@ -699,4 +731,6 @@ export const sacsScriptedDriverFactories: readonly SacsDriverFactory[] = [
   directAnthropicDriver,
   ...(process.platform === 'linux' ? [openCodeDriver] : []),
   piDriver,
+  // Runs wherever the pinned agy binary is installed; CI installs it.
+  ...(ANTIGRAVITY_BINARY ? [antigravityDriver] : []),
 ];

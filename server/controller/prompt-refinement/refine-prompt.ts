@@ -172,6 +172,7 @@ function classifyPromptRefinementError(error: unknown): PromptRefinementError {
           { cause: error },
         );
       case 'BINARY_NOT_FOUND':
+      case 'EXECUTOR_BUSY':
       case 'UNAVAILABLE':
         return new PromptRefinementError(
           'PROMPT_REFINEMENT_AGENT_UNAVAILABLE',

@@ -273,6 +273,8 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
       const { operation, runtimeRequest, publish } = prepare(request, options);
       operation.agentSessionId = request.agentSessionId;
       void runtime.resume(runtimeRequest, publish).catch((error) => {
+        // A runtime that already reported the run's end owns its outcome.
+        if (operation.ended) return;
         publish({ type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) });
       });
       return operation.handle;

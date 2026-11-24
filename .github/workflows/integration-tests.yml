@@ -62,6 +62,19 @@ jobs:
         working-directory: integration-tests
         run: bun run typecheck
 
+      - name: Cache Antigravity CLI
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/garcon-antigravity-cli
+          key: antigravity-cli-${{ hashFiles('scripts/install-antigravity-cli.ts') }}
+
+      - name: Install pinned Antigravity CLI
+        run: |
+          # A failed install must fail the job rather than silently skip the scripted tier.
+          antigravity_bin="$(bun scripts/install-antigravity-cli.ts)"
+          test -x "$antigravity_bin"
+          echo "ANTIGRAVITY_BIN=$antigravity_bin" >> "$GITHUB_ENV"
+
       - name: Run server integration tests
         working-directory: integration-tests
         env:

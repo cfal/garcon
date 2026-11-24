@@ -34,13 +34,15 @@ function createChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: 'Preview',
 		tags: [],
 		firstMessage: 'First',
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }

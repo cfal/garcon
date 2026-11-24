@@ -6,7 +6,8 @@
 	function chat(id: string, title: string): ChatSessionRecord {
 		return {
 			id,
-			parentChat: null,
+			parentChatId: null,
+			lineage: null,
 			projectPath: '/workspace/project',
 			orderGroup: 'normal',
 			title,
@@ -22,6 +23,7 @@
 			isArchived: false,
 			isProcessing: false,
 			processingPhase: null,
+			activityStatus: null,
 			canReloadFromNativeHistory: false,
 			isUnread: false,
 			status: 'running',

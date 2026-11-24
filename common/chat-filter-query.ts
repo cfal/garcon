@@ -22,6 +22,7 @@ export interface ChatFilterSpec {
   project: string[];
   ids?: ChatFilterOrGroup[];
   parents?: ChatFilterOrGroup[];
+  sources?: ChatFilterOrGroup[];
   createdBefore?: string[];
   createdAfter?: string[];
   updatedBefore?: string[];
@@ -42,7 +43,8 @@ export interface ChatFilterTerm {
 
 export interface ChatFilterTarget {
   readonly id: string;
-  readonly parentChat: { readonly chatId: string } | null;
+  readonly parentChatId: string | null;
+  readonly lineage: { readonly sourceChatId: string } | null;
   readonly title: string;
   readonly projectPath: string;
   readonly agentId: string;
@@ -73,6 +75,7 @@ export function isEmptyFilter(spec: ChatFilterSpec): boolean {
     && spec.project.length === 0
     && (spec.ids?.length ?? 0) === 0
     && (spec.parents?.length ?? 0) === 0
+    && (spec.sources?.length ?? 0) === 0
     && (spec.createdBefore?.length ?? 0) === 0
     && (spec.createdAfter?.length ?? 0) === 0
     && (spec.updatedBefore?.length ?? 0) === 0
@@ -146,6 +149,12 @@ export function parseChatFilterQuery(query: string): ChatFilterParseResult {
       else invalidTokens.push(token);
       continue;
     }
+    if (lower.startsWith('source:')) {
+      const parts = parseChatIdGroup(token.slice(7));
+      if (parts) (spec.sources ??= []).push(parts);
+      else invalidTokens.push(token);
+      continue;
+    }
     const timestampOperator = parseTimestampOperator(token, lower);
     if (timestampOperator) {
       if (timestampOperator.timestamp === null) invalidTokens.push(token);
@@ -176,9 +185,15 @@ export function matchesChatFilter(chat: ChatFilterTarget, spec: ChatFilterSpec):
     }
   }
   if (spec.parents) {
-    const parentChatId = chat.parentChat?.chatId ?? null;
+    const parentChatId = chat.parentChatId;
     for (const group of spec.parents) {
       if (parentChatId === null || !group.includes(parentChatId)) return false;
+    }
+  }
+  if (spec.sources) {
+    const sourceChatId = chat.lineage?.sourceChatId ?? null;
+    for (const group of spec.sources) {
+      if (sourceChatId === null || !group.includes(sourceChatId)) return false;
     }
   }
   if (!matchesTimeConstraints(chat.createdAt, spec.createdBefore, spec.createdAfter)) return false;
@@ -247,6 +262,9 @@ export function serializeChatFilter(spec: ChatFilterSpec): string {
   }
   for (const group of spec.parents ?? []) {
     parts.push(`parent:${group.join('|')}`);
+  }
+  for (const group of spec.sources ?? []) {
+    parts.push(`source:${group.join('|')}`);
   }
   for (const value of spec.createdBefore ?? []) parts.push(`created-before:${value}`);
   for (const value of spec.createdAfter ?? []) parts.push(`created-after:${value}`);

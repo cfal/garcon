@@ -15,7 +15,8 @@ function chat(
 ): ChatSessionRecord {
 	return {
 		id,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace',
 		orderGroup: 'normal',
 		title: id,
@@ -32,6 +33,7 @@ function chat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,

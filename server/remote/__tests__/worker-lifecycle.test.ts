@@ -40,10 +40,12 @@ test('gateway startup failure clears stale metadata and keeps children on the un
   const f = await fixture();
   await writeFile(join(f.dataDir, 'runtime.json'), 'Synthetic predecessor metadata');
   await writeFile(join(f.root, 'runtime.json'), 'Synthetic controller metadata');
+  const rejectionListeners = process.listenerCount('unhandledRejection');
   let checked: Promise<void> | undefined;
   await runExecutorWorker(f.options, () => {
     checked = (async () => {
       try {
+        expect(process.listenerCount('unhandledRejection')).toBe(rejectionListeners + 1);
         expect(process.env.GARCON_RUNTIME).toBe('executor');
         expect(process.env.GARCON_CONFIG_DIR).toBe(f.root);
         await expect(discoverRuntime({ configDir: f.root, runtime: 'executor' })).rejects.toThrow('no executor runtime file');
@@ -53,6 +55,7 @@ test('gateway startup failure clears stale metadata and keeps children on the un
     })();
   });
   await checked;
+  expect(process.listenerCount('unhandledRejection')).toBe(rejectionListeners);
   const lease = await acquireWorkspaceLease(f.dataDir, { retries: 0 });
   await lease.release();
 });
@@ -70,11 +73,13 @@ test('failure to clear the stale descriptor aborts before listener credential in
 test('gateway cleanup errors do not skip listener shutdown or lease release on startup failure', async () => {
   gatewayFailure = 'cleanup';
   const f = await fixture();
+  const rejectionListeners = process.listenerCount('unhandledRejection');
   let port: number | undefined;
   await expect(runExecutorWorker(f.options, (url) => {
     port = Number(new URL(url).port);
     throw new Error('Synthetic onboarding failure');
   })).rejects.toThrow('Synthetic gateway cleanup failure');
+  expect(process.listenerCount('unhandledRejection')).toBe(rejectionListeners);
   expect(port).toBeDefined();
   const replacement = Bun.serve({ port, hostname: '0.0.0.0', fetch: () => new Response('Synthetic replacement') });
   await replacement.stop(true);

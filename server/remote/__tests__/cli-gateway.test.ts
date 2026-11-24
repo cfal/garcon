@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { chmod, mkdir, mkdtemp, rm, stat, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +15,7 @@ import { parseJsonBody } from '../../common/http-body.js';
 import type { RouteMap } from '../../controller/lib/http-route-types.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import { createChatParentRoutes } from '../../controller/routes/chat-parent.js';
+import { commandHttpError } from '../../controller/lib/command-http-error.js';
 import { CLI_ENVELOPE_BYTES, cliRequestBytes, cliRoute } from '../transport/cli-protocol.js';
 import { parseAgentRunCommandRequest, parseSteerCommandRequest } from '../../../common/chat-command-contracts.js';
 import { asyncQuestionReplyText } from '../../../common/async-user-questions.js';
@@ -47,6 +49,40 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
   return { root, dataDir, gateway, discover, call, replace, deny() { allowed = false; }, disconnect() { live?.close(); live = null; } };
 }
 
+test.each([
+  ['INVALID_SETTINGS', 422, false],
+  ['SESSION_BUSY', 409, true],
+  ['UNAVAILABLE', 503, true],
+  ['TIMEOUT', 504, true],
+  ['TIMEOUT', 504, false],
+] as const)('forwards provider %s errors without losing retryability (%s, %s)', async (code, status, retryable) => {
+  const message = 'Synthetic speed selection failure';
+  let calls = 0;
+  const f = await fixture({ '/api/v1/chats/run': { POST: () => {
+    calls++;
+    return commandHttpError(new AgentIntegrationError(code, message, retryable));
+  } } });
+  const response = await f.call('/api/v1/chats/run', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  expect(response.status).toBe(status);
+  expect(await response.json()).toEqual({ success: false, errorCode: code, error: message, retryable });
+  expect(calls).toBe(1);
+});
+
+test.each(['working', 'complete', 'error', 'pending-user-action', null] as const)(
+  'preserves activity status %s in list and snapshot responses', async (activityStatus) => {
+    const list = { sessions: [{ id: '1000000000000001', activityStatus }] };
+    const snapshot = { chat: { id: '1000000000000001', activityStatus } };
+    const f = await fixture({
+      '/api/v1/chats': { GET: () => Response.json(list) },
+      '/api/v1/chats/snapshot': { GET: () => Response.json(snapshot) },
+    });
+    expect(await (await f.call('/api/v1/chats')).json()).toEqual(list);
+    expect(await (await f.call('/api/v1/chats/snapshot?chatId=1000000000000001&limit=0')).json()).toEqual(snapshot);
+  },
+);
+
 test('private role descriptors prove a live endpoint and never expose the controller capability or directory', async () => {
   const f = await fixture({}, null);
   const connection = await f.discover();
@@ -78,11 +114,10 @@ test('forwards the parent setter unchanged and preserves permission and controll
   const parentChatId = '1783725900000201';
   const f = await fixture(createChatParentRoutes({ set: async (input) => {
     requests.push(input);
-    return { success: true, chatId: input.chatId, parentChat: input.parentChatId === null ? null
-      : { chatId: input.parentChatId, relation: 'delegation' }, changed: true };
+    return { success: true, chatId: input.chatId, parentChatId: input.parentChatId, changed: true };
   } }));
   const client = new GarconClient(await f.discover());
-  await expect(client.setChatParent({ chatId, parentChatId })).resolves.toMatchObject({ parentChat: { chatId: parentChatId } });
+  await expect(client.setChatParent({ chatId, parentChatId })).resolves.toMatchObject({ parentChatId });
   expect(requests).toEqual([{ chatId, parentChatId }]);
   f.deny();
   await expect(client.setChatParent({ chatId, parentChatId: null })).rejects.toMatchObject({ errorCode: 'CLI_ACCESS_DENIED' });

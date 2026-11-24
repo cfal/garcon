@@ -1,14 +1,14 @@
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
-import type { ParentChatRef } from '../../../common/chat-parentage.js';
+import type { ChatLineage } from '../../../common/chat-parentage.js';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentName } from '../agents/session-types.js';
 import type { NativeSeedReceipt } from '../../../common/transcript-seed.js';
 import type { ChatPreambleSelection, PendingPreambleBoundary } from '../../../common/preambles.js';
 
 
-export const CHAT_REGISTRY_VERSION = 5;
+export const CHAT_REGISTRY_VERSION = 6;
 
 export interface CarryOverMigrationQuarantine {
   artifactId: string;
@@ -52,7 +52,8 @@ export interface ChatRegistryEntry {
   pendingPreambleBoundary: PendingPreambleBoundary | null;
   // Required normalized per-chat preamble selection; chats.json is authoritative.
   preambleSelection: ChatPreambleSelection;
-  readonly parentChat: ParentChatRef | null;
+  readonly parentChatId: string | null;
+  readonly lineage: ChatLineage | null;
 }
 
 export interface ChatRegistrySnapshot {

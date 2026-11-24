@@ -27,6 +27,7 @@ describe('inherited delegated grouping', () => {
 			section: 'inactive',
 			reorderScopeKey: JSON.stringify([
 				true,
+				false,
 				'parent',
 				'normal',
 				[

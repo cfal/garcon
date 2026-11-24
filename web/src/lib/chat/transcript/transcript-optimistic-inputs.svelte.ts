@@ -22,8 +22,8 @@ export class TranscriptOptimisticInputs {
 		this.onChanged();
 	}
 
-	markDelivered(clientMessageId: string): void {
-		const index = this.rows.findIndex((input) => input.clientMessageId === clientMessageId);
+	markDelivered(chatId: string, clientMessageId: string): void {
+		const index = this.rows.findIndex((input) => input.chatId === chatId && input.clientMessageId === clientMessageId);
 		const input = this.rows[index];
 		if (!input || input.delivery === 'delivered') return;
 		const next = [...this.rows];
@@ -32,8 +32,8 @@ export class TranscriptOptimisticInputs {
 		this.onChanged();
 	}
 
-	clear(clientMessageId: string): void {
-		const next = this.rows.filter((input) => input.clientMessageId !== clientMessageId);
+	clear(chatId: string, clientMessageId: string): void {
+		const next = this.rows.filter((input) => input.chatId !== chatId || input.clientMessageId !== clientMessageId);
 		if (next.length === this.rows.length) return;
 		this.#afterOrdinalByClientMessageId.delete(clientMessageId);
 		this.rows = next;

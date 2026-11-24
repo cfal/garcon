@@ -114,6 +114,35 @@ describe('WsConnection', () => {
 		vi.stubGlobal('WebSocket', originalWebSocket);
 	});
 
+	it('retains each socket attempt start across delayed open events and correlated replies', async () => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		const connection = new WsConnection();
+		const consume = vi.fn(() => false);
+		connection.addMessageConsumer(consume);
+		try {
+			connection.connect('token');
+			clock.mockReturnValue(20);
+			mockSockets[0].open();
+			mockSockets[0].message({ type: 'live-test' });
+			expect(consume).toHaveBeenLastCalledWith({ type: 'live-test' }, { connectionStartedAt: 10 });
+			const reply = connection.sendRequest({ type: 'request-test' });
+			const request = lastSentPayload(mockSockets[0]);
+			expect(request).not.toHaveProperty('connectionStartedAt');
+			mockSockets[0].message({ type: 'reply-test', clientRequestId: request.clientRequestId });
+			await reply;
+			expect(consume).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'reply-test' }), { connectionStartedAt: 10 });
+
+			clock.mockReturnValue(30);
+			connection.connect('token');
+			clock.mockReturnValue(40);
+			mockSockets[1].open();
+			mockSockets[1].message({ type: 'live-test' });
+			expect(consume).toHaveBeenLastCalledWith({ type: 'live-test' }, { connectionStartedAt: 30 });
+		} finally {
+			connection.disconnect();
+		}
+	});
+
 	it.each([4001, 4002])('pauses revoked sockets until auth recovery, code %s', async (code) => {
 		const connection = new WsConnection();
 		connection.onAuthFailure = vi.fn();
@@ -383,9 +412,11 @@ describe('WsConnection', () => {
 	it('sends application heartbeats and accepts matching pongs', async () => {
 		const connection = new WsConnection();
 		const snapshotSources: Array<string | undefined> = [];
+		const requestStarts: Array<number | undefined> = [];
 		connection.addMessageConsumer((data, context) => {
 			if (data.type === 'ws-pong') {
 				snapshotSources.push(context.processingSnapshotSource);
+				requestStarts.push(context.requestStartedAt);
 			}
 			return false;
 		});
@@ -400,6 +431,9 @@ describe('WsConnection', () => {
 		expect(ping).toMatchObject({ type: 'ws-ping' });
 		expect(typeof ping.clientRequestId).toBe('string');
 		expect(typeof ping.sentAt).toBe('number');
+		expect(ping).not.toHaveProperty('requestStartedAt');
+		const requestStartedAt = performance.now();
+		await vi.advanceTimersByTimeAsync(1_000);
 
 		socket.message({
 			type: 'ws-pong',
@@ -414,6 +448,7 @@ describe('WsConnection', () => {
 		expect(connection.isConnected).toBe(true);
 		expect(mockSockets).toHaveLength(1);
 		expect(snapshotSources).toEqual(['heartbeat']);
+		expect(requestStarts).toEqual([requestStartedAt]);
 
 		connection.disconnect();
 	});

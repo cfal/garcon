@@ -7,12 +7,38 @@ function host() {
   return {
     runExclusive: (_chatId, operation) => operation(),
     chatExists: () => true,
-    unsettledQueueReceiptKeys: () => new Set(),
+    inputAccepted: () => undefined,
+      unsettledQueueReceiptKeys: () => new Set(),
     publish: () => undefined,
   };
 }
 
 describe('ChatExecutionControlOperations', () => {
+  it('announces accepted queued input while paused and excludes duplicate receipts', async () => {
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const inputAccepted = mock(() => undefined);
+    const operations = new ChatExecutionControlOperations(repository, { ...host(), inputAccepted }, {
+      assertAvailable: async () => undefined,
+    });
+    await operations.create('chat-1', { content: 'Synthetic existing tail', images: [] });
+    await operations.pause('chat-1');
+    inputAccepted.mockClear();
+    const input = {
+      content: 'Synthetic paused input', images: [],
+      command: { key: 'synthetic-command', entryId: 'synthetic-entry' },
+      submission: { clientMessageId: 'synthetic-message', transcriptViewId: 'view-1' },
+    };
+    await operations.create('chat-1', input);
+    expect(inputAccepted).toHaveBeenCalledTimes(1);
+    expect(repository.load('chat-1').pause).not.toBeNull();
+    await operations.create('chat-1', input);
+    expect(inputAccepted).toHaveBeenCalledTimes(1);
+    await operations.enqueueControl('chat-1', {
+      content: 'Synthetic control', transcriptViewId: 'view-1', createdAt: '2026-01-01T00:00:00Z', receipt: null,
+    });
+    expect(inputAccepted).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     { kind: 'queued-turn-failed', entryId: 'failed-entry' },
     { kind: 'turn-failed', turnId: 'failed-turn' },
@@ -40,6 +66,7 @@ describe('ChatExecutionControlOperations', () => {
     const operations = new ChatExecutionControlOperations(repository, {
       runExclusive: (_chatId, operation) => operation(),
       chatExists: () => true,
+      inputAccepted: () => undefined,
       unsettledQueueReceiptKeys: () => new Set(),
       publish: () => {
         if (publicationFails) throw new Error('listener failed');
@@ -66,6 +93,7 @@ describe('ChatExecutionControlOperations', () => {
     const operations = new ChatExecutionControlOperations(repository, {
       runExclusive: (_chatId, operation) => operation(),
       chatExists: () => true,
+      inputAccepted: () => undefined,
       unsettledQueueReceiptKeys: () => new Set(),
       publish,
     }, { assertAvailable: mock(async () => undefined) });
@@ -87,7 +115,7 @@ describe('ChatExecutionControlOperations', () => {
 
     const dequeued = await operations.dequeueNextTurn('chat-1', (turn) => {
       expect(turn).toMatchObject({ kind: 'control', entry: input });
-      return true;
+      return 'inserted';
     });
     expect(dequeued?.input.kind).toBe('control');
     expect(dequeued?.control.controlEntries).toEqual([]);

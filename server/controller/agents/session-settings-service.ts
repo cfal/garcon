@@ -5,7 +5,7 @@ import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
-import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { AgentChatEntry, AgentSessionSettingsPatch } from './session-types.js';
 import type { AgentDirectory } from './directory.js';
 import { toAgentEndpointSelection } from './execution-planning.js';
@@ -19,6 +19,7 @@ import type { ChatExecutionCommands } from '../chat-execution/types.js';
 import { hasPendingTurnInput, type StoredChatExecutionControlState } from '../chat-execution/control-state.js';
 
 export type SettingsExecutionPort = Pick<ChatExecutionCommands,
+  | 'ownsExecution'
   | 'reserveTranscriptSnapshot'
   | 'releaseTranscriptSnapshot'
   | 'readChatExecutionControl'
@@ -44,10 +45,13 @@ export class AgentSessionSettingsService {
     directory: AgentDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     execution: SettingsExecutionPort;
-    chatMutationLock?: KeyedPromiseLock;
+    hasAdmittedProviderTurn(chatId: string): boolean;
+    chatMutationLock: KeyedPromiseLock;
+    selectionAdmissionLock: KeyedPromiseLock;
     onCommitted?: (chatId: string) => void;
   }) {
-    this.#lock = deps.chatMutationLock ?? new KeyedPromiseLock();
+    if (!deps.chatMutationLock) throw new Error('AgentSessionSettingsService requires the shared chat mutation lock');
+    this.#lock = deps.chatMutationLock;
   }
 
   async validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
@@ -143,11 +147,19 @@ export class AgentSessionSettingsService {
         };
         await integration.configurationValidation?.validate(configuration, readBefore(deadline, signal));
         this.deps.endpointResolver.resolveEndpointReference(next);
-        const commit = async (): Promise<AgentChatEntry> => {
-          if (entry.agentSessionId && integration.sessionConfiguration) {
+        const applyAndPersistSettings = async (): Promise<AgentChatEntry> => {
+          const sessionId = this.deps.registry.getChat(chatId)?.agentSessionId;
+          const permissionModeExplicit = patch.permissionMode !== undefined;
+          if (integration.sessionConfiguration
+            && permissionModeExplicit
+            && this.deps.execution.ownsExecution(chatId)
+            && (!sessionId || !this.deps.hasAdmittedProviderTurn(chatId))) {
+            throw new DomainError('SESSION_BUSY', 'The provider has not admitted this turn. Retry the permission change after it starts.', 409, true);
+          }
+          if (sessionId && integration.sessionConfiguration) {
             await integration.sessionConfiguration.apply(
-              entry.agentSessionId,
-              configuration,
+              sessionId,
+              { ...configuration, permissionModeExplicit },
               {
                 model: previous.model,
                 permissionMode: normalizePermissionMode(entry.permissionMode),
@@ -178,10 +190,13 @@ export class AgentSessionSettingsService {
           this.deps.onCommitted?.(chatId);
           return updated;
         };
-        if (!reservation) return await commit();
-        return await this.deps.execution.withChatExecutionControl(chatId, async (control) => {
-          assertEmptyQueue(control);
-          return commit();
+        // Dequeue must not observe a new native setting before the matching durable selection.
+        return await this.deps.selectionAdmissionLock.runExclusive(`chat:${chatId}`, () => {
+          if (!reservation) return applyAndPersistSettings();
+          return this.deps.execution.withChatExecutionControl(chatId, async (control) => {
+            assertEmptyQueue(control);
+            return applyAndPersistSettings();
+          });
         });
       } finally {
         if (reservation) await this.deps.execution.releaseTranscriptSnapshot(reservation);

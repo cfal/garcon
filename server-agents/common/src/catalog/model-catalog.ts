@@ -10,10 +10,7 @@ export interface ModelCatalogOptions {
     readonly priority: number;
     readonly model: string;
   } | null;
-  readonly discover?: (request: {
-    readonly strict: boolean;
-    readonly signal: AbortSignal;
-  }) => Promise<readonly AgentModelOption[]>;
+  readonly discover?: (request: Parameters<AgentCatalog['snapshot']>[0]) => Promise<readonly AgentModelOption[]>;
 }
 
 export function createModelCatalog(options: ModelCatalogOptions): AgentCatalog {
@@ -26,7 +23,7 @@ export function createModelCatalog(options: ModelCatalogOptions): AgentCatalog {
       } catch (error) {
         request.signal.throwIfAborted();
         if (error instanceof Error && error.name === 'AbortError') throw error;
-        if (request.strict) throw error;
+        if (request.strict || request.requireNativeDiscovery) throw error;
         options.logger.warn('Dynamic model discovery failed; using static models.', {
           code: 'MODEL_DISCOVERY_FAILED',
         });

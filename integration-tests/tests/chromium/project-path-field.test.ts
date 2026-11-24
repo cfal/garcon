@@ -3,12 +3,13 @@ import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { measureDialogHeightChange, pauseDialogResize } from '../../support/dialog-resize.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`project worktree selection retains keyboard, pin and nested picker behavior (${executionBackend})`, async () => {
-    await withChromiumFixture(`project-path-field-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
+    await withChromiumFixture(`project-path-field-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors, consumeExpectedBrowserErrors }, phase) => {
       const project = join(integration.executionDirs.project, 'repository ');
       await mkdir(project);
       await mkdir(project.trimEnd());
@@ -66,6 +67,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await browserExpect(selection.getByRole('switch', { name: 'Remove Exact project', exact: true })).toBeEnabled();
         await browserExpect(selection.getByRole('switch', { name: 'Add Sibling project', exact: true })).toBeDisabled();
         await selection.locator('[data-slot="new-chat-preamble-cancel"]').click();
+        await browserExpect(selection).toBeHidden();
       };
       await assertExactPreambleScope();
 
@@ -84,6 +86,18 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await feature.click();
       await browserExpect(feature).toBeChecked();
       await browserExpect(prompt).toHaveValue('Preserve this worktree draft');
+      const worktreePicker = page.getByRole('dialog', { name: 'Select worktree', exact: true });
+      if (executionBackend === 'in-process') {
+        await field.getByRole('button', { name: 'New worktree', exact: true }).click();
+        const create = worktreePicker.getByRole('button', { name: 'New worktree', exact: true });
+        await browserExpect(create).toBeEnabled();
+        const resize = await create.evaluateHandle(pauseDialogResize);
+        await page.getByRole('dialog', { name: 'New worktree', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
+        await browserExpect.poll(() => resize.evaluate(animation => animation.playState)).toBe('idle');
+        await resize.dispose();
+        await page.keyboard.press('Escape');
+        await browserExpect(worktreePicker).toHaveCount(0);
+      }
       expect((await integration.client.listChats()).sessions).toEqual([]);
       await assertExactPreambleScope();
 
@@ -95,13 +109,97 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const touch = width < 1000;
         await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: touch });
         await page.setViewportSize({ width, height: 900 });
+        if (touch) {
+          const enterPath = landing.getByRole('button', { name: 'Enter path', exact: true });
+          if (await enterPath.isVisible()) await enterPath.click();
+          expect(await landing.getByRole('textbox', { name: 'Project Path', exact: true }).evaluate(element =>
+            parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+        }
         await browserExpect.poll(() => field.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
         for (const radio of await field.getByRole('radio').all()) {
           await browserExpect.poll(async () => (await radio.locator('..').boundingBox())!.height).toBe(44);
         }
-        await page.screenshot({ path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
+        expect(await field.evaluate(element => {
+          const fieldBounds = element.getBoundingClientRect();
+          const controls = [...element.querySelectorAll('input, button')]
+            .filter(child => child.checkVisibility({ checkVisibilityCSS: true }))
+            .map(child => child.getBoundingClientRect());
+          return controls.every((rect, index) => {
+            const fitsWithinField = rect.left >= fieldBounds.left && rect.right <= fieldBounds.right + 1;
+            if (!fitsWithinField) return false;
+            return controls.slice(index + 1).every(other => {
+              const horizontallySeparated = rect.right <= other.left || other.right <= rect.left;
+              const verticallySeparated = rect.bottom <= other.top || other.bottom <= rect.top;
+              return horizontallySeparated || verticallySeparated;
+            });
+          });
+        })).toBe(true);
+        await page.screenshot({ animations: 'disabled', path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
       }
       await cdp.detach();
+
+      phase('explicit name generation creates only on confirmation');
+      await prompt.fill('Synthetic worktree naming task');
+      let requests = 0;
+      await page.route('**/api/v1/git/generate-name', async route => {
+        requests++;
+        expect(route.request().postDataJSON()).toEqual({ description: 'Synthetic worktree naming task', previousName: '' });
+        await route.fulfill({ json: { name: 'picker-review' } });
+      });
+      await field.getByRole('button', { name: 'New worktree', exact: true }).click();
+      const newWorktree = worktreePicker.getByRole('button', { name: 'New worktree', exact: true });
+      if (executionBackend === 'in-process') {
+        await browserExpect(newWorktree).toBeEnabled();
+        const { before, middle, after } = await newWorktree.evaluate(measureDialogHeightChange);
+        expect(middle).toBeLessThan(before);
+        expect(middle).toBeGreaterThan(after);
+      } else {
+        await newWorktree.click();
+      }
+      const create = page.getByRole('dialog', { name: 'New worktree', exact: true });
+      const name = create.getByRole('textbox', { name: /branch name/i });
+      await browserExpect(name).toHaveValue('');
+      expect(requests).toBe(0);
+      await create.getByRole('button', { name: 'Generate name' }).click();
+      await browserExpect(name).toHaveValue('picker-review');
+      await browserExpect(feature).toBeChecked();
+      if (executionBackend === 'remote-controller-dials') {
+        phase('the same executor reconnects without discarding the create draft');
+        const { client } = integration;
+        const location = create.getByRole('textbox', { name: 'Location' });
+        const base = create.getByRole('textbox', { name: 'Base ref' });
+        const submit = create.getByRole('button', { name: 'Create worktree' });
+        await create.getByRole('button', { name: 'Advanced' }).click();
+        const chosenPath = join(project, '.worktrees', 'picker-review');
+        await location.fill(chosenPath);
+        await base.fill('main');
+        await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+        await browserExpect(submit).toBeDisabled();
+        await browserExpect(name).toHaveValue('picker-review');
+        await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+        await browserExpect(submit).toBeEnabled({ timeout: 30_000 });
+        await browserExpect(location).toHaveValue(chosenPath);
+        await browserExpect(base).toHaveValue('main');
+      }
+      if (executionBackend === 'in-process') {
+        for (const width of [390, 1440]) {
+          await page.setViewportSize({ width, height: 900 });
+          await browserExpect(create.getByRole('button', { name: 'Create worktree' })).toBeInViewport();
+          await page.screenshot({ animations: 'disabled', path: join(artifacts, `worktree-create-${width}.png`) });
+        }
+        phase('keyboard retry after a destination conflict');
+        await create.getByRole('button', { name: 'Advanced' }).click();
+        const location = create.getByRole('textbox', { name: 'Location' });
+        await location.fill(worktree);
+        await name.press('Enter');
+        await browserExpect(create.getByRole('alert')).toContainText('already registered');
+        await browserExpect(name).toBeFocused();
+        await location.fill('');
+        consumeExpectedBrowserErrors(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
+      }
+      await create.getByRole('button', { name: 'Create worktree' }).click();
+      await browserExpect(field.getByRole('radio', { name: /picker-review/ })).toBeChecked();
+      expect(requests).toBe(1);
       assertNoBrowserErrors();
     }, undefined, { executionBackend, projectRoots: 'separate' });
   }, 120_000);

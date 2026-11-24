@@ -32,6 +32,7 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 				executorOrder: executors.executors.map((executor) => executor.id),
 				groupingFields: localSettings.sidebarGroupingFields,
 				nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
+				separateArchivedBranches: localSettings.sidebarSeparateArchivedBranches,
 				currentTime: minuteClock.currentTime,
 				inactivityDuration: localSettings.sidebarInactivityDuration,
 				sortMode: localSettings.sidebarSortMode,
@@ -40,6 +41,8 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 					sessions.isChatOptimisticallyArchived(chatId),
 				groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 				collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
+				expandedDelegationKeys: projectCollapse.expandedDelegationKeys,
+				collapseDelegatedChatsByDefault: localSettings.collapseDelegatedChatsByDefault,
 			};
 		},
 		write: reorderChat,

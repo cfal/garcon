@@ -19,6 +19,7 @@ export class ReadReceiptOutboxStore {
 	private sessions: ChatSessionsStore;
 	private flushRequested = false;
 	private flushPromise: Promise<void> | null = null;
+	private destroyed = false;
 
 	constructor(sessions: ChatSessionsStore) {
 		this.sessions = sessions;
@@ -26,6 +27,7 @@ export class ReadReceiptOutboxStore {
 
 	/** Marks the given chats read immediately using their current lastActivityAt. */
 	async markChatsReadNow(chatIds: string[]): Promise<void> {
+		if (this.destroyed) return;
 		const batch = chatIds.flatMap((chatId) => {
 			const chat = this.sessions.byId[chatId];
 			if (!chat?.lastActivityAt || !chat.isUnread) return [];
@@ -54,6 +56,10 @@ export class ReadReceiptOutboxStore {
 	}
 
 	destroy(): void {
+		this.destroyed = true;
+		this.flushRequested = false;
+		this.pendingByChatId = {};
+		this.firstPendingAt = null;
 		this.clearDebounce();
 		this.clearRetry();
 	}
@@ -89,6 +95,7 @@ export class ReadReceiptOutboxStore {
 	}
 
 	private enqueueEntries(entries: Array<{ chatId: string; lastReadAt: string }>): void {
+		if (this.destroyed) return;
 		let didChange = false;
 		for (const entry of entries) {
 			const existing = this.pendingByChatId[entry.chatId];
@@ -113,6 +120,7 @@ export class ReadReceiptOutboxStore {
 	}
 
 	private async requestFlush(): Promise<void> {
+		if (this.destroyed) return;
 		this.flushRequested = true;
 		if (this.flushPromise) {
 			await this.flushPromise;
@@ -149,6 +157,7 @@ export class ReadReceiptOutboxStore {
 
 		try {
 			const response = await markChatsReadBatch(batch);
+			if (this.destroyed) return false;
 			// Clear acknowledged entries.
 			for (const result of response.results) {
 				const pending = this.pendingByChatId[result.chatId];
@@ -165,6 +174,7 @@ export class ReadReceiptOutboxStore {
 			}
 			return false;
 		} catch {
+			if (this.destroyed) return false;
 			// Retry with backoff; pending entries remain.
 			const delay = RETRY_DELAYS[Math.min(this.retryIndex, RETRY_DELAYS.length - 1)];
 			this.retryIndex++;

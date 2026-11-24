@@ -40,6 +40,27 @@ describe('RemoteSettingsStore', () => {
 		expect(store.error).toBe('network down');
 	});
 
+	it.each(['resolve', 'reject'] as const)('starts a latest read after an older pending read %ss', async (settlement) => {
+		const oldRead = Promise.withResolvers<ReturnType<typeof makeRemoteSettingsSnapshot>>();
+		const fresh = makeRemoteSettingsSnapshot({ version: 3 });
+		mockedSettingsApi.getRemoteSettings.mockReturnValueOnce(oldRead.promise).mockResolvedValueOnce(fresh);
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeRemoteSettingsSnapshot({ version: 1 }));
+		const previous = store.refresh();
+		const previousSettled = Promise.allSettled([previous]);
+		const latest = store.refreshLatest();
+		expect(mockedSettingsApi.getRemoteSettings).toHaveBeenCalledTimes(1);
+		if (settlement === 'resolve') oldRead.resolve(makeRemoteSettingsSnapshot({ version: 2 }));
+		else oldRead.reject(new Error('older read failed'));
+
+		expect(await latest).toEqual(fresh);
+		await previousSettled;
+		expect(mockedSettingsApi.getRemoteSettings).toHaveBeenCalledTimes(2);
+		expect(store.error).toBeNull();
+		store.applySnapshot(makeRemoteSettingsSnapshot({ version: 2 }));
+		expect(store.snapshot).toEqual(fresh);
+	});
+
 	it('ignores stale refresh responses after a newer snapshot is already applied', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(

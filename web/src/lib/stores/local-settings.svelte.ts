@@ -168,6 +168,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	terminalAppearance: boolean;
 	overlayBackdropEffects: boolean;
 	highlightActiveWindow: boolean;
+	collapseDelegatedChatsByDefault: boolean;
 	autoExpandTools: boolean;
 	combineToolUseMessages: boolean;
 	alwaysExpandCliMessages: boolean;
@@ -193,6 +194,7 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	sidebarWidth: number;
 	sidebarGroupingFields: SidebarGroupingSelection[];
 	sidebarNestDelegatedChats: boolean;
+	sidebarSeparateArchivedBranches: boolean;
 	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarChatItemLayout: ChatItemLayout;
@@ -220,35 +222,11 @@ export interface LocalSettingsSnapshot extends TypographyPreferences, ComposerSt
 	customCompletionSoundName: string | null;
 }
 
-type BooleanLocalSettingKey =
-	| 'terminalAppearance'
-	| 'overlayBackdropEffects'
-	| 'highlightActiveWindow'
-	| 'swapDraggedOpenChats'
-	| 'autoExpandTools'
-	| 'combineToolUseMessages'
-	| 'alwaysExpandCliMessages'
-	| 'showThinking'
-	| 'allowDirectChats'
-	| 'reduceMotion'
-	| 'autoHideChatScrollbar'
-	| 'composerStatusBarGitProjects'
-	| 'composerStatusBarNonGitProjects'
-	| 'composerStatusBarProjectPath'
-	| 'composerStatusBarGitBranch'
-	| 'composerStatusBarCommit'
-	| 'autoScrollToBottom'
-	| 'sendByShiftEnter'
-	| 'steerWithCtrlEnter'
-	| 'fullscreenCoversSidebar'
-	| 'chatListAutohide'
-	| 'sidebarVisible'
-	| 'sidebarGroupNestedProjectPaths'
-	| 'sidebarNestDelegatedChats'
-	| 'sidebarShowProjectPath'
-	| 'codeEditorWordWrap'
-	| 'codeEditorVimMode'
-	| 'codeEditorLineNumbers';
+type BooleanPreferenceKey = {
+	[K in keyof LocalSettingsSnapshot]: LocalSettingsSnapshot[K] extends boolean ? K : never;
+}[keyof LocalSettingsSnapshot];
+// Browser notifications require permission before enabling.
+type BooleanLocalSettingKey = Exclude<BooleanPreferenceKey, 'browserNotifications'>;
 
 const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
@@ -256,6 +234,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	...TYPOGRAPHY_DEFAULTS,
 	overlayBackdropEffects: true,
 	highlightActiveWindow: true,
+	collapseDelegatedChatsByDefault: true,
 	autoExpandTools: false,
 	combineToolUseMessages: true,
 	alwaysExpandCliMessages: false,
@@ -269,7 +248,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
-	userMessageAlignment: 'right',
+	userMessageAlignment: 'left',
 	autoHideChatScrollbar: true,
 	inlineImageThumbnailSize: 'medium',
 	imageCacheSizeMiB: 64,
@@ -464,6 +443,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.highlightActiveWindow,
 			DEFAULTS.highlightActiveWindow,
 		),
+		collapseDelegatedChatsByDefault: parseBoolean(
+			parsed.collapseDelegatedChatsByDefault,
+			DEFAULTS.collapseDelegatedChatsByDefault,
+		),
 		overlayBackdropEffects: parseBoolean(
 			parsed.overlayBackdropEffects,
 			DEFAULTS.overlayBackdropEffects,
@@ -541,6 +524,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		sidebarNestDelegatedChats: parseBoolean(
 			parsed.sidebarNestDelegatedChats,
 			DEFAULTS.sidebarNestDelegatedChats,
+		),
+		sidebarSeparateArchivedBranches: parseBoolean(
+			parsed.sidebarSeparateArchivedBranches,
+			DEFAULTS.sidebarSeparateArchivedBranches,
 		),
 		sidebarInactivityDuration: parseSidebarInactivityDuration(parsed.sidebarInactivityDuration),
 		sidebarGroupNestedProjectPaths: parseBoolean(
@@ -648,6 +635,7 @@ export class LocalSettingsStore {
 	terminalFont = $state(DEFAULTS.terminalFont);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
 	highlightActiveWindow = $state(DEFAULTS.highlightActiveWindow);
+	collapseDelegatedChatsByDefault = $state(DEFAULTS.collapseDelegatedChatsByDefault);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	combineToolUseMessages = $state(DEFAULTS.combineToolUseMessages);
 	alwaysExpandCliMessages = $state(DEFAULTS.alwaysExpandCliMessages);
@@ -680,6 +668,7 @@ export class LocalSettingsStore {
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
 	sidebarGroupingFields = $state<SidebarGroupingSelection[]>(defaultSidebarGroupingFields());
 	sidebarNestDelegatedChats = $state(DEFAULTS.sidebarNestDelegatedChats);
+	sidebarSeparateArchivedBranches = $state(DEFAULTS.sidebarSeparateArchivedBranches);
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<ChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
@@ -779,6 +768,7 @@ export class LocalSettingsStore {
 			...this.snapshot(),
 			sidebarGroupingFields: normalizeSidebarGroupingFields(preferences.sidebarGroupingFields),
 			sidebarNestDelegatedChats: Boolean(preferences.sidebarNestDelegatedChats),
+			sidebarSeparateArchivedBranches: Boolean(preferences.sidebarSeparateArchivedBranches),
 			sidebarInactivityDuration: preferences.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: preferences.sidebarChatItemLayout,
@@ -840,6 +830,7 @@ export class LocalSettingsStore {
 			terminalFont: this.terminalFont,
 			overlayBackdropEffects: this.overlayBackdropEffects,
 			highlightActiveWindow: this.highlightActiveWindow,
+			collapseDelegatedChatsByDefault: this.collapseDelegatedChatsByDefault,
 			autoExpandTools: this.autoExpandTools,
 			combineToolUseMessages: this.combineToolUseMessages,
 			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
@@ -870,6 +861,7 @@ export class LocalSettingsStore {
 			sidebarWidth: this.sidebarWidth,
 			sidebarGroupingFields: this.sidebarGroupingFields.map((entry) => ({ ...entry })),
 			sidebarNestDelegatedChats: this.sidebarNestDelegatedChats,
+			sidebarSeparateArchivedBranches: this.sidebarSeparateArchivedBranches,
 			sidebarInactivityDuration: this.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
@@ -921,6 +913,7 @@ export class LocalSettingsStore {
 		this.terminalFont = snap.terminalFont;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
 		this.highlightActiveWindow = snap.highlightActiveWindow;
+		this.collapseDelegatedChatsByDefault = snap.collapseDelegatedChatsByDefault;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.combineToolUseMessages = snap.combineToolUseMessages;
 		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;
@@ -951,6 +944,7 @@ export class LocalSettingsStore {
 		this.sidebarWidth = snap.sidebarWidth;
 		this.sidebarGroupingFields = snap.sidebarGroupingFields;
 		this.sidebarNestDelegatedChats = snap.sidebarNestDelegatedChats;
+		this.sidebarSeparateArchivedBranches = snap.sidebarSeparateArchivedBranches;
 		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;

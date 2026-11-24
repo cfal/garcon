@@ -13,6 +13,7 @@ import {
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
 import { NewChatWorktreeState } from './new-chat-worktree-state.svelte';
+import { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
@@ -117,6 +118,12 @@ export class NewChatFormState {
 	gitRepoStatus = $state<'unknown' | 'git' | 'non-git'>('unknown');
 
 	readonly worktrees: NewChatWorktreeState;
+	readonly worktreePicker = new WorktreePickerSession({
+		target: () => ({ executorId: this.executorId, projectPath: this.nonblankPath }),
+		servingContext: () => this.gitAvailable ? (this.#options.executors?.gitContextKey(this.executorId) ?? this.executorId) : null,
+		servingInstanceId: () => this.#options.executors?.get(this.executorId)?.instanceId ?? null,
+		select: (path) => this.#selectWorktreePath(path),
+	});
 	// Images (delegated to shared ImageAttachmentState)
 	readonly #images = new ImageAttachmentState();
 
@@ -141,6 +148,7 @@ export class NewChatFormState {
 			getExecutorId: () => this.executorId,
 			getProjectPath: () => this.nonblankPath,
 			getContextKey: () => this.#worktreeContextKey,
+			getInstanceId: () => this.#options.executors?.get(this.executorId)?.instanceId ?? null,
 			isAvailable: () => this.#worktreesAvailable,
 			isSelectionDisabled: () => this.isUpdatingPinnedPath,
 			selectPath: (path) => this.#selectWorktreePath(path),
@@ -211,7 +219,7 @@ export class NewChatFormState {
 		this.#startupSelectionAutomatic = false;
 		this.#pathValidation.clear();
 		this.worktrees.cancelLoad();
-		this.worktrees.modalOpen = false;
+		this.worktreePicker.close();
 		this.showBrowser = false;
 		this.resetTabCompletions();
 		this.selectedModelsByAgent = {};
@@ -693,6 +701,7 @@ export class NewChatFormState {
 
 	dispose(): void {
 		this.worktrees.cancelLoad();
+		this.worktreePicker.close();
 		this.#pathCompletion.reset();
 		this.#pathValidation.dispose();
 	}
@@ -805,8 +814,8 @@ export class NewChatFormState {
 		this.showBrowser = false;
 		this.hasAutoOpened = false;
 		this.gitRepoStatus = 'unknown';
-		this.worktrees.modalOpen = false;
 		this.worktrees.clear();
+		this.worktreePicker.close();
 		this.chatTags = [];
 		this.showTagInput = false;
 		this.#permissionModeTouched = false;
@@ -820,19 +829,21 @@ export class NewChatFormState {
 	async loadSettingsAndModels(): Promise<void> {
 		this.#catalogRefreshCompleted = false;
 		try {
-			const settingsData = await this.#remoteSettings.ensureLoaded();
-			this.#applySettings(settingsData);
+			this.#applySettings(await this.#remoteSettings.refreshLatest());
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings', err);
+			if (this.#remoteSettings.snapshot) {
+				this.#applySettings(this.#remoteSettings.snapshot);
+				this.validateAllModelsAgainstLive();
+				return;
+			}
 			if (this.#startupSelectionAutomatic) {
 				for (const agentId of this.#selectableAgentIds) {
 					this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
 				}
 			}
-			if (!this.projectPath) {
-				this.projectPath = this.projectBasePath;
-			}
+			if (!this.projectPath) this.projectPath = this.projectBasePath;
 		} finally {
 			this.settingsLoaded = true;
 			void this.#refreshModelsInBackground();

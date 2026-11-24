@@ -28,6 +28,9 @@ export interface ExecutionControlPruningOptions {
 	getActiveChatIds: () => ReadonlySet<string>;
 }
 
+export type ExecutionResponseReceiver = Pick<ConversationUiPort,
+	'setExecutionControlFromLiveUpdate' | 'setExecutionControlFromRefresh' | 'setTransientFeedFromSnapshot'>;
+
 export interface ConversationUiPort {
 	readonly pendingPermissionRequests: PendingPermissionRequest[];
 	pendingViewChat: PendingViewChat | null;
@@ -49,11 +52,13 @@ export interface ConversationUiPort {
 	finishPlanModeForChat(chatId: string): PermissionMode | null;
 	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
 	markExecutionControlSocketDisconnected(): void;
-	confirmExecutionControlSocketInstance(serverInstanceId: string): void;
+	confirmExecutionControlSocketInstance(serverInstanceId: string, probeStartedAt?: number): boolean;
+	acceptsExecutionControlSocketObservation(serverInstanceId: string, startedAt: number): boolean;
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean;
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void;
+	captureExecutionResponse(): ExecutionResponseReceiver;
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void;
-	removeExecutionControl(chatId: string): void;
+	captureExecutionControlRemoval(chatId: string): () => boolean;
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void;
 	activateTransientFeed(chatId: string | null): void;
 	getTransientFeed(chatId: string): ChatTransientFeedSnapshot | null;
@@ -74,6 +79,10 @@ export class ConversationUiState implements ConversationUiPort {
 	private unassignedPreviousPermissionMode = $state<PermissionMode | null>(null);
 	private activeTransientChatId = $state<string | null>(null);
 	private readonly executionControlAuthority = new ExecutionControlInstanceAuthority();
+
+	constructor(private readonly onExecutionControlChanged?: (
+		chatId: string, control: ChatExecutionControlState | null,
+	) => void) {}
 
 	get pendingPermissionRequests(): PendingPermissionRequest[] {
 		const chatId = this.activeTransientChatId;
@@ -200,20 +209,49 @@ export class ConversationUiState implements ConversationUiPort {
 		this.executionControlAuthority.markSocketDisconnected();
 	}
 
-	confirmExecutionControlSocketInstance(serverInstanceId: string): void {
-		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId);
+	acceptsExecutionControlSocketObservation(serverInstanceId: string, startedAt: number): boolean {
+		return this.executionControlAuthority.acceptsSocketObservation(serverInstanceId, startedAt);
+	}
+
+	confirmExecutionControlSocketInstance(serverInstanceId: string, probeStartedAt?: number): boolean {
+		const decision = this.executionControlAuthority.confirmSocketInstance(serverInstanceId, probeStartedAt);
+		if (!decision) return false;
 		if (decision.kind === 'replace') {
-			this.executionControlByChatId = {};
+			this.#clearExecutionControls();
 			this.transientFeedByChatId = {};
 			this.pendingPermissionRequestsByChatId = {};
 			this.previousPermissionModeByChatId = {};
 			this.unassignedPendingPermissionRequests = [];
 			this.unassignedPreviousPermissionMode = null;
 		}
+		return true;
 	}
 
 	isExecutionControlSocketInstanceConfirmed(serverInstanceId: string): boolean {
 		return this.executionControlAuthority.isSocketInstanceConfirmed(serverInstanceId);
+	}
+
+	captureExecutionResponse(): ExecutionResponseReceiver {
+		const accepts = this.executionControlAuthority.captureResponseFence();
+		const transientFeeds = this.transientFeedByChatId;
+		return {
+			setExecutionControlFromLiveUpdate: (chatId, control) => {
+				if (accepts(control.serverInstanceId)) this.setExecutionControlFromLiveUpdate(chatId, control);
+			},
+			setExecutionControlFromRefresh: (chatId, control) => {
+				if (accepts(control.serverInstanceId)) this.setExecutionControlFromRefresh(chatId, control);
+			},
+			setTransientFeedFromSnapshot: snapshot => {
+				if (!accepts(snapshot.serverInstanceId)) return { kind: 'stale' };
+				const captured = transientFeeds[snapshot.chatId];
+				const current = this.getTransientFeed(snapshot.chatId);
+				const capturedView = captured?.serverInstanceId === snapshot.serverInstanceId ? captured.transcriptViewId : undefined;
+				const currentView = current?.serverInstanceId === snapshot.serverInstanceId ? current.transcriptViewId : undefined;
+				// Same-view responses still converge through the feed's revision ordering.
+				if (currentView !== capturedView && currentView !== snapshot.transcriptViewId) return { kind: 'stale' };
+				return this.setTransientFeedFromSnapshot(snapshot);
+			},
+		};
 	}
 
 	setExecutionControlFromLiveUpdate(chatId: string, control: ChatExecutionControlState): void {
@@ -223,7 +261,7 @@ export class ConversationUiState implements ConversationUiPort {
 		if (this.#handleExecutionControlInstanceDecision(decision, chatId, control)) return;
 		const current = this.executionControlByChatId[chatId] ?? null;
 		if (current && control.version < current.version) return;
-		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
+		this.#installExecutionControl(chatId, control);
 	}
 
 	setExecutionControlFromRefresh(chatId: string, control: ChatExecutionControlState): void {
@@ -233,7 +271,18 @@ export class ConversationUiState implements ConversationUiPort {
 		if (this.#handleExecutionControlInstanceDecision(decision, chatId, control)) return;
 		const current = this.executionControlByChatId[chatId] ?? null;
 		if (current && control.version <= current.version) return;
+		this.#installExecutionControl(chatId, control);
+	}
+
+	#installExecutionControl(chatId: string, control: ChatExecutionControlState): void {
 		this.executionControlByChatId = { ...this.executionControlByChatId, [chatId]: control };
+		this.onExecutionControlChanged?.(chatId, control);
+	}
+
+	#clearExecutionControls(): void {
+		const previousIds = this.executionControlChatIds;
+		this.executionControlByChatId = {};
+		for (const chatId of previousIds) this.onExecutionControlChanged?.(chatId, null);
 	}
 
 	#handleExecutionControlInstanceDecision(
@@ -254,18 +303,25 @@ export class ConversationUiState implements ConversationUiPort {
 			});
 			return true;
 		}
-		if (decision.kind === 'replace') {
-			this.executionControlByChatId = { [chatId]: control };
-			return true;
-		}
+		if (decision.kind === 'replace') this.#clearExecutionControls();
 		return false;
 	}
 
-	removeExecutionControl(chatId: string): void {
+	captureExecutionControlRemoval(chatId: string): () => boolean {
+		const control = this.getExecutionControl(chatId);
+		return () => {
+			if (this.getExecutionControl(chatId) !== control) return false;
+			this.#removeExecutionControl(chatId);
+			return true;
+		};
+	}
+
+	#removeExecutionControl(chatId: string): void {
 		if (!(chatId in this.executionControlByChatId)) return;
 		const nextControlByChatId = { ...this.executionControlByChatId };
 		delete nextControlByChatId[chatId];
 		this.executionControlByChatId = nextControlByChatId;
+		this.onExecutionControlChanged?.(chatId, null);
 	}
 
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void {
@@ -279,6 +335,7 @@ export class ConversationUiState implements ConversationUiPort {
 			delete nextControlByChatId[chatId];
 		}
 		this.executionControlByChatId = nextControlByChatId;
+		for (const chatId of staleIds) this.onExecutionControlChanged?.(chatId, null);
 	}
 
 	activateTransientFeed(chatId: string | null): void {
@@ -335,7 +392,7 @@ export class ConversationUiState implements ConversationUiPort {
 			this.executionControlAuthority.classifyNonAuthoritativeInstance(serverInstanceId);
 		if (decision.kind === 'reject') return false;
 		if (decision.kind === 'replace') {
-			this.executionControlByChatId = {};
+			this.#clearExecutionControls();
 			this.transientFeedByChatId = {};
 			this.pendingPermissionRequestsByChatId = {};
 			this.previousPermissionModeByChatId = {};

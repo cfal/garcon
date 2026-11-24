@@ -30,7 +30,6 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
-import type { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import type {
   AgentChatEntry,
   AgentExecutionAdmission,
@@ -56,7 +55,7 @@ import { UserMessage } from '@garcon/common/chat-types';
 import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { transcriptViewId } from '../ledger/contracts.js';
-import type { RetiredPermissionControl, TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
+import type { PermissionActionabilityChange, RetiredPermissionControl, TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
 import type { PreambleService } from '../preambles/service.js';
 import {
   assertPreambleSelectionComposition,
@@ -143,7 +142,7 @@ export interface AgentRegistryServiceContract {
   getAgentAuthStatusMap(executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string, executorId?: string | null): Promise<unknown | null>;
-  getAgentCatalogEntries(executorId?: string | null): Promise<AgentCatalogEntry[]>;
+  getAgentCatalogEntries(executorId?: string | null, confirmingAgents?: readonly string[]): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   assertExecutionModeSelectionSupported(agentId: string, selection: {
     readonly executorId?: string | null;
@@ -215,15 +214,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   constructor(args: {
     registry: IChatRegistry;
-    integrations: IntegrationRegistry;
-    executors?: ExecutionIntegrationDirectory;
+    executors: ExecutionIntegrationDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     getCarryOverRevision(entry: AgentChatEntry): string;
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
     onSettingsCommitted?: (chatId: string) => void;
-    chatMutationLock?: KeyedPromiseLock;
-    settingsExecution: SettingsExecutionPort;
+    chatMutationLock: KeyedPromiseLock;
+    getSettingsExecution(): SettingsExecutionPort;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
     hasPendingOwnershipTransfer(chatId: string): boolean;
@@ -235,7 +233,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     this.#getCarryOverRevision = args.getCarryOverRevision;
     this.#ledger = args.ledger;
     this.#adoption = args.adoption;
-    this.#directory = new AgentDirectory(args.integrations, args.executors);
+    this.#directory = new AgentDirectory(args.executors);
     this.#catalog = new AgentCatalogService({
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
@@ -261,8 +259,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
+      selectionAdmissionLock: args.selectionAdmissionLock,
       onCommitted: args.onSettingsCommitted,
-      execution: args.settingsExecution,
+      get execution() { return args.getSettingsExecution(); },
+      hasAdmittedProviderTurn: (chatId) => this.#runtime.hasAdmittedProviderTurn(chatId),
     });
     this.#ledger.subscribeSessionCommitted((event) => {
       this.#registry.updateChat(event.chatId, {
@@ -389,6 +389,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   getRunningSessionCount(): number { return this.#runtime.getRunningSessionCount(); }
   onPermissionRetired(listener: (control: RetiredPermissionControl) => void): void {
     this.#ledger.subscribePermissionRetired(listener);
+  }
+
+  onPermissionActionabilityChanged(listener: (event: PermissionActionabilityChange) => void): void {
+    this.#ledger.subscribePermissionActionabilityChanged(listener);
   }
 
   resolvePermission(
@@ -544,20 +548,15 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         const availability = await integration.readiness.status(new AbortController().signal);
         return [integration.descriptor.id, { ...availability, nativeReady: availability.ready, endpointReady: false }];
       }
-      const status = auth[integration.descriptor.id] as { authenticated?: boolean } | undefined;
+      const status = auth[integration.descriptor.id] as AgentAuthStatus | undefined;
       const nativeReady = status?.authenticated === true;
       const endpointReady = integration.endpoints !== null
         && this.#catalog.hasEndpointModels(integration.descriptor.id, executorId);
-      return [integration.descriptor.id, {
-        ready: nativeReady || endpointReady,
-        nativeReady,
-        endpointReady,
-        reason: endpointReady
-          ? 'At least one compatible API provider endpoint is configured.'
-          : nativeReady
-            ? 'Native agent authentication is available.'
-            : 'No native authentication or compatible API provider endpoint is configured.',
-      }];
+      let reason: string;
+      if (endpointReady) reason = 'At least one compatible API provider endpoint is configured.';
+      else if (nativeReady) reason = 'Native agent authentication is available.';
+      else reason = status?.detail?.trim() || 'No native authentication or compatible API provider endpoint is configured.';
+      return [integration.descriptor.id, { ready: nativeReady || endpointReady, nativeReady, endpointReady, reason }];
     })));
   }
 
@@ -806,7 +805,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   getAgentCatalogEntry(agentId: string, query: AgentModelQuery = {}) { return this.#catalog.getAgentCatalogEntry(agentId, query); }
-  getAgentCatalogEntries(executorId?: string | null) { return this.#catalog.getAgentCatalogEntries(executorId); }
+  getAgentCatalogEntries(executorId?: string | null, confirmingAgents?: readonly string[]) { return this.#catalog.getAgentCatalogEntries(executorId, confirmingAgents); }
 }
 
 function inputAttachments(options: UserInputAdmissionOptions) {

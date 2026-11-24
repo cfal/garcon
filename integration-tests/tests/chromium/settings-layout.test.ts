@@ -92,7 +92,8 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
     const dialog = page.getByRole('dialog', { name: 'Add Scheduled Prompt', exact: true });
     const project = dialog.locator('#scheduled-project-path');
     await browserExpect(project).toBeVisible();
-    await browserExpect(dialog.getByRole('button', { name: 'Select a different worktree', exact: true })).toBeVisible();
+    const worktreeLink = dialog.getByRole('button', { name: 'Select a different worktree', exact: true });
+    await browserExpect(worktreeLink).toBeVisible();
     const cdp = await context.newCDPSession(page);
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
@@ -107,15 +108,15 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
             element.scrollTop = top;
           }, scrollTop);
           // Captures one layout snapshot so scroll anchoring cannot mix field coordinates.
-          const geometry = await dialog.evaluate(element => {
+          const geometry = await worktreeLink.evaluate(link => {
+            const element = link.closest('[role="dialog"]')!;
             const picker = element.querySelector('[data-executor-picker]')!;
             const project = element.querySelector('#scheduled-project-path')!;
-            const field = element.querySelector('[data-slot="project-path-field"]')!;
             const readRect = ({ x, y, width, height }: DOMRect) => ({ x, y, width, height });
             return {
               picker: readRect(picker.getBoundingClientRect()),
               project: readRect(project.getBoundingClientRect()),
-              feedbackGap: field.nextElementSibling!.getBoundingClientRect().top - field.getBoundingClientRect().bottom,
+              feedbackGap: link.getBoundingClientRect().top - project.getBoundingClientRect().bottom,
               contained: element.scrollWidth <= element.clientWidth + 1,
               bounds: readRect(element.getBoundingClientRect()),
             };

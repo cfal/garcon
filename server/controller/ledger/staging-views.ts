@@ -13,6 +13,7 @@ import { viewRecord } from './connection-setup.js';
 import type { LedgerRow, LedgerRowDraft, TranscriptViewId } from './contracts.js';
 import { LedgerBulkOperationAbandonedError, LedgerSchemaError } from './errors.js';
 import { runTransaction } from './sqlite-operations.js';
+import { measureLedgerWrite } from './write-timings.js';
 
 // Whole-history reads and writes proceed in bounded steps separated by event-loop turns, so a
 // long transcript cannot stall WebSocket liveness or publication for other chats.
@@ -100,20 +101,26 @@ export class StagingViews {
       if (index > 0) await yieldToEventLoop();
       this.#assertGeneration(chatId, generation);
       const firstOrdinal = index + 1;
-      const batch: EncodedDraft[] = [];
-      let bytes = 0;
-      while (index < drafts.length && batch.length < BULK_WRITE_ROWS && bytes < BULK_WRITE_BYTES) {
-        const encoded = encodeDraft(drafts[index]!, clientMessageIds);
-        batch.push(encoded);
-        bytes += encoded.payloadJson.length;
-        index += 1;
-      }
-      materializeRows(viewId, batch, firstOrdinal);
-      this.write(chatId, (entry) => {
-        if (!viewRecord(entry.db, viewId, 'staging')) {
-          throw new LedgerSchemaError('Transcript staging view was discarded');
+      const context = { chatId, viewId, firstOrdinal, rows: 0, payloadCodeUnits: 0 };
+      measureLedgerWrite('ledger staging batch', context, (timings) => {
+        const batch: EncodedDraft[] = [];
+        timings.phase('encode');
+        while (index < drafts.length && batch.length < BULK_WRITE_ROWS && context.payloadCodeUnits < BULK_WRITE_BYTES) {
+          const encoded = encodeDraft(drafts[index]!, clientMessageIds);
+          batch.push(encoded);
+          context.payloadCodeUnits += encoded.payloadJson.length;
+          context.rows += 1;
+          index += 1;
         }
-        runTransaction(entry.db, () => insertEncodedRows(entry.db, viewId, batch, firstOrdinal));
+        timings.phase('validate');
+        materializeRows(viewId, batch, firstOrdinal);
+        timings.phase('write');
+        this.write(chatId, (entry) => {
+          if (!viewRecord(entry.db, viewId, 'staging')) {
+            throw new LedgerSchemaError('Transcript staging view was discarded');
+          }
+          runTransaction(entry.db, () => insertEncodedRows(entry.db, viewId, batch, firstOrdinal), timings);
+        });
       });
     }
   }

@@ -12,6 +12,7 @@ import { GitRpcServer } from './git-rpc-server.js';
 import { isGitRpcMethod, type GitRpcRequest } from '../transport/git-protocol.js';
 import { HistoryRpcServer } from './history-rpc-server.js';
 import type { ProducerRelay, ProducerRelaySession } from './producer-relay.js';
+import { createLogger } from '../../common/log.js';
 
 export interface ExecutorRpcServer {
   readonly ready: Promise<void>;
@@ -64,7 +65,9 @@ export function serveExecutionRuntime(
   };
   // Registration precedes readiness so an immediate describe cannot outrun dispatch installation.
   let unsubscribe = () => {};
-  unsubscribe = rpc.transport.onFailure(() => { void dispose(); });
+  unsubscribe = rpc.transport.onFailure(() => {
+    void dispose().catch((error: unknown) => { createLogger('executor-rpc').error('Session cleanup failed:', error); });
+  });
   void ready.catch((error: unknown) => rpc.transport.close(error instanceof Error ? error : new Error(String(error))));
   rpc.onProducerAck((acknowledgements) => relay.acknowledge(producerSession, acknowledgements));
   rpc.onTerminalDetach(async (request) => {
@@ -200,6 +203,8 @@ export function serveExecutionRuntime(
       case 'projectPathUpdates.commit': return required(integration.projectPathUpdates).commit(call.request, options);
       case 'projectPathUpdates.rollback': return required(integration.projectPathUpdates).rollback(call.request, options);
       case 'usageHistory.read': return required(integration.usageHistory).read({ ...call.request, signal });
+      case 'cliUpdates.status': return required(integration.cliUpdates).status({ ...call.request, signal });
+      case 'cliUpdates.startUpdate': return required(integration.cliUpdates).startUpdate();
       case 'credentials.resolve': throw new AgentCallError('rejected', 'Credential resolution is controller-owned');
       case 'calls.reconcile': throw new AgentCallError('rejected', 'Call reconciliation belongs to the RPC layer');
       default: return unknownMethod(call);

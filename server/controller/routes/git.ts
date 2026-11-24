@@ -1,7 +1,8 @@
 import { createGitRouteService, type GitServiceResolver } from './git-executor-service.js';
 import { createGitGenerationRoute } from './git-generation.js';
+import { createGitNameRoute } from './git-name.js';
 import { gitJsonBody, gitQuery, validContextLines, validPositiveLimit } from './git-request-fields.js';
-import { isGitDocumentRef } from '../../../common/git-request-validation.js';
+import { isGitDocumentRef, validateGitRequest } from '../../../common/git-request-validation.js';
 import { GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
 import {
   GIT_DIFF_LIMITS,
@@ -279,16 +280,12 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
   }
 
   async function postPush(body: JsonBody, request: Request): Promise<Response> {
-    return gitJson(git, async () => {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const remote = typeof input.remote === 'string' ? input.remote : undefined;
-      const remoteBranch = typeof input.remoteBranch === 'string' ? input.remoteBranch : undefined;
-      if (!project) {
-        return gitRouteError('Missing required parameter: project.', 400);
-      }
-
-      return git.push({ executorId: asJsonBody(body).executorId, signal: request.signal, projectPath: project, remote, remoteBranch });
+    return gitJson(git, () => {
+      const { project, executorId, ...fields } = body;
+      if (!isNonEmptyString(project)) return gitRouteError('Missing required parameter: project.', 400);
+      const input = { ...fields, projectPath: project };
+      validateGitRequest('push', input);
+      return git.push({ ...input, executorId, signal: request.signal });
     });
   }
 
@@ -522,24 +519,13 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
 
   async function postCreateWorktree(body: JsonBody, request: Request): Promise<Response> {
     return gitJson(git, async () => {
-      const input = asJsonBody(body);
-      const project = nonEmptyString(input.project);
-      const baseRef = typeof input.baseRef === 'string' ? input.baseRef : undefined;
-      const worktreePath = nonEmptyString(input.worktreePath);
-      const branch = typeof input.branch === 'string' ? input.branch : undefined;
-      const detach = input.detach === true;
-
-      if (!project || !worktreePath) {
-        return gitRouteError('Missing required parameters: project and worktreePath.', 400);
+      const { project, executorId, ...fields } = body;
+      if (!isNonEmptyString(project) || !isNonEmptyString(fields.worktreePath)) {
+        return gitRouteError('Missing required parameters: project and worktreePath.');
       }
-
-      return git.createWorktree({ executorId: asJsonBody(body).executorId, signal: request.signal,
-        projectPath: project,
-        baseRef,
-        worktreePath,
-        branch,
-        detach,
-      });
+      const input = { ...fields, projectPath: project };
+      validateGitRequest('createWorktree', input);
+      return git.createWorktree({ ...input, executorId, signal: request.signal });
     });
   }
 
@@ -767,6 +753,7 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       POST: gitJsonBody('getCommitSnapshot', postCommitSnapshot),
     },
     ...createGitComparisonRoutes(git),
+    '/api/v1/git/generate-name': { POST: createGitNameRoute(agents, settings) },
     '/api/v1/git/generate-commit-message': {
       POST: createGitGenerationRoute(agents, settings, resolveGit),
     },

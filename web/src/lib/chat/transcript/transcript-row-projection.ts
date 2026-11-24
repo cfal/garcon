@@ -1,7 +1,7 @@
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage, type ChatMessage } from '$shared/chat-types';
 import type { LocalNoticeRow } from './local-notice.js';
-import type { OptimisticUserInput } from './optimistic-user-input.js';
+import type { InputStatus, OptimisticUserInput } from './optimistic-user-input.js';
 import { responseMessageType } from './conversation-feed-mutations.js';
 
 export interface ChatTranscriptRow {
@@ -9,12 +9,18 @@ export interface ChatTranscriptRow {
 	id: string;
 	message: ChatMessage;
 	ordinal?: number;
-	awaitingDelivery?: boolean;
+	inputStatus?: InputStatus;
 }
 
 export type ChatDisplayRow = ChatTranscriptRow | LocalNoticeRow;
 
 function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
+	let inputStatus: InputStatus | undefined;
+	if (input.delivery === 'pending') {
+		inputStatus = 'sending';
+	} else if (typeof input.delivery === 'object') {
+		inputStatus = 'waiting-to-steer';
+	}
 	return {
 		kind: 'message',
 		id: `optimistic:${input.clientMessageId}`,
@@ -23,7 +29,7 @@ function optimisticInputToRow(input: OptimisticUserInput): ChatTranscriptRow {
 			...(input.contentMode ? { contentMode: input.contentMode } : {}),
 			...(input.contentFormat ? { contentFormat: input.contentFormat } : {}),
 		}),
-		...(input.delivery === 'pending' ? { awaitingDelivery: true } : {}),
+		...(inputStatus ? { inputStatus } : {}),
 	};
 }
 
@@ -34,10 +40,16 @@ export function mergeRowsWithOptimisticInputs(
 ): ChatTranscriptRow[] {
 	if (rows.length === 0) return optimisticInputs.map(optimisticInputToRow);
 
-	const optimisticRows = optimisticInputs.map((input) => ({
-		row: optimisticInputToRow(input),
-		afterOrdinal: afterOrdinalByClientMessageId.get(input.clientMessageId),
-	}));
+	// Steers can span ongoing output before either the acknowledgement or the echo.
+	const tailOrdinal = rows.at(-1)?.ordinal ?? 0;
+	const optimisticRows = optimisticInputs
+		.map((input) => ({
+			row: optimisticInputToRow(input),
+			afterOrdinal: input.placement === 'live-tail'
+				? tailOrdinal
+				: afterOrdinalByClientMessageId.get(input.clientMessageId) ?? 0,
+		}))
+		.sort((a, b) => a.afterOrdinal - b.afterOrdinal);
 	const merged: ChatTranscriptRow[] = [];
 	let messageIndex = 0;
 	let optimisticIndex = 0;
@@ -45,8 +57,7 @@ export function mergeRowsWithOptimisticInputs(
 	while (messageIndex < rows.length && optimisticIndex < optimisticRows.length) {
 		const row = rows[messageIndex];
 		const optimistic = optimisticRows[optimisticIndex];
-		const rowPrecedesOptimistic = optimistic.afterOrdinal !== undefined
-			&& row.ordinal !== undefined
+		const rowPrecedesOptimistic = row.ordinal !== undefined
 			&& row.ordinal <= optimistic.afterOrdinal;
 		if (rowPrecedesOptimistic) {
 			merged.push(row);

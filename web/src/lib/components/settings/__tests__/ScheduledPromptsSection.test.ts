@@ -55,7 +55,8 @@ function chat(id: string, executorId: string): ChatListEntry {
 	return {
 		id,
 		executorId,
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentId: 'claude',
 		agentOwnershipEpoch: 'epoch-1',
 		model: 'opus',
@@ -73,6 +74,7 @@ function chat(id: string, executorId: string): ChatListEntry {
 		isActive: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 	};

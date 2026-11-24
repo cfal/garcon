@@ -5,10 +5,10 @@ import { NewChatPromptDraft, NewChatPromptDraftStore } from '../new-chat-prompt-
 import * as chatsApi from '$lib/api/chats';
 import * as preamblesApi from '$lib/api/chat-preambles';
 import * as gitApi from '$lib/api/git';
+import type { GitWorktreeItem } from '$lib/api/git';
 import { browseDirectory } from '$lib/api/files';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
-import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
-import type { GitWorktreeItem } from '$lib/api/git';
+import { localExecutor, remoteExecutor, localScope, remoteScope } from '$lib/executors/__tests__/fixtures';
 import type { AgentMetadata, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
@@ -121,7 +121,7 @@ function makeMockRemoteSettings(snap?: RemoteSettingsSnapshot) {
 		get hasSnapshot() {
 			return this.snapshot !== null;
 		},
-		ensureLoaded: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
+		refreshLatest: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		refresh: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		update: vi.fn().mockResolvedValue(snap ?? makeSnapshot()),
 		applySnapshot: vi.fn(),
@@ -312,7 +312,7 @@ describe('NewChatFormState', () => {
 		'keeps a seeded project on %s and applies that executor startup defaults',
 		async (executorId) => {
 			const recent = { apiProviderId: null, modelEndpointId: null, modelProtocol: null };
-			mockRemoteSettings.ensureLoaded.mockResolvedValue(
+			mockRemoteSettings.refreshLatest.mockResolvedValue(
 				makeSnapshot({
 					recentAgentSettings: [
 						{
@@ -602,10 +602,10 @@ describe('NewChatFormState', () => {
 		expect(formState.firstMessage).toBe('Keep this draft');
 		formState.handlePathFocus();
 		await formState.handleTabCompletion();
-		formState.worktrees.openModal();
-		await formState.worktrees.load();
+		await formState.worktreePicker.open();
+		await formState.worktreePicker.refresh();
 		expect(formState.showBrowser).toBe(false);
-		expect(formState.worktrees.modalOpen).toBe(false);
+		expect(formState.worktreePicker.isOpen).toBe(false);
 		expect(browseDirectory).not.toHaveBeenCalled();
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
@@ -671,9 +671,9 @@ describe('NewChatFormState', () => {
 		await formState.handleTabCompletion();
 		expect(browseDirectory).toHaveBeenLastCalledWith('/same', undefined, executorId);
 		expect(formState.projectPath).toBe('/same/remote/');
-		formState.worktrees.openModal();
-		await formState.worktrees.load();
-		expect(formState.worktrees.modalOpen).toBe(false);
+		await formState.worktreePicker.open();
+		await formState.worktreePicker.refresh();
+		expect(formState.worktreePicker.isOpen).toBe(false);
 		expect(gitApi.getGitWorktrees).not.toHaveBeenCalled();
 		formState.dispose();
 	});
@@ -686,15 +686,16 @@ describe('NewChatFormState', () => {
 		executors.applySnapshot([localExecutor, remote]);
 		formState.selectExecutor(remote.id);
 		formState.projectPath = '/worker/project';
-		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
+		const listing = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
-		const loading = formState.worktrees.load();
+		const loading = formState.worktreePicker.open();
 		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
 			expect.any(Object),
 		);
 		executors.applySnapshot([localExecutor, { ...remote, instanceId: 'replacement' }]);
 		listing.resolve({
+			...remoteScope,
 			worktrees: [
 				{
 					name: 'old',
@@ -708,26 +709,31 @@ describe('NewChatFormState', () => {
 			],
 		});
 		await loading;
-		expect(formState.worktrees.items).toEqual([]);
+		expect(formState.worktreePicker.worktrees).toEqual([]);
 
 		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
-		const creating = formState.worktrees.create('/worker/feature', 'feature');
+		const replacement = { ...remoteScope, instanceId: 'replacement' };
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValueOnce({ ...replacement, worktrees: [] });
+		await formState.worktreePicker.syncCatalog();
+		const creating = formState.worktreePicker.create({ worktreePath: '/worker/feature', branch: 'feature' });
 		formState.selectExecutor('local');
 		formState.projectPath = '/local/draft';
-		creation.resolve({ success: true, worktreePath: '/worker/feature' });
-		await expect(creating).resolves.toBe(false);
+		creation.resolve({ ...replacement, success: true, worktreePath: '/worker/feature' });
+		await expect(creating).resolves.toEqual({
+			target: { executorId: remote.id, projectPath: '/worker/project' },
+			result: { createdPath: '/worker/feature' },
+		});
 		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
 			{ executorId: remote.id, projectPath: '/worker/project' },
-			'/worker/feature',
-			{ branch: 'feature', baseRef: undefined },
+			{ worktreePath: '/worker/feature', branch: 'feature' },
 		);
 		expect(formState.projectPath).toBe('/local/draft');
 	});
 
-	it('cancels a pending modal without a background reload and ignores superseded results', async () => {
-		const first = deferred<{ worktrees: GitWorktreeItem[] }>();
-		const second = deferred<{ worktrees: GitWorktreeItem[] }>();
+	it('ignores a worktree load superseded after the modal closes', async () => {
+		const first = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
+		const second = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		let firstSignal: AbortSignal | null | undefined;
 		vi.mocked(gitApi.getGitWorktrees)
 			.mockImplementationOnce((_project, options) => {
@@ -737,17 +743,16 @@ describe('NewChatFormState', () => {
 			.mockImplementationOnce(() => second.promise);
 
 		formState.projectPath = '/workspace/repo-a';
-		formState.worktrees.modalOpen = true;
-		const firstLoad = formState.worktrees.load();
-		formState.worktrees.closeModal();
-		expect(formState.worktrees.modalOpen).toBe(false);
-		expect(firstSignal?.aborted).toBe(true);
-		expect(formState.worktrees.isLoading).toBe(false);
+		const firstLoad = formState.worktreePicker.open();
+		formState.worktreePicker.close();
 		expect(gitApi.getGitWorktrees).toHaveBeenCalledOnce();
+		expect(firstSignal?.aborted).toBe(true);
+		expect(formState.worktreePicker.isLoading).toBe(false);
 
 		formState.projectPath = '/workspace/repo-b';
-		const secondLoad = formState.worktrees.load();
+		const secondLoad = formState.worktreePicker.open();
 		second.resolve({
+			...localScope,
 			worktrees: [
 				{
 					name: 'repo-b',
@@ -763,6 +768,7 @@ describe('NewChatFormState', () => {
 		await secondLoad;
 
 		first.resolve({
+			...localScope,
 			worktrees: [
 				{
 					name: 'repo-a',
@@ -777,10 +783,8 @@ describe('NewChatFormState', () => {
 		});
 		await firstLoad;
 
-		expect(formState.worktrees.items.map((worktree) => worktree.path)).toEqual([
-			'/workspace/repo-b',
-		]);
-		expect(formState.worktrees.isLoading).toBe(false);
+		expect(formState.worktreePicker.worktrees.map((worktree) => worktree.path)).toEqual(['/workspace/repo-b']);
+		expect(formState.worktreePicker.isLoading).toBe(false);
 	});
 
 	it('retains the known project inventory and draft when selecting an existing worktree', async () => {
@@ -795,7 +799,7 @@ describe('NewChatFormState', () => {
 		} satisfies GitWorktreeItem;
 		formState.projectPath = '/workspace/main';
 		formState.firstMessage = 'Keep this unsent draft';
-		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({ worktrees: [item] });
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({ ...localScope, worktrees: [item] });
 		await formState.worktrees.load();
 		formState.worktrees.selectListed(item.path);
 		expect(formState.projectPath).toBe(item.path);
@@ -818,6 +822,7 @@ describe('NewChatFormState', () => {
 		} satisfies GitWorktreeItem;
 		formState.projectPath = '/workspace/main';
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			...localScope,
 			worktrees: [item, { ...item, path: '/workspace/missing', isPathMissing: true }],
 		});
 		await formState.worktrees.load();
@@ -836,12 +841,13 @@ describe('NewChatFormState', () => {
 	});
 
 	it('does not publish a late worktree list after the selected project changes', async () => {
-		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
+		const listing = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		formState.projectPath = '/workspace/main';
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
 		const loading = formState.worktrees.load();
 		formState.projectPath = '/workspace/other';
 		listing.resolve({
+			...localScope,
 			worktrees: [
 				{
 					name: 'old',
@@ -860,6 +866,32 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/workspace/other');
 	});
 
+	it.each([localExecutor, {
+		...remoteExecutor,
+		executorServices: { ...remoteExecutor.executorServices, git: true },
+	}])('rejects an inline worktree catalog ahead of the $kind executor snapshot', async (executor) => {
+		const otherExecutors = executor.id === 'local' ? [] : [localExecutor];
+		executors.applySnapshot([...otherExecutors, executor]);
+		formState.selectExecutor(executor.id);
+		formState.projectPath = '/project';
+		const item = {
+			name: 'feature', path: '/feature', branch: 'feature', isCurrent: false,
+			isMain: false, isPathMissing: false, lastModifiedAt: null,
+		} satisfies GitWorktreeItem;
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			executorId: executor.id, instanceId: 'replacement', worktrees: [item],
+		});
+		await formState.worktrees.load();
+		expect(formState.worktrees.listed).toEqual([]);
+		expect(formState.worktrees.error).toBeTruthy();
+		formState.worktrees.selectListed(item.path);
+		expect(formState.projectPath).toBe('/project');
+		executors.applySnapshot([...otherExecutors, { ...executor, instanceId: 'replacement' }]);
+		await formState.worktrees.load();
+		expect(formState.worktrees.listed).toEqual([item]);
+		expect(formState.worktrees.error).toBeNull();
+	});
+
 	it.each([
 		['C:\\repo\\feature ', 'C:/repo/feature ', true],
 		['C:\\repo\\feature ', 'C:/repo/feature', false],
@@ -870,7 +902,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -911,6 +943,35 @@ describe('NewChatFormState', () => {
 		expect(formState.projectPath).toBe('/workspace/project');
 	});
 
+	it.each([false, true])('preserves explicit edits (%s) while fresh startup defaults load', async (edited) => {
+		const pending = deferred<RemoteSettingsSnapshot>();
+		mockRemoteSettings.snapshot = makeSnapshot({ version: 1 });
+		mockRemoteSettings.refreshLatest.mockReturnValueOnce(pending.promise);
+		const loading = formState.loadSettingsAndModels();
+		expect(formState.settingsLoaded).toBe(false);
+		if (edited) {
+			formState.selectExecutor('local');
+			formState.selectAgent('codex');
+			formState.projectPath = '/workspace/typed';
+		}
+		pending.resolve(makeSnapshot({
+			version: 2,
+			recentAgentSettings: [{
+				executorId: remoteExecutor.id,
+				agentId: 'claude',
+				model: 'opus',
+				apiProviderId: null,
+				modelEndpointId: null,
+				modelProtocol: null,
+			}],
+		}));
+		await loading;
+		expect(mockRemoteSettings.refreshLatest).toHaveBeenCalledOnce();
+		expect(formState.executorId).toBe(edited ? 'local' : remoteExecutor.id);
+		expect(formState.agentId).toBe(edited ? 'codex' : 'claude');
+		if (edited) expect(formState.projectPath).toBe('/workspace/typed');
+	});
+
 	it('uses the catalog permission modes for each integration', () => {
 		formState.agentId = 'claude';
 		expect(formState.permissionModes).toEqual([
@@ -931,7 +992,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads API provider startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -954,7 +1015,7 @@ describe('NewChatFormState', () => {
 
 	it('skips a direct startup recent when direct chats are unavailable', async () => {
 		selectableAgentIds = ['claude', 'codex'];
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -982,7 +1043,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('skips a startup recent whose endpoint no longer exposes the model', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1029,7 +1090,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1066,7 +1127,7 @@ describe('NewChatFormState', () => {
 	it('preserves a user model selection while the catalog refreshes', async () => {
 		const refresh = deferred<void>();
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1112,7 +1173,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1166,7 +1227,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1215,7 +1276,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1277,7 +1338,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1315,7 +1376,7 @@ describe('NewChatFormState', () => {
 		mockModelCatalog.refreshIfStale.mockImplementationOnce(async () => {
 			await refresh.promise;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1380,7 +1441,7 @@ describe('NewChatFormState', () => {
 		const refresh = deferred<void>();
 		selectableAgentIds = [];
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1415,7 +1476,7 @@ describe('NewChatFormState', () => {
 		const refresh = deferred<void>();
 		selectableAgentIds = [];
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1457,7 +1518,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(makeSnapshot({ recentAgentSettings: [] }));
+		mockRemoteSettings.refreshLatest.mockResolvedValue(makeSnapshot({ recentAgentSettings: [] }));
 
 		await formState.loadSettingsAndModels();
 		expect(formState.modelValue).toBe('');
@@ -1495,7 +1556,7 @@ describe('NewChatFormState', () => {
 			await refresh.promise;
 			catalogFresh = true;
 		});
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1524,7 +1585,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('loads Direct Anthropic startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -1548,7 +1609,7 @@ describe('NewChatFormState', () => {
 	it('falls back when Direct Anthropic has no endpoint models', async () => {
 		mockModelCatalog.getSelectableAgents.mockReturnValue(['claude', 'codex']);
 		selectableAgentIds = ['claude', 'codex'];
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -1578,7 +1639,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('reconciles a direct selection to the first available recent', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1611,7 +1672,7 @@ describe('NewChatFormState', () => {
 	it('preserves a user-touched selection when its agent becomes unavailable', async () => {
 		const refresh = deferred<void>();
 		mockModelCatalog.refreshIfStale.mockReturnValueOnce(refresh.promise);
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -1644,7 +1705,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('falls back when startup defaults reference a non-agent API provider id', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				recentAgentSettings: [
@@ -1666,7 +1727,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('normalizes invalid startup defaults from server settings', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				paths: { recentProjectPaths: ['/workspace/project'] },
 				executionDefaults: {
@@ -1686,7 +1747,7 @@ describe('NewChatFormState', () => {
 	});
 
 	it('does not replace manually touched execution modes when changing agent', async () => {
-		mockRemoteSettings.ensureLoaded.mockResolvedValue(
+		mockRemoteSettings.refreshLatest.mockResolvedValue(
 			makeSnapshot({
 				recentAgentSettings: [
 					{
@@ -2168,7 +2229,7 @@ describe('NewChatFormState prompt draft', () => {
 		expect(localStorage.length).toBe(0);
 	});
 
-	it('keeps a removed project card out of the list without clearing its target', () => {
+	it('keeps a removed project card out of the list without clearing its target', async () => {
 		const formState = createFormState();
 		formState.projectPath = '/workspace/implicit';
 		expect(formState.projectCardPath).toBeNull();
@@ -2179,7 +2240,9 @@ describe('NewChatFormState prompt draft', () => {
 		expect(formState.projectCardPath).toBeNull();
 		expect(formState.selectedProjectPath).toBe('/workspace/selected');
 		expect(formState.projectPath).toBe('/workspace/selected');
-		formState.worktrees.select('/workspace/worktree');
+		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({ ...localScope, worktrees: [] });
+		await formState.worktreePicker.open();
+		formState.worktreePicker.select('/workspace/worktree');
 		expect(formState.projectPath).toBe('/workspace/worktree');
 		expect(formState.selectedProjectPath).toBe('/workspace/selected');
 		expect(formState.projectCardPath).toBeNull();

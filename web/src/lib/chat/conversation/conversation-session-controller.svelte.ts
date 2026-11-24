@@ -2,7 +2,7 @@
 
 import { getChatSnapshot, handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
 import { literalInputFormat } from '$shared/input-format';
-import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
+import { isStopSatisfied, type ChatImage } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import {
 	INITIAL_VISIBLE_MESSAGES,
@@ -109,6 +109,7 @@ export class ConversationSessionController {
 			{
 				...deps,
 				refetchTranscript: (chatId) => this.#loadChat(chatId),
+				pendingSettings: (id) => deps.sessions.settingsMutations.pendingFor(id),
 				confirmHandoffFork: () => this.#handoffForkConfirmation.ask(),
 			},
 			this.#acceptedInputs,
@@ -208,8 +209,8 @@ export class ConversationSessionController {
 		if (!admission) throw new Error(m.chat_notice_handoff_requires_idle());
 		const request = { chatId, handoff, clientRequestId: createClientCommandId() };
 		try {
-			if (this.#settings.hasPending(chatId) && !(await this.#settings.settlePending(chatId)))
-				return;
+			const pendingSettings = this.deps.sessions.settingsMutations.pendingFor(chatId);
+			if (pendingSettings && !(await pendingSettings)) return;
 			const response = await handoffChat(request);
 			const current = this.deps.sessions.byId[chatId];
 			if (current?.agentOwnershipEpoch === handoff.expectedAgentOwnershipEpoch) {
@@ -404,6 +405,7 @@ export class ConversationSessionController {
 			this.#requestBottomRestore(chatId);
 		}
 
+		const executionResponse = deps.conversationUi.captureExecutionResponse();
 		const initialSnapshotPromise = getChatSnapshot(chatId, 1).catch(() => null);
 		const loadOptions: ChatLoadMessagesOptions = {
 			minimumLimit: minimumMessageLimit,
@@ -434,9 +436,10 @@ export class ConversationSessionController {
 			deps.sessions.selectedChatId === chatId &&
 			initialSnapshot?.chat.id === chatId &&
 			initialSnapshot.transcript.availability === 'available' &&
+			!loadedCursor?.stale &&
 			initialSnapshot.transcript.transcriptViewId === loadedCursor?.transcriptViewId
 		) {
-			deps.conversationUi.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
+			executionResponse.setTransientFeedFromSnapshot(initialSnapshot.transientFeed);
 		}
 	}
 
@@ -641,7 +644,8 @@ export class ConversationSessionController {
 		}
 
 		try {
-			if (this.#settings.hasPending(chatId) && !(await this.#settings.settlePending(chatId))) {
+			const pendingSettings = deps.sessions.settingsMutations.pendingFor(chatId);
+			if (pendingSettings && !(await pendingSettings)) {
 				this.#restorePreflightSubmission(
 					chatId,
 					previousText,
@@ -786,25 +790,19 @@ export class ConversationSessionController {
 	}
 
 	handleAbortForChat(chatId: string): Promise<void> {
-		const { conversationUi } = this.deps;
-		return this.#requestTurnStop(chatId, stopChat, (targetChatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
-		});
+		return this.#requestTurnStop(chatId, stopChat);
 	}
 
 	handleInterruptAndSendForChat(chatId: string): Promise<void> {
-		const { conversationUi } = this.deps;
-		return this.#requestTurnStop(chatId, interruptAndSendChat, (targetChatId, result) => {
-			conversationUi.setExecutionControlFromLiveUpdate(targetChatId, result.control);
-		});
+		return this.#requestTurnStop(chatId, interruptAndSendChat);
 	}
 
-	#requestTurnStop<T extends { outcome: ChatStopOutcome }>(
+	#requestTurnStop(
 		chatId: string,
-		request: (input: Parameters<typeof stopChat>[0]) => Promise<T>,
-		onResult?: (chatId: string, result: T) => void,
+		request: typeof stopChat | typeof interruptAndSendChat,
 	): Promise<void> {
 		const { deps } = this;
+		const response = deps.conversationUi.captureExecutionResponse();
 		const chat = deps.sessions.byId[chatId];
 		if (!chat) return Promise.resolve();
 		const lifecycle = deps.lifecycleForChat(chatId);
@@ -826,7 +824,9 @@ export class ConversationSessionController {
 			agentId: chat.agentId,
 		})
 			.then(async (result) => {
-				if (deps.sessions.byId[chatId]) onResult?.(chatId, result);
+				if (deps.sessions.byId[chatId]) {
+					response.setExecutionControlFromLiveUpdate(chatId, result.control);
+				}
 				await deps.requestProcessingSnapshot('stop-probe').catch(() => undefined);
 				if (isStopSatisfied(result.outcome)) return;
 				restore();

@@ -121,7 +121,9 @@
 	const processingReconciler = getChatProcessingReconciler();
 	const subagentToolbar = new SubagentToolbarState();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
-	const conversationUi = new ConversationUiState();
+	const conversationUi: ConversationUiState = new ConversationUiState((chatId, control) => {
+		conversationPanels.reconcileQueuedSteers(chatId, control);
+	});
 	const asyncQuestions = new AsyncQuestionController();
 	setAsyncQuestionController(asyncQuestions);
 	setConversationUi(conversationUi);
@@ -772,6 +774,7 @@
 
 {#if gitBranchActions.showNewBranchModal}
 	<NewBranchModal
+		contextKey={JSON.stringify([gitBranchActions.executorId, gitBranchActions.newBranchEffectiveProjectKey, gitBranchActions.newBranchSurfaceId])}
 		currentBranch={gitBranchActions.newBranchCurrentBranch || 'HEAD'}
 		newBranchName={gitBranchActions.newBranchName}
 		refOptions={gitBranchActions.newBranchRefs}

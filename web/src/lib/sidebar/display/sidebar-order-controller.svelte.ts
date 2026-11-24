@@ -22,6 +22,7 @@ function presentationKey(input: ProjectionInput): string {
 	return JSON.stringify([
 		normalizeSidebarGroupingFields(input.groupingFields),
 		input.nestDelegatedChats,
+		input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
 		Boolean(input.groupNestedProjectPaths),
 		input.inactivityDuration,
 		input.sortMode,

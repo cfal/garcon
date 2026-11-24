@@ -84,7 +84,8 @@ const OTHER_WINDOW: WorkspaceWindowId = 'window-2';
 function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	return {
 		id: '1788698026082000',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		agentId: 'codex',
 		agentOwnershipEpoch: 'epoch-1',
 		model: 'default',
@@ -106,6 +107,7 @@ function makeChatEntry(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		isActive: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		...overrides,

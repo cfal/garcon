@@ -7,7 +7,8 @@ import CurrentChatMenu from '../CurrentChatMenu.svelte';
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Chat',
@@ -23,6 +24,7 @@ function chat(): ChatSessionRecord {
 		isArchived: false,
 		isProcessing: false,
 		processingPhase: null,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'draft',

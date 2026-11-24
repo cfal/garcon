@@ -13,6 +13,9 @@ import type { ChatRegistryEntry } from './registry-contracts.js';
 import { extractFirstLine } from '../lib/text.js';
 import { resolveChatTitle } from './chat-title.js';
 import { carryOverRevision } from './carryover/segments.js';
+import type { ChatActivityStatus, ChatRunOutcome } from '../../../common/chat-activity.js';
+import type { ChatTransientFeedStore } from './chat-transient-feed.js';
+import { projectChatActivityStatus } from './chat-activity-status.js';
 
 interface ChatListProjectorSettings {
   getPinnedChatIds(): string[];
@@ -24,6 +27,7 @@ interface ChatListProjectorSettings {
 interface ChatListProjectorMetadata {
   listAllChatMetadata(): Map<string, ChatMetadata>;
   getChatMetadata(chatId: string): ChatMetadata | null;
+  getRunOutcome(chatId: string): ChatRunOutcome | null;
 }
 
 export interface ChatListMembershipSnapshot {
@@ -37,6 +41,7 @@ export interface ChatListProjectorDeps {
   settings: ChatListProjectorSettings;
   metadata: ChatListProjectorMetadata;
   processing: { phase(chatId: string): ChatProcessingPhase | null };
+  transientFeeds: Pick<ChatTransientFeedStore, 'hasPendingUserAction'>;
   canReloadFromNativeHistory(chatId: string, session: ChatRegistryEntry): boolean;
 }
 
@@ -47,6 +52,14 @@ export interface ChatSummaryProjection {
 
 export class ChatListProjector {
   constructor(private readonly deps: ChatListProjectorDeps) {}
+
+  #activityStatus(chatId: string, processingPhase: ChatProcessingPhase | null): ChatActivityStatus | null {
+    return projectChatActivityStatus({
+      processingPhase,
+      pendingUserAction: this.deps.transientFeeds.hasPendingUserAction(chatId),
+      lastRunOutcome: this.deps.metadata.getRunOutcome(chatId),
+    });
+  }
 
   membershipSnapshot(): ChatListMembershipSnapshot {
     return {
@@ -109,9 +122,11 @@ export class ChatListProjector {
     const inferredCreatedAt = chatIdCreatedAt(chatId).toISOString();
     const overrideTitle = this.deps.settings.getChatName(chatId);
     const title = resolveChatTitle(overrideTitle, metadata?.firstMessage);
+    const processingPhase = this.deps.processing.phase(chatId);
     return {
       chat: {
         id: chatId,
+        activityStatus: this.#activityStatus(chatId, processingPhase),
         ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
         agentId: session.agentId,
         agentOwnershipEpoch: session.agentOwnershipEpoch,
@@ -134,7 +149,7 @@ export class ChatListProjector {
           lastActivityAt: metadata?.lastActivity ?? null,
         },
       },
-      processingPhase: this.deps.processing.phase(chatId),
+      processingPhase,
     };
   }
 
@@ -155,8 +170,10 @@ export class ChatListProjector {
     const lastActivityAt = chat.activity.lastActivityAt;
     return {
       id: chat.id,
+      activityStatus: chat.activityStatus,
       ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
-      parentChat: session.parentChat,
+      parentChatId: session.parentChatId,
+      lineage: session.lineage,
       agentId: chat.agentId,
       agentOwnershipEpoch: session.agentOwnershipEpoch,
       model: chat.model,

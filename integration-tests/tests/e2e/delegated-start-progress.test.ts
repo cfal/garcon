@@ -2,6 +2,7 @@ import { describe, test } from 'bun:test';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { installLightpandaScrollGeometry } from '../../support/lightpanda-virtual-scroll.js';
 import { SpaDriver } from '../../support/spa-driver.js';
+import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { COMPACTION_MODEL, prepareDelegatedHistory, requestSnapshotChild,
   waitForStartOutcome } from '../../support/delegated-start-progress.js';
 
@@ -11,6 +12,7 @@ describe('Lightpanda delegated startup', () => {
       const integration = fixture.integration;
       const parent = await prepareDelegatedHistory(integration);
       const app = new SpaDriver(fixture.page, integration);
+      await fixture.page.evaluateOnNewDocument(seedLocalSettings, { collapseDelegatedChatsByDefault: false });
       await app.openChat(parent);
       await fixture.waitForSpaWebSocket();
       await fixture.page.waitForFunction(() => document.querySelector('[data-chat-scroll-viewport]')?.getAttribute('aria-busy') === 'false');

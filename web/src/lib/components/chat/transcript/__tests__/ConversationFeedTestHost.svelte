@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
+
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import { onDestroy, untrack } from 'svelte';
@@ -80,7 +82,7 @@
 
 	const chatState = untrack(() => transcript ?? new ActiveTranscriptState());
 	function replaceThinkingTranscript(viewId: string): void {
-		chatState.replaceGeneration('chat-1', viewId, [
+		seedTranscript(chatState, 'chat-1', viewId, [
 			{ ordinal: 1, message: new ThinkingMessage('2026-07-01T00:00:00.000Z', 'Synthetic thinking body') },
 		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
 	}
@@ -95,7 +97,7 @@
 	if (initialTranscriptScenario === 'thinking-disclosure') {
 		replaceThinkingTranscript('generation-1');
 	} else if (initialTranscriptScenario === 'file-links') {
-		chatState.replaceGeneration(initialChatContext.chatId, 'generation-1', [
+		seedTranscript(chatState, initialChatContext.chatId, 'generation-1', [
 			{ ordinal: 1, message: new AssistantMessage('2026-07-01T00:00:00.000Z', '[Message file](./message.txt)') },
 		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
 		pendingPermissions.push({
@@ -104,7 +106,7 @@
 			requestedTool: new ExitPlanModeToolUseMessage('2026-07-01T00:00:00.000Z', 'synthetic-tool', '[Permission file](./plan.txt)'),
 		});
 	} else if (initialTranscriptScenario === 'row-ids') {
-		chatState.replaceGeneration(
+		seedTranscript(chatState,
 			'chat-1',
 			'generation-1',
 			[
@@ -129,7 +131,7 @@
 		});
 	} else if (initialTranscriptScenario === 'tool-run' || initialTranscriptScenario === 'large-tool-run') {
 		const count = initialTranscriptScenario === 'large-tool-run' ? 2_000 : 3;
-		chatState.replaceGeneration(
+		seedTranscript(chatState,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: count }, (_, index) => ({
@@ -140,7 +142,7 @@
 		);
 		chatState.revealAllLoadedMessages();
 	} else if (initialTranscriptScenario === 'bash-filter') {
-		chatState.replaceGeneration(
+		seedTranscript(chatState,
 			'chat-1',
 			'generation-1',
 			[
@@ -180,7 +182,7 @@
 			ordinal: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
-		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+		seedTranscript(chatState, 'chat-1', 'generation-1', messages, {
 			lastOrdinal: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -209,7 +211,7 @@
 			ordinal: index + 1,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
 		}));
-		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+		seedTranscript(chatState, 'chat-1', 'generation-1', messages, {
 			lastOrdinal: messages.length,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -223,7 +225,7 @@
 			ordinal: index + 101,
 			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 101}`),
 		}));
-		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+		seedTranscript(chatState, 'chat-1', 'generation-1', messages, {
 			lastOrdinal: 120,
 			pageOldestOrdinal: 101,
 			nextBeforeOrdinal: null,

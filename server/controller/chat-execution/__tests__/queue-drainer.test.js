@@ -56,7 +56,8 @@ function queueCallbacks(overrides = {}) {
     discardPreparedInput: mock(() => undefined),
     publishIdle: mock(() => undefined),
     publishProjectUnavailable: mock(() => undefined),
-    publishTurnFailed: mock(() => undefined),
+    publishTurnStarted: () => undefined,
+        publishTurnFailed: mock(() => undefined),
     retireAttempt: mock(() => undefined),
     ...overrides,
   };
@@ -67,6 +68,7 @@ describe('QueueDrainer', () => {
     const repository = new InMemoryChatExecutionControlRepository('server-1');
     const controls = new ChatExecutionControlOperations(repository, {
       runExclusive: (_chatId, operation) => operation(), chatExists: () => true,
+      inputAccepted: () => undefined,
       unsettledQueueReceiptKeys: () => new Set(), publish() {},
     }, availableProjectAdmission());
     await controls.create('chat-1', { content: 'queued input', images: [] });
@@ -121,7 +123,7 @@ describe('QueueDrainer', () => {
         pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (chatId, admit) => {
           expect(chatId).toBe('chat-1');
-          expect(admit({ kind: 'user', entry })).toBe(true);
+          expect(admit({ kind: 'user', entry })).toBe('inserted');
           throw failure;
         }),
       },
@@ -139,6 +141,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput,
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed: mock(() => undefined),
         retireAttempt: mock(() => undefined),
       },
@@ -178,7 +181,7 @@ describe('QueueDrainer', () => {
         pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const input = { kind: 'user', entry };
-          const inserted = admit(input);
+          const inserted = admit(input) === 'inserted';
           shuttingDown = true;
           return { input, control: {}, inserted };
         }),
@@ -198,6 +201,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed: mock(() => undefined),
         retireAttempt,
       },
@@ -260,7 +264,7 @@ describe('QueueDrainer', () => {
           const entry = entries.shift();
           if (!entry) return null;
           const input = { kind: 'user', entry };
-          return { input, control: {}, inserted: admit(input) };
+          return { input, control: {}, inserted: admit(input) === 'inserted' };
         }),
         read: mock(async () => control([...entries])),
         pause: mock(async () => ({ control: control([...entries]), changed: true })),
@@ -280,6 +284,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed,
         retireAttempt: mock(() => undefined),
       },
@@ -329,7 +334,7 @@ describe('QueueDrainer', () => {
         pause: mock(async () => ({ control: control([entry]), changed: true })),
         dequeueNextTurn: mock(async (_chatId, admit) => {
           const input = { kind: 'user', entry };
-          return { input, control: {}, inserted: admit(input) };
+          return { input, control: {}, inserted: admit(input) === 'inserted' };
         }),
       },
       projectAdmission: availableProjectAdmission(),
@@ -347,6 +352,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => undefined),
         publishIdle: mock(() => undefined),
         publishProjectUnavailable: mock(() => undefined),
+        publishTurnStarted: () => undefined,
         publishTurnFailed,
         retireAttempt: mock(() => undefined),
       },
@@ -419,6 +425,7 @@ describe('QueueDrainer', () => {
         discardPreparedInput: mock(() => {}),
         publishIdle: mock(() => {}),
         publishProjectUnavailable: mock(() => {}),
+        publishTurnStarted: () => undefined,
         publishTurnFailed: mock(() => {}),
         retireAttempt: mock(() => {}),
       },
@@ -493,7 +500,7 @@ describe('QueueDrainer', () => {
           const controlEntry = pending.controlEntries.shift();
           if (!controlEntry) return null;
           const input = { kind: 'control', entry: controlEntry };
-          return { input, control: pending, inserted: admit(input) };
+          return { input, control: pending, inserted: admit(input) === 'inserted' };
         }),
       },
       turnRunner: { isChatRunning: () => false, runAgentTurn },
@@ -522,7 +529,8 @@ describe('QueueDrainer', () => {
         {
           runExclusive: (_chatId, operation) => operation(),
           chatExists: () => true,
-          unsettledQueueReceiptKeys: () => new Set(),
+          inputAccepted: () => undefined,
+      unsettledQueueReceiptKeys: () => new Set(),
           publish: () => undefined,
         },
         availableProjectAdmission(),
@@ -671,7 +679,8 @@ describe('QueueDrainer queued attachments', () => {
       {
         runExclusive: (_chatId, operation) => operation(),
         chatExists: () => true,
-        unsettledQueueReceiptKeys: () => new Set(),
+        inputAccepted: () => undefined,
+      unsettledQueueReceiptKeys: () => new Set(),
         publish: () => undefined,
       },
       availableProjectAdmission(),

@@ -109,6 +109,11 @@ export class ClaudeCliVersionProbe {
     return version;
   }
 
+  // Drops probed versions after the CLI is updated in place.
+  invalidate(): void {
+    this.#versions.clear();
+  }
+
   #version(claudeBinary: string): Promise<CliVersion> {
     let cached = this.#versions.get(claudeBinary);
     if (!cached) {

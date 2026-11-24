@@ -212,26 +212,23 @@ async function runGitProcess(
         return '';
       });
     const diagnosticOutput = options.truncateStdout === true;
-    const stdoutLimit = diagnosticOutput ? options.maxStdoutBytes ?? 32_768 : options.maxStdoutBytes ?? GIT_DEFAULT_MAX_STDOUT_BYTES;
+    const stdoutLimit = options.maxStdoutBytes ?? (diagnosticOutput ? 32_768 : GIT_DEFAULT_MAX_STDOUT_BYTES);
     const [stdout, stderr, exitCode] = await Promise.all([
       captureOutput(diagnosticOutput
-        ? readTextStreamPrefix(proc.stdout, stdoutLimit)
+        ? readTextStreamPrefix(proc.stdout, stdoutLimit, markGitOutputTruncated)
         : readGitOutput(proc.stdout, 'stdout', stdoutLimit)),
-      captureOutput(readTextStreamPrefix(
-        proc.stderr,
-        options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES,
-      )),
+      captureOutput(readTextStreamPrefix(proc.stderr, options.maxStderrBytes ?? GIT_DEFAULT_MAX_STDERR_BYTES)),
       proc.exited,
     ]).finally(async () => {
       abortState.signal?.removeEventListener('abort', abortListener);
       abortState.cleanup();
       await termination;
     });
-    if (diagnosticOutput && Buffer.byteLength(stdout) >= stdoutLimit) markGitOutputTruncated();
     if (outputLimitError) throw outputLimitError;
     if (exitCode === 0 && !abortState.aborted()) return { stdout, stderr };
 
-    if (isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
+    // A hook or receiver can mention a lock after a push has already updated another ref.
+    if (args[0] !== 'push' && isLockError(stderr) && attempt < GIT_LOCK_MAX_RETRIES) {
       lastFailure = { exitCode, stdout, stderr };
       // The attempt's timer was already cleaned up, so the delay itself must
       // respect the absolute budget; otherwise the total runtime overshoots

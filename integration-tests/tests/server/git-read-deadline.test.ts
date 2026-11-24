@@ -35,7 +35,7 @@ test('Git HTTP reports an expired upstream probe instead of clearing remote stat
       const executable = join(bin, 'git');
       await writeFile(executable, `#!${process.execPath}
 const args = process.argv.slice(2);
-if (args.includes('main@{upstream}') && await Bun.file('.git/hold-upstream-probe').exists()) {
+if (args[0] === 'for-each-ref' && args.at(-1) === 'refs/heads/main' && await Bun.file('.git/hold-upstream-probe').exists()) {
   await Bun.write('.git/upstream-probe-started', 'started');
   await Bun.sleep(60_000);
 }

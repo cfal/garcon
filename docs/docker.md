@@ -1,6 +1,6 @@
 # Docker
 
-Garcon's official container image is `ghcr.io/cfal/garcon:main`. It includes `garcon-cli` on PATH, Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. The same image runs a controller by default or an executor with an explicit command. CI publishes every commit on `main` to `ghcr.io/cfal/garcon` for `linux/amd64` and `linux/arm64`.
+Garcon's official container image is `ghcr.io/cfal/garcon:main`. It includes `garcon-cli` on PATH, Claude Code, Codex, Cursor Agent, Google Antigravity (`agy`), OpenCode, Amp, Factory Droid, Pi, Git, SSH, and the GitHub CLI. The same image runs a controller by default or an executor with an explicit command. CI publishes every commit on `main` to `ghcr.io/cfal/garcon` for `linux/amd64` and `linux/arm64`.
 
 ## Start From GHCR
 
@@ -177,6 +177,7 @@ Compose uses named volumes for credentials, configuration, and native history. T
 | `codex-home` | `/home/garcon/.codex` | Codex credentials and native history |
 | `cursor-home` | `/home/garcon/.cursor` | Cursor credentials and native history |
 | `factory-home` | `/home/garcon/.factory` | Factory credentials and native history |
+| `gemini-home` | `/home/garcon/.gemini` | Antigravity settings and native history |
 | `pi-home` | `/home/garcon/.pi` | Pi credentials, settings, and native history |
 | `opencode-data` | `/home/garcon/.local/share/opencode` | OpenCode credentials and session database |
 | `opencode-state` | `/home/garcon/.local/state/opencode` | OpenCode runtime state |
@@ -185,11 +186,11 @@ Compose uses named volumes for credentials, configuration, and native history. T
 
 OpenCode cache remains ephemeral. Its data and state volumes mount the actual XDG paths directly; Docker does not need the single-disk symlink indirection used by VM setups.
 
-Normal builds may reuse cached agent-installer layers. Run `docker compose build --no-cache` before `docker compose up -d` when refreshing those CLIs. Agent binaries remain outside the state volumes, so rebuilding does not delete credentials or history. `docker compose down` preserves volumes; `docker compose down -v` permanently deletes them.
+Normal builds may reuse cached agent-installer layers. Run `docker compose build --no-cache` before `docker compose up -d` when refreshing those CLIs. In-app [Claude Code and Codex updates](agent-cli-updates.md) last only until the container is recreated. Agent binaries remain outside the state volumes, so rebuilding does not delete credentials or history. `docker compose down` preserves volumes; `docker compose down -v` permanently deletes them.
 
 ## Agent And Git Setup
 
-Claude and Codex login can be started from Settings. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
+Claude, Codex, and Antigravity login can be started from Settings. A container may not provide an OS keyring; do not assume the Antigravity history volume also persists sign-in. See [Antigravity authentication](antigravity.md#authentication) for headless sign-in, Gemini API keys, and Agent Platform credentials. Configure other CLIs in a container shell, or provide their supported API-key environment variables to Compose:
 
 ```bash
 docker compose exec garcon bash -l

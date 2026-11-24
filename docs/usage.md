@@ -67,15 +67,23 @@ Usage surface -> GET /api/v1/usage?executorId&sinceDay&untilDay&timeZone
   including remote compaction, before that response's `token_count`. Once a
   rollout has records, only records are billed, keyed by `response_id`, and
   `token_count` only reports context size. Records with no response id or
-  usage, or with no known model, are malformed.
+  usage, or with no known model, are malformed. Records with a matching turn ID
+  use the speed at turn start, including compaction billed before `turn_context`.
+  Live edits do not reprice the active turn. When the record names a different turn,
+  the initial tier is ambiguous, or early compaction could have used either side of
+  a model switch, tokens still count but the cost is unknown.
+  The rollout does not record every one-turn override or the actual billed tier.
 - Rollouts written before records existed bill `token_count` events, which
   take their model from the latest `turn_context` and their tier from the
   latest `thread_settings_applied`. Cumulative counters reconcile each request
   delta; inconsistent events are skipped and reported as malformed. Garcon's JSONL fork copies events verbatim under a new session id,
   so a request's identity is its event time, model, and counters, and copies
-  count once. Codex's native forks restamp the copied history; those copies are
-  recognized as the burst of events right after the fork's `session_meta`,
-  since legacy rollouts record no explicit boundary
+  count once.
+- Codex native forks restamp copied history. A response whose `thread_id` matches
+  the fork's native UUID (`session_meta.id`) ends copy suppression immediately.
+  Otherwise, the parser treats usage as copied until the first gap of at least one
+  second, measured from `session_meta` or the preceding copied usage event.
+  Legacy rollouts have no explicit copy boundary
   (`forked_from_ordinal_exclusive` is set only for reverts and paginated
   history).
 - Both parsers read the first JSON value of a line that lost its newline, as
@@ -91,7 +99,10 @@ Costs are API list-price estimates from the built-in table in
 plans. Anthropic rates follow the official pricing page, including per-model
 cache-read rates, one-hour cache writes, fast mode, and Haiku 5.5's long-prompt
 tier. OpenAI rates follow LiteLLM's published table, including priority
-processing, flex processing, and the 272K-token long-context tier. Model names are matched after
+processing, flex processing, and the 272K-token long-context tier. Ultrafast estimates use
+[OpenAI’s published regular API rates](https://developers.openai.com/api/docs/pricing) for the model,
+excluding promotional discounts. Usage days use the recorded completion time. Ultrafast usage without a
+published rate counts toward tokens but is reported as unpriced. Model names are matched after
 removing provider prefixes, snapshot dates, and context variants such as
 `[1m]`. A model missing from the table is reported as unpriced: its tokens
 count, its cost is shown as unknown rather than zero, and totals note the

@@ -1,5 +1,5 @@
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-import type { ChatParentRelation } from '$shared/chat-parentage';
+import type { ChatLineage } from '$shared/chat-parentage';
 
 export type ChatMapNode = ChatMapChatNode | ChatMapMissingParentNode;
 
@@ -7,7 +7,7 @@ export interface ChatMapChatNode {
 	readonly key: `chat:${string}`;
 	readonly kind: 'chat';
 	readonly chat: ChatSessionRecord;
-	readonly relation: ChatParentRelation | null;
+	readonly relation: ChatLineage['kind'] | null;
 	readonly children: readonly ChatMapNode[];
 	readonly matchesQuery: boolean;
 	readonly inCycle: boolean;
@@ -40,7 +40,7 @@ interface TopologyChatNode {
 	readonly key: `chat:${string}`;
 	readonly kind: 'chat';
 	readonly chat: ChatSessionRecord;
-	readonly relation: ChatParentRelation | null;
+	readonly relation: ChatLineage['kind'] | null;
 	readonly inCycle: boolean;
 	readonly cycleBreak: boolean;
 	readonly parentKey: ChatMapNodeKey | null;
@@ -185,7 +185,7 @@ export function buildChatMapModel(
 
 	const parentById = new Map<string, string>();
 	for (const chat of chatsById.values()) {
-		const parentId = chat.parentChat?.chatId;
+		const parentId = chat.lineage?.sourceChatId;
 		if (parentId && chatsById.has(parentId)) parentById.set(chat.id, parentId);
 	}
 
@@ -199,14 +199,14 @@ export function buildChatMapModel(
 	const topologyByKey = new Map<ChatMapNodeKey, TopologyNode>();
 	for (const chat of chatsById.values()) {
 		const cycleBreak = cycleRootIds.has(chat.id);
-		const parentChat = chat.parentChat;
+		const lineage = chat.lineage;
 		let parentKey: ChatMapNodeKey | null = null;
-		let relation: ChatParentRelation | null = null;
-		if (!cycleBreak && parentChat) {
-			parentKey = chatsById.has(parentChat.chatId)
-				? chatKey(parentChat.chatId)
-				: missingParentKey(parentChat.chatId);
-			relation = parentChat.relation;
+		let relation: ChatLineage['kind'] | null = null;
+		if (!cycleBreak && lineage) {
+			parentKey = chatsById.has(lineage.sourceChatId)
+				? chatKey(lineage.sourceChatId)
+				: missingParentKey(lineage.sourceChatId);
+			relation = lineage.kind;
 		}
 		const key = chatKey(chat.id);
 		topologyByKey.set(key, {
@@ -222,14 +222,14 @@ export function buildChatMapModel(
 	}
 
 	for (const chat of chatsById.values()) {
-		const parentChat = chat.parentChat;
-		if (!parentChat || chatsById.has(parentChat.chatId)) continue;
-		const key = missingParentKey(parentChat.chatId);
+		const lineage = chat.lineage;
+		if (!lineage || chatsById.has(lineage.sourceChatId)) continue;
+		const key = missingParentKey(lineage.sourceChatId);
 		if (topologyByKey.has(key)) continue;
 		topologyByKey.set(key, {
 			key,
 			kind: 'missing-parent',
-			chatId: parentChat.chatId,
+			chatId: lineage.sourceChatId,
 			parentKey: null,
 			childrenKeys: [],
 		});

@@ -41,8 +41,8 @@
 			<div class="flex items-center gap-3">
 				<button
 					type="button"
-					onclick={() => form.worktrees.openModal()}
-					disabled={form.worktrees.isLoading || form.worktrees.isCreating || form.isUpdatingPinnedPath}
+					onclick={() => void form.worktreePicker.open()}
+					disabled={form.worktrees.isLoading || form.worktreePicker.isCreating || form.isUpdatingPinnedPath}
 					class="inline-flex items-center gap-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 				>
 					<Plus class="size-3.5" aria-hidden="true" />{m.git_worktree_new()}
@@ -50,7 +50,7 @@
 				<button
 					type="button"
 					onclick={() => void form.worktrees.load()}
-					disabled={form.worktrees.isLoading || form.worktrees.isCreating}
+					disabled={form.worktrees.isLoading || form.worktreePicker.isCreating}
 					aria-label={m.workspace_worktree_refresh()}
 					class="rounded-md p-1 text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 				>
@@ -146,17 +146,6 @@
 	{/if}
 </section>
 
-{#if form.worktrees.modalOpen}
-	<GitWorktreePickerModal
-		worktrees={form.worktrees.items}
-		isLoading={form.worktrees.isLoading}
-		isCreating={form.worktrees.isCreating}
-		errorMessage={form.worktrees.error}
-		onSelect={(path) => form.worktrees.select(path)}
-		onCreate={async (path, branch, baseRef) => {
-			await form.worktrees.create(path, branch, baseRef);
-		}}
-		onRefresh={() => void form.worktrees.load()}
-		onClose={() => form.worktrees.closeModal()}
-	/>
+{#if form.worktreePicker.isOpen}
+	<GitWorktreePickerModal session={form.worktreePicker} description={form.firstMessage} />
 {/if}

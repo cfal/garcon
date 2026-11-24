@@ -12,7 +12,7 @@ import type { ChatExecutionControlState } from './chat-execution-control.js';
 import { parseChatTransientControlAction, type ChatTransientControlAction } from './chat-transient-feed.js';
 import type { HttpErrorResponse } from './http-error.js';
 import type { ChatListEntry } from './chat-list.js';
-import type { ParentChatRef } from './chat-parentage.js';
+import type { ChatRelationships } from './chat-parentage.js';
 import type { CommandTagMutationOutcome } from './chat-tag-mutations.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
@@ -137,6 +137,7 @@ export type CommandErrorCode = Extract<
   | 'REQUEST_NOT_FOUND'
   | 'SERVER_SHUTTING_DOWN'
   | 'EXECUTOR_UNAVAILABLE'
+  | 'EXECUTOR_BUSY'
   | 'INTERNAL_ERROR'
 >;
 
@@ -151,10 +152,9 @@ export interface CommandAcceptedResponse {
   tagMutation?: CommandTagMutationOutcome;
 }
 
-export interface AgentTurnCommandResponse extends CommandAcceptedResponse {
+export interface AgentTurnCommandResponse extends CommandAcceptedResponse, Partial<ChatRelationships> {
   chatId: string;
   turnId: string;
-  parentChat?: ParentChatRef | null;
   chat?: ChatListEntry | null;
 }
 
@@ -373,11 +373,10 @@ export interface SteerCommandRequest {
   whenTurnUnavailable?: SteerUnavailableTurnPolicy;
 }
 
-export interface SteerCommandResponse extends CommandAcceptedResponse {
+export interface SteerCommandResponse extends CommandAcceptedResponse, Partial<ChatRelationships> {
   commandType: 'steer';
   chatId: string;
   turnId: string;
-  parentChat?: ParentChatRef | null;
   delivery?: never;
 }
 
@@ -462,10 +461,9 @@ export interface AgentStopCommandRequest {
   agentId?: string;
 }
 
-export interface AgentStopResponse extends CommandAcceptedResponse {
+export interface AgentStopResponse extends CommandAcceptedResponse, Partial<ChatRelationships> {
   outcome: ChatStopOutcome;
   control: ChatExecutionControlState;
-  parentChat?: ParentChatRef | null;
 }
 
 export interface AgentInterruptAndSendCommandRequest {
@@ -546,8 +544,8 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
   const executorId = body.executorId;
   if (executorId != null && !isExecutorId(executorId)) throw new CommandRequestValidationError('executorId is invalid');
   if ('options' in body) throw new CommandRequestValidationError('options is not supported');
-  if ('parentChat' in body) {
-    throw new CommandRequestValidationError('parentChat is not supported; use parentChatId');
+  if ('parentChat' in body || 'lineage' in body) {
+    throw new CommandRequestValidationError('Storage relationships are not supported; use parentChatId');
   }
   const origin = clientChatStartOrigin(body.origin);
   const clientRequestId = requiredCommandCorrelationId(body, 'clientRequestId');

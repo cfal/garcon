@@ -53,7 +53,8 @@ vi.mock('$lib/components/chat/ConversationWorkspace.svelte', async () => ({
 function chat(): ChatSessionRecord {
 	return {
 		id: 'chat-1',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/workspace/project',
 		orderGroup: 'normal',
 		title: 'Chat',
@@ -70,6 +71,7 @@ function chat(): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,

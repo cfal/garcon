@@ -18,12 +18,12 @@ async function setFormat(page: Page, composerInputMode: 'source' | 'formatted') 
 async function dismissDirectoryBrowser(page: Page): Promise<void> {
   const mobile = page.getByRole('dialog', { name: 'Select Directory', exact: true });
   const desktop = page.locator('[data-slot="directory-browser-dismiss"]');
-  if (await mobile.isVisible()) {
-    await mobile.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await browserExpect(mobile).toHaveCount(0);
-  } else if (await desktop.isVisible()) {
+  if (await desktop.isVisible()) {
     await page.keyboard.press('Escape');
     await browserExpect(desktop).toHaveCount(0);
+  } else if (await mobile.isVisible()) {
+    await mobile.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await browserExpect(mobile).toHaveCount(0);
   }
 }
 
@@ -135,6 +135,8 @@ test('New Chat keeps its 300px input cap in Source and formatted modes on deskto
       await composer.getByRole('button', { name: 'Add to prompt', exact: true }).focus();
       await setFormat(page, 'source');
       await browserExpect(source).toBeVisible();
+      await page.locator('#project-path-input').focus();
+      await browserExpect(page.getByRole('dialog', { name: 'Select Directory', exact: true })).toBeVisible();
       await dismissDirectoryBrowser(page);
       await source.fill('');
       await browserExpect(source).toHaveValue('');

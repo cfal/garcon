@@ -155,10 +155,7 @@
 				error: startup.validationStatus === 'invalid' ? startup.validationError : null,
 				worktree:
 					startup.gitAvailable && startup.gitRepoStatus === 'git'
-						? {
-								disabled: startup.isUpdatingPinnedPath,
-								onOpen: () => startup.worktrees.openModal(),
-							}
+						? { disabled: startup.isUpdatingPinnedPath, onOpen: () => startup.worktreePicker.open() }
 						: undefined,
 			}}
 		>
@@ -269,6 +266,7 @@
 						<AgentSettingsControls
 							descriptors={startup.agentSettingDescriptors}
 							envelope={startup.agentSettings}
+							defaults={modelCatalog.forExecutor(startup.executorId).getDefaultAgentSettings(startup.agentId)}
 							onChange={(descriptor, value) => startup.setAgentSetting(descriptor, value)}
 						/>
 					{/snippet}
@@ -290,19 +288,6 @@
 	</ScheduledPromptField>
 </div>
 
-{#if startup.gitAvailable && startup.worktrees.modalOpen}
-	<GitWorktreePickerModal
-		worktrees={startup.worktrees.items}
-		isLoading={startup.worktrees.isLoading}
-		isCreating={startup.worktrees.isCreating}
-		errorMessage={startup.worktrees.error}
-		onSelect={(path) => startup.worktrees.select(path)}
-		onCreate={async (path, branch, baseRef) => {
-			await startup.worktrees.create(path, branch, baseRef);
-		}}
-		onRefresh={() => {
-			void startup.worktrees.load();
-		}}
-		onClose={() => startup.worktrees.closeModal()}
-	/>
+{#if startup.worktreePicker.isOpen}
+	<GitWorktreePickerModal session={startup.worktreePicker} description={prompt} />
 {/if}

@@ -207,7 +207,7 @@ describe('garcon-cli chat research', () => {
         }),
         parentChatId,
       });
-      expect(first.parentChat).toEqual({ chatId: parentChatId, relation: 'delegation' });
+      expect(first.parentChatId).toEqual(parentChatId);
       expect(first.turnId).toBeString();
       expect(first.chatId).toBe(chatId);
       expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type)
@@ -264,7 +264,7 @@ describe('garcon-cli chat research', () => {
       expect(lineageCatalog).toMatchObject({ exitCode: 0, stderr: '' });
       expect(JSON.parse(lineageCatalog.stdout)).toMatchObject({
         page: { total: 1 },
-        chats: [{ chatId, parentChatId, parentRelation: 'delegation' }],
+        chats: [{ chatId, parentChatId, lineage: null }],
       });
 
       const catalog = await runCli(fixture, [

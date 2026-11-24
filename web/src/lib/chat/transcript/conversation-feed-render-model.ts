@@ -124,7 +124,7 @@ export class ConversationFeedRenderModelController {
 			}
 			if (previous.kind === 'message' && next.kind === 'message') {
 				if (previous.ordinal !== next.ordinal || previous.message !== next.message
-					|| previous.awaitingDelivery !== next.awaitingDelivery) return false;
+					|| previous.inputStatus !== next.inputStatus) return false;
 			} else if (previous !== next) {
 				return false;
 			}

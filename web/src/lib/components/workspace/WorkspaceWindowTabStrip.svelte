@@ -27,7 +27,7 @@
 	import { contextMenuPrimitives } from '$lib/components/ui/menu-primitives.js';
 	import type { WorkspaceWindowSurfaceMenuItems } from './workspace-window-menu-contract.js';
 	import WorkspaceSurfaceIcon from './WorkspaceSurfaceIcon.svelte';
-	import WorkspaceChatProcessingIndicator from './WorkspaceChatProcessingIndicator.svelte';
+	import ChatActivityIndicator from '$lib/components/chat/ChatActivityIndicator.svelte';
 	import type { WorkspaceWindowTabMeasure } from './workspace-window-add-layout.js';
 	import {
 		DEFAULT_WORKSPACE_WINDOW_TITLEBAR_METRICS,
@@ -526,9 +526,10 @@
 			></span>
 		{/if}
 		{#if chatIsProcessing}
-			<WorkspaceChatProcessingIndicator
-				statusId={processingStatusId}
-				sizePx={titlebarMetrics.iconSizePx}
+			<ChatActivityIndicator
+				status="working"
+				descriptionId={processingStatusId}
+				spinnerSizePx={titlebarMetrics.iconSizePx}
 			/>
 		{:else}
 			<WorkspaceSurfaceIcon kind={surfaceKind(surfaceId)} size={titlebarMetrics.iconSizePx} />

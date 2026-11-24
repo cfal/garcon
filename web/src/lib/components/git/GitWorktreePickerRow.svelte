@@ -5,6 +5,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { canonicalIsoTimestamp } from '$lib/utils/iso-timestamp.js';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
+	import { worktreeDisplayName } from './git-worktree-picker-state.svelte.js';
 
 	interface Props {
 		worktree: GitWorktreeItem;
@@ -49,52 +50,42 @@
 	onmousemove={() => onActivate(worktree.path)}
 	class="min-w-0 max-w-full w-full overflow-hidden rounded-md px-3 py-2 text-left transition-colors
 		{isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}
-		{worktree.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}
-		{worktree.isCurrent ? 'ring-1 ring-interactive-accent/30' : ''}"
+		{worktree.isPathMissing ? 'cursor-not-allowed opacity-40' : ''}"
 >
-	<div class="flex min-w-0 items-start gap-2 sm:gap-3">
-		<div class="flex h-5 w-5 shrink-0 items-center justify-center">
-			{#if worktree.isCurrent}
-				<Check class="h-4 w-4 text-interactive-accent" />
-			{:else}
-				<GitBranch class="h-3.5 w-3.5 text-muted-foreground" />
-			{/if}
-		</div>
+	<div class="flex min-w-0 items-center gap-2 sm:gap-3">
+		{#if worktree.isCurrent}
+			<Check class="size-4 shrink-0 text-interactive-accent" />
+			<span class="sr-only">{m.git_worktree_current()}</span>
+		{:else}
+			<GitBranch class="size-4 shrink-0 text-muted-foreground" />
+		{/if}
 		<div class="min-w-0 flex-1">
 			<div class="flex min-w-0 items-center gap-2">
-				<span class="min-w-0 truncate text-sm font-medium"
-					>{worktree.branch || worktree.name}</span
-				>
+				<span class="min-w-0 flex-1 truncate text-sm font-medium">{worktreeDisplayName(worktree)}</span>
 				{#if worktree.isMain}
-					<span
-						class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
-						>{m.git_worktree_repo()}</span
-					>
+					<span class="shrink-0 text-xs text-muted-foreground">{m.git_worktree_repo()}</span>
 				{/if}
 				{#if worktree.isPathMissing}
-					<span
-						class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
-						>{m.git_worktree_missing()}</span
+					<span class="shrink-0 text-xs text-destructive">{m.git_worktree_missing()}</span>
+				{/if}
+				{#if modified}
+					<time
+						datetime={modifiedAt ?? undefined}
+						title={modified.tooltip}
+						class="max-w-[33%] truncate text-xs text-muted-foreground"
 					>
+						{m.workspace_worktree_last_modified({ time: modified.label })}
+					</time>
+				{:else}
+					<span
+						title={m.workspace_worktree_last_modified_unavailable()}
+						class="truncate text-xs text-muted-foreground"
+					>
+						{m.workspace_worktree_last_modified_unavailable_short()}
+					</span>
 				{/if}
 			</div>
-			{#if modified}
-				<time
-					datetime={modifiedAt ?? undefined}
-					title={modified.tooltip}
-					class="block max-w-full truncate text-xs leading-4 text-muted-foreground"
-				>
-					{m.workspace_worktree_last_modified({ time: modified.label })}
-				</time>
-			{:else}
-				<span
-					title={m.workspace_worktree_last_modified_unavailable()}
-					class="block max-w-full truncate text-xs leading-4 text-muted-foreground"
-				>
-					{m.workspace_worktree_last_modified_unavailable_short()}
-				</span>
-			{/if}
-			<div class="truncate font-mono text-[11px] leading-4 text-muted-foreground">
+			<div class="truncate font-mono text-xs text-muted-foreground" title={worktree.path}>
 				{worktree.path}
 			</div>
 		</div>

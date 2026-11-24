@@ -144,8 +144,10 @@
 	const appTitle = createAppTitleStore();
 	const navigation = createNavigationStore();
 	const notifications = createNotificationsStore();
+	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const chatSessions = createChatSessionsStore({
 		notifyError: (message) => notifications.error(message),
+		onChatDeleted: (id) => sidebarProjectCollapse.forgetDeletedChat(id),
 	});
 	const appShell = createAppShellStore();
 	const ws = createWsConnection();
@@ -214,7 +216,6 @@
 	const workspace = workspaceServices.coordinator;
 	const workspaceShortcuts = workspaceServices.shortcuts;
 	const workbenchCommands = workspaceServices.commands;
-	const sidebarProjectCollapse = createSidebarProjectCollapseStore();
 	const minuteClock = createMinuteClockStore();
 	const themeController = new ThemeController({
 		getPreference: () => localSettings.themePreference,
@@ -283,6 +284,12 @@
 	let isPublicRoute = $derived(isAuthRoute || page.route.id === '/shared/[token]');
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
+	$effect(() => {
+		const root = document.documentElement;
+		root.toggleAttribute('data-reduce-motion', localSettings.reduceMotion);
+		return () => root.removeAttribute('data-reduce-motion');
+	});
+
 	// Projects presentation-only bounds without coupling Markdown loading to settings.
 	$effect(() => {
 		const root = document.documentElement;
@@ -337,6 +344,7 @@
 		const key = owner ? JSON.stringify([owner.mode, owner.key]) : null;
 		untrack(() => {
 			fileImages.setOwner(key);
+			modelCatalog.setOwner(key);
 			if (key !== presentationOwnerKey) {
 				presentationOwnerKey = key;
 				ticketsInvalidations.publishAuthority(authenticated);
@@ -529,6 +537,7 @@
 	});
 
 	onDestroy(() => {
+		modelCatalog.dispose();
 		auth.destroy();
 		window.removeEventListener('pagehide', handlePageHide);
 		browserNotificationsRouter.destroy();

@@ -1,3 +1,4 @@
+import type { ChatSettingsMutations } from './chat-settings-mutations.js';
 import type {
 	applyChatTagDelta,
 	deleteChat,
@@ -26,6 +27,7 @@ import type {
 
 export interface ChatSessionsStoreDeps {
 	listChats?: typeof import('$lib/api/chats.js').listChats;
+	onChatDeleted?: (chatId: string) => void;
 	deleteChat?: typeof deleteChat;
 	setLastSelectedChat?: typeof setLastSelectedChat;
 	generateChatTitle?: typeof generateChatTitle;
@@ -63,6 +65,7 @@ export function isChatTagRefreshRequired(
 }
 
 export interface ChatSessionsPort {
+	readonly settingsMutations: Pick<ChatSettingsMutations, 'change' | 'pendingFor'>;
 	byId: Record<string, ChatSessionRecord>;
 	order: string[];
 	readonly chatListStatus: ChatListLoadStatus;
@@ -90,6 +93,7 @@ export interface ChatSessionsPort {
 	applyStartEntry(entry: ChatListEntry): void;
 	upsertServerChat(entry: ChatListEntry): void;
 	removeChat(chatId: string): void;
+	applyServerDeletion(chatId: string): void;
 	patchPreview(chatId: string, content: string, timestamp?: string): void;
 	patchActivity(chatId: string, timestamp: string): void;
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void;

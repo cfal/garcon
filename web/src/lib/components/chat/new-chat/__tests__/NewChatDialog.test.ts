@@ -192,7 +192,7 @@ describe('NewChatDialog', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 		shell.openNewChatDialog();
 		await waitFor(() => expect(screen.getByPlaceholderText('How can I help you today?')).toHaveProperty('value', edited));
-		const send = screen.getByRole('button', { name: 'Start session' });
+		const send = await screen.findByRole('button', { name: 'Start session' });
 		await waitFor(() => expect(send).toHaveProperty('disabled', false));
 		await fireEvent.click(send);
 		expect(onCreateDraft).toHaveBeenCalledWith(expect.objectContaining({
@@ -217,11 +217,11 @@ describe('NewChatDialog', () => {
 		sessions.upsertFromServer([{
 			id: scheduledSeed.prospectiveChatId!, agentId: 'claude', model: 'opus',
 			title: 'Synthetic existing chat', projectPath: '/workspace', orderGroup: 'normal', tags: [],
-			permissionMode: 'default', thinkingMode: 'none', parentChat: null, agentOwnershipEpoch: 'epoch-a',
+			permissionMode: 'default', thinkingMode: 'none', parentChatId: null, lineage: null, agentOwnershipEpoch: 'epoch-a',
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
 			activity: { createdAt: null, lastActivityAt: null, lastReadAt: null }, preview: { lastMessage: '' },
 			isPinned: false, isArchived: false, isActive: true, isProcessing: false, processingPhase: null,
-			isUnread: false, canReloadFromNativeHistory: false,
+			isUnread: false, activityStatus: null, canReloadFromNativeHistory: false,
 		}]);
 		const existing = sessions.byId[scheduledSeed.prospectiveChatId!];
 		const start = screen.getByRole('button', { name: 'Start session' });

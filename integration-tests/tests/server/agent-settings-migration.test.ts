@@ -93,6 +93,17 @@ describe('agent settings migration', () => {
 
       await fixture.restartGarcon({
         beforeStart: async () => {
+          const registryPath = join(fixture.dirs.workspace, 'chats.json');
+          const registry = JSON.parse(await readFile(registryPath, 'utf8'));
+          registry.version = 5;
+          for (const entry of Object.values(registry.sessions) as Record<string, unknown>[]) {
+            expect(entry.parentChatId).toBeNull();
+            expect(entry.lineage).toBeNull();
+            delete entry.parentChatId;
+            delete entry.lineage;
+            entry.parentChat = null;
+          }
+          await writeFile(registryPath, JSON.stringify(registry));
           const projectSettings = JSON.parse(await readFile(
             join(fixture.dirs.workspace, 'project-settings.json'),
             'utf8',

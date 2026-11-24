@@ -19,6 +19,32 @@ function createTestStore() {
 }
 
 describe('ReadReceiptOutboxStore', () => {
+	it.each(['resolve', 'reject'] as const)('does not revive a destroyed outbox after a late %s', async (settlement) => {
+		const { outbox, sessions } = createTestStore();
+		const patch = vi.spyOn(sessions, 'patchLastReadAt');
+		const request = Promise.withResolvers<MarkChatsReadResponse>();
+		mockMarkBatch.mockReturnValue(request.promise);
+		outbox.enqueue('a', '2026-02-25T10:00:00.000Z');
+		const flush = outbox.flushNow();
+		outbox.enqueue('b', '2026-02-25T11:00:00.000Z');
+		const queuedFlush = outbox.flushNow();
+		outbox.destroy();
+		outbox.destroy();
+		if (settlement === 'reject') request.reject(new Error('Lost reply'));
+		else request.resolve({ success: true, results: [{ chatId: 'a', lastReadAt: '2026-02-25T10:00:00.000Z' }] });
+		await flush;
+		await queuedFlush;
+		outbox.enqueue('c', '2026-02-25T12:00:00.000Z');
+		await outbox.flushNow();
+		await outbox.markChatsReadNow(['a']);
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(mockMarkBatch).toHaveBeenCalledTimes(1);
+		expect(patch).not.toHaveBeenCalled();
+		expect(outbox.pendingByChatId).toEqual({});
+		expect(outbox.inFlight).toBe(false);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mockMarkBatch.mockReset();
@@ -132,7 +158,8 @@ describe('ReadReceiptOutboxStore', () => {
 		sessions.upsertFromServer([
 			{
 				id: 'a',
-				parentChat: null,
+				parentChatId: null,
+				lineage: null,
 				agentId: 'claude',
 				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
@@ -151,6 +178,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: true,
+				activityStatus: null,
 				canReloadFromNativeHistory: false,
 			},
 		]);
@@ -173,7 +201,8 @@ describe('ReadReceiptOutboxStore', () => {
 		sessions.upsertFromServer([
 			{
 				id: 'a',
-				parentChat: null,
+				parentChatId: null,
+				lineage: null,
 				agentId: 'claude',
 				agentOwnershipEpoch: 'epoch-a',
 				model: 'opus',
@@ -196,11 +225,13 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: true,
+				activityStatus: null,
 				canReloadFromNativeHistory: false,
 			},
 			{
 				id: 'b',
-				parentChat: null,
+				parentChatId: null,
+				lineage: null,
 				agentId: 'claude',
 				agentOwnershipEpoch: 'epoch-b',
 				model: 'opus',
@@ -223,6 +254,7 @@ describe('ReadReceiptOutboxStore', () => {
 				isProcessing: false,
 				processingPhase: null,
 				isUnread: false,
+				activityStatus: null,
 				canReloadFromNativeHistory: false,
 			},
 		]);

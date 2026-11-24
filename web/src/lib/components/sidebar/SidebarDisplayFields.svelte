@@ -66,6 +66,17 @@
 		/>
 		{m.sidebar_nest_delegated_chats()}
 	</label>
+	<label class="flex min-h-11 items-center gap-3 pl-7 text-sm">
+		<input
+			type="checkbox"
+			class="size-4"
+			disabled={!value.sidebarNestDelegatedChats}
+			checked={value.sidebarSeparateArchivedBranches}
+			onchange={(event) =>
+				onChange({ ...value, sidebarSeparateArchivedBranches: event.currentTarget.checked })}
+		/>
+		{m.sidebar_separate_archived_branches()}
+	</label>
 	<fieldset>
 		<legend class="mb-2 text-sm font-medium">{m.sidebar_group_heading()}</legend>
 		{#each value.sidebarGroupingFields as entry, index (entry.field)}

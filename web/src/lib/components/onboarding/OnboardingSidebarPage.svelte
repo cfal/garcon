@@ -10,6 +10,7 @@
 	const preferences = $derived({
 		sidebarGroupingFields: settings.sidebarGroupingFields,
 		sidebarNestDelegatedChats: settings.sidebarNestDelegatedChats,
+		sidebarSeparateArchivedBranches: settings.sidebarSeparateArchivedBranches,
 		sidebarInactivityDuration: settings.sidebarInactivityDuration,
 		sidebarGroupNestedProjectPaths: settings.sidebarGroupNestedProjectPaths,
 		sidebarChatItemLayout: settings.sidebarChatItemLayout,

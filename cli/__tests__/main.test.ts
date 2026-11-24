@@ -69,7 +69,8 @@ function acceptedControlResponse(_input: string | URL | Request, init?: RequestI
     turnId: 'turn-1',
     status: 'accepted',
     acceptedAt: new Date().toISOString(),
-    parentChat: null,
+    parentChatId: null,
+    lineage: null,
   });
 }
 
@@ -91,6 +92,7 @@ function controlSnapshotResponse(): Response {
       thinkingMode: 'none',
       projectPath: '/project',
       tags: [],
+      activityStatus: null,
       canReloadFromNativeHistory: false,
       activity: { createdAt: null, lastActivityAt: null },
     },
@@ -273,12 +275,12 @@ describe('main', () => {
       readStdin: async () => { throw new Error('Unexpected stdin'); },
       fetch: async (input, init) => {
         requests.push({ url: String(input), method: init?.method, body: JSON.parse(String(init?.body)) });
-        return Response.json({ success: true, chatId: CHAT_ID, parentChat: null, changed: true });
+        return Response.json({ success: true, chatId: CHAT_ID, parentChatId: null, changed: true });
       },
     });
     expect(result).toBe(0);
     expect(requests).toEqual([{ url: 'http://127.0.0.1:8080/api/v1/chats/parent', method: 'PUT', body: { chatId: CHAT_ID, parentChatId: null } }]);
-    expect(JSON.parse(capture.results[0]!)).toMatchObject({ parentChat: null, changed: true });
+    expect(JSON.parse(capture.results[0]!)).toMatchObject({ parentChatId: null, changed: true });
   });
 
   test('routes transcript search administration through typed settings and search endpoints', async () => {
@@ -483,6 +485,7 @@ describe('main', () => {
             thinkingMode: 'none',
             projectPath: '/project/that/need/not/exist',
             tags: ['cli'],
+            activityStatus: null,
             canReloadFromNativeHistory: false,
             activity: { createdAt: null, lastActivityAt: null },
           },
@@ -742,7 +745,7 @@ describe('main', () => {
         if (url.pathname === '/api/v1/chats/start') {
           submitted = JSON.parse(String(init?.body)) as Record<string, unknown>;
           return Response.json({ success: true, commandType: 'chat-start', clientRequestId: submitted.clientRequestId,
-            chatId: submitted.chatId, turnId: 'synthetic-turn', status: 'accepted', acceptedAt: TS, parentChat: null, chat: null });
+            chatId: submitted.chatId, turnId: 'synthetic-turn', status: 'accepted', acceptedAt: TS, parentChatId: null, lineage: null, chat: null });
         }
         throw new Error(`Unexpected request: ${url.pathname}`);
       },
@@ -819,7 +822,8 @@ describe('main', () => {
             turnId: 'turn-start',
             status: 'accepted',
             acceptedAt: TS,
-            parentChat: { chatId: '1785337200123455', relation: 'delegation' },
+            parentChatId: '1785337200123455',
+            lineage: null,
             chat: null,
           });
         }
@@ -842,7 +846,7 @@ describe('main', () => {
       parentChatId: '1785337200123455',
     });
     expect(capture.stdout.join('')).toBe(`${JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'start-async',
       workspace: 'default',
       serverInstanceId: 'instance',
@@ -854,7 +858,8 @@ describe('main', () => {
         status: 'accepted',
         acceptedAt: TS,
       },
-      parentChat: { chatId: '1785337200123455', relation: 'delegation' },
+      parentChatId: '1785337200123455',
+      lineage: null,
       titleUpdate: { status: 'succeeded', title: 'Async review', changed: true },
     }, null, 2)}\n`);
   });
@@ -880,7 +885,7 @@ describe('main', () => {
         const request = JSON.parse(String(init?.body));
         return Response.json({ success: true, commandType: kind === 'start' ? 'chat-start' : 'agent-run',
           clientRequestId: request.clientRequestId, chatId: request.chatId, turnId: 'turn-accepted',
-          status: 'accepted', acceptedAt: TS, parentChat: null, chat: null });
+          status: 'accepted', acceptedAt: TS, parentChatId: null, lineage: null, chat: null });
       },
     });
     expect(exitCode).toBe(130);
@@ -911,7 +916,8 @@ describe('main', () => {
             turnId: 'turn-start',
             status: 'accepted',
             acceptedAt: TS,
-            parentChat: null,
+            parentChatId: null,
+            lineage: null,
             chat: null,
           });
         }
@@ -930,7 +936,7 @@ describe('main', () => {
     expect(exitCode).toBe(0);
     expect(capture.diagnostics).toEqual([]);
     expect(JSON.parse(capture.results[0]!)).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'start',
       workspace: 'default',
       serverInstanceId: 'instance',
@@ -942,7 +948,8 @@ describe('main', () => {
         status: 'accepted',
         acceptedAt: TS,
       },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       titleUpdate: { status: 'not-requested' },
       turnReceipt: {
         state: 'completed',
@@ -989,7 +996,8 @@ describe('main', () => {
           turnId: 'turn-async',
           status: 'accepted',
           acceptedAt: TS,
-          parentChat: null,
+          parentChatId: null,
+          lineage: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -999,7 +1007,7 @@ describe('main', () => {
     expect(exitCode).toBe(0);
     expect(capture.stderr.join('')).toBe('');
     expect(capture.stdout.join('')).toBe(`${JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'resume-async',
       workspace: 'default',
       serverInstanceId: 'instance',
@@ -1011,7 +1019,8 @@ describe('main', () => {
         status: 'accepted',
         acceptedAt: TS,
       },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       delivery: 'new-turn',
     }, null, 2)}\n`);
   });
@@ -1037,7 +1046,8 @@ describe('main', () => {
             turnId: 'turn-sync',
             status: 'accepted',
             acceptedAt: TS,
-            parentChat: null,
+            parentChatId: null,
+            lineage: null,
           });
         }
         if (pathname === '/api/v1/chats/turn-receipt') {
@@ -1060,7 +1070,7 @@ describe('main', () => {
 
     expect(exitCode).toBe(1);
     expect(JSON.parse(capture.results[0]!)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'resume',
       workspace: 'default',
       serverInstanceId: 'instance',
@@ -1070,7 +1080,8 @@ describe('main', () => {
         chatId: CHAT_ID,
         turnId: 'turn-sync',
       },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       delivery: 'new-turn',
       titleUpdate: { status: 'not-requested' },
       turnReceipt: {
@@ -1131,7 +1142,8 @@ describe('main', () => {
           turnId: 'turn-active',
           status: 'accepted',
           acceptedAt: new Date().toISOString(),
-          parentChat: null,
+          parentChatId: null,
+          lineage: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -1166,15 +1178,15 @@ describe('main', () => {
       output: capture.output,
       fetch: async (_input, init) => {
         forkRequest = JSON.parse(String(init?.body)) as Record<string, string | boolean>;
-        const parentChat = {
-          chatId: CHAT_ID,
-          relation: 'fork' as const,
+        const lineage = {
+          sourceChatId: CHAT_ID,
+          kind: 'fork' as const,
           transcriptViewId: 'view-1',
           ordinal: 3,
         };
         return Response.json({
           success: true,
-          chat: chat({ id: String(forkRequest.chatId), parentChat }),
+          chat: chat({ id: String(forkRequest.chatId), lineage }),
         });
       },
     });
@@ -1185,14 +1197,15 @@ describe('main', () => {
       allowHandoffFork: true,
     });
     expect(JSON.parse(capture.results[0]!)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'fork',
       workspace: 'default',
       serverInstanceId: 'instance',
       sourceChatId: CHAT_ID,
       chat: {
         id: forkRequest?.chatId,
-        parentChat: { chatId: CHAT_ID, relation: 'fork' },
+        parentChatId: null,
+        lineage: { sourceChatId: CHAT_ID, kind: 'fork' },
       },
     });
     expect(capture.diagnostics).toEqual([]);
@@ -1214,9 +1227,9 @@ describe('main', () => {
           throw new Error('fork-async must not poll');
         }
         forkRequest = JSON.parse(String(init?.body)) as Record<string, string>;
-        const parentChat = {
-          chatId: CHAT_ID,
-          relation: 'fork' as const,
+        const lineage = {
+          sourceChatId: CHAT_ID,
+          kind: 'fork' as const,
           transcriptViewId: 'view-1',
           ordinal: 3,
         };
@@ -1228,8 +1241,9 @@ describe('main', () => {
           turnId: 'turn-fork',
           status: 'accepted',
           acceptedAt: TS,
-          parentChat,
-          chat: chat({ id: forkRequest.chatId, parentChat }),
+          parentChatId: null,
+          lineage,
+          chat: chat({ id: forkRequest.chatId, lineage }),
         });
       },
     });
@@ -1241,7 +1255,7 @@ describe('main', () => {
       command: 'Continue in the fork',
     });
     expect(JSON.parse(capture.results[0]!)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'fork-async',
       sourceChatId: CHAT_ID,
       receipt: {
@@ -1249,7 +1263,8 @@ describe('main', () => {
         chatId: forkRequest?.chatId,
         turnId: 'turn-fork',
       },
-      parentChat: { chatId: CHAT_ID, relation: 'fork' },
+      parentChatId: null,
+      lineage: { sourceChatId: CHAT_ID, kind: 'fork' },
       chat: { id: forkRequest?.chatId },
     });
   });
@@ -1274,9 +1289,9 @@ describe('main', () => {
           );
         }
         forkRequest = JSON.parse(String(init?.body)) as Record<string, string>;
-        const parentChat = {
-          chatId: CHAT_ID,
-          relation: 'fork' as const,
+        const lineage = {
+          sourceChatId: CHAT_ID,
+          kind: 'fork' as const,
           transcriptViewId: 'view-1',
           ordinal: 3,
         };
@@ -1288,8 +1303,9 @@ describe('main', () => {
           turnId: 'turn-fork',
           status: 'accepted',
           acceptedAt: TS,
-          parentChat,
-          chat: chat({ id: forkRequest.chatId, parentChat }),
+          parentChatId: null,
+          lineage,
+          chat: chat({ id: forkRequest.chatId, lineage }),
         });
       },
     });
@@ -1297,7 +1313,7 @@ describe('main', () => {
     expect(exitCode).toBe(0);
     expect(forkRequest?.command).toBe('Continue from stdin.\n');
     expect(JSON.parse(capture.results[0]!)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'fork',
       sourceChatId: CHAT_ID,
       receipt: { chatId: forkRequest?.chatId, turnId: 'turn-fork' },
@@ -1433,7 +1449,7 @@ describe('main', () => {
     expect(exitCode).toBe(0);
     expect(capture.diagnostics).toEqual([]);
     expect(JSON.parse(capture.results[0]!)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'add-row',
       workspace: 'default',
       serverInstanceId: 'instance',
@@ -1595,7 +1611,8 @@ describe('main', () => {
             version: 0,
             updatedAt: null,
           },
-          parentChat: null,
+          parentChatId: null,
+          lineage: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -1632,7 +1649,8 @@ describe('main', () => {
           acceptedAt: TS,
           outcome: 'already-idle',
           control,
-          parentChat: null,
+          parentChatId: null,
+          lineage: null,
         });
       },
       discoverRuntime: stubDiscovery,
@@ -1642,7 +1660,7 @@ describe('main', () => {
     expect(exitCode).toBe(0);
     expect(capture.stderr.join('')).toBe('');
     expect(capture.stdout.join('')).toBe(`${JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       command: 'stop',
       workspace: 'default',
       serverInstanceId: 'instance',
@@ -1653,7 +1671,8 @@ describe('main', () => {
         status: 'accepted',
         acceptedAt: TS,
       },
-      parentChat: null,
+      parentChatId: null,
+      lineage: null,
       outcome: 'already-idle',
       control,
     }, null, 2)}\n`);
@@ -1684,7 +1703,8 @@ describe('main', () => {
             version: 0,
             updatedAt: null,
           },
-          parentChat: null,
+          parentChatId: null,
+          lineage: null,
         });
       },
       discoverRuntime: stubDiscovery,

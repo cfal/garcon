@@ -7,7 +7,7 @@ import { ApiError } from '$lib/api/client';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
-import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { localExecutor, remoteExecutor, localScope } from '$lib/executors/__tests__/fixtures';
 import { tick } from 'svelte';
 
 vi.mock('$lib/api/chats', async (importOriginal) => {
@@ -69,6 +69,7 @@ describe('Sidebar dialogs', () => {
 			vi.useFakeTimers();
 			vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 			vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+				...localScope,
 				worktrees: [makeWorktree('/workspace/project-feature', 'feature')],
 			});
 			const panel = document.createElement('div');
@@ -327,6 +328,7 @@ describe('Sidebar dialogs', () => {
 		const selectedPath = '/workspace/repo-feature';
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
+			...localScope,
 			worktrees: [
 				makeWorktree('/workspace/repo', 'main', true),
 				makeWorktree(selectedPath, 'feature'),
@@ -418,7 +420,7 @@ describe('Sidebar dialogs', () => {
 
 			expect(signal?.aborted).toBe(true);
 			expect(screen.queryByRole('dialog', { name: 'Select worktree' })).toBeNull();
-			request.resolve({ worktrees: [makeWorktree('/workspace/stale', 'stale')] });
+			request.resolve({ ...localScope, worktrees: [makeWorktree('/workspace/stale', 'stale')] });
 			await Promise.resolve();
 		} finally {
 			rendered.unmount();

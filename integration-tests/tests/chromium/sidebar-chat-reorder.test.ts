@@ -141,24 +141,24 @@ async function dragRelative(
 ): Promise<ReorderChatResponse> {
   const source = page.locator(`[data-sidebar-virtual-row="${input.sourceId}"]`);
   const target = page.locator(`[data-sidebar-virtual-row="${input.targetId}"]`);
-  const sourceBox = await source.boundingBox();
+  // Menu dismissal can leave the body pointer-locked after the rows update.
+  await source.hover();
   const targetBox = await target.boundingBox();
-  if (!sourceBox || !targetBox) throw new Error('Missing sidebar drag geometry.');
+  if (!targetBox) throw new Error('Missing sidebar drag geometry.');
 
-  const responsePromise = page.waitForResponse((response) => isReorderRequest(response.request()), {
-    timeout: 10_000,
-  });
-  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(
     targetBox.x + targetBox.width / 2,
     targetBox.y + targetBox.height * (input.edge === 'top' ? 0.2 : 0.8),
     { steps: 12 },
   );
-  await page.waitForTimeout(300);
-  await page.mouse.up();
+  await page.locator(`[data-sidebar-virtual-row="${input.sourceId}"].opacity-45`).waitFor();
+  await page.locator('[data-sidebar-branch-drop-indicator]').waitFor();
+  const [response] = await Promise.all([
+    page.waitForResponse((response) => isReorderRequest(response.request()), { timeout: 10_000 }),
+    page.mouse.up(),
+  ]);
 
-  const response = await responsePromise;
   const parsed = parseReorderChatResponse(await response.json());
   if (!parsed) throw new Error('Invalid chat reorder response.');
   return parsed;
@@ -214,7 +214,7 @@ async function expectRelativeDrag(
       .getAttribute('class'),
   ).not.toContain('opacity-45');
   expect(
-    await fixture.page.locator(`${CHAT_ROW_SELECTOR} > div.pointer-events-none`).count(),
+    await fixture.page.locator('[data-sidebar-branch-drop-indicator]').count(),
   ).toBe(0);
   return expectedOrder;
 }
@@ -344,6 +344,7 @@ async function withSidebarChromiumFixture<T>(
       return {
         reorderExchanges: fixture.reorderExchanges,
         sortExchanges: fixture.sortExchanges,
+        bodyPointerEvents: await fixture.page.evaluate(() => getComputedStyle(document.body).pointerEvents).catch(() => null),
         sidebarOrder: await sidebarOrder(fixture.page).catch(() => []),
         serverOrder: await normalOrder(fixture.integration).catch(() => []),
         dimmedRows: await fixture.page
@@ -351,7 +352,7 @@ async function withSidebarChromiumFixture<T>(
           .evaluateAll((rows) => rows.map((row) => (row as HTMLElement).dataset.sidebarVirtualRow))
           .catch(() => []),
         dropIndicatorCount: await fixture.page
-          .locator(`${CHAT_ROW_SELECTOR} > div.pointer-events-none`)
+          .locator('[data-sidebar-branch-drop-indicator]')
           .count()
           .catch(() => -1),
       };
@@ -436,6 +437,7 @@ describe('Chromium sidebar chat reorder', () => {
       await page.addInitScript(seedLocalSettings, {
         sidebarSortMode: 'manual',
         sidebarNestDelegatedChats: true,
+        collapseDelegatedChatsByDefault: false,
       });
       const { a, b, a1, a2, b1, canonical } = await createSidebarDelegationFixture(integration);
       await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);

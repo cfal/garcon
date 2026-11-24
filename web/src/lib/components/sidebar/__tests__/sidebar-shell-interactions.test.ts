@@ -48,13 +48,15 @@ function createChat(
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'draft',
 		lastMessage: `${title} preview`,
 		tags: [],
 		firstMessage: `${title} first`,
 		...overrides,
-		parentChat: overrides.parentChat ?? null,
+		parentChatId: overrides.parentChatId ?? null,
+		lineage: overrides.lineage ?? null,
 		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
 	};
 }
@@ -503,11 +505,8 @@ describe('sidebar search dialog flow', () => {
 		expect(document.querySelector('[data-slot="sidebar"]')?.className).toContain(
 			'sidebar-reduce-motion',
 		);
-		const processingIndicator = document.querySelector(
-			'[data-slot="sidebar-chat-processing-indicator"]',
-		);
-		expect(processingIndicator).toBeTruthy();
-		expect(processingIndicator?.closest('.sidebar-reduce-motion')).toBeTruthy();
+		const processingIndicator = screen.getByTitle('Chat is processing');
+		expect(processingIndicator.closest('.sidebar-reduce-motion')).toBeTruthy();
 	});
 });
 

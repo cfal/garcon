@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { PERMISSION_MODE_VALUES, THINKING_MODE_VALUES } from '@garcon/common/chat-modes';
 import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 import { CODEX_MODELS } from '@garcon/common/models';
+import { CODEX_SPEED_SETTING, codexSpeed } from './agents/codex/service-tier.js';
 import { retargetNativeSeedReceipt } from '@garcon/common/transcript-seed';
 import {
   AgentIntegrationError,
@@ -37,6 +38,7 @@ import {
   createCodexAuthStatusResolver,
   resolveCodexExecAuthStatus,
 } from './agents/codex/codex-auth.js';
+import { createCodexCliUpdates } from './agents/codex/cli-updates.js';
 import { CodexExecution } from './agents/codex/execution.js';
 import { createCodexForkTranscriptRewriter } from './agents/codex/fork-transcript.js';
 import {
@@ -52,6 +54,7 @@ import {
   buildCodexHostProviderConfig,
 } from './agents/codex/app-server/endpoint-runtime.js';
 import { CodexAppServerClient } from './agents/codex/app-server/client.js';
+import { CODEX_CLI_NOT_FOUND, resolveCodexCli } from './agents/codex/app-server/cli.js';
 import { CodexAppServerRuntime } from './agents/codex/app-server/runtime.js';
 import { runSingleQuery } from './agents/codex/app-server/run-single-query.js';
 import { CodexSkillDiscovery } from './agents/codex/slash-command-discovery.js';
@@ -69,6 +72,7 @@ const CODEX_DESCRIPTOR = {
   requiresNativePathForProjectPathUpdate: false,
   supportedEndpointProtocols: ['openai-compatible'],
   configuration: [
+    { key: 'GARCON_CODEX_CLI', source: 'environment', description: 'Codex CLI executable.' },
     { key: 'OPENAI_API_KEY', source: 'environment', description: 'OpenAI API key.' },
     { key: 'CODEX_API_KEY', source: 'environment', description: 'Codex exec API key.' },
     { key: 'OPENAI_BASE_URL', source: 'environment', description: 'OpenAI API base URL.' },
@@ -98,6 +102,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates = null;
   readonly usageHistory: NonNullable<AgentIntegration['usageHistory']>;
+  readonly cliUpdates: NonNullable<AgentIntegration['cliUpdates']>;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -132,7 +137,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       skillDiscovery,
     });
     const login = new CliLoginController({
-      command: () => ['codex', 'login', '--device-auth'],
+      command: () => [resolveCodexCli().command, 'login', '--device-auth'],
       mode: 'device-code',
       logger,
       cwd: os.homedir(),
@@ -143,8 +148,8 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.settings = createVersionedSettings({
       ownerId: 'codex',
       schemaVersion: 1,
-      defaults: {},
-      descriptors: [],
+      defaults: { speed: 'standard' },
+      descriptors: [CODEX_SPEED_SETTING],
     });
     const execution = new CodexExecution(
       host,
@@ -173,6 +178,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       format: codexUsageFormat,
       roots: () => [path.join(config.home(), 'sessions'), path.join(config.home(), 'archived_sessions')],
     });
+    this.cliUpdates = createCodexCliUpdates({ config, logger });
     // Codex compacts natively through its app-server; the execution object owns
     // the call, the facet advertises that it exists.
     this.compaction = {
@@ -199,6 +205,16 @@ export default class CodexAgentIntegration implements AgentIntegration {
     this.auth = {
       async status(signal) {
         signal.throwIfAborted();
+        if (!Bun.which(resolveCodexCli().command)) {
+          authStatus.invalidate();
+          return {
+            authenticated: false,
+            canReauth: false,
+            label: 'Codex',
+            source: 'none',
+            detail: CODEX_CLI_NOT_FOUND,
+          };
+        }
         const status = await authStatus.refresh(signal);
         return {
           authenticated: status.authenticated,
@@ -296,6 +312,9 @@ export default class CodexAgentIntegration implements AgentIntegration {
     };
     this.singleQuery = {
       async run(request) {
+        if (codexSpeed(request.settings) !== 'standard') {
+          throw new AgentIntegrationError('INVALID_SETTINGS', 'Codex background generation supports Standard speed only.', false);
+        }
         const runtimeOptions = singleQueryRuntimeOptions(request);
         try {
           return await withSingleQueryControl(runtimeOptions, async (signal) => {
@@ -373,9 +392,10 @@ async function forkCodexNativeSession(
   let result;
   try {
     result = await runtime.forkSession({
+      speed: codexSpeed(request.settings),
       sourceSession: {
         projectPath: request.source.projectPath,
-        model: request.source.model,
+        model: request.model,
         agentSessionId: request.source.agentSessionId ?? source.agentSessionId,
         nativePath: source.path,
       },

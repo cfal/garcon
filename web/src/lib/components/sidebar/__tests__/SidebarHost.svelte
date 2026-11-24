@@ -9,7 +9,8 @@
 	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
+	import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 	import Sidebar from '../Sidebar.svelte';
 	import SidebarDisplayDialog from '../SidebarDisplayDialog.svelte';
 	import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
@@ -35,7 +36,7 @@
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
-	import type { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte';
+	import { SidebarProjectCollapseStore } from '$lib/sidebar/projects/sidebar-project-collapse.svelte';
 	import type {
 		SidebarInactivityDuration,
 		SidebarSortMode,
@@ -58,6 +59,7 @@
 		autoLoadSavedSearches?: boolean;
 		sidebarGroupingFields?: SidebarGroupingSelection[];
 		sidebarNestDelegatedChats?: boolean;
+		sidebarSeparateArchivedBranches?: boolean;
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: ChatItemLayout;
@@ -66,7 +68,7 @@
 		chatListAutohideAvailable?: boolean;
 		chatListDock?: ChatListDock;
 		reduceMotion?: boolean;
-		collapsedProjectKeys?: Set<string>;
+		collapseDelegatedChatsByDefault?: boolean;
 		sidebarSortMode?: SidebarSortMode;
 		sidebarSearchResultSort?: ChatSearchSort;
 		onQuietRefresh?: () => Promise<void> | void;
@@ -88,6 +90,7 @@
 		autoLoadSavedSearches = true,
 		sidebarGroupingFields = [{ field: 'project', enabled: true }],
 		sidebarNestDelegatedChats = false,
+		sidebarSeparateArchivedBranches = false,
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'detailed',
@@ -96,7 +99,7 @@
 		chatListAutohideAvailable = false,
 		chatListDock = 'left',
 		reduceMotion = false,
-		collapsedProjectKeys = new Set<string>(),
+		collapseDelegatedChatsByDefault = false,
 		sidebarSortMode = 'manual',
 		sidebarSearchResultSort = 'relevance',
 		onQuietRefresh = () => Promise.resolve(),
@@ -160,9 +163,16 @@
 		get sidebarNestDelegatedChats() {
 			return sidebarNestDelegatedChats;
 		},
+		get collapseDelegatedChatsByDefault() {
+			return collapseDelegatedChatsByDefault;
+		},
+		get sidebarSeparateArchivedBranches() {
+			return sidebarSeparateArchivedBranches;
+		},
 		setSidebarDisplay(value: SidebarDisplayPreferences) {
 			sidebarGroupingFields = value.sidebarGroupingFields;
 			sidebarNestDelegatedChats = value.sidebarNestDelegatedChats;
+			sidebarSeparateArchivedBranches = value.sidebarSeparateArchivedBranches;
 			sidebarInactivityDuration = value.sidebarInactivityDuration;
 			sidebarGroupNestedProjectPaths = value.sidebarGroupNestedProjectPaths;
 			sidebarChatItemLayout = value.sidebarChatItemLayout;
@@ -221,18 +231,15 @@
 
 	setMinuteClock({ currentTime: new Date('2025-01-02T00:00:00.000Z') } as never);
 
-	setSidebarProjectCollapse(untrack(() => projectCollapse) ?? {
-		get collapsedProjectKeys() {
-			return collapsedProjectKeys;
-		},
-		toggle(projectKey: string) {
-			const next = new Set(collapsedProjectKeys);
-			if (next.has(projectKey)) next.delete(projectKey);
-			else next.add(projectKey);
-			collapsedProjectKeys = next;
-		},
-		pruneToRoster() {},
-	} as never);
+	const providedCollapse = untrack(() => projectCollapse);
+	const collapse = providedCollapse ?? new SidebarProjectCollapseStore();
+	if (!providedCollapse) {
+		onDestroy(() => {
+			collapse.destroy();
+			localStorage.removeItem(LOCAL_STORAGE_KEYS.sidebarProjectCollapse);
+		});
+	}
+	setSidebarProjectCollapse(collapse);
 
 	function createSidebarSearchContext(): SidebarSearchStore {
 		return sidebarSearch ?? createDefaultSidebarSearchContext();
@@ -290,12 +297,15 @@
 			: undefined,
 		groupingFields: sidebarGroupingFields,
 		nestDelegatedChats: sidebarNestDelegatedChats,
+		separateArchivedBranches: sidebarSeparateArchivedBranches,
 		currentTime: new Date('2025-01-02T00:00:00.000Z'),
 		inactivityDuration: sidebarInactivityDuration,
 		sortMode: sidebarSortMode,
 		pinnedInsertPosition: 'top' as const,
 		groupNestedProjectPaths: sidebarGroupNestedProjectPaths,
-		collapsedProjectKeys,
+		collapsedProjectKeys: collapse.collapsedProjectKeys,
+		expandedDelegationKeys: collapse.expandedDelegationKeys,
+		collapseDelegatedChatsByDefault,
 		isChatOptimisticallyArchived: (chatId: string) =>
 			chatSessions?.isChatOptimisticallyArchived(chatId) ?? false,
 	});

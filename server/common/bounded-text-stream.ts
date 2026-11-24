@@ -1,28 +1,29 @@
-async function readBoundedTextStream(
+// Drains the stream while retaining only its bounded prefix. Notifies on the first discarded byte.
+export async function readTextStreamPrefix(
   stream: ReadableStream<Uint8Array> | null,
   maxBytes: number,
-  createLimitError?: () => Error,
+  onTruncate?: () => void,
 ): Promise<string> {
   if (!stream) return '';
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   const chunks: string[] = [];
-  let byteCount = 0;
+  let remainingBytes = maxBytes;
   try {
     while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      const remainingBytes = maxBytes - byteCount;
-      if (next.value.byteLength > remainingBytes) {
-        if (createLimitError) throw createLimitError();
-        if (remainingBytes > 0) {
-          chunks.push(decoder.decode(next.value.subarray(0, remainingBytes), { stream: true }));
-          byteCount = maxBytes;
-        }
-        continue;
+      const { done, value } = await reader.read();
+      if (done) break;
+      let chunk = value;
+      if (chunk.byteLength > remainingBytes) {
+        onTruncate?.();
+        onTruncate = undefined;
+        if (remainingBytes <= 0) continue;
+        chunk = chunk.subarray(0, remainingBytes);
+        remainingBytes = 0;
+      } else {
+        remainingBytes -= chunk.byteLength;
       }
-      byteCount += next.value.byteLength;
-      chunks.push(decoder.decode(next.value, { stream: true }));
+      chunks.push(decoder.decode(chunk, { stream: true }));
     }
     chunks.push(decoder.decode());
     return chunks.join('');
@@ -36,13 +37,5 @@ export function readTextStreamWithLimit(
   maxBytes: number,
   createLimitError: () => Error,
 ): Promise<string> {
-  return readBoundedTextStream(stream, maxBytes, createLimitError);
-}
-
-// Drains the stream while retaining only its bounded prefix.
-export function readTextStreamPrefix(
-  stream: ReadableStream<Uint8Array> | null,
-  maxBytes: number,
-): Promise<string> {
-  return readBoundedTextStream(stream, maxBytes);
+  return readTextStreamPrefix(stream, maxBytes, () => { throw createLimitError(); });
 }

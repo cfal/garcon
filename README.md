@@ -6,7 +6,7 @@
 <p align="center"><strong>Run the agents. See the work. Ship the change.</strong></p>
 
 <p align="center">
-  Garcon is a self-hosted visual workspace for coding agents. Run Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, and Pi side by side, coordinate their work, and move from prompt to reviewed commit without leaving the browser.
+  Garcon is a self-hosted visual workspace for coding agents. Run Claude Code, Codex, Cursor Agent, Google Antigravity, OpenCode, Amp, Factory Droid, and Pi side by side, coordinate their work, and move from prompt to reviewed commit without leaving the browser.
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@ Garcon runs agents, terminals, files, Git, and pull request commands on the host
 
 ## Install
 
-Requirements: [Bun](https://bun.sh/), `git`, a modern browser, and at least one coding agent CLI (signed in) or API provider. Pull request features also need an authenticated GitHub CLI (`gh`).
+Requirements: [Bun](https://bun.sh/), Git (2.29 or newer for Workbench Push), a modern browser, and at least one coding agent CLI (signed in) or API provider. Install the CLIs you use on each executor and put them on its service `PATH`. Source setup and prebuilt Garcon executables do not provision them; the Docker image does. Pull request features also need an authenticated GitHub CLI (`gh`).
 
 Choose one path:
 
@@ -48,7 +48,7 @@ bun run setup
 bun run start --project-base-dir ~/repos
 ```
 
-Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C.
+Replace `~/repos` with the folder that holds your projects. Open `http://127.0.0.1:8080`. The server stops when the terminal closes or you press Ctrl+C. Contributors running integration tests or the full `bun run check` also need `bun run setup:integration`; normal setup skips those test tools.
 
 Want to use your own domain, such as `https://garcon.example.com`? Interactive setup offers **Connect a custom domain with Cloudflare Tunnel** (optional, default No). The [Cloudflare Tunnel guide](docs/cloudflare-tunnel.md) covers prerequisites, background startup, Docker, and removal. You can also connect later, after starting Garcon and creating your account:
 
@@ -73,6 +73,10 @@ Starting with v0.4.0, [GitHub releases](https://github.com/cfal/garcon/releases)
 1. Open `http://127.0.0.1:8080`. On first launch, `/setup` asks you to create an account. Authentication is on by default.
 2. Open **Settings**. Coding agents use their existing CLI login; sign in from the agent's settings page if it shows **Not connected**. Add API endpoints under **Providers**.
 3. Start a chat and pick a project folder under your `--project-base-dir`.
+
+### Steering a running chat
+
+Send guidance with `/steer` or the Ctrl+Enter steering shortcut. In the tab that sent it, the bubble shows **Sending** while submission is unresolved. **Waiting to steer** means the server queued the guidance, not that the agent received it. Edit or remove it in the queue tray while it waits. The committed message appears without a waiting indicator. After guidance leaves the queue or is accepted directly, the local bubble disappears without fetching history or changing cache freshness. If its committed message was missed, it may stay absent until ordinary history or reconnect recovery. Disappearance does not prove cancellation or delivery. Reloading the tab drops the local bubble; restarting the server clears the queue. Local and remote executors behave the same way.
 
 ## Where Things Live
 
@@ -231,7 +235,7 @@ Stopping only the server process makes the loop restart it within about 10 secon
 ## Windows Notes
 
 - The default config folder is `%USERPROFILE%\.garcon`. Garcon ignores `HOME` on Windows, so Git Bash, PowerShell, and scheduled tasks share one folder. Set `GARCON_CONFIG_DIR` only to use a different location.
-- Codex runs from the native `codex.exe` bundled with Garcon. Set `GARCON_CODEX_CLI` only to use a different Codex build.
+- Install Codex CLI 0.171.0 or newer on each executor that uses it. Put the native `codex.exe` on the service's `PATH` or set `GARCON_CODEX_CLI` to its absolute path, particularly if your shell normally launches an npm shim.
 - Always run Garcon as the same non-administrator user. A copy started as administrator can leave files in the config folder that a normal-user copy cannot open.
 
 ## Troubleshooting
@@ -330,7 +334,7 @@ Garcon keeps that development loop coherent:
 
 ## Works With
 
-**Coding agents:** Claude Code, Codex, Cursor Agent, OpenCode, Amp, Factory Droid, and Pi.
+**Coding agents:** Claude Code, Codex, Cursor Agent, Google Antigravity, OpenCode, Amp, Factory Droid, and Pi.
 
 **Direct model access:** Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions compatible endpoints.
 
@@ -338,7 +342,13 @@ Garcon keeps that development loop coherent:
 
 Use an existing agent login or subscription where its CLI supports one, or configure API providers in Settings. Each chat keeps its own agent, model, effort, permission, provider, endpoint, and preamble settings where supported.
 
-Claude Code 2.1.238 or newer is required. Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
+In a Codex composer, use **Selected speed** (the gauge) to choose **Standard**, **Fast**, or **Ultrafast**. Fast and Ultrafast request faster routing for the same model and reasoning effort and use more credits or incur higher API charges. A change applies to subsequent turns, including queued prompts. Existing chats without a selection use Standard, regardless of the executor's `service_tier` setting. Background generation such as chat titles also uses Standard.
+
+Availability depends on your model, account, and workspace policy. Speed is saved as a preference, then checked when starting a turn, fork, or compaction. Fast and Ultrafast freshly resume the native session each time, adding startup latency but verifying the effective tier before inference. Unavailable tiers fail without falling back to Standard. Choose Standard or select a supported model rather than changing the executor's config. See [Codex speed settings](https://developers.openai.com/codex/speed).
+
+Changing speed does not affect an active operation. After Codex exhausts its own capacity retries, Fast and Ultrafast fail without an additional Garcon retry; submit again to recheck availability. Standard retains bounded automatic retries at its admitted speed, unless the native model or tier changed. Stop and submit again to use a new speed.
+
+Claude Code 2.1.238 or newer is required. Settings > Providers shows the installed Claude Code and Codex CLI versions on each executor and can update them in place; see [agent CLI updates](docs/agent-cli-updates.md). Model names ending in `[Nk]` set a per-chat auto-compaction window; see [Claude context windows](docs/claude-context-windows.md).
 
 ## Automate And Delegate
 

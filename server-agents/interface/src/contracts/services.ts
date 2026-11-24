@@ -41,6 +41,8 @@ export interface AgentReadiness {
 export interface AgentCatalog {
   snapshot(request: {
     readonly strict: boolean;
+    // A usable fallback can start a turn but cannot confirm that native discovery succeeded.
+    readonly requireNativeDiscovery?: true;
     readonly signal: AbortSignal;
     readonly timeoutMs?: number;
     readonly dispatchDeadline?: number;

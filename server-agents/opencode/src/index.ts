@@ -20,7 +20,7 @@ import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/sco
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createPathNativeSessionCodec } from '@garcon/server-agent-common/native-session/path-native-session';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
-import { singleQueryRuntimeOptions, withSingleQueryDirectory } from '@garcon/server-agent-common/shared/single-query-control';
+import { runIsolatedSingleQuery, singleQueryRuntimeOptions } from '@garcon/server-agent-common/shared/single-query-control';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createAgentProjectPathUpdates } from '@garcon/server-agent-common/execution/project-path-adapter';
 import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
@@ -89,6 +89,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
   readonly projectPathUpdates: NonNullable<AgentIntegration['projectPathUpdates']>;
   readonly usageHistory = null;
+  readonly cliUpdates = null;
   readonly catalog;
   readonly settings;
   readonly lifecycle;
@@ -165,23 +166,11 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
       },
     };
     this.singleQuery = {
-      async run(request) {
-        request.signal.throwIfAborted();
-        try {
-          return await withSingleQueryDirectory(request.signal, (directory) => runtime.runSingleQuery(request.prompt, {
-            model: request.model,
-            ...singleQueryRuntimeOptions(request),
-            projectPath: directory,
-          }));
-        } catch (error) {
-          if (error instanceof AgentIntegrationError) throw error;
-          throw new AgentIntegrationError(
-            'PROVIDER_FAILURE',
-            error instanceof Error ? error.message : String(error),
-            false,
-          );
-        }
-      },
+      run: (request) => runIsolatedSingleQuery(request, (directory) => runtime.runSingleQuery(request.prompt, {
+        model: request.model,
+        ...singleQueryRuntimeOptions(request),
+        projectPath: directory,
+      })),
     };
     this.lifecycle = createIntegrationLifecycle({
       start: () => runtime.startPurgeTimer(),

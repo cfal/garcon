@@ -19,10 +19,7 @@ import {
 import type { JsonObject, JsonValue } from '../../../common/json.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import { parseChatId, type ChatId } from '../../../common/chat-id.js';
-import {
-  parseParentChatRef,
-  type ParentChatRef,
-} from '../../../common/chat-parentage.js';
+import type { ChatLineage } from '../../../common/chat-parentage.js';
 import type { AgentName } from "../agents/session-types.js";
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
 import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
@@ -40,7 +37,8 @@ import {
   normalizeRegistryModes,
   parseCarryOverSegmentRefs,
   parsePendingPreambleBoundary,
-  requireNewParentChat,
+  requireChatLineage,
+  requireParentChatId,
 } from './registry-entry-codec.js';
 import { writeJsonFileAtomic, AtomicJsonWriteError } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
@@ -146,7 +144,8 @@ export interface NewChatRegistryEntry {
   // Every creation path writes an explicit already-resolved selection; there is
   // no persisted "inherit defaults" mode.
   preambleSelection: ChatPreambleSelection;
-  parentChat: ParentChatRef | null;
+  parentChatId: string | null;
+  lineage: ChatLineage | null;
 }
 
 export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
@@ -381,7 +380,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     carryOverMigrationQuarantine = null,
     pendingPreambleBoundary = null,
     preambleSelection,
-    parentChat,
+    parentChatId,
+    lineage,
   }: NewChatRegistryEntry): boolean {
     const chatId = parseChatId(id);
     if (!agentId) throw new Error('Agent not specified');
@@ -406,7 +406,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       pendingPreambleBoundary: normalizedPreambleBoundary,
       preambleSelection: normalizedPreambleSelection,
     });
-    const normalizedParentChat = requireNewParentChat(parentChat, chatId);
+    const normalizedParentChatId = requireParentChatId(parentChatId, chatId);
+    const normalizedLineage = requireChatLineage(lineage, chatId);
     assertSeedReceiptBinding({
       agentSessionId,
       nativeSeedReceipt: normalizedReceipt,
@@ -438,7 +439,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
             revision: normalizedPreambleSelection.revision,
             orderedPreambleIds: [...normalizedPreambleSelection.orderedPreambleIds],
           },
-          parentChat: normalizedParentChat,
+          parentChatId: normalizedParentChatId,
+          lineage: normalizedLineage,
         };
         this.#advanceChatMutationRevision(chatId);
         this.#emitChatAdded(chatId);
@@ -611,11 +613,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return this.#updateChatPhased(id, {}, { delegation: { parentChatId } });
   }
 
-  #delegationParent(id: string, existing: ChatRegistryEntry, parentChatId: string | null): ParentChatRef | null {
-    if (existing.parentChat && existing.parentChat.relation !== 'delegation') {
-      throw new DomainError('CHAT_PARENT_LINEAGE_LOCKED', 'Fork and handoff ancestry cannot be changed', 409);
-    }
-    if ((existing.parentChat?.chatId ?? null) === parentChatId) return existing.parentChat;
+  #delegationParent(id: string, existing: ChatRegistryEntry, parentChatId: string | null): string | null {
+    if (existing.parentChatId === parentChatId) return existing.parentChatId;
     if (parentChatId === null) return null;
     const sessions = this.getRegistry().sessions;
     if (!Object.hasOwn(sessions, parentChatId)) {
@@ -629,9 +628,9 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         throw new DomainError('CHAT_PARENT_CYCLE', 'The parent relationship would contain a cycle', 409);
       }
       visited.add(ancestor);
-      ancestor = sessions[ancestor]?.parentChat?.chatId ?? null;
+      ancestor = sessions[ancestor]?.parentChatId ?? null;
     }
-    return Object.freeze({ chatId: parentChatId, relation: 'delegation' });
+    return parentChatId;
   }
 
   async #updateChatPhased(
@@ -655,7 +654,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       const normalizedPatch = {
         ...this.#normalizeChatPatch(id, existing, patch),
         ...(observedProjectPath !== undefined ? { projectPath: observedProjectPath } : {}),
-        ...(delegation ? { parentChat: this.#delegationParent(id, existing, delegation.parentChatId) } : {}),
+        ...(delegation ? { parentChatId: this.#delegationParent(id, existing, delegation.parentChatId) } : {}),
       };
       const candidateEntry = { ...existing, ...normalizedPatch };
       assertPreambleBoundaryBinding(candidateEntry);
@@ -919,7 +918,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
   return {
     ...entry,
-    // Deeply frozen fields (parentChat, carryOverSegments) are safe to share; every
+    // Deeply frozen fields (lineage, carryOverSegments) are safe to share; every
     // other nested field must be copied here so callers cannot mutate registry
     // state through a handed-out entry. New entry fields declare themselves by
     // landing in one of these two groups.

@@ -59,12 +59,8 @@
 	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
 	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
 	import HandoffForkDialog from '$lib/components/chat/HandoffForkDialog.svelte';
-	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
+	import AppShellProjectPathDialog from './AppShellProjectPathDialog.svelte';
 	import ChatParentDialog from '$lib/components/chat/ChatParentDialog.svelte';
-	import {
-		executorPinnedProjectPaths,
-		togglePinnedProjectPathOptimistically,
-	} from '$lib/project-paths/pinned-project-path-settings.js';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import SidebarSearchDialogs from '$lib/components/sidebar/search/SidebarSearchDialogs.svelte';
@@ -136,6 +132,7 @@
 			return sessions.selectedChatId;
 		},
 		projectPathRevision: (chatId) => sessions.projectPathRevision(chatId),
+		pendingSettings: (id) => sessions.settingsMutations.pendingFor(id),
 		onQuietRefresh: quietRefresh,
 		isArchiveMutationPending: (chatId) => sessions.isArchiveMutationPending(chatId),
 		startArchivingChats: (chatIds) => archiveUndo.startArchivingChats(chatIds),
@@ -481,9 +478,7 @@
 		void chatNavigation.showChatInCurrentWindow(targetId, { navigate: true });
 	}
 
-	// Applies the same store mutations the ChatSessionDeletedWsMessage handler
-	// would apply once the server broadcast arrives. Running it eagerly lets
-	// the sidebar and URL update without waiting for the HTTP round-trip.
+	// Updates navigation immediately; only a confirmed deletion retires the saved branch choice.
 	function locallyDeleteChat(chatId: string) {
 		if (!sessions.hasChat(chatId)) return;
 		const wasSelected = sessions.selectedChatId === chatId;
@@ -920,22 +915,7 @@
 	onConfirm={() => chatActionController.handoffForkConfirmation.confirm()}
 />
 
-<ChatProjectPathDialog
-	projectPathDialog={chatActionDialogs.chatProjectPathDialog}
-	projectBasePath={appShell.projectBasePath}
-	pinnedProjectPaths={executorPinnedProjectPaths(
-		remoteSettings.snapshot,
-		chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
-	)}
-	onTogglePinnedProjectPath={async (path) => {
-		await togglePinnedProjectPathOptimistically(remoteSettings, path, {
-			executorId: chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
-		});
-	}}
-	{isMobile}
-	onClose={() => chatActionDialogs.closeProjectPathDialog()}
-	onConfirm={(target, projectPath) => chatActionController.updateProjectPath(target, projectPath)}
-/>
+<AppShellProjectPathDialog dialogs={chatActionDialogs} controller={chatActionController} {isMobile} />
 
 <ChatParentDialog
 	parentDialog={chatActionDialogs.parentDialog}

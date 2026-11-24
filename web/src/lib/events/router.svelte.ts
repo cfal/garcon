@@ -21,6 +21,7 @@ import {
 	ChatSessionDeletedWsMessage,
 	ChatReadUpdatedV1Message,
 	ChatListRefreshRequestedMessage,
+	ChatActivityUpdatedMessage,
 } from '$shared/ws-events';
 import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import type { ChatMessage, PermissionMode } from '$lib/types/chat';
@@ -76,7 +77,7 @@ export type EventRouterSessionsStore = Pick<
 	| 'patchPreview'
 	| 'patchActivity'
 	| 'quietRefreshChats'
-	| 'removeChat'
+	| 'applyServerDeletion'
 	| 'patchChat'
 	| 'reconcileProcessing'
 	| 'isChatProcessing'
@@ -279,7 +280,7 @@ function buildDispatch(
 	};
 
 	const sidebarCtx: SidebarContext = {
-		removeChat: (chatId) => stores.sessions.removeChat(chatId),
+		removeChat: (chatId) => stores.sessions.applyServerDeletion(chatId),
 		navigateAwayFromChat: stores.navigation.navigateAwayFromChat,
 		patchChatTitle: (chatId, title) => stores.sessions.patchChat(chatId, { title }),
 		patchChatProjectPath: (chatId, patch) => stores.sessions.patchChat(chatId, patch),
@@ -293,15 +294,18 @@ function buildDispatch(
 	const transientTranscriptViews = new Map<string, string>();
 
 	const refreshTransientFeed = (chatId: string, requestedTranscriptViewId: string) => {
-		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
-		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId) return;
-		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
 		const previousTranscriptViewId =
 			stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
+		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
+		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId
+			&& previousTranscriptViewId !== requestedTranscriptViewId) return;
+		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
+		const response = stores.conversationUi.captureExecutionResponse();
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
-				if (transientTranscriptViews.get(chatId) !== requestedTranscriptViewId) return;
-				const result = stores.conversationUi.setTransientFeedFromSnapshot(snapshot.transientFeed);
+				const currentView = transientTranscriptViews.get(chatId);
+				if (currentView !== requestedTranscriptViewId && currentView !== snapshot.transientFeed.transcriptViewId) return;
+				const result = response.setTransientFeedFromSnapshot(snapshot.transientFeed);
 				if (result.kind !== 'applied') return;
 				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;
 				transientTranscriptViews.set(chatId, snapshotTranscriptViewId);
@@ -397,6 +401,11 @@ function buildDispatch(
 
 		'chat-title-updated': (msg) => {
 			if (msg instanceof ChatTitleUpdatedMessage) handleChatTitle(msg, sidebarCtx);
+		},
+		'chat-activity-updated': (msg) => {
+			if (msg instanceof ChatActivityUpdatedMessage) {
+				stores.sessions.patchChat(msg.chatId, { activityStatus: msg.activityStatus });
+			}
 		},
 		'chat-project-path-updated': (msg) => {
 			if (msg instanceof ChatProjectPathUpdatedMessage)

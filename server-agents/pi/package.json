@@ -8,17 +8,13 @@
   "dependencies": {
     "@garcon/common": "workspace:*",
     "@garcon/server-agent-common": "workspace:*",
-    "@garcon/server-agent-interface": "workspace:*",
-    "@earendil-works/pi-agent-core": "1.5.2",
-    "@earendil-works/pi-ai": "1.5.2",
-    "@earendil-works/pi-coding-agent": "1.5.2",
-    "@earendil-works/pi-tui": "1.5.2"
+    "@garcon/server-agent-interface": "workspace:*"
   },
   "devDependencies": { "@types/bun": "^1.4.3", "typescript": "^6.0.3" },
   "garconBuild": {
     "apiVersion": 2,
     "integrationId": "pi",
-    "preMainModules": ["./src/build/prepare-compiled-runtime.ts"],
-    "embeddedDependencyMetadata": ["@earendil-works/pi-coding-agent/package.json"]
+    "preMainModules": [],
+    "embeddedDependencyMetadata": []
   }
 }

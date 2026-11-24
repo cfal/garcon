@@ -1,6 +1,7 @@
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import type { CodexStartRequest } from '../runtime-types.js';
+import type { CodexExecutionRequest, CodexThreadConfiguration } from '../runtime-types.js';
+import { codexServiceTier, type CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
 import type { CodexOperation } from './operation-routes.js';
@@ -11,7 +12,7 @@ import type {
 } from './protocol.js';
 import type { CodexTurnItemLedger } from './turn-item-ledger.js';
 import {
-  codexThreadSettingsTarget,
+  mapThinkingModeToCodexEffort,
   type CodexConfirmedThreadSettings,
   type CodexThreadSettingsTarget,
 } from './request-builders.js';
@@ -24,6 +25,8 @@ export type FinishSessionOptions = {
   aborted?: boolean;
   emitFinishedOnAbort?: boolean;
 };
+
+type CodexInferenceRoute = { readonly model: string; readonly serviceTier: CodexServiceTier };
 
 export interface ThreadSettingsWaiter {
   readonly target: CodexThreadSettingsTarget;
@@ -67,6 +70,7 @@ export interface RunningCodexSession {
   liveCodeModeResultToolIds: Map<string, string>;
   turnItems: CodexTurnItemLedger;
   capacityRetryCount: number;
+  admittedRoute: CodexInferenceRoute;
   turnAttemptGeneration: number;
   pendingCapacityFailure: { turnId: string; message: string } | null;
   sourceOperation: CodexOperation;
@@ -80,23 +84,34 @@ export interface RunningCodexSession {
   confirmedThreadSettings: CodexConfirmedThreadSettings;
   pendingThreadSettings: ThreadSettingsWaiter | null;
   threadSettingsUpdateChain: Promise<void>;
+  // Prevents idle reclamation during configuration work, without delaying explicit source retirement.
+  configurationReservations: number;
   configurationFenced: boolean;
   // Wall-clock stamp taken when the session finishes while its source stays
   // retained; drives the idle reclamation sweep for retained writers.
   idleSince: number | null;
 }
 
-export function providerOwnsReasoningEffort(
-  request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
-): boolean {
-  return codexThreadSettingsTarget(request).effort === null;
+function providerOwnsReasoningEffort(request: CodexThreadConfiguration): boolean {
+  return mapThinkingModeToCodexEffort(request.thinkingMode, request.model) === undefined;
 }
 
 export function recordExplicitReasoningEffort(
   session: RunningCodexSession,
-  request: Pick<CodexStartRequest, 'model' | 'permissionMode' | 'thinkingMode'>,
+  request: CodexThreadConfiguration,
 ): void {
   if (!providerOwnsReasoningEffort(request)) session.providerOwnsReasoningEffort = false;
+}
+
+export function canReuseThreadSettings(
+  session: RunningCodexSession, request: CodexExecutionRequest,
+): boolean {
+  if (session.configurationFenced || session.pendingThreadSettings) return false;
+  // Only fresh activation proves a premium tier; compaction cannot override a loaded tier.
+  if (codexServiceTier(request.speed) !== 'default' || session.admittedRoute.serviceTier !== 'default') return false;
+  if (session.confirmedThreadSettings.serviceTier !== 'default') return false;
+  if (providerOwnsReasoningEffort(request) && !session.providerOwnsReasoningEffort) return false;
+  return true;
 }
 
 export interface CodexAppServerRuntimeOptions {

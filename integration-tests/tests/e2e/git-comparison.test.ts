@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'puppeteer-core';
+import type { PersistedWorkspaceLayoutNode, PersistedWorkspaceLayoutV2 } from '../../../common/workspace-layout.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -291,6 +292,17 @@ describe('Lightpanda Git comparison', () => {
         ['root working marker'],
       );
 
+      await app.selectWorkspaceWindowSurface('git-comparison-worktree-inherited', compareWindowId);
+      await fixture.page.waitForFunction((windowId) => {
+        const raw = localStorage.getItem('workspace_layout_v2');
+        if (!raw) return false;
+        const saved = JSON.parse(raw) as PersistedWorkspaceLayoutV2;
+        const visit = (node: PersistedWorkspaceLayoutNode): boolean => node.type === 'partition'
+          ? node.children.some(visit)
+          : node.id === windowId && node.active?.type === 'chat'
+            && node.order.some(ref => ref.type === 'singleton' && ref.kind === 'git-compare');
+        return visit(saved.root);
+      }, { timeout: 20_000 }, compareWindowId);
       const beforeReloadConnections = await fixture.spaWebSocketConnectionCount();
       await fixture.page.reload({ waitUntil: [] });
       await fixture.waitForSpaWebSocket({
@@ -298,9 +310,11 @@ describe('Lightpanda Git comparison', () => {
       });
       await app.waitForSelectedChat(worktreeChat.id);
       await fixture.page.waitForSelector(
-        `[data-workspace-window-id="${compareWindowId}"] [data-workspace-surface-id="singleton:git-compare"]`,
+        `[data-workspace-window-id="${compareWindowId}"] [data-window-tab-measure-id="singleton:git-compare"]`,
       );
-      await app.selectWorkspaceWindowSurface('Compare', compareWindowId);
+      // Restored inactive tabs mount their panels only when selected.
+      expect(await fixture.page.$('[data-workspace-surface-id="singleton:git-compare"]')).toBeNull();
+      await app.selectWorkspaceWindowSurfaceById('singleton:git-compare', compareWindowId);
       await waitForComparisonMarkers(
         fixture.page,
         ['inherited head marker'],

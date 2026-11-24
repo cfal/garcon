@@ -286,17 +286,19 @@ describe('recursive sidebar projection', () => {
 			delegated('pinned', 'root', { isPinned: true }),
 			delegated('normal', 'root'),
 			chat('fork', {
-				parentChat: {
-					chatId: 'root',
-					relation: 'fork',
+				parentChatId: null,
+				lineage: {
+					sourceChatId: 'root',
+					kind: 'fork',
 					transcriptViewId: 'view-fixture',
 					ordinal: 0,
 				},
 			}),
 			chat('handoff', {
-				parentChat: {
-					chatId: 'root',
-					relation: 'handoff',
+				parentChatId: null,
+				lineage: {
+					sourceChatId: 'root',
+					kind: 'handoff',
 					transcriptViewId: 'view-fixture',
 					ordinal: 0,
 				},
@@ -361,6 +363,25 @@ describe('recursive sidebar projection', () => {
 			model.rows.some((row) => row.type === 'section-header' && row.section === 'in-progress'),
 		).toBe(false);
 	});
+
+	it('applies the collapse default to each untouched parent, but not to search or flat lists', () => {
+		const chats = [chat('root'), delegated('child', 'root'), delegated('leaf', 'child')];
+		const input = projectionInput(chats, {
+			collapseDelegatedChatsByDefault: true,
+			groupingFields: selections(['project']),
+		});
+		expect(buildSidebarRowModel(input).visibleChatIds).toEqual(['root']);
+		const expandedRoot = buildSidebarRowModel({
+			...input,
+			expandedDelegationKeys: new Set(['delegation:root']),
+		});
+		expect(expandedRoot.visibleChatIds).toEqual(['root', 'child']);
+		const search = buildSidebarRowModel({ ...input, matchingChatIds: new Set(['leaf']) });
+		expect(search.visibleChatIds).toEqual(['root', 'child', 'leaf']);
+		expect(search.actionableChatIds).toEqual(['leaf']);
+		const flat = buildSidebarRowModel({ ...input, nestDelegatedChats: false });
+		expect(flat.visibleChatIds).toEqual(['root', 'child', 'leaf']);
+	});
 	it.each(['top', 'bottom'] as const)(
 		'honors pinned %s branch recency at each level and stable ties',
 		(pinnedInsertPosition) => {
@@ -391,10 +412,10 @@ describe('recursive sidebar projection', () => {
 	});
 	it('cuts malformed cycles deterministically without mutating lineage', () => {
 		const chats = [delegated('b', 'a'), delegated('a', 'b'), delegated('self', 'self')];
-		const forest = buildSidebarDelegationForest(chats, true);
+		const forest = buildSidebarDelegationForest(chats, { nestDelegatedChats: true });
 		expect(forest.roots).toEqual(['a', 'self']);
 		expect(forest.ambiguousIds).toEqual(new Set(['a', 'b', 'self']));
-		expect(chats[1].parentChat?.chatId).toBe('b');
+		expect(chats[1].parentChatId).toBe('b');
 		expect(buildSidebarRowModel(projectionInput(chats)).visibleChatIds).toEqual(['a', 'b', 'self']);
 	});
 	it('combines only known executor-qualified ancestors from the full roster', () => {

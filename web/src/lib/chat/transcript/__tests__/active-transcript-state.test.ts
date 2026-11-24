@@ -1,3 +1,4 @@
+import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	ActiveTranscriptState,
@@ -17,6 +18,7 @@ import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 import type { OptimisticUserInput } from '../optimistic-user-input.js';
 import { mergeRowsWithOptimisticInputs } from '../transcript-row-projection.js';
+import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
@@ -128,9 +130,81 @@ describe('ActiveTranscriptState', () => {
 
 	afterEach(() => vi.restoreAllMocks());
 
+	it.each([
+		{ target: 'initial', shared: false }, { target: 'row', shared: false },
+		{ target: 'initial', shared: true }, { target: 'row', shared: true },
+	] as const)('retires echoes during $target navigation before returning to an echo-less latest page (shared: $shared)', async ({ target, shared }) => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chat = new ActiveTranscriptState(cache, shared ? overlays.forChat('chat-1') : null, {
+			onRecoveredMessages: (chatId, messages) => { overlays.clearEchoedInputs(chatId, messages); },
+		});
+		const latest = assistantEntries(951, 1000);
+		seedTranscript(chat, 'chat-1', 'generation-1', latest, {
+			lastOrdinal: 1000, pageOldestOrdinal: 951, nextBeforeOrdinal: 951, hasMore: true,
+		});
+		const pending = optimisticInput({ placement: 'live-tail' });
+		if (shared) overlays.upsertOptimisticInput('chat-1', pending, 1000);
+		else chat.upsertOptimisticUserInput(pending);
+		const echo = entry(1, user('guidance', { clientMessageId: pending.clientMessageId }));
+		vi.mocked(getChatMessages).mockImplementation(async request => ({
+			chatId: 'chat-1', limit: request.limit ?? 50,
+			...page({ messages: [echo, ...assistantEntries(2, 50)], lastOrdinal: 1000 }),
+		}));
+		try {
+			await expect(target === 'initial' ? chat.navigateToWindow('chat-1', 'initial') : chat.navigateToRow(
+				{ chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 1 }, new AbortController().signal, () => true,
+			)).resolves.toBe('loaded');
+			expect(chat.entries).toContainEqual(echo);
+			expect(chat.optimisticUserInputs).toEqual([]);
+			vi.mocked(getChatMessages).mockImplementation(async request => ({
+				chatId: 'chat-1', limit: request.limit ?? 50,
+				...page({ messages: latest, lastOrdinal: 1000, hasMore: true }),
+			}));
+			await expect(chat.navigateToWindow('chat-1', 'latest')).resolves.toBe('loaded');
+			expect(chat.visibleOptimisticInputs).toEqual([]);
+		} finally {
+			chat.clearMessages();
+			cache.flush();
+		}
+	});
+
+	it.each([
+		{ direction: 'earlier', shared: false }, { direction: 'later', shared: false },
+		{ direction: 'earlier', shared: true }, { direction: 'later', shared: true },
+	] as const)('retires an optimistic echo from an applied $direction page (shared: $shared)', async ({ direction, shared }) => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const overlays = new ConversationTranscriptOverlayStore();
+		const observe = vi.fn((chatId: string, messages: readonly TranscriptMessage[]) => {
+			overlays.clearEchoedInputs(chatId, messages);
+		});
+		const chat = new ActiveTranscriptState(cache, shared ? overlays.forChat('chat-1') : null, { onRecoveredMessages: observe });
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(2, assistant('response'))], {
+			lastOrdinal: 3, pageOldestOrdinal: 2, pageNewestOrdinal: 2, nextBeforeOrdinal: 2, hasMore: true,
+		});
+		chat.hasLaterMessages = true;
+		if (shared) overlays.upsertOptimisticInput('chat-1', optimisticInput(), 3);
+		else chat.upsertOptimisticUserInput(optimisticInput());
+		observe.mockClear();
+		const echo = entry(direction === 'earlier' ? 1 : 3, user('guidance', { clientMessageId: 'msg-1' }));
+		vi.mocked(getChatMessages).mockImplementation(async request => ({
+			chatId: 'chat-1', limit: request.limit ?? 50,
+			...page({ messages: [echo], lastOrdinal: 3, hasMore: direction === 'later' }),
+		}));
+		try {
+			await expect(direction === 'earlier' ? chat.loadEarlierPage('chat-1') : chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
+			expect(chat.entries).toContainEqual(echo);
+			expect(observe).toHaveBeenCalledWith('chat-1', [echo]);
+			expect(chat.optimisticUserInputs).toEqual([]);
+		} finally {
+			chat.clearMessages();
+			cache.flush();
+		}
+	});
+
 	it('reuses message projections until their transcript changes', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('Synthetic first response'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('Synthetic first response'))], {
 			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
 		});
 		const messages = chat.chatMessages;
@@ -157,7 +231,7 @@ describe('ActiveTranscriptState', () => {
 			{ ordinal: 1, get message() { return readEarlierMessage(); } },
 			...assistantEntries(2, INITIAL_VISIBLE_MESSAGES + 1),
 		];
-		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+		seedTranscript(chat, 'chat-1', 'generation-1', messages, {
 			lastOrdinal: messages.length, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
 		});
 		readEarlierMessage.mockClear();
@@ -176,7 +250,7 @@ describe('ActiveTranscriptState', () => {
 		const original = entry(1, assistant('Synthetic first response'));
 		const appended = entry(2, assistant('Synthetic second response'));
 		for (const chat of [first, second]) {
-			chat.replaceGeneration('chat-1', 'generation-1', [original], {
+			seedTranscript(chat, 'chat-1', 'generation-1', [original], {
 				lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
 			});
 			const previous = chat.entries;
@@ -341,17 +415,17 @@ describe('ActiveTranscriptState', () => {
 
 	it('bounds oversized generation replacements to the recent message window', () => {
 		const chat = new ActiveTranscriptState();
+		seedTranscript(chat, 'chat-1', 'generation-old', [entry(1, assistant('original'))], {
+			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
 		const messageCount = ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 25;
 		const messages = Array.from({ length: messageCount }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
 
-		chat.replaceGeneration('chat-1', 'generation-1', messages, {
-			lastOrdinal: messageCount,
-			pageOldestOrdinal: 1,
-			nextBeforeOrdinal: null,
-			hasMore: false,
-		});
+		expect(chat.setFromPage('chat-1', page({
+			transcriptViewId: 'generation-1', messages, lastOrdinal: messageCount, pageOldestOrdinal: 1,
+		}), chat.beginSnapshotLoad())).toBe('applied');
 
 		expect(chat.entries).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
 		expect(chat.entries[0]?.ordinal).toBe(26);
@@ -385,7 +459,7 @@ describe('ActiveTranscriptState', () => {
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', initial, {
+		seedTranscript(chat, 'chat-1', 'generation-1', initial, {
 			lastOrdinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -416,7 +490,7 @@ describe('ActiveTranscriptState', () => {
 		const initial = Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', initial, {
+		seedTranscript(chat, 'chat-1', 'generation-1', initial, {
 			lastOrdinal: ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -473,7 +547,7 @@ describe('ActiveTranscriptState', () => {
 		pageNewestOrdinal,
 	}) => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -508,7 +582,7 @@ describe('ActiveTranscriptState', () => {
 	it('[TLV5-UX.01-WEB-UNIT-01] grows one loaded interval across repeated bidirectional paging', async () => {
 		const chat = new ActiveTranscriptState();
 		const total = 400;
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -560,7 +634,7 @@ describe('ActiveTranscriptState', () => {
 	it('stages a fetched earlier page until its application gate opens', async () => {
 		const chat = new ActiveTranscriptState();
 		const current = assistantEntries(51, 100);
-		chat.replaceGeneration('chat-1', 'generation-1', current, {
+		seedTranscript(chat, 'chat-1', 'generation-1', current, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			pageNewestOrdinal: 100,
@@ -614,7 +688,7 @@ describe('ActiveTranscriptState', () => {
 	it('stages a fetched later page until its application gate opens', async () => {
 		const chat = new ActiveTranscriptState();
 		const current = assistantEntries(1, 50);
-		chat.replaceGeneration('chat-1', 'generation-1', current, {
+		seedTranscript(chat, 'chat-1', 'generation-1', current, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 50,
@@ -669,7 +743,7 @@ describe('ActiveTranscriptState', () => {
 	it('discards a fetched page whose application gate is invalidated', async () => {
 		const chat = new ActiveTranscriptState();
 		const current = assistantEntries(51, 100);
-		chat.replaceGeneration('chat-1', 'generation-1', current, {
+		seedTranscript(chat, 'chat-1', 'generation-1', current, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			pageNewestOrdinal: 100,
@@ -704,7 +778,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('[TLV5-PAGE.09-WEB-UNIT-01] crosses several hidden raw budgets before delivering visible earlier rows', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(2_001, 2_050), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(2_001, 2_050), {
 			lastOrdinal: 2_050,
 			pageOldestOrdinal: 2_001,
 			pageNewestOrdinal: 2_050,
@@ -760,7 +834,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('[TLV5-PAGE.09-WEB-UNIT-03] fills one later-page action across sparse raw budgets before mutating the interval', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 50), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(1, 50), {
 			lastOrdinal: 2_000,
 			pageOldestOrdinal: 1,
 			pageNewestOrdinal: 50,
@@ -925,7 +999,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('[TLV5-PAGE.10-WEB-UNIT-01] rejects a stalled raw continuation before mutating the loaded interval', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(251, 300), {
 			lastOrdinal: 300,
 			pageOldestOrdinal: 251,
 			pageNewestOrdinal: 300,
@@ -965,7 +1039,7 @@ describe('ActiveTranscriptState', () => {
 	it('[TLV5-PAGE.09-WEB-UNIT-02] resumes a hidden-only earlier continuation after chat switch', async () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 50 });
 		const chat = new ActiveTranscriptState(transcriptCache);
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(251, 300), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(251, 300), {
 			lastOrdinal: 300,
 			pageOldestOrdinal: 251,
 			pageNewestOrdinal: 300,
@@ -1048,7 +1122,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('[TLV5-UX.03-WEB-UNIT-01] keeps the loaded later edge when earlier paging expands a detached window', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: ACTIVE_TRANSCRIPT_RETENTION_LIMIT }, (_, index) =>
@@ -1082,7 +1156,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('fails an earlier page that claims more history without advancing', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -1110,7 +1184,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('fails an empty earlier page that still claims more history', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -1133,7 +1207,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('[TLV5-PAGE.06-WEB-UNIT-01] retains an earlier failure while its explicit retry is loading', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(51, assistant('message-51'))], {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -1171,7 +1245,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('invalidates an earlier page when gap recovery replaces the loaded window', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -1493,11 +1567,11 @@ describe('ActiveTranscriptState', () => {
 		chat.upsertOptimisticUserInput(optimisticInput());
 
 		const pendingRow = () => chat.visibleRows.find((row) => row.id === 'optimistic:msg-1');
-		expect(pendingRow()).toMatchObject({ awaitingDelivery: true });
+		expect(pendingRow()).toMatchObject({ inputStatus: 'sending' });
 
-		chat.markOptimisticUserInputDelivered('msg-1');
+		chat.markOptimisticUserInputDelivered('chat-1', 'msg-1');
 
-		expect(pendingRow()).not.toHaveProperty('awaitingDelivery');
+		expect(pendingRow()).not.toHaveProperty('inputStatus');
 	});
 
 	it('keeps transient local messages when replay only overlaps existing server messages', () => {
@@ -1550,7 +1624,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('exposes canonical durable and optimistic display row identities', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, user('durable'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, user('durable'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1572,7 +1646,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('fences old snapshot work and buffered rows without blanking the replacement presentation', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, user('Synthetic original'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, user('Synthetic original'))], {
 			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
 		});
 		const before = chat.entries;
@@ -1612,7 +1686,7 @@ describe('ActiveTranscriptState', () => {
 	it('merges a contiguous buffered suffix past a sparse snapshot ceiling', () => {
 		const chat = new ActiveTranscriptState();
 		const current = assistantEntries(177, 226);
-		chat.replaceGeneration('chat-1', 'generation-1', current, {
+		seedTranscript(chat, 'chat-1', 'generation-1', current, {
 			lastOrdinal: 226,
 			pageOldestOrdinal: 177,
 			nextBeforeOrdinal: 177,
@@ -1662,7 +1736,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves notices created after buffered live messages across successful snapshots', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1686,7 +1760,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('applies buffered live messages when a snapshot load fails', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1724,7 +1798,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves buffered live messages across overlapping snapshot loads', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1771,7 +1845,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves notices created after a superseding snapshot starts', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1812,7 +1886,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('clears loading state when switching away from an active snapshot load', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('existing'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1843,7 +1917,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('does not let a stale snapshot failure overwrite the active chat load state', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('one'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('one'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1901,7 +1975,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('does not install a stale snapshot when buffered messages indicate a new generation', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'current-generation', [entry(1, assistant('current'))], {
+		seedTranscript(chat, 'chat-1', 'current-generation', [entry(1, assistant('current'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -1929,7 +2003,7 @@ describe('ActiveTranscriptState', () => {
 		'preserves snapshot reload ownership when %s navigation races a generation change',
 		async (target) => {
 			const chat = new ActiveTranscriptState();
-			chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('current'))], {
+			seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('current'))], {
 				lastOrdinal: 1,
 				pageOldestOrdinal: 1,
 				nextBeforeOrdinal: null,
@@ -2003,7 +2077,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('applies buffered reconnect metadata with its exact live batch', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('initial'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -2057,7 +2131,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves an expanded detached interval through reconnect replay and buffered live rows', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
 			nextBeforeOrdinal: 201,
@@ -2116,7 +2190,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves an expanded detached prefix when a same-view snapshot overlaps it', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
 			nextBeforeOrdinal: 201,
@@ -2205,7 +2279,7 @@ describe('ActiveTranscriptState', () => {
 		'preserves immutable ordinal occurrences across a $name same-view snapshot',
 		({ current, snapshot, expected, expectedLoadedThrough, hasLaterMessages }) => {
 			const chat = new ActiveTranscriptState();
-			chat.replaceGeneration(
+			seedTranscript(chat,
 				'chat-1',
 				'generation-1',
 				assistantEntries(current[0], current[1], (ordinal) => `current-${ordinal}`),
@@ -2254,7 +2328,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('merges an expanded prefix, overlapping snapshot, and buffered live suffix by ordinal', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
 			nextBeforeOrdinal: 201,
@@ -2314,7 +2388,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('continues earlier paging from the retained prefix after a same-view snapshot', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
 			nextBeforeOrdinal: 201,
@@ -2392,7 +2466,7 @@ describe('ActiveTranscriptState', () => {
 	it('bridges every gap between a retained interval and a disjoint same-view snapshot', async () => {
 		const repeatedContent = 'same-text-different-ordinal';
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			assistantEntries(101, 300, (ordinal) =>
@@ -2477,7 +2551,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('bridges a disjoint snapshot and live rows buffered behind the retained interval', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			assistantEntries(101, 300, (ordinal) => `retained-${ordinal}`),
@@ -2574,7 +2648,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('keeps a fresh earlier request active after a snapshot invalidates its predecessor', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(201, 400), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(201, 400), {
 			lastOrdinal: 400,
 			pageOldestOrdinal: 201,
 			nextBeforeOrdinal: 201,
@@ -2657,7 +2731,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('retires an obsolete reconnect replay when a replacement snapshot installs', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
+		seedTranscript(chat, 'chat-1', 'generation-old', [entry(1, assistant('old'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -2698,7 +2772,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves live rows buffered before a same-view snapshot retires reconnect replay', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('initial'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -2730,7 +2804,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves replacement-view live rows buffered before its snapshot installs', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-old', [entry(1, assistant('old'))], {
+		seedTranscript(chat, 'chat-1', 'generation-old', [entry(1, assistant('old'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -2765,7 +2839,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('keeps reconnect replay active when a snapshot installation is stale', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('initial'))], {
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, assistant('initial'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -2798,21 +2872,6 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.chatMessages.map(contentOf)).toEqual(['initial', 'replayed']);
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 2 });
-	});
-
-	it('clears optimistic rows when a transcript view is replaced', () => {
-		const chat = new ActiveTranscriptState();
-		chat.upsertOptimisticUserInput(optimisticInput());
-
-		chat.replaceGeneration(
-			'chat-1',
-			'generation-2',
-			[entry(1, assistant('native'))],
-			{ lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
-		);
-
-		expect(chat.optimisticUserInputs).toEqual([]);
-		expect(chat.chatMessages.map(contentOf)).toEqual(['native']);
 	});
 
 	it('clears optimistic rows when a snapshot replaces the transcript view', () => {
@@ -2931,7 +2990,7 @@ describe('ActiveTranscriptState', () => {
 		const messages = Array.from({ length: 51 }, (_, index) =>
 			entry(index + 50, assistant(`message-${index + 50}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+		seedTranscript(chat, 'chat-1', 'generation-1', messages, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 50,
 			nextBeforeOrdinal: 50,
@@ -2952,7 +3011,7 @@ describe('ActiveTranscriptState', () => {
 		const messages = Array.from({ length: 175 }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+		seedTranscript(chat, 'chat-1', 'generation-1', messages, {
 			lastOrdinal: 175,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -2979,7 +3038,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves a partially expanded visible start across a same-view snapshot', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 200), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(1, 200), {
 			lastOrdinal: 200,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -3016,7 +3075,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('preserves a partially expanded visible start through transient row settlement', () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 200), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(1, 200), {
 			lastOrdinal: 200,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -3051,7 +3110,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('does not re-arm expanded-window growth from replacement-generation count slack', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 175 }, (_, index) => entry(index + 1, assistant(`old-${index + 1}`))),
@@ -3108,7 +3167,7 @@ describe('ActiveTranscriptState', () => {
 		const messages = Array.from({ length: 175 }, (_, index) =>
 			entry(index + 1, assistant(`message-${index + 1}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', messages, {
+		seedTranscript(chat, 'chat-1', 'generation-1', messages, {
 			lastOrdinal: 175,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -3198,7 +3257,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('loads only the first page for initial-prompt navigation', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3238,7 +3297,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('pages forward from the initial window until it rejoins the live transcript', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3315,7 +3374,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('chases live messages that arrive while paging forward from the initial window', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3394,7 +3453,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('coalesces concurrent forward page requests for the detached window', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3449,7 +3508,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('keeps a failed later page directional and retryable', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3500,7 +3559,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('keeps the reconnect cursor behind an unseen initial-window server head', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3547,7 +3606,7 @@ describe('ActiveTranscriptState', () => {
 		const latestWindow = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 51, assistant(`latest-${index + 51}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+		seedTranscript(chat, 'chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -3587,7 +3646,7 @@ describe('ActiveTranscriptState', () => {
 		const latestWindow = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 51, assistant(`latest-${index + 51}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+		seedTranscript(chat, 'chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -3624,7 +3683,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('keeps the initial window when Initial supersedes a pending Bottom request', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3674,7 +3733,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('ignores a stale Bottom rejection after Initial restores the existing initial window', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3708,7 +3767,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('keeps live messages in the latest cache while viewing the initial page', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3767,7 +3826,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('replays live messages that arrive while restoring the latest window', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3814,7 +3873,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('keeps the newest resend candidates when live rows overtake a latest-window response', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -3904,14 +3963,14 @@ describe('ActiveTranscriptState', () => {
 		},
 		{
 			name: 'clear',
-			mutate: (chat: ActiveTranscriptState) => chat.clearOptimisticUserInput('msg-1'),
+			mutate: (chat: ActiveTranscriptState) => chat.clearOptimisticUserInput('chat-1', 'msg-1'),
 			expected: [],
 		},
 	])(
 		'preserves an optimistic-input $name while restoring the latest window',
 		async ({ mutate, expected }) => {
 			const chat = new ActiveTranscriptState();
-			chat.replaceGeneration(
+			seedTranscript(chat,
 				'chat-1',
 				'generation-1',
 				Array.from({ length: 50 }, (_, index) =>
@@ -3957,7 +4016,7 @@ describe('ActiveTranscriptState', () => {
 		const latestWindow = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 51, assistant(`message-${index + 51}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+		seedTranscript(chat, 'chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -4006,7 +4065,7 @@ describe('ActiveTranscriptState', () => {
 			hasMore: false,
 		});
 		const chat = new ActiveTranscriptState(transcriptCache);
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -4046,7 +4105,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('lets a new chat paginate while the previous chat page request is still pending', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -4073,7 +4132,7 @@ describe('ActiveTranscriptState', () => {
 
 		chat.activateChat('chat-2');
 		expect(chat.pageStates.earlier.status).toBe('idle');
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-2',
 			'generation-2',
 			Array.from({ length: 50 }, (_, index) =>
@@ -4128,7 +4187,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('loads a new chat initial page while the previous chat page request is pending', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -4159,7 +4218,7 @@ describe('ActiveTranscriptState', () => {
 
 		const oldLoad = chat.loadEarlierPage('chat-1');
 		chat.activateChat('chat-2');
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-2',
 			'generation-2',
 			Array.from({ length: 50 }, (_, index) =>
@@ -4202,7 +4261,7 @@ describe('ActiveTranscriptState', () => {
 		const latestWindow = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 51, assistant(`chat-1-message-${index + 51}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+		seedTranscript(chat, 'chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -4224,14 +4283,14 @@ describe('ActiveTranscriptState', () => {
 
 		const oldLoad = chat.loadEarlierPage('chat-1');
 		chat.activateChat('chat-2');
-		chat.replaceGeneration('chat-2', 'generation-2', [entry(1, assistant('chat-2'))], {
+		seedTranscript(chat, 'chat-2', 'generation-2', [entry(1, assistant('chat-2'))], {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
 		chat.activateChat('chat-1');
-		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+		seedTranscript(chat, 'chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -4281,7 +4340,7 @@ describe('ActiveTranscriptState', () => {
 
 	it('does not share or apply a page request from a replaced generation', async () => {
 		const chat = new ActiveTranscriptState();
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			Array.from({ length: 50 }, (_, index) =>
@@ -4304,14 +4363,13 @@ describe('ActiveTranscriptState', () => {
 			);
 
 		const oldLoad = chat.loadEarlierPage('chat-1');
-		chat.replaceGeneration(
-			'chat-1',
-			'generation-2',
-			Array.from({ length: 50 }, (_, index) =>
+		expect(chat.setFromPage('chat-1', page({
+			transcriptViewId: 'generation-2',
+			messages: Array.from({ length: 50 }, (_, index) =>
 				entry(index + 51, assistant(`generation-2-message-${index + 51}`)),
 			),
-			{ lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true },
-		);
+			lastOrdinal: 100, pageOldestOrdinal: 51, nextBeforeOrdinal: 51, hasMore: true,
+		}), chat.beginSnapshotLoad())).toBe('applied');
 		const newLoad = chat.loadEarlierPage('chat-1');
 
 		expect(getChatMessages).toHaveBeenCalledTimes(2);
@@ -4360,7 +4418,7 @@ describe('ActiveTranscriptState', () => {
 		const latestWindow = Array.from({ length: 50 }, (_, index) =>
 			entry(index + 51, assistant(`message-${index + 51}`)),
 		);
-		chat.replaceGeneration('chat-1', 'generation-1', latestWindow, {
+		seedTranscript(chat, 'chat-1', 'generation-1', latestWindow, {
 			lastOrdinal: 100,
 			pageOldestOrdinal: 51,
 			nextBeforeOrdinal: 51,
@@ -4440,7 +4498,7 @@ describe('ActiveTranscriptState', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
 		const chat = new ActiveTranscriptState(transcriptCache);
 
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			[entry(1, user('first')), entry(2, assistant('second')), entry(3, assistant('third'))],
@@ -4459,7 +4517,7 @@ describe('ActiveTranscriptState', () => {
 	it('parks committed rows buffered by an obsolete snapshot and rejects its late result', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
 		const chat = new ActiveTranscriptState(transcriptCache);
-		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 1), {
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(1, 1), {
 			lastOrdinal: 1,
 			pageOldestOrdinal: 1,
 			nextBeforeOrdinal: null,
@@ -4484,7 +4542,7 @@ describe('ActiveTranscriptState', () => {
 	it('[TLV5-UX.17-WEB-UNIT-04] discards an expanded interval on chat switch and restores only the exact bounded tail', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 3 });
 		const chat = new ActiveTranscriptState(transcriptCache);
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			assistantEntries(1, 5),
@@ -4517,7 +4575,7 @@ describe('ActiveTranscriptState', () => {
 			undefined,
 			'History carried without compaction',
 		);
-		chat.replaceGeneration(
+		seedTranscript(chat,
 			'chat-1',
 			'generation-1',
 			[entry(1, assistant('source answer')), entry(2, notice)],

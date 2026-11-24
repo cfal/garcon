@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
@@ -34,6 +35,8 @@ vi.mock('$lib/api/agents.js', () => ({
 	launchAgentAuthLogin: vi.fn(),
 	getAgentAuthLoginStatus: vi.fn(),
 	completeAgentAuthLogin: vi.fn(),
+	getAgentCliUpdates: vi.fn(async () => ({ statuses: {}, failures: {} })),
+	startAgentCliUpdate: vi.fn(),
 }));
 
 vi.mock('$lib/notifications/completion-sound.js', () => ({
@@ -59,17 +62,17 @@ describe('Settings', () => {
 		let rendered = render(SettingsTestHost, props);
 		try {
 			const alignment = screen.getByRole<HTMLSelectElement>('combobox', { name: 'User message alignment' });
-			expect(alignment.value).toBe('right');
+			expect(alignment.value).toBe('left');
 			expect(within(alignment).getAllByRole('option').map(option => option.textContent)).toEqual(['Left', 'Right']);
-			await fireEvent.change(alignment, { target: { value: 'left' } });
+			await fireEvent.change(alignment, { target: { value: 'right' } });
 			expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
-				userMessageAlignment: 'left',
+				userMessageAlignment: 'right',
 			});
 			rendered.unmount();
 			rendered = render(SettingsTestHost, props);
 			expect(
 				screen.getByRole<HTMLSelectElement>('combobox', { name: 'User message alignment' }).value,
-			).toBe('left');
+			).toBe('right');
 		} finally {
 			rendered.unmount();
 		}
@@ -859,6 +862,7 @@ describe('Settings', () => {
 		};
 		const appShell = createAppShellStore();
 		appShell.openSettings('providers');
+		const beginLogin = vi.spyOn(ModelCatalogStore.prototype, 'beginLogin');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
@@ -888,7 +892,10 @@ describe('Settings', () => {
 			await waitFor(() =>
 				expect(providersApi.launchAgentAuthLogin).toHaveBeenCalledWith('claude', remoteExecutor.id),
 			);
+			expect(beginLogin).toHaveBeenCalledExactlyOnceWith('claude');
+			expect(beginLogin.mock.contexts[0]).toMatchObject({ executorId: remoteExecutor.id });
 		} finally {
+			beginLogin.mockRestore();
 			rendered.unmount();
 		}
 	});
@@ -937,6 +944,7 @@ describe('Settings', () => {
 			sessionId: 'synthetic-login',
 			deviceAuth,
 		});
+		const beginLogin = vi.spyOn(ModelCatalogStore.prototype, 'beginLogin');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
@@ -946,6 +954,8 @@ describe('Settings', () => {
 			const local = within(screen.getByRole('region', { name: 'Local' }));
 			const signIn = await local.findAllByRole('button', { name: 'Sign in' });
 			await fireEvent.click(signIn[0]);
+			expect(beginLogin).toHaveBeenCalledExactlyOnceWith('claude');
+			expect(beginLogin.mock.contexts[0]).toMatchObject({ executorId: localExecutor.id });
 			const input = await local.findByRole('textbox');
 			await fireEvent.input(input, { target: { value: 'synthetic-oauth-code' } });
 			vi.mocked(providersApi.getAgentAuthLoginStatus).mockImplementation(
@@ -972,6 +982,7 @@ describe('Settings', () => {
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('claude', 'local');
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('codex', 'local');
 		} finally {
+			beginLogin.mockRestore();
 			rendered.unmount();
 		}
 	});

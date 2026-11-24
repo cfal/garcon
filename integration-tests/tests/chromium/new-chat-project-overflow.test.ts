@@ -97,9 +97,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await more.scrollIntoViewIfNeeded();
       await more.click();
       await browserExpect(overflow).toBeVisible();
-      await overflow.getByRole('button', { name: client.executorId === 'local' ? paths[0]! : `Integration worker: ${paths[0]}`, exact: true }).click();
+      await overflow.getByRole('button', { name: client.executorId === 'local' ? paths[2]! : `Integration worker: ${paths[2]}`, exact: true }).click();
       await browserExpect(overflow).toHaveCount(0);
-      await browserExpect(primary.first()).toHaveAttribute('title', paths[0]!);
+      await browserExpect(primary.first()).toHaveAttribute('title', paths[2]!);
       await browserExpect(primary.first()).toHaveAttribute('aria-pressed', 'true');
       await browserExpect(prompt).toHaveValue('Synthetic overflow selection draft');
       await cdp.detach();

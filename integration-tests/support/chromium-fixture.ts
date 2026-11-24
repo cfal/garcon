@@ -37,6 +37,7 @@ export interface ChromiumFixture {
 }
 
 export interface ChromiumFixtureOptions extends IntegrationFixtureOptions {
+  classicScrollbars?: boolean;
   // Existing workflows use Source; null exercises the application's default.
   composerInputMode?: 'source' | 'formatted' | null;
   // Playwright request interception can miss requests from pages the app's service worker
@@ -47,8 +48,8 @@ export interface ChromiumFixtureOptions extends IntegrationFixtureOptions {
 
 const fixturesOwningBrowsers = new WeakSet<ChromiumFixture>();
 
-export async function launchChromiumBrowser(): Promise<Browser> {
-  return chromium.launch({ headless: true });
+export async function launchChromiumBrowser(classicScrollbars = false): Promise<Browser> {
+  return chromium.launch({ headless: true, ignoreDefaultArgs: classicScrollbars ? ['--hide-scrollbars'] : undefined });
 }
 
 export async function closeChromiumBrowser(browser: Browser): Promise<void> {
@@ -77,14 +78,14 @@ export async function createChromiumFixture(
   options: ChromiumFixtureOptions = {},
   sharedBrowser?: Browser,
 ): Promise<ChromiumFixture> {
-  const { serviceWorkers = 'block', composerInputMode = 'source', ...integrationOptions } = options;
+  const { serviceWorkers = 'block', composerInputMode = 'source', classicScrollbars, ...integrationOptions } = options;
   await requireCurrentWebBuild();
   const integration = await createIntegrationFixture(integrationOptions);
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
 
   try {
-    browser = sharedBrowser ?? (await launchChromiumBrowser());
+    browser = sharedBrowser ?? (await launchChromiumBrowser(classicScrollbars));
     context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       serviceWorkers,

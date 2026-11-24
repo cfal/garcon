@@ -293,7 +293,7 @@ for (const dialer of ['controller', 'worker'] as const) {
         model: 'test-model', permissionMode: 'default' as const, thinkingMode: 'medium' as const,
         settings: integration.settings.defaults(), endpoint: null,
       };
-      const change = integration.sessionConfiguration!.apply('test-session', configuration, configuration, {
+      const change = integration.sessionConfiguration!.apply('test-session', { ...configuration, permissionModeExplicit: true }, configuration, {
         dispatchDeadline: performance.now() + 500,
       });
 

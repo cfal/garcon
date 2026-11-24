@@ -1,15 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
+import { flushSync } from 'svelte';
 import RouterIntegrationHost from './RouterIntegrationHost.svelte';
 import type { EventRouterStores } from '../router.svelte';
-import type { WsConnection } from '$lib/ws/connection.svelte';
+import { WsConnection } from '$lib/ws/connection.svelte';
+import { createDrainCursor } from '$lib/ws/drain';
+import ReconnectCoordinatorTestHost from '$lib/ws/__tests__/ReconnectCoordinatorTestHost.svelte';
+import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
+import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
+import { AssistantMessage, BashToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
+import type { CompleteChatHistoryResponse } from '$shared/chat-view';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
+import * as chatsApi from '$lib/api/chats.js';
 import type { ChatSnapshotResponse } from '$shared/chat-snapshot';
+import type { ChatExecutionControlState } from '$shared/chat-execution-control';
+import { ApiError } from '$lib/api/client.js';
 
 vi.mock('$lib/api/chats.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api/chats.js')>()),
@@ -18,7 +31,29 @@ vi.mock('$lib/api/chats.js', async (importOriginal) => ({
 
 const TS = '2026-05-14T00:00:01.000Z';
 
-function executionControl(serverInstanceId: string, version: number, content: string) {
+class RouterTestSocket {
+	static readonly OPEN = 1;
+	static readonly CONNECTING = 0;
+	readyState = RouterTestSocket.CONNECTING;
+	onopen: (() => void) | null = null;
+	onclose: (() => void) | null = null;
+	onerror: (() => void) | null = null;
+	onmessage: ((event: Pick<MessageEvent, 'data'>) => void) | null = null;
+	send = vi.fn<(data: string) => void>();
+	close() { this.readyState = 3; }
+	open() { this.readyState = RouterTestSocket.OPEN; this.onopen?.(); }
+	message(data: Record<string, unknown>) { this.onmessage?.({ data: JSON.stringify(data) }); }
+}
+
+async function confirmHeartbeat(connection: WsConnection, socket: RouterTestSocket, serverInstanceId: string): Promise<void> {
+	const pong = connection.requestProcessingSnapshot('heartbeat');
+	const ping = JSON.parse(socket.send.mock.calls.at(-1)![0]) as { clientRequestId: string; sentAt: number };
+	socket.message({ ...ping, type: 'ws-pong', serverTime: TS, serverInstanceId,
+		processing: { outcome: 'snapshot', chats: [] } });
+	await pong;
+}
+
+function executionControl(serverInstanceId: string, version: number, content: string): ChatExecutionControlState {
 	return {
 		serverInstanceId,
 		queue: {
@@ -46,7 +81,8 @@ function executionControl(serverInstanceId: string, version: number, content: st
 function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
 		id: 'chat-a',
-		parentChat: null,
+		parentChatId: null,
+		lineage: null,
 		projectPath: '/repo',
 		orderGroup: 'normal',
 		title: 'Chat A',
@@ -66,6 +102,7 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		isProcessing: false,
 		processingPhase: null,
 		isUnread: false,
+		activityStatus: null,
 		canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
@@ -106,6 +143,7 @@ function chatSnapshot(transcriptViewId: string): ChatSnapshotResponse {
 			thinkingMode: 'none',
 			projectPath: '/repo',
 			tags: [],
+			activityStatus: null,
 			canReloadFromNativeHistory: false,
 			activity: { createdAt: TS, lastActivityAt: TS },
 		},
@@ -162,7 +200,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			patchPreview: vi.fn(),
 			patchActivity: vi.fn(),
 			quietRefreshChats: vi.fn(),
-			removeChat: vi.fn(),
+			applyServerDeletion: vi.fn(),
 			patchChat: vi.fn(),
 			reconcileProcessing: vi.fn(),
 			isChatProcessing: vi.fn(() => selectedChat.isProcessing),
@@ -210,6 +248,412 @@ describe('event router integration', () => {
 		vi.mocked(getChatSnapshot).mockReset();
 	});
 
+	it.each(['working', 'complete', 'error', 'pending-user-action', null] as const)(
+		'updates a background chat activity status to %s through normalize + filter + handler',
+		(activityStatus) => {
+			const stores = createStores();
+			renderRouterWithRawMessages(
+				[{ type: 'chat-activity-updated', chatId: 'chat-b', activityStatus }],
+				stores,
+			);
+			expect(stores.sessions.patchChat).toHaveBeenCalledExactlyOnceWith('chat-b', {
+				activityStatus,
+			});
+			expect(stores.lifecycle.markTurnRunning).not.toHaveBeenCalled();
+		},
+	);
+
+	it('drops malformed chat activity events without patching the sidebar', () => {
+		const stores = createStores();
+		const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			renderRouterWithRawMessages(
+				[{ type: 'chat-activity-updated', chatId: 'chat-b', activityStatus: 'unknown' }],
+				stores,
+			);
+			expect(stores.sessions.patchChat).not.toHaveBeenCalled();
+		} finally {
+			diagnostic.mockRestore();
+		}
+	});
+
+	it.each(['control', 'transient'] as const)('fences a delayed unseen-process %s broadcast before routing or steer recovery', async kind => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		const socket = new RouterTestSocket();
+		vi.stubGlobal('WebSocket', class extends RouterTestSocket { constructor() { super(); return socket; } });
+		const cache = new ChatTranscriptCache({ limit: 10 });
+		cache.replaceFromPage('chat-a', { transcriptViewId: 'view', lastOrdinal: 1,
+			pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+			messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'Synthetic response') }] });
+		const overlays = new ConversationTranscriptOverlayStore();
+		const lifecycle = new ConversationLifecycleState();
+		const panels = new ConversationPanelRegistry({ cache, overlays,
+			lifecycle: { forChat: () => lifecycle, remove() {} },
+			getComposerAnchorSurfaceId: () => null, getSelectedChatId: () => 'chat-a' });
+		const refreshTranscript = vi.spyOn(panels, 'loadChatSnapshot');
+		const controlChanged = vi.fn((chatId: string, control: Parameters<ConversationPanelRegistry['reconcileQueuedSteers']>[1]) =>
+			panels.reconcileQueuedSteers(chatId, control));
+		const ui = new ConversationUiState(controlChanged);
+		ui.confirmExecutionControlSocketInstance('first', 10);
+		ui.setExecutionControlFromRefresh('chat-a', executionControl('first', 1, 'old'));
+		const connection = new WsConnection();
+		const drain = createDrainCursor(connection);
+		const queued = executionControl('successor', 1, 'Synthetic guidance');
+		vi.mocked(getChatSnapshot).mockResolvedValue(chatSnapshot('view'));
+		const refresh = vi.fn(async () => ({ control: queued }));
+		const coordinator = render(ReconnectCoordinatorTestHost, { options: {
+			ws: connection, panels, conversationUi: ui,
+			sessions: { selectedChatId: 'chat-a', quietRefreshChats: vi.fn(async () => {}) },
+			getExecutionControl: refresh, getBackgroundCursors: () => [], markBackgroundStale() {},
+		} });
+		const router = render(RouterIntegrationHost, { connection, drainHandle: drain, stores: createStores({ conversationUi: ui }) });
+		try {
+			clock.mockReturnValue(15);
+			connection.connect('token');
+			socket.open();
+			flushSync();
+			expect(socket.send).toHaveBeenCalledOnce();
+			const query = JSON.parse(socket.send.mock.calls[0]![0]) as { clientRequestId: string };
+			const response = ui.captureExecutionResponse();
+			clock.mockReturnValue(20);
+			response.setExecutionControlFromRefresh('chat-a', queued);
+			ui.setTransientFeedFromSnapshot({ ...transientFeed('view'), serverInstanceId: 'successor' });
+			panels.upsertOptimisticInput('chat-a', { chatId: 'chat-a', clientMessageId: 'input', content: 'Synthetic guidance',
+				createdAt: TS, delivery: 'pending', placement: 'live-tail' });
+			panels.reconcileQueuedSteers('chat-a', ui.getExecutionControl('chat-a'), {
+				clientMessageId: 'input', entryId: 'entry-successor', serverInstanceId: 'successor',
+			});
+			socket.message({ type: 'reconnect-state', clientRequestId: query.clientRequestId, serverInstanceId: 'unseen',
+				processing: { outcome: 'snapshot', chats: [] }, controlResults: [] });
+			await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+			controlChanged.mockClear();
+			refreshTranscript.mockClear();
+			clock.mockReturnValue(25);
+			const frame = (serverInstanceId: string) => kind === 'control'
+				? { type: 'chat-execution-control-updated', chatId: 'chat-a', control: executionControl(serverInstanceId, 2, 'Edited guidance') }
+				: { type: 'chat-transient-feed-mutation', ...transientFeed('view', 1), serverInstanceId,
+					mutation: { kind: 'clear-run', runId: 'run' } };
+			const version = connection.messageVersion;
+			socket.message(frame('unseen'));
+			flushSync();
+			await Promise.resolve();
+			expect(connection.messageVersion).toBe(version);
+			expect(ui.getExecutionControl('chat-a')).toEqual(queued);
+			expect(controlChanged).not.toHaveBeenCalled();
+			expect(refreshTranscript).not.toHaveBeenCalled();
+			expect(overlays.forChat('chat-a').optimisticInputs.map(input => input.clientMessageId)).toEqual(['input']);
+
+			socket.message(frame('successor'));
+			flushSync();
+			expect(connection.messageVersion).toBe(version + 1);
+			if (kind === 'control') expect(ui.getExecutionControl('chat-a')?.version).toBe(2);
+			else expect(ui.getTransientFeed('chat-a')?.transientRevision).toBe(1);
+			expect(overlays.forChat('chat-a').optimisticInputs).toHaveLength(1);
+		} finally {
+			router.unmount();
+			coordinator.unmount();
+			drain.cleanup();
+			connection.disconnect();
+			panels.destroy();
+			cache.remove('chat-a');
+			cache.flush();
+			clock.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it.each((['control', 'transient'] as const).flatMap(kind =>
+		['success', 'retry', 'newer-live-update', 'view-change', 'disconnect', 'unmount', 'deletion', 'not-found'].map(completion => ({ kind, completion })),
+	))('catches up a suppressed successor $kind update ($completion)', async ({ kind, completion }) => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		const socket = new RouterTestSocket();
+		vi.stubGlobal('WebSocket', class extends RouterTestSocket { constructor() { super(); return socket; } });
+		const cache = new ChatTranscriptCache({ limit: 10 });
+		const panels = new ConversationPanelRegistry({ cache, overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove() {} },
+			getComposerAnchorSurfaceId: () => null, getSelectedChatId: () => 'chat-a' });
+		const ui = new ConversationUiState();
+		const connection = new WsConnection();
+		const drain = createDrainCursor(connection);
+		const fallback = Promise.withResolvers<{ control: ReturnType<typeof executionControl> }>();
+		const refresh = vi.fn(() => fallback.promise);
+		const empty = executionControl('successor', 0, '');
+		empty.queue.entries = [];
+		const latest = executionControl('successor', 2, 'Guidance queued by CLI');
+		latest.queue.pause = { id: 'pause', kind: 'manual', pausedAt: TS };
+		const latestTransient = { ...transientFeed('view', 2), serverInstanceId: 'successor' };
+		const snapshot = { ...chatSnapshot('view'), control: latest, transientFeed: latestTransient };
+		const catchup = Promise.withResolvers<ChatSnapshotResponse>();
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(catchup.promise).mockResolvedValue(snapshot);
+		const coordinator = render(ReconnectCoordinatorTestHost, { options: {
+			ws: connection, panels, conversationUi: ui,
+			sessions: { selectedChatId: 'chat-a', quietRefreshChats: vi.fn(async () => {}) },
+			getExecutionControl: refresh, getBackgroundCursors: () => [], markBackgroundStale() {},
+		} });
+		const router = render(RouterIntegrationHost, { connection, drainHandle: drain, stores: createStores({ conversationUi: ui }) });
+		try {
+			connection.connect('token');
+			socket.open();
+			flushSync();
+			const query = JSON.parse(socket.send.mock.calls[0]![0]) as { clientRequestId: string };
+			clock.mockReturnValue(20);
+			ui.captureExecutionResponse().setExecutionControlFromRefresh('chat-a', executionControl('retired', 1, 'Old guidance'));
+			socket.message({ type: 'reconnect-state', clientRequestId: query.clientRequestId, serverInstanceId: 'successor',
+				processing: { outcome: 'snapshot', chats: [] }, controlResults: [] });
+			await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+			const version = connection.messageVersion;
+			socket.message(kind === 'control'
+				? { type: 'chat-execution-control-updated', chatId: 'chat-a', control: latest }
+				: { type: 'chat-transient-feed-mutation', ...latestTransient, mutation: { kind: 'clear-run', runId: 'run' } });
+			flushSync();
+			expect(connection.messageVersion).toBe(version);
+			fallback.resolve({ control: empty });
+			await vi.waitFor(() => expect(ui.getExecutionControl('chat-a')).toEqual(empty));
+			clock.mockReturnValue(30);
+			await confirmHeartbeat(connection, socket, 'successor');
+			await confirmHeartbeat(connection, socket, 'successor');
+			expect(getChatSnapshot).toHaveBeenCalledOnce();
+			if (completion === 'disconnect') {
+				connection.disconnect();
+				flushSync();
+			} else if (completion === 'unmount') coordinator.unmount();
+			else if (completion === 'deletion') {
+				socket.message({ type: 'chat-session-deleted', chatId: 'chat-a' });
+				flushSync();
+			} else if (completion === 'view-change') {
+				ui.setTransientFeedFromSnapshot({ ...latestTransient, transcriptViewId: 'replacement' });
+			} else if (completion === 'newer-live-update') {
+				socket.message({ type: 'chat-execution-control-updated', chatId: 'chat-a', control: { ...latest, version: 3 } });
+				flushSync();
+			}
+			if (completion === 'retry') catchup.reject(new Error('Temporarily unavailable'));
+			else if (completion === 'not-found') catchup.reject(new ApiError(404, 'Chat deleted'));
+			else catchup.resolve(snapshot);
+			await catchup.promise.catch(() => undefined);
+			await new Promise<void>(resolve => setTimeout(resolve, 0));
+			if (['disconnect', 'unmount', 'deletion', 'not-found'].includes(completion)) {
+				expect(ui.getExecutionControl('chat-a')?.version).not.toBe(2);
+				expect(ui.getTransientFeed('chat-a')).toBeNull();
+			} else if (completion === 'view-change') {
+				expect(ui.getTransientFeed('chat-a')?.transcriptViewId).toBe('replacement');
+			} else {
+				if (completion === 'retry') {
+					expect(ui.getExecutionControl('chat-a')).toEqual(empty);
+					await confirmHeartbeat(connection, socket, 'successor');
+				}
+				await vi.waitFor(() => expect(ui.getExecutionControl('chat-a')).toEqual({ ...latest,
+					version: completion === 'newer-live-update' ? 3 : latest.version }));
+				expect(ui.getTransientFeed('chat-a')).toEqual(latestTransient);
+			}
+			if (!['disconnect', 'unmount', 'view-change'].includes(completion)) {
+				await confirmHeartbeat(connection, socket, 'successor');
+				expect(getChatSnapshot).toHaveBeenCalledTimes(completion === 'retry' ? 2 : 1);
+			}
+		} finally {
+			router.unmount();
+			coordinator.unmount();
+			drain.cleanup();
+			connection.disconnect();
+			panels.destroy();
+			cache.flush();
+			clock.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('keeps catch-up permissions when an older same-instance router snapshot returns', async () => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		const socket = new RouterTestSocket();
+		vi.stubGlobal('WebSocket', class extends RouterTestSocket { constructor() { super(); return socket; } });
+		const cache = new ChatTranscriptCache({ limit: 10 });
+		const panels = new ConversationPanelRegistry({ cache, overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove() {} },
+			getComposerAnchorSurfaceId: () => null, getSelectedChatId: () => 'chat-a' });
+		const ui = new ConversationUiState();
+		ui.activateTransientFeed('chat-a');
+		const connection = new WsConnection();
+		const drain = createDrainCursor(connection);
+		const control = executionControl('successor', 1, 'Queued guidance');
+		const fallback = Promise.withResolvers<{ control: ChatExecutionControlState }>();
+		const refresh = vi.fn(() => fallback.promise);
+		const snapshot = (view: string, permission: string, revision = 1): ChatSnapshotResponse => ({
+			...chatSnapshot(view), control, transientFeed: {
+				...transientFeed(view, revision), serverInstanceId: 'successor', rows: [{
+					permissionOccurrenceId: permission, runId: 'run', displayOrder: 1,
+					transcript: { transcriptViewId: view, afterOrdinal: 1 },
+					message: new PermissionRequestMessage(TS, permission, new BashToolUseMessage(TS, 'tool', 'pwd')),
+				}],
+			},
+		});
+		const old = snapshot('view-old', 'permission-old', 2);
+		const current = snapshot('view-current', 'permission-current');
+		const held = Promise.withResolvers<ChatSnapshotResponse>();
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(held.promise).mockResolvedValue(current);
+		const coordinator = render(ReconnectCoordinatorTestHost, { options: {
+			ws: connection, panels, conversationUi: ui,
+			sessions: { selectedChatId: 'chat-a', quietRefreshChats: vi.fn(async () => {}) },
+			getExecutionControl: refresh, getBackgroundCursors: () => [], markBackgroundStale() {},
+		} });
+		const router = render(RouterIntegrationHost, { connection, drainHandle: drain, stores: createStores({ conversationUi: ui }) });
+		try {
+			connection.connect('token');
+			socket.open();
+			flushSync();
+			const query = JSON.parse(socket.send.mock.calls[0]![0]) as { clientRequestId: string };
+			clock.mockReturnValue(20);
+			ui.setExecutionControlFromRefresh('chat-a', executionControl('retired', 1, 'Old guidance'));
+			socket.message({ type: 'chat-execution-control-updated', chatId: 'chat-a', control });
+			socket.message({ type: 'reconnect-state', clientRequestId: query.clientRequestId, serverInstanceId: 'successor',
+				processing: { outcome: 'snapshot', chats: [] }, controlResults: [] });
+			await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+			fallback.resolve({ control });
+			await vi.waitFor(() => expect(ui.getExecutionControl('chat-a')).toEqual(control));
+			ui.setTransientFeedFromSnapshot({ ...old.transientFeed, transientRevision: 0 });
+			socket.message({ type: 'chat-transient-feed-mutation', ...old.transientFeed,
+				mutation: { kind: 'clear-run', runId: 'run' } });
+			flushSync();
+			expect(getChatSnapshot).toHaveBeenCalledOnce();
+			clock.mockReturnValue(30);
+			await confirmHeartbeat(connection, socket, 'successor');
+			await vi.waitFor(() => expect(ui.getTransientFeed('chat-a')).toEqual(current.transientFeed));
+			held.resolve(old);
+			await held.promise;
+			await Promise.resolve();
+			expect(ui.getTransientFeed('chat-a')).toEqual(current.transientFeed);
+			expect(ui.pendingPermissionRequests.map(request => request.permissionOccurrenceId)).toEqual(['permission-current']);
+			await confirmHeartbeat(connection, socket, 'successor');
+			expect(getChatSnapshot).toHaveBeenCalledTimes(2);
+			const latest = snapshot('view-current', 'permission-current', 3);
+			vi.mocked(getChatSnapshot).mockResolvedValue(latest);
+			socket.message({ type: 'chat-transient-feed-mutation', ...latest.transientFeed,
+				mutation: { kind: 'clear-run', runId: 'run' } });
+			flushSync();
+			await vi.waitFor(() => expect(ui.getTransientFeed('chat-a')).toEqual(latest.transientFeed));
+			expect(getChatSnapshot).toHaveBeenCalledTimes(3);
+		} finally {
+			held.resolve(old);
+			fallback.resolve({ control });
+			router.unmount();
+			coordinator.unmount();
+			drain.cleanup();
+			connection.disconnect();
+			panels.destroy();
+			cache.flush();
+			clock.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it.each(['broadcast', 'native-reload'] as const)('fences held permission catch-up after %s replacement', async replacement => {
+		const clock = vi.spyOn(performance, 'now').mockReturnValue(10);
+		const socket = new RouterTestSocket();
+		vi.stubGlobal('WebSocket', class extends RouterTestSocket { constructor() { super(); return socket; } });
+		const cache = new ChatTranscriptCache({ limit: 10 });
+		const page: CompleteChatHistoryResponse = { chatId: 'chat-a', transcriptViewId: 'view', lastOrdinal: 1,
+			pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+			messages: [{ ordinal: 1, message: new AssistantMessage(TS, 'Synthetic response') }],
+			historyState: { kind: 'complete' }, limit: 50, resendCandidates: [] };
+		cache.replaceFromPage('chat-a', page);
+		const history = Promise.withResolvers<CompleteChatHistoryResponse>();
+		const read = vi.spyOn(chatsApi, 'getChatMessages').mockResolvedValue(page);
+		const panels = new ConversationPanelRegistry({ cache, overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove() {} },
+			getComposerAnchorSurfaceId: () => null, getSelectedChatId: () => 'chat-a' });
+		const ui = new ConversationUiState();
+		ui.activateTransientFeed('chat-a');
+		const connection = new WsConnection();
+		const drain = createDrainCursor(connection);
+		const catchup = Promise.withResolvers<ChatSnapshotResponse>();
+		const control = executionControl('successor', 1, 'Queued guidance');
+		const snapshot: ChatSnapshotResponse = { ...chatSnapshot('view'), control,
+			transcript: { availability: 'available', ...page },
+			transientFeed: { ...transientFeed('view', 1), serverInstanceId: 'successor', rows: [{
+				permissionOccurrenceId: 'obsolete-permission', runId: 'run', displayOrder: 1,
+				transcript: { transcriptViewId: 'view', afterOrdinal: 1 },
+				message: new PermissionRequestMessage(TS, 'obsolete-permission', new BashToolUseMessage(TS, 'tool', 'pwd')) }] } };
+		const replacementFeed = { ...transientFeed('replacement'), serverInstanceId: 'successor' };
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(catchup.promise).mockResolvedValue({ ...snapshot, transientFeed: replacementFeed,
+			transcript: { availability: 'available', ...page, transcriptViewId: 'replacement' } });
+		const refresh = vi.fn(async () => ({ control }));
+		const coordinator = render(ReconnectCoordinatorTestHost, { options: {
+			ws: connection, panels, conversationUi: ui,
+			sessions: { selectedChatId: 'chat-a', quietRefreshChats: vi.fn(async () => {}) },
+			getExecutionControl: refresh, getBackgroundCursors: () => [], markBackgroundStale() {},
+		} });
+		const defaults = createStores({ conversationUi: ui });
+		const router = render(RouterIntegrationHost, { connection, drainHandle: drain, stores: {
+			...defaults, chatState: { ...defaults.chatState,
+				getChatCursor: chatId => cache.readAppliedCursor(chatId),
+				isRenderedChat: chatId => panels.panelsForChat(chatId).length > 0,
+				markRenderedChatStale: chatId => panels.handleViewReplacement(chatId),
+				loadRenderedChat: async chatId => { await panels.loadChatSnapshot(chatId); },
+			},
+		} });
+		try {
+			panels.reconcile([{ chatId: 'chat-a', surfaceId: 'chat-view:window-one', windowId: 'window-one',
+				presentation: 'window-one', snapshotAdmission: 'admitted' }]);
+			await panels.loadChatSnapshot('chat-a');
+			read.mockReturnValue(history.promise);
+			connection.connect('token');
+			socket.open();
+			flushSync();
+			const query = JSON.parse(socket.send.mock.calls[0]![0]) as { clientRequestId: string };
+			clock.mockReturnValue(20);
+			ui.setExecutionControlFromRefresh('chat-a', executionControl('retired', 1, 'Old guidance'));
+			socket.message({ type: 'chat-execution-control-updated', chatId: 'chat-a', control });
+			socket.message({ type: 'reconnect-state', clientRequestId: query.clientRequestId, serverInstanceId: 'successor',
+				processing: { outcome: 'snapshot', chats: [] }, controlResults: [] });
+			await vi.waitFor(() => expect(ui.getExecutionControl('chat-a')).toEqual(control));
+			clock.mockReturnValue(30);
+			await confirmHeartbeat(connection, socket, 'successor');
+			expect(getChatSnapshot).toHaveBeenCalledOnce();
+			if (replacement === 'broadcast') {
+				socket.message({ type: 'chat-transcript-replaced', chatId: 'chat-a', previousTranscriptViewId: 'view',
+					transcriptViewId: 'replacement', lastOrdinal: 1 });
+				flushSync();
+				expect(cache.readAppliedCursor('chat-a')).toMatchObject({ transcriptViewId: 'view', stale: true });
+			} else {
+				const reloading = reloadChatFromNative(connection, panels, 'chat-a', {
+					signal: new AbortController().signal, onProgress() {},
+				});
+				const request = JSON.parse(socket.send.mock.calls.at(-1)![0]) as { clientRequestId: string; type: string };
+				expect(request.type).toBe('chat-reload');
+				socket.message({ ...page, type: 'chat-reloaded', clientRequestId: request.clientRequestId,
+					transcriptViewId: 'replacement' });
+				await expect(reloading).resolves.toBe('reloaded');
+				expect(cache.readAppliedCursor('chat-a')).toMatchObject({ transcriptViewId: 'replacement', stale: false });
+				panels.upsertOptimisticInput('chat-a', { chatId: 'chat-a', clientMessageId: 'new-input', content: 'New guidance',
+					createdAt: TS, delivery: 'pending', placement: 'live-tail' });
+			}
+			expect(ui.getTransientFeed('chat-a')).toBeNull();
+			catchup.resolve(snapshot);
+			await catchup.promise;
+			await new Promise<void>(resolve => setTimeout(resolve, 0));
+			expect(ui.pendingPermissionRequests).toEqual([]);
+			if (replacement === 'broadcast') history.resolve({ ...page, transcriptViewId: 'replacement' });
+			await vi.waitFor(() => expect(panels.panel('chat-view:window-one')?.transcript.transcriptViewId).toBe('replacement'));
+			await confirmHeartbeat(connection, socket, 'successor');
+			await vi.waitFor(() => expect(ui.getTransientFeed('chat-a')).toEqual(replacementFeed));
+			expect(getChatSnapshot).toHaveBeenCalledTimes(2);
+			expect(ui.pendingPermissionRequests).toEqual([]);
+			expect(read).toHaveBeenCalledTimes(replacement === 'broadcast' ? 2 : 1);
+			expect(panels.overlayFor('chat-a')?.optimisticInputs.map(input => input.clientMessageId))
+				.toEqual(replacement === 'native-reload' ? ['new-input'] : []);
+		} finally {
+			history.resolve({ ...page, transcriptViewId: 'replacement' });
+			router.unmount();
+			coordinator.unmount();
+			drain.cleanup();
+			connection.disconnect();
+			panels.destroy();
+			cache.remove('chat-a');
+			cache.flush();
+			read.mockRestore();
+			clock.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it.each([
 		['archive-toggled', 'chat-b'],
 		['execution-settings-updated', 'chat-b'],
@@ -241,6 +685,8 @@ describe('event router integration', () => {
 		renderRouterWithRawMessages([{ type: 'chat-session-deleted', chatId: 'chat-a' }], stores);
 
 		expect(stores.chatPresentations.clearDeletedChat).toHaveBeenCalledWith('chat-a');
+		expect(stores.sessions.applyServerDeletion).toHaveBeenCalledWith('chat-a');
+		expect(stores.sessions.quietRefreshChats).not.toHaveBeenCalled();
 	});
 
 	it('routes ws-fault through normalize + global filter + handler without a chat ID', () => {
@@ -765,6 +1211,58 @@ describe('event router integration', () => {
 		expect(stores.chatState.markChatTranscriptStale).not.toHaveBeenCalled();
 	});
 
+	it('refreshes an unfamiliar transient view when its replacement broadcast was missed', async () => {
+		const stores = createStores();
+		stores.conversationUi.setTransientFeedFromSnapshot(transientFeed('generation-old'));
+		const snapshot = chatSnapshot('generation-new');
+		vi.mocked(getChatSnapshot).mockResolvedValue(snapshot);
+		renderRouterWithRawMessages([{
+			type: 'chat-transient-feed-mutation', ...transientFeed('generation-new', 2),
+			mutation: { kind: 'clear-run', runId: 'run' },
+		}], stores);
+		await vi.waitFor(() => expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(snapshot.transientFeed));
+		expect(getChatSnapshot).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		{ previous: undefined, requested: 'generation-current' },
+		{ previous: 'generation-old', requested: 'generation-current' },
+		{ previous: undefined, requested: 'generation-old' },
+		{ previous: 'generation-old', requested: 'generation-old' },
+	])('applies newer concurrent snapshots (previous: $previous, requested: $requested)', async ({ previous, requested }) => {
+		const stores = createStores();
+		stores.conversationUi.activateTransientFeed('chat-a');
+		if (previous) stores.conversationUi.setTransientFeedFromSnapshot(transientFeed(previous));
+		const older = Promise.withResolvers<ChatSnapshotResponse>();
+		const newer = Promise.withResolvers<ChatSnapshotResponse>();
+		const first = chatSnapshot('generation-current');
+		first.transientFeed = transientFeed('generation-current', 2);
+		const permission = {
+			permissionOccurrenceId: 'permission-current', runId: 'run', displayOrder: 1,
+			transcript: { transcriptViewId: 'generation-current', afterOrdinal: 1 },
+			message: new PermissionRequestMessage(TS, 'permission-current', new BashToolUseMessage(TS, 'tool', 'pwd')),
+		};
+		const second = { ...first, transientFeed: { ...first.transientFeed, transientRevision: 3, rows: [permission] } };
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+		renderRouterWithRawMessages([2, 3].map(transientRevision => ({
+			type: 'chat-transient-feed-mutation', ...transientFeed(requested, transientRevision),
+			mutation: { kind: 'clear-run', runId: 'run' },
+		})), stores);
+		try {
+			await vi.waitFor(() => expect(getChatSnapshot).toHaveBeenCalledTimes(2));
+			older.resolve(first);
+			await vi.waitFor(() => expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(first.transientFeed));
+			newer.resolve(second);
+			await newer.promise;
+			await Promise.resolve();
+			expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(second.transientFeed);
+			expect(stores.conversationUi.pendingPermissionRequests.map(request => request.permissionOccurrenceId)).toEqual(['permission-current']);
+		} finally {
+			older.resolve(first);
+			newer.resolve(second);
+		}
+	});
+
 	it('does not restore a stale transient snapshot after transcript replacement', async () => {
 		let resolveSnapshot!: (snapshot: ChatSnapshotResponse) => void;
 		const pendingSnapshot = new Promise<ChatSnapshotResponse>((resolve) => {
@@ -806,7 +1304,7 @@ describe('event router integration', () => {
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
 	});
 
-	it('does not restore a transient snapshot from a replaced server instance', async () => {
+	it('does not restore a delayed transient snapshot from an unseen intermediate server instance', async () => {
 		let resolveSnapshot!: (snapshot: ChatSnapshotResponse) => void;
 		const pendingSnapshot = new Promise<ChatSnapshotResponse>((resolve) => {
 			resolveSnapshot = resolve;
@@ -845,11 +1343,12 @@ describe('event router integration', () => {
 			...chatSnapshot('generation-current'),
 			transientFeed: {
 				...transientFeed('generation-current', 2),
-				serverInstanceId: 'server-old',
+				serverInstanceId: 'server-intermediate',
 			},
 		});
 		await pendingSnapshot;
-		await vi.waitFor(() => expect(applySnapshot).toHaveBeenCalledTimes(3));
+		await Promise.resolve();
+		expect(applySnapshot).toHaveBeenCalledTimes(2);
 
 		expect(stores.conversationUi.getTransientFeed('chat-a')).toMatchObject({
 			serverInstanceId: 'server-new',

@@ -47,6 +47,8 @@ describe('scripted Pi provider failures', () => {
     'stream disconnected before completion: stream closed before response.completed',
     'upstream response was cut short after the reply had begun',
     'request to https://synthetic.invalid/token failed, reason:',
+    'Connection closed.',
+    'read ECONNRESET',
   ])(
     'keeps the turn active while retrying %s and publishes only the recovered final response', async (message) => {
       const testEnvironment = requireEnvironment();
