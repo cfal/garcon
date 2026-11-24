@@ -33,6 +33,8 @@
 	type="button"
 	data-testid="conversation-panel"
 	data-chat-id={chat.id}
+	data-observer-working={chat.observation?.isWorking}
+	data-capture-status={chat.observation?.captureStatus}
 	data-transcript-view-id={panel.transcript.transcriptViewId}
 	data-panel-pinned={panel.scroll.isPinnedToBottom}
 	data-command-owner={isCommandOwner}

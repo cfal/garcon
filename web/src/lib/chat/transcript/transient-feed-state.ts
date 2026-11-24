@@ -39,10 +39,10 @@ export function applyTransientFeedMutation(
   if (!current) return { kind: 'snapshot-required' };
   if (current.serverInstanceId !== incoming.serverInstanceId
       || current.chatId !== incoming.chatId) return { kind: 'stale' };
+  if (incoming.transcriptViewId !== current.transcriptViewId) return { kind: 'snapshot-required' };
   if (incoming.transientRevision < current.transientRevision) return { kind: 'stale' };
   if (incoming.transientRevision === current.transientRevision) return { kind: 'duplicate' };
-  if (incoming.transientRevision !== current.transientRevision + 1
-      || incoming.transcriptViewId !== current.transcriptViewId) {
+  if (incoming.transientRevision !== current.transientRevision + 1) {
     return { kind: 'snapshot-required' };
   }
   const rows = new Map(current.rows.map((row) => [

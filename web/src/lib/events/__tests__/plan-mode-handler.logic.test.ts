@@ -27,7 +27,7 @@ function makeContext(mode = 'plan'): {
 }
 
 function batch(messages: ChatMessage[], chatId = 'chat-1') {
-	return { chatId, messages };
+	return { chatId, messages, transcriptViewId: 'view-plan', lastOrdinal: 2 };
 }
 
 describe('plan mode handler', () => {
@@ -42,6 +42,7 @@ describe('plan mode handler', () => {
 		expect(pending).toHaveLength(1);
 		expect(pending[0].requestedTool).toBeInstanceOf(ExitPlanModeToolUseMessage);
 		expect((pending[0].requestedTool as ExitPlanModeToolUseMessage).plan).toBe('Do X');
+		expect(pending[0].transcript).toEqual({ transcriptViewId: 'view-plan', afterOrdinal: 2 });
 	});
 
 	it('sets plan permission mode on EnterPlanMode tool-use', () => {
@@ -51,7 +52,7 @@ describe('plan mode handler', () => {
 		]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default');
+		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default', 'view-plan');
 		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
 	});
 
@@ -60,7 +61,7 @@ describe('plan mode handler', () => {
 		const message = batch([new EnterPlanModeToolUseMessage('2026-02-24T00:00:00.000Z', 'tool-sc')]);
 
 		handlePlanModeMessages(message, ctx);
-		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default');
+		expect(ctx.conversationUi.beginPlanModeForChat).toHaveBeenCalledWith('chat-1', 'default', 'view-plan');
 		expect(ctx.setPermissionMode).toHaveBeenCalledWith('chat-1', 'plan');
 	});
 

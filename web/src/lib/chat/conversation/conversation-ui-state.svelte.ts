@@ -47,7 +47,8 @@ export interface ConversationUiPort {
 	clearTurnPermissionRequestsForChat(chatId: string): void;
 	setPendingViewChat(chat: PendingViewChat | null): void;
 	setPreviousPermissionMode(mode: PermissionMode | null): void;
-	beginPlanModeForChat(chatId: string, previousMode: PermissionMode): void;
+	beginPlanModeForChat(chatId: string, previousMode: PermissionMode, transcriptViewId?: string): void;
+	retirePlanModeForView(chatId: string, transcriptViewId: string): void;
 	previousPermissionModeFor(chatId: string): PermissionMode | null;
 	finishPlanModeForChat(chatId: string): PermissionMode | null;
 	getExecutionControl(chatId: string | null | undefined): ChatExecutionControlState | null;
@@ -75,7 +76,10 @@ export class ConversationUiState implements ConversationUiPort {
 		Record<string, PendingPermissionRequest[]>
 	>({});
 	private unassignedPendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
-	private previousPermissionModeByChatId = $state.raw<Record<string, PermissionMode>>({});
+	private previousPermissionModeByChatId = $state.raw<Record<string, {
+		mode: PermissionMode;
+		transcriptViewId?: string;
+	}>>({});
 	private unassignedPreviousPermissionMode = $state<PermissionMode | null>(null);
 	private activeTransientChatId = $state<string | null>(null);
 	private readonly executionControlAuthority = new ExecutionControlInstanceAuthority();
@@ -175,24 +179,34 @@ export class ConversationUiState implements ConversationUiPort {
 		}
 		this.previousPermissionModeByChatId = {
 			...this.previousPermissionModeByChatId,
-			[chatId]: mode,
+			[chatId]: { mode, transcriptViewId: this.getTransientFeed(chatId)?.transcriptViewId },
 		};
 	}
 
-	beginPlanModeForChat(chatId: string, previousMode: PermissionMode): void {
-		if (chatId in this.previousPermissionModeByChatId) return;
+	beginPlanModeForChat(chatId: string, previousMode: PermissionMode, transcriptViewId?: string): void {
+		const previous = this.previousPermissionModeByChatId[chatId];
+		if (previous && previous.transcriptViewId === transcriptViewId) return;
 		this.previousPermissionModeByChatId = {
 			...this.previousPermissionModeByChatId,
-			[chatId]: previousMode,
+			[chatId]: { mode: previousMode, transcriptViewId },
 		};
+	}
+
+	retirePlanModeForView(chatId: string, transcriptViewId: string): void {
+		this.updatePendingPermissionsForChat(chatId, requests => requests.filter(request =>
+			request.requestedTool.type !== 'exit-plan-mode-tool-use'
+			|| request.transcript?.transcriptViewId !== transcriptViewId));
+		if (this.previousPermissionModeByChatId[chatId]?.transcriptViewId === transcriptViewId) {
+			this.finishPlanModeForChat(chatId);
+		}
 	}
 
 	previousPermissionModeFor(chatId: string): PermissionMode | null {
-		return this.previousPermissionModeByChatId[chatId] ?? null;
+		return this.previousPermissionModeByChatId[chatId]?.mode ?? null;
 	}
 
 	finishPlanModeForChat(chatId: string): PermissionMode | null {
-		const previousMode = this.previousPermissionModeByChatId[chatId] ?? null;
+		const previousMode = this.previousPermissionModeFor(chatId);
 		if (previousMode === null) return null;
 		const next = { ...this.previousPermissionModeByChatId };
 		delete next[chatId];
@@ -405,6 +419,8 @@ export class ConversationUiState implements ConversationUiPort {
 		result: TransientFeedApplyResult,
 	): TransientFeedApplyResult {
 		if (result.kind !== 'applied') return result;
+		const previousView = this.getTransientFeed(chatId)?.transcriptViewId;
+		if (previousView && previousView !== result.snapshot.transcriptViewId) this.retirePlanModeForView(chatId, previousView);
 		this.transientFeedByChatId = {
 			...this.transientFeedByChatId,
 			[chatId]: result.snapshot,

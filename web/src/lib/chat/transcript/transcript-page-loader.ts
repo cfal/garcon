@@ -4,6 +4,7 @@ import {
 	type TranscriptPage,
 } from '$shared/chat-view';
 import { loadTranscriptPageDemand } from './transcript-page-demand.js';
+import type { ChatTranscriptCache, TranscriptViewLease } from './chat-transcript-cache.svelte.js';
 import {
 	transcriptAnchorContinuation,
 	transcriptAnchorWindow,
@@ -20,6 +21,7 @@ import {
 } from './transcript-page-progress.js';
 
 interface TranscriptPageHost {
+	readonly transcriptCache: ChatTranscriptCache;
 	readonly combinedMode: boolean;
 	activeChatId: string | null;
 	transcriptViewId: string;
@@ -58,6 +60,7 @@ export class TranscriptPageLoader {
 	#loadingChatId: string | null = null;
 	#loadingDirection: TranscriptPageDirection | null = null;
 	#operationEpoch = 0;
+	#viewLease: TranscriptViewLease | null = null;
 	#pending: Record<TranscriptPageDirection, TranscriptAnchorRequest | null> = {
 		earlier: null,
 		later: null,
@@ -121,6 +124,7 @@ export class TranscriptPageLoader {
 
 		const transcriptViewId = this.host.transcriptViewId;
 		const operationEpoch = this.#operationEpoch;
+		this.#viewLease = this.host.transcriptCache.openViewLease(chatId);
 		const loadedThroughOrdinal = this.host.loadedThroughOrdinal;
 		const lastOrdinal = this.host.lastOrdinal;
 		const retryError =
@@ -145,6 +149,7 @@ export class TranscriptPageLoader {
 
 	suspend(): void {
 		this.#operationEpoch += 1;
+		this.#viewLease = null;
 		this.#loadPromise = null;
 		this.#loadingChatId = null;
 		this.#loadingDirection = null;
@@ -204,7 +209,7 @@ export class TranscriptPageLoader {
 			const canPublish = this.host.combinedMode
 				? this.#isCurrent(chatId, transcriptViewId, operationEpoch)
 				: await this.#canApply(chatId, transcriptViewId, operationEpoch, options.applicationGate);
-			if (canPublish) {
+			if (canPublish && this.#isCurrent(chatId, transcriptViewId, operationEpoch)) {
 				this.host.pageStates[direction] = {
 					status: 'error',
 					error: error instanceof Error ? error.message : 'Page load failed',
@@ -257,7 +262,7 @@ export class TranscriptPageLoader {
 				!(await this.#canApply(chatId, transcriptViewId, operationEpoch, options.applicationGate))
 			)
 				return 'invalidated';
-			if (boundary() !== request.cursorOrdinal) return 'invalidated';
+			if (!isCurrent() || boundary() !== request.cursorOrdinal) return 'invalidated';
 			const page = result.page;
 			const progressed = page.startOrdinal < page.endOrdinal;
 			if (direction === 'earlier') {
@@ -308,6 +313,7 @@ export class TranscriptPageLoader {
 		if (demand.kind === 'invalidated') return 'invalidated';
 		if (
 			!(await this.#canApply(chatId, transcriptViewId, operationEpoch, options.applicationGate))
+			|| !this.#isCurrent(chatId, transcriptViewId, operationEpoch)
 		) {
 			return 'invalidated';
 		}
@@ -348,6 +354,7 @@ export class TranscriptPageLoader {
 		if (demand.kind === 'invalidated') return 'invalidated';
 		if (
 			!(await this.#canApply(chatId, transcriptViewId, operationEpoch, options.applicationGate))
+			|| !this.#isCurrent(chatId, transcriptViewId, operationEpoch)
 		) {
 			return 'invalidated';
 		}
@@ -402,6 +409,7 @@ export class TranscriptPageLoader {
 
 	#isCurrent(chatId: string, transcriptViewId: string, operationEpoch: number): boolean {
 		return (
+			this.#viewLease?.isCurrent() === true &&
 			this.#operationEpoch === operationEpoch &&
 			this.host.activeChatId === chatId &&
 			this.host.transcriptViewId === transcriptViewId

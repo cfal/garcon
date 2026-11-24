@@ -73,6 +73,10 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 		chatState: {
 			getCursor: () => deps.chatState.getCursor(),
 			getChatCursor: (chatId) => transcriptCache.readAppliedCursor(chatId),
+			recheckChatTranscript: (chatId) => {
+				deps.panels.invalidateChatSnapshot(chatId);
+				deps.panels.markChatStale(chatId);
+			},
 			applyChatMessages: (
 				chatId,
 				transcriptViewId,
@@ -106,9 +110,8 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					// Leaves the stale cache flag set so a later activation retries.
 				}
 			},
-			markRenderedChatStale: (chatId) => {
-				deps.chatState.discardChat(chatId);
-				deps.panels.handleViewReplacement(chatId);
+			markRenderedChatStale: (chatId, replacementViewId, previousViewId) => {
+				if (deps.panels.handleViewReplacement(chatId, replacementViewId, previousViewId)) deps.chatState.discardChat(chatId);
 			},
 			appendLocalNotice: (noticeType, content) => {
 				const chatId = deps.sessions.selectedChatId;
@@ -123,9 +126,8 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.panels.removeChat(chatId);
 				deps.chatDrafts?.discardChat(chatId);
 			},
-			markChatTranscriptStale: (chatId) => {
-				deps.chatState.discardChat(chatId);
-				deps.panels.handleViewReplacement(chatId);
+			markChatTranscriptStale: (chatId, replacementViewId, previousViewId) => {
+				if (deps.panels.handleViewReplacement(chatId, replacementViewId, previousViewId)) deps.chatState.discardChat(chatId);
 			},
 		},
 		lifecycle: {

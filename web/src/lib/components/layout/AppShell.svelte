@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import { ArchiveUndoController } from '$lib/chat/actions/archive-undo-controller.js';
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
@@ -544,10 +545,6 @@
 		chatActionDialogs.requestShare(chat, m.sidebar_chats_new_chat());
 	}
 
-	function requestProjectPathChat(chat: ChatSessionRecord): void {
-		chatActionDialogs.requestProjectPath(chat, m.sidebar_chats_new_chat());
-	}
-
 	function requestTagsChat(chat: ChatSessionRecord): void {
 		chatActionDialogs.requestTags(chat, m.sidebar_chats_new_chat());
 	}
@@ -566,7 +563,10 @@
 		requestRename: requestRenameChat,
 		requestDetails: requestDetailsChat,
 		requestShare: requestShareChat,
-		requestProjectPath: requestProjectPathChat,
+		requestProjectPath(chat: ChatSessionRecord): void {
+			if (!canExecuteChat(chat)) return;
+			chatActionDialogs.requestProjectPath(chat, m.sidebar_chats_new_chat());
+		},
 		requestParent: (chat: ChatSessionRecord) => chatActionDialogs.requestParent(chat, m.sidebar_chats_new_chat()),
 		configurePreambles(chat: ChatSessionRecord, transcriptViewId: string): void {
 			appShell.openChatPreambleSelection(chat.id, transcriptViewId);

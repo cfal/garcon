@@ -98,6 +98,22 @@ function makeTransientFeed(chatId: string): ChatTransientFeedSnapshot {
 }
 
 describe('ConversationUiState', () => {
+	it('replaces only predecessor-owned plan controls when a successor feed is installed', () => {
+		const ui = new ConversationUiState();
+		ui.setTransientFeedFromSnapshot({ ...makeTransientFeed('chat'), transcriptViewId: 'view-old', rows: [] });
+		ui.beginPlanModeForChat('chat', 'default', 'view-old');
+		ui.updatePendingPermissionsForChat('chat', ['view-old', 'view-live'].map(view => ({
+			...makeExitPlanRequest(view), transcript: { transcriptViewId: view, afterOrdinal: 1 },
+		})));
+		ui.setTransientFeedFromSnapshot(makeTransientFeed('chat'));
+		expect(ui.pendingPermissionsFor('chat').map(request => request.permissionOccurrenceId)).toEqual(['view-live', 'permission-live']);
+		expect(ui.previousPermissionModeFor('chat')).toBeNull();
+		ui.beginPlanModeForChat('chat', 'acceptEdits', 'view-live');
+		ui.retirePlanModeForView('chat', 'view-old');
+		expect(ui.pendingPermissionsFor('chat').map(request => request.permissionOccurrenceId)).toEqual(['view-live', 'permission-live']);
+		expect(ui.previousPermissionModeFor('chat')).toBe('acceptEdits');
+	});
+
 	it('fences delayed HTTP transient snapshots against newer execution authority', () => {
 		const changed = vi.fn();
 		const ui = new ConversationUiState(changed);

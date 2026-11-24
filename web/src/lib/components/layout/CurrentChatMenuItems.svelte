@@ -171,8 +171,8 @@
 	{/if}
 	{#if canReload}
 		<menu.Item
-			disabled={selectedChat.isProcessing || selectedChat.observation?.isWorking}
-			onSelect={() => !selectedChat.isProcessing && !selectedChat.observation?.isWorking && onReload()}
+			disabled={selectedChat.isProcessing}
+			onSelect={() => !selectedChat.isProcessing && onReload()}
 		>
 			<RefreshCw />
 			{m.sidebar_chats_reload()}

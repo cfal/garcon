@@ -84,9 +84,7 @@ describe('PromptComposer focus', () => {
 		const editor = screen.getByRole<HTMLTextAreaElement>('textbox');
 		await fireEvent.input(editor, { target: { value: 'Retained draft' } });
 		await rendered.rerender({ observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true } });
-		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
-		expect(send.disabled).toBe(true);
-		await fireEvent.click(send);
+		expect(screen.queryByRole('button', { name: 'Send message' })).toBeNull();
 		await fireEvent.keyDown(editor, { key: 'Enter' });
 		await fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
 		expect(onsubmit).not.toHaveBeenCalled();
@@ -94,7 +92,24 @@ describe('PromptComposer focus', () => {
 		await rendered.rerender({ observation: null });
 		expect(screen.getByRole('textbox')).toBe(editor);
 		expect(editor.value).toBe('Retained draft');
-		expect(send.disabled).toBe(false);
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
+	});
+
+	it('discards portalled settings when switching to an observer without remounting its editor', async () => {
+		const rendered = render(PromptComposerTestHost, {
+			selectedChatId: 'parent', selectedStatus: 'running', selectableAgents: ['claude', 'codex'],
+		});
+		const editor = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(editor, { target: { value: 'Retained draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		expect(await screen.findByRole('button', { name: 'Codex' })).toBeTruthy();
+		await rendered.rerender({ observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true } });
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Codex' })).toBeNull());
+		expect(screen.getByRole('textbox')).toBe(editor);
+		await rendered.rerender({ observation: null });
+		expect(screen.getByRole('textbox')).toBe(editor);
+		expect(editor.value).toBe('Retained draft');
+		expect(screen.queryByRole('button', { name: 'Codex' })).toBeNull();
 	});
 
 	it.each(['in', 'rename', 'move', 'tag', 'fork'])(

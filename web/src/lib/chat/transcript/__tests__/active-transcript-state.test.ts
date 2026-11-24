@@ -130,6 +130,59 @@ describe('ActiveTranscriptState', () => {
 
 	afterEach(() => vi.restoreAllMocks());
 
+	it('checks loaded coverage rather than the observed head before confirming foreign recovery debt', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const chat = new ActiveTranscriptState(cache);
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(1, 3), {
+			lastOrdinal: 10, pageOldestOrdinal: 1, pageNewestOrdinal: 3, nextBeforeOrdinal: null, hasMore: false,
+		});
+		cache.applyMessages('chat-1', 'generation-1', { firstOrdinal: 4, lastOrdinal: 10, messages: assistantEntries(4, 10) });
+		cache.applyMessages('chat-1', 'retired', { firstOrdinal: 1, lastOrdinal: 1, messages: assistantEntries(1, 1) });
+		vi.mocked(getChatMessages).mockResolvedValueOnce({ ...page({ messages: assistantEntries(1, 7) }), chatId: 'chat-1', limit: 50 })
+			.mockResolvedValueOnce({ ...page({ messages: assistantEntries(1, 10) }), chatId: 'chat-1', limit: 50 });
+		await chat.loadMessages('chat-1');
+		expect(cache.readAppliedCursor('chat-1')).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 10, stale: false });
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(chat.entries.map(entry => entry.ordinal)).toEqual(Array.from({ length: 10 }, (_, index) => index + 1));
+		cache.remove('chat-1');
+	});
+
+	it('uses contiguous buffered commits to confirm foreign recovery debt without rereading', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const chat = new ActiveTranscriptState(cache);
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(1, 3), {
+			lastOrdinal: 3, pageOldestOrdinal: 1, pageNewestOrdinal: 3, nextBeforeOrdinal: null, hasMore: false,
+		});
+		cache.applyMessages('chat-1', 'retired', { firstOrdinal: 1, lastOrdinal: 1, messages: assistantEntries(1, 1) });
+		const held = Promise.withResolvers<Awaited<ReturnType<typeof getChatMessages>>>();
+		vi.mocked(getChatMessages).mockReturnValueOnce(held.promise);
+		const loading = chat.loadMessages('chat-1');
+		cache.applyMessages('chat-1', 'generation-1', { firstOrdinal: 4, lastOrdinal: 5, messages: assistantEntries(4, 5) });
+		chat.applyMessages('chat-1', 'generation-1', assistantEntries(4, 5), 4, 5);
+		held.resolve({ ...page({ messages: assistantEntries(1, 3) }), chatId: 'chat-1', limit: 50 });
+		await loading;
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(cache.readAppliedCursor('chat-1')).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 5, stale: false });
+		expect(chat.entries.map(entry => entry.ordinal)).toEqual([1, 2, 3, 4, 5]);
+		cache.remove('chat-1');
+	});
+
+	it('rechecks a raw latest navigation whose page does not cover recovery debt', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const chat = new ActiveTranscriptState(cache);
+		seedTranscript(chat, 'chat-1', 'generation-1', assistantEntries(1, 1), {
+			lastOrdinal: 2, pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		cache.applyMessages('chat-1', 'generation-1', { firstOrdinal: 2, lastOrdinal: 2, messages: assistantEntries(2, 2) });
+		cache.applyMessages('chat-1', 'retired', { firstOrdinal: 1, lastOrdinal: 1, messages: assistantEntries(1, 1) });
+		vi.mocked(getChatMessages).mockResolvedValueOnce({ ...page({ messages: assistantEntries(1, 1) }), chatId: 'chat-1', limit: 50 })
+			.mockResolvedValueOnce({ ...page({ messages: assistantEntries(1, 2) }), chatId: 'chat-1', limit: 50 });
+		expect(await chat.navigateToWindow('chat-1', 'latest')).toBe('invalidated');
+		await vi.waitFor(() => expect(cache.readAppliedCursor('chat-1')).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 2, stale: false }));
+		expect(getChatMessages).toHaveBeenCalledTimes(2);
+		cache.remove('chat-1');
+	});
+
 	it.each([
 		{ target: 'initial', shared: false }, { target: 'row', shared: false },
 		{ target: 'initial', shared: true }, { target: 'row', shared: true },
@@ -1805,23 +1858,17 @@ describe('ActiveTranscriptState', () => {
 			hasMore: false,
 		});
 		let resolveFirstSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
-		let resolveSecondSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages)
 			.mockReturnValueOnce(
 				new Promise((resolve) => {
 					resolveFirstSnapshot = resolve;
-				}),
-			)
-			.mockReturnValueOnce(
-				new Promise((resolve) => {
-					resolveSecondSnapshot = resolve;
 				}),
 			);
 
 		const firstLoad = chat.loadMessages('chat-1');
 		applyMessages(chat, 'chat-1', 'generation-1', [entry(2, assistant('live'))]);
 		const secondLoad = chat.loadMessages('chat-1');
-		resolveSecondSnapshot({
+		resolveFirstSnapshot({
 			chatId: 'chat-1',
 			limit: 50,
 			...page({ messages: [entry(1, assistant('existing'))], lastOrdinal: 1 }),
@@ -1831,16 +1878,12 @@ describe('ActiveTranscriptState', () => {
 			expect.objectContaining({ content: 'existing' }),
 			expect.objectContaining({ content: 'live' }),
 		]);
-		resolveFirstSnapshot({
-			chatId: 'chat-1',
-			limit: 50,
-			...page({ messages: [entry(1, assistant('existing'))], lastOrdinal: 1 }),
-		});
 		await expect(firstLoad).resolves.toEqual([
 			expect.objectContaining({ content: 'existing' }),
 			expect.objectContaining({ content: 'live' }),
 		]);
 		expect(chat.getCursor()).toEqual({ transcriptViewId: 'generation-1', lastOrdinal: 2 });
+		expect(getChatMessages).toHaveBeenCalledOnce();
 	});
 
 	it('preserves notices created after a superseding snapshot starts', async () => {
@@ -1852,16 +1895,10 @@ describe('ActiveTranscriptState', () => {
 			hasMore: false,
 		});
 		let resolveFirstSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
-		let resolveSecondSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
 		vi.mocked(getChatMessages)
 			.mockReturnValueOnce(
 				new Promise((resolve) => {
 					resolveFirstSnapshot = resolve;
-				}),
-			)
-			.mockReturnValueOnce(
-				new Promise((resolve) => {
-					resolveSecondSnapshot = resolve;
 				}),
 			);
 
@@ -1874,14 +1911,10 @@ describe('ActiveTranscriptState', () => {
 		});
 		await firstLoad;
 		chat.appendLocalNotice('error', 'newer notice');
-		resolveSecondSnapshot({
-			chatId: 'chat-1',
-			limit: 50,
-			...page({ messages: [entry(1, assistant('existing'))], lastOrdinal: 1 }),
-		});
 
 		await secondLoad;
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'newer notice']);
+		expect(getChatMessages).toHaveBeenCalledOnce();
 	});
 
 	it('clears loading state when switching away from an active snapshot load', async () => {
@@ -1944,7 +1977,7 @@ describe('ActiveTranscriptState', () => {
 		await chat.loadMessages('chat-2');
 		rejectFirstSnapshot(new Error('old chat failed'));
 
-		await expect(firstLoad).rejects.toThrow('old chat failed');
+		await expect(firstLoad).resolves.toEqual(chat.chatMessages);
 		expect(chat.activeChatId).toBe('chat-2');
 		expect(chat.chatMessages.map(contentOf)).toEqual(['two']);
 		expect(chat.loadStatus).toBe('loaded');

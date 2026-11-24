@@ -38,12 +38,12 @@ export interface ReconnectWsPort {
 
 export interface ReconnectPanelRegistryPort {
 	readonly transcriptCache: Pick<ChatTranscriptCache,
-		'readAppliedCursor' | 'markValidated' | 'markStaleExcept' | 'trackReplayValidation'>;
+		'readAppliedCursor' | 'markValidated' | 'markStaleExcept' | 'trackReplayValidation' | 'openViewLease' | 'acceptedView'>;
 	visibleChatIds(): readonly string[];
 	panelsForChat(chatId: string): readonly unknown[];
 	hasInactiveWindow(chatId: string): boolean;
 	markChatStale(chatId: string): void;
-	handleViewReplacement(chatId: string): void;
+	handleViewReplacement(chatId: string, replacementViewId: string): void;
 	loadChatSnapshot(chatId: string): Promise<boolean>;
 	invalidateChatSnapshot(chatId: string): void;
 	beginReconnectReplay(chatId: string, transcriptViewId: string): number;
@@ -229,6 +229,7 @@ export class ChatReconnectCoordinator {
 			return;
 		}
 		const replayToken = panels.beginReconnectReplay(chatId, cursor.transcriptViewId);
+		const lease = panels.transcriptCache.openViewLease(chatId);
 		const validation = panels.transcriptCache.trackReplayValidation(chatId);
 		try {
 			const message = await this.#replayTranscript({
@@ -261,7 +262,7 @@ export class ChatReconnectCoordinator {
 		} catch {
 			// Stops replay from buffering live commits during snapshot recovery.
 			panels.abortReconnectReplay(replayToken, chatId);
-			if (epoch === this.#reconnectEpoch) await this.#loadRenderedSnapshot(chatId, epoch);
+			if (epoch === this.#reconnectEpoch && lease.isCurrent()) await this.#loadRenderedSnapshot(chatId, epoch);
 		} finally {
 			validation.release();
 			panels.abortReconnectReplay(replayToken, chatId);
@@ -282,9 +283,7 @@ export class ChatReconnectCoordinator {
 		panels.invalidateChatSnapshot(chatId);
 		try {
 			await panels.loadChatSnapshot(chatId);
-		} catch {
-			if (epoch === this.#reconnectEpoch) panels.markChatStale(chatId);
-		}
+		} catch { /* The snapshot owner records failures before its view lease retires. */ }
 	}
 
 	async #reconcileGlobalState(
@@ -399,7 +398,7 @@ export class ChatReconnectCoordinator {
 			response.setTransientFeedFromSnapshot(snapshot.transientFeed);
 			// Unavailable history may carry only a placeholder view, not a replacement.
 			if (capturedViewId && snapshot.transcript.availability === 'available' && snapshot.transcript.transcriptViewId !== capturedViewId) {
-				panels.handleViewReplacement(chatId);
+				panels.handleViewReplacement(chatId, snapshot.transcript.transcriptViewId);
 				if (panels.panelsForChat(chatId).length > 0) {
 					panels.invalidateChatSnapshot(chatId);
 					const loaded = await panels.loadChatSnapshot(chatId);
@@ -442,6 +441,7 @@ export class ChatReconnectCoordinator {
 		// Captures cursors first, then invalidates even persisted-only and pending-only tails.
 		cache.markStaleExcept(excludedChatIds);
 		const validations = new Map(cursors.map((cursor) => [cursor.chatId, cache.trackReplayValidation(cursor.chatId)]));
+		const leases = new Map(cursors.map(cursor => [cursor.chatId, cache.openViewLease(cursor.chatId)]));
 		const replayTokens = this.#beginParkedBackgroundReplays(cursors);
 
 		let shouldRefresh = false;
@@ -449,17 +449,20 @@ export class ChatReconnectCoordinator {
 			for (const cursor of cursors) {
 				if (epoch !== this.#reconnectEpoch) return;
 				const replayToken = replayTokens.get(cursor.chatId) ?? null;
+				const isCurrent = () => epoch === this.#reconnectEpoch && leases.get(cursor.chatId)!.isLive()
+					&& (cache.acceptedView(cursor.chatId) ?? cursor.transcriptViewId) === cursor.transcriptViewId;
 				try {
+					if (!isCurrent()) continue;
 					const validation = validations.get(cursor.chatId)!;
 					if (!validation.isCurrent()) throw new Error('Transcript continuity changed before replay');
 					const message = await this.#replayTranscript({
 						chatId: cursor.chatId,
 						transcriptViewId: cursor.transcriptViewId,
 						afterOrdinal: cursor.lastOrdinal,
-						isCurrent: () => epoch === this.#reconnectEpoch,
+						isCurrent,
 						apply: (page) => this.#applyBackgroundReplayPage(cursor.chatId, page, replayToken),
 					});
-					if (!message) return;
+					if (!message || !isCurrent()) continue;
 					if (replayToken !== null) {
 						const result = this.options.panels.finishReconnectReplay(replayToken, cursor.chatId);
 						replayTokens.delete(cursor.chatId);
@@ -481,6 +484,7 @@ export class ChatReconnectCoordinator {
 						replayTokens.delete(cursor.chatId);
 					}
 					if (epoch !== this.#reconnectEpoch) return;
+					if (!isCurrent()) continue;
 					this.options.markBackgroundStale(cursor.chatId);
 					if (this.options.panels.panelsForChat(cursor.chatId).length > 0) {
 						await this.#loadRenderedSnapshot(cursor.chatId, epoch);

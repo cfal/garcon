@@ -269,8 +269,11 @@ function createReconnectDeps(
 		quietRefreshChats: vi.fn(async () => undefined),
 	};
 	const replayTokens = new Map<string, number>();
+	const viewCache = new ChatTranscriptCache({ limit: 100 });
 	const panels = {
 		transcriptCache: {
+			acceptedView: vi.fn<ChatTranscriptCache['acceptedView']>(chatId => viewCache.acceptedView(chatId)),
+			openViewLease: vi.fn<ChatTranscriptCache['openViewLease']>(chatId => viewCache.openViewLease(chatId)),
 			readAppliedCursor: vi.fn((chatId: string) => {
 				if (chatId === sessions.selectedChatId) return { ...selectedCursor, stale: false };
 				const cursor = backgroundApplied.get(chatId);
@@ -587,7 +590,7 @@ describe('ChatReconnectCoordinator', () => {
 		}
 	});
 
-	it('refreshes beyond live commits discarded after a snapshot overtakes replay', async () => {
+	it('merges replayed live commits into the concurrent head read', async () => {
 		localStorage.clear();
 		const { cache, panels, descriptor, messages, page } = snapshotRecoveryFixture(3);
 		const oldSnapshot = deferred<CompleteChatHistoryResponse>();
@@ -603,7 +606,6 @@ describe('ChatReconnectCoordinator', () => {
 			const deps = createReconnectDeps();
 			deps.ws.sendRequest.mockImplementation(async request => 'chatId' in request
 				? replay.promise : reconnectStateResponse());
-			const invalidate = vi.spyOn(panels, 'invalidateChatSnapshot');
 			const coordinator = new ChatReconnectCoordinator({ ...deps, panels });
 			await coordinator.handleConnectionState(true);
 			await coordinator.handleConnectionState(false);
@@ -614,10 +616,10 @@ describe('ChatReconnectCoordinator', () => {
 				messages: [messages[2]!], firstOrdinal: 3, lastOrdinal: 3, resendCandidates: [], noticeRevision: 0,
 			})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
 			replay.resolve(deltaResponse('chat-1', 'generation-selected', [messageJson(2, 'row-2')]));
-			await flushUntil(() => invalidate.mock.calls.length >= 2);
+			await reconnect;
 			replacementSnapshot.resolve(page(2));
 			await Promise.all([pending, reconnect]);
-			expect(read).toHaveBeenCalledTimes(3);
+			expect(read).toHaveBeenCalledTimes(2);
 			expect(cache.get('chat-1')).toMatchObject({ stale: false, lastOrdinal: 3 });
 			expect(panels.panel('chat-view:window-one')!.transcript.entries.map(entry => entry.ordinal)).toEqual([1, 2, 3]);
 		} finally {
@@ -708,10 +710,9 @@ describe('ChatReconnectCoordinator', () => {
 			held.reject(new Error('Hidden pre-reconnect read failed'));
 			await Promise.all([pending, revealed]);
 			if (!revealBeforeRejection) {
-				expect(read).toHaveBeenCalledTimes(1);
-				expect(cache.get('chat-1')?.stale).toBe(true);
+				expect(read).toHaveBeenCalledTimes(2);
+				expect(cache.get('chat-1')?.stale).toBe(false);
 				panels.reconcile([descriptor]);
-				await panels.loadChatSnapshot('chat-1');
 			}
 			expect(read).toHaveBeenCalledTimes(2);
 			expect(cache.get('chat-1')).toMatchObject({ stale: false, lastOrdinal: 2 });
@@ -1932,7 +1933,7 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.panels.loadChatSnapshot).toHaveBeenCalledWith('chat-1');
 	});
 
-	it('[TLV5-REPLAY.07-WEB-UNIT-01] discards a partial rendered replay when its transcript view is replaced', async () => {
+	it.each([false, true])('[TLV5-REPLAY.07-WEB-UNIT-01] discards a partial rendered replay when its transcript view is replaced (buffered=%s)', async buffered => {
 		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
 		cache.replace(
 			'chat-1',
@@ -2001,6 +2002,11 @@ describe('ChatReconnectCoordinator', () => {
 		const reconnect = coordinator.handleConnectionState(true);
 		await flushUntil(() => subscribeCount === 2);
 
+		if (buffered) panels.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'generation-selected', firstOrdinal: 7, lastOrdinal: 7,
+			messages: [{ ordinal: 7, message: new AssistantMessage(TS, 'Old buffered row') }],
+			resendCandidates: [], noticeRevision: 0,
+		});
 		seedTranscript(activeTranscript,
 			'chat-1',
 			'generation-reloaded',
@@ -2036,8 +2042,7 @@ describe('ChatReconnectCoordinator', () => {
 		);
 		await reconnect;
 
-		expect(loadChatSnapshot).toHaveBeenCalledOnce();
-		expect(loadChatSnapshot).toHaveBeenCalledWith('chat-1');
+		expect(loadChatSnapshot).not.toHaveBeenCalled();
 		expect(markValidated).not.toHaveBeenCalled();
 		expect(baseDeps.conversationUi.setTransientFeedFromSnapshot).not.toHaveBeenCalled();
 		expect(
@@ -2052,6 +2057,9 @@ describe('ChatReconnectCoordinator', () => {
 		expect(activeTranscript.getCursor()).toEqual({
 			transcriptViewId: 'generation-reloaded',
 			lastOrdinal: 2,
+		});
+		expect(cache.readAppliedCursor('chat-1')).toEqual({
+			transcriptViewId: 'generation-reloaded', lastOrdinal: 2, stale: false,
 		});
 		panels.destroy();
 		cache.flush();
@@ -2527,6 +2535,7 @@ describe('ChatReconnectCoordinator', () => {
 			deps.panels.markChatStale.mockImplementation((chatId) => cache.markStale(chatId));
 			deps.panels.transcriptCache.markStaleExcept.mockImplementation(ids => cache.markStaleExcept(ids));
 			deps.panels.transcriptCache.trackReplayValidation.mockImplementation(id => cache.trackReplayValidation(id));
+			deps.panels.transcriptCache.openViewLease.mockImplementation(id => cache.openViewLease(id));
 			deps.getBackgroundCursors.mockImplementation(limit => cache.listCursors(limit));
 			const applyBackground: NonNullable<ChatReconnectCoordinatorOptions['onBackgroundMessages']> =
 				(chatId, transcriptViewId, messages, firstOrdinal, lastOrdinal) =>
@@ -2564,15 +2573,14 @@ describe('ChatReconnectCoordinator', () => {
 			cache.replace(chatId, 'view', [{ ordinal: 1, message: new AssistantMessage(TS, 'one') }], 1, null);
 		}
 		const lifecycle = new ConversationLifecycleState();
-		const load = vi.fn<NonNullable<ConstructorParameters<typeof ConversationPanelRegistry>[0]['loadTranscriptSnapshot']>>(async (transcript, chatId) => {
-			cache.replace(chatId, 'view', [1, 2].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) })), 2, null);
-			transcript.installCachedSnapshot(chatId);
-		});
+		const load = vi.spyOn(cache.headReads, 'read').mockResolvedValue({ kind: 'complete', page: {
+			transcriptViewId: 'view', messages: [1, 2].map(ordinal => ({ ordinal, message: new AssistantMessage(TS, `row-${ordinal}`) })),
+			lastOrdinal: 2, pageOldestOrdinal: 1, pageNewestOrdinal: 2, nextBeforeOrdinal: null, hasMore: false,
+		} });
 		const panels = new ConversationPanelRegistry({ cache,
 			overlays: new ConversationTranscriptOverlayStore(),
 			lifecycle: { forChat: () => lifecycle, remove: () => {} },
 			getSelectedChatId: () => 'chat-1', getComposerAnchorSurfaceId: () => 'chat-view:window-left',
-			loadTranscriptSnapshot: load,
 		});
 		const visible = { surfaceId: 'chat-view:window-left', chatId: 'chat-1', presentation: 'window-left',
 			windowId: 'window-left', snapshotAdmission: 'admitted' } as const;
@@ -2681,6 +2689,38 @@ describe('ChatReconnectCoordinator', () => {
 		expect(deps.getBackgroundCursors).toHaveBeenCalledWith(21);
 		expect(deps.onBackgroundMessages).toHaveBeenCalledTimes(20);
 		expect(deps.panels.transcriptCache.markStaleExcept).toHaveBeenCalledWith(new Set(['chat-1']));
+	});
+
+	it.each([
+		{ outcome: 'resolved', cold: false }, { outcome: 'rejected', cold: false },
+		{ outcome: 'resolved', cold: true }, { outcome: 'rejected', cold: true },
+	])('drops a retired offscreen replay when $outcome (cold=$cold)', async ({ outcome, cold }) => {
+		const deps = createReconnectDeps({ selectedChatId: '',
+			backgroundCursors: [{ chatId: 'chat-background', transcriptViewId: 'generation-1', lastOrdinal: 1 }] });
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const initialCache = cold ? new ChatTranscriptCache({ limit: 100 }) : cache;
+		initialCache.replace('chat-background', 'generation-1', [{ ordinal: 1, message: new AssistantMessage(TS, 'Old row') }], 1, null);
+		initialCache.flush();
+		expect(cache.acceptedView('chat-background')).toBe(cold ? null : 'generation-1');
+		const held = deferred<Record<string, unknown>>();
+		const send = deps.ws.sendRequest.getMockImplementation()!;
+		deps.ws.sendRequest.mockImplementation(request => 'type' in request && request.type === 'chat-subscribe'
+			? held.promise : send(request));
+		const markStale = vi.fn((chatId: string) => cache.markStale(chatId));
+		const coordinator = new ChatReconnectCoordinator({ ...deps, markBackgroundStale: markStale,
+			panels: { ...deps.panels, transcriptCache: cache } });
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const replay = coordinator.handleConnectionState(true);
+		await flushUntil(() => deps.ws.sendRequest.mock.calls.some(([request]) => 'type' in request && request.type === 'chat-subscribe'));
+		cache.replace('chat-background', 'generation-2', [{ ordinal: 1, message: new AssistantMessage(TS, 'Current row') }], 1, null);
+		if (outcome === 'rejected') held.reject(new Error('Retired replay failed'));
+		else held.resolve(deltaResponse('chat-background', 'generation-1', [messageJson(2, 'Old replay row')]));
+		await replay;
+		expect(deps.onBackgroundMessages).not.toHaveBeenCalled();
+		expect(markStale).not.toHaveBeenCalled();
+		expect(cache.readAppliedCursor('chat-background')).toMatchObject({ transcriptViewId: 'generation-2', stale: false });
+		cache.remove('chat-background');
 	});
 
 	it('defers background snapshots for non-resumable cached cursors', async () => {

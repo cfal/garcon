@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import { onDestroy, untrack } from 'svelte';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
@@ -139,6 +140,7 @@
 		cache: chatTranscriptCache,
 		lifecycle: conversationLifecycles,
 		overlays: conversationTranscriptOverlays,
+		onTranscriptViewReplaced: (chatId, previousViewId) => conversationUi.retirePlanModeForView(chatId, previousViewId),
 		getComposerAnchorSurfaceId: () => workspace.composerAnchorSurfaceId,
 		getSelectedChatId: () => sessions.selectedChatId,
 		retainInactiveWindows: () => localSettings.activeCombineToolUseMessages,
@@ -476,6 +478,14 @@
 		});
 	});
 
+	// Retires cache ownership after panel removal can publish its final window.
+	$effect(() => {
+		const activeChatIds = new Set(Object.keys(sessions.byId));
+		if (sessions.chatListStatus === 'ready') {
+			untrack(() => chatTranscriptCache.retainChats(activeChatIds));
+		}
+	});
+
 	$effect(() => {
 		const projects = visibleGitProjects;
 		void gitQuickSummary.isEnabled;
@@ -613,7 +623,7 @@
 				{visible}
 				style={PORTABLE_SURFACE_STYLE}
 				onAppendToChatDraft={appendToChatDraft}
-				onChooseProjectFolder={modelCatalog
+				onChooseProjectFolder={canExecuteChat(sessions.selectedChat) && modelCatalog
 					.forExecutor(sessions.selectedChat?.executorId)
 					.supportsUpdateProjectPath(sessions.selectedChat?.agentId ?? '') && sessions.selectedChat
 					? () => chatActions.requestProjectPath(sessions.selectedChat!)
@@ -688,11 +698,12 @@
 			{#if mobileChat && mobilePanel && !mobilePanelRetainedOnDesktop}
 				{#key mobilePanel}
 					{const panel = mobilePanel}
-					{const chat = mobileChat}
+					{const initialChat = mobileChat}
+					{const panelChat = $derived(mobileChat?.id === panel.chatId ? mobileChat : initialChat)}
 					{const surfaceId = mobileChatSurface.id}
 					<ConversationPanel
 						{surfaceId}
-						{chat}
+						chat={panelChat}
 						{panel}
 						isCommandOwner={workspace.focusOwner.kind !== 'chat-list' &&
 							workspace.focusOwner.surfaceId === surfaceId}

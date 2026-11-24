@@ -73,6 +73,7 @@
 		executionPolicy?: 'conversation' | 'literal' | null;
 		onRegisterSubmit?: (submit: (message: string) => Promise<boolean>) => void;
 		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
+		onRegisterReload?: (reload: (chatId: string) => Promise<void>) => void;
 		onPatchActivity?: (chatId: string, timestamp: string) => void;
 		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 		commit?: CommitController;
@@ -87,6 +88,7 @@
 		executionPolicy = 'conversation',
 		onRegisterSubmit,
 		onRegisterAppendToDraft,
+		onRegisterReload,
 		onPatchActivity,
 		fetchProjectResolution,
 		commit,
@@ -465,6 +467,7 @@
 <ConversationWorkspace
 	{onRegisterSubmit}
 	{onRegisterAppendToDraft}
+	{onRegisterReload}
 	isVisible={!showTestLayer}
 	isPresented={true}
 	{subagentToolbar}

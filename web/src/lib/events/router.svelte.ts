@@ -95,6 +95,7 @@ export type EventRouterChatStateStore = Pick<
 	'getCursor' | 'appendLocalNotice' | 'appendServerNotice' | 'loadMessages'
 > & {
 	getChatCursor: (chatId: string) => { transcriptViewId: string; lastOrdinal: number } | null;
+	recheckChatTranscript: (chatId: string) => void;
 	applyChatMessages: (
 		chatId: string,
 		transcriptViewId: string,
@@ -106,9 +107,9 @@ export type EventRouterChatStateStore = Pick<
 	reloadChatTranscript: (chatId: string) => void;
 	isRenderedChat: (chatId: string) => boolean;
 	loadRenderedChat: (chatId: string) => Promise<void> | void;
-	markRenderedChatStale: (chatId: string) => void;
+	markRenderedChatStale: (chatId: string, replacementViewId: string | null, previousViewId?: string) => void;
 	removeChatTranscript: (chatId: string) => void;
-	markChatTranscriptStale: (chatId: string) => void;
+	markChatTranscriptStale: (chatId: string, replacementViewId: string | null, previousViewId?: string) => void;
 };
 
 export interface EventRouterLifecycleStore {
@@ -291,46 +292,50 @@ function buildDispatch(
 		removeChatTranscript: stores.chatState.removeChatTranscript,
 		clearChatPresentations: stores.chatPresentations.clearDeletedChat,
 	};
-	const transientTranscriptViews = new Map<string, string>();
+	const transientTranscriptViews = new Map<string, { viewId: string }>();
 
 	const refreshTransientFeed = (chatId: string, requestedTranscriptViewId: string) => {
 		const previousTranscriptViewId =
 			stores.conversationUi.getTransientFeed(chatId)?.transcriptViewId;
-		const knownTranscriptViewId = transientTranscriptViews.get(chatId);
-		if (knownTranscriptViewId && knownTranscriptViewId !== requestedTranscriptViewId
-			&& previousTranscriptViewId !== requestedTranscriptViewId) return;
-		transientTranscriptViews.set(chatId, requestedTranscriptViewId);
+		const scope = transientTranscriptViews.get(chatId) ?? { viewId: previousTranscriptViewId ?? requestedTranscriptViewId };
+		transientTranscriptViews.set(chatId, scope);
 		const response = stores.conversationUi.captureExecutionResponse();
 		void getChatSnapshot(chatId, 1)
 			.then((snapshot) => {
-				const currentView = transientTranscriptViews.get(chatId);
-				if (currentView !== requestedTranscriptViewId && currentView !== snapshot.transientFeed.transcriptViewId) return;
+				if (transientTranscriptViews.get(chatId) !== scope) return;
 				const result = response.setTransientFeedFromSnapshot(snapshot.transientFeed);
 				if (result.kind !== 'applied') return;
 				const snapshotTranscriptViewId = snapshot.transientFeed.transcriptViewId;
-				transientTranscriptViews.set(chatId, snapshotTranscriptViewId);
+				scope.viewId = snapshotTranscriptViewId;
 				if (
 					(previousTranscriptViewId && previousTranscriptViewId !== snapshotTranscriptViewId) ||
 					requestedTranscriptViewId !== snapshotTranscriptViewId
 				)
-					handleViewTransition(chatId, snapshotTranscriptViewId);
+					handleViewTransition(chatId, snapshot.transcript.availability === 'available'
+						? snapshot.transcript.transcriptViewId : null, previousTranscriptViewId ?? requestedTranscriptViewId);
 			})
 			.catch(() => undefined);
 	};
 
-	const handleViewTransition = (chatId: string, transcriptViewId: string) => {
+	const handleViewTransition = (chatId: string, transcriptViewId: string | null, previousViewId?: string) => {
 		messagesAccumulator.flush();
 		const selectedChatId = stores.sessions.selectedChat?.id ?? null;
+		if (transcriptViewId === null) {
+			stores.chatState.recheckChatTranscript(chatId);
+			if (stores.chatState.isRenderedChat(chatId)) void stores.chatState.loadRenderedChat(chatId);
+			else if (selectedChatId === chatId) stores.chatState.reloadChatTranscript(chatId);
+			return;
+		}
 		const cursor = stores.chatState.getChatCursor(chatId);
 		if (cursor?.transcriptViewId === transcriptViewId) {
 			return;
 		}
 		if (stores.chatState.isRenderedChat(chatId)) {
-			stores.chatState.markRenderedChatStale(chatId);
+			stores.chatState.markRenderedChatStale(chatId, transcriptViewId, previousViewId);
 			void stores.chatState.loadRenderedChat(chatId);
 			return;
 		}
-		stores.chatState.markChatTranscriptStale(chatId);
+		stores.chatState.markChatTranscriptStale(chatId, transcriptViewId, previousViewId);
 		if (selectedChatId === chatId) stores.chatState.reloadChatTranscript(chatId);
 	};
 
@@ -345,9 +350,17 @@ function buildDispatch(
 		'chat-transcript-replaced': (msg) => {
 			if (!(msg instanceof ChatTranscriptReplacedMessage)) return;
 			void stores.sessions.quietRefreshChats();
-			transientTranscriptViews.set(msg.chatId, msg.transcriptViewId);
-			stores.conversationUi.removeTransientFeed(msg.chatId);
-			handleViewTransition(msg.chatId, msg.transcriptViewId);
+			stores.conversationUi.retirePlanModeForView(msg.chatId, msg.previousTranscriptViewId);
+			const transientView = stores.conversationUi.getTransientFeed(msg.chatId)?.transcriptViewId
+				?? transientTranscriptViews.get(msg.chatId)?.viewId;
+			transientTranscriptViews.set(msg.chatId, { viewId: transientView ?? msg.transcriptViewId });
+			if (!transientView || transientView === msg.previousTranscriptViewId || transientView === msg.transcriptViewId) {
+				transientTranscriptViews.set(msg.chatId, { viewId: msg.transcriptViewId });
+				if (transientView !== msg.transcriptViewId) stores.conversationUi.removeTransientFeed(msg.chatId);
+			} else {
+				refreshTransientFeed(msg.chatId, msg.transcriptViewId);
+			}
+			handleViewTransition(msg.chatId, msg.transcriptViewId, msg.previousTranscriptViewId);
 		},
 		'chat-transient-feed-mutation': (msg) => {
 			if (!(msg instanceof ChatTransientFeedMutationMessage)) return;
@@ -493,9 +506,11 @@ export function createEventRouter(
 	});
 }
 
-function messagesOf(msg: ChatMessagesMessage): { chatId: string; messages: ChatMessage[] } {
+function messagesOf(msg: ChatMessagesMessage): { chatId: string; transcriptViewId: string; lastOrdinal: number; messages: ChatMessage[] } {
 	return {
 		chatId: msg.chatId,
+		transcriptViewId: msg.transcriptViewId,
+		lastOrdinal: msg.lastOrdinal,
 		messages: msg.messages.map((entry) => entry.message),
 	};
 }

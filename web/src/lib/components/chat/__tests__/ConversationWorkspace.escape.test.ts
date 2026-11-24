@@ -15,6 +15,7 @@ import { ConversationSessionController } from '$lib/chat/conversation/conversati
 import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+import * as m from '$lib/paraglide/messages.js';
 
 vi.mock('$lib/notifications/completion-sound.js', () => ({ playCompletionSound: vi.fn() }));
 
@@ -98,6 +99,20 @@ const mockStopChat = vi.mocked(stopChat);
 const mockGetGitRefs = vi.mocked(getGitRefs);
 
 describe('ConversationWorkspace Escape abort handling', () => {
+	it('opens the native-child Reload warning through the registered workspace action', async () => {
+		let reload!: (chatId: string) => Promise<void>;
+		render(ConversationWorkspaceEscapeHost, {
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: false },
+			onRegisterReload: callback => { reload = callback; },
+		});
+		await waitFor(() => expect(reload).toBeTypeOf('function'));
+		const requested = reload('chat-1');
+		expect(await screen.findByText(m.chat_native_child_reload_description())).toBeTruthy();
+		expect(screen.queryByRole('list')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_cancel() }));
+		await requested;
+	});
+
 	it('hides the observer composer and blocks editor, Stop and sibling submit shortcuts', async () => {
 		let submit!: (message: string) => Promise<boolean>;
 		let append!: ChatDraftAppend;
