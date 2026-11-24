@@ -91,7 +91,7 @@
 			closeLevel();
 			restoreFocus();
 		}}
-		class="max-h-(--bits-dropdown-menu-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto {contentClass}"
+		class="max-h-(--bits-menu-content-available-height) max-w-[calc(100vw-1rem)] overflow-y-auto {contentClass}"
 	>
 		{@render children()}
 	</DropdownMenuSubContent>

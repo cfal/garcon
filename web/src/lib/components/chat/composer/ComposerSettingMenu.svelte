@@ -39,6 +39,7 @@
 	} = $props();
 	const name = $derived(value ? `${label}: ${value}` : label);
 	let open = $state(false);
+	let trigger = $state<HTMLElement | null>(null);
 	$effect.pre(() => {
 		if (placement === 'hidden') open = false;
 	});
@@ -51,6 +52,7 @@
 {:else}
 	<DropdownMenu bind:open>
 		<DropdownMenuTrigger
+			bind:ref={trigger}
 			hidden={placement === 'hidden'}
 			{disabled}
 			aria-label={name}
@@ -65,6 +67,7 @@
 		<DropdownMenuContent
 			{align}
 			{side}
+			getFocusReturnTarget={() => trigger}
 			{onOpenAutoFocus}
 			onCloseAutoFocus={(event) => {
 				if (placement === 'hidden') event.preventDefault();

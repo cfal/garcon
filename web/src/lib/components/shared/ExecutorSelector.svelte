@@ -40,6 +40,7 @@
 		class?: string;
 	} = $props();
 	let open = $state(false);
+	let trigger = $state<HTMLElement | null>(null);
 	const hidden = $derived(presentation === 'hidden');
 	$effect.pre(() => {
 		if (hidden) open = false;
@@ -141,6 +142,7 @@
 	{/if}
 	<DropdownMenu bind:open onOpenChange={refreshOnOpen}>
 		<DropdownMenuTrigger
+			bind:ref={trigger}
 			{hidden}
 			class={cn(triggerClass, inComposer && compact && 'size-9 justify-center px-0')}
 			{disabled}
@@ -155,6 +157,7 @@
 		<DropdownMenuContent
 			{align}
 			{side}
+			getFocusReturnTarget={() => trigger}
 			onCloseAutoFocus={(event) => {
 				if (hidden) event.preventDefault();
 			}}

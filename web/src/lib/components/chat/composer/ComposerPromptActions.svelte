@@ -35,6 +35,7 @@
 		'inline-flex size-9 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
 	const ordinary = 'border-border bg-background text-foreground hover:bg-muted';
 	const menu = new OverflowMenuState();
+	let trigger = $state<HTMLElement | null>(null);
 	export const closeOverflow = menu.closeThen;
 
 	$effect.pre(() => {
@@ -50,6 +51,7 @@
 
 <DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
 	<DropdownMenuTrigger
+		bind:ref={trigger}
 		hidden={!folded.length}
 		disabled={!explainUnavailableImage && folded.every((action) => action.disabled)}
 		aria-label={label}
@@ -63,6 +65,7 @@
 		sideOffset={8}
 		collisionPadding={8}
 		class="w-64 max-w-[calc(100vw-1rem)]"
+		getFocusReturnTarget={() => trigger}
 		onCloseAutoFocus={menu.onCloseAutoFocus}
 	>
 		{#each folded as action (action.id)}

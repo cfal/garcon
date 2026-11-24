@@ -128,3 +128,51 @@ test('the live composer follows tile width and local group order without changin
     assertNoBrowserErrors();
   }, undefined, { executionBackend: 'remote-controller-dials' });
 }, 180_000);
+
+test('the folded Executor menu scrolls its last choice into a short viewport', async () => {
+  await withChromiumFixture('composer-short-executor-menu', async ({ page, integration }) => {
+    const { client, executionDirs, directAgents } = integration;
+    for (let i = 1; i <= 22; i++) {
+      await client.post('/api/v1/executors', {
+        label: `Worker ${i}`, direction: 'executor-connects', noTls: true,
+      });
+    }
+    const chatId = integration.newChatId();
+    const turn = await client.startDirectChat({
+      chatId, content: 'Synthetic executor menu', projectPath: executionDirs.project, agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.setViewportSize({ width: 390, height: 490 });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const toolbar = page.locator('[data-composer-toolbar]:visible');
+    await toolbar.evaluate(row => { row.style.maxWidth = '136px'; });
+    await toolbar.locator('[data-composer-overflow="settings"]').click();
+    await page.getByRole('menuitem', { name: 'Executor: Local', exact: true }).click();
+    const menu = page.locator('[data-slot="dropdown-menu-sub-content"]');
+    const choices = menu.getByRole('menuitemradio');
+    await expect(choices).toHaveCount(23);
+    await menu.evaluate(node => { node.scrollTop = node.scrollHeight; });
+    await expect(choices.last()).toBeInViewport({ ratio: 1 });
+  });
+}, 120_000);
+
+test('Escape returns focus to an executor trigger mounted after discovery', async () => {
+  await withChromiumFixture('composer-late-executor-focus', async ({ page, integration }) => {
+    const { client, executionDirs, directAgents } = integration;
+    const chatId = integration.newChatId();
+    const turn = await client.startDirectChat({
+      chatId, content: 'Synthetic executor discovery', projectPath: executionDirs.project, agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const executor = page.locator('[data-composer-toolbar]:visible').getByRole('button', { name: 'Executor: Local' });
+    await page.getByPlaceholder('Reply...', { exact: true }).focus();
+    await expect(executor).toHaveCount(0);
+    await client.post('/api/v1/executors', { label: 'New worker', direction: 'executor-connects', noTls: true });
+    await executor.press('ArrowDown');
+    await expect(page.getByRole('menuitemradio', { name: 'Local', exact: true })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(executor).toBeFocused();
+  });
+}, 120_000);
