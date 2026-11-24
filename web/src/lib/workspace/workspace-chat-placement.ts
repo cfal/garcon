@@ -135,9 +135,13 @@ export class WorkspaceChatPlacementService {
 			const rows = planChatTiles(latest, chatIds, getHostSize());
 			const tiles = rows.flat();
 			tiled = tiles.length;
-			const focused = this.deps.lastFocusedWindowId();
-			const { windowId } = tiles.find((tile) => tile.windowId === focused)
-				?? tiles.find((tile) => tile.chatId === chatIds[0])!;
+			const focusedId = this.deps.lastFocusedWindowId();
+			const focusedWindow = focusedId && windowNodeById(latest.desktopRoot, focusedId);
+			const active = focusedWindow && latest.surfaces[focusedWindow.tabs.activeId];
+			const focusedTile = active?.type === 'chat'
+				? tiles.find((tile) => tile.windowId === focusedId && tile.chatId === active.chatId)
+				: null;
+			const { windowId } = focusedTile ?? tiles.find((tile) => tile.chatId === chatIds[0])!;
 			return {
 				destination: { windowId, surfaceId: chatViewSurfaceId(windowId) },
 				mutations: [{ type: 'tile-chats', partitionId: `partition-tile-${createRandomId()}`, rows }],

@@ -341,6 +341,15 @@ describe('tiling chats', () => {
 		expect(coordinator.focusedChatId).toBe('focused');
 	});
 
+	it('focuses the priority chat when the previously focused pane gets a different chat', async () => {
+		const { coordinator } = createHarness({ hostSize: { width: 720, height: 240 } });
+		await coordinator.showChatInWindow('waiting', 'window-main');
+		await coordinator.showChatInWindow('previous', 'window-files');
+		expect(await coordinator.tileChats(['waiting', 'running', 'previous'])).toBe(2);
+		expect(coordinator.focusedChatId).toBe('waiting');
+		expect(coordinator.currentWindowId).toBe('window-main');
+	});
+
 	it('does nothing for an empty list and presents only the first chat on mobile', async () => {
 		const { coordinator, layout } = createHarness();
 		const revision = layout.revision;
