@@ -21,6 +21,7 @@ import {
 } from '$lib/workspace/surface-types.js';
 import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { TerminalClientSession } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { ChatSurfaceTransferPort } from '$lib/workspace/chat-surface-transfer.js';
 import type {
@@ -536,6 +537,16 @@ function renderRoot(isMobile = false) {
 	return render(WorkspaceRoot, { isMobile, chatActions });
 }
 
+function useChatCatalog(records: ChatSessionRecord[]) {
+	const sessions = new ChatSessionsStore();
+	sessions.byId = Object.fromEntries(records.map(chat => [chat.id, chat]));
+	sessions.order = records.map(chat => chat.id);
+	sessions.isLoadingChats = false;
+	sessions.selectedChatId = 'chat-a';
+	testContext.current!.sessions = sessions;
+	return sessions;
+}
+
 function positionedDragEvent(type: string, clientX: number, clientY: number): DragEvent {
 	const event = new DragEvent(type, { bubbles: true, cancelable: true });
 	Object.defineProperties(event, {
@@ -698,27 +709,83 @@ describe('WorkspaceRoot', () => {
 		expectGutters(edgeContent, { left: true, right: false });
 	});
 
-	it('renders a draft conversation panel without requesting a server transcript', async () => {
+	it('admits a placed draft only when its catalog record becomes server-backed', async () => {
 		installContext();
-		const sessions = testContext.current?.sessions as {
-			selectedChat: ChatSessionRecord | null;
-			byId: Record<string, ChatSessionRecord>;
-		};
-		const draft = chat('chat-a', 'Chat A', {
-			status: 'draft',
-			orderGroup: null,
-		});
-		sessions.selectedChat = draft;
-		sessions.byId['chat-a'] = draft;
-		chatApiMocks.getChatMessages.mockRejectedValue(new Error('Session not found'));
-		chatApiMocks.getCombinedChatMessages.mockRejectedValue(new Error('Session not found'));
-
+		const sessions = useChatCatalog([]);
 		renderRoot();
+		expect(screen.queryByTestId('conversation-panel')).toBeNull();
+		sessions.byId = { 'chat-a': chat('chat-a', 'Chat A', { status: 'draft', orderGroup: null }) };
 		await tick();
-
-		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
+		const draftPanel = screen.getByTestId('conversation-panel');
+		expect(draftPanel.dataset.chatId).toBe('chat-a');
 		expect(chatApiMocks.getChatMessages).not.toHaveBeenCalled();
 		expect(chatApiMocks.getCombinedChatMessages).not.toHaveBeenCalled();
+
+		sessions.patchChat('chat-a', { status: 'running', orderGroup: 'normal' });
+		await waitFor(() => expect(draftPanel.dataset.transcriptViewId).toBe('view-chat-a'));
+		expect(screen.getByTestId('conversation-panel')).toBe(draftPanel);
+		sessions.byId = {};
+		await tick();
+		expect(screen.queryByTestId('conversation-panel')).toBeNull();
+	});
+
+	it('does not reconcile four unchanged panels for an unplaced chat completion', async () => {
+		const { layout } = installContext();
+		const sessions = useChatCatalog(['a', 'b', 'c', 'd', 'e'].map(id => chat(`chat-${id}`, id)));
+		sessions.applyProcessingEvent('chat-c', 'running');
+		sessions.patchChat('chat-c', { activityStatus: 'working' });
+		const place = (changes: WorkspaceLayoutMutation[]) =>
+			expect(layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, changes))).toBe(true);
+		place([
+			{ type: 'set-window-chat', windowId: 'window-files', chatId: 'chat-b' },
+			{ type: 'open-chat-in-new-window', targetWindowId: 'window-main', edge: 'bottom',
+				newWindowId: 'window-d', partitionId: 'partition-d', chatId: 'chat-d' },
+			{ type: 'open-chat-in-new-window', targetWindowId: 'window-files', edge: 'bottom',
+				newWindowId: 'window-e', partitionId: 'partition-e', chatId: 'chat-e' },
+		]);
+		renderRoot();
+		await waitFor(() => expect(screen.getAllByTestId('conversation-panel').map(n =>
+			n.dataset.transcriptViewId).sort()).toEqual(['view-chat-a', 'view-chat-b', 'view-chat-d', 'view-chat-e']));
+		const registry = testContext.current!.conversationPanels as ConversationPanelRegistry;
+		const original = panelMounts.map(({ panel }) => panel);
+		expect(original).toHaveLength(4);
+		const lookup = registry.panel.bind(registry);
+		using prepare = vi.spyOn(registry, 'prepareForReconcile');
+		using reconcile = vi.spyOn(registry, 'reconcile');
+		using cacheMounts = vi.spyOn(registry.transcriptCache, 'setMountedChatIds');
+		using reads = vi.spyOn(registry, 'panel');
+		const revision = layout.revision;
+		const complete = () => sessions.patchChat('chat-c', { activityStatus: 'complete' });
+		for (const [update, replacesRoster] of [
+			[complete, true],
+			[() => sessions.applyProcessingEvent('chat-c', null), true],
+			[complete, false],
+		] as const) {
+			const previous = sessions.byId;
+			update();
+			await tick();
+			expect(sessions.byId !== previous).toBe(replacesRoster);
+			expect(prepare).not.toHaveBeenCalled();
+			expect(reconcile).not.toHaveBeenCalled();
+			expect(cacheMounts).not.toHaveBeenCalled();
+			expect(reads).not.toHaveBeenCalled();
+			expect(layout.revision).toBe(revision);
+			for (const panel of original) {
+				expect(sessions.byId[panel.chatId]).toBe(previous[panel.chatId]);
+				expect(lookup(panel.surfaceId)).toBe(panel);
+			}
+		}
+		place([{ type: 'set-window-chat', windowId: 'window-files', chatId: 'chat-c' }]);
+		await tick();
+		expect(prepare).toHaveBeenCalledOnce();
+		expect(reconcile).toHaveBeenCalledOnce();
+		expect(cacheMounts).toHaveBeenCalledOnce();
+		expect(reads).toHaveBeenCalled();
+		for (const panel of original) {
+			const current = lookup(panel.surfaceId);
+			if (panel.chatId === 'chat-b') expect(current?.chatId).toBe('chat-c');
+			else expect(current).toBe(panel);
+		}
 	});
 
 	it('keeps visible project resolution stable across chat record updates', async () => {
