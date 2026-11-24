@@ -28,11 +28,27 @@ export function sidebarChatInset(depth: number): number {
 	return SIDEBAR_CHAT_BASE_INSET + depth * SIDEBAR_NESTING_STEP;
 }
 
+export interface SidebarTreeContinuation {
+	readonly depth: number;
+	readonly outer: SidebarTreeContinuation | null;
+}
+
+export interface SidebarTreeScope {
+	parentDepth: number;
+	delegationDepth: number;
+	continuations: SidebarTreeContinuation | null;
+}
+
+export interface SidebarTreeGuide extends SidebarTreeScope {
+	isLastChild: boolean;
+}
+
 export interface SidebarVirtualProjectHeaderRow {
 	executorId?: string;
 	type: 'project-header';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	projectKey: string;
 	collapseKey: string;
 	projectPath: string;
@@ -49,6 +65,7 @@ export interface SidebarVirtualExecutorHeaderRow {
 	type: 'executor-header';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	executorId: string;
 	collapseKey: string;
 	count: number;
@@ -63,6 +80,7 @@ export interface SidebarVirtualSectionHeaderRow {
 	type: 'section-header';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	section: SidebarChatSection;
 	count: number;
 	containsChat: (chatId: string) => boolean;
@@ -73,6 +91,7 @@ export interface SidebarVirtualChatRow {
 	type: 'chat';
 	key: string;
 	depth: number;
+	tree?: SidebarTreeGuide;
 	chat: ChatSessionRecord;
 	list: PersistedChatOrderGroup;
 	isPinned: boolean;
@@ -108,6 +127,16 @@ export interface SidebarRowModel {
 	visibleChatIds: string[];
 	matchingChatIds: string[];
 	actionableChatIds: string[];
+}
+
+export function sidebarDisplayRows(
+	rows: SidebarVirtualRow[],
+	layout: ChatItemLayout,
+): SidebarVirtualRow[] {
+	if (layout === 'single-line') return rows;
+	return rows.map((row) =>
+		row.tree ? { ...row, depth: row.depth - row.tree.delegationDepth } : row,
+	);
 }
 
 export function estimateSidebarVirtualRowSize(

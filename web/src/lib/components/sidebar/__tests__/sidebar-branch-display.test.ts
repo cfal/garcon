@@ -98,7 +98,7 @@ it('aligns a failed delegated row with successful nested content', async () => {
 	});
 	const fallback = await screen.findByText('child');
 	expect(fallback.getAttribute('data-sidebar-virtual-row-error')).toBe('child');
-	expect(fallback.style.paddingLeft).toBe('24px');
+	expect(fallback.style.paddingLeft).toBe('12px');
 	expect(view.container.querySelector('[data-sidebar-virtual-row="parent"]')).toBeTruthy();
 });
 
@@ -139,7 +139,7 @@ it.each([false, true])(
 );
 
 it.each(['single-line', 'compact', 'detailed'] as const)(
-	'keeps %s chat indentation inside the full-width item',
+	'keeps %s chat padding inside the full-width item',
 	async (chatItemLayout) => {
 		const view = render(SidebarChatListHost, {
 			chats: [chat('parent'), delegated('child', 'parent'), chat('peer')],
@@ -149,7 +149,7 @@ it.each(['single-line', 'compact', 'detailed'] as const)(
 			await view.rerender({ isMobile });
 			for (const [id, padding] of [
 				['parent', '12px'],
-				['child', '24px'],
+				['child', chatItemLayout === 'single-line' ? '24px' : '12px'],
 				['peer', '12px'],
 			]) {
 				const row = view.container.querySelector<HTMLElement>(

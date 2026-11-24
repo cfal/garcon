@@ -17,21 +17,26 @@ export function newChatProjectKey(project: NewChatProject): string {
 }
 
 interface NewChatProjectVisibilityOptions {
-	promoted?: NewChatProject;
+	promoted?: readonly NewChatProject[];
 	selected?: NewChatProject;
 }
 
 export function splitNewChatProjects(
 	groups: readonly NewChatProjectGroup[],
-	{ promoted, selected }: NewChatProjectVisibilityOptions = {},
+	{ promoted = [], selected }: NewChatProjectVisibilityOptions = {},
 ): {
 	visible: NewChatProject[];
 	overflow: NewChatProject[];
 } {
 	const entries = groups.flatMap(group => group.paths.map(path => ({ executorId: group.executorId, path })));
-	const promotedIndex = promoted ? entries.findIndex(entry => entry.executorId === promoted.executorId
-		&& projectPathKey(entry.path) === projectPathKey(promoted.path)) : -1;
-	let ordered = promotedIndex < 0 ? entries : [entries[promotedIndex]!, ...entries.filter((_, index) => index !== promotedIndex)];
+	const eligible = new Map(entries.map(entry => [newChatProjectKey(entry), entry]));
+	const promotedEntries = promoted.flatMap(project => {
+		const key = newChatProjectKey(project);
+		const entry = eligible.get(key);
+		eligible.delete(key);
+		return entry ? [entry] : [];
+	});
+	let ordered = [...promotedEntries, ...eligible.values()];
 	const selectedIndex = selected ? ordered.findIndex(entry => newChatProjectKey(entry) === newChatProjectKey(selected)) : -1;
 	if (selectedIndex >= VISIBLE_PROJECT_LIMIT) {
 		ordered = [ordered[selectedIndex]!, ...ordered.filter((_, index) => index !== selectedIndex)];

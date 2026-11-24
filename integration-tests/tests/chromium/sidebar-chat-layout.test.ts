@@ -105,17 +105,81 @@ test('inherited groups omit headers while differing groups retain full internal 
         await openSidebar(page);
         const parent = page.locator(`[data-sidebar-virtual-row="${a}"] .chat-item-root button`).first();
         const child = page.locator(`[data-sidebar-virtual-row="${a1}"] .chat-item-root button`).first();
+        const childPaddingLeft = mixed ? 120 : 72;
         await browserExpect(parent).toHaveCSS('padding-left', '60px');
-        await browserExpect(child).toHaveCSS('padding-left', mixed ? '120px' : '72px');
+        await browserExpect(child).toHaveCSS('padding-left', `${childPaddingLeft}px`);
         await browserExpect(child).toHaveCSS('padding-right', '8px');
         const bounds = await child.boundingBox();
         const parentBounds = await parent.boundingBox();
         expect(bounds!.x).toBe(parentBounds!.x);
         expect(bounds!.width).toBe(parentBounds!.width);
         await expectRowGeometry(page.locator(`[data-sidebar-virtual-row="${a1}"]`), false);
+        const guide = child.locator('xpath=ancestor::*[@data-sidebar-virtual-item]').locator('[data-sidebar-tree-guides]');
+        const incoming = guide.locator('[data-sidebar-tree-incoming]');
+        await browserExpect(guide).toHaveCount(1);
+        await browserExpect(guide).toHaveCSS('pointer-events', 'none');
+        await browserExpect(guide).toHaveAttribute('aria-hidden', 'true');
+        await browserExpect(incoming).toHaveAttribute('data-sidebar-tree-incoming', 'end');
+        const guideBounds = await guide.boundingBox();
+        const incomingBounds = await incoming.boundingBox();
+        expect(incomingBounds!.y).toBe(guideBounds!.y);
+        expect(incomingBounds!.x).toBe(guideBounds!.x + childPaddingLeft - 12);
         const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
         await mkdir(artifacts, { recursive: true });
         await page.screenshot({ path: join(artifacts, `sidebar-inherited-${mixed ? 'mixed' : 'same'}-${width}.png`) });
+      }
+    }
+    assertNoBrowserErrors();
+  });
+}, 120_000);
+
+test('multi-line delegation arrows align with titles while single-line keeps tree guides', async () => {
+  await withChromiumFixture('sidebar-delegation-layouts', async ({ page, integration, assertNoBrowserErrors }) => {
+    const { a, a1 } = await createSidebarDelegationFixture(integration);
+    await page.addInitScript(seedLocalSettings, {
+      sidebarNestDelegatedChats: true,
+      sidebarGroupingFields: [],
+      chatListFontSize: '16',
+    });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${a}`);
+    const child = page.locator(`[data-sidebar-virtual-row="${a1}"]`);
+    const wrapper = child.locator('xpath=ancestor::*[@data-sidebar-virtual-item]');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const label of ['Compact', 'Detailed', 'Single-line']) {
+        await openSidebar(page);
+        await chooseMenuOption(page, label);
+        const singleLine = label === 'Single-line';
+        await browserExpect(wrapper.locator('[data-sidebar-tree-guides]')).toHaveCount(singleLine ? 1 : 0);
+        const arrow = child.locator('[data-sidebar-delegation-arrow]');
+        await browserExpect(arrow).toHaveCount(singleLine ? 0 : 1);
+        await browserExpect(child.locator('[data-slot="chat-summary-header"]')).toHaveCSS('font-size', '16px');
+        await browserExpect(child.locator('.chat-item-root button').first()).toHaveCSS('padding-left', singleLine ? '24px' : '12px');
+        if (singleLine) continue;
+        await browserExpect(arrow).toHaveText('\u21b3');
+        await browserExpect(arrow).toHaveAttribute('aria-hidden', 'true');
+        await browserExpect(arrow).toHaveCSS('pointer-events', 'none');
+        await browserExpect.poll(() => arrow.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          const header = element.closest('[data-slot="chat-summary-header"]')!.getBoundingClientRect();
+          const title = element.nextElementSibling!.getBoundingClientRect();
+          const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+          return {
+            beforeTitle: bounds.right <= title.left,
+            centered: Math.abs(bounds.y + bounds.height / 2 - header.y - header.height / 2) < 0.51,
+            hitsRow: !element.contains(hit) && hit?.closest('[data-sidebar-virtual-row]') === element.closest('[data-sidebar-virtual-row]'),
+          };
+        })).toEqual({ beforeTitle: true, centered: true, hitsRow: true });
+        if (width === 390 && label === 'Compact') {
+          await child.locator('[data-slot="chat-summary-header"]').click({ modifiers: ['Control'] });
+          const selection = child.getByRole('checkbox');
+          await browserExpect(selection).toBeVisible();
+          const checkboxBounds = await selection.locator(':scope > div').first().boundingBox();
+          const arrowBounds = await arrow.boundingBox();
+          expect(arrowBounds!.x).toBeGreaterThanOrEqual(checkboxBounds!.x + checkboxBounds!.width);
+          await page.keyboard.press('Escape');
+          await browserExpect(selection).toHaveCount(0);
+        }
       }
     }
     assertNoBrowserErrors();
@@ -156,6 +220,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
           for (const showPath of [false, true]) {
             await setProjectPathVisibility(page, showPath);
             await expectRowGeometry(row, showPath);
+            await browserExpect(row.locator('xpath=ancestor::*[@data-sidebar-virtual-item]').locator('[data-sidebar-tree-guides]')).toHaveCount(0);
             const header = row.locator('[data-slot="chat-summary-header"]');
             await browserExpect(header.locator('[data-slot="sidebar-chat-timestamp-badge"]')).toHaveCount(1);
             // Project grouping places remote chats beneath an executor header, which replaces the pill.

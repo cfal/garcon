@@ -34,6 +34,7 @@
 		getChatSessions,
 		getAppShell,
 		getWs,
+		getExecutors,
 		getLocalSettings,
 		getRemoteSettings,
 		getNotifications,
@@ -59,6 +60,7 @@
 	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
 	import HandoffForkDialog from '$lib/components/chat/HandoffForkDialog.svelte';
 	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
+	import ChatParentDialog from '$lib/components/chat/ChatParentDialog.svelte';
 	import {
 		executorPinnedProjectPaths,
 		togglePinnedProjectPathOptimistically,
@@ -87,6 +89,7 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const ws = getWs();
+	const executors = getExecutors();
 	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
@@ -622,6 +625,7 @@
 		requestDetails: requestDetailsChat,
 		requestShare: requestShareChat,
 		requestProjectPath: requestProjectPathChat,
+		requestParent: (chat: ChatSessionRecord) => chatActionDialogs.requestParent(chat, m.sidebar_chats_new_chat()),
 		configurePreambles(chat: ChatSessionRecord, transcriptViewId: string): void {
 			appShell.openChatPreambleSelection(chat.id, transcriptViewId);
 		},
@@ -931,6 +935,16 @@
 	{isMobile}
 	onClose={() => chatActionDialogs.closeProjectPathDialog()}
 	onConfirm={(target, projectPath) => chatActionController.updateProjectPath(target, projectPath)}
+/>
+
+<ChatParentDialog
+	parentDialog={chatActionDialogs.parentDialog}
+	chats={sessions.orderedChats}
+	isConnected={ws.isConnected}
+	executorLabel={(id) => executors.label(id)}
+	onRefresh={quietRefresh}
+	onClose={() => chatActionDialogs.closeParentDialog()}
+	onConfirm={(chatId, parentChatId) => chatActionController.setParent(chatId, parentChatId)}
 />
 
 <SidebarTagDialog

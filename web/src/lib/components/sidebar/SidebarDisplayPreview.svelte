@@ -4,10 +4,13 @@
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
 	import SidebarBranchBadge from './SidebarBranchBadge.svelte';
+	import SidebarDelegationArrow from './SidebarDelegationArrow.svelte';
+	import SidebarTreeGuides from './SidebarTreeGuides.svelte';
 	import { buildSidebarChatListProjection } from '$lib/sidebar/display/sidebar-row-model';
 	import {
 		estimateSidebarVirtualRowSize,
 		sidebarChatInset,
+		sidebarDisplayRows,
 	} from '$lib/sidebar/display/sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from '$lib/sidebar/display/sidebar-display-options';
 	import { SIDEBAR_PREVIEW_CHATS, SIDEBAR_PREVIEW_NOW } from './sidebar-preview-chats';
@@ -20,6 +23,9 @@
 			currentTime: SIDEBAR_PREVIEW_NOW,
 		}),
 	);
+	const displayRows = $derived(
+		sidebarDisplayRows(projection.rowModel.rows, options.chatItemLayout),
+	);
 </script>
 
 <div class="min-w-0" data-sidebar-display-preview>
@@ -29,10 +35,14 @@
 		style={`width:${width}px`}
 		inert
 	>
-		{#each projection.rowModel.rows as row (row.key)}
-			<div
-				style={`height:${estimateSidebarVirtualRowSize(row, options.chatItemLayout, options.showProjectPath, options.chatFontScale)}px`}
-			>
+		{#each displayRows as row (row.key)}
+			{@const height = estimateSidebarVirtualRowSize(
+				row,
+				options.chatItemLayout,
+				options.showProjectPath,
+				options.chatFontScale,
+			)}
+			<div class="relative" style={`height:${height}px`}>
 				{#if row.type === 'executor-header'}<SidebarExecutorHeaderRow {row} preview />
 				{:else if row.type === 'project-header'}<SidebarProjectHeaderRow {row} preview />
 				{:else if row.type === 'section-header'}<SidebarSectionHeaderRow {row} />
@@ -54,10 +64,25 @@
 									? 'Remote'
 									: undefined}
 							>
-								{#snippet titleBadge()}<SidebarBranchBadge branch={row.branch} />{/snippet}
+								{#snippet titlePrefix()}
+									{#if row.tree && options.chatItemLayout !== 'single-line'}
+										<SidebarDelegationArrow depth={row.tree.delegationDepth} />
+									{/if}
+								{/snippet}
+								{#snippet titleBadge()}
+									<SidebarBranchBadge branch={row.branch} />
+								{/snippet}
 							</ChatSummary>
 						</div>
 					</div>
+				{/if}
+				{#if row.tree && options.chatItemLayout === 'single-line'}
+					<SidebarTreeGuides
+						{row}
+						guide={row.tree}
+						contentHeight={row.type === 'chat' ? height - 1 : height}
+						{width}
+					/>
 				{/if}
 			</div>
 		{/each}

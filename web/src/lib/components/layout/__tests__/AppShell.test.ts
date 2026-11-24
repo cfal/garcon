@@ -96,6 +96,9 @@ vi.mock('$lib/components/chat/HandoffForkDialog.svelte', async () => ({
 vi.mock('$lib/components/chat/ChatProjectPathDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
+vi.mock('$lib/components/chat/ChatParentDialog.svelte', async () => ({
+	default: (await import('./AppShellGenericStub.svelte')).default,
+}));
 vi.mock('$lib/components/chat/ShareChatDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));

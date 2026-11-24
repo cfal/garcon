@@ -24,9 +24,9 @@
 	const remoteSettings = getRemoteSettings();
 	const projects = new NewChatProjectsController(() => form, executors, remoteSettings);
 	const groups = $derived(projects.groups.filter(group => executors.isReady(group.executorId)));
-	let promotedProject = $state<NewChatProject | undefined>();
+	let promotedProjects = $state<NewChatProject[]>([]);
 	const partition = $derived(splitNewChatProjects(groups, {
-		promoted: promotedProject,
+		promoted: promotedProjects,
 		selected: { executorId: form.executorId, path: form.selectedProjectPath },
 	}));
 	let moreOpen = $state(false);
@@ -39,8 +39,10 @@
 	});
 
 	function selectProject(executorId: string, path: string): void {
+		// Retains the displayed order before selection invalidates the derived partition.
+		const previousVisible = partition.visible;
 		if (!projects.select(executorId, path) || !moreOpen) return;
-		promotedProject = { executorId, path };
+		promotedProjects = [{ executorId, path }, ...previousVisible];
 		selectionClosedMore = true;
 		moreOpen = false;
 	}

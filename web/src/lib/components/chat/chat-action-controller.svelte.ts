@@ -10,7 +10,8 @@ import type {
 	ChatActionDialogsState,
 	ChatProjectPathDialog,
 } from './chat-action-dialogs-state.svelte';
-import { getChatDetails, togglePinned, updateChatProjectPath } from '$lib/api/chats.js';
+import { getChatDetails, togglePinned, updateChatProjectPath, setChatParent } from '$lib/api/chats.js';
+import { ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { resolveProject } from '$lib/api/project-resolution.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -193,6 +194,16 @@ export class ChatActionController {
 		this.deps.onProjectPathUpdated(chatId, {
 			projectPath: nextPath,
 		});
+	}
+
+	async setParent(chatId: string, parentChatId: string | null): Promise<void> {
+		try {
+			await setChatParent({ chatId, parentChatId });
+		} catch (error) {
+			if (error instanceof ApiMutationOutcomeUnknownError) await this.deps.onQuietRefresh();
+			throw error;
+		}
+		await this.deps.onQuietRefresh();
 	}
 
 	async forkChat(sourceChatId: string): Promise<void> {

@@ -121,6 +121,20 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.isLoadingChats).toBe(false);
 	});
 
+	it('reports quiet refresh failures without rejecting a successful mutation caller', async () => {
+		const notifyError = vi.fn();
+		const store = new ChatSessionsStore({ notifyError });
+		mockListChats.mockRejectedValueOnce(new Error('Offline'));
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			await expect(store.quietRefreshChats()).resolves.toBeUndefined();
+			expect(notifyError).toHaveBeenCalledWith('Failed to refresh chats.');
+			expect(store.chatListError).toBe('Offline');
+		} finally {
+			log.mockRestore();
+		}
+	});
+
 	it.each([false, true])(
 		'requires an applied post-request order snapshot (follow-up succeeds: %s)',
 		async (succeeds) => {
@@ -166,6 +180,24 @@ describe('ChatSessionsStore IO', () => {
 		expect(await confirmation).toBe(false);
 		expect(store.byId.created).toBeDefined();
 		expect(fetchChats).toHaveBeenCalledTimes(2);
+	});
+
+	it('converges on changed parentage after an older roster fetch without changing selection', async () => {
+		const store = new ChatSessionsStore();
+		const first = deferred<Awaited<ReturnType<typeof listChats>>>();
+		const original = makeServerSession({ id: 'child' });
+		store.upsertServerChat(original);
+		store.setSelectedChatId('child');
+		mockListChats.mockReturnValueOnce(first.promise).mockResolvedValueOnce({
+			sessions: [{ ...original, parentChat: { chatId: '1783725900000201', relation: 'delegation' } }], total: 1, lastSelectedChatId: null,
+		});
+		const stale = store.quietRefreshChats();
+		const invalidated = store.quietRefreshChats();
+		first.resolve({ sessions: [original], total: 1, lastSelectedChatId: null });
+		await Promise.all([stale, invalidated]);
+		expect(mockListChats).toHaveBeenCalledTimes(2);
+		expect(store.byId.child?.parentChat).toEqual({ chatId: '1783725900000201', relation: 'delegation' });
+		expect(store.selectedChatId).toBe('child');
 	});
 
 	it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {

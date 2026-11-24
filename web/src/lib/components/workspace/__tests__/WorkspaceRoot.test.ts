@@ -524,6 +524,7 @@ const chatActions = {
 	requestDetails: vi.fn(),
 	requestShare: vi.fn(),
 	requestProjectPath: vi.fn(),
+	requestParent: vi.fn(),
 	configurePreambles: vi.fn(),
 	fork: vi.fn(),
 	reload: vi.fn(),
@@ -754,6 +755,60 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByRole('menuitem', { name: m.sidebar_tooltips_delete_chat() })).toBeTruthy();
 	});
 
+	it.each([false, true])('closes a tab context menu when its chat changes (multiple tabs: %s)', async (multipleTabs) => {
+		const { layout } = installContext();
+		if (multipleTabs) {
+			layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [{
+				type: 'register-surface',
+				surface: portableSingletonDescriptor('chat-map'),
+				windowId: 'window-main',
+			}]));
+		}
+		renderRoot();
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+		expect(await screen.findByRole('menuitem', { name: m.chat_parent_title() })).toBeTruthy();
+		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
+			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-b' },
+		]));
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(chatActions.requestParent).not.toHaveBeenCalled();
+
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: m.chat_parent_title() }));
+		expect(chatActions.requestParent).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-b' }));
+	});
+
+	it.each(['chat', 'surface'] as const)(
+		'closes the window menu when its %s identity changes',
+		async (target) => {
+			const { layout } = installContext();
+			const { container } = renderRoot();
+			const trigger = container.querySelector('[data-workspace-window-menu-trigger="window-main"]');
+			if (!trigger) throw new Error('Missing window menu trigger');
+			await fireEvent.click(trigger);
+			expect(await screen.findByRole('menuitem', { name: m.chat_parent_title() })).toBeTruthy();
+
+			const mutations: WorkspaceLayoutMutation[] =
+				target === 'chat'
+					? [{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-b' }]
+					: [
+							{
+								type: 'register-surface',
+								surface: portableSingletonDescriptor('chat-map'),
+								windowId: 'window-main',
+							},
+							{
+								type: 'activate-window-tab',
+								windowId: 'window-main',
+								surfaceId: 'singleton:chat-map',
+							},
+						];
+			layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, mutations));
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			expect(chatActions.requestParent).not.toHaveBeenCalled();
+		},
+	);
+
 	it('configures the exact chat and transcript view from a nonselected window menu', async () => {
 		const { layout } = installContext();
 		layout.publish(
@@ -786,6 +841,9 @@ describe('WorkspaceRoot', () => {
 			expect.objectContaining({ id: 'chat-b' }),
 			'view-chat-b',
 		);
+		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: m.chat_parent_title() }));
+		expect(chatActions.requestParent).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-b' }));
 	});
 
 	it('adds terminal actions to both tab menus', async () => {

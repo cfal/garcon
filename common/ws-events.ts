@@ -331,6 +331,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'pinned-toggled',
   'archive-toggled',
   'tags-updated',
+  'parent-updated',
   'chats-reordered',
   'agent-handoff',
   'execution-settings-updated',

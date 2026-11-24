@@ -29,7 +29,7 @@ describe('New Chat project visibility', () => {
 		const result = splitNewChatProjects([
 			{ executorId: 'local', paths: ['/a', '/b', '/c', '/d', '/e'] },
 			{ executorId: 'worker', paths: ['/a', '/chosen', '/last'] },
-		], { promoted: { executorId: 'worker', path: '/chosen' } });
+		], { promoted: [{ executorId: 'worker', path: '/chosen' }] });
 		expect(result.visible).toEqual([
 			{ executorId: 'worker', path: '/chosen' },
 			...['/a', '/b', '/c', '/d'].map(path => ({ executorId: 'local', path })),
@@ -67,9 +67,70 @@ describe('New Chat project visibility', () => {
 		}
 	});
 
+	it('retains the hoisted seed when an overflow project replaces the active selection', () => {
+		const groups = [{ executorId: 'local', paths: ['/d', '/e', '/f', '/g', '/h', '/seed', '/chosen'] }];
+		const previous = splitNewChatProjects(groups, { selected: { executorId: 'local', path: '/seed' } });
+		const selected = { executorId: 'local', path: '/chosen' };
+		const result = splitNewChatProjects(groups, { selected, promoted: [selected, ...previous.visible] });
+		expect(result.visible).toEqual(['/chosen', '/seed', '/d', '/e', '/f'].map(path => ({ executorId: 'local', path })));
+		expect(result.overflow).toEqual(['/g', '/h'].map(path => ({ executorId: 'local', path })));
+	});
+
+	it('preserves the previous cards through repeated cross-executor overflow promotions', () => {
+		const groups = [
+			{ executorId: 'local', paths: ['/same', '/b', '/c', '/d', '/e', '/f'] },
+			{ executorId: 'worker', paths: ['/same', '/other'] },
+		];
+		let previous = splitNewChatProjects(groups, { selected: { executorId: 'worker', path: '/same' } });
+		for (const selected of [
+			{ executorId: 'worker', path: '/other' },
+			{ executorId: 'local', path: '/f' },
+			{ executorId: 'local', path: '/e' },
+		]) {
+			const result = splitNewChatProjects(groups, { selected, promoted: [selected, ...previous.visible] });
+			expect(result.visible).toEqual([selected, ...previous.visible.slice(0, 4)]);
+			expect(new Set([...result.visible, ...result.overflow].map(newChatProjectKey)).size).toBe(8);
+			previous = result;
+		}
+		expect(previous.visible).toContainEqual({ executorId: 'local', path: '/same' });
+		expect(previous.visible).toContainEqual({ executorId: 'worker', path: '/same' });
+	});
+
+	it('drops stale promotions after removal or executor loss and fills from eligible projects', () => {
+		const promoted = [
+			{ executorId: 'local', path: '/removed' },
+			{ executorId: 'offline', path: '/a' },
+			{ executorId: 'worker', path: '/same' },
+			{ executorId: 'local', path: '/a' },
+		];
+		const groups = [
+			{ executorId: 'local', paths: ['/a', '/b', '/c', '/d', '/e'] },
+			{ executorId: 'worker', paths: ['/same'] },
+		];
+		const result = splitNewChatProjects(groups, { promoted });
+		expect(result.visible).toEqual([
+			{ executorId: 'worker', path: '/same' },
+			...['/a', '/b', '/c', '/d'].map(path => ({ executorId: 'local', path })),
+		]);
+		expect(result.overflow).toEqual([{ executorId: 'local', path: '/e' }]);
+	});
+
+	it('deduplicates repeated promotions while retaining eligible Windows path spelling', () => {
+		const groups = [{ executorId: 'local', paths: ['/a', '/b', '/c', '/d', '/e', 'D:\\work\\selected'] }];
+		const result = splitNewChatProjects(groups, {
+			promoted: [
+				{ executorId: 'local', path: 'D:/work/selected' },
+				{ executorId: 'local', path: 'D:\\work\\selected' },
+				{ executorId: 'local', path: '/a' },
+			],
+		});
+		expect(result.visible).toEqual(['D:\\work\\selected', '/a', '/b', '/c', '/d'].map(path => ({ executorId: 'local', path })));
+		expect(result.overflow).toEqual([{ executorId: 'local', path: '/e' }]);
+	});
+
 	it('retains an explicit More promotion when a different primary project is selected', () => {
 		const groups = [{ executorId: 'local', paths: ['/a', '/b', '/c', '/d', '/e', '/f', '/g'] }];
-		const promoted = { executorId: 'local', path: '/g' };
+		const promoted = [{ executorId: 'local', path: '/g' }];
 		expect(splitNewChatProjects(groups, { promoted, selected: { executorId: 'local', path: '/b' } }))
 			.toEqual(splitNewChatProjects(groups, { promoted }));
 		expect(splitNewChatProjects(groups, { promoted, selected: { executorId: 'local', path: '/f' } }).visible)
@@ -91,7 +152,7 @@ describe('New Chat project visibility', () => {
 			{ executorId: 'local', path: '/removed' },
 			{ executorId: 'offline', path: '/a' },
 		]) {
-			expect(splitNewChatProjects(groups, { selected, promoted: selected })).toEqual(splitNewChatProjects(groups));
+			expect(splitNewChatProjects(groups, { selected, promoted: [selected] })).toEqual(splitNewChatProjects(groups));
 		}
 	});
 

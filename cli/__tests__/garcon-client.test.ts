@@ -891,6 +891,26 @@ describe('GarconClient', () => {
     });
   });
 
+  test('sets parents in one PUT and rejects mismatched acknowledgements without retrying', async () => {
+    const chatId = runRequest.chatId;
+    const parentChatId = '1785337200123457';
+    const requests: unknown[] = [];
+    let reply: unknown = { success: true, chatId, parentChat: { chatId: parentChatId, relation: 'delegation' }, changed: true };
+    const client = new GarconClient({ ...connection, fetch: async (input, init) => {
+      requests.push({ url: String(input), method: init?.method, body: JSON.parse(String(init?.body)) });
+      return Response.json(reply);
+    } });
+    expect(await client.setChatParent({ chatId, parentChatId })).toEqual(reply);
+    expect(requests).toEqual([{ url: `${connection.baseUrl}/api/v1/chats/parent`, method: 'PUT', body: { chatId, parentChatId } }]);
+    reply = { success: true, chatId, parentChat: null, changed: true };
+    await expect(client.setChatParent({ chatId, parentChatId })).rejects.toThrow('mutation outcome is unknown');
+    expect(requests).toHaveLength(2);
+    expect(await client.setChatParent({ chatId, parentChatId: null })).toEqual(reply);
+    reply = { success: true, chatId: parentChatId, parentChat: null, changed: true };
+    await expect(client.setChatParent({ chatId, parentChatId: null })).rejects.toThrow('mutation outcome is unknown');
+    expect(requests).toHaveLength(4);
+  });
+
   test('uses desired-state metadata routes and strictly correlates their responses', async () => {
     const requests: Array<{ url: string; method: string | undefined; body: string }> = [];
     const client = new GarconClient({

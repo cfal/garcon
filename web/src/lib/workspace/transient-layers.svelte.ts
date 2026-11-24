@@ -103,7 +103,7 @@ export class TransientLayerRegistry {
 	}
 
 	handleEscape(event: KeyboardEvent): boolean {
-		if (event.key !== 'Escape' || event.isComposing) return false;
+		if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return false;
 		const layer = this.#topVisibleLayer();
 		if (!layer || !layer.onEscape()) return false;
 		event.preventDefault();

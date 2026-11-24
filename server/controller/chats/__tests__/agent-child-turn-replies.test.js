@@ -65,6 +65,19 @@ function fixture(mode) {
 }
 
 for (const mode of ['start', 'resume']) describe(`${mode} terminal reporting`, () => {
+  it('keeps the admitted completion recipient after delegation is replaced or cleared', async () => {
+    const f = fixture(mode);
+    f.controller.request(SOURCE, f.command);
+    await until(() => f.deliveries.length === 1);
+    f.chats.set(CHILD, { parentChat: { chatId: '2000000000000000', relation: 'delegation' } });
+    f.chats.set(CHILD, { parentChat: null });
+    await f.finish('Synthetic captured result.');
+    await until(() => f.deliveries.length === 2);
+    expect(f.deliveries[1]).toMatchObject({ status: 'completed', chatId: CHILD });
+    expect(f.context.execution.deliverServerControlInput.mock.calls.map(([id]) => id)).toEqual([PARENT, PARENT]);
+    expect(f.admit).toHaveBeenCalledTimes(1);
+  });
+
   it('acknowledges before reporting only the exact turn and releases both locks before waiting', async () => {
     const f = fixture(mode);
     f.controller.request(SOURCE, f.command);
