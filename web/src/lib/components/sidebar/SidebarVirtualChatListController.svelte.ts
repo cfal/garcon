@@ -96,9 +96,9 @@ export class SidebarVirtualChatListController {
 		}
 		this.#source = nextSource;
 		if (!normalizedAnchor) return;
-		const row = input.rows.find((candidate) => candidate.key === normalizedAnchor.key);
-		if (!row) return;
-		const nextSize = this.#estimateRow(row, input);
+		const anchorIndex = nextSource.keys.indexOf(normalizedAnchor.key);
+		if (anchorIndex < 0) return;
+		const nextSize = nextSource.estimates[anchorIndex];
 		const normalizedOffset = Math.min(
 			Math.round((normalizedAnchor.offset / normalizedAnchor.size) * nextSize),
 			nextSize,
