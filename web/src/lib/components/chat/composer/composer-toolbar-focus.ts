@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import type { fitComposerToolbar } from '$lib/chat/composer/composer-toolbar-layout';
+import type { ComposerToolbarLayout } from '$lib/chat/composer/composer-toolbar-layout';
 
 const visibleButton = 'button:not(:disabled):not([hidden]):not([hidden] *)';
 
@@ -30,7 +30,7 @@ function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 
 export async function retainComposerToolbarFocus(
 	root: HTMLElement,
-	layout: ReturnType<typeof fitComposerToolbar>,
+	layout: ComposerToolbarLayout,
 	closeOverflow: (group: string, afterClose: () => void) => void,
 ): Promise<void> {
 	const previous = document.activeElement;

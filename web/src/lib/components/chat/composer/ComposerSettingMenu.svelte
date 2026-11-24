@@ -6,7 +6,7 @@
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import ComposerSettingSubmenu from '$lib/components/shared/ComposerSettingSubmenu.svelte';
-	import type { ComposerControlPlacement } from './composer-toolbar-types';
+	import type { ComposerControlPlacement } from '$lib/chat/composer/composer-toolbar-layout';
 
 	let {
 		id,

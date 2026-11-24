@@ -4,10 +4,12 @@
 	import type { ModelTriggerWidths } from '$lib/agents/model-trigger-fit';
 	import ModelSelectorMenuItem from '$lib/components/model-selector/ModelSelectorMenuItem.svelte';
 	import type {
+		ComposerControlPlacement,
 		ComposerSettingId,
-		fitComposerToolbar,
+		ComposerToolbarLayout,
 	} from '$lib/chat/composer/composer-toolbar-layout';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import type ModelSelectorPopover from '$lib/components/model-selector/ModelSelectorPopover.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import {
 		DropdownMenu,
@@ -16,7 +18,7 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import AgentSettingControl from './AgentSettingControl.svelte';
 	import ComposerModeControl from './ComposerModeControl.svelte';
-	import type { ComposerControlPlacement, ComposerToolbarSettings } from './composer-toolbar-types';
+	import type { ComposerToolbarSettings } from './composer-toolbar-types';
 	import { OverflowMenuState } from '$lib/components/shared/overflow-menu-state.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -36,7 +38,7 @@
 		side,
 	}: ComposerToolbarSettings & {
 		ids: readonly ComposerSettingId[];
-		layout: ReturnType<typeof fitComposerToolbar>;
+		layout: ComposerToolbarLayout;
 		onModelMeasure: (widths: ModelTriggerWidths) => void;
 		onExecutorMeasure: (width: number) => void;
 		bypass: boolean;
@@ -45,7 +47,7 @@
 		side: 'top' | 'bottom';
 	} = $props();
 	let menuTrigger = $state<HTMLElement | null>(null);
-	let picker = $state<ComposerModelSelector>();
+	let picker = $state<ModelSelectorPopover>();
 	const menu = new OverflowMenuState(() => picker?.dismissPicker());
 	export const closeOverflow = menu.closeThen;
 	const folded = $derived(layout.foldedSettings);
@@ -69,10 +71,9 @@
 			{...executor}
 			{disabled}
 			service="agents"
-			presentation={placement === 'menu' ? 'composer-menu' : 'composer'}
-			hidden={placement === 'hidden'}
+			presentation={placement}
 			compact={!layout.fullExecutor}
-			onMeasure={placement === 'menu' ? undefined : onExecutorMeasure}
+			onMeasure={onExecutorMeasure}
 			{align}
 			{side}
 		/>
@@ -100,13 +101,14 @@
 		{#if placement === 'menu'}
 			<ModelSelectorMenuItem
 				onSelect={() => closeOverflow(() => picker?.openPicker())}
-				disabled={model.disabled || disabled}
+				{disabled}
 				selection={picker?.menuSelection()}
 			/>
 		{:else}
 			<ComposerModelSelector
-				bind:this={picker}
 				{...model}
+				bind:picker
+				{disabled}
 				{align}
 				{side}
 				toolbarDisplay={layout.modelDisplay}

@@ -7,6 +7,8 @@ import {
 export type PromptActionId = 'image' | 'snippet' | 'expand' | 'refine';
 export type ComposerSettingId = 'executor' | 'model' | 'effort' | 'permission' | `agent:${string}`;
 export type ComposerControlId = PromptActionId | ComposerSettingId;
+export type ComposerControlPlacement = 'inline' | 'hidden' | 'menu';
+export type ComposerToolbarLayout = ReturnType<typeof fitComposerToolbar>;
 
 export interface ComposerToolbarControls {
 	prompt: readonly PromptActionId[];
@@ -51,13 +53,13 @@ export function fitComposerToolbar(
 	executorWidthRem?: number,
 ) {
 	const inline = new Set<ComposerControlId>();
-	const hidden = (group: readonly ComposerControlId[]) => group.some((id) => !inline.has(id));
-	function minimumWidth() {
+	const isFolded = (id: ComposerControlId) => !inline.has(id);
+	function rowWidth() {
 		const count =
 			inline.size +
 			Number(controls.send) +
-			Number(hidden(controls.prompt)) +
-			Number(hidden(controls.settings));
+			Number(controls.prompt.some(isFolded)) +
+			Number(controls.settings.some(isFolded));
 		const sendSeparation = controls.send && count > 1 ? gap : 0;
 		return (
 			count * icon +
@@ -68,31 +70,40 @@ export function fitComposerToolbar(
 	}
 
 	const ids = [...controls.prompt, ...controls.settings];
+	let spare = Infinity;
 	if (widthRem > 0) {
-		// A model too wide to promote must not displace smaller controls that still fit.
-		for (const id of ids.sort((a, b) => retention(b, controls) - retention(a, controls))) {
+		let occupied = rowWidth();
+		ids.sort((a, b) => retention(b, controls) - retention(a, controls));
+		for (const id of ids) {
 			if (id === 'image' && controls.explainUnavailableImage) continue;
-			const previous = minimumWidth();
 			inline.add(id);
-			const budget = id === 'model' ? widthRem : Math.max(widthRem, previous);
-			if (minimumWidth() > budget) inline.delete(id);
+			const proposed = rowWidth();
+			// Even below the minimum width, an icon can replace its own overflow button for free.
+			if (proposed <= widthRem || (id !== 'model' && proposed <= occupied)) {
+				occupied = proposed;
+			} else {
+				inline.delete(id);
+			}
 		}
+		spare = Math.max(0, widthRem - occupied);
 	} else {
-		for (const id of ids) if (id !== 'image' && id !== 'snippet') inline.add(id);
+		for (const id of ids) {
+			if (id !== 'image' && id !== 'snippet') inline.add(id);
+		}
 	}
 	// Labels expand only with space that cannot keep another button inline.
-	const spare = widthRem > 0 ? Math.max(0, widthRem - minimumWidth()) : Infinity;
 	const modelDisplay: ModelTriggerDisplay = inline.has('model')
 		? fitModelTrigger(modelWidthsRem, modelWidthsRem.model + spare)
 		: 'overflow';
-	const prefixWidth = modelDisplay === 'combined' ? modelWidthsRem.combined - modelWidthsRem.model : 0;
-	const fullExecutor = inline.has('executor') &&
-		(widthRem <= 0 || (executorWidthRem !== undefined && spare - prefixWidth >= executorWidthRem - icon));
+	const prefixWidth =
+		modelDisplay === 'combined' ? modelWidthsRem.combined - modelWidthsRem.model : 0;
+	const executorFits =
+		executorWidthRem !== undefined && executorWidthRem - icon <= spare - prefixWidth;
 	return {
 		inline,
-		foldedPrompt: controls.prompt.filter((id) => !inline.has(id)),
-		foldedSettings: controls.settings.filter((id) => !inline.has(id)),
-		fullExecutor,
+		foldedPrompt: controls.prompt.filter(isFolded),
+		foldedSettings: controls.settings.filter(isFolded),
+		fullExecutor: inline.has('executor') && (widthRem <= 0 || executorFits),
 		modelDisplay,
 	};
 }

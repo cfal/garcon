@@ -932,7 +932,7 @@
 					onChange: (descriptor, value) => onAgentSettingChange?.(descriptor, value),
 					disabled: !onAgentSettingChange || directAdmissionPending,
 				}}
-				model={{ ...activeModel, onChange: (next) => onModelChange?.(next), disabled: directAdmissionPending }}
+				model={{ ...activeModel, onChange: (next) => onModelChange?.(next) }}
 			/>
 		</form>
 	</div>

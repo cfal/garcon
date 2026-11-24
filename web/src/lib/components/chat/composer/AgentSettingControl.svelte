@@ -12,7 +12,8 @@
 	import BrainCircuit from '@lucide/svelte/icons/brain-circuit';
 	import AgentThinkingIcon from './AgentThinkingIcon.svelte';
 	import ComposerSettingMenu from './ComposerSettingMenu.svelte';
-	import type { ComposerAgentSettings, ComposerControlPlacement } from './composer-toolbar-types';
+	import type { ComposerControlPlacement } from '$lib/chat/composer/composer-toolbar-layout';
+	import type { ComposerAgentSettings } from './composer-toolbar-types';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {

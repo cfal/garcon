@@ -36,32 +36,18 @@
 	let row = $state<HTMLDivElement>();
 	let promptGroup = $state<ComposerPromptActions>();
 	let settingsGroup = $state<ComposerSettingsGroup>();
-	let unit = $state<HTMLElement>();
-	let rowWidth = $state(0);
-	let rem = $state(16);
+	let ruler = $state<HTMLElement>();
+	let rowRect = $state<DOMRectReadOnly>();
+	let measuredRem = $state<number>();
+	const rowWidth = $derived(rowRect?.width ?? row?.clientWidth ?? 0);
+	const rem = $derived(measuredRem ?? (ruler?.clientWidth || 16));
 	let modelWidths = $state<ModelTriggerWidths>();
 	let executorWidth = $state<number>();
-	$effect(() => {
-		const toolbar = row;
-		const ruler = unit;
-		if (!toolbar || !ruler) return;
-		rowWidth = toolbar.clientWidth;
-		rem = ruler.clientWidth || 16;
-		const observer = new ResizeObserver((entries) => {
-			for (const { target, contentRect } of entries) {
-				if (target === toolbar) rowWidth = contentRect.width;
-				if (target === ruler && contentRect.width) rem = contentRect.width;
-			}
-		});
-		observer.observe(toolbar);
-		observer.observe(ruler);
-		return () => observer.disconnect();
-	});
-	const actions = $derived(composerPromptActions(prompt));
-	// The menu can explain an unsupported attachment without relying on hover.
-	const explainUnavailableImage = $derived(
-		prompt.image?.supported === false && !prompt.editingDisabled && !prompt.isPromptTransformPending,
-	);
+
+	function measureRem({ width }: DOMRectReadOnly): void {
+		if (width) measuredRem = width;
+	}
+	const { actions, explainUnavailableImage } = $derived(composerPromptActions(prompt));
 	const settings = $derived.by(() => {
 		const ids: ComposerSettingId[] = [];
 		if (executor?.executors.showComposerExecutor(executor.executorId)) ids.push('executor');
@@ -107,9 +93,13 @@
 	style="container: composer-controls / inline-size"
 	data-slot="composer-bottom-bar"
 >
-	<span aria-hidden="true" class="pointer-events-none invisible absolute w-4" bind:this={unit}
+	<span
+		aria-hidden="true"
+		class="pointer-events-none invisible absolute w-4"
+		bind:this={ruler}
+		bind:contentRect={null, measureRem}
 	></span>
-	<div bind:this={row} class="flex min-w-0 flex-nowrap items-center gap-1" data-composer-toolbar>
+	<div bind:this={row} bind:contentRect={rowRect} class="flex min-w-0 flex-nowrap items-center gap-1" data-composer-toolbar>
 		{#each groups as group (group)}
 			{@const first = group === groups[0]}
 			{#if group === 'settings' ? settings.length > 0 : actions.length > 0}

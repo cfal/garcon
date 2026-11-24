@@ -168,6 +168,11 @@
 		target.focus({ preventScroll: true });
 	}
 
+	function closeDraft(compact: boolean): void {
+		if (compact) selector.discardAndClose();
+		else selector.commitAndClose();
+	}
+
 	function handleOpenChange(open: boolean): void {
 		if (open) {
 			closingFromOutside = false;
@@ -175,11 +180,7 @@
 			selector.openDraft();
 			return;
 		}
-		if (isCompactLayout) {
-			selector.discardAndClose();
-			return;
-		}
-		selector.commitAndClose();
+		closeDraft(isCompactLayout);
 	}
 
 	$effect(() => {
@@ -213,11 +214,7 @@
 			)
 				return;
 			closingFromOutside = true;
-			if (compactLayout) {
-				selector.discardAndClose();
-				return;
-			}
-			selector.commitAndClose();
+			closeDraft(compactLayout);
 		}
 
 		return () => {

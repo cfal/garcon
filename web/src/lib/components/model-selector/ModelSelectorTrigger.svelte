@@ -49,6 +49,7 @@
 		[agent, model].filter(Boolean).join(' ') || m.model_selector_unavailable(),
 	);
 	const modelOnly = $derived(model || combined);
+	const standalone = $derived(toolbarDisplay === undefined);
 	let combinedBox = $state<readonly ResizeObserverSize[]>();
 	let modelBox = $state<readonly ResizeObserverSize[]>();
 	let available = $state<DOMRectReadOnly>();
@@ -68,10 +69,10 @@
 	let menuTrigger = $state<HTMLElement | null>(null);
 	const menu = new OverflowMenuState(() => dismissPicker());
 	export function standaloneAnchor(): HTMLElement | null {
-		return toolbarDisplay === undefined && display === 'overflow' ? menuTrigger : null;
+		return standalone && display === 'overflow' ? menuTrigger : null;
 	}
 	$effect.pre(() => {
-		if (toolbarDisplay !== undefined) return;
+		if (!standalone) return;
 		const folded = display === 'overflow';
 		if (!folded && menu.open) {
 			menu.closeThen(() => triggerNode?.focus({ preventScroll: true }));
@@ -89,7 +90,7 @@
 </script>
 
 <div
-	class={toolbarDisplay === undefined
+	class={standalone
 		? 'relative inline-grid w-max min-w-0 max-w-full grid-cols-[minmax(0,1fr)] [justify-items:var(--model-trigger-justify,start)]'
 		: 'contents'}
 	bind:contentRect={available}
@@ -98,8 +99,7 @@
 	<div
 		aria-hidden="true"
 		inert
-		class="pointer-events-none invisible flex h-0 min-w-0 flex-col items-start overflow-hidden {toolbarDisplay ===
-		undefined
+		class="pointer-events-none invisible flex h-0 min-w-0 flex-col items-start overflow-hidden {standalone
 			? 'col-start-1 row-start-1'
 			: 'absolute w-0'}"
 	>
@@ -107,7 +107,7 @@
 		<span class="{buttonClass} w-max shrink-0" bind:borderBoxSize={modelBox}>{modelOnly}</span>
 	</div>
 	{@render children(display === 'combined' ? combined : modelOnly, display === 'overflow')}
-	{#if toolbarDisplay === undefined}
+	{#if standalone}
 		<DropdownMenu open={menu.open} onOpenChange={menu.setOpen}>
 			<DropdownMenuTrigger
 				bind:ref={menuTrigger}

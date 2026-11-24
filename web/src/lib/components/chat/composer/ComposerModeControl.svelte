@@ -2,7 +2,8 @@
 	import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '$lib/components/ui/dropdown-menu';
 	import ComposerSettingMenu from './ComposerSettingMenu.svelte';
 	import ComposerModeIcon from './ComposerModeIcon.svelte';
-	import type { ComposerControlPlacement, ComposerModeSelection } from './composer-toolbar-types';
+	import type { ComposerControlPlacement } from '$lib/chat/composer/composer-toolbar-layout';
+	import type { ComposerModeSelection } from './composer-toolbar-types';
 
 	let {
 		id,

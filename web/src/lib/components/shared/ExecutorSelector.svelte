@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import Network from '@lucide/svelte/icons/network';
+	import type { ComposerControlPlacement } from '$lib/chat/composer/composer-toolbar-layout';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -19,7 +20,6 @@
 		service,
 		onSelect,
 		disabled = false,
-		hidden = false,
 		presentation = 'toolbar',
 		compact = false,
 		onMeasure,
@@ -32,8 +32,7 @@
 		service: 'files' | 'git' | 'agents';
 		onSelect: (executorId: string) => void;
 		disabled?: boolean;
-		hidden?: boolean;
-		presentation?: 'toolbar' | 'composer' | 'composer-menu' | 'field';
+		presentation?: 'toolbar' | 'field' | ComposerControlPlacement;
 		compact?: boolean;
 		onMeasure?: (width: number) => void;
 		align?: 'start' | 'end';
@@ -41,24 +40,25 @@
 		class?: string;
 	} = $props();
 	let open = $state(false);
+	const hidden = $derived(presentation === 'hidden');
 	$effect.pre(() => {
 		if (hidden) open = false;
 	});
 
-	const inComposer = $derived(presentation === 'composer' || presentation === 'composer-menu');
+	const inComposer = $derived(presentation !== 'toolbar' && presentation !== 'field');
+	const selectedExecutor = $derived(executors.get(executorId));
 	const visible = $derived(
 		inComposer ? executors.showComposerExecutor(executorId) : executors.hasRemoteExecutors,
 	);
 	const executorLabel = $derived.by(() => {
-		if (inComposer && !executors.get(executorId)) {
-			return executors.hasSnapshot ? `${executors.label(executorId)}: ${executorId}` : m.executors_remote();
-		}
-		return executors.label(executorId);
+		if (!inComposer || selectedExecutor) return executors.label(executorId);
+		if (!executors.hasSnapshot) return m.executors_remote();
+		return `${executors.label(executorId)}: ${executorId}`;
 	});
-	const executorTitle = $derived(inComposer || executors.get(executorId) ? executorLabel : executorId);
+	const executorTitle = $derived(inComposer || selectedExecutor ? executorLabel : executorId);
 	const triggerClass = $derived(cn(
 		'inline-flex h-8 min-w-0 max-w-40 items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',
-		presentation === 'composer' && [composerSelectionTriggerClass, 'composer-executor-trigger w-max max-w-none shrink-0 whitespace-nowrap'],
+		inComposer && [composerSelectionTriggerClass, 'composer-executor-trigger w-max max-w-none shrink-0 whitespace-nowrap'],
 		presentation === 'field' && 'h-10 max-w-full border border-border bg-background px-3 text-base pointer-fine:text-sm',
 		className,
 	));
@@ -85,7 +85,7 @@
 
 {#snippet choices()}
 	<DropdownMenuRadioGroup value={executorId}>
-		{#if !executors.get(executorId)}
+		{#if !selectedExecutor}
 			<DropdownMenuRadioItem value={executorId} disabled class="text-sm" title={executorTitle}>
 				<span class="min-w-0 max-w-64 break-words">{executorLabel}</span>
 			</DropdownMenuRadioItem>
@@ -121,7 +121,7 @@
 	{/if}
 {/snippet}
 
-{#if visible && presentation === 'composer-menu'}
+{#if visible && presentation === 'menu'}
 	<ComposerSettingSubmenu
 		id="executor"
 		name={m.executors_named_label({ label: executorLabel })}
@@ -134,7 +134,7 @@
 		{#snippet icon()}<Network class="size-4 text-file-icon-folder" />{/snippet}
 	</ComposerSettingSubmenu>
 {:else if visible}
-	{#if presentation === 'composer' && onMeasure}
+	{#if inComposer && onMeasure}
 		<span inert aria-hidden="true" class="pointer-events-none invisible absolute h-0 w-0 overflow-hidden">
 			<span class={triggerClass} bind:borderBoxSize={fullBox}>{@render triggerContent(false)}</span>
 		</span>
@@ -142,13 +142,13 @@
 	<DropdownMenu bind:open onOpenChange={refreshOnOpen}>
 		<DropdownMenuTrigger
 			{hidden}
-			class={cn(triggerClass, presentation === 'composer' && compact && 'size-9 justify-center px-0')}
+			class={cn(triggerClass, inComposer && compact && 'size-9 justify-center px-0')}
 			{disabled}
 			title={executorTitle}
 			aria-label={m.executors_named_label({ label: executorLabel })}
-			data-composer-control={presentation === 'composer' ? 'executor' : undefined}
+			data-composer-control={inComposer ? 'executor' : undefined}
 			data-executor-picker
-			data-presentation={presentation}
+			data-presentation={inComposer ? 'composer' : presentation}
 		>
 			{@render triggerContent(compact)}
 		</DropdownMenuTrigger>

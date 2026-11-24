@@ -6,8 +6,6 @@ import type ComposerModelSelector from '$lib/components/model-selector/ComposerM
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 
-export type ComposerControlPlacement = 'inline' | 'hidden' | 'menu';
-
 export interface ComposerAgentSettings {
 	descriptors: readonly AgentSettingDescriptor[];
 	envelope: AgentSettingsEnvelope;
@@ -26,7 +24,15 @@ export interface ComposerToolbarSettings {
 	permission: ComposerModeSelection<PermissionMode>;
 	effort: ComposerModeSelection<ThinkingMode>;
 	agentSettings?: ComposerAgentSettings;
-	model?: ComponentProps<typeof ComposerModelSelector>;
+	model?: Pick<
+		ComponentProps<typeof ComposerModelSelector>,
+		| 'value'
+		| 'mode'
+		| 'onChange'
+		| 'getRecents'
+		| 'preferRecentsOnOpen'
+		| 'getSelectableAgentIds'
+	>;
 	executor?: {
 		executors: ExecutorsStore;
 		executorId: string;

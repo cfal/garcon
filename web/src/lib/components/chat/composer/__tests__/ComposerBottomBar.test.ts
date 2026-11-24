@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { tick, type ComponentProps } from 'svelte';
 import { buildPermissionOptions, buildThinkingOptions } from '$lib/chat/composer/composer-controls';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
@@ -40,12 +40,33 @@ async function resize(container: HTMLElement, width: number) {
 
 describe('ComposerBottomBar', () => {
 	let restoreObserver: () => void;
-	beforeEach(() => {
+	beforeAll(() => {
 		restoreObserver = installResizeObserverHarness();
 	});
-	afterEach(() => {
-		cleanup();
-		restoreObserver();
+	afterAll(() => restoreObserver());
+	afterEach(cleanup);
+
+	it('fits fractional rem measurements and retains the last visible ruler width', async () => {
+		const props = controls();
+		const { container } = render(ComposerBottomBar, {
+			image: props.image,
+			onOpenSnippetPalette: props.onOpenSnippetPalette,
+			send: props.send,
+			permission: { ...props.permission, options: [] },
+			effort: { ...props.effort, options: [] },
+		});
+		const row = await resize(container, 150);
+		const ruler = row.previousElementSibling!;
+		const snippet = () => screen.queryByRole('button', { name: 'Snippets' });
+		const rem = 20.125;
+		ResizeObserverHarness.emit(ruler, rem);
+		await tick();
+		expect(snippet()).toBeNull();
+		ResizeObserverHarness.emit(ruler, 0);
+		await tick();
+		expect(snippet()).toBeNull();
+		await resize(container, 7.5 * rem);
+		expect(snippet()).toBeTruthy();
 	});
 
 	it('promotes image and snippet out of Add, then returns focus when a shortcut folds', async () => {

@@ -973,6 +973,8 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'queue this next' } });
 
+		const model = screen.getByRole<HTMLButtonElement>('button', { name: 'Claude Opus' });
+		expect(model.disabled).toBe(true);
 		expect(textarea.disabled).toBe(false);
 		expect(
 			(screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled,
@@ -985,6 +987,7 @@ describe('PromptComposer focus', () => {
 			selectedIsProcessing: true,
 		});
 		const queueButton = screen.getByRole('button', { name: 'Queue message' }) as HTMLButtonElement;
+		expect(model.disabled).toBe(false);
 		expect(queueButton.disabled).toBe(false);
 		await fireEvent.click(queueButton);
 		expect(onsubmit).toHaveBeenCalledOnce();

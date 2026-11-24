@@ -32,7 +32,7 @@ export interface PromptActionOptions {
 	editingDisabled?: boolean;
 }
 
-export function composerPromptActions(options: PromptActionOptions): ComposerPromptAction[] {
+export function composerPromptActions(options: PromptActionOptions) {
 	const disabled = Boolean(options.editingDisabled || options.isPromptTransformPending);
 	const actions: ComposerPromptAction[] = [];
 	if (options.onOpenSnippetPalette) {
@@ -80,5 +80,9 @@ export function composerPromptActions(options: PromptActionOptions): ComposerPro
 			run: options.onOpenExpandedEditor,
 		});
 	}
-	return actions;
+	return {
+		actions,
+		// A disabled image stays in the menu so its explanation does not depend on hover.
+		explainUnavailableImage: options.image?.supported === false && !disabled,
+	};
 }

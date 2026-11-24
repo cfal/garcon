@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RefinePromptResponse } from '$shared/prompt-refinement';
 import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
@@ -126,8 +126,12 @@ async function constrainComposerActions(container: HTMLElement): Promise<void> {
 describe('NewChatForm composer actions', () => {
 	let restoreResizeObserver: () => void;
 
-	beforeEach(() => {
+	beforeAll(() => {
 		restoreResizeObserver = installResizeObserverHarness();
+	});
+	afterAll(() => restoreResizeObserver());
+
+	beforeEach(() => {
 		vi.stubGlobal(
 			'matchMedia',
 			vi.fn().mockImplementation(() => ({
@@ -144,7 +148,6 @@ describe('NewChatForm composer actions', () => {
 	afterEach(() => {
 		cleanup();
 		localStorage.clear();
-		restoreResizeObserver();
 		resetPromptEditorStub();
 		vi.mocked(refinementApi.refinePrompt).mockReset();
 		vi.unstubAllGlobals();
