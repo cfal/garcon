@@ -36,7 +36,6 @@
 		getWs,
 		getExecutors,
 		getLocalSettings,
-		getRemoteSettings,
 		getNotifications,
 		getSidebarSearch,
 		getWorkspaceCoordinator,
@@ -87,7 +86,6 @@
 	const ws = getWs();
 	const executors = getExecutors();
 	const localSettings = getLocalSettings();
-	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const singletonSurfaces = getSingletonSurfaces();
 	const routeTicketId = $derived(selectedTicketFromUrl(page.url));
