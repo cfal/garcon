@@ -615,42 +615,43 @@ describe('AppShell responsive workspace binding', () => {
 				},
 			},
 		});
-		const advanceMinute = () => flushSync(() => vi.advanceTimersByTime(60_000));
-		const sections = () => order.projection.rowModel.rows
-			.filter((row) => row.type === 'section-header')
-			.map((row) => row.section);
+		const rebuildsOnNextMinute = () => {
+			build.mockClear();
+			flushSync(() => vi.advanceTimersByTime(60_000));
+			return build.mock.calls.length;
+		};
+		const setActivityGrouping = (enabled: boolean) => {
+			flushSync(() => {
+				settings.sidebarGroupingFields[0].enabled = enabled;
+			});
+		};
+		const sections = () =>
+			order.projection.rowModel.rows
+				.filter((row) => row.type === 'section-header')
+				.map((row) => row.section);
 		const badge = container.querySelector('[data-slot="sidebar-chat-timestamp-badge"]');
 		const initial = order.projection;
 		expect(initial.rowModel.visibleChatIds).toEqual(['aging', 'recent']);
 		expect(build).toHaveBeenCalledOnce();
-		build.mockClear();
-		for (const minute of [1, 2]) {
-			advanceMinute();
-			const now = new Date(start.getTime() + minute * 60_000);
-			expect(badge?.textContent?.trim()).toBe(formatRelativeTimestamp(recent.lastActivityAt, now)!.label);
-			expect(build).not.toHaveBeenCalled();
+		for (let minute = 0; minute < 2; minute++) {
+			expect(rebuildsOnNextMinute()).toBe(0);
+			expect(badge?.textContent?.trim()).toBe(
+				formatRelativeTimestamp(recent.lastActivityAt, new Date())!.label,
+			);
 			expect(order.projection).toBe(initial);
 		}
 
-		flushSync(() => {
-			settings.sidebarGroupingFields[0].enabled = true;
-		});
+		setActivityGrouping(true);
 		expect(sections()).toEqual(['active']);
-		build.mockClear();
-		advanceMinute();
+		expect(rebuildsOnNextMinute()).toBe(1);
 		expect(sections()).toEqual(['active', 'inactive']);
 		expect(order.projection.rowModel.visibleChatIds).toEqual(['recent', 'aging']);
-		expect(build).toHaveBeenCalledOnce();
 
-		flushSync(() => {
-			settings.sidebarGroupingFields[0].enabled = false;
-		});
+		setActivityGrouping(false);
 		const ungrouped = order.projection;
 		expect(ungrouped.rowModel.visibleChatIds).toEqual(initial.rowModel.visibleChatIds);
-		build.mockClear();
-		advanceMinute();
+		expect(rebuildsOnNextMinute()).toBe(0);
 		expect(order.projection).toBe(ungrouped);
-		expect(build).not.toHaveBeenCalled();
 	});
 
 	it('uses the shared backdrop for the mobile drawer and preserves dismissal', async () => {
