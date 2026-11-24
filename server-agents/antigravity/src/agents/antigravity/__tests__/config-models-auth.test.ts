@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, setSystemTime } from 'bun:test';
 import { mkdtemp, mkdtempDisposable, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, normalize, relative } from 'node:path';
@@ -9,6 +9,7 @@ import {
   antigravityLoginEnvironment,
   createAntigravityProbes,
   getAntigravityAuthStatus,
+  MODEL_LISTING_REUSE_MS,
   validateAntigravityLoginCode,
 } from '../antigravity-auth.ts';
 import { antigravityCliFailure, createAntigravityCatalog, parseAntigravityModels, runAntigravityModels } from '../antigravity-models.ts';
@@ -152,6 +153,62 @@ describe('parseAntigravityModels', () => {
     const binary = join(dir.path, 'agy');
     await writeFile(binary, '#!/bin/sh\necho "Using current profile" >&2\nexec sleep 15\n', { mode: 0o700 });
     await expect(runAntigravityModels(config({ binary: () => binary }), 100)).rejects.toThrow('agy models timed out after 100 ms');
+  });
+});
+
+describe('createAntigravityProbes model listing reuse', () => {
+  async function fakeAgy(root: string) {
+    const binary = join(root, 'agy');
+    await writeFile(binary, `#!/bin/sh
+cd "$(dirname "$0")" || exit 1
+echo run >> runs
+if test -f fail; then echo "Error: Please sign in to view available models." >&2; exit 1; fi
+printf '%s\\tModel\\n' "$(cat model)"
+`, { mode: 0o700 });
+    await writeFile(join(root, 'model'), 'model-a');
+    const runs = async () => (await Bun.file(join(root, 'runs')).text().catch(() => '')).split('\n').filter(Boolean).length;
+    return { probes: createAntigravityProbes(config({ binary: () => binary })), runs };
+  }
+
+  it('reuses a successful listing instead of running agy for every caller', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-reuse-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    const first = await probes.runModels();
+    const second = await probes.runModels();
+    expect(first).toMatchObject({ exitCode: 0, stdout: 'model-a\tModel\n' });
+    expect(second).toEqual(first);
+    expect(await runs()).toBe(1);
+  });
+
+  it('answers from the last listing while a stale one refreshes', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-refresh-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    const start = Date.now();
+    try {
+      setSystemTime(start);
+      await probes.runModels();
+      await writeFile(join(dir.path, 'model'), 'model-b');
+      setSystemTime(start + MODEL_LISTING_REUSE_MS);
+      expect((await probes.runModels()).stdout).toBe('model-a\tModel\n');
+      const deadline = AbortSignal.timeout(5000);
+      while ((await probes.runModels()).stdout !== 'model-b\tModel\n') {
+        deadline.throwIfAborted();
+        await Bun.sleep(10);
+      }
+      expect(await runs()).toBe(2);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  it('runs agy again after a failed listing so sign-in changes surface', async () => {
+    await using dir = await mkdtempDisposable(join(tmpdir(), 'agy-models-failure-'));
+    const { probes, runs } = await fakeAgy(dir.path);
+    await writeFile(join(dir.path, 'fail'), '');
+    expect((await probes.runModels()).exitCode).toBe(1);
+    await rm(join(dir.path, 'fail'));
+    expect((await probes.runModels()).stdout).toBe('model-a\tModel\n');
+    expect(await runs()).toBe(2);
   });
 });
 

@@ -15,22 +15,40 @@ import {
 import { sharedProbe, waitUnlessAborted } from '@garcon/server-agent-common/shared/shared-probe';
 
 const AUTHENTICATE_PROBE_TIMEOUT_MS = 10_000;
+export const MODEL_LISTING_REUSE_MS = 5 * 60_000;
 
 interface AntigravityProbes {
   readonly runModels: () => Promise<AntigravityCliResult>;
   readonly authenticate: () => Promise<boolean>;
 }
 
-// A completed login replaces both in-flight probes and their last observed status.
+// A completed login replaces both in-flight probes, the reused model listing, and their last observed status.
 export function createAntigravityProbes(config: AntigravityConfig): AntigravityProbes & { lastProbed: AgentAuthStatus | null } {
   const authentication = new Map<string, Promise<boolean>>();
   const models = new Map<string, Promise<AntigravityCliResult>>();
+  const listings = new Map<string, { readonly result: AntigravityCliResult; readonly listedAt: number }>();
+  const listModels = (key: string) => sharedProbe(models, key, () => runAntigravityModels(config)).then(
+    (result) => {
+      if (result.exitCode === 0) listings.set(key, { result, listedAt: Date.now() });
+      else listings.delete(key);
+      return result;
+    },
+    (error: unknown) => {
+      listings.delete(key);
+      throw error;
+    },
+  );
   return {
     lastProbed: null,
     authenticate: () => sharedProbe(authentication, JSON.stringify([config.binary(), config.authMethod()]),
       () => authenticateOnce(config)),
-    runModels: () => sharedProbe(models, JSON.stringify([config.binary(), config.authMethod(), config.apiKey()]),
-      () => runAntigravityModels(config)),
+    runModels: () => {
+      const key = JSON.stringify([config.binary(), config.authMethod(), config.apiKey()]);
+      const listing = listings.get(key);
+      if (!listing) return listModels(key);
+      if (Date.now() - listing.listedAt >= MODEL_LISTING_REUSE_MS) void listModels(key).catch(() => {});
+      return Promise.resolve(listing.result);
+    },
   };
 }
 
