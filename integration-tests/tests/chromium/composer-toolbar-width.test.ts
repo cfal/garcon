@@ -17,6 +17,7 @@ test('the live composer follows tile width and local group order without changin
     const toolbar = page.locator('[data-composer-toolbar]:visible');
     const editor = page.getByPlaceholder('Reply...', { exact: true });
     const executor = toolbar.getByRole('button', { name: 'Executor: Integration worker' });
+    const model = toolbar.locator('[data-slot="model-selector-trigger"]');
     const window = page.locator('[data-workspace-window-id="window-main"]');
     const divider = page.getByRole('separator', { name: 'Resize windows' }).first().locator('[data-workspace-window-resize-hit-area]');
     const promptMenu = toolbar.locator('[data-composer-overflow="prompt"]');
@@ -27,6 +28,14 @@ test('the live composer follows tile width and local group order without changin
     await expect(promptMenu).toHaveCount(0);
     await expect(settingsMenu).toHaveCount(0);
     await expect(groups.first()).toHaveAttribute('data-composer-group', 'settings');
+
+    const buttonSurface = (button: Element) => {
+      const { borderTop, backgroundColor } = getComputedStyle(button);
+      return { borderTop, backgroundColor };
+    };
+    const promptSurface = await toolbar.getByRole('button', { name: 'Snippets', exact: true }).evaluate(buttonSurface);
+    expect(await executor.evaluate(buttonSurface)).toEqual(promptSurface);
+    expect(await model.evaluate(buttonSurface)).toEqual(promptSurface);
 
     phase('fitting each host name at its actual width');
     const { client } = integration;
@@ -66,7 +75,6 @@ test('the live composer follows tile width and local group order without changin
     await editor.fill('Synthetic unsent draft');
     const original = await editor.elementHandle();
     const modelPicker = page.locator('[data-slot="popover-content"]');
-    const model = toolbar.locator('[data-slot="model-selector-trigger"]');
     await model.click();
     await expect(modelPicker.getByRole('textbox')).toBeFocused();
     await editor.click({ position: { x: 10, y: 8 } });
