@@ -14,7 +14,7 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { AssistantMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, ThinkingMessage } from '$shared/chat-types';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
 import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
 import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
@@ -150,6 +150,50 @@ describe('ConversationFeed', () => {
 		expect(screen.queryByText('Synthetic appended answer')).toBeNull();
 	});
 
+	it.each([
+		[640, 'group'], [3000, 'group'], [3000, 'thinking'], [3000, 'default'],
+	] as const)('does not read unrelated row IDs on append (%i rows, %s)', async (size, mode) => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
+		const transcript = new ActiveTranscriptState(undefined, null, { combineMessages: true });
+		const stamp = '2026-01-01T00:00:00.000Z';
+		const entry = (ordinal: number) => ({ ordinal, message: new AssistantMessage(stamp, 'Synthetic answer ' + ordinal) });
+		seedTranscript(transcript, 'chat-1', 'generation-1', [
+			{ ordinal: 1, message: new BashToolUseMessage(stamp, 'one', 'pwd') },
+			{ ordinal: 2, message: new BashToolUseMessage(stamp, 'two', 'pwd') },
+			{ ordinal: 3, message: new ThinkingMessage(stamp, 'Synthetic thinking') },
+		], { lastOrdinal: 3, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		const { container, unmount } = render(ConversationFeedTestHost, { transcript });
+		try {
+			if (mode !== 'default') {
+				const button = await screen.findByRole('button', { name: mode === 'group' ? 'Execute 2 commands' : 'Thinking' });
+				await fireEvent.click(button);
+				expect(button.getAttribute('aria-expanded')).toBe(String(mode === 'group'));
+			}
+			const more = Array.from({ length: size - 3 }, (_, i) => entry(i + 4));
+			expect(transcript.applyMessages('chat-1', 'generation-1', more, 4, size)).toBe('applied');
+			await tick();
+			expect(transcript.visibleRows).toHaveLength(size);
+			const sizer = container.querySelector<HTMLElement>('[data-chat-virtual-sizer]')!;
+			const modelCount = Number(sizer.dataset.chatVirtualModelCount);
+			const revision = Number(sizer.dataset.chatVirtualDataRevision);
+			let reads = 0;
+			// Excludes mounted edge rows and the announcer's independent 512-row tail.
+			for (const row of transcript.visibleRows.slice(25, -512)) {
+				const id = row.id;
+				Object.defineProperty(row, 'id', { configurable: true, get() { reads++; return id; } });
+			}
+			expect(transcript.applyMessages('chat-1', 'generation-1', [entry(size + 1)], size + 1, size + 1)).toBe('applied');
+			await tick();
+			expect(Number(sizer.dataset.chatTranscriptEntryCount)).toBe(size + 1);
+			expect(Number(sizer.dataset.chatVirtualModelCount)).toBe(modelCount + 1);
+			expect(Number(sizer.dataset.chatVirtualDataRevision)).toBe(revision + 1);
+			expect(reads).toBe(0);
+		} finally {
+			unmount();
+			transcript.transcriptCache.flush();
+		}
+	});
+
 	it('keeps the raw feed unchanged until refresh, then combines rows behind an accessible disclosure', async () => {
 		const raw = render(ConversationFeedTestHost, { transcriptScenario: 'tool-run' });
 		await waitFor(() => expect(raw.container.querySelectorAll('[data-chat-row-id]')).toHaveLength(3));
@@ -171,6 +215,44 @@ describe('ConversationFeed', () => {
 		await fireEvent.click(group);
 		await waitFor(() => expect(container.querySelectorAll('[data-chat-row-id]')).toHaveLength(0));
 		expect(group.getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('keeps moved disclosures but prunes evicted ones when a hidden pane is revealed', async () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
+		const transcript = new ActiveTranscriptState(undefined, null, { combineMessages: true });
+		const stamp = '2026-01-01T00:00:00.000Z';
+		const original = [
+			{ ordinal: 10, message: new BashToolUseMessage(stamp, 'one', 'pwd') },
+			{ ordinal: 11, message: new BashToolUseMessage(stamp, 'two', 'pwd') },
+			{ ordinal: 12, message: new ThinkingMessage(stamp, 'Synthetic thinking') },
+		];
+		const replace = (rows: Parameters<typeof seedTranscript>[3]) =>
+			seedTranscript(transcript, 'chat-1', 'generation-1', rows, {
+				lastOrdinal: rows.at(-1)!.ordinal, pageOldestOrdinal: rows[0].ordinal, nextBeforeOrdinal: null, hasMore: false,
+			});
+		replace(original);
+		const { rerender, unmount } = render(ConversationFeedTestHost, { transcript });
+		const group = () => screen.findByRole('button', { name: 'Execute 2 commands' });
+		const thinking = () => screen.findByRole('button', { name: 'Thinking' });
+		try {
+			await fireEvent.click(await group());
+			await fireEvent.click(await thinking());
+			replace([{ ordinal: 9, message: new AssistantMessage(stamp, 'Earlier') }, ...original]);
+			await screen.findByText('Earlier');
+			expect((await group()).getAttribute('aria-expanded')).toBe('true');
+			expect((await thinking()).getAttribute('aria-expanded')).toBe('false');
+			await rerender({ isVisible: false });
+			replace([{ ordinal: 20, message: new AssistantMessage(stamp, 'Different window') }]);
+			await rerender({ isVisible: true });
+			await screen.findByText('Different window');
+			replace(original);
+			await screen.findByText('Synthetic thinking');
+			expect((await group()).getAttribute('aria-expanded')).toBe('false');
+			expect((await thinking()).getAttribute('aria-expanded')).toBe('true');
+		} finally {
+			unmount();
+			transcript.transcriptCache.flush();
+		}
 	});
 
 	it('keeps grouping and focus unchanged when combination is disabled in another tab', async () => {

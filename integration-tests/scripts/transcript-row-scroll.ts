@@ -6,15 +6,18 @@ import { createIntegrationFixture } from '../support/integration-fixture.js';
 import { requireCurrentWebBuild } from '../support/web-build-gate.js';
 import { openPaneBenchmarkDriver, paneViewport } from './pane-benchmark-driver.js';
 import { installTranscriptScrollProbe } from './transcript-scroll-probe.js';
+import { stripeSampler } from './transcript-stripes.js';
 
 const { values } = parseArgs({ options: {
   engine: { type: 'string', default: 'gtk' }, webdriver: { type: 'string' },
   modes: { type: 'string', default: 'normal' }, pairs: { type: 'string', default: '3' },
   corpus: { type: 'string', default: 'paragraphs' },
   'expect-bubble-shadow': { type: 'string' },
+  'stripe-container': { type: 'string' }, 'stripe-display': { type: 'string' },
 } });
 const engine = values.engine, corpus = values.corpus;
 assert.ok(engine === 'gtk' || engine === 'chromium');
+assert.ok(!values['stripe-container'] || (engine === 'gtk' && values['stripe-display']));
 assert.ok(corpus === 'paragraphs' || corpus === 'mixed');
 const expectedShadow = values['expect-bubble-shadow'];
 assert.ok(expectedShadow === undefined || expectedShadow === 'present' || expectedShadow === 'absent');
@@ -25,7 +28,9 @@ const queries: Record<string, string> = { normal: '', menu: '?rowMenu=inert',
 const modes = values.modes!.split(','), pairs = Number(values.pairs);
 assert.ok(modes[0] === 'normal' && modes.length <= 12 && modes.every(m => Object.hasOwn(queries, m)));
 assert.ok(Number.isSafeInteger(pairs) && pairs > 0 && pairs <= 12);
-const emit = (record: Record<string, unknown>) => console.log(JSON.stringify({ engine, corpus, ...record }));
+const emit = (record: Record<string, unknown>) => console.log(JSON.stringify({
+  engine, corpus, ...(values['stripe-container'] ? { pairedStripes: true } : {}), ...record,
+}));
 const meter = await readFile(new URL('../../docs/qa/webkit-spa-responsiveness/measure-wheel-train.js', import.meta.url), 'utf8');
 
 function prompt(i: number): string {
@@ -110,16 +115,24 @@ try {
       assert.deepEqual(setup, { rows: 100, width: 1520, height: 806, inner: [paneViewport.width, paneViewport.height] });
       assert.match(contentDigest, /^[a-f0-9]{64}$/);
       emit({ kind: 'block', version: d.version, block, mode, ...setup, contentDigest });
+      let stripes;
+      if (values['stripe-container']) {
+        await probe('anchor', 46);
+        stripes = await stripeSampler(d, values['stripe-container'], values['stripe-display']!);
+      }
       for (let pair = 0; pair <= pairs; pair++) for (const sign of [1, -1]) {
         const pre = await probe<Position>('anchor', sign === 1 ? 46 : 66);
         if (pair > 0) checkVariant(pre, mode);
         await probe('begin');
+        const endStripes = await stripes?.start();
         const start = performance.now();
         for (let j = 0; j < 14; j++) {
           await Bun.sleep(Math.max(0, start + j * 60 - performance.now()));
           await d.wheel(pre.x, pre.y, 120 * sign);
         }
+        const lastAckUs = stripes?.now();
         const { timing: t, post } = await probe<{ timing: Timing; post: Position }>('finish');
+        if (endStripes) emit({ kind: 'stripes', version: d.version, block, pair, sign, ...await endStripes(lastAckUs!) });
         checkVariant(post, mode);
         assert.equal(t.wheelCount, 14); assert.ok(t.pixelMode); assert.equal(t.wheelDelta, sign * 1680);
         assert.ok(Math.abs(t.moved - t.wheelDelta) <= 1 && t.intervals.length > 0);

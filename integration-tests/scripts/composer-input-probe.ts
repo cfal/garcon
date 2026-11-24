@@ -1,5 +1,5 @@
 // Serialized into the isolated fixture page. Text, socket frames and chat IDs never leave it.
-export function composerInputProbe(ids: string[], drafts: string[], compact: boolean) {
+export function composerInputProbe(ids: string[], drafts: string[], compact: boolean, observeReplyDom = !compact) {
   const one = <T extends Element = HTMLElement>(selector: string, root: ParentNode = document) => root.querySelector<T>(selector);
   const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   async function until(test: () => boolean, label: string, timeout = 12_000) {
@@ -67,16 +67,16 @@ export function composerInputProbe(ids: string[], drafts: string[], compact: boo
   if (!prop.configurable || !prop.get) throw Error('Cannot observe native socket delivery');
   let socket: WebSocket | null = null, disconnected = false;
   const abort = new AbortController(), opts = { capture: true, signal: abort.signal };
-  let user = '', assistant = '', receipt: { kind: string; at: number }[] = [];
+  let user = '', assistant = '', receipt: { kind: string; at: number; view: string; ordinal: number }[] = [];
   let projectedAt: number | null = null, observer: MutationObserver | null = null;
   function receive(e: MessageEvent) {
     if (!user || typeof e.data !== 'string' || !e.data.includes(ids[2]!)) return;
     const m = JSON.parse(e.data);
     if (m.type !== 'chat-messages' || m.chatId !== ids[2]) return;
-    for (const { message } of m.messages) {
+    for (const { message, ordinal } of m.messages) {
       const kind = message.type === 'user-message' && message.content === user ? 'user' :
         message.type === 'assistant-message' && message.content === assistant ? 'assistant' : 'unexpected';
-      receipt.push({ kind, at: performance.now() });
+      receipt.push({ kind, at: performance.now(), view: m.transcriptViewId, ordinal });
     }
   }
   Object.defineProperty(MessageEvent.prototype, 'data', { ...prop, get(this: MessageEvent) {
@@ -145,7 +145,7 @@ export function composerInputProbe(ids: string[], drafts: string[], compact: boo
     beginTurn(prompt: string, reply: string) {
       if (disconnected) throw Error('App socket disconnected');
       user = prompt; assistant = reply; receipt = []; projectedAt = null;
-      if (!compact) {
+      if (observeReplyDom) {
         observer = new MutationObserver(records => {
           if (records.some(r => r.type === 'characterData' ? r.target.textContent?.includes(reply) :
             Array.from(r.addedNodes).some(node => node.textContent?.includes(reply)))) {
@@ -155,10 +155,11 @@ export function composerInputProbe(ids: string[], drafts: string[], compact: boo
         observer.observe(feed(2)!, { childList: true, subtree: true, characterData: true });
       }
     },
-    async userSeen() { await until(() => receipt.some(e => e.kind === 'user') && (compact || !!feed(2)?.textContent?.includes(user)), 'user row on receiver'); },
+    async userSeen() { await until(() => receipt.some(e => e.kind === 'user') && (!observeReplyDom || !!feed(2)?.textContent?.includes(user)), 'user row on receiver'); },
+    wireRows() { return receipt.map(({ ordinal, view }) => ({ ordinal, view })); },
     async delivery() {
       await until(() => receipt.some(e => e.kind === 'assistant') &&
-        (compact || (projectedAt !== null && settledFeed(2) && !!feed(2)?.textContent?.includes(assistant))), 'assistant delivery and settled receiver');
+        (!observeReplyDom || (projectedAt !== null && settledFeed(2) && !!feed(2)?.textContent?.includes(assistant))), 'assistant delivery and settled receiver');
       if (disconnected || receipt.map(e => e.kind).join(',') !== 'user,assistant') throw Error('Unexpected received row count or order');
       user = '';
       return { userMs: Math.round(receipt[0]!.at - down), assistantMs: Math.round(receipt[1]!.at - down),

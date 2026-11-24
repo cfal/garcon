@@ -7,15 +7,20 @@ import { requireCurrentWebBuild } from '../support/web-build-gate.js';
 import { openPaneBenchmarkDriver, paneViewport } from './pane-benchmark-driver.js';
 import { composerInputProbe } from './composer-input-probe.js';
 import { drawerFocusProbe } from './composer-input-focus-probe.js';
+import { receiverPositionProbe } from './receiver-position-probe.js';
 
 const { values } = parseArgs({ options: {
   webdriver: { type: 'string' }, viewport: { type: 'string', default: 'desktop' }, smoke: { type: 'boolean' },
   'focus-diagnostic': { type: 'boolean' },
+  'receiver-position': { type: 'string' }, 'receiver-counters': { type: 'boolean' },
 } });
 assert.ok(values.webdriver && ['desktop', 'compact'].includes(values.viewport!),
   'Use --webdriver=http://127.0.0.1:PORT --viewport=desktop|compact [--smoke]');
 const compact = values.viewport === 'compact', viewport = compact ? { width: 480, height: 844 } : paneViewport;
 const diagnostic = values['focus-diagnostic'] ?? false;
+const position = values['receiver-position'], counters = !!values['receiver-counters'];
+assert.ok(!position || (!compact && !diagnostic && ['pinned', 'detached'].includes(position)));
+assert.ok(!counters || position);
 assert.ok(!diagnostic || (compact && !values.smoke), 'The focus diagnostic runs only on compact, separately from smoke');
 const emit = (kind: string, data: Record<string, unknown>) => console.log(JSON.stringify({ kind, viewport: values.viewport, ...data }));
 const drafts = ['First synthetic draft.', 'Other synthetic draft.', '', ''];
@@ -45,6 +50,11 @@ try {
       content: 'Synthetic initial paragraph ' + n });
     await terminal(chatId, r.turnId);
   }
+  if (position) for (let i = 0; i < 40; i++) {
+    const id = ids[2]!;
+    await terminal(id, (await f.client.runDirectChat({ chatId: id, agent: f.directAgents.openAi,
+      content: 'Synthetic reader history ' + i + '. ' + 'A fixed paragraph. '.repeat(8) })).turnId);
+  }
   const d = await openPaneBenchmarkDriver('gtk', values.webdriver, viewport);
   try {
     type Page = ReturnType<typeof composerInputProbe>;
@@ -61,7 +71,7 @@ try {
         ids.forEach((id,i)=>localStorage.setItem('chat_draft_'+id,drafts[i]));
       `, f.garcon.authToken, layout(ids), ids, drafts);
       await d.navigate(f.garcon.baseUrl + '/chat/' + ids[index]);
-      await d.evaluate(`window.inputQA=(${composerInputProbe})(...arguments);return true;`, ids, drafts, compact);
+      await d.evaluate(`window.inputQA=(${composerInputProbe})(...arguments);return true;`, ids, drafts, compact, !compact && !position);
       const initial = await call('start', index);
       assert.deepEqual(initial, { ...viewport, visible: compact ? 1 : 4 }, 'Unexpected initial layout');
     }
@@ -80,8 +90,18 @@ try {
       await terminal(receiver, (await f.client.runDirectChat({ chatId: receiver, agent: f.directAgents.openAi, content: 'Synthetic calibration' })).turnId);
       await call('socketReady');
       const p = await call('editorPoint'); assert.ok(p, 'Editor covered'); await d.click(p.x, p.y); await call('focusReady', 0);
+      type Reader = ReturnType<typeof receiverPositionProbe>;
+      const reader = <K extends keyof Reader>(name: K, ...args: Parameters<Reader[K]>) =>
+        d.evaluate<Awaited<ReturnType<Reader[K]>>>(`return window.readerQA.${name}(...arguments)`, ...args);
+      if (position) {
+        await d.evaluate(`window.readerQA=(${receiverPositionProbe})(...arguments);return true`, receiver, position === 'pinned', counters);
+        const point = await reader('point');
+        await d.wheel(point.x, point.y, position === 'pinned' ? 1920 : -1920);
+        await Bun.sleep(350);
+        emit('reader-start', { position, counters, ...await reader('start') });
+      }
       const offset = 6;
-      let sequence = 0, lastReply = '';
+      let sequence = 0, lastReply = '', lastRow = '';
       async function trial(active: boolean, block: number, key: number) {
         const tag = String(++sequence).padStart(3, '0'), prompt = 'Synthetic request ' + tag, reply = 'Synthetic response ' + tag;
         lastReply = reply;
@@ -90,7 +110,14 @@ try {
         const run = () => f.client.runDirectChat({ chatId: receiver, agent: f.directAgents.openAi, content: prompt });
         let turn: Awaited<ReturnType<typeof run>> | undefined;
         try {
-          if (active) { turn = await run(); await held.received; await call('userSeen'); }
+          if (position) await reader('beginTurn');
+          if (active) {
+            turn = await run(); await held.received; await call('userSeen');
+            if (position) {
+              const [user] = await call('wireRows'); assert.ok(user);
+              await reader('after', user.view + ':' + user.ordinal, 1);
+            }
+          }
           await call('position', 0, offset); await call('arm', 0, offset, false);
           if (active) {
             const nativeKey = d.key('x');
@@ -101,12 +128,28 @@ try {
           if (!active) { turn = await run(); await held.received; assert.ok(held.releaseText(reply)); }
           await terminal(receiver, turn!.turnId);
           const delivery = await call('delivery');
-          emit('key', { block, key, active, ...edit, ...delivery });
+          let receiverResult;
+          if (position) {
+            const wire = await call('wireRows');
+            const page = await f.client.getMessages(receiver, { limit: 4 });
+            assert.deepEqual(wire, page.messages.slice(-2).map(m => ({ ordinal: m.ordinal, view: page.transcriptViewId })));
+            assert.deepEqual(page.messages.slice(-2).map(m => m.message.type), ['user-message', 'assistant-message']);
+            lastRow = wire[1]!.view + ':' + wire[1]!.ordinal;
+            receiverResult = await reader('after', lastRow, 2);
+          }
+          emit('key', { block, key, active, ...(position ? { position, counters, receiver: receiverResult } : {}), ...edit, ...delivery });
           if (block >= 0 && active && delivery.duringKey > 0) activeOverlap++;
           assert.equal(edit.ok, true, 'Incorrect steady editor input; remaining keys cannot share its precondition');
           assert.ok(active ? delivery.userMs <= 0 : delivery.beforeKey === 0 && delivery.duringKey === 0, 'Wrong treatment window');
           await d.key('Backspace'); await call('restored', 0, offset);
         } finally { held.releaseEcho(); }
+      }
+      if (position) {
+        await trial(true, -1, 0);
+        if (!values.smoke) for (let key = 0; key < (counters ? 2 : 4); key++) await trial(true, 0, key);
+        if (position === 'detached') { const at = await reader('revealPoint'); await d.click(at.x, at.y); }
+        await reader('revealed', lastRow); await call('responseVisible', lastReply);
+        await reader('close'); await call('close'); return;
       }
       const order = compact ? [true, false, false, true] : [false, true, true, false];
       for (const active of [false, true]) await trial(active, -1, 0);
@@ -129,7 +172,7 @@ try {
     // Each direction starts clean; an earlier lost/misrouted character cannot contaminate a later trial.
     const moves = diagnostic ? [[0,1],[1,0],[1,1],[1,0],[0,1],[0,0],[1,0],[0,1]] :
       (values.smoke ? [0] : [0, 1, 1, 0]).map(start => [start, 1-start]);
-    for (const [start, dest] of moves) {
+    for (const [start, dest] of position ? [] : moves) {
       await open(start);
       assert.ok((await navigate(1-start, drafts[1-start]!)).correct, 'Could not warm opposite draft');
       assert.ok((await navigate(start, drafts[start]!)).correct, 'Could not warm origin');
