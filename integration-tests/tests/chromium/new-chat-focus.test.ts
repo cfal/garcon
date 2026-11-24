@@ -38,6 +38,9 @@ test('new chat keeps directory input focus after initial prompt focus', async ()
     await input.press('Escape');
     await browserExpect(browser).toHaveCount(0);
     await browserExpect(input).toBeFocused();
+    await input.click();
+    await browserExpect(browser).toHaveCount(0);
+    await browserExpect(input).toBeFocused();
     await prompt.click();
     const cdp = await context.newCDPSession(page);
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });

@@ -641,7 +641,7 @@
 						form.handlePathFocus();
 					}}
 					onclick={() => {
-						if (!form.isUpdatingPinnedPath) form.handlePathFocus();
+						if (isMobile && !form.isUpdatingPinnedPath) form.handlePathFocus();
 					}}
 					oninput={() => {
 						form.clearError();
