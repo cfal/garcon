@@ -32,7 +32,9 @@ const MAX_LINES = 1000;
 // Sidebar activity status adds input-acceptance and turn-start notifications; outcome
 // tracking stays in chat metadata.
 // Reserved-steer guards and honest discard receipts stay with execution ownership.
-const EXECUTION_FOOTPRINT_BUDGET = 9349;
+// Native observers add read-only checks at each existing command admission point.
+// Observation, persistence, and history replacement remain outside execution.
+const EXECUTION_FOOTPRINT_BUDGET = 9384;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

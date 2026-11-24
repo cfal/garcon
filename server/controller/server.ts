@@ -122,13 +122,12 @@ import {
   NativeActivityAnchorPageReader,
   NativeTranscriptActivityService,
   TranscriptLedgerStore,
-  TranscriptReloadService,
   TranscriptViewReader,
 } from './ledger/index.js';
 
 import createAllRoutes from './routes/index.js';
 import { TranscriptClearService } from './ledger/clear.js';
-import { ObserverReloadService, reloadOutcomeUnknown } from './ledger/observer-reload.js';
+import { createChatReloader } from './ledger/reload-chat.js';
 import { ModelCatalogResponseCache } from './agents/model-catalog-cache.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
@@ -565,8 +564,8 @@ export async function startServer(): Promise<void> {
     );
     transcriptLedger.subscribeRunEndedCommitted((chatId, runId) => queue.markRunTerminalCommitted(chatId, runId));
     executionQueries = queue;
-    const transcriptReload = new TranscriptReloadService({
-      ledger: transcriptLedger,
+    const transcriptReload = createChatReloader({
+      reader: transcriptReader, ledger: transcriptLedger, observers: nativeChildren,
       adoption: transcriptAdoption,
       registry: chatRegistry,
       integrations: directory,
@@ -577,10 +576,6 @@ export async function startServer(): Promise<void> {
         entry.carryOverMigrationQuarantine,
       ),
       chatMutationLock,
-    });
-    const observerReload = new ObserverReloadService({
-      registry: chatRegistry, ledger: transcriptLedger, integrations: directory,
-      observers: nativeChildren, execution: queue, chatMutationLock,
     });
     const transcriptClear = new TranscriptClearService({
       ledger: transcriptLedger,
@@ -830,11 +825,7 @@ export async function startServer(): Promise<void> {
           transcriptReader.replay(chatId, viewId, afterOrdinal, throughOrdinal),
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
-      transcriptReload: async (chatId, options) => {
-        const replacement = await (chatRegistry.getChat(chatId)?.nativeObservation ? observerReload : transcriptReload).reload(chatId, options);
-        try { return await transcriptReader.page(chatId, 100, undefined, replacement.viewId); }
-        catch (error) { throw reloadOutcomeUnknown(error); }
-      },
+      transcriptReload,
       queue,
       transientFeeds,
       registry: chatRegistry,

@@ -4,6 +4,7 @@ import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import type { ChatReloadProgress } from '../../../common/ws-events.js';
 import { DomainError } from '../../common/domain-error.js';
+import { createLogger } from '../../common/log.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { AgentDirectory } from '../agents/directory.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
@@ -16,6 +17,8 @@ import { LedgerFencedError, TranscriptViewNotInitializedError } from './errors.j
 import { observationNotice, observedDrafts } from './observed-drafts.js';
 import type { TranscriptReloadOptions } from './reload.js';
 import type { TranscriptLedgerService } from './service.js';
+
+const logger = createLogger('ledger:observer-reload');
 
 export interface ObserverReloadOptions {
   readonly registry: Pick<IChatRegistry, 'getChat'>;
@@ -61,7 +64,12 @@ export class ObserverReloadService {
           try { await this.options.execution.releaseTranscriptSnapshot(reservation); }
           catch (error) { failure = error; }
         }
-        if (failure) throw promoted ? reloadOutcomeUnknown(failure) : failure;
+        if (failure) {
+          if (promoted) throw reloadOutcomeUnknown(failure);
+          logger.warn('Snapshot reservation release failed after an unsuccessful Reload', {
+            chatId, reason: failure instanceof Error ? failure.message : String(failure),
+          });
+        }
       }
     });
   }

@@ -13,6 +13,8 @@ import { ChatRowService } from '../../chats/chat-row-service.js';
 import { ChatPreambleSelectionService } from '../../preambles/chat-selection-service.js';
 import { AgentSessionSettingsService } from '../../agents/session-settings-service.js';
 import { isDirectDelegatedChild } from '../../chats/agent-delegation.js';
+import type { ChatListEntry } from '../../../../common/chat-list.js';
+import { AssistantMessage } from '../../../../common/chat-types.js';
 
 const chatId = '1783725900000101';
 const parent = '1783725900000100';
@@ -24,7 +26,7 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 function unused(): never { throw new Error('Read-only admission reached a side effect'); }
 
-async function fixture() {
+async function fixture(projectedChat?: ChatListEntry, overrides: Partial<ChatCommandServiceDeps> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'observer-admission-'));
   const chats = new ChatRegistry(directory);
   await chats.init();
@@ -42,14 +44,16 @@ async function fixture() {
     chats, ledger, transcripts, chatMutationLock, fileMentions: { resolve: unused },
     get queue() { return unused(); }, get settings() { return unused(); },
     get recentTitleIcons() { return unused(); }, get metadata() { return unused(); },
-    get agents() { return unused(); }, get chatListProjector() { return unused(); },
+    get agents() { return unused(); },
+    get chatListProjector() { return projectedChat ? { buildOne: () => projectedChat } : unused(); },
     get ownership() { return unused(); }, get handoffs() { return unused(); },
     get transientFeeds() { return unused(); }, get preambles() { return unused(); },
     get chatTags() { return unused(); }, inspectProject: unused,
     createForkedChat: unused, readForkedNativeHistory: unused,
+    ...overrides,
   } satisfies ChatCommandServiceDeps;
   cleanups.push(async () => { transcripts.close(); await chats.flush(); await rm(directory, { recursive: true, force: true }); });
-  return { chats, transcripts, chatMutationLock, accept, commands: new ChatCommandService(deps) };
+  return { chats, transcripts, chatMutationLock, ledger, accept, commands: new ChatCommandService(deps) };
 }
 
 const mutations: Array<[string, (commands: ChatCommandService) => Promise<unknown>]> = [
@@ -85,6 +89,21 @@ test.each(mutations)('observer rejects %s before command acceptance or provider 
   expect(f.accept).not.toHaveBeenCalled();
 });
 
+test('a failed observer deletion leaves the capture writer open', async () => {
+  const failure = new Error('Synthetic journal failure');
+  const f = await fixture(undefined, {
+    ownership: { delete: async () => { throw failure; } },
+    handoffs: { cancelPreparation() {}, resolveTarget: unused, createPreparation: unused,
+      seedContinuationLedger: unused, deleteContinuationLedger: unused },
+  });
+  const lease = f.transcripts.openObservation(chatId);
+  await expect(f.commands.deleteChat({ chatId })).rejects.toBe(failure);
+  expect(f.chats.getChat(chatId)).not.toBeNull();
+  expect(lease.closed).toBe(false);
+  lease.publishRows([{ message: new AssistantMessage('2026-01-01T00:00:00.000Z', 'Still captured') }]);
+  expect(f.transcripts.currentRows(chatId)).toHaveLength(1);
+});
+
 test('direct row and preamble owners reject observers before adoption', async () => {
   const f = await fixture();
   const ensure = mock(unused);
@@ -109,4 +128,31 @@ test('settings and delegated parentage cannot grant observer execution authority
     get execution() { return unused(); }, hasAdmittedProviderTurn: unused });
   await expect(settings.updateSessionSettings(chatId, { model: 'other' })).rejects.toMatchObject({ code: 'CHAT_READ_ONLY' });
   expect(isDirectDelegatedChild(parent, chatId, f.chats.getChat(chatId))).toBe(false);
+});
+
+test.each(['fork', 'fork-run'] as const)('completed %s replay remains readable after its source is deleted', async commandType => {
+  const projected = {
+    id: nextId, observation: null, parentChatId: null, lineage: null,
+    agentId: 'test', agentOwnershipEpoch: 'target-epoch', model: 'model',
+    permissionMode: 'default', thinkingMode: 'none',
+    agentSettings: { ownerId: 'test', schemaVersion: 1, values: {} },
+    title: 'Synthetic target', projectPath: '/synthetic', orderGroup: 'normal', tags: [],
+    activity: { createdAt: null, lastActivityAt: null, lastReadAt: null }, preview: { lastMessage: '' },
+    isPinned: false, isArchived: false, isActive: false, isProcessing: false,
+    processingPhase: null, activityStatus: null, canReloadFromNativeHistory: false, isUnread: false,
+  } satisfies ChatListEntry;
+  const f = await fixture(projected);
+  f.chats.removeChat(chatId);
+  f.chats.addChat({ id: nextId, agentId: 'test', model: 'model', projectPath: '/synthetic',
+    parentChatId: null, lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] } });
+  const accepted = await f.ledger.accept({ commandType, chatId: nextId, clientRequestId: 'request',
+    turnId: 'synthetic-turn', payload: {} });
+  const terminal = await f.ledger.settleTerminal(accepted.record.key, 'finished');
+  if (!terminal) throw new Error('Synthetic command did not settle');
+  f.accept.mockResolvedValue({ kind: 'duplicate', record: terminal.record });
+  const response = commandType === 'fork'
+    ? await f.commands.forkChat(fork)
+    : await f.commands.submitForkRun(fork);
+  expect(response.chat).toEqual(projected);
+  expect(f.chats.getChat(chatId)).toBeNull();
 });

@@ -126,12 +126,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (!inputTranscript) throw new Error('ChatExecutionCoordinator requires an input transcript');
     if (!getDrainOptions) throw new Error('ChatExecutionCoordinator requires a drain option resolver');
     if (!chatExists) throw new Error('ChatExecutionCoordinator requires a chat existence resolver');
-    if (!controls) {
-      throw new Error('ChatExecutionCoordinator requires an execution control repository');
-    }
-    if (!options?.projectAdmission) {
-      throw new Error('ChatExecutionCoordinator requires project admission');
-    }
+    if (!controls) throw new Error('ChatExecutionCoordinator requires an execution control repository');
+    if (!options?.projectAdmission) throw new Error('ChatExecutionCoordinator requires project admission');
     if (!options.attachmentAdmission) {
       throw new Error('ChatExecutionCoordinator requires attachment admission');
     }

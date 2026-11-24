@@ -61,7 +61,6 @@ describe('native child capture admission', () => {
     const ownership = new AgentOwnershipJournal({ workspaceDir: f.directory, registry: f.registry,
       ledger: f.ledger, integrations: { get, require: get }, isExecutorConfigured: () => true });
     await ownership.initialize();
-    f.ledger.closeChat(id);
     await ownership.delete(id);
     await ownership.waitForProviderCleanup();
     f.create();

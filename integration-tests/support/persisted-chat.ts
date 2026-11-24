@@ -14,6 +14,7 @@ export async function restartWithSeededChat(
     const file = Bun.file(registryPath);
     const registry: ChatRegistrySnapshot = await file.exists() ? await file.json() : { version: CHAT_REGISTRY_VERSION, sessions: {} };
     registry.sessions[chatId] = {
+      nativeObservation: null,
       executorId: fixture.client.executorId,
       projectPath: fixture.executionDirs.project,
       nativeSession: null,

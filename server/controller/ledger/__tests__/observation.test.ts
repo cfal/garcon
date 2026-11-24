@@ -25,7 +25,7 @@ async function fixture() {
 }
 
 describe('passive observation acceptance', () => {
-  it('commits literal conversation before fanout without dispatch, input, or run facts', async () => {
+  it('[TLV5-OBSERVE.01-LEDGER-01] commits literal conversation before fanout without dispatch, input, or run facts', async () => {
     const { ledger, lease, request } = await fixture();
     const delivered = mock(() => undefined);
     ledger.subscribe(delivered);

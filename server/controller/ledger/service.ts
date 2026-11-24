@@ -56,7 +56,7 @@ import { PermissionControlEvents, type PermissionActionabilityChange } from './p
 import { inputDetail } from './input-submission.js';
 export type { PermissionActionabilityChange } from './permission-control-events.js';
 import { ProducerLease } from './producer-lease.js';
-import { ObservationLease, type TranscriptObservationLease } from './observation.js';
+import { ObservationWriters, type TranscriptObservationLease } from './observation.js';
 import { projectFinalResponse } from './final-response.js';
 import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
@@ -90,7 +90,7 @@ export class TranscriptLedgerService {
   readonly #runAbandonedListeners = new Set<(chatId: string, runId: string) => void | Promise<void>>();
   readonly #permissionEvents: PermissionControlEvents;
   readonly #leases = new Map<string, ProducerLease>();
-  readonly #observations = new Map<string, ObservationLease>();
+  readonly #observations: ObservationWriters;
   readonly #activeRuns = new Map<string, string>();
   readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
   readonly #permissionClaims = new Map<string, PermissionResolutionClaim>();
@@ -99,6 +99,8 @@ export class TranscriptLedgerService {
   constructor(store: TranscriptLedgerStore, options: TranscriptLedgerServiceOptions = {}) {
     this.#store = store;
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#observations = new ObservationWriters({ store, now: this.#now,
+      hasProducer: chatId => this.#leases.has(chatId), notify: event => this.#notify(event) });
     this.#createRunId = options.createRunId ?? (() => crypto.randomUUID());
     this.#serverInstanceId = options.serverInstanceId ?? crypto.randomUUID();
     this.#onListenerError = options.onListenerError ?? (() => undefined);
@@ -197,19 +199,7 @@ export class TranscriptLedgerService {
   }
 
   openObservation(chatId: string): TranscriptObservationLease {
-    if (this.#observations.has(chatId) || this.#leases.has(chatId)) throw new TypeError('Transcript writer is already open');
-    const view = this.#store.existingCurrentView(chatId);
-    if (!view) throw new TypeError('Observation requires an existing transcript view');
-    const lease = new ObservationLease((drafts) => {
-      if (this.#observations.get(chatId) !== lease
-        || this.#store.existingCurrentView(chatId)?.viewId !== view.viewId) throw new TranscriptSinkClosedError();
-      const rows = this.#store.append(chatId, view.viewId, drafts);
-      this.#notify({ type: 'rows', chatId, viewId: view.viewId, rows });
-    }, () => {
-      if (this.#observations.get(chatId) === lease) this.#observations.delete(chatId);
-    }, this.#now);
-    this.#observations.set(chatId, lease);
-    return lease;
+    return this.#observations.open(chatId);
   }
 
   beginRun(chatId: string, runId = this.#createRunId()): string {
@@ -722,8 +712,7 @@ export class TranscriptLedgerService {
   }
 
   close(): void {
-    for (const lease of this.#observations.values()) lease.close();
-    this.#observations.clear();
+    this.#observations.closeAll();
     for (const lease of this.#leases.values()) lease.close();
     this.#leases.clear();
     this.#activeRuns.clear();
@@ -745,7 +734,7 @@ export class TranscriptLedgerService {
   }
 
   #clearChatState(chatId: string): void {
-    this.#observations.get(chatId)?.close();
+    this.#observations.close(chatId);
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
     this.#clearChatPermissions(chatId);

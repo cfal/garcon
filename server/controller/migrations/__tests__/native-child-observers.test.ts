@@ -5,6 +5,8 @@ import path from 'node:path';
 import { migrateNativeChildObservers } from '../native-child-observers.js';
 import { ChatRegistry } from '../../chats/store.js';
 import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.js';
+import { splitChatRelationships } from '../chat-relationships-split.js';
+import { finalizeCarryOverMigrationValidation, migrateLegacyCarryOverWorkspace } from '../carryover/chat-carryover-migration.js';
 
 const ID = '1783725900000401';
 const directories: string[] = [];
@@ -54,4 +56,16 @@ it('does not interpret a missing schema-7 marker as executable', async () => {
   const { directory, file, entry } = await fixture();
   await fs.writeFile(file, JSON.stringify({ version: 7, sessions: { [ID]: entry } }));
   await expect(migrateNativeChildObservers(directory)).rejects.toThrow('Missing nativeObservation');
+});
+
+it('finalizes linked carryover migration after upgrading the registry to schema 7', async () => {
+  const { directory, file } = await fixture();
+  await fs.writeFile(file, JSON.stringify({ version: 4, sessions: {} }));
+  await migrateLegacyCarryOverWorkspace(directory);
+  await splitChatRelationships(directory);
+  await migrateNativeChildObservers(directory);
+  await finalizeCarryOverMigrationValidation(directory);
+  expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(7);
+  const marker = JSON.parse(await fs.readFile(path.join(directory, 'carryover-transcripts/migration-v2.json'), 'utf8'));
+  expect(marker.rollbackSafe).toBe(false);
 });

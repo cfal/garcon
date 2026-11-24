@@ -8,8 +8,12 @@ import { integrationFixture } from '../../../remote/__tests__/integration-fixtur
 import { KeyedPromiseLock } from '../../../common/keyed-lock.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { ChatRegistry } from '../../chats/store.js';
+import { emptyStoredChatExecutionControl } from '../../chat-execution/control-state.js';
+import { TranscriptAdoptionService } from '../adoption.js';
 import { TranscriptLedgerService } from '../service.js';
 import { TranscriptLedgerStore } from '../store.js';
+import { createChatReloader } from '../reload-chat.js';
+import { TranscriptViewReader } from '../view-reader.js';
 import { ObserverReloadService, type ObserverReloadOptions } from '../observer-reload.js';
 import { LedgerFencedError } from '../errors.js';
 
@@ -62,7 +66,7 @@ async function fixture() {
     releaseTranscriptSnapshot, retireChat, options, service };
 }
 
-test('manual child Reload replaces with inert history and retires capture only after promotion', async () => {
+test('[TLV5-OBSERVE.02-RELOAD-01] manual child Reload replaces with inert history and retires capture only after promotion', async () => {
   const f = await fixture();
   const promote = spyOn(f.ledger, 'replaceCurrentView');
   const replacement = await f.service.reload(CHILD);
@@ -189,4 +193,64 @@ test('release failure after cutover reports an unknown outcome rather than a saf
   expect(f.writer.closed).toBe(true);
   expect(f.ledger.currentView(CHILD)?.viewId).not.toBe(f.original.viewId);
   expect(f.reserved.size).toBe(0);
+});
+
+test.each(['read', 'busy', 'uncertain-promotion'] as const)('release failure preserves the original %s failure', async failure => {
+  const f = await fixture();
+  const original = new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', 'Synthetic history unavailable', false);
+  if (failure === 'read') f.loadHistory.mockImplementation(async function* () { throw original; });
+  if (failure === 'busy') f.loadHistory.mockImplementation(async function* () {
+    throw new AgentIntegrationError('SESSION_BUSY', 'Synthetic busy source', true);
+  });
+  if (failure === 'uncertain-promotion') spyOn(f.ledger, 'replaceCurrentView').mockImplementation(() => {
+    throw new LedgerFencedError(CHILD);
+  });
+  f.releaseTranscriptSnapshot.mockImplementation(async ({ chatId }) => {
+    f.reserved.delete(chatId);
+    throw new Error('Synthetic release failure');
+  });
+  const reload = f.service.reload(CHILD);
+  if (failure === 'read') await expect(reload).rejects.toBe(original);
+  else await expect(reload).rejects.toMatchObject({
+    code: failure === 'busy' ? 'CHAT_RUNNING' : 'RELOAD_OUTCOME_UNKNOWN',
+    retryable: failure === 'busy',
+  });
+  expect(f.ledger.currentView(CHILD)).toEqual(f.original);
+  expect(f.writer.closed).toBe(failure === 'uncertain-promotion');
+  expect(f.reserved.size).toBe(0);
+});
+
+test.each(['success', 'failure', 'replacement'] as const)('Reload reply pins the promoted view on page %s', async outcome => {
+  const f = await fixture();
+  const getCarryOverRevision = () => 'carry-v1:0';
+  const adoption = new TranscriptAdoptionService({
+    ...f.options, getCarryOverRevision, loadFrozenPrefix: async () => [],
+  });
+  const reader = new TranscriptViewReader(f.ledger, adoption);
+  const page = reader.page.bind(reader);
+  let promotedViewId = f.original.viewId;
+  const readPage = spyOn(reader, 'page').mockImplementation(async (...args) => {
+    promotedViewId = f.ledger.currentView(CHILD)!.viewId;
+    expect(args).toEqual([CHILD, 100, undefined, promotedViewId]);
+    if (outcome === 'failure') throw new Error('Synthetic page failure');
+    if (outcome === 'replacement') {
+      const next = await f.ledger.stageView(CHILD, [], 1);
+      f.ledger.replaceCurrentView(CHILD, promotedViewId, next.viewId);
+    }
+    return page(...args);
+  });
+  const reload = createChatReloader({
+    ...f.options, adoption, reader, getCarryOverRevision, reopenProducer: () => {},
+    execution: { ...f.options.execution, readChatExecutionControl: async () => emptyStoredChatExecutionControl('synthetic-server') },
+  });
+  if (outcome === 'success') {
+    const result = await reload(CHILD, {});
+    expect(result.transcriptViewId).toBe(promotedViewId);
+    expect(result.transcriptViewId).not.toBe(f.original.viewId);
+  } else {
+    await expect(reload(CHILD, {})).rejects.toMatchObject({ code: 'RELOAD_OUTCOME_UNKNOWN', retryable: false });
+  }
+  expect(readPage).toHaveBeenCalledTimes(1);
+  expect(f.loadHistory).toHaveBeenCalledTimes(1);
+  expect(f.writer.closed).toBe(true);
 });

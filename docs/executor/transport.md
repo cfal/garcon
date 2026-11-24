@@ -99,6 +99,18 @@ targets remain intact; bulk errors do not disable Stop or fall back to Local.
 
 ## Ordering And Bounds
 
+Native-child observations share their originating parent's producer binding and
+primary lane, but never its executable sink. The controller demultiplexes them
+into passive child ledgers before normal parent routing. Observation frames are
+droppable under retention pressure, including an oversized newest frame; loss
+ends affected capture with a bounded gap marker rather than failing parent work.
+Replay retains the captured binding and child identity, never discovering old
+children or reattaching a retired child. Child history uses the existing bulk
+`history.open` discriminated request and session-scoped reader sequence through
+the nullable `nativeChildObservation` facet. Bulk loss leaves primary capture
+healthy; no replacement reader resumes automatically. Protocol revision 59
+includes these contracts and the observer list/snapshot projection.
+
 Each authenticated socket owns one session. `MessageSession` is a bounded send
 queue with a 16 MiB encoded message limit. Both lanes share 32 MiB / 4,096 unsent
 messages; bulk may use at most 24 MiB / 3,072. Ordinary traffic leaves 32 KiB /

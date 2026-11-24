@@ -78,6 +78,32 @@ async function runningTurn(dialer: 'controller' | 'worker') {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`child retention pressure preserves parent rows and settlement with a conservative binding gap (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { relay: { retainedBytes: 8192 } });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      await integration.execution.start(request);
+      const received: AgentProducerNotification['event'][] = [];
+      integration.producers.subscribe(({ event }) => received.push(event));
+      const publish = fixture.generations[0]!.nativePublishers[0]!;
+      publish(row('Parent before'));
+      publish({ type: 'native-child-rows', childKey: 'child', rows: [{ message: new AssistantMessage('now', 'x'.repeat(2048)) }] });
+      publish({ type: 'native-child-rows', childKey: 'child', rows: [{ message: new AssistantMessage('now', 'Suppressed child') }] });
+      publish(row('Parent after'));
+      publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      await integration.execution.runningSessions();
+      expect(received.map(event => event.type)).toEqual([
+        'rows', 'publication-gap', 'native-child-capture-ended', 'rows', 'run-ended',
+      ]);
+      expect(received.filter(event => event.type === 'rows').map(event => event.rows[0]?.message))
+        .toMatchObject([{ content: 'Parent before' }, { content: 'Parent after' }]);
+      expect(received.at(-1)).toMatchObject({ outcome: 'finished' });
+      expect(fixture.generations[0]!.calls.abort).toBe(0);
+      expect(fixture.executor.availability).toBe('ready');
+    } finally { await fixture.dispose(); }
+  });
+
   test(`child content survives parent completion and remains isolated from malformed observations (${dialer} dials)`, async () => {
     const { fixture, integration, request, publish } = await runningTurn(dialer);
     try {

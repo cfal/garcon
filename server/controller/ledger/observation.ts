@@ -1,6 +1,7 @@
 import type { AgentProducedRow } from '@garcon/server-agent-interface';
 import { isNativeChildStatus, type NativeChildStatus } from '../../../common/chat-observation.js';
-import type { LedgerRowDraft } from './contracts.js';
+import type { LedgerRowDraft, TranscriptCommitEvent } from './contracts.js';
+import type { TranscriptLedgerStore } from './store.js';
 import { TranscriptSinkClosedError } from './errors.js';
 import { observationNotice, observedDrafts } from './observed-drafts.js';
 
@@ -11,6 +12,37 @@ export interface TranscriptObservationLease {
   publishGap(): void;
   close(): void;
   onClosed(listener: () => void): () => void;
+}
+
+export class ObservationWriters {
+  readonly #leases = new Map<string, ObservationLease>();
+
+  constructor(private readonly options: {
+    store: Pick<TranscriptLedgerStore, 'existingCurrentView' | 'append'>;
+    hasProducer(chatId: string): boolean;
+    notify(event: TranscriptCommitEvent): void;
+    now(): string;
+  }) {}
+
+  has(chatId: string): boolean { return this.#leases.has(chatId); }
+  close(chatId: string): void { this.#leases.get(chatId)?.close(); }
+  closeAll(): void { for (const lease of this.#leases.values()) lease.close(); }
+
+  open(chatId: string): TranscriptObservationLease {
+    if (this.has(chatId) || this.options.hasProducer(chatId)) throw new TypeError('Transcript writer is already open');
+    const view = this.options.store.existingCurrentView(chatId);
+    if (!view) throw new TypeError('Observation requires an existing transcript view');
+    const lease = new ObservationLease(drafts => {
+      if (this.#leases.get(chatId) !== lease
+        || this.options.store.existingCurrentView(chatId)?.viewId !== view.viewId) throw new TranscriptSinkClosedError();
+      const rows = this.options.store.append(chatId, view.viewId, drafts);
+      this.options.notify({ type: 'rows', chatId, viewId: view.viewId, rows });
+    }, () => {
+      if (this.#leases.get(chatId) === lease) this.#leases.delete(chatId);
+    }, this.options.now);
+    this.#leases.set(chatId, lease);
+    return lease;
+  }
 }
 
 export class ObservationLease implements TranscriptObservationLease {

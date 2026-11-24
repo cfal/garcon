@@ -411,7 +411,6 @@ export class SessionCommands {
 
   private async deleteChatLocked(chatId: string): Promise<{ success: true; chatId: string }> {
     const entry = this.support.requireChat(chatId);
-    if (entry.nativeObservation) this.deps.transcripts.closeChat(chatId);
     this.deps.ledger.beginChatDeletion(chatId);
 
     let retired: boolean;
