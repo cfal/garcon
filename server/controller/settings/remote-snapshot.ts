@@ -49,7 +49,7 @@ export async function buildRemoteSettingsSnapshot({
   telegramSettings,
   projectBasePath,
 }: {
-  settings: SettingsStore;
+  settings: Pick<SettingsStore, 'getRemoteSettingsSnapshotSource'>;
   agents: Pick<AgentRegistryServiceContract, 'getAgentAuthStatusMap' | 'getAgentReadinessMap' | 'getAgentCatalogEntries'>;
   telegramSettings?: TelegramSettingsStore | null;
   projectBasePath: string;

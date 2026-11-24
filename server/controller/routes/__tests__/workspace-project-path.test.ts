@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import createWorkspaceRoutes from '../workspace.js';
+import { createProjectPathPreferenceRoutes } from '../project-path-preferences.js';
+import { buildRemoteSettingsSnapshot } from '../../settings/remote-snapshot.js';
 import { SettingsStore } from '../../settings/store.js';
 import type { AgentRegistryServiceContract } from '../../agents/registry.js';
 import type { RouteMap, RouteHandler } from '../../lib/http-route-types.js';
@@ -10,11 +11,13 @@ import type { RouteMap, RouteHandler } from '../../lib/http-route-types.js';
 type ProjectPathSettings = Pick<SettingsStore, 'getRemoteSettingsSnapshotSource' | 'removeProjectPathFromList' | 'setPathSettings'>;
 type SnapshotAgents = Pick<AgentRegistryServiceContract, 'getAgentAuthStatusMap' | 'getAgentReadinessMap' | 'getAgentCatalogEntries'>;
 
-// Exercises only the settings routes; unrelated route dependencies are never invoked.
-const projectPathRoutes = createWorkspaceRoutes as (
-  settings: ProjectPathSettings, agents: SnapshotAgents, telegramNotifier: Parameters<typeof createWorkspaceRoutes>[2] | undefined,
-  telegramSettings: Parameters<typeof createWorkspaceRoutes>[3] | undefined, projectBasePath: string,
-) => RouteMap;
+function projectPathRoutes(settings: ProjectPathSettings, agents: SnapshotAgents, projectBasePath: string): RouteMap {
+  const options = { settings, agents, projectBasePath };
+  return {
+    ...createProjectPathPreferenceRoutes(options),
+    '/api/v1/app/settings': { GET: async () => Response.json(await buildRemoteSettingsSnapshot(options)) },
+  };
+}
 
 function remoteSettingsSource(overrides: Partial<ReturnType<SettingsStore['getRemoteSettingsSnapshotSource']>> = {}): ReturnType<SettingsStore['getRemoteSettingsSnapshotSource']> {
   return { ...new SettingsStore(join(tmpdir(), 'garcon-project-path-defaults')).getRemoteSettingsSnapshotSource(), ...overrides };
@@ -51,7 +54,7 @@ describe('DELETE project path preferences', () => {
   let handler: RouteHandler;
   beforeEach(() => {
     ctx = createWorkspaceFixture();
-    handler = projectPathRoutes(ctx.settings, ctx.agents, undefined, undefined, '/projects')[ROUTE]!.DELETE!;
+    handler = projectPathRoutes(ctx.settings, ctx.agents, '/projects')[ROUTE]!.DELETE!;
   });
 
   it('passes only the explicit identity to the domain and returns its canonical snapshot', async () => {
@@ -105,7 +108,7 @@ it.each(['local', REMOTE])('HTTP removal preserves changes made after a stale cl
   });
   await settings.recordChatStartup({ executorId: REMOTE, agentId: 'test', model: 'synthetic', projectPath: 'D:/projects/atlas' });
   const { agents } = createWorkspaceFixture();
-  const routes = projectPathRoutes(settings, agents, undefined, undefined, '/projects');
+  const routes = projectPathRoutes(settings, agents, '/projects');
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch(request, server) {
     const url = new URL(request.url);
     const handler = routes[url.pathname]?.[request.method];
