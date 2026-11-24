@@ -289,6 +289,7 @@ describe('tiling chats', () => {
 	it('replaces the visible grid in one publication without losing chat bindings or other tabs', async () => {
 		const { coordinator, layout, files } = createHarness({ hostSize: { width: 720, height: 240 } });
 		await coordinator.showChatInWindow('retained', 'window-files');
+		await coordinator.placeFileSession('open', { type: 'window', windowId: 'window-files' });
 		await coordinator.openChatInNewWindow('idle', 'window-main');
 		const extra = coordinator.currentWindowId;
 		await coordinator.placeFileSession('edited', { type: 'window', windowId: extra });
@@ -305,9 +306,14 @@ describe('tiling chats', () => {
 			['window-files', { type: 'chat', chatId: 'retained' }],
 			['window-main', { type: 'chat', chatId: 'new' }],
 		]);
-		expect(windowTabs(layout.snapshot, 'window-files').order).toEqual(
-			expect.arrayContaining([CANONICAL_FILES_SURFACE_ID, fileSurfaceId('edited')]),
-		);
+		const retainedChat = chatViewSurfaceId('window-files');
+		const openFile = fileSurfaceId('open');
+		const movedFile = fileSurfaceId('edited');
+		expect(windowTabs(layout.snapshot, 'window-files')).toEqual({
+			activeId: retainedChat,
+			order: [retainedChat, CANONICAL_FILES_SURFACE_ID, openFile, movedFile],
+			mru: [retainedChat, openFile, CANONICAL_FILES_SURFACE_ID, movedFile],
+		});
 		expect(files.destroy).not.toHaveBeenCalled();
 	});
 
@@ -332,6 +338,16 @@ describe('tiling chats', () => {
 		expect(await coordinator.tileChats(['first', 'second'])).toBe(1);
 		expect(coordinator.focusedChatId).toBe('first');
 		expect(coordinator.windowCount).toBe(2);
+	});
+
+	it('presents an already placed chat on mobile without replacing the focused chat', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.showChatInWindow('working', 'window-files');
+		await coordinator.showChatInWindow('focused', 'window-main');
+		await coordinator.enterMobilePresentation();
+		expect(await coordinator.tileChats(['working', 'other'])).toBe(1);
+		expect(layout.snapshot.mobileActiveSurfaceId).toBe(chatViewSurfaceId('window-files'));
+		expect(layout.surface(CANONICAL_CHAT_SURFACE_ID)).toMatchObject({ chatId: 'focused' });
 	});
 });
 
