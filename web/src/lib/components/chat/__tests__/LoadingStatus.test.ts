@@ -24,15 +24,19 @@ describe('LoadingStatus', () => {
 
 		await rerender({ isVisible: true });
 		expect(vi.getTimerCount()).toBe(1);
-		const spinner = container.querySelector('.text-status-processing');
-		const firstFrame = spinner?.textContent;
+		const spinner = container.querySelector<HTMLElement>('.text-status-processing')!;
+		const firstFrame = spinner.textContent;
+		expect([...spinner.classList].some((name) => name.startsWith('transition'))).toBe(false);
+		expect(spinner.style.transitionDuration).toBe('');
+		expect(spinner.classList.contains('scale-110')).toBe(true);
 		await vi.advanceTimersByTimeAsync(120);
 		await tick();
-		expect(spinner?.textContent).not.toBe(firstFrame);
+		expect(spinner.textContent).not.toBe(firstFrame);
+		expect(spinner.classList.contains('scale-110')).toBe(false);
 
 		await rerender({ spinnerSelectionKey: 'chat-2' });
 		expect(vi.getTimerCount()).toBe(1);
-		expect(spinner?.textContent).toBe(firstFrame);
+		expect(spinner.textContent).toBe(firstFrame);
 
 		await rerender({ isVisible: false });
 		expect(vi.getTimerCount()).toBe(0);

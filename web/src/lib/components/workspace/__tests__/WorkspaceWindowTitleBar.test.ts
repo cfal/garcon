@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
+import { fromStore, writable } from 'svelte/store';
 import WorkspaceWindowTitleBar from '../WorkspaceWindowTitleBar.svelte';
 import WorkspaceWindowAddMenu from '../WorkspaceWindowAddMenu.svelte';
 import { WorkspaceWindowAddMenuState } from '../workspace-window-add-menu-state.svelte.js';
@@ -1479,6 +1481,48 @@ describe('WorkspaceWindowTitleBar', () => {
 			expect(screen.queryByRole('tab', { name: 'Git' })).toBeNull();
 		} finally {
 			rendered.unmount();
+			restore();
+		}
+	});
+
+	it('keeps the tab width observer when a roster update leaves the labels unchanged', async () => {
+		const restore = installResizeObserverHarness();
+		const record = fromStore(writable({ title: 'Chat A', working: true }));
+		const { container, rerender, unmount } = renderTitleBar(
+			workspaceWindow([chatSurface.id]),
+			true,
+			() => record.current.title,
+		);
+		const measuredTab = () => container.querySelector<HTMLElement>('[data-window-tab-measure-id]')!;
+		const observerFor = (element: Element) =>
+			ResizeObserverHarness.instances.find((observer) => observer.observed.has(element));
+		try {
+			const tab = measuredTab();
+			const initial = observerFor(tab);
+			expect(initial).toBeDefined();
+			await tick();
+			const read = vi.spyOn(tab, 'getBoundingClientRect');
+			record.current = { title: 'Chat A', working: false };
+			await tick();
+			expect(observerFor(tab)).toBe(initial);
+			expect(read).not.toHaveBeenCalled();
+
+			ResizeObserverHarness.emit(tab, 160);
+			expect(read).toHaveBeenCalled();
+			read.mockClear();
+			record.current = { title: 'Renamed Chat', working: false };
+			await tick();
+			expect(tab.textContent).toContain('Renamed Chat');
+			expect(read).toHaveBeenCalled();
+
+			await rerender({ workspaceWindow: workspaceWindow([gitSurface.id]) });
+			const replacement = measuredTab();
+			expect(replacement).not.toBe(tab);
+			expect(replacement.textContent).toContain('Renamed Chat');
+			expect(observerFor(replacement)).toBeDefined();
+			expect(observerFor(tab)).toBeUndefined();
+		} finally {
+			unmount();
 			restore();
 		}
 	});

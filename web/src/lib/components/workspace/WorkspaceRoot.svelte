@@ -89,6 +89,7 @@
 		visibleChatPresentations,
 		fullscreenHiddenChatPresentations,
 		visiblePortablePresentations,
+		type VisibleChatPresentation,
 	} from '$lib/workspace/visible-presentations.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -194,24 +195,36 @@
 	const projectedWindowId = $derived(fullscreenWindowId);
 	const presentedCurrentWindowId = $derived(projectedWindowId ?? currentWindowId);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
-	const chatPresentations = $derived.by<ConversationPanelDescriptor[]>(() =>
-		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').flatMap((presentation) => {
-			const chat = sessions.byId[presentation.chatId] ?? null;
-			if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
-				return [];
-			}
-			return [
-				{
-					...presentation,
-					snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
-				},
-			];
-		}),
+	const visibleChatPlacements = $derived(
+		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').map(observePanelAdmission),
+	);
+	const chatPresentations = $derived(
+		visibleChatPlacements.flatMap(({ placement, admission }) =>
+			admission === null ? [] : [{ ...placement, snapshotAdmission: admission }],
+		),
 	);
 	const fullscreenHiddenChats = $derived(
 		fullscreenHiddenChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop')
 			.filter(item => resolveChatSurfacePresentation(sessions.byId[item.chatId] ?? null, sessions.isLoadingChats) === 'conversation'),
 	);
+
+	// A visible placement depends on catalog admission, not the entire chat record.
+	function observePanelAdmission(placement: VisibleChatPresentation) {
+		const admission = $derived.by<ConversationPanelDescriptor['snapshotAdmission'] | null>(() => {
+			const chat = sessions.byId[placement.chatId] ?? null;
+			if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
+				return null;
+			}
+			return chat?.status === 'draft' ? 'deferred' : 'admitted';
+		});
+		return {
+			placement,
+			get admission() {
+				return admission;
+			},
+		};
+	}
+
 	const existingChatSurfaceIds = $derived.by(
 		() =>
 			new Set<ChatViewSurfaceId>(
