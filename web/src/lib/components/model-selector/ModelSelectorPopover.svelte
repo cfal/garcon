@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import { getModelCatalog, getExecutors } from '$lib/context';
@@ -80,7 +80,6 @@
 	let closingFromOutside = false;
 	let triggerFrame = $state<ModelSelectorTrigger>();
 	const overflowAnchor = $derived(toolbarAnchor ?? triggerFrame?.standaloneAnchor() ?? null);
-	const Trigger = $derived(isCompactLayout ? Dialog.Trigger : Popover.Trigger);
 	const committed = $derived(selector.committedSelection);
 
 	const showAgent = $derived(mode.agent === 'select');
@@ -121,13 +120,9 @@
 			(showExecutor ? 176 : 0);
 		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
 		const updateLayout = () => {
-			if (isCompactLayout === mediaQuery.matches) return;
-			const replaceFocusedTrigger = document.activeElement === triggerNode;
 			isCompactLayout = mediaQuery.matches;
-			if (replaceFocusedTrigger)
-				void tick().then(() => (overflowAnchor ?? triggerNode)?.focus({ preventScroll: true }));
 		};
-		untrack(updateLayout);
+		updateLayout();
 		mediaQuery.addEventListener('change', updateLayout);
 		return () => mediaQuery.removeEventListener('change', updateLayout);
 	});
@@ -226,18 +221,6 @@
 	});
 </script>
 
-{#snippet trigger(label: string, hidden: boolean)}
-	<Trigger
-		bind:ref={triggerNode}
-		{disabled}
-		{hidden}
-		title={selector.triggerTitle}
-		data-slot="model-selector-trigger"
-		data-composer-control={toolbarDisplay === undefined ? undefined : 'model'}
-		class="{triggerBaseClass} col-start-1 row-start-1">{label}</Trigger
-	>
-{/snippet}
-
 {#snippet catalogError()}
 	{#if selector.modelCatalog.error}
 		<div role="alert" class="flex shrink-0 items-center gap-2 px-3 py-2 text-sm text-destructive">
@@ -267,9 +250,24 @@
 	{dismissPicker}
 >
 	{#snippet children(label, hidden)}
+		<!-- The enclosing dialog keeps this focus anchor when the picker changes surfaces. -->
+		<button
+			bind:this={triggerNode}
+			type="button"
+			{disabled}
+			{hidden}
+			title={selector.triggerTitle}
+			aria-haspopup="dialog"
+			aria-expanded={selector.open}
+			aria-controls={selector.open ? contentNode?.id : undefined}
+			data-state={selector.open ? 'open' : 'closed'}
+			data-slot="model-selector-trigger"
+			data-composer-control={toolbarDisplay === undefined ? undefined : 'model'}
+			onclick={() => handleOpenChange(!selector.open)}
+			class="{triggerBaseClass} col-start-1 row-start-1">{label}</button
+		>
 		{#if isCompactLayout}
 			<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
-				{@render trigger(label, hidden)}
 				<Dialog.Content
 					onCloseAutoFocus={restoreTriggerFocus}
 					bind:ref={contentNode}
@@ -294,9 +292,8 @@
 			</Dialog.Root>
 		{:else}
 			<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
-				{@render trigger(label, hidden)}
 				<Popover.Content
-					customAnchor={overflowAnchor}
+					customAnchor={overflowAnchor ?? triggerNode}
 					onInteractOutside={(event) => {
 						if (isTileResize(event)) event.preventDefault();
 					}}

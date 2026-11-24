@@ -68,6 +68,11 @@ test('the live composer follows tile width and local group order without changin
     const modelPicker = page.locator('[data-slot="popover-content"]');
     const model = toolbar.locator('[data-slot="model-selector-trigger"]');
     await model.click();
+    await expect(modelPicker.getByRole('textbox')).toBeFocused();
+    await editor.click({ position: { x: 10, y: 8 } });
+    await expect(modelPicker).toHaveCount(0);
+    await expect(editor).toBeFocused();
+    await model.click();
     await expect(modelPicker).toBeVisible();
     const resizeTile = async (width: number) => {
       const hit = (await divider.boundingBox())!;

@@ -18,6 +18,7 @@ async function openNewChat(fixture: ChromiumFixture): Promise<Locator> {
 
   await fixture.page
     .getByRole("button", { name: "New Chat", exact: true })
+    .first()
     .click();
   await fixture.page
     .getByRole("status", { name: "Loading chat defaults..." })
@@ -270,6 +271,15 @@ describe("Chromium New Chat composer layout", () => {
         await expectLocator(longModelTrigger).toHaveText(`Direct (Chat Completions) ${LONG_MODEL_LABEL}`);
         await expectLocator(addTrigger).toHaveCount(0);
         await expectLocator(settingsMenu).toHaveCount(0);
+        markPhase("returning to the path field with an outside click");
+        const pathInput = dialog.locator('#project-path-input');
+        await longModelTrigger.click();
+        await modelPopover.waitFor();
+        await pathInput.click({ position: { x: 8, y: 8 } });
+        await modelPopover.waitFor({ state: "detached" });
+        await expectLocator(pathInput).toBeFocused();
+        await pathInput.press("Escape");
+        await expectLocator(fixture.page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
         markPhase("dropping the agent prefix before folding any buttons");
         await bottomBar.evaluate(bar => {
           const [prompt, settings] = Array.from(bar.querySelectorAll('[data-composer-group]'),
@@ -299,3 +309,36 @@ describe("Chromium New Chat composer layout", () => {
     );
   });
 });
+
+test("resizing an open New Chat picker to a compact dialog keeps focus in the picker", async () => {
+  await withChromiumFixture("new-chat-model-picker-breakpoint", async (fixture) => {
+    const { page, integration } = fixture;
+    const agent = integration.directAgents.openAi;
+    await integration.client.put(`/api/v1/api-providers?id=${encodeURIComponent(agent.provider.providerId)}`, {
+      endpoint: { models: [{ value: agent.provider.model, label: LONG_MODEL_LABEL }] },
+    });
+    const chatId = integration.newChatId();
+    const turn = await integration.client.startDirectChat({
+      chatId, content: 'Synthetic model selection', projectPath: integration.executionDirs.project, agent,
+    });
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const dialog = await openNewChat(fixture);
+    const toolbar = dialog.locator('[data-composer-toolbar]');
+    const model = toolbar.locator('[data-slot="model-selector-trigger"]');
+    await expectLocator(model).toContainText(LONG_MODEL_LABEL);
+    await model.click();
+    const columns = page.locator('[data-slot="model-selector-columns"]');
+    await expectLocator(columns).toBeVisible();
+    await waitForAnimations(page.locator('[data-slot="popover-content"]'));
+    await page.setViewportSize({ width: 390, height: 844 });
+    const compact = page.locator('[data-slot="model-selector-compact"]');
+    await expectLocator(compact).toBeVisible();
+    await expectLocator(model).toBeHidden();
+    await waitForAnimations(page.getByRole('dialog').filter({ has: compact }));
+    await expectLocator(page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expectLocator(compact).toHaveCount(0);
+    await expectLocator(toolbar.locator('[data-composer-overflow="settings"]')).toBeFocused();
+  });
+}, 60_000);
