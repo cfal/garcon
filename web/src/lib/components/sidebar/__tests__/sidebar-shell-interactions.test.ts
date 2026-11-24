@@ -71,6 +71,47 @@ describe('sidebar search dialog flow', () => {
 		cleanup();
 	});
 
+	it('tiles the full roster despite a sidebar filter and reports the outcome', async () => {
+		const chats = [
+			createChat('busy', 'Working', { isProcessing: true, processingPhase: 'running' }),
+			createChat('idle', 'Idle'),
+			createChat('waiting', 'Waiting', {
+				isProcessing: true, processingPhase: 'running', activityStatus: 'pending-user-action',
+			}),
+		];
+		const sidebarSearch = createSidebarSearchStore({
+			getChats: () => chats,
+			getSelectedChatId: () => null,
+			getTranscriptSearchEnabled: () => false,
+			getSearchResultSort: () => 'activity',
+			notifyError: vi.fn(),
+		});
+		sidebarSearch.applyQuery('Idle');
+		const onTileWorkingChats = vi.fn<(ids: readonly string[]) => Promise<number>>()
+			.mockResolvedValueOnce(1)
+			.mockResolvedValueOnce(2)
+			.mockRejectedValueOnce(new Error('Workspace busy'));
+		const notifications = { info: vi.fn(), error: vi.fn(), dismissKey: vi.fn() };
+		render(SidebarHost, {
+			chats, sidebarSearch, onTileWorkingChats, notifications, autoLoadSavedSearches: false,
+		});
+		expect(sidebarSearch.filteredChats.map((chat) => chat.id)).toEqual(['idle']);
+		async function tile(): Promise<void> {
+			await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Tile working chats' }));
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		}
+		await tile();
+		expect(onTileWorkingChats).toHaveBeenCalledWith(['waiting', 'busy']);
+		expect(notifications.info).toHaveBeenCalledWith(
+			'Tiled 1 of 2 working chats. The rest could not fit.', { key: 'tile-working-chats' },
+		);
+		await tile();
+		expect(notifications.dismissKey).toHaveBeenCalledWith('tile-working-chats');
+		await tile();
+		expect(notifications.error).toHaveBeenCalledWith('Workspace busy');
+	});
+
 	it('starts a project chat without toggling its collapsed group', async () => {
 		const onNewProjectChat = vi.fn();
 		const { container } = render(SidebarHost, {

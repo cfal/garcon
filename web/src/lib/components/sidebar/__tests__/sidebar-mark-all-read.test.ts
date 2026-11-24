@@ -30,6 +30,12 @@ describe('sidebar mark all as read menu', () => {
 			expect(screen.getByRole('menu')).toBeTruthy();
 		});
 
+		const items = screen.getAllByRole('menuitem');
+		expect(items.slice(0, 2).map((item) => item.textContent?.trim())).toEqual([
+			'Tile working chats',
+			'Mark all as read',
+		]);
+		expect(items[0].getAttribute('aria-disabled')).toBe('true');
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Mark all as read' }));
 
 		expect(onMarkAllRead).toHaveBeenCalledOnce();

@@ -75,6 +75,7 @@ export interface WorkspaceCoordinatorDeps {
 	surfaceFrames?: SurfaceFrameRegistry;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 	windowsFitHost: WorkspaceWindowsFitResolver;
+	getHostSize(): WorkspaceHostSize | null;
 	resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	onTerminalLauncherDismissed?(): void;
@@ -252,13 +253,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	get currentChatSurfaceId(): `chat-view:${WorkspaceWindowId}` {
 		const mobileSurface = this.layout.snapshot.surfaces[this.layout.snapshot.mobileActiveSurfaceId];
 		if (this.isMobile && mobileSurface?.type === 'chat') return mobileSurface.id;
-		const workspaceWindow = windowNodeById(this.layout.snapshot.desktopRoot, this.currentWindowId);
-		const activeSurface = workspaceWindow
-			? this.layout.snapshot.surfaces[workspaceWindow.tabs.activeId]
-			: null;
-		return activeSurface?.type === 'chat'
-			? activeSurface.id
-			: chatViewSurfaceId(this.currentWindowId);
+		return chatViewSurfaceId(this.currentWindowId);
 	}
 
 	get composerAnchorSurfaceId(): ChatViewSurfaceId | null {
@@ -413,6 +408,12 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 
 	async showChatInCurrentWindow(chatId: string): Promise<ChatViewSurfaceId> {
 		return this.#chatPlacement.showInCurrentWindow(chatId, this.currentWindowId);
+	}
+
+	tileChats(chatIds: readonly string[]): Promise<number> {
+		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
+		this.#presentation.cancelPendingWindowPointerInteraction();
+		return this.#chatPlacement.tileChats(chatIds, this.#deps.getHostSize);
 	}
 
 	async showChatInWindow(chatId: string, windowId: WorkspaceWindowId): Promise<ChatViewSurfaceId> {

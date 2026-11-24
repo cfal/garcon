@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { typographyScale } from '$lib/theme/typography.js';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
 	import SidebarSearchDock from './search/SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
@@ -30,6 +30,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import { workingChatIdsForTiling } from '$lib/workspace/workspace-chat-tiling.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { SavedChatSearch } from '$lib/api/settings';
 
@@ -62,6 +63,8 @@
 		onShareChat: (chat: ChatSessionRecord) => void;
 		onManageTags: (chat: ChatSessionRecord) => void;
 		onOpenChatInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
+		onTileWorkingChats?: (chatIds: readonly string[]) => Promise<number>;
+		actionsHidden?: boolean;
 		chatListAutohideAvailable?: boolean;
 		onChatListAutohideChange?: (enabled: boolean) => void;
 		onShowScheduledPrompts: () => void;
@@ -98,6 +101,8 @@
 		onShareChat,
 		onManageTags,
 		onOpenChatInNewWindow,
+		onTileWorkingChats,
+		actionsHidden = false,
 		chatListAutohideAvailable = false,
 		onChatListAutohideChange,
 		onShowScheduledPrompts,
@@ -149,6 +154,8 @@
 			.filter((chat) => chat.isUnread && Boolean(chat.lastActivityAt))
 			.map((chat) => chat.id),
 	);
+	const workingChatIds = $derived(workingChatIdsForTiling(chats));
+	const canTileWorkingChats = $derived(rosterReady && !isLoading && workingChatIds.length > 0);
 	let actionableChatIds = $derived(projection.rowModel.actionableChatIds);
 	let actionableChatIdSet = $derived(new Set(actionableChatIds));
 
@@ -304,6 +311,25 @@
 		}
 	}
 
+	async function handleTileWorkingChats(): Promise<void> {
+		if (!canTileWorkingChats || !onTileWorkingChats) return;
+		const chatIds = workingChatIds;
+		if (isMobile) appShell.setSidebarOpen(false);
+		await tick();
+		try {
+			const tiled = await onTileWorkingChats(chatIds);
+			if (tiled < chatIds.length) {
+				notifications.info(m.notifications_chats_partially_tiled({ tiled, total: chatIds.length }), {
+					key: 'tile-working-chats',
+				});
+			} else {
+				notifications.dismissKey('tile-working-chats');
+			}
+		} catch (error) {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		}
+	}
+
 	async function handleMarkAllRead() {
 		if (isMarkingAllRead || visibleUnreadChatIds.length === 0) return;
 		isMarkingAllRead = true;
@@ -360,6 +386,7 @@
 >
 	<div class="order-1 flex-shrink-0">
 		<SidebarSearchDock
+			{actionsHidden}
 			{isLoading}
 			visibleUnreadCount={visibleUnreadChatIds.length}
 			{onShowDisplay}
@@ -372,6 +399,7 @@
 			activeQuery={sidebarSearch.activeQuery}
 			onOpenSearchDialog={() => sidebarSearch.openSearchDialog()}
 			onCreateChat={handlePrimaryAction}
+			onTileWorkingChats={canTileWorkingChats && onTileWorkingChats ? handleTileWorkingChats : undefined}
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}
