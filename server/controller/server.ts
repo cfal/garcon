@@ -128,6 +128,7 @@ import {
 
 import createAllRoutes from './routes/index.js';
 import { TranscriptClearService } from './ledger/clear.js';
+import { ObserverReloadService, reloadOutcomeUnknown } from './ledger/observer-reload.js';
 import { ModelCatalogResponseCache } from './agents/model-catalog-cache.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
@@ -577,6 +578,10 @@ export async function startServer(): Promise<void> {
       ),
       chatMutationLock,
     });
+    const observerReload = new ObserverReloadService({
+      registry: chatRegistry, ledger: transcriptLedger, integrations: directory,
+      observers: nativeChildren, execution: queue, chatMutationLock,
+    });
     const transcriptClear = new TranscriptClearService({
       ledger: transcriptLedger,
       ownership: agentOwnership,
@@ -823,8 +828,9 @@ export async function startServer(): Promise<void> {
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
       transcriptReload: async (chatId, options) => {
-        await transcriptReload.reload(chatId, options);
-        return transcriptReader.page(chatId, 100);
+        const replacement = await (chatRegistry.getChat(chatId)?.nativeObservation ? observerReload : transcriptReload).reload(chatId, options);
+        try { return await transcriptReader.page(chatId, 100, undefined, replacement.viewId); }
+        catch (error) { throw reloadOutcomeUnknown(error); }
       },
       queue,
       transientFeeds,

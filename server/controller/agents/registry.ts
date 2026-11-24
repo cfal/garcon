@@ -589,6 +589,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
 
   resendCandidates(chatId: string) {
     const chat = this.#registry.getChat(chatId);
+    if (chat?.nativeObservation) return [];
     const integration = chat && this.#directory.get(chat.agentId, chat.executorId);
     if (!integration || integration.literalExecution) return [];
     return this.#ledger.resendCandidates(chatId);

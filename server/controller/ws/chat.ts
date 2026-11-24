@@ -3,6 +3,7 @@
 // All dependencies are injected via the constructor.
 
 import { sendWebSocketJson } from './utils.js';
+import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import type { PrimaryWebSocket } from './primary-delivery.js';
 import {
   ReconnectStateMessage,
@@ -231,7 +232,8 @@ function reportReloadProgress(send: (progress: ChatReloadProgress) => void): {
 }
 
 function reloadErrorCode(error: unknown): ClientRequestErrorCode {
-  if (isDomainError(error) && (error.code === 'CHAT_RUNNING' || error.code === 'HISTORY_LOAD_FAILED')) {
+  if ((isDomainError(error) || error instanceof AgentIntegrationError) && error.code === 'SESSION_BUSY') return 'CHAT_RUNNING';
+  if (isDomainError(error) && (error.code === 'CHAT_RUNNING' || error.code === 'HISTORY_LOAD_FAILED' || error.code === 'RELOAD_OUTCOME_UNKNOWN')) {
     return error.code;
   }
   return 'HISTORY_LOAD_FAILED';
@@ -463,11 +465,17 @@ export class ChatHandler {
     const progress = reportReloadProgress((update) => writer.send(new ChatReloadProgressMessage(
       clientRequestId, chatId, update.phase, update.rows,
     )));
+    let saving = false;
+    let replaced = false;
     try {
       const reload = await this.#transcriptReload(chatId, {
         signal: controller.signal,
-        onProgress: progress.update,
+        onProgress: (update) => {
+          if (update.phase === 'saving') saving = true;
+          progress.update(update);
+        },
       });
+      replaced = true;
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,
@@ -481,7 +489,8 @@ export class ChatHandler {
       ));
     } catch (error: unknown) {
       if (error instanceof WebSocketResponseDroppedError) throw error;
-      if (controller.signal.aborted) {
+      const uncertain = replaced || (isDomainError(error) && error.code === 'RELOAD_OUTCOME_UNKNOWN');
+      if (controller.signal.aborted && !saving && !uncertain) {
         this.#sendRequestError(writer, {
           clientRequestId, requestType,
           code: 'REQUEST_CANCELLED',
@@ -493,9 +502,9 @@ export class ChatHandler {
       const message = (error as Error).message || 'Failed to reload chat';
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
-        code: reloadErrorCode(error),
+        code: uncertain ? 'RELOAD_OUTCOME_UNKNOWN' : reloadErrorCode(error),
         message,
-        retryable: isDomainError(error) ? error.retryable : true, chatId,
+        retryable: uncertain ? false : isDomainError(error) ? error.retryable : true, chatId,
       });
     } finally {
       progress.stop();

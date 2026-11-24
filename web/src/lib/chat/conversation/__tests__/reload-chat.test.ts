@@ -154,6 +154,25 @@ describe('reloadChatFromNative', () => {
 		);
 	});
 
+	it.each(['same', 'replaced', 'unavailable'] as const)('refreshes only the ledger after an uncertain Reload (%s)', async outcome => {
+		const { chat, panels } = fixture();
+		seedTranscript(chat, 'chat-1', 'generation-1', [], {
+			lastOrdinal: 0, pageOldestOrdinal: 0, nextBeforeOrdinal: null, hasMore: false,
+		});
+		vi.mocked(getChatMessages).mockClear();
+		if (outcome === 'unavailable') vi.mocked(getChatMessages).mockRejectedValue(new Error('Offline'));
+		else vi.mocked(getChatMessages).mockResolvedValue({
+			chatId: 'chat-1', transcriptViewId: outcome === 'same' ? 'generation-1' : 'generation-2',
+			lastOrdinal: 0, messages: [], pageOldestOrdinal: 0, pageNewestOrdinal: 0,
+			nextBeforeOrdinal: null, hasMore: false, limit: 100, resendCandidates: [], historyState: { kind: 'complete' },
+		});
+		const ws = wsWithResponse(Promise.reject(new WsRequestError('RELOAD_OUTCOME_UNKNOWN', 'Outcome unknown', false)));
+		await expect(reloadChatFromNative(ws, panels, 'chat-1', options())).rejects.toMatchObject({ code: 'RELOAD_OUTCOME_UNKNOWN' });
+		expect(getChatMessages).toHaveBeenCalledExactlyOnceWith({ chatId: 'chat-1', limit: 100 });
+		expect(ws.sendProgressRequest).toHaveBeenCalledTimes(1);
+		expect(chat.transcriptViewId).toBe(outcome === 'replaced' ? 'generation-2' : 'generation-1');
+	});
+
 	it.each(['generation-2', 'generation-3'])('preserves newer inputs when %s is installed before the reload reply', async viewId => {
 		const { chat, panels } = fixture();
 		seedTranscript(chat, 'chat-1', 'generation-1', [], {

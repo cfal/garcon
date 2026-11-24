@@ -9,6 +9,7 @@ import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
 import type { ConversationPanelRegistry } from './conversation-panel-registry.svelte.js';
 import type { WsProgressRequest, WsRequestProgress } from '$lib/ws/connection.svelte.js';
 import { WsRequestError } from '$lib/ws/ws-request-error.js';
+import { getChatMessages } from '$lib/api/chats.js';
 
 // The server reports progress every second, so this only expires a reload
 // whose server or connection has stopped answering.
@@ -61,6 +62,14 @@ export async function reloadChatFromNative(
 		raw = await request.response;
 	} catch (error) {
 		if (error instanceof WsRequestError && error.code === 'REQUEST_CANCELLED') return 'cancelled';
+		if (error instanceof WsRequestError && error.code === 'RELOAD_OUTCOME_UNKNOWN') {
+			try {
+				const page = await getChatMessages({ chatId, limit: 100 });
+				if (page.chatId === chatId && page.transcriptViewId !== undefined) applyReload(page);
+			} catch {
+				// A failed ledger read leaves the outcome unknown; native Reload is never retried.
+			}
+		}
 		throw error;
 	} finally {
 		options.signal.removeEventListener('abort', cancel);
