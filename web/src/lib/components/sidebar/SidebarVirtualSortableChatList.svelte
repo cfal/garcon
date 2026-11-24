@@ -221,12 +221,16 @@
 	let virtualSnapshot = $derived(virtual.snapshot);
 	let virtualItems = $derived(virtual.items(virtualSnapshot, rows));
 	const displayRows = $derived(sidebarDisplayRows(rows, displayOptions.chatItemLayout));
-	// Matches rows by identity while the geometry effect catches up with regrouping.
-	const rowsByKey = $derived(new Map(displayRows.map((row, index) => [row.key, { row, index }])));
 	const renderedItems = $derived.by(() => {
+		let indexesByKey: Map<string, number> | undefined;
 		return virtualItems.flatMap((virtualItem) => {
-			const match = rowsByKey.get(virtualItem.key);
-			return match ? [{ row: match.row, virtualItem: { ...virtualItem, index: match.index } }] : [];
+			const row = displayRows[virtualItem.index];
+			if (row?.key === virtualItem.key) return [{ row, virtualItem }];
+			// Regrouping can precede the geometry update; stale items still resolve by key.
+			indexesByKey ??= new Map(displayRows.map((item, index) => [item.key, index]));
+			const index = indexesByKey.get(virtualItem.key);
+			if (index === undefined) return [];
+			return [{ row: displayRows[index], virtualItem: { ...virtualItem, index } }];
 		});
 	});
 	let totalHeight = $derived(virtualSnapshot.sizerSize + bottomPadding);
