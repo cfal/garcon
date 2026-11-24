@@ -227,7 +227,7 @@
 	$effect(() => {
 		if (isLoading || !rosterReady) return;
 		const roster = chats;
-		untrack(() => projectCollapse.pruneToRoster(roster));
+		untrack(() => projectCollapse.pruneGroupChoices(roster));
 	});
 
 	let bulkShowPin = $derived(selectedChats.some((c) => !c.isPinned));
@@ -413,7 +413,8 @@
 			isMultiSelectMode={selection.isActive}
 			isMultiSelected={(id) => selection.isSelected(id)}
 			{displayOptions}
-			onToggleProjectCollapsed={(projectKey) => projectCollapse.toggle(projectKey)}
+			onToggleProjectCollapsed={(key) =>
+				projectCollapse.toggle(key, localSettings.collapseDelegatedChatsByDefault)}
 			onNewProjectChat={handleNewProjectChat}
 			onEnterMultiSelect={enterMultiSelect}
 			onMultiSelectToggle={handleMultiSelectToggle}

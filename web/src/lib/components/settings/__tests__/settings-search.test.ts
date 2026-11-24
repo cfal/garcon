@@ -17,6 +17,7 @@ describe('settings search', () => {
 	it.each([
 		'User message alignment',
 		'Auto-hide chat scrollbar',
+		'Collapse delegated chat trees by default',
 		'Composer status bar',
 		'Show for Git projects',
 		'Show for non-Git projects',

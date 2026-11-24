@@ -95,6 +95,7 @@ test('inherited groups omit headers while differing groups retain full internal 
     });
     await page.addInitScript(seedLocalSettings, {
       sidebarSortMode: 'manual', sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
       sidebarGroupingFields: ['executor', 'project', 'activity', 'status'].map(field => ({ field, enabled: true })),
     });
     for (const mixed of [false, true]) {
@@ -141,6 +142,7 @@ test('archive separation preserves archived subtrees through dialog apply and re
     const before = await integration.client.listChats();
     await page.addInitScript(seedLocalSettings, {
       sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
       sidebarGroupingFields: [],
       sidebarSortMode: 'manual',
     });
@@ -193,6 +195,7 @@ test('multi-line delegation arrows align with titles while single-line keeps tre
     const { a, a1 } = await createSidebarDelegationFixture(integration);
     await page.addInitScript(seedLocalSettings, {
       sidebarNestDelegatedChats: true,
+      collapseDelegatedChatsByDefault: false,
       sidebarGroupingFields: [],
       chatListFontSize: '16',
     });
