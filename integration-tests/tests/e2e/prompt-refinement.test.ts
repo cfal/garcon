@@ -45,7 +45,7 @@ describe('Lightpanda prompt refinement', () => {
       });
 
       await app.fill(COMPOSER_SELECTOR, draft);
-      await app.clickResponsiveAction('Refine prompt');
+      await app.refinePrompt('[data-composer]');
       await held.received;
 
       expect(
@@ -147,7 +147,7 @@ describe('Lightpanda prompt refinement', () => {
       });
 
       await app.fill(NEW_CHAT_COMPOSER_SELECTOR, draft);
-      await app.clickResponsiveAction('Refine prompt', { within: '[role="dialog"]' });
+      await app.refinePrompt('[data-slot="new-chat-composer"]');
       await held.received;
 
       expect(

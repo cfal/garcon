@@ -863,6 +863,22 @@ export class SpaDriver {
     }
   }
 
+  async refinePrompt(within: string): Promise<void> {
+    const toolbar = `${within} [data-composer-toolbar]`;
+    const selector = `${toolbar} button[data-composer-control="refine"][aria-label="Refine prompt"]:enabled`;
+    await this.#page.waitForSelector(selector);
+    const clicked = await this.#page.$eval(selector, element => {
+      const button = element as HTMLButtonElement;
+      if (button.hidden) return false;
+      button.click();
+      return true;
+    });
+    if (clicked) return;
+    await this.#page.$eval(`${toolbar} [data-composer-overflow="prompt"]:not([hidden])`, element => (element as HTMLElement).click());
+    await this.waitForMenuItemEnabled('Refine prompt');
+    await this.clickMenuItem('Refine prompt');
+  }
+
   async clickResponsiveAction(
     name: string,
     options: ResponsiveActionClickOptions = {},
