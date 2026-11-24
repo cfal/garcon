@@ -64,6 +64,19 @@
 		},
 	});
 
+	const remoteExecutor = $derived.by(() => {
+		const id = cardState.executorId;
+		if (id === 'local') return null;
+		if (!executors.hasSnapshot) return { label: m.executors_remote(), unavailable: false };
+		const host = executors.get(id);
+		const unavailable = !executors.isReady(id);
+		const label = executors.label(id);
+		return {
+			label: host && unavailable ? `${label} (${executorStatus(host)})` : label,
+			unavailable,
+		};
+	});
+
 	let defaultPrompt = $derived(
 		promptKind === 'prompt-refinement'
 			? DEFAULT_PROMPT_REFINEMENT_PROMPT
@@ -131,11 +144,9 @@
 		<div class="grid items-start gap-3 pb-1 pt-2 @sm:grid-cols-[minmax(8rem,1fr)_auto]">
 			<div class="min-w-0 pt-1.5 text-sm font-medium text-foreground">
 				{modelLabel}
-				{#if cardState.executorId !== 'local'}
-					{@const host = executors.get(cardState.executorId)}
-					{@const unavailable = executors.hasSnapshot && !executors.isReady(cardState.executorId)}
-					<p role="status" class="wrap-anywhere text-xs font-normal {unavailable ? 'text-destructive' : 'text-muted-foreground'}">
-						{executors.hasSnapshot ? executors.label(cardState.executorId) : m.executors_remote()}{host && unavailable ? ` (${executorStatus(host)})` : ''}
+				{#if remoteExecutor}
+					<p role="status" class="wrap-anywhere text-xs font-normal {remoteExecutor.unavailable ? 'text-destructive' : 'text-muted-foreground'}">
+						{remoteExecutor.label}
 					</p>
 				{/if}
 			</div>

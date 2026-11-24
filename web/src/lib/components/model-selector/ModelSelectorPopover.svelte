@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import { getModelCatalog, getExecutors } from '$lib/context';
@@ -74,12 +75,11 @@
 		onChange: (next) => onChange(next),
 	});
 
-	let isCompactLayout = $state(false);
 	let triggerNode = $state<HTMLElement | null>(null);
 	let contentNode = $state<HTMLElement | null>(null);
 	let closingFromOutside = false;
 	let triggerFrame = $state<ModelSelectorTrigger>();
-	const overflowAnchor = $derived(toolbarAnchor ?? triggerFrame?.standaloneAnchor() ?? null);
+	const pickerAnchor = $derived(toolbarAnchor ?? triggerFrame?.standaloneAnchor() ?? triggerNode);
 	const committed = $derived(selector.committedSelection);
 
 	const showAgent = $derived(mode.agent === 'select');
@@ -87,6 +87,16 @@
 	const showSource = $derived(selector.shouldShowSourcePicker);
 	const showEffort = $derived(selector.effortSelectionEnabled);
 	const showExecutor = $derived(selector.showExecutorPicker);
+	const compactMaxWidth = $derived(
+		(showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) +
+			(showExecutor ? 176 : 0),
+	);
+	const compactViewport = $derived(
+		typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+			? new MediaQuery(`(max-width: ${compactMaxWidth}px)`)
+			: undefined,
+	);
+	const isCompactLayout = $derived(compactViewport?.current ?? false);
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
 		if (showExecutor) {
@@ -112,20 +122,6 @@
 		),
 	);
 	const modelListId = $derived(`model-selector-model-list-${selector.instanceId}`);
-
-	$effect(() => {
-		if (typeof window.matchMedia !== 'function') return;
-		const compactMaxWidth =
-			(showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) +
-			(showExecutor ? 176 : 0);
-		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
-		const updateLayout = () => {
-			isCompactLayout = mediaQuery.matches;
-		};
-		updateLayout();
-		mediaQuery.addEventListener('change', updateLayout);
-		return () => mediaQuery.removeEventListener('change', updateLayout);
-	});
 
 	$effect(() => {
 		void selector.committedExecutorId;
@@ -155,10 +151,9 @@
 	}
 
 	function restoreTriggerFocus(event: Event): void {
-		const target = overflowAnchor ?? triggerNode;
-		if (!target?.isConnected) return;
+		if (!pickerAnchor?.isConnected) return;
 		event.preventDefault();
-		target.focus({ preventScroll: true });
+		pickerAnchor.focus({ preventScroll: true });
 	}
 
 	function closeDraft(compact: boolean): void {
@@ -202,7 +197,7 @@
 			if (
 				isLayoutResize(event) ||
 				trigger.contains(target) ||
-				overflowAnchor?.contains(target) ||
+				pickerAnchor?.contains(target) ||
 				content.contains(target)
 			)
 				return;
@@ -291,11 +286,11 @@
 		{:else}
 			<Popover.Root open={selector.open} onOpenChange={handleOpenChange}>
 				<Popover.Content
-					customAnchor={overflowAnchor ?? triggerNode}
+					customAnchor={pickerAnchor}
 					onInteractOutside={(event) => {
 						if (isLayoutResize(event)) event.preventDefault();
 					}}
-					getFocusReturnTarget={() => overflowAnchor ?? triggerNode}
+					getFocusReturnTarget={() => pickerAnchor}
 					onCloseAutoFocus={(event) => {
 						if (!closingFromOutside) restoreTriggerFocus(event);
 					}}

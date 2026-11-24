@@ -53,18 +53,20 @@
 	let combinedBox = $state<readonly ResizeObserverSize[]>();
 	let modelBox = $state<readonly ResizeObserverSize[]>();
 	let available = $state<DOMRectReadOnly>();
-	const widths = $derived(
-		combinedBox?.[0]?.inlineSize && modelBox?.[0]?.inlineSize
-			? { combined: combinedBox[0].inlineSize, model: modelBox[0].inlineSize }
-			: undefined,
-	);
+	const widths = $derived.by(() => {
+		const combined = combinedBox?.[0]?.inlineSize;
+		const model = modelBox?.[0]?.inlineSize;
+		if (!combined || !model) return undefined;
+		return { combined, model };
+	});
 	$effect(() => {
 		if (widths) onMeasure?.(widths);
 	});
-	const display = $derived(
-		toolbarDisplay ??
-			(widths && available ? fitModelTrigger(widths, available.width) : 'combined'),
-	);
+	const display = $derived.by(() => {
+		if (toolbarDisplay !== undefined) return toolbarDisplay;
+		if (widths && available) return fitModelTrigger(widths, available.width);
+		return 'combined';
+	});
 
 	let menuTrigger = $state<HTMLElement | null>(null);
 	const menu = new OverflowMenuState(() => dismissPicker());
