@@ -1,5 +1,133 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
+Native-child observation amendment: registry schema 7 distinguishes immutable
+observation provenance from executable session bindings. Newly observed native
+children use ordinary per-chat ledgers and a controller-owned, view-bound passive
+writer. L1/L3/L5 remain unchanged: ordinary reads are ledger-only, accepted rows
+commit before visibility, and uncaptured output may be lost. The L7 passive
+writer accepts inert provider content and typed presentation notices only; it
+cannot execute Garcon commands, publish permissions, or settle runs. Observed
+user messages are `provider-row` evidence, not outbound `user-input` submissions.
+New observer registration uses the existing asynchronous registry save and
+accepts its initial crash window; existing committed rows survive restart.
+
+L10 and section 11 additionally permit explicit observer Reload through the
+nullable `nativeChildObservation` facet. It replaces rather than merges the
+entire observer view, with no executable session fact or frozen prefix. The
+controller locks the child and source in canonical order, reserves the child
+and still-matching executable owner, and pins the old view and committed
+watermark. The provider separately checks pending, live, background, and retiring
+native writers and invalidates the read on source activity. A controller
+watermark is not a drain of the independent bulk history lane. Successful atomic
+promotion closes live capture; definite pre-promotion failure leaves it intact.
+Unknown promotion outcomes fence only the child and require snapshot recovery,
+never an automatic second Reload. Source reservation temporarily prevents new
+input to the matching parent while history is read.
+
+Browser snapshot ownership belongs to the shared transcript cache, independently
+of its bounded row windows. Accepted view identity survives eviction and degraded
+reads; hydration prefers a pending persistence draft and refuses stored rows from
+a different remembered view. One cache-scoped head-read coordinator owns each
+chat's in-flight request, including fallback callers. Raw and combined demand
+functions return data; they never install it. Cache acceptance synchronously
+checks the read fence, folds contiguous live commits into the page, validates
+coverage, accepts the view, and publishes the bounded cache. Panel lifetime does
+not own this read: removing or switching a panel neither transfers nor restarts
+it. Panels consume the result behind their own navigation epochs. Paging and
+window selection remain panel-local.
+
+The coordinator permits one follow-up read, not nested loader/registry retry
+loops. Refresh invalidates an individual attempt; replacement retires competing
+operations and their queued follow-ups. Recovery debt belongs to the chat, not
+the retired operation. A new admitted read may resume it; no background retry
+framework is introduced. An explicit demand after invalidation of the final
+attempt queues behind that exhausted operation rather than joining it.
+Already-started reads may finish after panels close.
+Repeated gaps leave the cache stale and wait for another explicit demand or
+activation rather than reporting false freshness or throwing a continuity error.
+First-view acceptance permits a concurrent complete response for that same view,
+but not a conflicting page or a viewless failure. Replacement announcements reset
+shared presentation once; a matching snapshot or Reload reply does not clear newer
+overlays again. Chat deletion, ready-inventory pruning, and workspace teardown
+retire the corresponding ownership. Unknown Reload recovery reads only the ledger.
+Delayed replacement events retain their previous-view qualification; a mismatch
+requests a ledger recheck without resetting the accepted view's overlays. Transient
+feed placeholder IDs never establish replacement identity. A first live base can
+repair a cold panel even when its outstanding read fails. The cache retains the
+highest rejected live-commit ordinal for the affected view across read takeovers;
+only a covering frontier or a superseding view clears that recovery obligation.
+A partial replacement stays stale, and an admitted panel resumes ledger recovery.
+A successful current-head read can dismiss a different-view frontier that predates
+that read, but cannot dismiss debt recorded while it was in flight or certify a
+snapshot that loses accepted rows. Live commits are buffered once for the shared
+read, including commits rejected for a missing base; contiguous rows can complete
+that base without another read. The recovery floor survives row eviction while
+debt is outstanding. Confirmed same-view cursor repair discards the invalid floor
+and pre-reset buffered commits, but retains missed-commit debt for the fresh ledger
+read to adjudicate. If repair invalidates the only loaded window and the bounded
+read remains incomplete, the panel may remain empty until another demand succeeds.
+Delayed replacement events preserve transient feeds already on a
+successor view; mismatches recheck the feed without assuming view order or
+treating a placeholder as authority. Every replacement event fences prior feed
+reads, including when the installed feed is preserved. Unavailable transcript
+history requests revalidation without announcing a replacement. Local plan
+controls carry their source view and retire for the accepted predecessor,
+separately from newer transient permissions.
+
+```mermaid
+flowchart LR
+    Panels[Panels and fallback] --> Head[One head-read coordinator per cache]
+    Head --> Demand[Data-only ledger demand]
+    Demand --> Accept[Synchronous cache acceptance]
+    Live[Committed live batches] --> Accept
+    Accept --> Projection[Panel-local presentation and navigation]
+```
+
+| Transition | Owner and outcome |
+| --- | --- |
+| Another head demand | Coordinator joins compatible work or queues the requested activation/size. |
+| Panel closes | Only its presentation epoch retires; the chat-owned read continues. |
+| Refresh or missed commit | Cache retains debt; coordinator uses at most one follow-up read. |
+| Replacement or Reload | Cache retires old operations; the new view never inherits their publication authority. |
+| Confirmed same-view rollback | Cache discards the invalid coverage floor; a fresh read must still settle missed debt. |
+| Unavailable history | No replacement identity is inferred. |
+| Chat deletion or teardown | Cache ownership retires; late completions cannot recreate it. |
+
+Capture is NEW-only, bounded, and independent of browser subscriptions. Claude
+2.1.330+ requires a fresh root API partial for an Agent invocation, confirmation
+in its complete assistant block, and a matching local task start. Nested Claude
+frames cannot prove freshness and do not create observers. Codex accepts verified
+live spawn activities, including children of already verified children. Parent
+completion never implies child completion. Source retirement, deletion, Reload,
+or restart ends capture without synthesizing a successful terminal. No startup
+discovery, native backfill, or automatic reattachment is introduced.
+
+Claude lifecycle signals are not native-file flush acknowledgments. In CLI
+2.1.330, child completion can precede queued sidechain writes; the normal result
+path attempts a drain but proceeds on timeout or failure. Reload reads the
+validated retained conversation currently on disk, not proof of its completeness.
+Stable file identity does not detect a write that has not started. There is no
+read-only flush barrier, fixed settling delay, or automatic follow-up import;
+detectable corruption still refuses replacement, and later retained output
+requires another manual Reload. The pinned SDK's
+[child reader](https://github.com/anthropics/claude-agent-sdk-python/blob/3184360393a92ca8a6ec7bbbdee571afd1ce1c56/src/claude_agent_sdk/_internal/sessions.py#L1556-L1640)
+also reads native JSONL without synchronizing with the writer.
+
+Codex interaction activity acknowledges submission, not a drained child queue.
+After V2 interaction or legacy send/resume activity, native idle is unknown until
+verified writer exit, even after a child terminal. Such sources cannot Reload or
+be automatically idle-reclaimed; capture and parent execution remain operational.
+
+Native-writer knowledge is process-local and bounded. A surviving remote worker
+can retain the evidence needed for manual Reload after controller restart; a
+full worker restart, including Local controller restart, leaves old children
+unavailable for native Reload. Existing committed history remains readable.
+Unknown retirement, missing native history, or exhausted source proof fails
+closed. Merely retrying or resuming a parent does not prove an unknown old writer
+has exited. These limitations qualify sections 14-16, not the ledger durability
+contract. The browser hides the composer and its spacer entirely, showing a
+read-only activity tray only while that child is working.
+
 Chat-list activity amendment: list entries and chat snapshots carry nullable
 `activityStatus` (`working`, `complete`, `error`, or `pending-user-action`). This
 is presentation only and never an execution-admission predicate. Working uses
