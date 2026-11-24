@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../integration-tests/support/pi-model-discovery-fixture.js';
 import { PI_BINARY } from '../integration-tests/support/pinned-agent-binaries.js';
+import { CHAT_REGISTRY_VERSION } from '../server/controller/chats/registry-contracts.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
@@ -400,9 +401,10 @@ async function run() {
       message: { role: 'user', content: 'embeddedworkertoken' },
     })}\n`);
     await writeFile(path.join(workspaceDir, 'chats.json'), JSON.stringify({
-      version: 6,
+      version: CHAT_REGISTRY_VERSION,
       sessions: {
         [SMOKE_CHAT_ID]: {
+          nativeObservation: null,
           agentId: 'claude',
           parentChatId: null,
           lineage: null,

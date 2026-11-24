@@ -13,6 +13,7 @@ import {
 import { encodeCarryOverPages } from '../../../server/controller/chats/carryover/page-codec.js';
 import { rollbackLegacyCarryOverMigration } from '../../../server/controller/migrations/carryover/chat-carryover-rollback.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
+import { CHAT_REGISTRY_VERSION } from '../../../server/controller/chats/registry-contracts.js';
 import { transcriptViewId } from '../../../server/controller/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
@@ -40,7 +41,7 @@ describe('carryover bootstrap migration', () => {
         expect(firstEntry.carryOverSegments).toHaveLength(2);
         const migratedSegments = firstEntry.carryOverSegments;
 
-        expect(firstRegistry.version).toBe(6);
+        expect(firstRegistry.version).toBe(CHAT_REGISTRY_VERSION);
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
           version: CURRENT_WORKSPACE_VERSION,
         });
@@ -102,10 +103,13 @@ describe('carryover bootstrap migration', () => {
   test.each([5, 6])('resumes a schema-%s checkpoint without closing the carryover rollback window', async (schema) => {
     await withIntegrationFixture(`carryover-checkpoint-${schema}`, async (fixture) => {
       await fixture.restartGarcon({ beforeStart: async () => {
+        const registryPath = join(fixture.dirs.workspace, 'chats.json');
+        const registry = JSON.parse(await readFile(registryPath, 'utf8'));
+        registry.version = schema;
+        for (const entry of Object.values(registry.sessions) as Record<string, unknown>[]) {
+          delete entry.nativeObservation;
+        }
         if (schema === 5) {
-          const registryPath = join(fixture.dirs.workspace, 'chats.json');
-          const registry = JSON.parse(await readFile(registryPath, 'utf8'));
-          registry.version = 5;
           for (const entry of Object.values(registry.sessions) as Record<string, unknown>[]) {
             expect(entry.parentChatId).toBeNull();
             expect(entry.lineage).toBeNull();
@@ -113,13 +117,13 @@ describe('carryover bootstrap migration', () => {
             delete entry.lineage;
             entry.parentChat = null;
           }
-          await writeFile(registryPath, JSON.stringify(registry));
         }
+        await writeFile(registryPath, JSON.stringify(registry));
         await writeFile(join(fixture.dirs.workspace, 'workspace-version.json'),
           JSON.stringify({ version: 9, checkpoint: true }));
       } });
       expect(await readJson(fixture, 'workspace-version.json')).toEqual({ version: CURRENT_WORKSPACE_VERSION });
-      expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 6 });
+      expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: CHAT_REGISTRY_VERSION });
       expect(await readJson<MigrationMarker>(fixture, 'carryover-transcripts/migration-v2.json'))
         .toMatchObject({ phase: 'complete', rollbackSafe: true });
       expect(await readdir(join(fixture.dirs.workspace, 'migration-backups'))).toHaveLength(2);
@@ -160,7 +164,7 @@ describe('carryover bootstrap migration', () => {
         });
 
         // The rollback finished from its marker, then the boot re-migrated.
-        expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: 6 });
+        expect(await readJson<RegistryFile>(fixture, 'chats.json')).toMatchObject({ version: CHAT_REGISTRY_VERSION });
         expect(await readJson<{ version: number }>(fixture, 'agent-ownership-journal.json'))
           .toMatchObject({ version: 5 });
         expect(await readJson<{ version: number }>(fixture, 'workspace-version.json')).toEqual({
@@ -212,7 +216,7 @@ describe('carryover bootstrap migration', () => {
       'carryover-missing-linked-manifest',
       async (fixture) => {
         const registry = await readJson<RegistryFile>(fixture, 'chats.json');
-        expect(registry.version).toBe(6);
+        expect(registry.version).toBe(CHAT_REGISTRY_VERSION);
         expect(registry.sessions[CHAT_ID]).toMatchObject({
           carryOverSegments: [],
           carryOverMigrationQuarantine: {

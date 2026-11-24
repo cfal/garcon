@@ -455,9 +455,10 @@ async function writeLegacyPiSession(input: {
     },
   ].map((entry) => JSON.stringify(entry)).join('\n')}\n`);
   await writeFile(join(input.workspace, 'chats.json'), JSON.stringify({
-    version: 6,
+    version: 7,
     sessions: {
       [input.chatId]: {
+        nativeObservation: null,
         agentId: 'pi',
         executorId: input.executorId,
         nativeSession: {
