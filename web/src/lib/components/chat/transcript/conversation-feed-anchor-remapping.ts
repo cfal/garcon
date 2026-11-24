@@ -20,9 +20,8 @@ function replacementKey(
 	const previousItem = previousIndex === undefined ? undefined : previous.items[previousIndex];
 	const rowIds = previousItem?.kind === 'tool-group'
 		? previousItem.members.map((member) => member.item.id)
-		: [previous.representativeRowIdByKey.get(key)];
+		: previousItem?.kind === 'transcript' ? [previousItem.item.id] : [];
 	for (const rowId of rowIds) {
-		if (rowId === undefined) continue;
 		const index = next.indexByRowId.get(rowId);
 		if (index === undefined) continue;
 		const nextKey = next.items[index]?.key;

@@ -2,6 +2,7 @@ import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixtur
 import { describe, expect, it } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, GrepToolUseMessage, ReadToolUseMessage, ThinkingMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
 import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage, type ChatMessage } from '$shared/chat-types';
+import { parseServerWsMessage } from '$shared/ws-events';
 import {
 	ActiveTranscriptState,
 	type ChatDisplayRow,
@@ -10,7 +11,7 @@ import type { ConversationFeedMutationClock } from '$lib/chat/transcript/convers
 import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
 import { ACTIVE_TRANSCRIPT_RETENTION_LIMIT } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
-import { estimateConversationFeedItemSize } from '../conversation-feed-virtual-items.js';
+import { estimateConversationFeedItemSize, resolveConversationVirtualTarget } from '../conversation-feed-virtual-items.js';
 
 const TS = '2026-08-03T00:00:00.000Z';
 type ProjectionInput = Parameters<ConversationFeedProjectionState['reconcile']>[0];
@@ -81,6 +82,49 @@ function expectMatchesFullProjection(
 }
 
 describe('ConversationFeedProjectionState', () => {
+	it.each([120, 3000])('retains the tool alias index on a visible receiver append after %i ledger entries', (count) => {
+		const chatId = 'chat-1';
+		const transcriptViewId = 'generation-1';
+		const transcript = new ActiveTranscriptState(undefined, null, { combineMessages: true });
+		const history = Array.from({ length: count }, (_, index) => {
+			const toolId = `read-${Math.floor(index / 3)}`;
+			const message = index % 3 === 0 ? new ReadToolUseMessage(TS, toolId, '/synthetic')
+				: index % 3 === 1 ? new ToolResultMessage(TS, toolId, { raw: 'result' }, false)
+				: new AssistantMessage(TS, 'Synthetic response');
+			return { ordinal: index + 1, message };
+		});
+		seedTranscript(transcript, chatId, transcriptViewId, history, {
+			lastOrdinal: count, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const config = input({ combineToolUseMessages: true });
+		const controller = new ConversationFeedProjectionState();
+		const project = () => controller.reconcile({
+			...config, rows: transcript.visibleRows, mutationClock: transcript.feedMutationClock,
+		}).model;
+		const before = project();
+		const ordinal = count + 1;
+		const batch = parseServerWsMessage({
+			type: 'chat-messages', chatId, transcriptViewId, firstOrdinal: ordinal, lastOrdinal: ordinal,
+			messages: [{ ordinal, message: { type: 'assistant-message', content: 'Next response', timestamp: TS } }],
+			resendCandidates: [],
+		});
+		if (batch?.type !== 'chat-messages') throw new Error('Expected a typed transcript batch');
+		expect(transcript.applyMessages(chatId, transcriptViewId, batch.messages, ordinal, ordinal)).toBe('applied');
+		const after = project();
+
+		expect(before.rowIdByToolAnchorId.size).toBe(count / 3);
+		expect(after.rowIdByToolAnchorId).toBe(before.rowIdByToolAnchorId);
+		const retained = new Set(Object.values(after));
+		let replacedIndexEntries = 0;
+		for (const value of Object.values(before)) {
+			if (value instanceof Map && !retained.has(value)) replacedIndexEntries += value.size;
+		}
+		// Only the presented virtual keys (including the two spacers) and durable row indexes change.
+		expect(replacedIndexEntries).toBeLessThanOrEqual(count * 4 / 3 + 2);
+		expect(before.indexByRowId.has(`${transcriptViewId}:${ordinal}`)).toBe(false);
+		expect(after.items.at(-2)).toMatchObject({ kind: 'transcript', item: { id: `${transcriptViewId}:${ordinal}` } });
+	});
+
 	it.each([false, true])('does not inspect historical messages or rebuild their targets on a text append (combined=%s)', (combined) => {
 		let messageReads = 0;
 		let toolIdReads = 0;
@@ -107,10 +151,42 @@ describe('ConversationFeedProjectionState', () => {
 		};
 		const next = projections.reconcile(appended);
 		expect({ messageReads, toolIdReads }).toEqual({ messageReads: 0, toolIdReads: 0 });
-		expect(next.model.targetByDomAnchorId.get('tool-input-tool-0'))
-			.toBe(previous.model.targetByDomAnchorId.get('tool-input-tool-0'));
+		expect(previous.model.rowIdByToolAnchorId.size).toBe(128);
+		expect(next.model.rowIdByToolAnchorId).toBe(previous.model.rowIdByToolAnchorId);
 		expect(previous.model.indexByRowId.has('generation-1:129')).toBe(false);
 		expectMatchesFullProjection(next, appended);
+	});
+
+	it('keeps tool aliases scoped to their snapshot through prepend and view replacement', () => {
+		const row = (ordinal: number, message: ChatMessage): ChatDisplayRow => ({
+			kind: 'message', ordinal, id: `generation-1:${ordinal}`, message,
+		});
+		const tool = () => new ReadToolUseMessage(TS, 'reused', '/synthetic');
+		const controller = new ConversationFeedProjectionState();
+		const config = input({ rows: [row(4, tool())], combineToolUseMessages: true });
+		const first = controller.reconcile(config);
+		const earlier = {
+			...config, mutationClock: clock(2, { 'history-earlier': 2 }),
+			rows: [row(1, new UserMessage(TS, 'Synthetic input')), row(2, tool()),
+				row(3, new ToolResultMessage(TS, 'reused', { raw: 'result' }, false)), ...config.rows],
+		};
+		const prepended = controller.reconcile(earlier);
+		const replacement = {
+			...config, surfaceIdentity: 'chat-1:generation-2', transcriptViewId: 'generation-2',
+			rows: [], mutationClock: clock(3, { replacement: 3 }),
+		};
+		const replaced = controller.reconcile(replacement);
+		expectMatchesFullProjection(prepended, earlier);
+		expectMatchesFullProjection(replaced, replacement);
+
+		const alias = { kind: 'dom-anchor', id: 'tool-input-reused' } as const;
+		expect(resolveConversationVirtualTarget(first.model, alias)).toEqual({
+			index: 1, innerRowId: 'tool-group:generation-1:4', collapsedMemberRowId: 'generation-1:4',
+		});
+		expect(resolveConversationVirtualTarget(prepended.model, alias)).toEqual({
+			index: 2, innerRowId: 'tool-group:generation-1:2', collapsedMemberRowId: 'generation-1:4',
+		});
+		expect(resolveConversationVirtualTarget(replaced.model, alias)).toBeUndefined();
 	});
 
 	it.each([
@@ -498,9 +574,7 @@ describe('ConversationFeedProjectionState', () => {
 		expect(appended.model.items[101]).toBe(first.model.items[101]);
 		expect(appended.model.indexByKey).not.toBe(first.model.indexByKey);
 		expect(appended.model.indexByRowId).not.toBe(first.model.indexByRowId);
-		expect(appended.model.targetByDomAnchorId).not.toBe(first.model.targetByDomAnchorId);
 		expect(first.model.indexByRowId.has(appendedRowId)).toBe(false);
-		expect(first.model.targetByDomAnchorId.has(appendedRowId)).toBe(false);
 		expect(oldEndKey).toBeDefined();
 		expect(first.model.indexByKey.get(oldEndKey!)).toBe(first.model.items.length - 1);
 		expect(appended.model.indexByRowId.get(appendedRowId)).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);

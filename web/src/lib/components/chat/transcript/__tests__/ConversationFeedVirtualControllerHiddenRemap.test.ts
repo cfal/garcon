@@ -62,15 +62,7 @@ function projection(
 			]),
 			['tail', items.length - 1],
 		]),
-		targetByDomAnchorId: new Map(),
-		memberRowIdByDomAnchorId: new Map(),
-		representativeRowIdByKey: new Map(items.map((item): [string, string] => [
-			item.key,
-			item.kind === 'tool-group' ? memberIds[0] : item.key,
-		])),
-		collapsedGroupByMemberRowId: new Map(
-			collapsed ? members.map((member): [string, ToolGroupVirtualFeedItem] => [member.item.id, group]) : [],
-		),
+		rowIdByToolAnchorId: new Map(),
 		transcriptStartIndex: 0,
 		transcriptEndIndex: items.length,
 	};
@@ -196,6 +188,40 @@ async function hiddenRemapPosition(
 }
 
 describe('ConversationFeedVirtualController hidden remap', () => {
+	it.each([
+		{ keepCollapsed: true, expected: 'cancelled' },
+		{ keepCollapsed: false, expected: 'target-missing' },
+	])('rechecks the original member and DOM alias after async reveal ($expected)', async ({ keepCollapsed, expected }) => {
+		const initial = fallbackProjection(1, true, true, false);
+		const publishedDuringReveal = fallbackProjection(2, true, keepCollapsed, true);
+		const requested: string[] = [];
+		const restoreObserver = installResizeObserverHarness();
+		let exposure!: {
+			controller: ConversationFeedVirtualController;
+			viewport(): HTMLDivElement | null;
+			apply(next: ConversationFeedProjection): Promise<void>;
+		};
+		try {
+			render(ConversationFeedVirtualControllerHiddenRemapHost, {
+				initial, combined: publishedDuringReveal,
+				async revealToolGroup(rowId) {
+					requested.push(rowId);
+					await exposure.apply(publishedDuringReveal);
+					return 'applied';
+				},
+				onReady(value) { exposure = value; },
+			});
+			await waitFor(() => expect(exposure?.viewport()).toBeTruthy());
+			ResizeObserverHarness.emit(exposure.viewport()!, 400, 80);
+			const result = await exposure.controller.scrollToTarget({ kind: 'dom-anchor', id: 'tool-input-a' });
+			expect(requested).toEqual(['view:3']);
+			expect(result).toBe(expected);
+		} finally {
+			cleanup();
+			restoreObserver();
+		}
+	});
+
 	it('restores a compressed summary to the viewport instead of the old member depth', async () => {
 		const restored = await hiddenRemapPosition(projection(false, 1), [projection(true, 2)], 340);
 		expect(restored.key).toBe('summary:member');

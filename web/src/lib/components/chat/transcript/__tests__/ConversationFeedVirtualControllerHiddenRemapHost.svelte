@@ -17,10 +17,11 @@
 	interface Props {
 		initial: ConversationFeedProjection;
 		combined: ConversationFeedProjection;
+		revealToolGroup?: (rowId: string) => Promise<'applied' | 'cancelled'>;
 		onReady(exposure: Exposure): void;
 	}
 
-	let { initial, combined, onReady }: Props = $props();
+	let { initial, combined, revealToolGroup, onReady }: Props = $props();
 	let current = $state.raw(untrack(() => initial));
 	let visible = $state(true);
 	let viewportElement: HTMLDivElement | null = $state(null);
@@ -35,6 +36,7 @@
 		get visible() { return visible; },
 		get pinned() { return false; },
 		get retention() { return retention; },
+		get revealToolGroup() { return revealToolGroup; },
 	});
 	const snapshot = $derived(controller.snapshot);
 
