@@ -168,4 +168,18 @@ describe('PR refresh identity', () => {
 		expect(row?.textContent).toBe(text);
 		expect(indexCalls()).toBe(1);
 	});
+
+	it('does not carry Reviewed marks onto a changed patch at the same head', async () => {
+		const original = detail();
+		const progress = new PullRequestFileProgress();
+		const first = render(PullRequestChangesTab, { detail: original, progress });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Viewed' }));
+		await first.unmount();
+		const updated = detail(6);
+		updated.files[0].bodyFingerprint = 'updated-patch';
+		updated.fileBodies['synthetic.ts'].bodyFingerprint = 'updated-patch';
+		render(PullRequestChangesTab, { detail: updated, progress });
+		expect((await screen.findByRole('button', { name: 'Viewed' })).getAttribute('aria-pressed')).toBe('false');
+		expect(screen.getByRole('button', { name: /synthetic.ts/ }).getAttribute('aria-expanded')).toBe('true');
+	});
 });

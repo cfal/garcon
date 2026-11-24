@@ -5,13 +5,20 @@ export class PullRequestFileProgress {
 	collapsed = $state<Set<string>>(new Set());
 	#reviewId: string | null = null;
 	#head: string | null = null;
+	#fingerprints = new Map<string, string>();
 
-	selectReview(detail: Pick<PullRequestDetail, 'reviewId' | 'headRefOid'> | null): void {
+	selectReview(detail: Pick<PullRequestDetail, 'reviewId' | 'headRefOid' | 'files'> | null): void {
 		const reviewId = detail?.reviewId ?? null;
 		const head = detail?.headRefOid ?? null;
-		if (this.#reviewId === reviewId && this.#head === head) return;
+		const files = detail?.files ?? [];
+		if (
+			this.#reviewId === reviewId && this.#head === head &&
+			this.#fingerprints.size === files.length &&
+			files.every((file) => this.#fingerprints.get(file.path) === file.bodyFingerprint)
+		) return;
 		this.#reviewId = reviewId;
 		this.#head = head;
+		this.#fingerprints = new Map(files.map((file) => [file.path, file.bodyFingerprint]));
 		this.viewed = new Set();
 		this.collapsed = new Set();
 	}

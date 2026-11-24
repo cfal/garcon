@@ -1027,6 +1027,21 @@ describe('PullRequestsPanel', () => {
 		expect(api.post).toHaveBeenCalledExactlyOnceWith(run.id);
 	});
 
+	it.each(['hidden panel', 'different tab'] as const)('notifies a post failure with a %s', async (view) => {
+		const { controller, api, notifyError } = setup();
+		const request = Promise.withResolvers<typeof snapshot>();
+		api.post.mockImplementationOnce(() => request.promise);
+		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+		if (view === 'hidden panel') controller.setPresentationVisible(false);
+		else controller.tab = 'checks';
+		request.reject(new Error('Post failed while away'));
+		await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Post failed while away'));
+		controller.setPresentationVisible(true);
+		controller.tab = 'review';
+		await screen.findByText('Post failed while away');
+	});
+
 	for (const status of ['unknown', 'posted'] as const) {
 		it(`allows ${status === 'unknown' ? 'unknown-post reconciliation' : 'cleanup retry'} for an outdated review`, async () => {
 			const older: PullRequestReviewRunDetail = {
