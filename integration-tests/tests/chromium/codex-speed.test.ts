@@ -24,9 +24,24 @@ test('the speed picker persists per chat and defers unavailable-tier errors unti
       const second = await seed(STANDARD_ONLY_MODEL);
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`${integration.garcon.baseUrl}/chat/${first}`);
-      const picker = (speed: string) => page.getByRole('button', { name: `Selected speed: ${speed}`, exact: true });
+      const composer = page.locator('[data-composer]:visible');
+      const speedTrigger = composer.locator('button[data-composer-control="agent:speed"]');
+      const speedControl = async (speed: string) => {
+        const name = `Selected speed: ${speed}`;
+        await browserExpect(speedTrigger).toHaveAttribute('aria-label', name);
+        if (await speedTrigger.isVisible()) return { control: speedTrigger, folded: false };
+        await composer.locator('[data-composer-overflow="settings"]').click();
+        return { control: page.getByRole('menuitem', { name, exact: true }), folded: true };
+      };
+      const expectSpeed = async (speed: string) => {
+        const { control, folded } = await speedControl(speed);
+        await browserExpect(control).toBeVisible();
+        if (folded) await page.keyboard.press('Escape');
+      };
       const chooseSpeed = async (from: string, to: string) => {
-        await picker(from).click();
+        const { control, folded } = await speedControl(from);
+        if (folded) await control.press('ArrowRight');
+        else await control.click();
         await browserExpect(page.getByRole('menuitemradio')).toHaveCount(3);
         await page.getByRole('menuitemradio', { name: new RegExp(`^${to}`) }).click();
       };
@@ -57,12 +72,12 @@ test('the speed picker persists per chat and defers unavailable-tier errors unti
       await browserExpect.poll(async () => (await client.listChats()).sessions.find(({ id }) => id === first)?.agentSettings.values.speed).toBe('ultrafast');
       await page.goto(`${integration.garcon.baseUrl}/chat/${first}`);
       await page.reload();
-      await browserExpect(picker('Ultrafast')).toBeVisible();
-      const editor = page.locator('[data-composer]:visible textarea');
+      await expectSpeed('Ultrafast');
+      const editor = composer.locator('textarea');
       const startY = (await editor.boundingBox())!.y;
       for (const [id, speed] of [[second, 'Standard'], [first, 'Ultrafast'], [second, 'Standard']] as const) {
         await page.locator(`[data-sidebar-virtual-row="${id}"] button`).first().click();
-        await browserExpect(picker(speed)).toBeVisible();
+        await expectSpeed(speed);
         expect(Math.abs((await editor.boundingBox())!.y - startY)).toBeLessThan(2);
       }
       await withExpectedConsoleErrors([
@@ -86,7 +101,7 @@ test('the speed picker persists per chat and defers unavailable-tier errors unti
           release.resolve();
         }
         await browserExpect(page.getByText(/Ultrafast speed is unavailable/)).toBeVisible();
-        await browserExpect(picker('Ultrafast')).toBeVisible();
+        await expectSpeed('Ultrafast');
         await browserExpect(page.getByText('Forking chat...', { exact: true })).toHaveCount(0);
         expect((await client.listChats()).sessions).toHaveLength(3);
       });
