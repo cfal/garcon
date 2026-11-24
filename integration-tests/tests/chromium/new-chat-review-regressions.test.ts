@@ -6,6 +6,12 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { toExecutorPath } from '../../../server/common/executor-path.js';
+import type { CreateWorktreeOptions } from '../../../common/git.js';
+
+type WorktreeCreationRequest = Omit<CreateWorktreeOptions, 'projectPath'> & {
+  executorId: string;
+  project: CreateWorktreeOptions['projectPath'];
+};
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`New Chat keeps active project actions visible and creates a selected worktree (${executionBackend})`, async () => {
@@ -71,9 +77,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const createRequest = page.waitForRequest(request => request.method() === 'POST'
         && new URL(request.url()).pathname === '/api/v1/git/worktrees/create');
       await creation.getByRole('button', { name: 'Create worktree', exact: true }).click();
-      const payload = (await createRequest).postDataJSON();
-      expect(payload.executorId ?? 'local').toBe(client.executorId);
-      expect(payload.projectPath).toBe(toExecutorPath(project));
+      const payload: WorktreeCreationRequest = (await createRequest).postDataJSON();
+      expect(payload.executorId).toBe(client.executorId);
+      expect(payload.project).toBe(toExecutorPath(project));
       expect(payload.branch).toBe('review-created');
       await browserExpect(picker).toHaveCount(0);
       await browserExpect(creation).toHaveCount(0);
