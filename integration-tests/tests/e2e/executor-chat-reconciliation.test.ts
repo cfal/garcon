@@ -5,7 +5,7 @@ import type { AgentRunCommandRequest } from '../../../common/chat-command-contra
 import { effectiveExecutorId, type ExecutorSnapshot } from '../../../common/executors.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
-import { openModelSelector, selectExecutor, selectModelOption } from '../../support/executor-ui.js';
+import { selectExecutor, selectModelOption } from '../../support/executor-ui.js';
 
 test.each(['stay', 'chat switch', 'reload'])('committed agent choices survive navigation and preserve composer text (%s)', async (leave) => {
   await withE2eFixture('executor-chat-reconciliation', async fixture => {
@@ -43,9 +43,7 @@ test.each(['stay', 'chat switch', 'reload'])('committed agent choices survive na
     await fixture.waitForSpaWebSocket();
     await app.waitForButton('Executor: Local');
     const selectAnthropic = async () => {
-      await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
-      await app.waitForButton('Anthropic');
-      await app.clickButton('Anthropic');
+      await app.openAgentModels('Anthropic', { scope: '[data-slot="composer-bottom-bar"]' });
       const committed = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
       await selectModelOption(fixture.page, 'Integration Anthropic Echo');
       expect((await committed).status()).toBe(200);
@@ -129,9 +127,7 @@ test.each(['different agent', 'durable owner'])(
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.openChat(chatId);
     await fixture.waitForSpaWebSocket();
-    await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
-    await app.waitForButton('Anthropic');
-    await app.clickButton('Anthropic');
+    await app.openAgentModels('Anthropic', { scope: '[data-slot="composer-bottom-bar"]' });
     const agentCommitted = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
     await selectModelOption(fixture.page, 'Integration Anthropic Echo');
     expect((await agentCommitted).status()).toBe(200);
@@ -147,9 +143,7 @@ test.each(['different agent', 'durable owner'])(
     await app.waitForText('Move to Local');
     await app.fill('[role="dialog"] input', confirmedPath);
     if (selection === 'durable owner') {
-      await openModelSelector(fixture.page);
-      await app.waitForButton('Chat Completions');
-      await app.clickButton('Chat Completions');
+      await app.openAgentModels('Chat Completions');
       await selectModelOption(fixture.page, 'Integration Echo');
     }
     await app.waitForDialogButtonEnabled('Use This Executor');

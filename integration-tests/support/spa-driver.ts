@@ -1,4 +1,5 @@
 import type { Page } from 'puppeteer-core';
+import { clickInlineComposerButton } from './composer-actions.js';
 import { openModelSelector, selectModelOption } from './executor-ui.js';
 import type { RecordedAnthropicRequest } from './fake-anthropic-server.js';
 import type { RecordedCompletionRequest, RequestMatcher } from './fake-openai-server.js';
@@ -116,10 +117,14 @@ export class SpaDriver {
     );
     if (directProviderSelected) return;
 
-    await openModelSelector(this.#page);
-    await this.waitForButton(input.optionAgentLabel, { timeout: 30_000 });
-    await this.clickButton(input.optionAgentLabel);
+    await this.openAgentModels(input.optionAgentLabel, { timeout: 30_000 });
     await selectModelOption(this.#page, input.modelLabel);
+  }
+
+  async openAgentModels(label: string, options: { scope?: string; timeout?: number } = {}): Promise<void> {
+    await openModelSelector(this.#page, options.scope);
+    await this.waitForButton(label, { timeout: options.timeout });
+    await this.clickButton(label);
   }
 
   async #startDirectChat<TRequest>(input: {
@@ -866,14 +871,7 @@ export class SpaDriver {
   async refinePrompt(within: string): Promise<void> {
     const toolbar = `${within} [data-composer-toolbar]`;
     const selector = `${toolbar} button[data-composer-control="refine"][aria-label="Refine prompt"]:enabled`;
-    await this.#page.waitForSelector(selector);
-    const clicked = await this.#page.$eval(selector, element => {
-      const button = element as HTMLButtonElement;
-      if (button.hidden) return false;
-      button.click();
-      return true;
-    });
-    if (clicked) return;
+    if (await clickInlineComposerButton(this.#page, selector)) return;
     await this.#page.$eval(`${toolbar} [data-composer-overflow="prompt"]:not([hidden])`, element => (element as HTMLElement).click());
     await this.waitForMenuItemEnabled('Refine prompt');
     await this.clickMenuItem('Refine prompt');

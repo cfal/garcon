@@ -59,9 +59,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       expect(runRequests).toEqual([]);
 
       const beforeAgent = (await client.getChatSnapshot(chatId)).chat;
-      await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
-      await app.waitForButton('Anthropic');
-      await app.clickButton('Anthropic');
+      await app.openAgentModels('Anthropic', { scope: '[data-slot="composer-bottom-bar"]' });
       const agentSaved = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
       await selectModelOption(fixture.page, 'Integration Anthropic Echo');
       expect((await agentSaved).status()).toBe(200);
@@ -284,9 +282,7 @@ test('a same-executor agent switch chooses a new folder when the current one is 
     await app.waitForText('Project folder unavailable');
     await app.fill('[data-composer] textarea', 'Retained folder recovery draft');
 
-    await openModelSelector(fixture.page, '[data-slot="composer-bottom-bar"]');
-    await app.waitForButton('Anthropic');
-    await app.clickButton('Anthropic');
+    await app.openAgentModels('Anthropic', { scope: '[data-slot="composer-bottom-bar"]' });
     await selectModelOption(fixture.page, 'Integration Anthropic Echo');
     await app.waitForText('Choose a project folder');
     expect(await fixture.page.$eval('[role="dialog"] input', element => (element as HTMLInputElement).value)).toBe(missing);

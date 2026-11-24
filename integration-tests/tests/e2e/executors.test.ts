@@ -140,9 +140,7 @@ test('normal app onboarding supports both directions and sends remote chat input
         return dialog && !dialog.querySelector('[role="status"][aria-label="Loading chat defaults..."]');
       });
       await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Inbound Worker');
-      await openModelSelector(fixture.page);
-      await app.waitForButton('Chat Completions', { timeout: 20_000 });
-      await app.clickButton('Chat Completions');
+      await app.openAgentModels('Chat Completions');
       await selectModelOption(fixture.page, 'Integration Echo');
       await fixture.page.waitForSelector('[role="dialog"] [data-slot="model-selector-trigger"][title^="Direct (Chat Completions) /"]');
       await app.fill('[role="dialog"] input[aria-label="Project Path"]', inboundDirs.project);
