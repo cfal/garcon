@@ -317,11 +317,13 @@ test("resizing an open New Chat picker to a compact dialog keeps focus in the pi
     await integration.client.put(`/api/v1/api-providers?id=${encodeURIComponent(agent.provider.providerId)}`, {
       endpoint: { models: [{ value: agent.provider.model, label: LONG_MODEL_LABEL }] },
     });
-    const chatId = integration.newChatId();
-    const turn = await integration.client.startDirectChat({
-      chatId, content: 'Synthetic model selection', projectPath: integration.executionDirs.project, agent,
-    });
-    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    for (const recent of [integration.directAgents.anthropic, agent]) {
+      const chatId = integration.newChatId();
+      const turn = await integration.client.startDirectChat({
+        chatId, content: 'Synthetic model selection', projectPath: integration.executionDirs.project, agent: recent,
+      });
+      await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    }
     await page.setViewportSize({ width: 1280, height: 900 });
     const dialog = await openNewChat(fixture);
     const toolbar = dialog.locator('[data-composer-toolbar]');
@@ -329,7 +331,9 @@ test("resizing an open New Chat picker to a compact dialog keeps focus in the pi
     await expectLocator(model).toContainText(LONG_MODEL_LABEL);
     await model.click();
     const columns = page.locator('[data-slot="model-selector-columns"]');
-    await expectLocator(columns).toBeVisible();
+    await expectLocator(columns.getByText('Recent models', { exact: true })).toBeVisible();
+    await columns.getByRole('button', { name: /^Chat Completions/ }).click();
+    await columns.getByRole('textbox').fill('Echo');
     await waitForAnimations(page.locator('[data-slot="popover-content"]'));
     await page.setViewportSize({ width: 390, height: 844 });
     const compact = page.locator('[data-slot="model-selector-compact"]');
@@ -337,6 +341,13 @@ test("resizing an open New Chat picker to a compact dialog keeps focus in the pi
     await expectLocator(model).toBeHidden();
     await waitForAnimations(page.getByRole('dialog').filter({ has: compact }));
     await expectLocator(page.locator('[data-slot="directory-browser"]')).toHaveCount(0);
+    await expectLocator(compact.getByRole('textbox')).toHaveValue('Echo');
+    await expectLocator(compact.getByRole('textbox')).toBeFocused();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expectLocator(columns.getByRole('textbox')).toHaveValue('Echo');
+    await expectLocator(columns.getByRole('textbox')).toBeFocused();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectLocator(compact.getByRole('textbox')).toBeFocused();
     await page.keyboard.press('Escape');
     await expectLocator(compact).toHaveCount(0);
     await expectLocator(toolbar.locator('[data-composer-overflow="settings"]')).toBeFocused();

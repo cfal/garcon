@@ -214,10 +214,6 @@ export class ModelSelectorState {
 		return this.contentPane === 'recents';
 	}
 
-	get shouldStartFromRecentsOnOpen(): boolean {
-		return this.#options.preferRecentsOnOpen && this.recentOptions.length > 1;
-	}
-
 	isRecentSelected(recent: ModelSelectorRecentOption): boolean {
 		if (!this.value.model) return false;
 		const selection = this.committedSelection;
@@ -424,7 +420,7 @@ export class ModelSelectorState {
 		if (this.open) return;
 		this.open = true;
 		this.query = '';
-		this.contentPane = this.shouldStartFromRecentsOnOpen ? 'recents' : 'browse';
+		this.contentPane = this.#options.preferRecentsOnOpen && this.recentOptions.length > 1 ? 'recents' : 'browse';
 		this.#startDraftFromValue();
 		this.resetActiveModelIndex();
 		if (this.executorReady) void this.modelCatalog.refreshIfStale();
