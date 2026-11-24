@@ -7,6 +7,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { reloadUntilNativeContains } from '../../support/live-agent.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 
 test('keeps Codex activation quiet for incomparable native timestamps while preserving Reload', async () => {
@@ -47,12 +48,12 @@ test('keeps Codex activation quiet for incomparable native timestamps while pres
       const activationCursor = fixture.client.markEvents();
       expect(await fixture.client.getMessages(chatId, { purpose: 'activation' })).toEqual(before);
       // Covers the detector's complete five-second probe deadline before asserting silence.
-      await expect(fixture.client.waitForEvent(
+      expect(await throwingRejectionOf(fixture.client.waitForEvent(
         (event): event is ChatOperationalNoticeMessage => event.type === 'chat-operational-notice'
           && event.chatId === chatId && event.detail?.type === 'native-transcript-drift',
         'unexpected Codex native drift warning',
         { afterIndex: activationCursor, timeoutMs: 6_000 },
-      )).rejects.toThrow('Timed out waiting for unexpected Codex native drift warning.');
+      ))).toThrow('Timed out waiting for unexpected Codex native drift warning.');
 
       await fixture.client.reloadChat(chatId);
       const reloaded = await fixture.client.getMessages(chatId);
