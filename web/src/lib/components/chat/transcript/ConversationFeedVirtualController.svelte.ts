@@ -599,7 +599,11 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			const releaseTarget = this.options.retention.acquire(key, 'target');
 			try {
 				const align = options.viewportOffset === undefined ? (options.align ?? 'center') : 'start';
-				this.#virt.scrollToIndex(resolved.index, { align });
+				if (options.viewportOffset !== undefined && target.kind !== 'dom-anchor') {
+					this.#virt.scrollToAnchor(key, options.viewportOffset);
+				} else {
+					this.#virt.scrollToIndex(resolved.index, { align });
+				}
 				return await settleConversationTarget({
 					root: () => this.options.virtualRoot,
 					rowId: resolved.innerRowId,

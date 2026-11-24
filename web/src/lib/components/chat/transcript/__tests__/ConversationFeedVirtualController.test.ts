@@ -81,6 +81,35 @@ function snapshot(keys: readonly string[], sizes: readonly number[]): VirtualLis
 	};
 }
 
+function observeReadingTarget(exposure: ControllerExposure, index: number) {
+	const view = exposure.viewport()!;
+	const wrapper = view.querySelector<HTMLElement>(`[data-chat-virtual-item][data-index="${index}"]`)!;
+	const node = wrapper.querySelector<HTMLElement>('[data-chat-row-id],[data-chat-anchor-id]')!;
+	let inset = 0;
+	const rect = () => {
+		const item = exposure.controller.snapshot.positions.itemAt(index)!;
+		return new DOMRect(0, item.start - view.scrollTop, view.clientWidth, item.size);
+	};
+	wrapper.getBoundingClientRect = rect;
+	node.getBoundingClientRect = () => {
+		const r = rect();
+		return new DOMRect(0, r.top + inset, r.width, r.height - inset);
+	};
+	const writes: number[] = [];
+	const firstWrite = Promise.withResolvers<void>();
+	let top = view.scrollTop;
+	Object.defineProperty(view, 'scrollTop', {
+		configurable: true,
+		get: () => top,
+		set(value: number) {
+			top = value;
+			writes.push(value);
+			firstWrite.resolve();
+		},
+	});
+	return { view, node, writes, firstWrite: firstWrite.promise, setInset(value: number) { inset = value; } };
+}
+
 describe('ConversationFeed virtual policy', () => {
 	it('uses existing estimates for passive detached fill without requiring offscreen mounts', () => {
 		const measurements = new Map([['visible', 20]]);
@@ -234,6 +263,65 @@ describe('ConversationFeedVirtualController', () => {
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
+	});
+
+	it.each([false, true])('seeks directly to the captured fractional reader offset (group: %s)', async group => {
+		const { exposure } = await renderController({ initialPinned: false, groupFocusMode: group, groupTailCount: 12 });
+		const index = group ? 0 : 3;
+		const { view, node, writes } = observeReadingTarget(exposure, index);
+		const start = exposure.controller.snapshot.positions.itemAt(index)!.start;
+		view.scrollTop = start + 8.25;
+		const saved = exposure.controller.captureRestoreTarget('view', false);
+		expect(saved).toEqual({ kind: group ? 'group-summary' : 'row', ordinal: group ? 1 : 4, transcriptViewId: 'view', viewportOffset: -8.25 });
+		if (!saved || saved.kind === 'end') throw Error('Expected a detached reader');
+		view.scrollTop = 0;
+		writes.length = 0;
+		const request = group ? { kind: 'presentation-row', id: 'b' } as const : { kind: 'row', id: 'row-3' } as const;
+		expect(await exposure.controller.scrollToTarget(request, { viewportOffset: saved.viewportOffset })).toBe('completed');
+		expect(writes).toEqual([start + 8.25]);
+		expect(node.getBoundingClientRect().top).toBe(-8.25);
+	});
+
+	it('uses the new width for the first seek and still corrects a late inner-row inset', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		await exposure.hide();
+		await exposure.showAtLayout(240, 80);
+		await settleController();
+		const { view, node, writes, firstWrite, setInset } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		expect(start).toBe(240);
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: 6.5 });
+		await firstWrite;
+		setInset(13);
+		await nextFrame();
+		await nextFrame();
+		expect(writes).toEqual([start - 6.5]);
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(writes).toEqual([start - 6.5, start - 6.5 + 13]);
+		expect(node.getBoundingClientRect().top).toBe(6.5);
+		expect(view.clientWidth).toBe(240);
+	});
+
+	it.each([[0, 14.5], [11, -12.25]])('restores only an attainable offset at row %i', async (index, viewportOffset) => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node } = observeReadingTarget(exposure, index);
+		const start = exposure.controller.snapshot.positions.itemAt(index)!.start;
+		const attainable = Math.min(view.scrollHeight - view.clientHeight, Math.max(0, start - viewportOffset));
+		expect(await exposure.controller.scrollToTarget({ kind: 'row', id: `row-${index}` }, { viewportOffset })).toBe('completed');
+		expect(view.scrollTop).toBe(attainable);
+		expect(node.getBoundingClientRect().top).toBe(start - attainable);
+	});
+
+	it('does not write for a missing reader or a superseded seek', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { writes } = observeReadingTarget(exposure, 3);
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -8 });
+		const missing = exposure.controller.scrollToTarget({ kind: 'row', id: 'missing' }, { viewportOffset: 5 });
+		expect(await seek).toBe('cancelled');
+		expect(await missing).toBe('target-missing');
+		expect(writes).toEqual([]);
 	});
 
 	it('restores summary focus after an intervening same-surface publication', async () => {
