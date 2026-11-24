@@ -60,6 +60,18 @@ Same browser page, alternating complete old/new projections of a deterministic f
 
 A faster projection helps both engines. It does not make sorting 2,000 chats free or measure how often a real catalog rebuilds. [Per-sample results](qa/webkit-spa-responsiveness/optimization-sidebar.csv).
 
+## Edits during incoming output
+
+The [native input study](qa/webkit-spa-responsiveness/composer-input.md) checks actual browser receipt of a completed assistant row, not just server acceptance. On GTK, all 32 measured foreground edits reached the right draft. Four desktop tiles took 44 ms quiet versus 109.5 ms receiving from keydown to the second animation-frame callback; the compact layout with no presented recipient took 21.5 versus 23.5 ms. The reply arrived **after** the native input event on every in-window sample. Optimizing key handlers alone would miss this delay.
+
+The same study found a correctness failure: clicking a chat in the compact drawer then typing could send the first key to Menu instead of the already-eligible editor. Releasing the closed drawer's inert layer wasn't enough. On an explicit **mouse** selection, the destination can now consume its existing focus request after the DOM commit rather than waiting a frame. On stock, three of eight diagnostic attempts lost the character; the final candidate passed all eight with the right focus, text and caret. This is not a touch-device or IME result.
+
+Two independent costs grow with history or catalog size. On a [visible append](qa/webkit-spa-responsiveness/visible-receiver-projection.md) after 3,000 mixed ledger entries, the feed copied 4,002 old navigation-index entries instead of 13,002, with prior snapshots still intact. On a [2,000-chat sidebar refresh](../web/src/lib/components/sidebar/__tests__/SidebarVirtualSortableChatList.test.ts), 16 rows were mounted: matching those rows no longer read the other 1,984 keys. Geometry validation still read them once. These operation counts are not milliseconds or explanations for the four-chat result.
+
+For a different typing delay, [the long-draft comparison](qa/webkit-spa-responsiveness/composer-labels.md) isolates repeated Markdown label searches. On a 24,000-character paragraph with many unfinished labels, the paired production builds took 85.5 versus 49 ms to the second callback. The same run did not improve ordinary prose.
+
+[Google's Modern Web Guidance applied to these measurements](qa/webkit-spa-responsiveness/google-modern-web-guidance.md) identifies two follow-ups: separate visible recipient rendering from socket delivery in the same desktop layout, and compare native `scrollend` with Garcon's touch-settlement timer on a physical iPhone. Neither requires changing how the product handles input or scrolling to take the measurement.
+
 ## Alternatives not shipped
 
 - **Remove the custom transcript thumb?** On an isolated candidate build, remove the scrollbar component and corner but retain the same native overflow viewport and width. A second diagnostic instead kept the thumb and skipped the synchronous first measurement of newly mounted transcript rows, relying on ResizeObserver. Neither improved this WebKitGTK wheel test. Median callback gap at one pane: **80 ms normal, 165 ms without the thumb, 183 ms observer-only**. At twelve panes: **22, 58, 83 ms**. Normal / thumb removed / observer-only / observer-only / thumb removed / normal block order. Median movement was 1,680 px in every variant; feed dimensions were identical. This is a software-rendered, variable-load run, not evidence that a custom thumb is inherently faster. Removing it would lose dragging; waiting for the observer would weaken the prepaint guarantee. [Control samples](qa/webkit-spa-responsiveness/optimization-scroll-controls.csv).

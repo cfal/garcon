@@ -1,0 +1,66 @@
+# Native input during delivery and chat selection
+
+Stock `d64f0b5d8`, Linux WebKitGTK 2.50.6 / MiniBrowser, one local Xvfb session at a time. These are separate desktop (1840×960, four presented chats) and compact (480×844, one presented chat) workloads on the same engine, not an iPhone, touch keyboard, or display-presentation test.
+
+## First edit
+
+After selecting a **different** chat explicitly, the first trusted key was preserved in 4/4 desktop and **3/4 compact** attempts on stock. All seven successful keys reached the destination's temporary Source textarea, not a ready Formatted editor; the exact updated draft and logical caret survived its conversion. In the compact failure the key arrived 84 ms after the drawer-row click, targeted neither editor, and generated no beforeinput/input. The old draft was unchanged; the destination roundtrip lacked the character. No failed attempts were replaced.
+
+A separate untimed compact diagnostic reproduced this on 2/6 moving selections and 1/2 same-owner controls. All three keys reached the bottom **Menu** button: the destination route, anchor, shared host and exact draft matched, but the closed drawer was still present and the composer was inert. Both drafts remained pristine; focus was still on Menu at the end of observation. In one move, relative to the actual row click: +23 ms Menu focused, +96 ms destination anchor and Source draft matched, +105 ms keydown on Menu, +111 ms drawer gone and workspace live, +186 ms rich editor present. Successful moves also returned focus to Menu first, then focused Source **before** the key. This is evidence of a gap, not of the drawer stealing focus back from an editor already focused after selection.
+
+[AppShell](../../../web/src/lib/components/layout/AppShell.svelte) starts explicit navigation and closes the drawer. The normal close-focus callback returns focus to the opening control. On stock, the drawer's [transient-layer attachment](../../../web/src/lib/workspace/transient-layer-action.ts) considered it open until the DOM node unmounted, while Bits UI's focus scope follows logical open state. The [navigation controller](../../../web/src/lib/components/layout/app-shell-chat-navigation-controller.svelte.ts) requests composer focus after placement and routing; [focus delivery](../../../web/src/lib/components/chat/composer/prompt-composer-focus-delivery.svelte.ts) checks ownership/interaction generation and attempts native focus in rAF. The diagnostic observed focus and DOM states, not private request timestamps. An edit with no legitimate target must not be intercepted and replayed globally.
+
+### Drawer selection comparisons
+
+One separate production build attached the existing transient layer only while `appShell.sidebarOpen` was true. Same compact workload, six moves plus two same-owner selections, fresh document per attempt. A strict pass requires keydown itself to target the focused destination editor, not just a correct final string.
+
+| Compact diagnostic | Strict pass: moves / same owner | Actually lost: moves / same owner | Keydowns with inert composer |
+| --- | ---: | ---: | ---: |
+| Stock | 4/6, 1/2 | 2/6, 1/2 | 3/8 |
+| Drawer-only | 5/6, 0/2 | 1/6, 0/2 | 0/8 |
+| Drawer-only with ordering marks | 4/6, 1/2 | 2/6, 0/2 | 0/8 |
+| Drawer + eligible first attempt, unmarked | 6/6, 2/2 | 0/6, 0/2 | 0/8 |
+
+On the unmarked drawer-only build, the lost move reached Menu at +87 ms. The close returned focus to Menu at +10; the destination already had a live bound Source with the exact draft at +75. No trusted input followed. The drawer left the DOM at +91; focus remained on Menu through +2,125. Both drafts were pristine with collapsed [22,22] on revisit. In the two same-owner failures, keydown also targeted Menu (+31/+30 ms), but WebKit delivered native beforeinput/input to the destination rich editor. Both characters persisted exactly once with collapsed [23,23]; those trials **still fail** the early-focus guard. In all eight drawer-only roundtrips the other draft was unchanged, both editors regained focus on revisit, and both feeds settled at the end. No wrong-owner edits. Removing the stale inert state alone did not solve lost first edits; this is not a timing or touch-keyboard result.
+
+The mounted AppShell test used the actual Bits dialog lifetime: the closed node remained connected. Stock failed the registry-release assertion, and the conditional attachment passed, including rapid reopen and independent layer ownership. All 48 AppShell tests passed on that candidate, including registered Escape restoring focus and backdrop dismissal. These tests do not prove first-key delivery; the native counterexample takes precedence.
+
+### Why an eligible editor missed the key
+
+A separate drawer-only build added page-clock marks to the existing shell navigation request, close-focus callback and focus delivery gates; no change to focus timing. Of six moves, two lost the key in opposite directions. At keydown, the selected route, editor owner and exact destination Source draft already matched, the host was live, and Menu still held focus.
+
+| Lost move | Close-focus returned to Menu | Explicit destination request, eligible Source | Trusted keydown on Menu | First scheduled attempt |
+| --- | ---: | ---: | ---: | ---: |
+| B → A | +14 ms | +83 ms | +100 ms | +142 ms, stale generation |
+| A → B | +10 ms | +86 ms | +91 ms | +105 ms, stale generation |
+
+Times are relative to the drawer-row click, for **ordering only**. On both failures the earlier request had already been rejected for the old owner. The current explicit request passed the owner, visibility, enabled, target and interaction-generation checks; it waited for rAF before its first focus attempt. The [keyboard interaction handler](../../../web/src/lib/components/shared/KeyboardShortcuts.svelte) correctly advanced the generation at keydown, so the later attempt did not steal focus. No native input followed; both drafts remained exact and unedited. The other four moves focused Source before the key and passed all guards. One of two same-owner controls strictly passed; the other failed only its Menu keydown-target guard and preserved the character in the rich editor. All eight attempts and both roundtrips are retained, not pooled with the uninstrumented build. The evidence supports changing when **an already eligible explicit request** first tries focus, not bypassing cancellation or capturing an uncovered key.
+
+### Scoped first attempt
+
+The unmarked candidate retains the conditional drawer attachment. For a compact drawer mouse selection only, AppShell carries the selected chat and that pointer interaction's generation through the existing navigation request. The composer's post-commit effect attempts that request immediately if the owner, target and generation remain current, the input is enabled and visible, and no reopened drawer or other main-inert layer owns the workspace. Refused native focus uses the existing single rAF retry. Touch, pen, keyboard-only selections, ordinary mount and other shell focus requests keep their original scheduling. No new request on close or replayed input.
+
+All eight native attempts strictly passed: six moves reached Source before rich restoration, and both same-owner keys reached rich. In every trial Menu regained focus on close, the destination then received focus **before keydown**, beforeinput/input reached the correct editor, and the full text and collapsed [22,22] → [23,23] range matched. Both drafts, native focus, ranges and end pins matched on both revisits. This removes the observed avoidable wait after eligibility; a key before eligibility can still be uncovered. A mounted regression separately held rAF: on stock the outside button was still focused after commit. Touch-device keyboard appearance and IME were not tested on hardware.
+
+After removing the store's redundant request-ID accessor, 312 focused tests passed across AppShell, navigation, the shell store, Source, Formatted and the [held-frame drawer regressions](../../../web/src/lib/components/chat/composer/__tests__/PromptComposerDrawerFocus.test.ts). Checks include refused focus retrying once, cancellation by a newer interaction/owner/modal, disabled or hidden inputs, ordinary requests clearing drawer intent, and no accelerated request on touch, pen or keyboard-only activation.
+
+## Steady typing
+
+| GTK workspace | Keydown→input quiet / receiving (ms) | Keydown→second rAF quiet / receiving (ms) | Assistant wire receipt inside key window |
+| --- | ---: | ---: | ---: |
+| Desktop, receiver visible | 5 / 3.5 | 44 / 109.5 | 0/8 quiet, 7/8 receiving |
+| Compact, receiver not presented | 2 / 2 | 21.5 / 23.5 | 0/8 quiet, 8/8 receiving |
+
+Medians over eight measured trusted keys per condition. Desktop second-rAF block medians were 41.5 and 44 ms quiet versus 134 and 94.5 ms receiving. On compact they were 22.5 and 20 versus 25 and 21 ms. All 32 measured edits passed: same connected foreground editor, exact before/after text, collapsed DOM range [6,6]→[7,7], focus retained, feed settled, Backspace restored the original. All eight receiving user rows had arrived before keydown on each viewport. All observed in-window assistant receipts followed native input; on desktop the corresponding seven assistant rows also appeared in the receiving feed before the second callback. The compact receiver had no presented feed; its final response was checked on reveal. No quiet recipient row entered a key window.
+
+This compares completed user/assistant rows, **not partial tokens**: the direct runtime [awaits the streamed response](../../../server-agents/common/src/direct/direct-chat-runtime-base.ts) before publishing one assistant row. The treatment moves the same turn volume across the key boundary; it does not isolate the cost of routing, rendering, focus, or layout. There is one ABBA sequence per viewport, and the viewport changes both geometry and receiver visibility. These numbers are neither platform-wide latency nor a CI budget.
+
+## Reproduction
+
+1. From an isolated checkout, run `bun run build` at the repo root and start a dedicated loopback WebKitWebDriver/Xvfb. Run [composer-input.ts](../../../integration-tests/scripts/composer-input.ts) with `bun integration-tests/scripts/composer-input.ts --webdriver=http://127.0.0.1:PORT --viewport=desktop`, then `--viewport=compact`. For the separate passive drawer trace, add `--focus-diagnostic` to the compact command. `--smoke` runs only the warm keys and one first edit. A finished run prints `complete` **after** disposal and exits nonzero on a failed first edit; a partial run is not a pass.
+2. Each viewport gets a fresh four-chat synthetic fixture, two distinct stored 22-character single-paragraph drafts, a current-build guard and real native W3C input. Steady typing keeps the same A editor. Per key, a real held fake-provider turn adds one unique user and one assistant row to C. Quiet runs it after the key settles. Receiving waits for the user row on the application's socket (and in C's visible feed on desktop), then releases the provider immediately after issuing the native key command. Require both ordered browser receipts, the matching successful turn terminal, and a settled receiving feed or final reveal. Blocks are quiet/receiving/receiving/quiet on desktop, reversed on compact. Instrumentation is the same within each pair.
+3. First edits run **without** background turns. Each attempt opens a fresh document, warms both drafts through the real sidebar, and issues pointer-up then keydown in consecutive W3C ticks in **one** request. There is no intervening focus, route, mount or frame wait. The observed click→keydown gap is not controlled to 0 ms. Check the recipient at keydown/input, final rich text, logical range within the actual editor, native focus, end pin and both drafts after revisiting. Stage traces add passive event/DOM observations and are excluded from the timing comparison.
+
+[Per-attempt CSV](composer-input.csv) includes warmups (`block=-1`), wrong keys and nullable timings; only `stock` nonnegative blocks enter the steady-key medians. Wire and DOM timestamps are relative to **page keydown**; negative means the row was already delivered. `dom_during` is blank for a non-presented receiver. [Drawer stages](composer-input-focus.csv) are relative to the row click; A/B are aliases, never real IDs or text. A portable device is still needed for IME, software-keyboard appearance and physical input-to-presentation. A 390 px compact preflight stopped at the dimension guard (MiniBrowser supplied 447 px); the measured contract was fixed at 480. Smoke used a 15 ms release delay and is not pooled with measured samples.
+
+To reproduce the `drawer-marked` ordering, collect `performance.mark` at the navigation controller's composer-focus callback, on entry/return of drawer close-autofocus, and in `PromptComposerFocusDelivery` at request, failed eligibility (reason), successful eligibility (Source/rich), rAF entry, generation rejection, native focus result and effect cleanup. Merge those marks with the passive drawer stages using the same page clock; record only the anonymous request sequence. Marks sharing a millisecond do not establish sub-millisecond order.
