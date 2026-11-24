@@ -75,9 +75,12 @@ describe('process-owned terminals', () => {
     expect((await service.list({ ...authority, key: 'different' })).terminals).toEqual([]);
     const other = await serviceFor(runtime, crypto.randomUUID(), backend);
     expect((await other.list(authority)).terminals).toEqual([]);
-    await expect(other.terminate(authority, created.terminal.terminalId, 'delete')).rejects.toMatchObject({ code: 'terminal-validation' });
-    await expect(service.create(authority, { requestId: 'create', expectedTerminalRuntimeId: runtime.id, requestedInitialWorkingDirectory: '/different' })).rejects.toMatchObject({ code: 'terminal-validation' });
-    await expect(service.create(authority, { requestId: 'fresh', expectedTerminalRuntimeId: crypto.randomUUID(), requestedInitialWorkingDirectory: null })).rejects.toMatchObject({ code: 'terminal-runtime-changed' });
+    const otherFailure = await other.terminate(authority, created.terminal.terminalId, 'delete').then(() => null, error => error);
+    expect(otherFailure).toMatchObject({ code: 'terminal-validation' });
+    const retryFailure = await service.create(authority, { requestId: 'create', expectedTerminalRuntimeId: runtime.id, requestedInitialWorkingDirectory: '/different' }).then(() => null, error => error);
+    expect(retryFailure).toMatchObject({ code: 'terminal-validation' });
+    const staleFailure = await service.create(authority, { requestId: 'fresh', expectedTerminalRuntimeId: crypto.randomUUID(), requestedInitialWorkingDirectory: null }).then(() => null, error => error);
+    expect(staleFailure).toMatchObject({ code: 'terminal-runtime-changed' });
   });
 
   it('keeps queued input bounded and fences expired or detached authority', async () => {
@@ -98,8 +101,10 @@ describe('process-owned terminals', () => {
     const { runtime, ptys } = setup();
     const service = await serviceFor(runtime, 'local', backend);
     const request = { requestId: 'invalid', expectedTerminalRuntimeId: runtime.id, requestedInitialWorkingDirectory: '/synthetic-missing-directory' };
-    await expect(service.create(authority, request)).rejects.toMatchObject({ code: 'terminal-validation', status: 422 });
-    await expect(service.create(authority, { ...request, requestedInitialWorkingDirectory: null })).rejects.toMatchObject({ code: 'terminal-validation', status: 409 });
+    const createFailure = await service.create(authority, request).then(() => null, error => error);
+    expect(createFailure).toMatchObject({ code: 'terminal-validation', status: 422 });
+    const retryFailure = await service.create(authority, { ...request, requestedInitialWorkingDirectory: null }).then(() => null, error => error);
+    expect(retryFailure).toMatchObject({ code: 'terminal-validation', status: 409 });
     expect(ptys).toHaveLength(0);
   });
 
@@ -118,7 +123,8 @@ describe('process-owned terminals', () => {
     await service.attach(authority, first, request);
     await service.attach(authority, second, { ...request, clientId: 'second', intent: 'takeover' });
     expect(first.messages).toContainEqual(expect.objectContaining({ type: 'terminal-taken-over' }));
-    await expect(service.input(authority, first, terminal.terminalId, 'stale')).rejects.toThrow();
+    const inputFailure = await service.input(authority, first, terminal.terminalId, 'stale').then(() => null, error => error);
+    expect(inputFailure).toBeInstanceOf(Error);
     await service.rename(authority, terminal.terminalId, 'Build logs');
     for (const browser of [first, second]) {
       expect(browser.messages).toContainEqual(expect.objectContaining({ type: 'terminal-status', terminal: expect.objectContaining({ title: 'Build logs' }) }));
@@ -133,7 +139,8 @@ describe('process-owned terminals', () => {
     await service.resize(authority, second, terminal.terminalId, 120, 40);
     await applied.promise;
     expect(ptys[0].operations).toEqual([[100, 30], 'command\r', [120, 40]]);
-    await expect(service.list({ ...authority, expiresAtMs: 1 })).rejects.toMatchObject({ code: 'terminal-auth-expired' });
+    const expiredFailure = await service.list({ ...authority, expiresAtMs: 1 }).then(() => null, error => error);
+    expect(expiredFailure).toMatchObject({ code: 'terminal-auth-expired' });
     const terminated = await service.terminate(authority, terminal.terminalId, 'terminate');
     expect(await service.terminate(authority, terminal.terminalId, 'terminate')).toEqual(terminated);
     for (const browser of [first, second]) {

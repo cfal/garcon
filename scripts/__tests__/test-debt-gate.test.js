@@ -6,6 +6,7 @@ const existing = 'server/controller/agents/__tests__/old.test.ts';
 test('test scope and compiler options cannot weaken the debt ratchet', () => {
   const config = { extends: './server/tsconfig.json', include: ['server/**/*.ts', 'cli/**/*.ts'], compilerOptions: { strict: true }, exclude: [existing] };
   expect(testConfigurationProblems(config, { ...config, exclude: [] })).toEqual([]);
+  expect(testConfigurationProblems(config, { ...config, include: [...config.include, 'common/__tests__/**/*.ts'] })).toEqual([]);
   for (const change of [{ include: ['server/**/*.ts'] }, { compilerOptions: { strict: false } }, { extends: './loose.json' }, { files: [] }]) {
     expect(testConfigurationProblems(config, { ...config, ...change })).toHaveLength(1);
   }

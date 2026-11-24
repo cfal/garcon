@@ -196,7 +196,8 @@ for (const dialer of ['controller', 'worker'] as const) {
       fixture.controller.disconnect(); fixture.worker.disconnect();
       expect(await call).toMatchObject({ outcome: 'unknown' });
       await ready;
-      await expect(integration.execution.start(await requestFor(integration))).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+      const startFailure = await integration.execution.start(await requestFor(integration)).then(() => null, error => error);
+      expect(startFailure).toMatchObject({ code: 'SESSION_BUSY' });
       release.resolve();
       await integration.execution.runningSessions();
       expect(events).toEqual(['session', 'launch-settled']);
@@ -686,7 +687,8 @@ for (const dialer of ['controller', 'worker'] as const) {
       await integration.execution.runningSessions();
       expect(events).toEqual(['publication-failed']);
       const next = await requestFor(integration);
-      await expect(integration.execution.start(next)).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+      const startFailure = await integration.execution.start(next).then(() => null, error => error);
+      expect(startFailure).toMatchObject({ code: 'SESSION_BUSY' });
       const running = spyOn(worker.integration.execution, 'runningSessions').mockResolvedValue([
         { agentSessionId: 'test-session', status: null, startedAt: null },
       ]);
@@ -696,7 +698,8 @@ for (const dialer of ['controller', 'worker'] as const) {
             model: 'test-model', nativeSession: null, carryOverRevision: '0', nativeSeedReceipt: null, settings: integration.settings.defaults() },
           signal: new AbortController().signal,
         })[Symbol.asyncIterator]();
-        await expect(reader.next()).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+        const readFailure = await reader.next().then(() => null, error => error);
+        expect(readFailure).toMatchObject({ code: 'SESSION_BUSY' });
         expect(worker.calls.import).toBe(0);
       } finally { running.mockRestore(); }
       publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });

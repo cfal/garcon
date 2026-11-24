@@ -3,9 +3,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 export function testConfigurationProblems(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
-  const { exclude: _before, ...previous } = before;
-  const { exclude: _after, ...current } = after;
-  return isDeepStrictEqual(previous, current) ? [] : ['Test typecheck configuration changed outside the shrink-only exclusion list'];
+  const { exclude: _before, include: previousIncludes, ...previous } = before;
+  const { exclude: _after, include: currentIncludes, ...current } = after;
+  const includesPreserved = isDeepStrictEqual(previousIncludes, currentIncludes)
+    || (Array.isArray(previousIncludes) && Array.isArray(currentIncludes)
+      && currentIncludes.every(value => typeof value === 'string')
+      && previousIncludes.every(value => currentIncludes.includes(value)));
+  return includesPreserved && isDeepStrictEqual(previous, current)
+    ? [] : ['Test typecheck configuration weakened its include scope or changed compiler settings'];
 }
 
 export function testDebtProblems(before: readonly string[] | null, after: readonly string[], addedFiles: readonly string[]): string[] {

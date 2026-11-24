@@ -123,8 +123,9 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(await gh.minimizePullRequestComment({ projectPath: fixture.projectPath, repository, actor, commentId: created.id })).toMatchObject({ executorId, instanceId, minimized: true });
       await expect(gh.createPullRequestComment({ projectPath: fixture.projectPath, repository, actor, expected, number: 1, body: 'x'.repeat(65_537) }))
         .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
-      await expect(gh.createPullRequestComment({ projectPath: fixture.projectPath, repository, actor, expected, number: 9, body: 'Synthetic review' }))
-        .rejects.toMatchObject({ code: 'GH_MUTATION_REJECTED' });
+      const rejected = await gh.createPullRequestComment({ projectPath: fixture.projectPath, repository, actor, expected, number: 9, body: 'Synthetic review' })
+        .then(() => null, error => error);
+      expect(rejected).toMatchObject({ code: 'GH_MUTATION_REJECTED' });
       const detail = await gh.getPullRequest({ projectPath: fixture.projectPath, repository, number: 1 });
       expect(detail).toMatchObject({ executorId, instanceId });
       expect(detail.body.length).toBe(config.bodyBytes);

@@ -85,7 +85,8 @@ for (const dialer of ['controller', 'worker'] as const) {
     try {
       const primary = fixture.connections.controller.primary;
       expect(fixture.connections.controller.bulk.current).toBeNull();
-      await expect(primary.call('', 'projects.inspect', { projectPath: '/project' })).resolves.toEqual({ ok: true });
+      const inspection = await primary.call('', 'projects.inspect', { projectPath: '/project' });
+      expect(inspection).toEqual({ ok: true });
       fixture.start();
       await fixture.ready();
       for (let loss = 0; loss < 3; loss++) {
