@@ -9,6 +9,7 @@ import {
 import { reduceWorkspaceLayout } from '$lib/workspace/workspace-layout.svelte.js';
 import { portableSingletonDescriptor } from '$lib/workspace/surface-types.js';
 import { HOVER_CAPABLE_MEDIA_QUERY } from '$lib/layout/desktop-layout.js';
+import { COARSE_POINTER_QUERY, WIDE_FINE_POINTER_QUERY } from '../mobile-viewport-binding';
 import { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
 import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
@@ -303,6 +304,9 @@ describe('AppShell responsive workspace binding', () => {
 			'matchMedia',
 			vi.fn((query: string) => {
 				if (query === hoverMediaQuery.media) return hoverMediaQuery;
+				if (query === WIDE_FINE_POINTER_QUERY || query === COARSE_POINTER_QUERY) {
+					return new TestMediaQueryList(query, false);
+				}
 				throw new Error(`Unexpected media query: ${query}`);
 			}),
 		);

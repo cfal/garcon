@@ -22,6 +22,31 @@ describe('bindMobileViewport', () => {
 		for (const callback of callbacks) callback(0);
 	}
 
+	function bindDesktop({ wide = true, fine = true, coarse = false, touch = 0 } = {}) {
+		const device = { wide, fine, coarse, touch };
+		vi.spyOn(window.navigator, 'maxTouchPoints', 'get').mockImplementation(() => device.touch);
+		vi.stubGlobal('matchMedia', (query: string): Pick<MediaQueryList, 'matches'> => ({
+			get matches() {
+				if (query === '(min-width: 769px) and (pointer: fine) and (any-pointer: fine)') {
+					return device.wide && device.fine;
+				}
+				return query === '(any-pointer: coarse)' && device.coarse;
+			},
+		}));
+		unbind = bindMobileViewport(onMetrics);
+		flushFrame();
+		return device;
+	}
+
+	function resize(inner: number, visual = inner, top = 0) {
+		vi.stubGlobal('innerHeight', inner);
+		viewport.height = visual;
+		viewport.offsetTop = top;
+		viewport.dispatchEvent(new Event('resize'));
+		flushFrame();
+		return onMetrics.mock.lastCall?.[0];
+	}
+
 	beforeEach(() => {
 		viewport = createViewport();
 		vi.stubGlobal('visualViewport', viewport);
@@ -124,6 +149,99 @@ describe('bindMobileViewport', () => {
 		expect(frames.size).toBe(1);
 		flushFrame();
 		expect(onMetrics).toHaveBeenCalledTimes(3);
+	});
+
+	it('reports every desktop frame but only rewrites pixel values that changed', () => {
+		bindDesktop();
+		const writes = vi.spyOn(style, 'setProperty');
+		const open = resize(800, 520, 40);
+		expect(open).toEqual({
+			appHeight: 520, viewportOffsetTop: 40, viewportCenterY: 300,
+			keyboardHeight: 280, keyboardVisible: true,
+		});
+		expect(writes.mock.calls).toEqual([
+			['--app-height', '520px'], ['--app-viewport-offset-top', '40px'],
+			['--app-viewport-center-y', '300px'],
+		]);
+		writes.mockClear();
+		expect(resize(800, 520, 40)).toEqual(open);
+		expect(onMetrics).toHaveBeenCalledTimes(3);
+		expect(writes).not.toHaveBeenCalled();
+
+		resize(800, 520, 52.5);
+		expect(writes.mock.calls).toEqual([
+			['--app-viewport-offset-top', '53px'], ['--app-viewport-center-y', '313px'],
+		]);
+		writes.mockClear();
+		resize(800, 499.5, 52.5);
+		expect(writes.mock.calls).toEqual([
+			['--app-height', '500px'], ['--app-viewport-center-y', '303px'],
+		]);
+		expect(resize(800)?.keyboardVisible).toBe(false);
+		expect(style.getPropertyValue('--app-height')).toBe('');
+		writes.mockClear();
+		expect(resize(800, 520, 40)).toEqual(open);
+		expect(writes).toHaveBeenCalledTimes(3);
+	});
+
+	it('repairs missing or higher-priority declarations even at unchanged desktop geometry', () => {
+		bindDesktop();
+		resize(800, 500);
+		style.removeProperty('--app-viewport-offset-top');
+		style.setProperty('--app-height', '500px', 'important');
+		const writes = vi.spyOn(style, 'setProperty');
+		resize(800, 500);
+		expect(writes.mock.calls).toEqual([
+			['--app-height', '500px'], ['--app-viewport-offset-top', '0px'],
+		]);
+		expect(style.getPropertyPriority('--app-height')).toBe('');
+	});
+
+	it.each([
+		['narrow layout', { wide: false }], ['touchscreen', { touch: 5 }],
+		['secondary coarse pointer', { coarse: true }], ['no fine primary pointer', { fine: false }],
+	] as const)('preserves all viewport writes for %s', (_, device) => {
+		bindDesktop(device);
+		const metrics = resize(800, 620);
+		const writes = vi.spyOn(style, 'setProperty');
+		expect(resize(800, 620)).toEqual(metrics);
+		expect(writes).toHaveBeenCalledTimes(3);
+	});
+
+	it('does not require pointer media queries to publish or refresh a keyboard', () => {
+		vi.stubGlobal('matchMedia', undefined);
+		unbind = bindMobileViewport(onMetrics);
+		flushFrame();
+		expect(resize(520)?.keyboardHeight).toBe(280);
+		const writes = vi.spyOn(style, 'setProperty');
+		expect(resize(520)?.keyboardHeight).toBe(280);
+		expect(writes).toHaveBeenCalledTimes(3);
+	});
+
+	it('honors layout and pointer changes while the keyboard stays open', () => {
+		const device = bindDesktop();
+		const expected = resize(800, 520);
+		const writes = vi.spyOn(style, 'setProperty');
+		for (const [wide, coarse, count] of [
+			[false, false, 3], [true, false, 0], [true, true, 3], [true, false, 0],
+		] as const) {
+			Object.assign(device, { wide, coarse });
+			writes.mockClear();
+			expect(resize(800, 520)).toEqual(expected);
+			expect(writes).toHaveBeenCalledTimes(count);
+		}
+	});
+
+	it('does not use native window motion to change keyboard reporting', () => {
+		bindDesktop();
+		for (const [inner, outer, gap] of [
+			[960, 998, 0], [960, 1231, 0], [960, 998, 0], [680, 998, 280],
+			[1121, 1231, 0], [1121, 1171, 0], [1111, 1111, 0], [1001, 1111, 110],
+		]) {
+			vi.stubGlobal('outerHeight', outer);
+			expect(resize(inner)).toMatchObject({ keyboardVisible: gap > 0, keyboardHeight: gap });
+			expect(style.getPropertyValue('--app-height')).toBe(gap ? `${inner}px` : '');
+		}
 	});
 
 	it('cancels pending work, removes listeners, and clears overrides on teardown', () => {

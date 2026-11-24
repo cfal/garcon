@@ -1,10 +1,15 @@
 import { computeMobileViewportMetrics, type MobileViewportMetrics } from './mobile-viewport';
 
+export const WIDE_FINE_POINTER_QUERY = '(min-width: 769px) and (pointer: fine) and (any-pointer: fine)';
+export const COARSE_POINTER_QUERY = '(any-pointer: coarse)';
+
 export function bindMobileViewport(
 	onMetrics: (metrics: MobileViewportMetrics) => void,
 ): (() => void) | undefined {
 	if (typeof window === 'undefined' || !window.visualViewport) return;
 	const viewport = window.visualViewport;
+	const wideFinePointer = window.matchMedia?.(WIDE_FINE_POINTER_QUERY);
+	const coarsePointer = window.matchMedia?.(COARSE_POINTER_QUERY);
 	let frameId: number | null = null;
 	let previousAppHeight: number | null = null;
 	let baselineAppHeight: number | null = null;
@@ -32,15 +37,23 @@ export function bindMobileViewport(
 			clearViewportOverrides();
 			return;
 		}
-		document.documentElement.style.setProperty('--app-height', `${metrics.appHeight}px`);
-		document.documentElement.style.setProperty(
-			'--app-viewport-offset-top',
-			`${metrics.viewportOffsetTop}px`,
-		);
-		document.documentElement.style.setProperty(
-			'--app-viewport-center-y',
-			`${metrics.viewportCenterY}px`,
-		);
+		const style = document.documentElement.style;
+		const skipUnchanged =
+			wideFinePointer?.matches &&
+			coarsePointer?.matches === false &&
+			window.navigator.maxTouchPoints === 0;
+		function setPixels(name: string, pixels: number) {
+			const value = `${pixels}px`;
+			if (
+				skipUnchanged &&
+				style.getPropertyValue(name) === value &&
+				!style.getPropertyPriority(name)
+			) return;
+			style.setProperty(name, value);
+		}
+		setPixels('--app-height', metrics.appHeight);
+		setPixels('--app-viewport-offset-top', metrics.viewportOffsetTop);
+		setPixels('--app-viewport-center-y', metrics.viewportCenterY);
 	}
 
 	function scheduleViewportMetrics() {
