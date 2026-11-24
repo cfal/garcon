@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import {
 	getChatSessions,
 	getExecutors,
@@ -24,16 +25,23 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 	const sidebarSearch = getSidebarSearch();
 	const controller = new SidebarOrderController({
 		get input() {
+			const groupingFields = localSettings.sidebarGroupingFields;
+			const groupByActivity = groupingFields.some(
+				({ field, enabled }) => field === 'activity' && enabled,
+			);
 			return {
 				allChats: sessions.orderedChats,
 				matchingChatIds: sidebarSearch.activeQuery.trim()
 					? new Set(sidebarSearch.filteredChats.map((chat) => chat.id))
 					: undefined,
 				executorOrder: executors.executors.map((executor) => executor.id),
-				groupingFields: localSettings.sidebarGroupingFields,
+				groupingFields,
 				nestDelegatedChats: localSettings.sidebarNestDelegatedChats,
 				separateArchivedBranches: localSettings.sidebarSeparateArchivedBranches,
-				currentTime: minuteClock.currentTime,
+				// Relative labels observe the clock independently of row ordering.
+				currentTime: groupByActivity
+					? minuteClock.currentTime
+					: untrack(() => minuteClock.currentTime),
 				inactivityDuration: localSettings.sidebarInactivityDuration,
 				sortMode: localSettings.sidebarSortMode,
 				pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',

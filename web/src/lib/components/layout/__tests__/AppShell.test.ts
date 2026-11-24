@@ -25,6 +25,11 @@ import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte'
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { SidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte';
 import { chat } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
+import * as sidebarRows from '$lib/sidebar/display/sidebar-row-model';
+import { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
+import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
+import ChatSummary from '../../chat/ChatSummary.svelte';
+import { createAppShellSidebarOrder } from '../app-shell-sidebar-order';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const shortcuts = vi.hoisted(() => ({ userInteractionGeneration: 0 }) satisfies Pick<WorkspaceShortcutDispatcher, 'userInteractionGeneration'>);
@@ -579,6 +584,74 @@ describe('AppShell responsive workspace binding', () => {
 			await waitFor(() => expect(show).toHaveBeenCalledWith(offset === -1 ? 'above' : 'below'));
 		},
 	);
+
+	it('reprojects on a minute tick only with Activity grouping enabled', ({ onTestFinished }) => {
+		const start = new Date('2026-01-03T12:00:00Z');
+		vi.useFakeTimers({ now: start });
+		const clock = new MinuteClockStore();
+		onTestFinished(() => {
+			clock.destroy();
+			vi.useRealTimers();
+		});
+		const recent = chat('recent', { lastActivityAt: start.toISOString() });
+		const aging = chat('aging', { lastActivityAt: '2026-01-01T12:03:00Z' });
+		installContext([aging, recent]);
+		testContext.current!.minuteClock = clock;
+		const settings = testContext.current!.localSettings as AppShellLocalSettingsState;
+		settings.sidebarGroupingFields = [{ field: 'activity', enabled: false }];
+		settings.sidebarInactivityDuration = '2-days';
+		const build = vi.spyOn(sidebarRows, 'buildSidebarChatListProjection');
+		const order = createAppShellSidebarOrder();
+		const { container } = render(ChatSummary, {
+			props: {
+				get session() {
+					return order.projection.rowModel.rows.findLast((row) => row.type === 'chat')!.chat;
+				},
+				variant: 'sidebar',
+				chatItemLayout: 'single-line',
+				showTimestamp: true,
+				get currentTime() {
+					return clock.currentTime;
+				},
+			},
+		});
+		const advanceMinute = () => flushSync(() => vi.advanceTimersByTime(60_000));
+		const sections = () => order.projection.rowModel.rows
+			.filter((row) => row.type === 'section-header')
+			.map((row) => row.section);
+		const badge = container.querySelector('[data-slot="sidebar-chat-timestamp-badge"]');
+		const initial = order.projection;
+		expect(initial.rowModel.visibleChatIds).toEqual(['aging', 'recent']);
+		expect(build).toHaveBeenCalledOnce();
+		build.mockClear();
+		for (const minute of [1, 2]) {
+			advanceMinute();
+			const now = new Date(start.getTime() + minute * 60_000);
+			expect(badge?.textContent?.trim()).toBe(formatRelativeTimestamp(recent.lastActivityAt, now)!.label);
+			expect(build).not.toHaveBeenCalled();
+			expect(order.projection).toBe(initial);
+		}
+
+		flushSync(() => {
+			settings.sidebarGroupingFields[0].enabled = true;
+		});
+		expect(sections()).toEqual(['active']);
+		build.mockClear();
+		advanceMinute();
+		expect(sections()).toEqual(['active', 'inactive']);
+		expect(order.projection.rowModel.visibleChatIds).toEqual(['recent', 'aging']);
+		expect(build).toHaveBeenCalledOnce();
+
+		flushSync(() => {
+			settings.sidebarGroupingFields[0].enabled = false;
+		});
+		const ungrouped = order.projection;
+		expect(ungrouped.rowModel.visibleChatIds).toEqual(initial.rowModel.visibleChatIds);
+		build.mockClear();
+		advanceMinute();
+		expect(order.projection).toBe(ungrouped);
+		expect(build).not.toHaveBeenCalled();
+	});
 
 	it('uses the shared backdrop for the mobile drawer and preserves dismissal', async () => {
 		const workspace = installContext();
