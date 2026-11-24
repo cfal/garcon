@@ -37,11 +37,12 @@ describe('chat tile geometry', () => {
 		const { desktopRoot } = reduceWorkspaceLayout(snapshot, [{ type: 'tile-chats', rows }]);
 		const rects = computeWindowRects(desktopRoot).windows;
 		for (const [y, row] of rows.entries()) {
-			for (const { windowId } of row) {
+			for (const [x, { windowId }] of row.entries()) {
 				const rect = rects.find((candidate) => candidate.workspaceWindow.id === windowId)!.rect;
 				expect(rect.height).toBeCloseTo(1 / rows.length);
 				expect(rect.width).toBeCloseTo(1 / row.length);
 				expect(rect.top).toBeCloseTo(y / rows.length);
+				expect(rect.left).toBeCloseTo(x / row.length);
 			}
 		}
 	});

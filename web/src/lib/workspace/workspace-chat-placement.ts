@@ -136,7 +136,8 @@ export class WorkspaceChatPlacementService {
 			const tiles = rows.flat();
 			tiled = tiles.length;
 			const focused = this.deps.lastFocusedWindowId();
-			const { windowId } = tiles.find((tile) => tile.windowId === focused) ?? tiles[0];
+			const { windowId } = tiles.find((tile) => tile.windowId === focused)
+				?? tiles.find((tile) => tile.chatId === chatIds[0])!;
 			return {
 				destination: { windowId, surfaceId: chatViewSurfaceId(windowId) },
 				mutations: [{ type: 'tile-chats', rows }],

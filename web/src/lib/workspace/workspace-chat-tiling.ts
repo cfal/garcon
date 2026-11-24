@@ -66,22 +66,21 @@ export function planChatTiles(
 	host: WorkspaceHostSize | null,
 ): WorkspaceChatTile[][] {
 	const rows = fitChatRows(chatIds, host);
-	const selected = new Set(rows.flat());
-	const existing = new Map<string, WorkspaceWindowId>();
-	const spare: WorkspaceWindowId[] = [];
-	// Keeps mounted chat surfaces in their original windows, including inactive chat tabs.
-	for (const { id } of collectWindowNodes(snapshot.desktopRoot)) {
+	const unplaced = new Set(rows.flat());
+	const windows = collectWindowNodes(snapshot.desktopRoot);
+	const retained = new Map<WorkspaceWindowId, string>();
+	for (const { id } of windows) {
 		const chat = snapshot.surfaces[chatViewSurfaceId(id)];
-		if (chat?.type === 'chat' && chat.chatId && selected.has(chat.chatId)) {
-			existing.set(chat.chatId, id);
-		} else {
-			spare.push(id);
-		}
+		if (chat?.type === 'chat' && chat.chatId && unplaced.delete(chat.chatId))
+			retained.set(id, chat.chatId);
 	}
-	return rows.map((row) =>
-		row.map((chatId) => ({
-			chatId,
-			windowId: existing.get(chatId) ?? spare.shift() ?? `window-${createRandomId()}`,
-		})),
-	);
+	// Reordering mounted windows detaches their DOM and resets transcript scroll in Chromium.
+	const remaining = [...unplaced];
+	const tiles: WorkspaceChatTile[] = [];
+	for (const { id } of windows) {
+		const chatId = retained.get(id) ?? remaining.shift();
+		if (chatId !== undefined) tiles.push({ windowId: id, chatId });
+	}
+	for (const chatId of remaining) tiles.push({ windowId: `window-${createRandomId()}`, chatId });
+	return rows.map((row) => tiles.splice(0, row.length));
 }

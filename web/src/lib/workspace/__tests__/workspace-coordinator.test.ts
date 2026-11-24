@@ -303,17 +303,18 @@ describe('tiling chats', () => {
 			window.id, layout.surface(window.tabs.activeId),
 		]);
 		expect(visible).toMatchObject([
-			['window-files', { type: 'chat', chatId: 'retained' }],
 			['window-main', { type: 'chat', chatId: 'new' }],
+			['window-files', { type: 'chat', chatId: 'retained' }],
 		]);
 		const retainedChat = chatViewSurfaceId('window-files');
 		const openFile = fileSurfaceId('open');
 		const movedFile = fileSurfaceId('edited');
 		expect(windowTabs(layout.snapshot, 'window-files')).toEqual({
 			activeId: retainedChat,
-			order: [retainedChat, CANONICAL_FILES_SURFACE_ID, openFile, movedFile],
-			mru: [retainedChat, openFile, CANONICAL_FILES_SURFACE_ID, movedFile],
+			order: [retainedChat, CANONICAL_FILES_SURFACE_ID, openFile],
+			mru: [retainedChat, openFile, CANONICAL_FILES_SURFACE_ID],
 		});
+		expect(windowTabs(layout.snapshot, 'window-main').order.at(-1)).toBe(movedFile);
 		expect(files.destroy).not.toHaveBeenCalled();
 	});
 
@@ -327,6 +328,17 @@ describe('tiling chats', () => {
 		expect(layout.revision).toBe(revision);
 		guard.resolve(false);
 		expect(await closing).toBe(false);
+	});
+
+	it('fits the current host at publication time and keeps focus on a surviving pane', async () => {
+		const options = { hostSize: { width: 360, height: 240 } };
+		const { coordinator } = createHarness(options);
+		await coordinator.showChatInWindow('focused', 'window-files');
+		const tiling = coordinator.tileChats(['one', 'focused', 'three', 'four']);
+		options.hostSize = { width: 1440, height: 240 };
+		expect(await tiling).toBe(4);
+		expect(coordinator.currentWindowId).toBe('window-files');
+		expect(coordinator.focusedChatId).toBe('focused');
 	});
 
 	it('does nothing for an empty list and presents only the first chat on mobile', async () => {
