@@ -178,6 +178,14 @@ function setup(
 	return { api, onOpenChat, controller, getDetail, getRuns, getRun, notifyError, panel };
 }
 
+async function startPendingPost(api: ReturnType<typeof setup>['api']) {
+	const request = Promise.withResolvers<PullRequestReviewsSnapshot>();
+	api.post.mockReturnValueOnce(request.promise);
+	await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
+	await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+	return request;
+}
+
 describe('PullRequestsPanel', () => {
 	describe('detail refresh lifecycle', () => {
 		let settings: ReturnType<typeof createLocalSettingsStore>;
@@ -987,16 +995,14 @@ describe('PullRequestsPanel', () => {
 	});
 
 	it('retains an in-flight post and its error when the panel moves to another window', async () => {
-		const { controller, onOpenChat, api, panel } = setup();
-		const request = Promise.withResolvers<typeof snapshot>();
-		api.post.mockImplementationOnce(() => request.promise);
-		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
-		await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+		const { controller, onOpenChat, api, panel, notifyError } = setup();
+		const request = await startPendingPost(api);
 		await panel.unmount();
 		render(PullRequestsPanel, { controller, onOpenChat });
 		expect(screen.getByRole('button', { name: /Posting/ })).toHaveProperty('disabled', true);
 		request.reject(new Error('Posting failed'));
 		await screen.findByText('Posting failed');
+		expect(notifyError).not.toHaveBeenCalled();
 		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', false);
 		expect(api.post).toHaveBeenCalledTimes(1);
 	});
@@ -1009,10 +1015,7 @@ describe('PullRequestsPanel', () => {
 			}),
 			getRun: async (id) => id === older.id ? older : run,
 		});
-		const request = Promise.withResolvers<typeof snapshot>();
-		api.post.mockImplementationOnce(() => request.promise);
-		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
-		await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+		const request = await startPendingPost(api);
 		if (target === 'run') controller.selectRun(older.id);
 		else controller.select(snapshot.inbox[1]);
 		await panel.unmount();
@@ -1029,10 +1032,7 @@ describe('PullRequestsPanel', () => {
 
 	it.each(['hidden panel', 'different tab'] as const)('notifies a post failure with a %s', async (view) => {
 		const { controller, api, notifyError } = setup();
-		const request = Promise.withResolvers<typeof snapshot>();
-		api.post.mockImplementationOnce(() => request.promise);
-		await fireEvent.click((await screen.findAllByText('Change 7'))[0]);
-		await fireEvent.click(await screen.findByRole('button', { name: 'Post to GitHub' }));
+		const request = await startPendingPost(api);
 		if (view === 'hidden panel') controller.setPresentationVisible(false);
 		else controller.tab = 'checks';
 		request.reject(new Error('Post failed while away'));

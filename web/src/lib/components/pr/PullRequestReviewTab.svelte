@@ -96,11 +96,13 @@
 						onclick={() => void controller.performReviewAction('post')}
 					>
 						<Send class="h-3.5 w-3.5" />
-						{pending?.kind === 'post' && pending.runId === run.id
-							? m.pull_request_review_posting()
-							: run.post.status === 'posted'
-								? m.pull_request_review_retry_cleanup()
-								: m.pull_request_review_post()}
+						{#if pending?.kind === 'post' && pending.runId === run.id}
+							{m.pull_request_review_posting()}
+						{:else if run.post.status === 'posted'}
+							{m.pull_request_review_retry_cleanup()}
+						{:else}
+							{m.pull_request_review_post()}
+						{/if}
 					</button>
 				{/if}
 				{#if active && entry.latestRun}

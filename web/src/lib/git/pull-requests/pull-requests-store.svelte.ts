@@ -127,10 +127,11 @@ export class PullRequestsStore implements PortableSingletonController {
 			else await this.reviews.post(target.runId);
 		} catch (error) {
 			const message = errorMessage(error, m.pull_request_review_action_failed());
-			if (key === this.selectedKey) this.#actionFailure = { runId: target.runId, message };
-			const visibleInline = this.#visible && this.tab === 'review' &&
-				key === this.selectedKey && this.reviewActionError !== null;
-			if (!visibleInline) this.#deps.notifyError?.(message);
+			if (key === this.selectedKey) {
+				this.#actionFailure = { runId: target.runId, message };
+				if (this.#visible && this.tab === 'review' && this.reviewActionError !== null) return;
+			}
+			this.#deps.notifyError?.(message);
 		} finally {
 			this.#pendingActions.delete(key);
 		}
