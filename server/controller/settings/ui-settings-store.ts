@@ -1,7 +1,6 @@
 import {
   GENERATION_UI_SETTING_KEYS,
   generationSelectionExecutorError,
-  parseExecutorProjectPreferences,
   parseExecutorProjectPreferencesPatch,
 } from '../../../common/settings.js';
 import {
@@ -11,10 +10,13 @@ import {
 } from './settings-shared.js';
 import {
   normalizePathSettings,
+  readExecutorProjectPreferences,
   sanitizeExecutionDefaultsSettings,
 } from './startup-recents.js';
 import type { ProjectSettings, SettingsStoreContext } from './types.js';
 import { ValidationDomainError } from '../../common/domain-error.js';
+import { reconcileProjectPins } from '../../../common/project-pins.js';
+import { isRecord } from '../../../common/json.js';
 
 export class UiSettingsStore {
   #context: SettingsStoreContext;
@@ -53,10 +55,22 @@ export class UiSettingsStore {
     return this.#context.mutate(async () => {
       const settings = this.#context.readSettings();
       const next = { ...(settings.paths || {}), ...patch };
+      if (Array.isArray(patch.pinnedProjectPaths)) {
+        const pins = reconcileProjectPins(settings.paths.pinnedProjectPaths, patch.pinnedProjectPaths, next.recentProjectPaths);
+        next.pinnedProjectPaths = pins.pinnedPaths;
+        next.recentProjectPaths = pins.recentPaths;
+      }
       if (executorPatches) {
-        const byExecutor = { ...parseExecutorProjectPreferences(settings.paths.byExecutor) };
+        if (settings.paths.byExecutor !== undefined && !isRecord(settings.paths.byExecutor)) {
+          throw new Error('Invalid executor project preferences');
+        }
+        const byExecutor = { ...(isRecord(settings.paths.byExecutor) ? settings.paths.byExecutor : {}) };
+        const validPreferences = readExecutorProjectPreferences(byExecutor);
         for (const [executorId, fields] of Object.entries(executorPatches)) {
-          byExecutor[executorId] = { ...(byExecutor[executorId] ?? { recentPaths: [], pinnedPaths: [] }), ...fields };
+          if (executorId in byExecutor && !validPreferences[executorId]) throw new Error('Invalid executor project preferences');
+          const previous = validPreferences[executorId] ?? { recentPaths: [], pinnedPaths: [] };
+          byExecutor[executorId] = { ...previous, ...fields, ...(fields.pinnedPaths === undefined ? {} :
+            reconcileProjectPins(previous.pinnedPaths, fields.pinnedPaths, previous.recentPaths)) };
         }
         next.byExecutor = byExecutor;
       }

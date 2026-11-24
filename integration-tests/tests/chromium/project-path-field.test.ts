@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { measureDialogHeightChange, pauseDialogResize } from '../../support/dialog-resize.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`project path field retains keyboard, pin and nested picker behavior (${executionBackend})`, async () => {
+  test(`project worktree selection retains keyboard, pin and nested picker behavior (${executionBackend})`, async () => {
     await withChromiumFixture(`project-path-field-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors, consumeExpectedBrowserErrors }, phase) => {
       const project = join(integration.executionDirs.project, 'repository ');
       await mkdir(project);
@@ -27,32 +27,38 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         });
         catalog = response.snapshot;
       }
+      await integration.client.put('/api/v1/app/settings', { paths: integration.client.executorId === 'local'
+        ? { recentProjectPaths: [project], pinnedProjectPaths: [] }
+        : { byExecutor: { [integration.client.executorId]: { pinnedPaths: [project] } } },
+      });
       await page.goto(integration.garcon.baseUrl);
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
-      const input = page.locator('#project-path-input');
-      const field = page.locator('[data-slot="project-path-field"]');
-      await browserExpect(input).toBeVisible();
-      if (executionBackend !== 'in-process') {
-        await page.getByRole('dialog').locator('[data-executor-picker]').click();
-        await page.getByRole('menuitemradio', { name: 'Integration worker', exact: true }).click();
-      }
-      await input.fill(project);
-      const prompt = page.getByPlaceholder('How can I help you today?');
-      await browserExpect(field.locator('.text-status-success-foreground')).toBeVisible();
-      await input.press('Enter');
+      const landing = page.getByRole('dialog', { name: 'New Chat', exact: true });
+      await browserExpect(landing).toBeVisible();
+      const projectCard = landing.getByRole('button', { name: integration.client.executorId === 'local' ? project : `Integration worker: ${project}`, exact: true });
+      await projectCard.focus();
+      await page.keyboard.press('Enter');
+      const field = landing.getByRole('region', { name: 'Worktrees', exact: true });
+      const primary = field.getByRole('radio', { name: /^main/ });
+      await browserExpect(primary).toBeChecked();
+      const prompt = landing.getByPlaceholder('How can I help you today?');
       await browserExpect(prompt).toBeFocused();
-      const inputBounds = (await input.boundingBox())!;
-      await page.mouse.click(inputBounds.x + inputBounds.width - 12, inputBounds.y + inputBounds.height / 2);
-      await browserExpect(input).toBeFocused();
-      await input.press('Enter');
-      await browserExpect(prompt).toBeFocused();
-      await browserExpect(page.getByRole('dialog', { name: 'Select Directory', exact: true })).toHaveCount(0);
+      await prompt.fill('Preserve this worktree draft');
+      await browserExpect(landing.locator('#project-path-input')).toHaveCount(0);
 
       phase('pin the owning executor path');
-      await page.getByRole('button', { name: 'Pin project path', exact: true }).click();
-      await browserExpect(page.getByRole('button', { name: 'Unpin project path', exact: true })).toHaveAttribute('aria-busy', 'false');
-      await browserExpect(input).not.toHaveAttribute('readonly');
-      await browserExpect(page.getByRole('dialog').getByRole('button', { name: project, exact: true })).toBeVisible();
+      const projectActions = projectCard.locator('..').getByRole('button', { name: /^Project actions:/ });
+      if (integration.client.executorId !== 'local') {
+        await projectActions.click();
+        await page.getByRole('menuitem', { name: 'Unpin', exact: true }).click();
+        await browserExpect(projectActions).toHaveAttribute('aria-busy', 'false');
+        await browserExpect(projectCard.getByRole('img', { name: 'Pinned', exact: true })).toHaveCount(0);
+      }
+      await projectActions.click();
+      await page.getByRole('menuitem', { name: 'Pin', exact: true }).click();
+      await browserExpect(projectActions).toHaveAttribute('aria-busy', 'false');
+      await browserExpect(projectCard.getByRole('img', { name: 'Pinned', exact: true })).toBeVisible();
+      await browserExpect(landing.getByRole('button', { name: 'Choose folder', exact: true })).toBeEnabled();
+      await browserExpect(projectCard).toHaveAttribute('aria-pressed', 'true');
 
       phase('preamble eligibility distinguishes the spaced project from its sibling');
       const assertExactPreambleScope = async () => {
@@ -65,29 +71,34 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       };
       await assertExactPreambleScope();
 
-      phase('nested picker Escape leaves the new-chat form open');
-      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
-      const picker = page.getByRole('dialog', { name: 'Select worktree', exact: true });
-      await browserExpect(picker.getByRole('option', { name: /feature/ })).toBeVisible();
+      phase('nested folder browser Escape leaves the new-chat form open');
+      await landing.getByRole('button', { name: 'Choose folder', exact: true }).click();
+      const picker = landing.getByRole('dialog', { name: 'Select Directory', exact: true });
+      await browserExpect(picker.locator('[aria-current="location"]')).toHaveText(basename(integration.executionDirs.project));
+      await browserExpect(picker.getByRole('button', { name: 'feature', exact: true })).toHaveCount(0);
       await page.keyboard.press('Escape');
       await browserExpect(picker).toHaveCount(0);
-      await browserExpect(input).toHaveValue(project);
+      await browserExpect(landing).toBeVisible();
+      await browserExpect(primary).toBeChecked();
 
       phase('worktree selection updates only the draft');
-      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
+      const feature = field.getByRole('radio', { name: /feature/ });
+      await feature.click();
+      await browserExpect(feature).toBeChecked();
+      await browserExpect(prompt).toHaveValue('Preserve this worktree draft');
+      const worktreePicker = page.getByRole('dialog', { name: 'Select worktree', exact: true });
       if (executionBackend === 'in-process') {
-        const create = picker.getByRole('button', { name: 'New worktree', exact: true });
+        await field.getByRole('button', { name: 'New worktree', exact: true }).click();
+        const create = worktreePicker.getByRole('button', { name: 'New worktree', exact: true });
         await browserExpect(create).toBeEnabled();
         const resize = await create.evaluateHandle(pauseDialogResize);
         await page.getByRole('dialog', { name: 'New worktree', exact: true }).getByRole('button', { name: 'Close', exact: true }).click();
         await browserExpect.poll(() => resize.evaluate(animation => animation.playState)).toBe('idle');
         await resize.dispose();
-        await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
+        // The shared picker closes outright, so a subsequent Escape would dismiss New Chat.
+        await browserExpect(worktreePicker).toHaveCount(0);
+        await browserExpect(landing).toBeVisible();
       }
-      await picker.getByRole('option', { name: /feature/ }).click();
-      await browserExpect(input).toHaveValue(worktree);
-      await input.press('Enter');
-      await browserExpect(prompt).toBeFocused();
       expect((await integration.client.listChats()).sessions).toEqual([]);
       await assertExactPreambleScope();
 
@@ -100,16 +111,15 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: touch });
         await page.setViewportSize({ width, height: 900 });
         if (touch) {
-          expect(await input.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+          const enterPath = landing.getByRole('button', { name: 'Enter path', exact: true });
+          if (await enterPath.isVisible()) await enterPath.click();
+          expect(await landing.getByRole('textbox', { name: 'Project Path', exact: true }).evaluate(element =>
+            parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
         }
-        const link = field.getByRole('button', { name: 'Select a different worktree' });
-        const { leftOffset, verticalGap } = await link.evaluate(button => {
-          const path = button.closest('[data-slot="project-path-field"]')!.querySelector('input')!.getBoundingClientRect();
-          const bounds = button.getBoundingClientRect();
-          return { leftOffset: bounds.left - path.left, verticalGap: bounds.top - path.bottom };
-        });
-        expect(Math.abs(leftOffset)).toBeLessThan(1);
-        expect(verticalGap).toBe(4);
+        await browserExpect.poll(() => field.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        for (const radio of await field.getByRole('radio').all()) {
+          await browserExpect.poll(async () => (await radio.locator('..').boundingBox())!.height).toBe(44);
+        }
         expect(await field.evaluate(element => {
           const fieldBounds = element.getBoundingClientRect();
           const controls = [...element.querySelectorAll('input, button')]
@@ -137,8 +147,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         expect(route.request().postDataJSON()).toEqual({ description: 'Synthetic worktree naming task', previousName: '' });
         await route.fulfill({ json: { name: 'picker-review' } });
       });
-      await page.getByRole('button', { name: 'Select a different worktree', exact: true }).click();
-      const newWorktree = picker.getByRole('button', { name: 'New worktree', exact: true });
+      await field.getByRole('button', { name: 'New worktree', exact: true }).click();
+      const newWorktree = worktreePicker.getByRole('button', { name: 'New worktree', exact: true });
       if (executionBackend === 'in-process') {
         await browserExpect(newWorktree).toBeEnabled();
         const { before, middle, after } = await newWorktree.evaluate(measureDialogHeightChange);
@@ -153,7 +163,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(requests).toBe(0);
       await create.getByRole('button', { name: 'Generate name' }).click();
       await browserExpect(name).toHaveValue('picker-review');
-      await browserExpect(input).toHaveValue(worktree);
+      await browserExpect(feature).toBeChecked();
       if (executionBackend === 'remote-controller-dials') {
         phase('the same executor reconnects without discarding the create draft');
         const { client } = integration;
@@ -189,7 +199,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         consumeExpectedBrowserErrors(['console.error: Failed to load resource: the server responded with a status of 409 (Conflict)']);
       }
       await create.getByRole('button', { name: 'Create worktree' }).click();
-      await browserExpect(input).toHaveValue(join(project, '.worktrees', 'picker-review'));
+      await browserExpect(field.getByRole('radio', { name: /picker-review/ })).toBeChecked();
       expect(requests).toBe(1);
       assertNoBrowserErrors();
     }, undefined, { executionBackend, projectRoots: 'separate' });

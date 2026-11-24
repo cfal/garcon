@@ -5,6 +5,7 @@ import {
 	clearTelegramRecipient,
 	getRemoteSettings,
 	resolveTelegramRecipientLink,
+	removeProjectPathFromList,
 	saveTelegramBotToken,
 	sendTelegramTest,
 	testTelegramBotToken,
@@ -124,6 +125,22 @@ describe('settings API contract', () => {
 			configurationKey: 'saved-config-key',
 		});
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
+	});
+
+	it('removes a project through an executor-qualified identity-only DELETE and normalizes the snapshot', async () => {
+		const snapshot = makeSnapshot();
+		fetchMock.mockResolvedValue(jsonResponse({ success: true, settings: snapshot }));
+		const request = { executorId: '22222222-2222-4222-8222-222222222222', projectPath: '/projects/atlas ' };
+		await expect(removeProjectPathFromList(request)).resolves.toEqual({ success: true, settings: snapshot });
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/v1/app/settings/project-path');
+		expect(options.method).toBe('DELETE');
+		expect(JSON.parse(options.body)).toEqual(request);
+	});
+
+	it.each([null, {}, { success: false }, { success: true, settings: {} }])('rejects malformed project removal replies: %j', async payload => {
+		fetchMock.mockResolvedValue(jsonResponse(payload));
+		await expect(removeProjectPathFromList({ executorId: 'local', projectPath: '/project' })).rejects.toThrow('Invalid project path removal response');
 	});
 
 	it('preserves app title settings in remote settings payloads', async () => {

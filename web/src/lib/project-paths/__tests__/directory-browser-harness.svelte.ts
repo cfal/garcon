@@ -5,6 +5,7 @@ export interface DirectoryBrowserHarnessOptions {
 	executorId?: string;
 	executorContextKey?: string;
 	currentPath?: string;
+	initialDirectory?: string;
 	basePath?: string;
 	confirmsSelection?: boolean;
 	supportsCreation?: boolean;
@@ -20,6 +21,9 @@ export function openDirectoryBrowser(initial: DirectoryBrowserHarnessOptions = {
 	const selections: string[] = [];
 	let closes = 0;
 	const browser = new DirectoryBrowserState({
+		get initialDirectory() {
+			return initial.initialDirectory;
+		},
 		get executorId() {
 			return executorId;
 		},

@@ -7,6 +7,7 @@ import {
   type UpdateChatTitleResponse,
 } from '../../../common/chat-title-contracts.js';
 import { parseExecutorId } from '../../../common/executors.js';
+import { createProjectPathPreferenceRoutes } from './project-path-preferences.js';
 import {
   GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
   PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
@@ -406,6 +407,7 @@ export default function createWorkspaceRoutes(
       '/api/v1/app/settings': { GET: getAppSettings, PUT: withJsonBody(putAppSettings) },
       '/api/v1/app/generation/test': { POST: withJsonBody(postGenerationModelTest) },
     },
+    createProjectPathPreferenceRoutes({ settings, agents, telegramSettings, projectBasePath }),
     createTelegramRoutes(settings, agents, telegramNotifier, telegramSettings, projectBasePath),
     createFolderRoutes(settings),
     createSavedSearchRoutes(settings),

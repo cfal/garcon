@@ -30,7 +30,7 @@ test('font completion and cached font changes refit existing text without editin
         reduceMotion: true,
       });
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
-      await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+      await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
       await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
       const input = page.locator('[data-slot="new-chat-composer"] textarea');
       await input.evaluate((node: HTMLTextAreaElement) => {
@@ -97,7 +97,7 @@ test('composer grows a line at a time, shrinks, caps long drafts, and refits wra
 test('New Chat rests at one line and a scheduled prompt at three, and both fit their content', async () => {
   await withChromiumFixture('content-sized-prompt-forms', async ({ page, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
-    await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+    await page.getByRole('dialog', { name: 'New Chat', exact: true }).waitFor({ state: 'visible' });
     await page.getByRole('status', { name: 'Loading chat defaults...' }).waitFor({ state: 'detached' });
     const input = page.locator('[data-slot="new-chat-composer"] textarea');
     for (const width of [1440, 390]) {
@@ -142,6 +142,8 @@ test('New Chat rests at one line and a scheduled prompt at three, and both fit t
 test('ticket descriptions rest at three lines, grow with typing, and shrink on clear', async () => {
   await withChromiumFixture('content-sized-ticket-text', async ({ page, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await collapseCanonicalFilesWindow(page);
     await clickWorkspaceWindowAddAction(page, 'Open Tickets');
     for (const width of [1440, 390]) {
@@ -251,6 +253,8 @@ test('a wrapped draft is sized at its full width, not the width a scrollbar woul
 test('typing in a tall field leaves a scrolled dialog where it was', async () => {
   await withVisibleScrollbars('content-sized-dialog-scroll', async ({ page, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await collapseCanonicalFilesWindow(page);
     await clickWorkspaceWindowAddAction(page, 'Open Tickets');
     await page.setViewportSize({ width: 390, height: 520 });
@@ -286,6 +290,8 @@ test('typing in a tall field leaves a scrolled dialog where it was', async () =>
 test('measurement does not add a line when its reserved space makes a fitting parent scroll', async () => {
   await withVisibleScrollbars('content-sized-parent-scrollbar', async ({ page, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await collapseCanonicalFilesWindow(page);
     await clickWorkspaceWindowAddAction(page, 'Open Tickets');
     await page.getByRole('button', { name: 'New ticket', exact: true }).click();

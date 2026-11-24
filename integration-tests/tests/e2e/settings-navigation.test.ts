@@ -20,6 +20,7 @@ test.each([
     } });
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Settings');
@@ -64,6 +65,7 @@ test('a generation toggle cannot choose an agent for an incomplete saved remote 
     } });
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Settings');
@@ -86,6 +88,7 @@ test('one settings dialog holds app and server tabs and executor-owned sections 
   await withE2eFixture('settings-navigation', async (fixture) => {
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Settings');
@@ -161,6 +164,7 @@ test('an unrelated executor update preserves a Local OAuth code', async () => {
     });
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Settings');

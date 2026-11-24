@@ -54,6 +54,7 @@ describe("Lightpanda Tickets", () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1440, 900);
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
       await app.selectWorkspaceWindowSurface("Open Tickets");
       await fixture.page.waitForSelector('[data-ticket-id="G-1"]');
@@ -118,6 +119,7 @@ describe("Lightpanda Tickets", () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1440, 900);
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
       await app.selectWorkspaceWindowSurface("Open Tickets");
       await app.waitForText("No tickets yet");
@@ -155,6 +157,7 @@ describe("Lightpanda Tickets", () => {
         },
       });
       await fixture.page.reload({ waitUntil: [] });
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.page.waitForSelector(".ticket-recovery summary");
       await fixture.page.evaluate(() =>
         document.querySelector<HTMLElement>(".ticket-recovery summary")!.click(),
@@ -203,6 +206,7 @@ describe("Lightpanda Tickets", () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1440, 900);
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
       await app.selectWorkspaceWindowSurface("Open Tickets");
       await app.waitForText("No tickets yet");
@@ -350,6 +354,7 @@ describe("Lightpanda Tickets", () => {
         const app = new SpaDriver(fixture.page, fixture.integration);
         await app.setViewport(1440, 900);
         await app.open();
+        await app.dismissEmptyWorkspaceLanding();
         await fixture.waitForSpaWebSocket();
         await app.selectWorkspaceWindowSurface("Open Tickets");
         await app.waitForText("No tickets yet");

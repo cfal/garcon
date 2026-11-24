@@ -55,6 +55,7 @@ describe('Lightpanda minute scheduling', () => {
         await app.waitForText('Review A & B');
       };
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
       await openSchedules();
       await app.waitForText('Every 90 minutes');
@@ -146,6 +147,7 @@ describe('Lightpanda minute scheduling', () => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       await fixture.page.setViewport({ width: 1_280, height: 2_000 });
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
       await app.clickButton('More actions');
       await app.waitForMenuItemEnabled('Scheduled prompts');

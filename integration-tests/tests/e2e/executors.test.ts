@@ -67,6 +67,7 @@ test('Local chat remains usable when executor discovery fails at startup', async
     });
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
+    await app.dismissEmptyWorkspaceLanding();
     await fixture.waitForSpaWebSocket();
     await fixture.page.waitForFunction(() => document.documentElement.dataset.executorDiscoveryFailed === 'true');
     await app.startOpenAiDirectChat('Synthetic local request after discovery failure');
@@ -88,6 +89,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       const app = new SpaDriver(fixture.page, fixture.integration);
       await app.setViewport(1_440, 900);
       await app.open();
+      await app.dismissEmptyWorkspaceLanding();
       await fixture.waitForSpaWebSocket();
       await openExecutors(app);
       await app.clickButton('Add Executor');
@@ -146,13 +148,13 @@ test('normal app onboarding supports both directions and sends remote chat input
       await app.waitForButton('Integration Echo');
       await app.clickButton('Integration Echo');
       await fixture.page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some((button) => button.getAttribute('aria-label')?.startsWith('Direct (Chat Completions) /')));
-      await app.fill('[role="dialog"] input[aria-label="Project Path"]', inboundDirs.project);
+      await app.enterNewChatProjectPath(inboundDirs.project);
       const browsing = fixture.page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/files/browse' && new URL(response.url()).searchParams.get('executorId') === inbound.id);
-      await fixture.page.$eval('input[aria-label="Project Path"]', (element) => (element as HTMLInputElement).focus());
+      await app.clickDialogButton('Choose folder');
       expect((await browsing).status()).toBe(200);
       await app.waitForText('remote-folder');
       await fixture.page.$eval('[data-slot="directory-browser-dismiss"]', (element) => (element as HTMLElement).click());
-      expect(await app.hasButton('Select a different worktree')).toBe(false);
+      expect(await fixture.page.$$eval('[data-slot="new-chat-worktrees"] input[type="radio"]', rows => rows.length)).toBe(0);
       const prompt = 'Synthetic remote request @context.txt';
       await app.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', prompt);
       await app.waitForDialogButtonEnabled('Start session');

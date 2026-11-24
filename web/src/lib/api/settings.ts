@@ -14,6 +14,11 @@ import type {
 	UpdateChatTitleRequest,
 	UpdateChatTitleResponse,
 } from '$shared/chat-title-contracts';
+import {
+	parseRemoveProjectPathResponse,
+	type RemoveProjectPathRequest,
+	type RemoveProjectPathResponse,
+} from '$shared/project-path-preferences';
 
 const GENERATION_MODEL_TEST_TIMEOUT_MS = 120_000;
 
@@ -51,6 +56,16 @@ export async function updateRemoteSettings(
 		throw new Error('Invalid remote settings update response');
 	}
 	return { ...payload, settings: snapshot };
+}
+
+/** Removes a saved project entry without replacing cached preference arrays. */
+export async function removeProjectPathFromList(
+	request: RemoveProjectPathRequest,
+): Promise<RemoveProjectPathResponse> {
+	const payload = await apiDelete<unknown>('/api/v1/app/settings/project-path', request);
+	const response = parseRemoveProjectPathResponse(payload);
+	if (!response) throw new Error('Invalid project path removal response');
+	return response;
 }
 
 /** Tests the saved effective model for a generation target. */

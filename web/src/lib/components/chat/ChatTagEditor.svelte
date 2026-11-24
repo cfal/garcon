@@ -11,9 +11,10 @@
 		onAdd: (raw: string) => boolean;
 		onRemove: (tag: string) => void;
 		onClose: () => void;
+		presentation?: 'standalone' | 'session-row';
 	}
 
-	let { tags, knownTags, open, onAdd, onRemove, onClose }: Props = $props();
+	let { tags, knownTags, open, onAdd, onRemove, onClose, presentation = 'standalone' }: Props = $props();
 	let inputValue = $state('');
 	let inputRef = $state<HTMLInputElement | null>(null);
 
@@ -61,30 +62,31 @@
 </script>
 
 {#if open || tags.length > 0}
-	<div class="space-y-2">
-		<div class="flex flex-wrap items-center gap-1.5">
+	<div class={presentation === 'session-row' ? 'min-w-[min(120px,100%)] flex-1' : 'space-y-2'}>
+		<div class="flex min-w-0 flex-wrap items-center gap-1.5">
 			{#each tags as tag (tag)}
 				<button
 					type="button"
-					class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {getTagColorClasses(
-						tag,
-					)}"
+					class="inline-flex min-w-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium hover:opacity-80 transition-opacity {presentation === 'session-row'
+						? 'max-w-36 border-border bg-muted text-foreground'
+						: 'max-w-full ' + getTagColorClasses(tag)}"
 					onclick={() => onRemove(tag)}
 					aria-label={m.sidebar_tags_remove({ tag })}
+					title={tag}
 				>
-					{tag}
-					<X class="w-3 h-3" aria-hidden="true" />
+					<span class="min-w-0 truncate">{tag}</span>
+					<X class="size-3 shrink-0" aria-hidden="true" />
 				</button>
 			{/each}
 			{#if open}
-				<div class="relative flex-1 min-w-[120px]">
+				<div class="relative min-w-[min(120px,100%)] max-w-full flex-1">
 					<input
 						bind:this={inputRef}
 						type="text"
 						bind:value={inputValue}
 						onkeydown={handleKeydown}
 						placeholder={m.chat_new_chat_tags_placeholder()}
-						class="w-full px-2 py-1 text-xs bg-transparent border-none outline-none placeholder-muted-foreground/60 text-foreground"
+						class="w-full px-2 py-1 text-xs pointer-coarse:text-base bg-transparent border-none outline-none placeholder-muted-foreground/60 text-foreground"
 					/>
 					{#if suggestions.length > 0}
 						<div

@@ -2,6 +2,7 @@ import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { browseDirectory, createDirectory } from '$lib/api/files.js';
 import * as m from '$lib/paraglide/messages.js';
 import { errorMessage } from '$lib/utils/error-message.js';
+import { projectPathKey } from '$shared/project-path-preferences';
 import {
 	directoryNameProblem,
 	type DirectoryEntry,
@@ -21,6 +22,8 @@ export interface DirectoryBrowserStateOptions {
 	get executorContextKey(): string;
 	/** Path held by the owning field; blank starts at the base. */
 	get currentPath(): string;
+	/** Opens a selected directory before following subsequent field edits. */
+	get initialDirectory(): string | undefined;
 	/** Confines browsing and creation to this subtree. */
 	get basePath(): string;
 	/** Keeps navigation local until confirm() instead of publishing each step. */
@@ -65,6 +68,7 @@ function isFileError(error: unknown, errorCode: string): boolean {
 // base, a path ending in a separator, and a path the browser navigated to are
 // known directories, so they list themselves.
 function fieldView(typed: string, basePath: string, navigated: string | undefined): DirectoryView {
+	typed = projectPathKey(typed);
 	const directory = normalizeDirectoryPath(typed);
 	if (
 		typed === navigated ||
@@ -85,6 +89,7 @@ function fieldView(typed: string, basePath: string, navigated: string | undefine
 /** Browses, selects, and creates directories for one path field on one executor. */
 export class DirectoryBrowserState {
 	readonly #options: DirectoryBrowserStateOptions;
+	readonly #initialDirectory: string | undefined;
 	// `fallbacks` counts the steps this browser took away from a path that names
 	// no directory; zero marks a directory the user reached from a listing.
 	#navigation = $state.raw<(DirectoryTarget & { readonly fallbacks: number }) | null>(null);
@@ -108,13 +113,14 @@ export class DirectoryBrowserState {
 		this.#navigation?.executorId === this.#options.executorId ? this.#navigation : null,
 	);
 
-	// The confirming browser owns its location and filter; the other follows the field.
+	// A selected directory opens unfiltered; subsequent desktop edits complete the field.
 	readonly #view = $derived.by((): DirectoryView => {
 		const { basePath, currentPath, confirmsSelection } = this.#options;
 		const typed =
 			currentPath.trim() && isWithinBasePath(currentPath, basePath) ? currentPath : basePath;
 		const navigated = this.#currentNavigation?.directory;
-		if (!confirmsSelection) return fieldView(typed, basePath, navigated);
+		if (!confirmsSelection && currentPath !== this.#initialDirectory)
+			return fieldView(typed, basePath, navigated);
 		const directory = navigated ?? normalizeDirectoryPath(typed);
 		return { directory, query: this.#filterIn(directory).trim(), matchesAnywhere: true };
 	});
@@ -172,6 +178,7 @@ export class DirectoryBrowserState {
 
 	constructor(options: DirectoryBrowserStateOptions) {
 		this.#options = options;
+		this.#initialDirectory = options.initialDirectory;
 	}
 
 	get parentPath(): string | null {
@@ -346,13 +353,16 @@ export class DirectoryBrowserState {
 		return applies ? filter.text : '';
 	}
 
-	// The confirming browser opens on the field's path as a directory. A path that
+	// The confirming browser and selected-folder picker open on a directory. A path that
 	// names none opens a nearby ancestor instead. A missing name becomes the
 	// filter, so the list offers to create it; a file's name does not. Each step
 	// costs one listing, so a path missing more than a few levels opens the base.
 	#retreatToParent(error: unknown, executorId: string, directory: string): boolean {
 		const navigation = this.#currentNavigation;
-		if (!this.#options.confirmsSelection || navigation?.fallbacks === 0) return false;
+		if (
+			(!this.#options.confirmsSelection && this.#options.currentPath !== this.#initialDirectory) ||
+			navigation?.fallbacks === 0
+		) return false;
 		const missing = isFileError(error, 'FILE_NOT_FOUND');
 		if (!missing && !isFileError(error, 'FILE_DIRECTORY_REQUIRED')) return false;
 		const parent = parentDirectoryPath(directory, this.#options.basePath);

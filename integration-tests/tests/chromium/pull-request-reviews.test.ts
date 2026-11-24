@@ -57,6 +57,8 @@ test('reviews pull requests in chats and shows them in the Github inbox', async 
     // Wide enough for the inbox list and detail to stay side by side next to the review chat.
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().waitFor({ timeout: 30_000 });
     await collapseCanonicalFilesWindow(page);
     await page.locator('[data-workspace-window-add-group-trigger="github-views"]').first().click();

@@ -18,6 +18,8 @@ test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('provid
       if (new URL(request.url()).pathname === '/api/v1/api-providers' && ['POST', 'PUT'].includes(request.method())) saves++;
     });
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });

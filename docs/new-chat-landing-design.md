@@ -1,0 +1,110 @@
+# New chat landing screen
+
+An empty workspace opens New Chat after its chat list loads successfully, without
+requiring a click through the empty-chat placeholder. Closing the screen stays
+closed for that empty period; an existing chat or draft rearms the behavior for
+when the last chat is later removed. Explicit chat and ticket destinations and
+other active dialogs retain priority. Loading and failed lists do not trigger it.
+
+New Chat opens a full-page start screen with pinned and recent project folders above the
+existing composer. Projects and worktrees share a centered column capped at 28rem,
+narrower than the 36rem prompt and session-option rows on desktop. Narrow screens
+use the available width. The screen omits the introductory heading and subtitle;
+the visible New Chat title retains the dialog's accessible name. The session options
+and prompt sit at the bottom of the available screen, above its safe-area inset.
+Project/worktree selection sits above them, centered in the remaining space, with
+at least 48px separation on mobile and 64px on desktop. Short screens, expanded
+options and long project lists scroll naturally without hiding either section.
+Compact project cards use one column. Each card shows
+its folder name and a truncated path, with full paths on hover and
+executor labels when multiple machines are represented. Selecting a card selects
+both its executor and path without clearing the prompt or starting a chat.
+The main list shows at most five cards total without an internal scrollbar.
+Overflow stays saved in a floating More menu, shown only when needed as a compact
+bar matching the cards with a downward chevron. The menu opens below and closes
+on outside click or Escape, before the landing screen closes. Its compact cards
+only select projects. Selection closes More and moves the highlighted project
+to the top of the main list, preserving the remaining order. A selected project
+from a seed, folder browser or another executor is likewise brought into the
+main list when it would otherwise overflow. Selecting an already visible card
+preserves the primary order. Main-list cards
+have a three-dot menu on the right with Pin or Unpin and Remove from list.
+Only pinned cards show a rotated pin indicator. Selection uses highlighting without
+a checkmark. Pinning and removal preserve the selected project, worktree and prompt.
+Removal deletes that executor's saved pin and recent entry, retaining other owners
+and the folder itself. A removed selected card stays absent on reopen; choosing
+the folder explicitly or starting a session there can make it available again.
+
+Project cards reuse the existing executor-qualified pinned and recent paths. Pinned
+folders appear first; recent folders retain their recorded order. Each machine can
+have five pins, stored oldest first. A sixth pin unpins the oldest while retaining
+it in saved recents. Existing excess pins are likewise unpinned, never removed.
+Saved project recents are retained until explicitly removed. Duplicate drive-letter
+Windows paths with different slash styles appear once, retaining the pinned spelling.
+POSIX backslashes and exact whitespace remain significant. A selectable worktree
+list replaces the permanent directory text field. It lists worktrees for the selected
+project on its owning executor, including the primary checkout. Worktrees use smaller,
+flat rows with titles on the left and muted, root-abbreviated paths such as
+`…/garcon-ui` on the right. Full paths remain in hover titles and accessible labels.
+Selecting a row changes the new chat's target without clearing its prompt.
+The worktree header opens the shared worktree picker and its creation form.
+Creation retains the picker's name generation, reconnect handling and executor
+instance checks. Successful creation selects the new worktree on the current
+executor while retaining the selected parent project and prompt. The inline
+catalog owns discovery and selection; the shared picker owns creation outcomes.
+A muted Choose folder action sits at the top right of the saved-projects heading,
+at the same visual level. It reveals a manual path field and Garcon's executor-owned
+folder browser. Each opening lists the configured project root's subfolders;
+opening the browser alone does not change the selected project. Users can navigate
+folders or paste a full directory path. The existing field validation applies to
+manual paths, and Enter validates without starting a session. Desktop navigation
+selects the entered folder; mobile navigation requires Select this directory.
+Closing the browser leaves the path field available. Worktree selection uses the
+inline list without a separate picker button. Ordinary non-Git folders remain usable.
+The desktop dropdown includes a bottom check button that closes browsing without
+changing the current path, including while its listing loads or reports an error.
+Clicking outside also closes it. Mobile retains explicit directory confirmation.
+Mobile also offers Enter path directly, without opening the full-screen browser.
+An executor without Files exposes Enter path on every screen size and keeps the
+manual field editable. Only browsing and Tab completion require Files. Tab
+completes typed directories on the selected executor, updates selection and
+validation together, and resets its completion cycle when the user types.
+Typing retains the existing debounced validation and shows path errors even when
+the executor cannot provide Git services.
+This replaces the unsuccessful native-dialog attempt; no OS dialog is requested.
+Remove from list uses an executor-qualified settings operation that removes only
+the requested path under the settings mutation lock. Concurrent pin/recent updates
+remain intact. It adds no environment presets, executor RPC or WebSocket payloads.
+The forwarded CLI settings endpoint remains limited to transcript search enablement.
+
+The existing NewChatDialog remains the owner of open/close, focus containment,
+ticket prefills, draft creation and navigation. Its presentation fills the
+available viewport and returns to the previous workspace on Close or Escape.
+The form, prompt editor and model selector retain their owners. A focused project
+picker owns folder browsing and executor selection; the worktree list retains
+discovery and selection. The tag and preamble options sit below Worktrees as
+matching full-width, 44px outlined rows with muted icons and labels and add actions.
+Their empty labels read Add tags to session and Add preambles to session. Selected
+tags and the tag input appear inside the tag field; its label disappears once
+tags are selected. Selected preamble titles likewise replace the preamble label.
+The fields retain their icons and add controls. Tags wrap within their field when
+needed; preambles retain compact titles and overflow counts. Loading, error/retry,
+conditional Clear, tag editing and removal retain their existing behavior.
+Escape closes a nested picker, then tag editing, before the landing screen,
+restoring focus to the corresponding control at each level.
+The landing page scrolls within the keyboard-adjusted viewport on mobile.
+
+Worktree discovery uses the existing executor-qualified Git API. Loading, empty,
+error/retry, missing-path and offline states remain explicit. Target changes cancel
+and fence old requests; results from a different project, executor or connection
+generation cannot populate or select the current list. Worktree selection reuses
+the same path validation and admission gates as every other submit path.
+
+Project cards are hidden while their executor is offline or removed, without
+deleting its saved preferences or changing an unavailable selected target. Card identity
+includes the executor and path; identical paths on different machines remain
+distinct. The New Chat projects controller owns selection and readiness checks for both lists.
+
+Validation covers retained drafts, Local/remote identity, offline/live pin updates,
+worktree discovery/selection, stale responses, keyboard submission, close/reopen,
+nested dialogs, and narrow/wide layouts.

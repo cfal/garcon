@@ -3,6 +3,7 @@
 // the config payload used to start a session.
 
 import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
+import { projectPathKey } from '$shared/project-path-preferences';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { NewChatPathValidationController } from './new-chat-path-validation-controller.js';
@@ -11,6 +12,7 @@ import {
 	isSupportedChatAttachment,
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
+import { NewChatWorktreeState } from './new-chat-worktree-state.svelte';
 import { WorktreePickerSession } from '$lib/git/targets/worktree-picker-session.svelte.js';
 import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
@@ -75,6 +77,8 @@ export class NewChatFormState {
 
 	// Path
 	projectPath = $state('');
+	#selectedProjectPath = $state<string | null>(null);
+	#showProjectCard = $state(false);
 	#pinnedProjectPaths = $state<string[]>([]);
 	browseStartPath = $state('');
 	#localProjectBasePath = $state('/');
@@ -113,21 +117,42 @@ export class NewChatFormState {
 	// Git repo status from validate-start endpoint.
 	gitRepoStatus = $state<'unknown' | 'git' | 'non-git'>('unknown');
 
+	readonly worktrees: NewChatWorktreeState;
 	readonly worktreePicker = new WorktreePickerSession({
 		target: () => ({ executorId: this.executorId, projectPath: this.nonblankPath }),
 		servingContext: () => this.gitAvailable ? (this.#options.executors?.gitContextKey(this.executorId) ?? this.executorId) : null,
 		servingInstanceId: () => this.#options.executors?.get(this.executorId)?.instanceId ?? null,
-		select: (path) => this.selectProjectPath(path),
+		select: (path) => this.#selectWorktreePath(path),
 	});
 	// Images (delegated to shared ImageAttachmentState)
 	readonly #images = new ImageAttachmentState();
 
 	// Injected dependencies
 	readonly #options: NewChatFormStateOptions;
-	readonly #pathCompletion = new ProjectPathCompletionController(this);
+	readonly #pathCompletion: ProjectPathCompletionController;
 
 	constructor(options: NewChatFormStateOptions) {
 		this.#options = options;
+		const getForm = () => this;
+		// Publishes completion through the same identity and validation update as manual edits.
+		this.#pathCompletion = new ProjectPathCompletionController({
+			get executorId() { return getForm().executorId; },
+			get filesAvailable() { return getForm().filesAvailable; },
+			get pathContextKey() { return getForm().pathContextKey; },
+			get projectPath() { return getForm().projectPath; },
+			set projectPath(path) { getForm().editProjectPath(path); },
+			get showBrowser() { return getForm().showBrowser; },
+			set showBrowser(open) { getForm().showBrowser = open; },
+		});
+		this.worktrees = new NewChatWorktreeState({
+			getExecutorId: () => this.executorId,
+			getProjectPath: () => this.nonblankPath,
+			getContextKey: () => this.#worktreeContextKey,
+			getInstanceId: () => this.#options.executors?.get(this.executorId)?.instanceId ?? null,
+			isAvailable: () => this.#worktreesAvailable,
+			isSelectionDisabled: () => this.isUpdatingPinnedPath,
+			selectPath: (path) => this.#selectWorktreePath(path),
+		});
 		this.preambles = new NewChatPreambleSelectionState(this);
 	}
 
@@ -164,6 +189,17 @@ export class NewChatFormState {
 	get gitAvailable(): boolean {
 		return this.#options.executors?.gitAvailable(this.executorId) ?? this.isLocalExecutor;
 	}
+	get #worktreesAvailable(): boolean {
+		const bulk = this.#options.executors?.get(this.executorId)?.bulk;
+		return this.gitAvailable && (!bulk || bulk.availability === 'ready');
+	}
+	get #worktreeContextKey(): string {
+		return JSON.stringify([
+			this.pathContextKey,
+			this.gitAvailable,
+			this.#options.executors?.get(this.executorId)?.bulk?.availability,
+		]);
+	}
 	get executorReady(): boolean {
 		return this.#options.executors?.isReady(this.executorId) ?? true;
 	}
@@ -177,9 +213,12 @@ export class NewChatFormState {
 		if (executorId === this.executorId) return;
 		this.#executorModelCandidate ??= this.resolvedModelSelection;
 		this.executorId = executorId;
+		this.#selectedProjectPath = null;
+		this.#showProjectCard = false;
 		this.#catalogRefreshCompleted = false;
 		this.#startupSelectionAutomatic = false;
 		this.#pathValidation.clear();
+		this.worktrees.cancelLoad();
 		this.worktreePicker.close();
 		this.showBrowser = false;
 		this.resetTabCompletions();
@@ -203,6 +242,19 @@ export class NewChatFormState {
 
 	get nonblankPath(): string {
 		return this.projectPath.trim() ? this.projectPath : '';
+	}
+
+	get selectedProjectPath(): string {
+		return this.#selectedProjectPath ?? this.nonblankPath;
+	}
+
+	get projectCardPath(): string | null {
+		return this.#showProjectCard ? this.selectedProjectPath : null;
+	}
+
+	dismissProjectCard(path: string): void {
+		if (projectPathKey(path) === projectPathKey(this.selectedProjectPath))
+			this.#showProjectCard = false;
 	}
 
 	get isPinnedPath(): boolean {
@@ -270,7 +322,10 @@ export class NewChatFormState {
 
 	get resolvedModelSelection(): ResolvedModelSelection | null {
 		return resolveNewChatModelSelection(
-			this.#modelCatalog, this.agentId, this.modelValue, this.modelSelectionTarget,
+			this.#modelCatalog,
+			this.agentId,
+			this.modelValue,
+			this.modelSelectionTarget,
 		);
 	}
 
@@ -295,14 +350,19 @@ export class NewChatFormState {
 	}
 
 	get agentSelectionError(): string | null {
-		return this.settingsLoaded && this.modelCatalogValidated && !this.#selectableAgentIds.includes(this.agentId)
-			? m.chat_new_chat_errors_agent_unavailable() : null;
+		return this.settingsLoaded &&
+			this.modelCatalogValidated &&
+			!this.#selectableAgentIds.includes(this.agentId)
+			? m.chat_new_chat_errors_agent_unavailable()
+			: null;
 	}
 
 	get executionModeError(): string | null {
 		if (!this.modelCatalogValidated) return null;
-		if (!isPermissionModeSupported(this.permissionMode, this.permissionModes) ||
-			!isThinkingModeSupported(this.thinkingMode, this.thinkingModes)) {
+		if (
+			!isPermissionModeSupported(this.permissionMode, this.permissionModes) ||
+			!isThinkingModeSupported(this.thinkingMode, this.thinkingModes)
+		) {
 			return m.chat_new_chat_errors_execution_modes_unavailable();
 		}
 		return null;
@@ -551,12 +611,32 @@ export class NewChatFormState {
 		this.#images.revokeAll();
 	}
 
+	#selectWorktreePath(worktreePath: string): void {
+		const projectPath = this.selectedProjectPath;
+		const showProjectCard = this.#showProjectCard;
+		this.selectProjectPath(worktreePath);
+		this.#selectedProjectPath = projectPath;
+		this.#showProjectCard = showProjectCard;
+	}
+
 	// Path validation
 
 	selectProjectPath(path: string): void {
-		this.projectPath = path;
-		this.clearError();
+		this.resetTabCompletions();
+		this.#updateProjectPath(path);
 		this.#pathValidation.validateSelectedPath();
+	}
+
+	editProjectPath(path: string): void {
+		this.#updateProjectPath(path);
+		this.#pathValidation.validateChangedPath();
+	}
+
+	#updateProjectPath(path: string): void {
+		this.projectPath = path;
+		this.#selectedProjectPath = path;
+		this.#showProjectCard = true;
+		this.clearError();
 	}
 
 	validateChangedPath(): void {
@@ -620,6 +700,7 @@ export class NewChatFormState {
 	}
 
 	dispose(): void {
+		this.worktrees.cancelLoad();
 		this.worktreePicker.close();
 		this.#pathCompletion.reset();
 		this.#pathValidation.dispose();
@@ -645,7 +726,13 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
-		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.executionModeError || this.attachmentError)
+		if (
+			!this.modelCatalogValidated ||
+			this.modelSelectionPending ||
+			this.modelSelectionError ||
+			this.executionModeError ||
+			this.attachmentError
+		)
 			return null;
 		if (!this.nonblankPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
@@ -704,6 +791,8 @@ export class NewChatFormState {
 			modelProtocol: seed.modelProtocol,
 		});
 		this.projectPath = seed.projectPath;
+		this.#selectedProjectPath = null;
+		this.#showProjectCard = true;
 		this.restoreExecutionModes(seed.permissionMode, seed.thinkingMode);
 		this.replaceAgentSettingsById(seed.agentSettingsById);
 		this.chatTags = [...seed.tags];
@@ -714,6 +803,8 @@ export class NewChatFormState {
 
 	/** Resets form state when the dialog opens. An explicit prefill wins over the retained draft. */
 	reseed(prefill: string, prospectiveChatId?: ChatId): void {
+		this.#selectedProjectPath = null;
+		this.#showProjectCard = false;
 		this.#pathCompletion.reset();
 		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;
@@ -723,6 +814,7 @@ export class NewChatFormState {
 		this.showBrowser = false;
 		this.hasAutoOpened = false;
 		this.gitRepoStatus = 'unknown';
+		this.worktrees.clear();
 		this.worktreePicker.close();
 		this.chatTags = [];
 		this.showTagInput = false;

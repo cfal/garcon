@@ -14,6 +14,8 @@ test('keeps the mobile shell full height across non-keyboard viewport discrepanc
       });
     });
     await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     const shell = page.locator('.mobile-shell');
     const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
     const menu = page.locator('[data-mobile-current-chat-menu]').getByRole('button');
@@ -60,6 +62,8 @@ test('keeps the mobile shell full height across non-keyboard viewport discrepanc
     });
     await assertFullHeight();
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await assertFullHeight();
     fixture.assertNoBrowserErrors();
   });
@@ -156,6 +160,8 @@ test('keeps mobile workspace commands reachable before selecting a chat', async 
   await withChromiumFixture('mobile-workspace-navigation-empty', async ({ page, integration }) => {
     await page.setViewportSize({ width: 320, height: 844 });
     await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
     for (const [label, selector] of [
       ['Open Chat Map', '[data-chat-map-panel]'],
@@ -171,6 +177,7 @@ test('keeps mobile workspace commands reachable before selecting a chat', async 
       expect(await page.locator('[data-composer-shell]').isVisible()).toBe(false);
     }
     await page.getByRole('button', { name: 'New Chat', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Project Path', exact: true }).waitFor();
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Choose folder', exact: true }).waitFor();
   });
 }, 120_000);

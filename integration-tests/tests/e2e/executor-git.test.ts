@@ -372,21 +372,21 @@ test('New Chat selects a worktree from its chosen executor', async () => {
     await app.clickButton('Chat Completions');
     await app.waitForButton('Integration Echo');
     await app.clickButton('Integration Echo');
-    await app.fill('[role="dialog"] input[aria-label="Project Path"]', executionDirs.project);
-    await app.waitForButton('Select a different worktree');
+    await app.enterNewChatProjectPath(executionDirs.project);
+    await app.waitForButtonEnabled('Refresh worktrees');
     const listing = fixture.page.waitForResponse(response => {
       const url = new URL(response.url());
       return url.pathname === '/api/v1/git/worktrees' && url.searchParams.get('executorId') === client.executorId;
     });
-    await app.clickButton('Select a different worktree');
+    await app.clickButton('Refresh worktrees');
     expect((await listing).status()).toBe(200);
-    await fixture.page.waitForFunction(path => [...document.querySelectorAll('[data-worktree-index]')]
-      .some(element => element.textContent?.includes(path)), {}, worktree);
+    await fixture.page.waitForFunction(path => [...document.querySelectorAll<HTMLInputElement>('[data-slot="new-chat-worktrees"] input[type="radio"]')]
+      .some(element => element.value === path), {}, worktree);
     await fixture.page.evaluate(path => {
-      const button = [...document.querySelectorAll<HTMLButtonElement>('[data-worktree-index]')]
-        .find(element => element.textContent?.includes(path));
-      if (!button) throw new Error('Remote worktree not listed');
-      button.click();
+      const radio = [...document.querySelectorAll<HTMLInputElement>('[data-slot="new-chat-worktrees"] input[type="radio"]')]
+        .find(element => element.value === path);
+      if (!radio) throw new Error('Remote worktree not listed');
+      radio.click();
     }, worktree);
     expect(await fixture.page.$eval('input[aria-label="Project Path"]', element => (element as HTMLInputElement).value)).toBe(worktree);
     await app.fill('[role="dialog"] textarea[placeholder="How can I help you today?"]', 'Synthetic remote worktree chat');

@@ -27,6 +27,7 @@
 			executorId: string;
 			executorContextKey: string;
 			currentPath: string;
+			initialDirectory?: string;
 			basePath: string;
 			isMobile: boolean;
 			onSelect: (path: string) => void;
@@ -162,6 +163,7 @@
 					executorId={browser.executorId}
 					executorContextKey={browser.executorContextKey}
 					currentPath={browser.currentPath}
+					initialDirectory={browser.initialDirectory}
 					basePath={browser.basePath}
 					isMobile={browser.isMobile}
 					onSelect={browser.onSelect}

@@ -52,6 +52,35 @@ export class SpaDriver {
     await this.waitForSelectedChat(chatId);
   }
 
+  async dismissEmptyWorkspaceLanding(): Promise<void> {
+    if ((await this.#integration.client.listChats()).total !== 0) return;
+    await this.#page.waitForSelector('[data-new-chat-landing="true"]');
+    await this.clickDialogButton('Close');
+    await this.#page.waitForFunction(() => document.querySelector('[data-new-chat-landing="true"]') === null);
+  }
+
+  async revealNewChatProjectPath(): Promise<void> {
+    if (await this.#page.$('[data-new-chat-landing="true"] input[aria-label="Project Path"]')) return;
+    const manualEntry = await this.#page.evaluate(() => [...document.querySelectorAll('[data-new-chat-landing="true"] button')]
+      .some(button => button.textContent?.trim() === 'Enter path'));
+    await this.clickDialogButton(manualEntry ? 'Enter path' : 'Choose folder');
+    await this.#page.waitForSelector('[data-new-chat-landing="true"] input[aria-label="Project Path"]');
+    if (!manualEntry) {
+      await this.#page.$eval('[data-new-chat-landing="true"] input[aria-label="Project Path"]', element => element.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape', bubbles: true, cancelable: true,
+      })));
+    }
+  }
+
+  async enterNewChatProjectPath(path: string): Promise<void> {
+    await this.revealNewChatProjectPath();
+    const selector = '[data-new-chat-landing="true"] input[aria-label="Project Path"]';
+    await this.fill(selector, path);
+    await this.#page.$eval(selector, element => element.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    })));
+  }
+
   async #openUrl(url: string): Promise<void> {
     const response = await this.#page.goto(url, {
       // Lightpanda 0.3.5 executes the document but does not consistently report
@@ -154,13 +183,7 @@ export class SpaDriver {
     await this.ensureDirectModelSelected(input);
 
     const requestedProjectPath = input.projectPath ?? this.#integration.dirs.project;
-    const projectPath = await this.#page.$eval(
-      '[role="dialog"] input[aria-label="Project Path"]',
-      (element) => (element as HTMLInputElement).value,
-    );
-    if (projectPath !== requestedProjectPath) {
-      await this.fill('[role="dialog"] input[aria-label="Project Path"]', requestedProjectPath);
-    }
+    await this.enterNewChatProjectPath(requestedProjectPath);
     await this.fill(
       '[role="dialog"] textarea[placeholder="How can I help you today?"]',
       input.content,

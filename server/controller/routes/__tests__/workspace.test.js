@@ -17,6 +17,7 @@ beforeEach(() => {
 it.each([
   ['/api/v1/app/session-name', 'PUT'],
   ['/api/v1/app/settings', 'PUT'],
+  ['/api/v1/app/settings/project-path', 'DELETE'],
   ['/api/v1/app/generation/test', 'POST'],
   ['/api/v1/app/telegram/token', 'PUT'],
   ['/api/v1/app/folders', 'POST'],

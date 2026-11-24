@@ -36,7 +36,6 @@
 		getWs,
 		getExecutors,
 		getLocalSettings,
-		getRemoteSettings,
 		getNotifications,
 		getSidebarSearch,
 		getWorkspaceCoordinator,
@@ -47,7 +46,7 @@
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
-	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
+	import { isBareChatRoute, restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
 	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
 	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
@@ -59,12 +58,8 @@
 	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
 	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
 	import HandoffForkDialog from '$lib/components/chat/HandoffForkDialog.svelte';
-	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
+	import AppShellProjectPathDialog from './AppShellProjectPathDialog.svelte';
 	import ChatParentDialog from '$lib/components/chat/ChatParentDialog.svelte';
-	import {
-		executorPinnedProjectPaths,
-		togglePinnedProjectPathOptimistically,
-	} from '$lib/project-paths/pinned-project-path-settings.js';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import SidebarSearchDialogs from '$lib/components/sidebar/search/SidebarSearchDialogs.svelte';
@@ -79,6 +74,7 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
+	import { bindEmptyWorkspaceLanding } from './empty-workspace-landing-binding.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -90,7 +86,6 @@
 	const ws = getWs();
 	const executors = getExecutors();
 	const localSettings = getLocalSettings();
-	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const singletonSurfaces = getSingletonSurfaces();
 	const routeTicketId = $derived(selectedTicketFromUrl(page.url));
@@ -259,6 +254,17 @@
 				error instanceof Error ? error.message : m.notifications_delete_chat_failed(),
 			);
 		},
+	});
+	bindEmptyWorkspaceLanding({
+		openNewChat: handleNewChat,
+		sessions, transientLayers,
+		shell: appShell,
+		getNavigation: () => ({
+			isBareRoute: isBareChatRoute(appPathname(page.url.pathname)),
+			hasNavigationTarget: Boolean(
+				page.params.id || routeTicketId || sessions.selectedChatId || chatNavigation.pendingChatTarget,
+			),
+		}),
 	});
 
 	$effect(() => {
@@ -907,22 +913,7 @@
 	onConfirm={() => chatActionController.handoffForkConfirmation.confirm()}
 />
 
-<ChatProjectPathDialog
-	projectPathDialog={chatActionDialogs.chatProjectPathDialog}
-	projectBasePath={appShell.projectBasePath}
-	pinnedProjectPaths={executorPinnedProjectPaths(
-		remoteSettings.snapshot,
-		chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
-	)}
-	onTogglePinnedProjectPath={async (path) => {
-		await togglePinnedProjectPathOptimistically(remoteSettings, path, {
-			executorId: chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
-		});
-	}}
-	{isMobile}
-	onClose={() => chatActionDialogs.closeProjectPathDialog()}
-	onConfirm={(target, projectPath) => chatActionController.updateProjectPath(target, projectPath)}
-/>
+<AppShellProjectPathDialog dialogs={chatActionDialogs} controller={chatActionController} {isMobile} />
 
 <ChatParentDialog
 	parentDialog={chatActionDialogs.parentDialog}

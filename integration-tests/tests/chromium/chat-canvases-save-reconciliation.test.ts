@@ -17,6 +17,8 @@ for (const nextAction of ['edit', 'delete', 'edit-before-failure'] as const) {
     await withChromiumFixture(`canvas-uncertain-${nextAction}`, async ({ page, integration, assertNoBrowserErrors }) => {
       await integration.client.post(endpoint, { id: 'board', content: { title: 'Original', nodes: [], connections: [] } });
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.getByRole('dialog', { name: 'New Chat', exact: true })
+        .getByRole('button', { name: 'Close', exact: true }).click();
       await collapseCanonicalFilesWindow(page);
       await clickWorkspaceWindowAddAction(page, 'Open Canvas');
       await page.getByLabel('Choose canvas').waitFor();

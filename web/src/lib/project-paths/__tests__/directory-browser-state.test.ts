@@ -68,6 +68,91 @@ afterEach(() => {
 	vi.resetAllMocks();
 });
 
+describe('DirectoryBrowserState opening a selected directory', () => {
+	it.each(['D:/projects', 'D:\\projects'])('opens saved Windows folders across slash aliases (base: %s)', async (basePath) => {
+		directories.set('D:/projects', ['selected']);
+		directories.set('D:/projects/selected', ['nested']);
+		const field = open({
+			basePath,
+			currentPath: 'D:\\projects\\selected',
+			initialDirectory: 'D:\\projects\\selected',
+		});
+		await settle();
+		expect(browsedPaths()).toEqual(['D:/projects/selected']);
+		expect(names(field)).toEqual(['nested']);
+		expect(field.browser.breadcrumbs.map(crumb => crumb.label)).toEqual(['projects', 'selected']);
+		expect(field.browser.query).toBe('');
+		field.type('D:\\projects\\selected\\ne');
+		await settle();
+		expect(names(field)).toEqual(['nested']);
+		expect(browsedPaths()).toEqual(['D:/projects/selected']);
+	});
+
+	it('falls back from a missing saved Windows folder and creates its missing name', async () => {
+		directories.set('D:/projects', ['selected']);
+		directories.set('D:/projects/selected', []);
+		const field = open({
+			basePath: 'D:/projects',
+			currentPath: 'D:\\projects\\selected\\missing',
+			initialDirectory: 'D:\\projects\\selected\\missing',
+		});
+		await settle();
+		expect(browsedPaths()).toEqual(['D:/projects/selected/missing', 'D:/projects/selected']);
+		expect(field.browser.suggestedName).toBe('missing');
+		field.browser.startCreation('missing');
+		expect(await field.browser.submitCreation()).toBe(true);
+		await settle();
+		expect(field.selections).toEqual(['D:/projects/selected/missing']);
+		expect(field.browser.query).toBe('');
+	});
+
+	it('preserves literal POSIX filename backslashes when opening and completing paths', async () => {
+		directories.set('/repo/literal\\folder', ['nested']);
+		const field = open({ currentPath: '/repo/literal\\folder', initialDirectory: '/repo/literal\\folder' });
+		await settle();
+		expect(browsedPaths()).toEqual(['/repo/literal\\folder']);
+		expect(names(field)).toEqual(['nested']);
+		field.type('/repo/literal\\folder/ne');
+		await settle();
+		expect(names(field)).toEqual(['nested']);
+		expect(browsedPaths()).toEqual(['/repo/literal\\folder']);
+	});
+
+	it('opens inside an existing selected folder before following manual edits', async () => {
+		const field = open({ currentPath: '/repo/alpha', initialDirectory: '/repo/alpha' });
+		await settle();
+		expect(browsedPaths()).toEqual(['/repo/alpha']);
+		expect(names(field)).toEqual(['alpine', 'nested']);
+		expect(field.browser.query).toBe('');
+		field.type('/repo/alpha/ne');
+		await settle();
+		expect(names(field)).toEqual(['nested']);
+		expect(browsedPaths()).toEqual(['/repo/alpha']);
+	});
+
+	it('falls back for a missing selected folder and offers its name for creation', async () => {
+		const field = open({ currentPath: '/repo/alpha/missing', initialDirectory: '/repo/alpha/missing' });
+		await settle();
+		expect(browsedPaths()).toEqual(['/repo/alpha/missing', '/repo/alpha']);
+		expect(field.browser.directory).toBe('/repo/alpha');
+		expect(field.browser.suggestedName).toBe('missing');
+		field.browser.startCreation(field.browser.suggestedName!);
+		expect(field.browser.creationName).toBe('missing');
+		expect(await field.browser.submitCreation()).toBe(true);
+		await settle();
+		expect(field.selections).toEqual(['/repo/alpha/missing']);
+		expect(field.browser.query).toBe('');
+	});
+
+	it('keeps an unreadable selected directory as an error', async () => {
+		vi.mocked(browseDirectory).mockRejectedValueOnce(new ApiError(403, 'Denied', 'FILE_PERMISSION_DENIED'));
+		const field = open({ currentPath: '/repo/alpha', initialDirectory: '/repo/alpha' });
+		await settle();
+		expect(browsedPaths()).toEqual(['/repo/alpha']);
+		expect(field.browser.listing).toEqual({ status: 'error', message: 'Denied' });
+	});
+});
+
 describe('DirectoryBrowserState following a typed path', () => {
 	it('lists the parent of a typed name and filters by it without refetching', async () => {
 		const field = open({ currentPath: '/repo/al' });

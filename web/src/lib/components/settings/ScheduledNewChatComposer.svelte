@@ -211,23 +211,22 @@
 	</div>
 
 	{#if conversationInput}
-	<div class="space-y-1.5" data-slot="scheduled-new-chat-preambles">
-		<NewChatPreambleControls
-			selection={startup.preambles}
-			nonblankPath={startup.nonblankPath}
-			validationStatus={startup.validationStatus}
-			pickerDescription={m.scheduled_prompts_preamble_selection_description()}
-			summaryReadyLabel={m.scheduled_prompts_preamble_preview_label()}
-			summaryEmptyLabel={m.scheduled_prompts_preamble_none_current()}
-			onOpenCatalog={(returnFocus) => appShell.openPreamblesOverScheduledPrompts(returnFocus)}
-		/>
-		<p class="px-1 text-xs text-muted-foreground" data-slot="scheduled-new-chat-preamble-hint">
-			{startup.preambles.choice.mode === 'defaults'
-				? m.scheduled_prompts_preamble_defaults_hint()
-				: m.scheduled_prompts_preamble_explicit_hint()}
-		</p>
-	</div>
-
+		<div class="space-y-1.5" data-slot="scheduled-new-chat-preambles">
+			<NewChatPreambleControls
+				selection={startup.preambles}
+				nonblankPath={startup.nonblankPath}
+				validationStatus={startup.validationStatus}
+				pickerDescription={m.scheduled_prompts_preamble_selection_description()}
+				summaryReadyLabel={m.scheduled_prompts_preamble_preview_label()}
+				summaryEmptyLabel={m.scheduled_prompts_preamble_none_current()}
+				onOpenCatalog={(returnFocus) => appShell.openPreamblesOverScheduledPrompts(returnFocus)}
+			/>
+			<p class="px-1 text-xs text-muted-foreground" data-slot="scheduled-new-chat-preamble-hint">
+				{startup.preambles.choice.mode === 'defaults'
+					? m.scheduled_prompts_preamble_defaults_hint()
+					: m.scheduled_prompts_preamble_explicit_hint()}
+			</p>
+		</div>
 	{/if}
 	<ScheduledPromptField
 		bind:ref={textarea}

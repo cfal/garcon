@@ -15,7 +15,10 @@ vi.mock(
 const ScheduledNewChatComposerTestHost = (await import('./ScheduledNewChatComposerTestHost.svelte'))
 	.default;
 
-function makeStartup(modelSelectionError: string | null = null, executorId = 'local'): NewChatFormState {
+function makeStartup(
+	modelSelectionError: string | null = null,
+	executorId = 'local',
+): NewChatFormState {
 	return {
 		executorId,
 		isLocalExecutor: executorId === 'local',
@@ -75,7 +78,7 @@ function makeStartup(modelSelectionError: string | null = null, executorId = 'lo
 }
 
 function renderComposer(
-		overrides: {
+	overrides: {
 		conversationInput?: boolean;
 		executorId?: string;
 		prompt?: string;

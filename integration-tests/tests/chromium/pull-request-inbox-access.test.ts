@@ -23,6 +23,8 @@ test('mobile opens the global PR inbox despite a cached failed GitHub check', as
       await page.screenshot({ path: join(directory, `${name}.png`) });
     };
     await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('dialog', { name: 'New Chat', exact: true })
+      .getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
