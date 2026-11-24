@@ -354,16 +354,26 @@ function newTranscriptTail(
 	return tail;
 }
 
+function replaceTranscriptTail(
+	model: ConversationVirtualFeedModel,
+	from: number,
+	tail: ConversationVirtualFeedItem[],
+): ConversationVirtualFeedModel {
+	const footer = model.items.slice(model.transcriptEndIndex);
+	const items = model.items.slice(0, from).concat(tail, footer);
+	return indexConversationItems(items, model.transcriptStartIndex, from + tail.length, {
+		previous: model,
+		from,
+	});
+}
+
 export function appendConversationVirtualTranscriptTail(
 	model: ConversationVirtualFeedModel,
 	surfaceIdentity: string,
 	appendedItems: ConversationFeedRenderItem[],
 ): ConversationVirtualFeedModel | null {
 	const appended = newTranscriptTail(model, surfaceIdentity, appendedItems);
-	if (!appended) return null;
-	const from = model.transcriptEndIndex;
-	const items = model.items.slice(0, from).concat(appended, model.items.slice(from));
-	return indexConversationItems(items, model.transcriptStartIndex, from + appended.length, { previous: model, from });
+	return appended ? replaceTranscriptTail(model, model.transcriptEndIndex, appended) : null;
 }
 
 export function appendCombinedConversationTail(
@@ -401,16 +411,7 @@ export function appendCombinedConversationTail(
 		grouped[0]?.kind === 'tool-group' &&
 		previousGroup.expanded !== grouped[0].expanded
 	) return null;
-	const items = model.items.slice(0, changedIndex).concat(
-		grouped,
-		model.items.slice(model.transcriptEndIndex),
-	);
-	return {
-		model: indexConversationItems(items, model.transcriptStartIndex, changedIndex + grouped.length, {
-			previous: model, from: changedIndex,
-		}),
-		changedIndex,
-	};
+	return { model: replaceTranscriptTail(model, changedIndex, grouped), changedIndex };
 }
 
 export function estimateConversationFeedItemSize(

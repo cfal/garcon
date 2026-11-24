@@ -244,14 +244,6 @@ export class ConversationFeedAnnouncerState {
 		const resumedLiveEnd =
 			this.#detachedStatusAnnounced && input.visible && input.isLiveWindow && input.pinnedToBottom;
 		if (resumedLiveEnd) this.#detachedStatusAnnounced = false;
-		// Detached mutation metadata carries message types but no command content.
-		const responseUpdatedOutsideWindow =
-			!input.isLiveWindow &&
-			Object.entries(input.mutationClock.lastResponseRevisionByMessageType).some(
-				([messageType, revision]) =>
-					revision > previousDataRevision &&
-					isAnnounceableResponseMessageType(messageType, input.hiddenToolTypes),
-			);
 		const addedPermissionAnnouncements = addedFloatingPermissionOccurrences.filter((occurrence) => {
 			if (this.#observedPermissionOccurrences.has(occurrence)) return false;
 			rememberAnnouncementLineage(this.#observedPermissionOccurrences, occurrence);
@@ -263,6 +255,14 @@ export class ConversationFeedAnnouncerState {
 		}
 		if (!input.isLiveWindow) {
 			this.#rememberLineages(tailRows, input.floatingPermissionOccurrences);
+			// Detached mutation metadata carries message types but no command content.
+			const responseUpdatedOutsideWindow = Object.entries(
+				input.mutationClock.lastResponseRevisionByMessageType,
+			).some(
+				([messageType, revision]) =>
+					revision > previousDataRevision &&
+					isAnnounceableResponseMessageType(messageType, input.hiddenToolTypes),
+			);
 			if (
 				this.#detachedStatusAnnounced ||
 				(!responseUpdatedOutsideWindow && addedPermissionAnnouncements.length === 0)
@@ -281,21 +281,22 @@ export class ConversationFeedAnnouncerState {
 			return resumedLiveEnd || clearedDetachedStatus ? { kind: 'clear' } : null;
 		}
 
-		const priorTailIndex = priorTailRowId ? tailRows.findIndex((row) => row.id === priorTailRowId) : -1;
-		const lastKnownIndex = priorTailIndex >= 0 ? priorTailIndex : tailRows.findLastIndex(row => priorRowIds.has(row.id));
-		const appendedRows = lastKnownIndex < 0 ? tailRows.slice(-1) : tailRows.slice(lastKnownIndex + 1);
-		const streamedRows = tailRows.filter((row) => {
+		let lastKnownIndex = priorTailRowId ? tailRows.findIndex((row) => row.id === priorTailRowId) : -1;
+		if (lastKnownIndex < 0) lastKnownIndex = tailRows.findLastIndex((row) => priorRowIds.has(row.id));
+		const candidatesById = new Map<string, ChatDisplayRow>();
+		// Appends are announced before streamed revisions. Without overlap, only the last row is announced.
+		for (const row of tailRows.slice(lastKnownIndex < 0 ? -1 : lastKnownIndex + 1)) {
+			candidatesById.set(row.id, row);
+		}
+		for (const row of tailRows) {
 			const prior = priorContent.get(row.id);
 			const next = nextContent.get(row.id);
-			return prior !== undefined && next !== undefined && next !== prior;
-		});
-		const candidatesById = new Map<string, ChatDisplayRow>();
-		for (const row of [...appendedRows, ...streamedRows]) candidatesById.set(row.id, row);
-		const candidates = [...candidatesById.values()];
+			if (prior !== undefined && next !== undefined && next !== prior) candidatesById.set(row.id, row);
+		}
 		const duplicate = trailingDiagnosticNoticeDuplicate(tailRows);
 		const duplicateIsAnnounced = duplicate && tailRows.some(row => row.id === duplicate.messageRowId
 			&& announcementForAppendedRow(row, input.hiddenToolTypes, input.hiddenBashCommands) !== null);
-		const announcementCandidates = candidates.filter((row) => {
+		const announcementCandidates = [...candidatesById.values()].filter((row) => {
 			if (duplicateIsAnnounced && row.id === duplicate.noticeId) return false;
 			if (row.kind !== 'message') return true;
 			if (row.message instanceof UserMessage) {
@@ -311,12 +312,12 @@ export class ConversationFeedAnnouncerState {
 			}
 			return true;
 		});
-		const responseUpdated =
-			addedPermissionAnnouncements.length > 0 ||
-			announcementCandidates.some((row) =>
-				this.#isResponseAnnouncement(row, input.hiddenToolTypes, input.hiddenBashCommands),
-			);
 		if (!input.pinnedToBottom) {
+			const responseUpdated =
+				addedPermissionAnnouncements.length > 0 ||
+				announcementCandidates.some((row) =>
+					this.#isResponseAnnouncement(row, input.hiddenToolTypes, input.hiddenBashCommands),
+				);
 			if (!responseUpdated || this.#detachedStatusAnnounced) {
 				return clearedDetachedStatus ? { kind: 'clear' } : null;
 			}

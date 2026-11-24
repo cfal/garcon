@@ -285,17 +285,17 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		}
 		const selected = identityChanged
 			? null
-				: remapConversationAnchor(readingAnchor, previousModel, input.next.model);
+			: remapConversationAnchor(readingAnchor, previousModel, input.next);
 		const selectedAnchor = selected?.anchor ?? null;
 		const nextHiddenAnchor = identityChanged
 			? null
-				: (remapConversationAnchor(this.#hiddenAnchor, previousModel, input.next.model)?.anchor ?? null);
-			const anchor = conversationProjectionMutationAnchor({
-				selected,
-				restoreEnd,
-				explicitNavigation: nextGeometry.endBehavior === 'explicit-navigation',
-				targetScrollActive: this.#activeTargetScrolls > 0,
-			});
+			: (remapConversationAnchor(this.#hiddenAnchor, previousModel, input.next)?.anchor ?? null);
+		const anchor = conversationProjectionMutationAnchor({
+			selected,
+			restoreEnd,
+			explicitNavigation: nextGeometry.endBehavior === 'explicit-navigation',
+			targetScrollActive: this.#activeTargetScrolls > 0,
+		});
 		const result = this.#virt.apply(
 			identityChanged
 				? {

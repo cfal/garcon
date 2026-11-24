@@ -605,6 +605,17 @@ describe('ConversationFeedAnnouncerState', () => {
 		).toBe('world');
 	});
 
+	it('announces new rows before streamed revisions in the same update', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const chat = { ...enabled, surfaceIdentity: 'chat:generation' };
+		announcer.reconcile({ ...chat, rows: [assistantRow('1', 'first')], mutationClock: clock(1) });
+		expect(announcer.reconcile({
+			...chat,
+			rows: [assistantRow('1', 'first continued'), assistantRow('2', 'second')],
+			mutationClock: clock(2, 2),
+		})).toBe('second\ncontinued');
+	});
+
 	it('flattens Markdown without exposing formatting punctuation', () => {
 		expect(plainAnnouncementText('## See [the file](/tmp/file) and `value`')).toBe(
 			'See the file and value',

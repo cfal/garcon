@@ -9,19 +9,17 @@
 		controller: ConversationFeedVirtualController;
 		viewport(): HTMLDivElement | null;
 		hide(): Promise<void>;
-		combine(): Promise<void>;
 		apply(next: ConversationFeedProjection): Promise<void>;
 		show(): Promise<void>;
 	}
 
 	interface Props {
 		initial: ConversationFeedProjection;
-		combined: ConversationFeedProjection;
 		revealToolGroup?: (rowId: string) => Promise<'applied' | 'cancelled'>;
 		onReady(exposure: Exposure): void;
 	}
 
-	let { initial, combined, revealToolGroup, onReady }: Props = $props();
+	let { initial, revealToolGroup, onReady }: Props = $props();
 	let current = $state.raw(untrack(() => initial));
 	let visible = $state(true);
 	let viewportElement: HTMLDivElement | null = $state(null);
@@ -54,7 +52,7 @@
 	};
 
 	onMount(() => {
-		onReady({ controller, viewport: () => viewportElement, hide, combine, apply, show });
+		onReady({ controller, viewport: () => viewportElement, hide, apply, show });
 	});
 	onDestroy(() => controller.destroy());
 
@@ -62,10 +60,6 @@
 		controller.prepareForHide();
 		visible = false;
 		await tick();
-	}
-
-	async function combine(): Promise<void> {
-		await apply(combined);
 	}
 
 	async function apply(next: ConversationFeedProjection): Promise<void> {

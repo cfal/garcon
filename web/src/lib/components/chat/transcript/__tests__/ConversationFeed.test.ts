@@ -21,6 +21,16 @@ import { ConversationFeedVirtualController } from '../ConversationFeedVirtualCon
 import { ConversationToolGroupState } from '../ConversationToolGroupState.svelte.js';
 import { CHAT_FEED_ANNOUNCEMENT_BATCH_MS } from '../conversation-feed-announcer.js';
 
+const disclosureTimestamp = '2026-01-01T00:00:00.000Z';
+
+function disclosureRows(firstOrdinal: number) {
+	return [
+		{ ordinal: firstOrdinal, message: new BashToolUseMessage(disclosureTimestamp, 'one', 'pwd') },
+		{ ordinal: firstOrdinal + 1, message: new BashToolUseMessage(disclosureTimestamp, 'two', 'pwd') },
+		{ ordinal: firstOrdinal + 2, message: new ThinkingMessage(disclosureTimestamp, 'Synthetic thinking') },
+	];
+}
+
 async function showFeedScrollbar(container: HTMLElement): Promise<{
 	scrollbar: HTMLElement;
 	thumb: HTMLElement;
@@ -155,13 +165,10 @@ describe('ConversationFeed', () => {
 	] as const)('does not read unrelated row IDs on append (%i rows, %s)', async (size, mode) => {
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
 		const transcript = new ActiveTranscriptState(undefined, null, { combineMessages: true });
-		const stamp = '2026-01-01T00:00:00.000Z';
-		const entry = (ordinal: number) => ({ ordinal, message: new AssistantMessage(stamp, 'Synthetic answer ' + ordinal) });
-		seedTranscript(transcript, 'chat-1', 'generation-1', [
-			{ ordinal: 1, message: new BashToolUseMessage(stamp, 'one', 'pwd') },
-			{ ordinal: 2, message: new BashToolUseMessage(stamp, 'two', 'pwd') },
-			{ ordinal: 3, message: new ThinkingMessage(stamp, 'Synthetic thinking') },
-		], { lastOrdinal: 3, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		const entry = (ordinal: number) => ({ ordinal, message: new AssistantMessage(disclosureTimestamp, 'Synthetic answer ' + ordinal) });
+		seedTranscript(transcript, 'chat-1', 'generation-1', disclosureRows(1), {
+			lastOrdinal: 3, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
 		const { container, unmount } = render(ConversationFeedTestHost, { transcript });
 		try {
 			if (mode !== 'default') {
@@ -220,12 +227,7 @@ describe('ConversationFeed', () => {
 	it('keeps moved disclosures but prunes evicted ones when a hidden pane is revealed', async () => {
 		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ combineToolUseMessages: true }));
 		const transcript = new ActiveTranscriptState(undefined, null, { combineMessages: true });
-		const stamp = '2026-01-01T00:00:00.000Z';
-		const original = [
-			{ ordinal: 10, message: new BashToolUseMessage(stamp, 'one', 'pwd') },
-			{ ordinal: 11, message: new BashToolUseMessage(stamp, 'two', 'pwd') },
-			{ ordinal: 12, message: new ThinkingMessage(stamp, 'Synthetic thinking') },
-		];
+		const original = disclosureRows(10);
 		const replace = (rows: Parameters<typeof seedTranscript>[3]) =>
 			seedTranscript(transcript, 'chat-1', 'generation-1', rows, {
 				lastOrdinal: rows.at(-1)!.ordinal, pageOldestOrdinal: rows[0].ordinal, nextBeforeOrdinal: null, hasMore: false,
@@ -237,12 +239,12 @@ describe('ConversationFeed', () => {
 		try {
 			await fireEvent.click(await group());
 			await fireEvent.click(await thinking());
-			replace([{ ordinal: 9, message: new AssistantMessage(stamp, 'Earlier') }, ...original]);
+			replace([{ ordinal: 9, message: new AssistantMessage(disclosureTimestamp, 'Earlier') }, ...original]);
 			await screen.findByText('Earlier');
 			expect((await group()).getAttribute('aria-expanded')).toBe('true');
 			expect((await thinking()).getAttribute('aria-expanded')).toBe('false');
 			await rerender({ isVisible: false });
-			replace([{ ordinal: 20, message: new AssistantMessage(stamp, 'Different window') }]);
+			replace([{ ordinal: 20, message: new AssistantMessage(disclosureTimestamp, 'Different window') }]);
 			await rerender({ isVisible: true });
 			await screen.findByText('Different window');
 			replace(original);

@@ -1,11 +1,11 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'svelte';
 import { BashToolUseMessage, UserMessage } from '$shared/chat-types';
 import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
 import { installResizeObserverHarness, ResizeObserverHarness } from '$lib/components/shared/__tests__/resize-observer-harness';
 import type { ConversationFeedMutationKind } from '$lib/chat/transcript/conversation-feed-mutations.js';
 import type { ConversationFeedProjection } from '../ConversationFeedProjectionState.svelte.js';
-import { ConversationFeedVirtualController } from '../ConversationFeedVirtualController.svelte.js';
 import type {
 	ConversationVirtualFeedItem,
 	ConversationVirtualFeedModel,
@@ -13,7 +13,10 @@ import type {
 	ToolGroupVirtualFeedItem,
 } from '../conversation-feed-virtual-items.js';
 import { buildConversationVirtualFeedModel } from '../conversation-feed-virtual-items.js';
-import ConversationFeedVirtualControllerHiddenRemapHost from './ConversationFeedVirtualControllerHiddenRemapHost.svelte';
+import { remapConversationAnchor } from '../conversation-feed-anchor-remapping.js';
+import HiddenRemapHost from './ConversationFeedVirtualControllerHiddenRemapHost.svelte';
+
+type Controls = Parameters<ComponentProps<typeof HiddenRemapHost>['onReady']>[0];
 
 const timestamp = '2026-08-03T00:00:00.000Z';
 
@@ -148,20 +151,11 @@ async function hiddenRemapPosition(
 	scrollTop: number,
 ): Promise<{ key: string | undefined; start: number; end: number; scrollTop: number }> {
 	const restoreObserver = installResizeObserverHarness();
-	const firstPublication = publications[0];
-	if (!firstPublication) throw new Error('Expected at least one hidden publication');
-	let exposure: {
-		controller: ConversationFeedVirtualController;
-		viewport(): HTMLDivElement | null;
-		hide(): Promise<void>;
-		combine(): Promise<void>;
-		apply(next: ConversationFeedProjection): Promise<void>;
-		show(): Promise<void>;
-	} | undefined;
+	if (!publications.length) throw new Error('Expected at least one hidden publication');
+	let exposure: Controls | undefined;
 	try {
-		render(ConversationFeedVirtualControllerHiddenRemapHost, {
+		render(HiddenRemapHost, {
 			initial,
-			combined: firstPublication,
 			onReady(value) { exposure = value; },
 		});
 		await waitFor(() => expect(exposure).toBeDefined());
@@ -188,6 +182,19 @@ async function hiddenRemapPosition(
 }
 
 describe('ConversationFeedVirtualController hidden remap', () => {
+	it('takes fallback keys from published geometry without reading unrelated items', () => {
+		const previous = projection(false, 1);
+		const next = projection(true, 2);
+		const readTailKey = vi.fn(() => 'tail');
+		Object.defineProperty(next.model.items.at(-1)!, 'key', { get: readTailKey });
+		const anchor = { key: 'member', viewportOffset: -12, fallbackKeys: [] };
+		expect(remapConversationAnchor(anchor, previous.model, next)).toEqual({
+			oldKey: 'member',
+			anchor: { key: 'summary:member', viewportOffset: 0, fallbackKeys: ['before', 'tail'] },
+		});
+		expect(readTailKey).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		{ keepCollapsed: true, expected: 'cancelled' },
 		{ keepCollapsed: false, expected: 'target-missing' },
@@ -196,14 +203,10 @@ describe('ConversationFeedVirtualController hidden remap', () => {
 		const publishedDuringReveal = fallbackProjection(2, true, keepCollapsed, true);
 		const requested: string[] = [];
 		const restoreObserver = installResizeObserverHarness();
-		let exposure!: {
-			controller: ConversationFeedVirtualController;
-			viewport(): HTMLDivElement | null;
-			apply(next: ConversationFeedProjection): Promise<void>;
-		};
+		let exposure!: Controls;
 		try {
-			render(ConversationFeedVirtualControllerHiddenRemapHost, {
-				initial, combined: publishedDuringReveal,
+			render(HiddenRemapHost, {
+				initial,
 				async revealToolGroup(rowId) {
 					requested.push(rowId);
 					await exposure.apply(publishedDuringReveal);

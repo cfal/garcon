@@ -1,4 +1,5 @@
 import type { VirtualMutationAnchor } from '$lib/virt/virtual-list-types.js';
+import type { ConversationFeedProjection } from './ConversationFeedProjectionState.svelte.js';
 import type { ConversationVirtualFeedModel } from './conversation-feed-virtual-items.js';
 import {
 	conversationAnchorFallbackKeys,
@@ -18,11 +19,10 @@ function replacementKey(
 	if (next.indexByKey.has(key)) return key;
 	const previousIndex = previous.indexByKey.get(key);
 	const previousItem = previousIndex === undefined ? undefined : previous.items[previousIndex];
-	const rowIds = previousItem?.kind === 'tool-group'
-		? previousItem.members.map((member) => member.item.id)
-		: previousItem?.kind === 'transcript' ? [previousItem.item.id] : [];
-	for (const rowId of rowIds) {
-		const index = next.indexByRowId.get(rowId);
+	if (previousItem?.kind !== 'tool-group' && previousItem?.kind !== 'transcript') return;
+	const members = previousItem.kind === 'tool-group' ? previousItem.members : [previousItem];
+	for (const member of members) {
+		const index = next.indexByRowId.get(member.item.id);
 		if (index === undefined) continue;
 		const nextKey = next.items[index]?.key;
 		if (nextKey) return nextKey;
@@ -33,19 +33,16 @@ function replacementKey(
 export function remapConversationAnchor(
 	anchor: ConversationVirtualAnchor | null,
 	previous: ConversationVirtualFeedModel,
-	next: ConversationVirtualFeedModel,
+	next: ConversationFeedProjection,
 ): RemappedConversationAnchor | null {
 	if (!anchor) return null;
 	for (const candidate of [anchor.key, ...anchor.fallbackKeys]) {
-		const nextKey = replacementKey(candidate, previous, next);
+		const nextKey = replacementKey(candidate, previous, next.model);
 		if (!nextKey) continue;
-		const nextIndex = next.indexByKey.get(nextKey);
+		const nextIndex = next.model.indexByKey.get(nextKey);
 		const fallbackKeys = nextIndex === undefined
 			? []
-			: conversationAnchorFallbackKeys(
-					next.items.map((item) => item.key),
-					nextIndex,
-				);
+			: conversationAnchorFallbackKeys(next.geometry.keys, nextIndex);
 		let viewportOffset = 0;
 		if (candidate === anchor.key) {
 			viewportOffset = nextKey === candidate
