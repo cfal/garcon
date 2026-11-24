@@ -437,7 +437,6 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 }
 
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
-	const flag = (key: BooleanLocalSettingKey) => parseBoolean(parsed[key], DEFAULTS[key]);
 	return {
 		themePreference: parseThemePreference(parsed.themePreference),
 		terminalAppearance: parseBoolean(parsed.terminalAppearance, DEFAULTS.terminalAppearance),
@@ -466,12 +465,27 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
 		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
 		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
-		modelControlsLeft: flag('modelControlsLeft'),
-		composerStatusBarGitProjects: flag('composerStatusBarGitProjects'),
-		composerStatusBarNonGitProjects: flag('composerStatusBarNonGitProjects'),
-		composerStatusBarProjectPath: flag('composerStatusBarProjectPath'),
-		composerStatusBarGitBranch: flag('composerStatusBarGitBranch'),
-		composerStatusBarCommit: flag('composerStatusBarCommit'),
+		modelControlsLeft: parseBoolean(parsed.modelControlsLeft, DEFAULTS.modelControlsLeft),
+		composerStatusBarGitProjects: parseBoolean(
+			parsed.composerStatusBarGitProjects,
+			DEFAULTS.composerStatusBarGitProjects,
+		),
+		composerStatusBarNonGitProjects: parseBoolean(
+			parsed.composerStatusBarNonGitProjects,
+			DEFAULTS.composerStatusBarNonGitProjects,
+		),
+		composerStatusBarProjectPath: parseBoolean(
+			parsed.composerStatusBarProjectPath,
+			DEFAULTS.composerStatusBarProjectPath,
+		),
+		composerStatusBarGitBranch: parseBoolean(
+			parsed.composerStatusBarGitBranch,
+			DEFAULTS.composerStatusBarGitBranch,
+		),
+		composerStatusBarCommit: parseBoolean(
+			parsed.composerStatusBarCommit,
+			DEFAULTS.composerStatusBarCommit,
+		),
 		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
 		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
 		composerInputMode:
