@@ -120,7 +120,7 @@
 		{@const descriptor = agentSettings.descriptors.find((item) => `agent:${item.key}` === id)}
 		{#if descriptor}
 			<svelte:boundary>
-				<AgentSettingControl settings={agentSettings} {descriptor} {placement} {align} {side} />
+				<AgentSettingControl settings={agentSettings} {descriptor} {placement} {align} {side} {disabled} />
 				{#snippet failed()}{/snippet}
 			</svelte:boundary>
 		{/if}

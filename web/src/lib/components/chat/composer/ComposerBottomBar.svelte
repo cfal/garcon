@@ -112,7 +112,7 @@
 							bind:this={promptGroup}
 							{actions}
 							{explainUnavailableImage}
-							inline={layout.inline}
+							foldedIds={layout.foldedPrompt}
 							align={first ? 'start' : 'end'}
 							{side}
 						/>

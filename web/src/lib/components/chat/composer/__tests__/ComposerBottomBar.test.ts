@@ -219,6 +219,22 @@ describe('ComposerBottomBar', () => {
 		expect(document.activeElement).toBe(more);
 	});
 
+	it('enables agent settings only when the group is unlocked and changes can be applied', async () => {
+		const defaults = { ownerId: 'sample-agent', schemaVersion: 1, values: { review: false } };
+		const agentSettings = {
+			descriptors: [{ key: 'review', type: 'boolean', label: 'Review changes' }],
+			envelope: defaults,
+			defaults,
+		} as const;
+		const { rerender } = render(ComposerBottomBar, { ...controls(), agentSettings });
+		const trigger = screen.getByRole('button', { name: 'Review changes: Off' });
+		expect(trigger).toHaveProperty('disabled', true);
+		await rerender({ agentSettings: { ...agentSettings, onChange: vi.fn() } });
+		expect(trigger).toHaveProperty('disabled', false);
+		await rerender({ settingsDisabled: true });
+		expect(trigger).toHaveProperty('disabled', true);
+	});
+
 	it.each(['inline', 'overflow'])('locks an open %s permission menu during admission', async (placement) => {
 		const props = controls();
 		const { container, rerender } = render(ComposerBottomBar, props);

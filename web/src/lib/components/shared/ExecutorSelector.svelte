@@ -63,11 +63,11 @@
 		presentation === 'field' && 'h-10 max-w-full border border-border bg-background px-3 text-base pointer-fine:text-sm',
 		className,
 	));
-	let fullBox = $state<readonly ResizeObserverSize[]>();
-	$effect(() => {
-		const width = fullBox?.[0]?.inlineSize;
+
+	function reportFullWidth(box?: ResizeObserverSize[]): void {
+		const width = box?.[0]?.inlineSize;
 		if (width) onMeasure?.(width);
-	});
+	}
 
 	function refreshOnOpen(open: boolean): void {
 		if (open) void executors.refresh();
@@ -137,7 +137,7 @@
 {:else if visible}
 	{#if inComposer && onMeasure}
 		<span inert aria-hidden="true" class="pointer-events-none invisible absolute h-0 w-0 overflow-hidden">
-			<span class={triggerClass} bind:borderBoxSize={fullBox}>{@render triggerContent(false)}</span>
+			<span class={triggerClass} bind:borderBoxSize={null, reportFullWidth}>{@render triggerContent(false)}</span>
 		</span>
 	{/if}
 	<DropdownMenu bind:open onOpenChange={refreshOnOpen}>

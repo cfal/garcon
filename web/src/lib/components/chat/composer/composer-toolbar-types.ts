@@ -10,8 +10,7 @@ export interface ComposerAgentSettings {
 	descriptors: readonly AgentSettingDescriptor[];
 	envelope: AgentSettingsEnvelope;
 	defaults: AgentSettingsEnvelope;
-	onChange: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
-	disabled?: boolean;
+	onChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;
 }
 
 export interface ComposerModeSelection<T extends string> {

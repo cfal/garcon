@@ -929,8 +929,7 @@
 					descriptors: modelCatalog.getAgentSettingsDescriptors(agentState.agentId),
 					envelope: agentState.agentSettings,
 					defaults: modelCatalog.getDefaultAgentSettings(agentState.agentId),
-					onChange: (descriptor, value) => onAgentSettingChange?.(descriptor, value),
-					disabled: !onAgentSettingChange || directAdmissionPending,
+					onChange: onAgentSettingChange,
 				}}
 				model={{ ...activeModel, onChange: (next) => onModelChange?.(next) }}
 			/>

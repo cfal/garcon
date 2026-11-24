@@ -44,7 +44,7 @@ describe('AgentSettingControl', () => {
 		}
 		await fireEvent.change(input, { target: { value: '4' } });
 		expect(onChange).toHaveBeenCalledWith(descriptor, 4);
-		await rerender({ settings: { ...settings, disabled: true } });
+		await rerender({ disabled: true });
 		expect((input as HTMLInputElement).disabled).toBe(true);
 		await fireEvent.change(input, { target: { value: '6' } });
 		expect(onChange).toHaveBeenCalledTimes(1);

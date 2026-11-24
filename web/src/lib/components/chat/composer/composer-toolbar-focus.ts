@@ -10,18 +10,18 @@ function focusOrigin(root: HTMLElement, focused: HTMLElement) {
 		control ??= element.closest<HTMLElement>('[data-composer-control]')?.dataset.composerControl;
 		if (root.contains(element)) {
 			const group = element.closest<HTMLElement>('[data-composer-group]')?.dataset.composerGroup;
-			return group
-				? {
-						group,
-						control,
-						overflow: element.hasAttribute('data-composer-overflow') ? element : null,
-					}
-				: null;
+			if (!group) return null;
+			return {
+				group,
+				control,
+				overflow: element.hasAttribute('data-composer-overflow') ? element : null,
+			};
 		}
 		const menuId: string | undefined = element.closest('[role="menu"]')?.id;
-		const trigger: HTMLElement | null = menuId
-			? document.querySelector(`[aria-controls="${CSS.escape(menuId)}"]`)
-			: null;
+		if (!menuId) return null;
+		const trigger: HTMLElement | null = document.querySelector(
+			`[aria-controls="${CSS.escape(menuId)}"]`,
+		);
 		if (!trigger || trigger === element) return null;
 		element = trigger;
 	}
@@ -68,9 +68,9 @@ export async function retainComposerToolbarFocus(
 		(current !== previous && current !== document.body && current?.isConnected)
 	)
 		return;
-	if (!folding && previous.isConnected && !previous.closest('[hidden]')) {
-		if (current !== previous) previous.focus({ preventScroll: true });
-		return;
+	if (folding || !previous.isConnected || previous.closest('[hidden]')) {
+		focusReplacement();
+	} else if (current !== previous) {
+		previous.focus({ preventScroll: true });
 	}
-	focusReplacement();
 }
