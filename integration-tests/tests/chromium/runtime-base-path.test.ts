@@ -111,7 +111,9 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
           expect(offline?.status()).toBe(200);
           expect(await offline?.text()).toContain(`base: "${basePath}"`);
           await page.waitForLoadState('networkidle');
-          await page.evaluate(() => {
+          // Seeds the signed-out cold navigation without racing the workspace's peer-logout redirect.
+          await page.goto('about:blank');
+          await page.addInitScript(() => {
             localStorage.setItem('garcon.logout-epoch', crypto.randomUUID());
             localStorage.removeItem('bearer-token');
           });
