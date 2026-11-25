@@ -325,6 +325,7 @@ describe('AppShell responsive workspace binding', () => {
 		['visibilitychange', 390, false],
 		['resize', 390, true],
 		['resize', 1024, false],
+		['resize', 1024, true],
 	] as const)(
 		'restores CSS viewport sizing on %s at %ipx (hover: %s)',
 		async (resumeEvent, width, canHover) => {

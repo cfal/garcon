@@ -50,7 +50,7 @@ function setup() {
 		}),
 	} satisfies CanvasApiPort;
 	const memory = recoveryMemory();
-	const controller = new CanvasController(memory.port, api);
+	const controller = new CanvasController(api, memory.port);
 	controllers.add(controller);
 	const guard = new CanvasExitGuard(memory.port, () => controller.session);
 	guard.activate();

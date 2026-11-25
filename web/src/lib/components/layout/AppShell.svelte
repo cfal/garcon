@@ -267,11 +267,11 @@
 	});
 
 	$effect(() => {
-		if (!isMobile && hoverCapability.current) return;
+		const mode = isMobile || !hoverCapability.current ? 'layout-or-overlay' : 'overlay-only';
 		const unbindViewport = bindMobileViewport((metrics) => {
 			mobileKeyboardVisible = metrics.keyboardVisible;
 			appShell.keyboardHeight = metrics.keyboardHeight;
-		});
+		}, mode);
 		if (!unbindViewport) return;
 		return () => {
 			unbindViewport();

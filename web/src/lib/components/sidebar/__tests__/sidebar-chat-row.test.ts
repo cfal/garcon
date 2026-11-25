@@ -45,24 +45,18 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 }
 
 async function openDesktopMenu(): Promise<void> {
-	const row = document.querySelector('.chat-item-root button');
-	if (!row) throw new Error('Expected sidebar row');
-	await fireEvent.pointerEnter(row);
 	await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
 }
 
 describe('shared sidebar chat row', () => {
 	it('focuses the first action on keyboard entry without a previous hover', async () => {
 		render(SidebarChatItemHost, { session: createChat() });
-		const trigger = () => screen.getByRole('button', { name: 'Chat actions' });
-		const placeholder = trigger();
-		placeholder.focus();
-		await waitFor(() => {
-			expect(trigger()).not.toBe(placeholder);
-			expect(document.activeElement).toBe(trigger());
-		});
-		await fireEvent.keyDown(trigger(), { key: 'ArrowDown' });
+		const trigger = screen.getByRole('button', { name: 'Chat actions' });
+		trigger.focus();
+		expect(screen.queryByRole('menu')).toBeNull();
+		await fireEvent.keyDown(trigger, { key: 'ArrowDown' });
 		await waitFor(() => expect(document.activeElement).toBe(screen.getAllByRole('menuitem')[0]));
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBe(trigger);
 	});
 	it.each(['single-line', 'compact', 'detailed'] as const)(
 		'shows an executor pill before the agent only with multiple executors in %s layout',
@@ -170,8 +164,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('ops')).toBeTruthy();
 		expect(screen.getByText('prod')).toBeTruthy();
 		expect(screen.getByRole('button', { name: '+1' })).toBeTruthy();
-		expect(document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]')).toBeNull();
-		await fireEvent.focus(title.closest('button')!);
+		expect(screen.queryByRole('menu')).toBeNull();
 		const desktopMenuTrigger = document.querySelector<HTMLElement>(
 			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]',
 		);
@@ -440,20 +433,27 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('Claude')).toBeTruthy();
 	});
 
-	it('renders the mobile chat row without also rendering the desktop row', () => {
+	it('opens mobile chat actions from the visible button without a desktop trigger', async () => {
+		const onTogglePinned = vi.fn();
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			isMobile: true,
+			onTogglePinned,
 		});
 
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
-		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+		const trigger = screen.getByRole('button', { name: 'Chat actions' });
 		expect(
 			document.querySelector('[data-slot="sidebar-chat-summary"]')?.parentElement?.className,
 		).not.toContain('pr-8');
 		expect(
 			document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'),
 		).toBeNull();
+		await fireEvent.click(trigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Pin', exact: true }));
+		expect(onTogglePinned).toHaveBeenCalledWith('chat-1');
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBe(trigger);
 	});
 
 	it('orders sidebar-only menu actions before row actions', async () => {
