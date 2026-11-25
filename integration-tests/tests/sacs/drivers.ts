@@ -562,7 +562,7 @@ const piDriver: SacsDriverFactory = {
 const antigravityDriver: SacsDriverFactory = {
   id: 'antigravity',
   label: 'Antigravity',
-  steering: null,
+  steering: STEERING,
   nativeSessions: NATIVE_SESSIONS,
   nativeHistoryImport: null,
   legacyHistoryImport: null,

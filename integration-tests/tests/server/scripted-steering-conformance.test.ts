@@ -5,6 +5,7 @@ import { assistantContents, userContents } from '../../support/chat-assertions.j
 import { claudeText } from '../../support/fake-claude-model.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
+import { geminiText } from '../../support/fake-gemini-model.js';
 import {
   type IntegrationDirectories,
   withIntegrationFixture,
@@ -23,6 +24,12 @@ import {
   liveCodexRunRequest,
   liveCodexStartRequest,
 } from '../../support/live-codex.js';
+import {
+  ANTIGRAVITY_BINARY,
+  scriptedAntigravityRunRequest,
+  scriptedAntigravityStartRequest,
+  startScriptedAntigravityTestEnvironment,
+} from '../../support/scripted-antigravity.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import {
@@ -353,6 +360,29 @@ if (process.platform === 'linux') {
         runRequest: scriptedOpenCodeRunRequest,
         holdReply: (reply) => environment.model.scriptHeldTurn([chatCompletionsText(reply)]),
         scriptReply: (reply) => environment.model.scriptTurn([chatCompletionsText(reply)]),
+        markRequests: () => environment.model.markRequests(),
+        userTextsSince: (cursor) => environment.model.requestsSince(cursor)
+          .flatMap((request) => request.userTexts),
+        assertSettled: () => environment.model.assertSettled(),
+        reset: () => environment.model.reset(),
+      },
+      dispose: () => environment.dispose(),
+    };
+  });
+}
+
+if (ANTIGRAVITY_BINARY) {
+  defineSteeringConformance('Antigravity', async () => {
+    const environment = startScriptedAntigravityTestEnvironment();
+    return {
+      driver: {
+        id: 'antigravity',
+        serverEnvironment: environment.serverEnvironment,
+        prepareWorkspace: environment.prepareWorkspace,
+        startRequest: scriptedAntigravityStartRequest,
+        runRequest: scriptedAntigravityRunRequest,
+        holdReply: (reply) => environment.model.scriptHeldTurn([geminiText(reply)]),
+        scriptReply: (reply) => environment.model.scriptTurn([geminiText(reply)]),
         markRequests: () => environment.model.markRequests(),
         userTextsSince: (cursor) => environment.model.requestsSince(cursor)
           .flatMap((request) => request.userTexts),

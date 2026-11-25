@@ -31,6 +31,12 @@ export interface AcpAgentPolicy {
   command: string | (() => string);
   args?: string[];
   abortStrategy?: AcpAbortStrategy;
+  // The agent folds a `session/prompt` sent during a running turn into that
+  // turn: it settles the earlier prompt at once, carries the new input into the
+  // turn's next model request, and settles the new prompt when the turn ends.
+  // While the turn waits for a permission answer it refuses the new prompt
+  // with an error and keeps running the earlier one.
+  steersWithOverlappingPrompts?: boolean;
   // Agents with native accept-edits mode decide edits themselves.
   acceptsEditsOnClient?: boolean;
   authenticateMethodId?: string | (() => string);

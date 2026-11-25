@@ -154,7 +154,7 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       expect(antigravity.models.find((model) => model.value === ANTIGRAVITY_TEST_MODEL)?.label)
         .toBe('Gemini 3.1 Pro (Low)');
       expect(antigravity.authLoginSupported).toBe(true);
-      expect(antigravity.supportsSteering).toBe(false);
+      expect(antigravity.supportsSteering).toBe(true);
       const authUrl = `/api/v1/agents/auth?agent=antigravity&executorId=${encodeURIComponent(fixture.client.executorId)}`;
       const retired = await rejectionOf(fixture.client.get(`${authUrl}&loginInstance=retired-test-worker`));
       expect(retired).toMatchObject({ status: 409, body: { errorCode: 'LOGIN_INSTANCE_CHANGED' } });
@@ -387,7 +387,7 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
-  test('rejects explicit steering and delivers a queued image on the next turn', async () => {
+  test('delivers a queued image on the next turn', async () => {
     const { model } = requireEnvironment();
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOod9ACAAIrAOpAC706AAAAAElFTkSuQmCC';
     const firstPrompt = marker('FIRST_INPUT');
@@ -402,10 +402,6 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       }));
       await withTimeout(held.requested, LIVE_TURN_TIMEOUT_MS, () => 'agy did not dispatch the first turn');
       const cursor = fixture.client.markEvents();
-      expect(await rejectionOf(fixture.client.steer({
-        chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
-        content: 'unsupported steer', whenTurnUnavailable: 'queue',
-      }))).toMatchObject({ status: 422, body: { errorCode: 'OPERATION_UNSUPPORTED' } });
       const queued = await fixture.client.enqueue({
         chatId, clientRequestId: crypto.randomUUID(), content: queuedPrompt,
         images: [{ name: 'pixel.png', mimeType: 'image/png', data: `data:image/png;base64,${png}` }],
