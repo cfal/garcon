@@ -5,6 +5,7 @@ import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { selectExecutor } from '../../support/executor-ui.js';
+import { performLightpandaAction } from '../../support/lightpanda-action.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`Reveal reports an unavailable file executor without opening Local Files (${executionBackend})`, async () => {
@@ -30,10 +31,12 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await app.waitForText('Files unavailable on Integration worker. Unsaved edits are retained.');
       const filePanel = '[role="tabpanel"][data-workspace-surface-id^="file:"][aria-hidden="false"]';
       await fixture.page.$eval(`${filePanel} .cm-content`, element => (element as HTMLElement).focus());
-      await fixture.page.evaluate(() => {
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
-      });
-      await fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
+      await performLightpandaAction(
+        () => fixture.page.evaluate(() => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
+        }),
+        () => fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]'),
+      );
       await fixture.page.evaluate(() => {
         const command = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
           .find(element => element.textContent?.includes('Reveal Active File in Explorer'));

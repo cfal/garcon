@@ -4,6 +4,7 @@ import * as filesystem from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ProtocolError } from 'puppeteer-core';
 import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
@@ -27,6 +28,7 @@ import {
   stopLightpandaChild,
   type LightpandaStopChild,
 } from '../../support/lightpanda-process.js';
+import { performLightpandaAction } from '../../support/lightpanda-action.js';
 import {
   assertSensitiveValuesNotPersisted,
   createIntegrationFixture,
@@ -808,6 +810,32 @@ describe('integration support contracts', () => {
     await stopLightpandaChild(child, () => '(test logs)', 1);
 
     expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+  });
+
+  test('confirms a Lightpanda action with a lost reply without dispatching it twice', async () => {
+    const lostReply = new ProtocolError();
+    lostReply.originalMessage = 'Promise was collected';
+    const calls: string[] = [];
+    const act = async () => { calls.push('act'); throw lostReply; };
+    await performLightpandaAction(act, async () => { calls.push('confirm'); });
+    expect(calls).toEqual(['act', 'confirm']);
+
+    const missing = new Error('Expected menu did not open');
+    expect(await rejectionOf(performLightpandaAction(act, async () => { throw missing; }))).toBe(missing);
+  });
+
+  test('propagates other Lightpanda action errors without confirming', async () => {
+    const nearMatch = new ProtocolError();
+    nearMatch.originalMessage = 'Promise was collected.';
+    for (const failure of [new Error('Promise was collected'), nearMatch]) {
+      let confirmed = false;
+      const error = await rejectionOf(performLightpandaAction(
+        async () => { throw failure; },
+        async () => { confirmed = true; },
+      ));
+      expect(error).toBe(failure);
+      expect(confirmed).toBe(false);
+    }
   });
 
   test('serves models and deterministic streaming echoes', async () => {
