@@ -76,6 +76,13 @@ async function fixture(
 }
 
 describe('root browser notifications routing', () => {
+	it('closes the permission on remove even when this tab never saw its upsert', async () => {
+		const f = await fixture([]);
+		f.send(permission('remove'));
+		expect(f.delivery.close).toHaveBeenCalledExactlyOnceWith(
+			'permission:synthetic-instance:background:occurrence',
+		);
+	});
 	it.each(['remove', 'clear-run'] as const)('leaves peer notifications alone on disconnect until authoritative %s', async (kind) => {
 		const f = await fixture([permission()], true, true);
 		expect(f.delivery.show).not.toHaveBeenCalled();

@@ -52,15 +52,18 @@ describe('browser notification delivery', () => {
 	it('retracts a resolved permission even when worker delivery finishes after close', async () => {
 		let release!: () => void;
 		const close = vi.fn();
+		let published: { tag?: string; data: unknown; close: typeof close } | undefined;
 		const registration = {
 			active: {},
-			showNotification: async () => {
+			showNotification: async (_title: string, options: NotificationOptions) => {
 				await new Promise<void>((resolve) => {
 					release = resolve;
 				});
+				published = { tag: options.tag, data: options.data, close };
 			},
-			getNotifications: async (options?: { tag?: string }) =>
-				options?.tag === 'permission' ? [{ close }] : [],
+			getNotifications: vi.fn(async ({ tag }: GetNotificationOptions) =>
+				published && published.tag === tag ? [published] : [],
+			),
 		};
 		vi.stubGlobal('Notification', { permission: 'granted' });
 		vi.stubGlobal('isSecureContext', true);
@@ -73,8 +76,12 @@ describe('browser notification delivery', () => {
 		service.show('Generic permission', 'captured', 'permission');
 		await vi.waitFor(() => expect(release).toBeDefined());
 		service.close('permission');
+		await vi.waitFor(() =>
+			expect(registration.getNotifications).toHaveBeenCalledExactlyOnceWith({ tag: 'permission' }),
+		);
+		expect(close).not.toHaveBeenCalled();
 		release();
-		await vi.waitFor(() => expect(close).toHaveBeenCalled());
+		await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
 		service.destroy();
 	});
 	it('rechecks focus after registration resolves', async () => {
