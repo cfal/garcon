@@ -38,8 +38,9 @@ const PERMISSION_OPTIONS = [
 ];
 
 // Speaks the agy 1.5 ACP shapes the runtime depends on: agent-defined
-// permission option ids, `session/cancel` as a notification, and upstream
-// failures reported as a message chunk followed by `end_turn`.
+// permission option ids, `session/cancel` as a notification, upstream
+// failures reported as a message chunk followed by `end_turn`, and a prompt
+// sent during a turn settling the open prompt and joining that turn.
 class FakeAntigravityAgent {
   readonly received: AcpJsonRpcMessage[] = [];
   readonly sessions = new Set<string>();
@@ -49,6 +50,9 @@ class FakeAntigravityAgent {
   resumeAvailableModels: unknown = MODELS.availableModels;
   #stdout!: ReadableStreamDefaultController<Uint8Array>;
   #openPrompt: { id: number | string; sessionId: string } | null = null;
+  readonly #unansweredPermissions = new Set<string>();
+  // When set, a prompt sent during a turn is refused, as agy refuses one while a permission is unanswered.
+  refusesOverlappingPrompts = false;
   #script: (agent: FakeAntigravityAgent, sessionId: string) => void = () => {};
   // Delays or drops the reply to `session/cancel`, as a slow or unresponsive agent would.
   cancelReply: 'immediate' | 'deferred' | 'ignored' = 'immediate';
@@ -95,6 +99,7 @@ class FakeAntigravityAgent {
   process(): AcpProcess {
     const exited = Promise.withResolvers<number>();
     this.#exitCurrent = exited.resolve;
+    this.#openPrompt = null;
     return {
       stdin: { write: (data: string | Uint8Array) => this.#receive(String(data)), flush: () => this.promptFlush ?? 0 },
       stdout: new ReadableStream<Uint8Array>({ start: (controller) => { this.#stdout = controller; } }),
@@ -121,6 +126,7 @@ class FakeAntigravityAgent {
   }
 
   requestPermission(sessionId: string, toolCallId: string, options = PERMISSION_OPTIONS, id = 'permission-1'): void {
+    this.#unansweredPermissions.add(id);
     this.#send({
       jsonrpc: '2.0',
       id,
@@ -157,6 +163,7 @@ class FakeAntigravityAgent {
 
   #handle(message: AcpJsonRpcMessage): void {
     this.received.push(message);
+    if (message.method === undefined) this.#unansweredPermissions.delete(String(message.id));
     const params = (message.params ?? {}) as Record<string, unknown>;
     const reply = (result: unknown, gate?: Promise<void> | null) => {
       const send = () => this.#send({ jsonrpc: '2.0', id: message.id, result });
@@ -200,6 +207,14 @@ class FakeAntigravityAgent {
         return reply(result, this.configReplyGate);
       }
       case 'session/prompt':
+        if (this.#openPrompt) {
+          if (this.refusesOverlappingPrompts || this.#unansweredPermissions.size > 0) {
+            return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Can\'t add this prompt to session' } });
+          }
+          this.endPrompt();
+          this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
+          return;
+        }
         this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
         return this.#script(this, String(params.sessionId));
       case 'session/cancel':
@@ -325,7 +340,7 @@ describe('Antigravity ACP runtime', () => {
       expect(agent.requests('session/prompt').map((frame) => frame.params)).toEqual([{
         sessionId: result.agentSessionId, prompt: [{ type: 'text', text: 'Selected history.\n\nContinue.' }],
       }]);
-      expect(events.map((event) => event.type)).toEqual(['session', 'run-ended']);
+      expect(events.map((event) => event.type)).toEqual(['session', 'steerable', 'run-ended']);
       expect(result.nativeSeedReceipt).toEqual(receiptForCarriedContext(request.carriedContext, result.agentSessionId));
     } finally { runtime.shutdown(); }
   });
@@ -1670,5 +1685,76 @@ describe('Antigravity one-shot query', () => {
     expect(agent.received.find((message) => message.id === 'permission-1')?.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'deny' },
     });
+  });
+  it('folds an accepted steer into the running turn, which ends when the steer settles', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt(() => {});
+    const started = await runtime.startSession(request());
+
+    const steered = await runtime.steer({
+      chatId: 'chat-1',
+      projectPath: '/work',
+      agentSessionId: started.agentSessionId,
+      nativeSession: null,
+      target: runtime.captureSteerTarget(started.agentSessionId),
+      input: 'Also do this.',
+      clientMessageId: 'steer-1',
+      prepareDelivery: async () => {},
+    });
+    agent.update(started.agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Did both.' } });
+    agent.endPrompt();
+    await waitFor(() => runEnded(events).length > 0);
+
+    expect(steered).toEqual({ kind: 'accepted' });
+    expect(agent.requests('session/prompt')[1]?.params).toEqual({
+      sessionId: started.agentSessionId,
+      prompt: [{ type: 'text', text: 'Also do this.' }],
+    });
+    expect(runEnded(events)).toEqual([expect.objectContaining({
+      outcome: 'finished',
+      finalResponse: { type: 'text', text: 'Did both.' },
+    })]);
+  });
+
+  it('keeps the original prompt in charge of the turn when agy refuses a steer', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt(() => {});
+    agent.refusesOverlappingPrompts = true;
+    const started = await runtime.startSession(request());
+
+    const steered = await runtime.steer({
+      chatId: 'chat-1',
+      projectPath: '/work',
+      agentSessionId: started.agentSessionId,
+      nativeSession: null,
+      target: runtime.captureSteerTarget(started.agentSessionId),
+      input: 'Also do this.',
+      clientMessageId: 'steer-1',
+      prepareDelivery: async () => {},
+    });
+    const runningAfterRefusal = runtime.isRunning(started.agentSessionId);
+    agent.endPrompt();
+    await waitFor(() => runEnded(events).length > 0);
+
+    expect(steered).toEqual({ kind: 'rejected', reason: 'provider-rejected', message: 'Can\'t add this prompt to session' });
+    expect(runningAfterRefusal).toBe(true);
+    expect(runEnded(events)).toEqual([expect.objectContaining({ outcome: 'finished' })]);
+  });
+
+  it('offers no steering target while a permission answer is pending', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, sessionId) => fake.requestPermission(sessionId, 'tool-1'));
+    const started = await runtime.startSession(request());
+    await waitFor(() => events.some((event) => event.type === 'permission'));
+    const permission = events.find((event) => event.type === 'permission');
+    if (permission?.type !== 'permission' || !permission.decision) throw new Error('Expected a permission request');
+
+    const whilePending = runtime.captureSteerTarget(started.agentSessionId);
+    await permission.decision.respond({ allow: true });
+
+    expect(whilePending).toBeNull();
+    expect(runtime.captureSteerTarget(started.agentSessionId)).not.toBeNull();
+    expect(events.filter((event) => event.type === 'steerable')).toHaveLength(2);
+    runtime.shutdown();
   });
 });

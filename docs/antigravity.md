@@ -24,7 +24,7 @@ agy 1.5.13 has three surfaces, and ACP is the only one that covers Garcon's need
 | Cancel | `session/cancel` | None documented; closing stdin ends the session after the turn | Interactive |
 | Resume | `session/resume` | `--conversation <id>`, one process per session | `/resume` |
 | Model and mode | `session/set_model`, `mode` config option | Process flags | Interactive |
-| Mid-turn steering | Accepts overlapping prompts; delivery to the active turn is not confirmed | A second input line queued a separate turn in the held-model probe | `queuedMessages` setting |
+| Mid-turn steering | An overlapping `session/prompt` joins the running turn; see [Steering](#steering) | A second input line queued a separate turn in the held-model probe | `queuedMessages` setting |
 | Fork / rewind | Absent (`session/fork` returns -32601; `/fork` is sent to the model as text) | Rejected: "/fork is not available in print mode" | `/fork` (alias `/branch`), `/rewind` (alias `/undo`) |
 
 ACP defines an [optional native fork](https://github.com/agentclientprotocol/agent-client-protocol/blob/c9fef684e0ed6686a7b4aac6b9edb89f5187eed9/docs/rfds/session-fork.mdx#L45). The agy engine implements `ForkConversation` (with a step index) and `RewindConversation` internally, but only the TUI exposes them. Garcon therefore forks Antigravity chats through its provider-neutral path: the fork seeds a new chat from the Garcon ledger, and the first turn carries that transcript as a prefix into a fresh agy session. Fork-at-message works the same way. What is lost compared with a native fork is agy's internal state (cached reads, plan state) rather than the conversation itself.
@@ -62,6 +62,18 @@ A cooperative cancel settles only when the agent answers the open prompt. The ne
 Stop works the same way while a turn is still being configured (model and mode are applied before the prompt). The turn is reserved from admission, so that window counts as busy, and an abort there ends the turn before its prompt is sent. A follow-up that is waiting on a stopped turn gives up as soon as its own admission closes.
 
 After a cancelled turn, agy merges the next user message into the unanswered one, so the model sees both prompts as one request.
+
+### Steering
+
+agy folds a `session/prompt` sent during a running turn into that turn. Held-model probes against 1.5.13 established:
+
+- The open prompt settles with `end_turn` as soon as the new one arrives. That reply carries no `usage`, unlike a turn that finished on its own.
+- The turn keeps running. Its next model request carries the new input after the current step: after the pending tool result, or after the reply being streamed when there is no tool call.
+- The new prompt settles when the combined turn ends, with the turn's `usage`. A further prompt supersedes it the same way, and `session/cancel` settles the latest prompt with `cancelled`.
+- A prompt sent before the first model request is merged into that request.
+- While the turn waits for a permission or question answer, agy refuses the new prompt with JSON-RPC `-32603` ("answer it or send session/cancel, then send this prompt again"). The open prompt keeps running.
+
+The shared ACP runtime enables this through the policy's `steersWithOverlappingPrompts`; Cursor leaves it off. A steer is a text-only `session/prompt` on the running session. The agent settling the superseded prompt accepts the steer and hands the turn to the steer's prompt, so the Garcon run ends only when the latest prompt settles. An error on the steer's prompt while the superseded prompt still runs is a refusal, reported as `provider-rejected`, and the turn keeps its prompt. If neither happens within 15 s, or the transport fails, the outcome is unknown. A turn offers no steering target while it waits for a permission answer, and reports itself steerable again once the answer is sent, so a pending steer is delivered then. A steer whose check and write race the turn's natural end still reaches the agent, which runs it as the next prompt of the same Garcon run.
 
 A chat's project path cannot change. agy keeps the working directory recorded with the conversation and ignores the `cwd` that `session/resume` passes, even in a new process started in the new directory, so a moved chat would keep reading and editing the old one. The descriptor therefore declares `supportsProjectPathUpdate: false`, and the scripted tier asserts that Garcon refuses the move.
 
@@ -162,16 +174,18 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 
 ## Testing
 
-- **Unit tests** (`server-agents/antigravity/src/**/__tests__`) cover configuration and auth-method selection, model parsing, mode mapping, and tool and result normalization. They also cover executor-error detection and the login environment. A runtime suite drives the shared ACP runtime against a fake agent that speaks agy's wire shapes. It covers agent-defined permission option IDs, cancellation (prompt, late, and ignored), in-band executor errors, and resume in a new process.
+- **Unit tests** (`server-agents/antigravity/src/**/__tests__`) cover configuration and auth-method selection, model parsing, mode mapping, and tool and result normalization. They also cover executor-error detection and the login environment. A runtime suite drives the shared ACP runtime against a fake agent that speaks agy's wire shapes. It covers agent-defined permission option IDs, cancellation (prompt, late, and ignored), in-band executor errors, resume in a new process, and steering acceptance, refusal, and the permission-answer gate.
 - **Shared ACP tests** in `server-agents/common/src/acp/__tests__` cover authentication-method negotiation, permission-option selection by kind, and the cancel notification.
 - **Web tests** cover executor-scoped auth diagnostics, submitting a sign-in code, catalog refresh after Settings closes, and selecting Default or a discovered model in New Chat.
 - **Scripted-model tier** (`integration-tests/tests/server/antigravity-scripted-model.test.ts`) runs the real pinned `agy` behind `FakeGeminiModel`, the Gemini sibling of `FakeClaudeModel` and `FakeCodexModel`, in all three execution lanes with an isolated `HOME`. agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method and streams `POST /v1beta/models/<model>:streamGenerateContent?alt=sse`. Requests without tool declarations are auxiliary (title generation, web-search grounding) and get a canned reply outside the script. The suite covers catalog discovery, command approval and denial, file edits in accept-edits mode, and model switching on resume. It also covers Stop, upstream API errors, resume after a server restart, and the refused project path update.
   - agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`, so tool IDs are deterministic.
-  - With no discovered models, the suite starts a chat with the catalog's Default and checks the actual Gemini model and thinking budget. While a turn is held, an explicit steer must be rejected and a queued image must arrive only in the next turn.
+  - With no discovered models, the suite starts a chat with the catalog's Default and checks the actual Gemini model and thinking budget. While a turn is held, a queued image must arrive only in the next turn.
   - A nonzero command exit fails the tool, not the turn. A rejected model request fails that turn, not the next one. A disposable title query must not execute a requested command or publish its tool or reply to the chat. Stop must abort the held model request and retain the same agy process for the follow-up.
   - Scripted calls must satisfy agy's tool schema; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Otherwise the CLI rejects them without emitting a tool call. agy's own rules also auto-approve some commands, such as `touch`.
+  - The shared scripted steering conformance suite (`scripted-steering-conformance.test.ts`) runs the same binary: queued guidance becomes same-turn input exactly once, and accepted guidance survives Stop.
+  - `antigravity-scripted-steer.test.ts` matches the Claude and Codex steering guarantees: concurrent steers reach the running turn in committed ledger order, and a steer sent while a command awaits approval waits in the queue and joins the same turn once the command is approved.
   - `ANTIGRAVITY_BIN` supplies the binary. `scripts/install-antigravity-cli.ts` downloads the pinned version and verifies its SHA-512, and CI caches it as it does Lightpanda. When `ANTIGRAVITY_BIN` is unset, the real-CLI scenarios are skipped; synthetic discovery-failure cases still run.
-- **Server agent compatibility suite** (`integration-tests/tests/sacs`) registers an Antigravity driver on the same binary and fake model whenever `ANTIGRAVITY_BIN` is set. It exercises transcript lifecycle, interrupt, restart and remote disconnect, plus a handoff fork that submits exactly the selected transcript prefix to a fresh native session. The driver has no steering, history-import, or native-forking facets.
+- **Server agent compatibility suite** (`integration-tests/tests/sacs`) registers an Antigravity driver on the same binary and fake model whenever `ANTIGRAVITY_BIN` is set. It exercises transcript lifecycle, interrupt, restart and remote disconnect, plus a handoff fork that submits exactly the selected transcript prefix to a fresh native session. Its steering facet runs the shared commit-before-delivery case. The driver has no history-import or native-forking facets.
 
 ## Comparison With t3code
 
@@ -184,13 +198,12 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 | CLI install | Managed, checksummed download with version leases | User-installed `agy` on the executor; pinned download for tests |
 | Models | `session/new` config options, probed per model for thinking levels | `agy models` flattened IDs |
 | Permission modes | default, auto, plan via `/plan`; full access by policy | default, accept-edits, plan; bypass by policy |
-| Steering mid-turn | Yes (second `session/prompt`) | No (queued as the next turn) |
+| Steering mid-turn | Yes (second `session/prompt`) | Same |
 | Images | Yes, plus audio, PDFs, and text resources | Images |
 | Executor-error outcome | Native SQLite error steps | Wire marker |
 | Subagent child-work tracking | From native `brain/` files | Tool row only |
 | Usage limits / quota | OAuth quota API, token cost from native DBs | Not implemented |
 | Text generation | Disposable ACP session | `singleQuery` via a disposable ACP session |
 
-Gaps deliberately left for follow-up are steering, Reload from native history (`session/load` replay), quota reporting, and ACP elicitation for `ask_question`.
+Gaps deliberately left for follow-up are Reload from native history (`session/load` replay), quota reporting, and ACP elicitation for `ask_question`.
 
-In a held-model probe against 1.5.13, a second concurrent ACP v1 `session/prompt` did not acknowledge delivery while the first request was held. Both prompt RPCs later returned `end_turn`. Even [ACP v2](https://github.com/agentclientprotocol/agent-client-protocol/blob/c9fef684e0ed6686a7b4aac6b9edb89f5187eed9/docs/protocol/v2/prompt-lifecycle.mdx#L415) leaves steering versus queueing to the agent. In stream-json mode, agy did not send the second model request until the first reply was available; the second request included that reply and the CLI emitted two separate results. Neither observation establishes delivery into the active turn. In Garcon, normal input to a busy Antigravity chat goes to the next-turn queue; an explicit steer request is rejected as unsupported.

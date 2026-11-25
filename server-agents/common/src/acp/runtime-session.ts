@@ -2,7 +2,12 @@ import type { PermissionDecisionPayload } from '@garcon/common/chat-command-cont
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
 import type { AcpClient } from './client.js';
-import type { AcpJsonRpcId, AcpSessionConfigOption, AcpSessionModelState } from './protocol.js';
+import type {
+  AcpJsonRpcId,
+  AcpSessionConfigOption,
+  AcpSessionModelState,
+  AcpSessionPromptResult,
+} from './protocol.js';
 
 export type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
@@ -46,6 +51,11 @@ export interface AcpTurnContext {
   sourceRetired: boolean;
   readonly settled: PromiseWithResolvers<void>;
   cancelTimer: ReturnType<typeof setTimeout> | null;
+  // The prompt whose settlement ends the turn. A steer takes it over once the
+  // agent settles the prompt that steer superseded.
+  ownerPrompt: Promise<AcpSessionPromptResult> | null;
+  // The steer the agent has not yet accepted or refused; later steers wait for it.
+  steerDecision: Promise<unknown> | null;
 }
 
 type AcpRuntimeSessionIdentity = Pick<AcpAgentRuntimeSession,
