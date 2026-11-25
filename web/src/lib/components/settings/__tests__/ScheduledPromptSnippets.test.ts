@@ -11,8 +11,24 @@ const expand = vi.mocked(expandSnippet);
 const snippet: Snippet = {
 	id: 'review',
 	shortName: 'review',
-	template: 'Review {{arguments}}',
+	template: 'Review {{arguments}} in {{project_path}}',
 	defaultArguments: 'API',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+};
+const localSnippet: Snippet = {
+	id: 'local-review',
+	shortName: 'local-review',
+	template: 'Review {{arguments}} on {{current_date}}',
+	defaultArguments: 'API',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+};
+const boundarySnippet: Snippet = {
+	id: 'boundary',
+	shortName: 'boundary',
+	template: '{{arguments}}{{current_date}}',
+	defaultArguments: '',
 	createdAt: '2026-01-01T00:00:00.000Z',
 	updatedAt: '2026-01-01T00:00:00.000Z',
 };
@@ -24,11 +40,11 @@ const response: ExpandSnippetResponse = {
 	shortName: snippet.shortName,
 	contextProjectPath: '/repo',
 	contextExecutorId: 'local',
-	expandedText: 'Review API',
+	expandedText: 'Review API in /repo',
 };
 
-function renderEditor() {
-	const getSnippets = vi.fn(async () => ({ revision: 1, snippets: [snippet] }));
+function renderEditor(items: readonly Snippet[] = [snippet]) {
+	const getSnippets = vi.fn(async () => ({ revision: 1, snippets: [...items] }));
 	const getPreambles = vi.fn(async () => ({ revision: 0, preambles: [] }));
 	const snippets = createSnippetsStore({ get: getSnippets });
 	const preambles = createPreamblesStore({ get: getPreambles });
@@ -36,12 +52,12 @@ function renderEditor() {
 	return { snippets, getSnippets, getPreambles };
 }
 
-async function openArguments() {
+async function openArguments(shortName = 'review') {
 	const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
 	prompt.setSelectionRange(prompt.value.length, prompt.value.length);
 	await fireEvent.click(screen.getByRole('button', { name: 'Insert Snippet' }));
-	await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
-	return screen.findByRole('dialog', { name: 'Arguments for /snippet review' });
+	await fireEvent.click(await screen.findByRole('option', { name: new RegExp(`^${shortName}\\b`) }));
+	return screen.findByRole('dialog', { name: `Arguments for /snippet ${shortName}` });
 }
 
 beforeEach(() => expand.mockReset());
@@ -78,8 +94,41 @@ describe('scheduled prompt snippet interactions', () => {
 		expand.mockResolvedValueOnce({ ...response, sourceUpdatedAt: updated.updatedAt });
 		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
 		await waitFor(() =>
-			expect(screen.getByTestId('prompt-draft').textContent).toBe('Before Review API'),
+			expect(screen.getByTestId('prompt-draft').textContent).toBe('Before Review API in /repo'),
 		);
+	});
+
+	it('expands scheduled snippets without project_path locally without calling the server', async () => {
+		renderEditor([localSnippet]);
+		await openArguments('local-review');
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
+			target: { value: 'pull requests' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('prompt-draft').textContent).toBe(
+				'Before Review pull requests on {{current_date}}',
+			),
+		);
+		expect(expand).not.toHaveBeenCalled();
+	});
+
+	it('reopens arguments with preserved edits when local deferred boundary validation fails', async () => {
+		renderEditor([boundarySnippet]);
+		await openArguments('boundary');
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
+			target: { value: 'report\\' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+
+		const dialog = await screen.findByRole('dialog', { name: 'Arguments for /snippet boundary' });
+		expect(within(dialog).getByRole('alert').textContent).toContain('Add a separator');
+		expect(
+			(within(dialog).getByRole('textbox', { name: 'Arguments' }) as HTMLTextAreaElement).value,
+		).toBe('report\\');
+		expect(screen.getByTestId('prompt-draft').textContent).toBe('Before ');
+		expect(expand).not.toHaveBeenCalled();
 	});
 
 	it('shows retryable expansion failures inside the reopened arguments dialog and preserves edits', async () => {

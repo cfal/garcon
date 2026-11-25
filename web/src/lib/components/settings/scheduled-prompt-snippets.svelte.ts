@@ -2,6 +2,7 @@ import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 import { matchesSelectableSnippetExpansion } from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+import { tryExpandSelectableSnippetLocally } from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import {
 	applySnippetTriggerReplacement,
@@ -53,6 +54,21 @@ export class ScheduledPromptSnippets {
 		const source = this.options.prompt;
 		const range = this.palette.trigger ?? this.#selection;
 		this.error = null;
+		const local = tryExpandSelectableSnippetLocally(
+			snippet,
+			{ type: 'value', value: argumentsText },
+			{ kind: 'scheduled' },
+		);
+		if (local.kind === 'expanded') {
+			const replacement = applySnippetTriggerReplacement(source, range, local.expandedText);
+			this.palette.complete();
+			await this.options.onInsert(replacement.text, replacement.caret);
+			return 'inserted';
+		}
+		if (local.kind === 'error') {
+			this.error = local.message;
+			return 'failed';
+		}
 		this.options.onPendingChange(true);
 		try {
 			const result = await this.expansion.run({

@@ -10,8 +10,51 @@ const item = selectableSnippets(
 		{
 			id: 'review',
 			shortName: 'review',
-			template: 'Review {{arguments}} {{chat_id}}',
+			template: 'Review {{arguments}} in {{project_path}} {{chat_id}}',
 			defaultArguments: 'API',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		},
+	],
+	[],
+)[0];
+const localItem = selectableSnippets(
+	[
+		{
+			id: 'daily',
+			shortName: 'daily',
+			template: 'Review {{arguments}} for {{chat_id}} on {{current_date}} / {{current_date_local}}',
+			defaultArguments: 'API',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		},
+	],
+	[],
+)[0];
+const preambleItem = selectableSnippets(
+	[],
+	[
+		{
+			id: '00000000-0000-4000-8000-000000000001',
+			enabled: true,
+			title: 'Daily context',
+			snippetShortName: 'context',
+			content: 'Chat {{chat_id}} on {{current_date}} / {{current_date_local}}',
+			scope: { type: 'global' },
+			agentIds: [],
+			tagFilter: { mode: 'any', tags: [] },
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		},
+	],
+)[0];
+const boundaryItem = selectableSnippets(
+	[
+		{
+			id: 'boundary',
+			shortName: 'boundary',
+			template: '{{arguments}}{{current_date}}',
+			defaultArguments: '',
 			createdAt: '2026-01-01T00:00:00.000Z',
 			updatedAt: '2026-01-01T00:00:00.000Z',
 		},
@@ -26,7 +69,7 @@ const response = {
 	shortName: 'review',
 	contextProjectPath: '/repo',
 	contextExecutorId: 'local',
-	expandedText: 'Review API {{chat_id}}',
+	expandedText: 'Review API in /repo {{chat_id}}',
 };
 
 function fixture() {
@@ -70,10 +113,44 @@ describe('scheduled prompt snippets', () => {
 			context: { type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo' } },
 		});
 		expect(onInsert).toHaveBeenCalledWith(
-			'Before Review API {{chat_id}} after',
-			'Before Review API {{chat_id}}'.length,
+			'Before Review API in /repo {{chat_id}} after',
+			'Before Review API in /repo {{chat_id}}'.length,
 		);
 		expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
+	});
+
+	it('expands scheduled snippets without project_path locally without hitting the server', async () => {
+		const { controller, onInsert, onPendingChange } = fixture();
+		controller.open(7, 15);
+		expect(await controller.insert(localItem, '{{chat_id}}')).toBe('inserted');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onPendingChange).not.toHaveBeenCalled();
+		expect(onInsert).toHaveBeenCalledWith(
+			'Before Review \\{{chat_id}} for {{chat_id}} on {{current_date}} / {{current_date_local}} after',
+			'Before Review \\{{chat_id}} for {{chat_id}} on {{current_date}} / {{current_date_local}}'.length,
+		);
+	});
+
+	it('inserts named preambles verbatim locally in scheduled prompts', async () => {
+		const { controller, onInsert, onPendingChange } = fixture();
+		controller.open(7, 15);
+		expect(await controller.insert(preambleItem, '')).toBe('inserted');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onPendingChange).not.toHaveBeenCalled();
+		expect(onInsert).toHaveBeenCalledWith(
+			'Before Chat {{chat_id}} on {{current_date}} / {{current_date_local}} after',
+			'Before Chat {{chat_id}} on {{current_date}} / {{current_date_local}}'.length,
+		);
+	});
+
+	it('rejects ambiguous deferred token boundaries locally without calling the server', async () => {
+		const { controller, onInsert, onPendingChange } = fixture();
+		controller.open(7, 15);
+		expect(await controller.insert(boundaryItem, 'report\\')).toBe('failed');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onPendingChange).not.toHaveBeenCalled();
+		expect(onInsert).not.toHaveBeenCalled();
+		expect(controller.error).toContain('Add a separator');
 	});
 
 	it('replaces the configured inline trigger while preserving surrounding prose', async () => {
@@ -83,7 +160,7 @@ describe('scheduled prompt snippets', () => {
 		expect(controller.palette.isOpen).toBe(true);
 		expect(controller.palette.initialQuery).toBe('review');
 		expect(await controller.insert(item, '')).toBe('inserted');
-		expect(onInsert.mock.calls[0][0]).toBe('Before Review API {{chat_id}} after');
+		expect(onInsert.mock.calls[0][0]).toBe('Before Review API in /repo {{chat_id}} after');
 	});
 
 	it('detects input before its parent prompt prop updates', async () => {
@@ -94,7 +171,7 @@ describe('scheduled prompt snippets', () => {
 		expect(controller.palette.initialQuery).toBe('');
 		input.prompt = 'Before ;; after';
 		expect(await controller.insert(item, '')).toBe('inserted');
-		expect(onInsert.mock.calls[0][0]).toBe('Before Review API {{chat_id}} after');
+		expect(onInsert.mock.calls[0][0]).toBe('Before Review API in /repo {{chat_id}} after');
 	});
 
 	it.each(['edit', 'target', 'close'])('discards a delayed response after %s', async (change) => {
