@@ -91,6 +91,9 @@ describe('GitPorcelainPanel stash list', () => {
 			expect(load).toHaveBeenCalledOnce();
 			await panel.rerender({ selectedFile: 'second.ts' });
 			expect(load).toHaveBeenCalledTimes(view === 'history' ? 2 : 1);
+			load.mockClear();
+			await panel.rerender({ project: { ...project } });
+			expect(load).toHaveBeenCalledOnce();
 		},
 	);
 

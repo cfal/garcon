@@ -57,12 +57,13 @@
 	$effect(() => {
 		void loadKey;
 		const owner = loadOwner;
+		const target = project;
 		return untrack(() => {
 			if (owner.inspectorView === 'none') {
 				owner.cancelActiveLoad();
 				return;
 			}
-			void owner.loadCurrentView(project);
+			void owner.loadCurrentView(target);
 			return () => owner.cancelActiveLoad();
 		});
 	});

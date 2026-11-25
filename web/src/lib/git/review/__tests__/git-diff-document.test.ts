@@ -1365,7 +1365,7 @@ describe('GitDiffDocumentController', () => {
 		const controller = new GitDiffDocumentController();
 		const paths = ['a.ts', 'b.ts'];
 		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (_snapshot, requested) =>
-			bodyResponse('doc', requested),
+			bodyResponse('doc', requested.map(({ path }) => path)),
 		);
 		const open = (maxLoadedRows: number) => controller.open({
 			project: '/project', documentId: 'doc', files: paths.map(file),
