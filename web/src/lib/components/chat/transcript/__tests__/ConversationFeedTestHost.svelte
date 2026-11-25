@@ -41,6 +41,7 @@
 		transcript?: ActiveTranscriptState;
 		isVisible?: boolean;
 		onCoverageChange?: () => void;
+		onViewportPortChange?: (port: ConversationViewportPort | null) => void;
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -68,6 +69,7 @@
 		transcript,
 		isVisible = true,
 		onCoverageChange,
+		onViewportPortChange,
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -85,14 +87,6 @@
 		seedTranscript(chatState, 'chat-1', viewId, [
 			{ ordinal: 1, message: new ThinkingMessage('2026-07-01T00:00:00.000Z', 'Synthetic thinking body') },
 		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
-	}
-	let viewportPort: ConversationViewportPort | null = null;
-	let navigationResult = $state('idle');
-	async function navigateToTool(ordinal: number, presentation = false): Promise<void> {
-		navigationResult = await viewportPort?.scrollToTarget({
-			kind: presentation ? 'presentation-row' : 'row',
-			id: `generation-1:${ordinal}`,
-		}) ?? 'not-ready';
 	}
 	if (initialTranscriptScenario === 'thinking-disclosure') {
 		replaceThinkingTranscript('generation-1');
@@ -294,7 +288,7 @@
 	{onCoverageChange}
 	pinnedToBottom={true}
 		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
-		onViewportPortChange={(port) => (viewportPort = port)}
+		{onViewportPortChange}
 />
 {#if showAnnouncementTrigger}
 	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}
@@ -309,13 +303,6 @@
 {/if}
 {#if transcriptScenario === 'tool-run' || transcriptScenario === 'large-tool-run'}
 	<button onclick={() => localSettings.toggle('combineToolUseMessages')}>Toggle combination</button>
-{/if}
-{#if transcriptScenario === 'tool-run'}
-	<button onclick={() => navigateToTool(1)}>Navigate first tool</button>
-	<button onclick={() => navigateToTool(2)}>Navigate middle tool</button>
-	<button onclick={() => navigateToTool(3)}>Navigate last tool</button>
-	<button onclick={() => navigateToTool(2, true)}>Restore group summary</button>
-	<div data-testid="tool-navigation-result">{navigationResult}</div>
 {/if}
 {#if transcriptScenario === 'count-shrink'}
 	<button onclick={shrinkTranscript}>Shrink transcript</button>

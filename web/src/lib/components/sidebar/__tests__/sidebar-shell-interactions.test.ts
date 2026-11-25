@@ -1,5 +1,6 @@
 import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
 import { chat, delegated } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
@@ -563,6 +564,33 @@ describe('sidebar back-to-top control', () => {
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
+	});
+
+	it('enables edge autoscroll when only the sidebar bottom padding begins to overflow', async () => {
+		const { container } = render(SidebarHost, {
+			chats: [chat('one'), chat('two')],
+			autoLoadSavedSearches: false,
+		});
+		const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+		const list = viewport.querySelector<HTMLElement>('[data-sidebar-virtual-list]')!;
+		const sizer = list.querySelector<HTMLElement>('[data-sidebar-virtual-sizer]')!;
+		const height = Number.parseFloat(list.style.height);
+		expect(height).toBeGreaterThan(Number.parseFloat(sizer.style.height) + 1);
+		async function resize(viewportHeight: number) {
+			Object.defineProperties(viewport, {
+				clientHeight: { configurable: true, value: viewportHeight },
+				scrollHeight: { configurable: true, value: Math.max(height, viewportHeight) },
+			});
+			ResizeObserverHarness.emit(viewport, 320, viewportHeight);
+			await tick();
+			await vi.dynamicImportSettled();
+			return viewport.hasAttribute('data-auto-scrollable');
+		}
+		expect(await resize(height)).toBe(false);
+		expect(await resize(height - 1)).toBe(true);
+		expect(await resize(0)).toBe(false);
+		expect(await resize(height - 1)).toBe(true);
+		expect(await resize(height)).toBe(false);
 	});
 
 	it('returns the scroll viewport to the top without losing keyboard focus', async () => {

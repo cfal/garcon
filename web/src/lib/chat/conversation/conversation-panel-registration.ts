@@ -5,7 +5,6 @@ import type { ConversationViewportPort } from '$lib/chat/transcript/conversation
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
 import type { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { TranscriptRowNavigationResult, TranscriptRowTarget } from '$lib/chat/transcript/transcript-row-navigation.js';
-import type { UserMessageNavigatorSelectionResult } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 import type { ConversationLifecycleRegistry } from './conversation-lifecycle-registry.svelte.js';
 import type { ConversationLifecycleState } from './conversation-lifecycle-state.svelte.js';
@@ -48,8 +47,8 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	#presentation: ConversationPanelPresentationPort | null = null;
 	#lastTarget: ConversationPanelRestoreTarget = { kind: 'end' };
 	#restoreEpoch = 0;
-	#readyRestoreEpoch: number | null = null;
-	#applyingRestoreEpoch: number | null = null;
+	#restoreReady = false;
+	#applyingRestore: AbortController | null = null;
 	#restoreResumeRequested = false;
 	#destroyed = false;
 	#visible = true;
@@ -128,11 +127,13 @@ export class PanelRegistration implements ConversationPanelRegistration {
 
 	attachPresentation(port: ConversationPanelPresentationPort): () => void {
 		if (this.#destroyed) return () => {};
+		this.#applyingRestore?.abort();
 		this.#presentation = port;
 		this.scroll.setViewportVisible(this.isPresentationVisible);
 		this.resumePendingRestore();
 		return () => {
 			if (this.#presentation !== port) return;
+			this.#applyingRestore?.abort();
 			this.#rowNavigation?.abort();
 			if (this.isPresentationVisible) this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
 			port.closeTransients();
@@ -143,10 +144,6 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	resumePendingRestore(): void {
 		if (!this.isPresentationVisible) return;
 		if (this.#presentation?.getViewport()) this.#presentationReady?.();
-		if (this.#applyingRestoreEpoch !== null) {
-			this.#restoreResumeRequested = true;
-			return;
-		}
 		void this.#applyPendingRestore();
 	}
 
@@ -168,6 +165,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 
 	prepareForHide(): ConversationPanelRestoreTarget {
 		if (!this.isPresentationVisible) return this.#lastTarget;
+		this.#applyingRestore?.abort();
 		this.#rowNavigation?.abort();
 		const target = this.captureRestoreTarget();
 		this.#presentation?.prepareForHide();
@@ -200,16 +198,17 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	#beginRestore(target: ConversationPanelRestoreTarget | null): number {
+		this.#applyingRestore?.abort();
 		this.#rowNavigation?.abort();
 		const restoreEpoch = ++this.#restoreEpoch;
-		this.#readyRestoreEpoch = null;
+		this.#restoreReady = false;
 		this.#lastTarget = target ?? { kind: 'end' };
 		return restoreEpoch;
 	}
 
 	async #finishRestore(restoreEpoch: number): Promise<void> {
 		if (this.#destroyed || restoreEpoch !== this.#restoreEpoch) return;
-		this.#readyRestoreEpoch = restoreEpoch;
+		this.#restoreReady = true;
 		await this.#applyPendingRestore();
 	}
 
@@ -224,7 +223,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 		const combined = AbortSignal.any([signal, operation.signal]);
 		const current = () => !this.#destroyed && this.#rowNavigation === operation && ownsNavigation();
 		++this.#restoreEpoch;
-		this.#readyRestoreEpoch = null;
+		this.#restoreReady = false;
 		try {
 			const result = await this.scroll.navigateToTranscriptRow(
 				target,
@@ -271,14 +270,12 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	async #applyPendingRestore(): Promise<void> {
-		const restoreEpoch = this.#readyRestoreEpoch;
-		if (
-			!this.isPresentationVisible ||
-			restoreEpoch === null ||
-			restoreEpoch !== this.#restoreEpoch ||
-			this.#applyingRestoreEpoch !== null
-		)
+		const restoreEpoch = this.#restoreEpoch;
+		if (!this.isPresentationVisible || !this.#restoreReady) return;
+		if (this.#applyingRestore) {
+			this.#restoreResumeRequested = true;
 			return;
+		}
 		if (this.#lastTarget.kind === 'end') {
 			this.#prepareInitialBottomRestore();
 			return;
@@ -289,7 +286,8 @@ export class PanelRegistration implements ConversationPanelRegistration {
 			return;
 		}
 		if (!this.#presentation) return;
-		this.#applyingRestoreEpoch = restoreEpoch;
+		const attempt = new AbortController();
+		this.#applyingRestore = attempt;
 		this.scroll.setPinnedToBottom(false);
 		try {
 			const target = this.#lastTarget;
@@ -298,25 +296,21 @@ export class PanelRegistration implements ConversationPanelRegistration {
 				transcriptViewId: target.transcriptViewId,
 				rowId: `${target.transcriptViewId}:${target.ordinal}`,
 			};
-			let result: UserMessageNavigatorSelectionResult;
-			if (target.kind === 'group-summary') {
-				result = await this.scroll.jumpToMessageRow(row, {
-					viewportOffset: target.viewportOffset,
-					presentation: 'group-summary',
-				});
-			} else {
-				result = await this.scroll.jumpToMessageRow(row, {
-					viewportOffset: target.viewportOffset,
-				});
-			}
+			const { viewportOffset } = target;
+			const result = await this.scroll.jumpToMessageRow(
+				row,
+				target.kind === 'group-summary' ? { viewportOffset, presentation: target.kind } : { viewportOffset },
+				attempt.signal,
+			);
 			if (
-				result === 'completed' &&
-				restoreEpoch === this.#restoreEpoch &&
-				restoreEpoch === this.#readyRestoreEpoch
-			)
-				this.#readyRestoreEpoch = null;
+				!attempt.signal.aborted &&
+				result !== 'unavailable' &&
+				restoreEpoch === this.#restoreEpoch
+			) {
+				this.#restoreReady = false;
+			}
 		} finally {
-			if (this.#applyingRestoreEpoch === restoreEpoch) this.#applyingRestoreEpoch = null;
+			this.#applyingRestore = null;
 			if (this.#restoreResumeRequested) {
 				this.#restoreResumeRequested = false;
 				void this.#applyPendingRestore();
@@ -325,7 +319,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	#prepareInitialBottomRestore(): void {
-		this.#readyRestoreEpoch = null;
+		this.#restoreReady = false;
 		this.scroll.setPinnedToBottom(true);
 		this.scroll.prepareInitialBottomRestore(this.chatId);
 	}

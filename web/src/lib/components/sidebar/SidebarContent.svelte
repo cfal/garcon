@@ -83,6 +83,8 @@
 	}: SidebarContentProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	let measuredViewport = $state<HTMLElement | null>(null);
+	let viewportHeight = $state(0);
 	let showBackToTop = $state(false);
 
 	$effect(() => {
@@ -94,35 +96,38 @@
 	$effect(() => {
 		const viewport = viewportRef;
 		if (!viewport) {
+			measuredViewport = null;
 			showBackToTop = false;
 			return;
 		}
-		const scrollViewport: HTMLElement = viewport;
-
-		function updateVisibility(): void {
+		const updateViewport = () => {
+			if (viewportRef !== viewport) return;
+			const height = viewport.clientHeight;
+			viewportHeight = height;
 			const nextVisible = shouldShowSidebarBackToTop({
-				scrollTop: scrollViewport.scrollTop,
-				viewportHeight: scrollViewport.clientHeight,
+				scrollTop: viewport.scrollTop,
+				viewportHeight: height,
 				currentlyVisible: showBackToTop,
 			});
 			if (nextVisible === showBackToTop) return;
 			if (
 				!nextVisible &&
-				scrollViewport.ownerDocument.activeElement?.closest('[data-sidebar-back-to-top]')
+				viewport.ownerDocument.activeElement?.closest('[data-sidebar-back-to-top]')
 			) {
-				scrollViewport.focus({ preventScroll: true });
+				viewport.focus({ preventScroll: true });
 			}
 			showBackToTop = nextVisible;
-		}
+		};
 
 		// Keeps visibility state reads from re-subscribing the DOM lifecycle effect.
-		untrack(updateVisibility);
-		scrollViewport.addEventListener('scroll', updateVisibility, { passive: true });
+		untrack(updateViewport);
+		measuredViewport = viewport;
+		viewport.addEventListener('scroll', updateViewport, { passive: true });
 		const resizeObserver =
-			typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateVisibility);
-		resizeObserver?.observe(scrollViewport);
+			typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateViewport);
+		resizeObserver?.observe(viewport);
 		return () => {
-			scrollViewport.removeEventListener('scroll', updateVisibility);
+			viewport.removeEventListener('scroll', updateViewport);
 			resizeObserver?.disconnect();
 		};
 	});
@@ -154,6 +159,7 @@
 >
 	<SidebarChatList
 		{viewportRef}
+		viewportHeight={measuredViewport === viewportRef ? viewportHeight : 0}
 		{projection}
 		{selectedChatId}
 		{isLoading}

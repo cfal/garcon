@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createVirtualListHarness } from './virtual-list-test-harness';
+import type { VirtualMeasurementAnchor } from '../virtual-list-types';
 
 const active: Array<ReturnType<typeof createVirtualListHarness>> = [];
 
@@ -7,6 +8,20 @@ function harness(options?: Parameters<typeof createVirtualListHarness>[0]) {
 	const created = createVirtualListHarness(options);
 	active.push(created);
 	return created;
+}
+
+function readerHarness(
+	estimates: Record<string, number>,
+	{ viewportOffset, viewportSize = 200 }: { viewportOffset: number; viewportSize?: number },
+) {
+	const test = harness({ viewportSize, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset } });
+	test.controller.apply({
+		kind: 'update',
+		keys: Object.keys(estimates),
+		estimates: Object.values(estimates),
+		anchor: { kind: 'none' },
+	});
+	return test;
 }
 
 afterEach(() => {
@@ -394,6 +409,38 @@ describe('VirtualListController', () => {
 				scrollWrites: 0,
 			}),
 		);
+	});
+
+	it.each(['scroll', 'resize'])('keeps user movement during a resize when %s arrives first', first => {
+		const test = harness({ viewportSize: 100 });
+		const keys = ['a', 'b', 'c', 'd'];
+		const estimates = [100, 100, 100, 100];
+		test.controller.apply({ kind: 'update', keys, estimates, anchor: { kind: 'none' } });
+		test.setPhysicalScrollTop(250);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update', keys: ['prepended', ...keys], estimates: [30, ...estimates],
+			anchor: { kind: 'item', key: 'c' },
+		});
+
+		// The old 250px is unreachable, but 110px is user movement, not the new 200px edge.
+		test.setViewportSizeSilently(200);
+		expect(test.viewport.scrollHeight - test.viewport.clientHeight).toBe(200);
+		test.setPhysicalScrollTopSilently(110);
+		if (first === 'resize') test.emitViewportResize();
+		test.viewport.dispatchEvent(new Event('scroll'));
+		if (first === 'scroll') test.emitViewportResize();
+		test.environment.flushMicrotasks();
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
+		expect(test.controller.viewportPosition?.logicalOffset).toBe(140);
+		expect(test.writes).toBe(0);
+
+		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(140);
+		expect(test.writes).toBe(1);
 	});
 
 	it('records settled deviation and painted anchor coordinates', () => {
@@ -930,6 +977,181 @@ describe('VirtualListController', () => {
 		test.environment.flushMicrotasks();
 
 		expect(test.viewport.scrollTop).toBe(0);
+	});
+
+	it.each(['before', 'after'])('keeps the reader offset when its row first measures %s the seek commits', timing => {
+		const test = readerHarness({ before: 1000, reader: 192, after: 300, tail: 2000 }, { viewportOffset: -300.25 });
+		if (timing === 'before') test.mountItem('reader', 800);
+		expect(test.controller.scrollToAnchor('reader', -300.25)).toEqual({ kind: 'scheduled' });
+		test.environment.flushMicrotasks();
+		if (timing === 'after') {
+			test.mountItem('reader', 800);
+			test.environment.flushMicrotasks();
+		}
+		expect(test.controller.measuredSize('reader')).toBe(800);
+		expect(test.viewport.scrollTop).toBe(1300.25);
+		expect(test.writes).toBe(1);
+	});
+
+	it('falls back to the visible row when a pending measurement anchor is removed', () => {
+		const test = readerHarness(
+			{ before: 100, visible: 100, reader: 100, tail: 500 }, { viewportOffset: 10, viewportSize: 100 },
+		);
+		const before = test.mountItem('before', 100);
+		test.controller.scrollToAnchor('reader', 10);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(190);
+
+		test.environment.observer.emit(before.element, 120);
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'visible', 'tail'], estimates: [100, 100, 500],
+			anchor: { kind: 'none' },
+		});
+		test.environment.observer.emit(before.element, 150);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(240);
+	});
+
+	it('uses the new reader rather than a pending projection anchor for subsequent measurements', () => {
+		let policy: VirtualMeasurementAnchor = 'geometric';
+		const test = harness({ viewportSize: 200, get measurementAnchor() { return policy; } });
+		const keys = ['before', 'other', 'reader', 'tail'];
+		const estimates = [50, 50, 100, 500];
+		test.controller.apply({ kind: 'update', keys, estimates, anchor: { kind: 'none' } });
+		const before = test.mountItem('before', 50);
+		const other = test.mountItem('other', 50);
+		test.environment.flushMicrotasks();
+		test.controller.apply({
+			kind: 'update', keys: ['prepended', ...keys], estimates: [20, ...estimates], anchor: { kind: 'item', key: 'other' },
+		});
+		policy = { kind: 'item', key: 'reader', viewportOffset: 200 };
+		test.environment.observer.emit(before.element, 60);
+		policy = 'geometric';
+		test.environment.observer.emit(other.element, 50);
+		expect(test.records.at(-1)).toMatchObject({ source: 'resize', anchorIndex: 3 });
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(0);
+		expect(test.writes).toBe(0);
+	});
+
+	it.each([
+		{ offset: 100, before: 90, tailEstimate: 500, tail: 500, first: 0, expected: 0 },
+		{ offset: 100, before: 130, tailEstimate: 500, tail: 500, first: 0, expected: 30 },
+		{ offset: 50, before: 90, tailEstimate: 500, tail: 500, first: 0, expected: 40 },
+		{ offset: -50, before: 50, tailEstimate: 60, tail: 70, first: 10, expected: 20 },
+		{ offset: -50, before: 50, tailEstimate: 20, tail: 30, first: 0, expected: 0 },
+	])('preserves the attainable reader offset at a physical edge: %j', ({ offset, before, tailEstimate, tail, first, expected }) => {
+		const test = readerHarness({ before: 50, reader: 100, tail: tailEstimate }, { viewportOffset: offset });
+		test.controller.scrollToAnchor('reader', offset);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(first);
+		test.mountItem('before', before);
+		test.mountItem('tail', tail);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(expected);
+		expect(test.writes).toBe(expected === first ? 1 : 2);
+	});
+
+	it('resolves a clipped reader against committed bounds, not overflow from a resizing wrapper', () => {
+		const test = readerHarness(
+			{ before: 50, reader: 100, growing: 60, tail: 16 }, { viewportOffset: -50, viewportSize: 216 },
+		);
+		const growing = test.mountItem('growing', 60);
+		test.controller.scrollToAnchor('reader', -50);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(10);
+
+		test.setPhysicalScrollHeight(280);
+		test.environment.observer.emit(growing.element, 130);
+		test.setPhysicalScrollHeight(null);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(80);
+	});
+
+	it.each([
+		{
+			offset: -60, estimates: { before: 400, reader: 40, tail: 40 }, growing: 'reader', size: 240,
+			paintedStart: 400, sizer: 680, userScrollTop: 279, afterInput: 279,
+		},
+		{
+			offset: 100, estimates: { before: 50, reader: 100, tail: 500 }, growing: 'before', size: 60,
+			paintedStart: 50, sizer: 650, userScrollTop: 50, afterInput: 60,
+		},
+	] as const)('cancels the exact seek without turning it into visual deviation: %j', scenario => {
+		const { offset, estimates, growing, size, paintedStart, sizer, userScrollTop, afterInput } = scenario;
+		const test = readerHarness(estimates, { viewportOffset: offset });
+		const mounted = test.mountItem(growing, estimates[growing]);
+		test.controller.scrollToAnchor('reader', offset);
+		test.environment.flushMicrotasks();
+		test.environment.observer.emit(mounted.element, size);
+		test.viewport.dispatchEvent(new WheelEvent('wheel'));
+		test.environment.flushMicrotasks();
+		expect(test.controller.snapshot.positions.itemAt(1)!.start).toBe(paintedStart);
+		expect(test.controller.snapshot.sizerSize).toBe(sizer);
+		expect(test.controller.snapshot.visibleRange?.startIndex).toBe(0);
+		test.setPhysicalScrollTop(userScrollTop);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(afterInput);
+	});
+
+	it.each([200.8, 201.2])('resumes a bottom-clamped reader after the browser attains %f', attained => {
+		const test = readerHarness(
+			{ before: 360, reader: 100, tail: 100 }, { viewportOffset: -300, viewportSize: 359 },
+		);
+		test.controller.scrollToAnchor('reader', -300);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(201);
+		test.setPhysicalScrollTop(attained);
+		const before = test.mountItem('before', 360);
+		const tail = test.mountItem('tail', 100);
+		test.environment.flushMicrotasks();
+		test.environment.observer.emit(before.element, 350);
+		test.environment.observer.emit(tail.element, 110);
+		test.environment.flushMicrotasks();
+		expect(test.writes).toBe(1);
+		expect(test.viewport.scrollTop).toBe(attained);
+		test.mountItem('reader', 500);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(601);
+	});
+
+	it('does not resume a newly attainable reader seek during native momentum', () => {
+		const test = readerHarness({ before: 400, reader: 40, tail: 40 }, { viewportOffset: -60 });
+		const reader = test.mountItem('reader', 40);
+		test.controller.scrollToAnchor('reader', -60);
+		test.environment.flushMicrotasks();
+		test.environment.flushFrames();
+		expect(test.viewport.scrollTop).toBe(280);
+
+		test.controller.setScrollActivity('coasting');
+		test.environment.observer.emit(reader.element, 240);
+		test.environment.flushMicrotasks();
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
+		expect(test.controller.measuredSize('reader')).toBe(240);
+		expect(test.viewport.scrollTop).toBe(280);
+		expect(test.writes).toBe(1);
+
+		test.controller.setScrollActivity('idle');
+		test.mountItem('tail', 60);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(460);
+		expect(test.writes).toBe(2);
+	});
+
+	it.each(['row', 'viewport'])('commits the reader start and leading inset together after a %s resize', source => {
+		const test = readerHarness({ a: 100, b: 100, reader: 100, tail: 600 }, { viewportOffset: -50 });
+		const a = test.mountItem('a', 100);
+		test.controller.scrollToAnchor('reader', -50);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(250);
+		test.environment.observer.emit(a.element, 150);
+		test.setLeadingOffset(10);
+		if (source === 'row') test.environment.observer.emit(a.element, 180);
+		else test.emitViewportResize();
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(source === 'row' ? 340 : 310);
+		expect(test.writes).toBe(2);
 	});
 
 	it('preserves a pending navigation target through a resize batch', () => {

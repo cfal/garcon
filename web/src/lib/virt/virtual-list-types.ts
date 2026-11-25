@@ -44,8 +44,17 @@ export function virtualItems(
 
 	return items;
 }
+
+type VirtualItemAnchor = { readonly kind: 'item'; readonly key: string };
+
+/** A reader restore preserves the requested row offset as far as physical bounds allow. */
+export type VirtualMeasurementAnchor =
+	| 'geometric'
+	| 'end'
+	| (VirtualItemAnchor & { readonly viewportOffset?: number });
+
 export type VirtualMutationAnchor =
-	| { readonly kind: 'item'; readonly key: string }
+	| VirtualItemAnchor
 	| { readonly kind: 'item-remap'; readonly oldKey: string; readonly newKey: string }
 	| { readonly kind: 'end' }
 	| { readonly kind: 'none' };

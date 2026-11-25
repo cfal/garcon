@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
@@ -218,6 +219,23 @@ function isSidebarViewport(element: HTMLElement): boolean {
 	);
 }
 
+async function settleAutoScroll() {
+	vi.advanceTimersByTime(32);
+	await vi.dynamicImportSettled();
+}
+
+// Happy DOM falls back to Event for DragEvent, which drops the pointer coordinates.
+function nativeDrag(dataTransfer: DataTransfer, type: string, target: HTMLElement, y: number) {
+	const event = new MouseEvent(type, {
+		bubbles: true,
+		cancelable: true,
+		clientX: 100,
+		clientY: y,
+	});
+	Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+	return fireEvent(target, event);
+}
+
 beforeEach(() => {
 	originalElementsFromPoint = document.elementsFromPoint;
 	if (!originalElementsFromPoint) {
@@ -234,19 +252,23 @@ beforeEach(() => {
 	vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
 		this: HTMLElement,
 	) {
-		return isSidebarViewport(this) ? 640 : 0;
+		return isSidebarViewport(this) ? Number.parseFloat(this.style.height) : 0;
 	});
 	vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (
 		this: HTMLElement,
 	) {
 		if (!isSidebarViewport(this)) return 0;
 		const list = this.querySelector<HTMLElement>('[data-sidebar-virtual-list]');
-		return Math.max(640, Number.parseFloat(list?.style.height ?? '0') || 0);
+		return Math.max(
+			Number.parseFloat(this.style.height),
+			Number.parseFloat(list?.style.height ?? '0') || 0,
+		);
 	});
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
 		this: HTMLElement,
 	) {
-		if (isSidebarViewport(this)) return rect({ left: 0, top: 0, width: 320, height: 640 });
+		if (isSidebarViewport(this))
+			return rect({ left: 0, top: 0, width: 320, height: Number.parseFloat(this.style.height) });
 		if (this.hasAttribute('data-sidebar-virtual-sizer')) {
 			const viewport = this.closest<HTMLElement>('[data-testid$="sidebar-viewport"]');
 			return rect({
@@ -380,6 +402,202 @@ afterEach(() => {
 });
 
 describe('SidebarVirtualSortableChatList', () => {
+	it('keeps edge autoscroll attached across an equal-geometry roster update', async () => {
+		vi.useFakeTimers();
+		const rows = makeRows(12);
+		const view = render(SidebarVirtualSortableChatListHost, { rows, rowHeight });
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		await settleAutoScroll();
+		expect(viewport.getAttribute('data-auto-scrollable')).toBe('true');
+		const added = vi.spyOn(viewport, 'setAttribute');
+		const removed = vi.spyOn(viewport, 'removeAttribute');
+		const scrollHeight = vi.spyOn(viewport, 'scrollHeight', 'get').mockClear();
+		const clientHeight = vi.spyOn(viewport, 'clientHeight', 'get').mockClear();
+
+		await view.rerender({
+			rows: rows.map((row, i) =>
+				i === 1 ? { ...row, chat: { ...row.chat, title: 'Renamed recipient' } } : row,
+			),
+		});
+		await settleAutoScroll();
+		expect(screen.getByText('Renamed recipient')).toBeTruthy();
+		expect(added.mock.calls.map(([name]) => name)).not.toContain('data-auto-scrollable');
+		expect(removed).not.toHaveBeenCalledWith('data-auto-scrollable');
+		expect(scrollHeight).not.toHaveBeenCalled();
+		expect(clientHeight).not.toHaveBeenCalled();
+	});
+
+	it('edge-scrolls only while the live viewport overflows and reordering is allowed', async () => {
+		vi.useFakeTimers();
+		let reorder!: SidebarOrderController;
+		const view = render(SidebarVirtualSortableChatListHost, {
+			rows: makeRows(4),
+			rowHeight,
+			onRegisterReorder: (value) => (reorder = value),
+		});
+		const viewport = screen.getByTestId('virtual-sidebar-viewport');
+		const source = viewport.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]')!;
+		await settleAutoScroll();
+		vi.spyOn(document, 'elementsFromPoint').mockReturnValue([viewport]);
+		const scroll = vi.spyOn(viewport, 'scrollBy');
+		const dataTransfer = new DataTransfer();
+		const drag = (type: string, target: HTMLElement, y: number) =>
+			nativeDrag(dataTransfer, type, target, y);
+		const dragAtBottom = async () => {
+			scroll.mockClear();
+			await drag('dragover', viewport, viewport.clientHeight - 1);
+			vi.advanceTimersByTime(80);
+			await tick();
+		};
+		await drag('dragstart', source, 40);
+		try {
+			expect(viewport.scrollHeight).toBe(viewport.clientHeight);
+			await dragAtBottom();
+			expect(scroll).not.toHaveBeenCalled();
+			await view.rerender({ viewportHeight: 200 });
+			await settleAutoScroll();
+			await dragAtBottom();
+			expect(scroll).toHaveBeenCalled();
+			expect(viewport.scrollTop).toBeGreaterThan(0);
+
+			await view.rerender({ displayOptions: { sortMode: 'recent' } });
+			await dragAtBottom();
+			expect(scroll).not.toHaveBeenCalled();
+			await view.rerender({ displayOptions: { sortMode: 'manual' } });
+			await dragAtBottom();
+			expect(scroll).toHaveBeenCalled();
+			const sorting = reorder.sort('created');
+			expect(reorder.busy).toBe(true);
+			scroll.mockClear();
+			vi.advanceTimersByTime(64);
+			expect(scroll).not.toHaveBeenCalled();
+			await sorting;
+			await dragAtBottom();
+			expect(scroll).toHaveBeenCalled();
+
+			await view.rerender({ viewportHeight: 640 });
+			viewport.scrollTop = 0;
+			await dragAtBottom();
+			expect(scroll).not.toHaveBeenCalled();
+			await view.rerender({ rows: makeRows(12) });
+			await settleAutoScroll();
+			await dragAtBottom();
+			expect(scroll).toHaveBeenCalled();
+		} finally {
+			await drag('dragend', source, 40);
+		}
+	});
+
+	it('transfers edge autoscroll to a replacement viewport and releases it on unmount', async () => {
+		vi.useFakeTimers();
+		const view = render(SidebarVirtualSortableChatListHost, { rows: [], rowHeight });
+		const first = screen.getByTestId('virtual-sidebar-viewport');
+		const replacement = view.container;
+		replacement.dataset.testid = 'sidebar-list-viewport';
+		replacement.style.overflowY = 'auto';
+		await settleAutoScroll();
+		expect(first.hasAttribute('data-auto-scrollable')).toBe(false);
+		await view.rerender({ rows: makeRows(12) });
+		await settleAutoScroll();
+		expect(first.hasAttribute('data-auto-scrollable')).toBe(true);
+		replacement.style.height = '0px';
+		await view.rerender({ viewportOverride: replacement, viewportHeight: 0 });
+		await settleAutoScroll();
+		expect(first.hasAttribute('data-auto-scrollable')).toBe(false);
+		expect(replacement.hasAttribute('data-auto-scrollable')).toBe(false);
+		replacement.style.height = '640px';
+		await view.rerender({ viewportHeight: 640 });
+		await settleAutoScroll();
+		expect(replacement.hasAttribute('data-auto-scrollable')).toBe(true);
+		view.unmount();
+		expect(replacement.hasAttribute('data-auto-scrollable')).toBe(false);
+	});
+
+	it.each(['cancel', 'row', 'unmounted row', 'no target', 'header', 'incompatible row'] as const)(
+		'only persists an accepted native sidebar release: %s',
+		async (ending) => {
+			vi.useFakeTimers();
+			const persist = vi.fn();
+			const ended = vi.fn();
+			const rows = [
+				makeProjectHeader('/tmp/other', 1),
+				makeScopedRow(60, '/tmp/other', ['chat-60']),
+				...makeRows(60),
+			];
+			const { container } = render(SidebarVirtualSortableChatListHost, {
+				rows,
+				rowHeight,
+				onPersistReorder: persist,
+				onWorkspaceDragEnd: ended,
+			});
+			const viewport = screen.getByTestId('virtual-sidebar-viewport');
+			const row0 = viewport.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-0"]')!;
+			const row1 = viewport.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-1"]')!;
+			const transfer = new DataTransfer();
+			const hit = vi.spyOn(document, 'elementFromPoint');
+			let stickyRowAtDrop = false;
+			const stopMonitor = monitorForElements({
+				onDrop: ({ location }) => {
+					stickyRowAtDrop = location.current.dropTargets.some(
+						(record) => record.element === row1 && record.isActiveDueToStickiness,
+					);
+				},
+			});
+			const drag = async (type: string, element: HTMLElement, y: number) => {
+				await nativeDrag(transfer, type, element, y);
+				vi.advanceTimersByTime(32);
+				await tick();
+			};
+			const releaseOver = async (target: HTMLElement) => {
+				hit.mockReturnValue(target);
+				await drag('dragover', target, 150);
+				await drag('drop', target, 150);
+			};
+			try {
+				hit.mockReturnValue(row0);
+				await drag('dragstart', row0, 44);
+				hit.mockReturnValue(row1);
+				await drag('dragover', row1, 150);
+				expect(container.querySelector('[data-sidebar-branch-drop-indicator]')).not.toBeNull();
+
+				if (ending === 'row') {
+					await drag('drop', row1, 150);
+				} else if (ending === 'cancel') {
+					// Escape ends a drag over the valid row without a native drop.
+					await drag('dragend', row0, 150);
+				} else if (ending === 'no target') {
+					await releaseOver(document.body);
+				} else if (ending === 'unmounted row') {
+					viewport.scrollTop = rowHeight * 45;
+					await fireEvent.scroll(viewport);
+					expect(row1.isConnected).toBe(false);
+					await releaseOver(viewport);
+				} else {
+					const target =
+						ending === 'header'
+							? viewport.querySelector<HTMLElement>('[data-sidebar-virtual-item="project-header"]')!
+							: viewport.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-60"]')!;
+					await releaseOver(target);
+					expect(stickyRowAtDrop).toBe(true);
+				}
+				if (ending === 'row' || ending === 'unmounted row') {
+					expect(persist).toHaveBeenCalledExactlyOnceWith(
+						expect.objectContaining({
+							chatId: 'chat-0',
+							placement: { kind: 'relative', referenceChatId: 'chat-1', position: 'after' },
+						}),
+					);
+				} else {
+					expect(persist).not.toHaveBeenCalled();
+				}
+				expect(ended).toHaveBeenCalledExactlyOnceWith('chat-0');
+			} finally {
+				stopMonitor();
+				await drag('dragend', document.body, 150);
+			}
+		},
+	);
+
 	it.each([4, 50, 2_000])('only matches mounted rows for %i chats', async (count) => {
 		const rows = makeRows(count);
 		const sessions = new ChatSessionsStore();

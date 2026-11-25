@@ -9,11 +9,20 @@ import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationLifecycleState } from '../conversation-lifecycle-state.svelte.js';
+import type { ConversationPanelPresentationPort } from '../conversation-panel-registration.js';
 import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
 
 vi.mock('$lib/api/chats.js', () => ({ getChatMessages: vi.fn() }));
 const chatId = '1000000000000001';
 const target = { chatId, transcriptViewId: 'view-1', ordinal: 100 };
+const readingTarget = { kind: 'row', transcriptViewId: 'view-1', ordinal: 1000, viewportOffset: -8 } as const;
+const windowPanel = {
+	surfaceId: 'chat-view:window-one',
+	windowId: 'window-one',
+	presentation: 'window-one',
+	chatId,
+	snapshotAdmission: 'admitted',
+} as const;
 const row = (ordinal: number) => ({
 	ordinal,
 	message: new AssistantMessage('2026-01-01T00:00:00.000Z', `Synthetic row ${ordinal}`),
@@ -44,12 +53,36 @@ function snapshotPage(transcriptViewId = 'view-1'): CompleteChatHistoryResponse 
 	};
 }
 function held<T>() {
-	let release!: (value: T) => void;
-	const promise = new Promise<T>((resolve) => {
-		release = resolve;
-	});
-	return { promise, release };
+	const { promise, resolve } = Promise.withResolvers<T>();
+	return { promise, release: resolve };
 }
+
+function pendingSeek() {
+	const started = held<void>();
+	const result = held<'cancelled'>();
+	return {
+		started: started.promise,
+		start() {
+			started.release();
+			return result.promise;
+		},
+		cancel: () => result.release('cancelled'),
+	};
+}
+
+function presentationPort(
+	getViewport: ConversationPanelPresentationPort['getViewport'],
+): ConversationPanelPresentationPort {
+	return {
+		getScrollContainer: () => null,
+		getViewport,
+		getQueueContainer: () => undefined,
+		captureRestoreTarget: () => null,
+		closeTransients: () => {},
+		prepareForHide: () => {},
+	};
+}
+
 const cleanup: (() => void)[] = [];
 afterEach(() => {
 	for (const fn of cleanup.splice(0)) fn();
@@ -66,16 +99,8 @@ function fixture() {
 		getSelectedChatId: () => chatId,
 	});
 	cleanup.push(() => registry.destroy());
-	registry.reconcile([
-		{
-			surfaceId: 'chat-view:window-one',
-			windowId: 'window-one',
-			presentation: 'window-one',
-			chatId,
-			snapshotAdmission: 'admitted',
-		},
-	]);
-	const panel = registry.panel('chat-view:window-one')!;
+	registry.reconcile([windowPanel]);
+	const panel = registry.panel(windowPanel.surfaceId)!;
 	const viewport = {
 		isReady: () => true,
 		isAtEnd: () => false,
@@ -100,14 +125,7 @@ function fixture() {
 		scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>(async () => 'completed'),
 	} satisfies ConversationViewportPort;
 	let attachedViewport: ConversationViewportPort | null = null;
-	panel.attachPresentation({
-		getScrollContainer: () => null,
-		getViewport: () => attachedViewport,
-		getQueueContainer: () => undefined,
-		captureRestoreTarget: () => null,
-		closeTransients: () => {},
-		prepareForHide: () => {},
-	});
+	panel.attachPresentation(presentationPort(() => attachedViewport));
 	return {
 		registry,
 		panel,
@@ -134,6 +152,46 @@ it('waits for the exact renderer viewport, supersedes bottom restore, and loads 
 	expect(f.viewport.scrollToEnd).not.toHaveBeenCalled();
 	expect(f.viewport.measureViewportFill).not.toHaveBeenCalled();
 	expect(getChatMessages).toHaveBeenCalledOnce();
+});
+
+it('does not replay a user-cancelled seek on a presentation attached before viewport lookup', async () => {
+	const f = fixture();
+	f.attach();
+	const seek = pendingSeek();
+	const second = {
+		...f.viewport,
+		scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>()
+			.mockImplementationOnce(seek.start)
+			.mockResolvedValue('completed'),
+	};
+	const jump = vi.spyOn(f.panel.scroll, 'jumpToMessageRow');
+	const restore = f.panel.restore(readingTarget);
+	expect(jump).toHaveBeenCalledOnce();
+	f.panel.attachPresentation(presentationPort(() => second));
+	await seek.started;
+	f.panel.scroll.noteUserScrollIntent('earlier');
+	seek.cancel();
+	await Promise.all(jump.mock.results.map(call => call.value));
+	await restore;
+	await tick();
+	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
+	expect(second.scrollToTarget).toHaveBeenCalledOnce();
+});
+
+it('resumes an interrupted restore when the same presentation is immediately shown again', async () => {
+	const f = fixture();
+	f.attach();
+	const seek = pendingSeek();
+	f.viewport.scrollToTarget.mockImplementationOnce(seek.start);
+	const restore = f.panel.restore(readingTarget);
+	await seek.started;
+	f.panel.prepareForHide();
+	f.registry.reconcile([windowPanel]);
+	expect(f.registry.panel(windowPanel.surfaceId)).toBe(f.panel);
+	seek.cancel();
+	await restore;
+	await tick();
+	expect(f.viewport.scrollToTarget).toHaveBeenCalledTimes(2);
 });
 
 it('retains reload identity if the view changes while the target page is held', async () => {

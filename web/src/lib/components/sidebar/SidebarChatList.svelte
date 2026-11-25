@@ -19,6 +19,7 @@
 	interface SidebarChatListProps {
 		reorder: SidebarOrderController;
 		viewportRef?: HTMLElement | null;
+		viewportHeight: number;
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
 		isLoading: boolean;
@@ -52,6 +53,7 @@
 	let {
 		reorder,
 		viewportRef = null,
+		viewportHeight,
 		projection,
 		selectedChatId,
 		isLoading,
@@ -134,6 +136,7 @@
 	<SidebarVirtualSortableChatList
 		rows={projection.rowModel.rows}
 		{viewportRef}
+		{viewportHeight}
 		{selectedChatId}
 		{currentTime}
 		{isMobile}

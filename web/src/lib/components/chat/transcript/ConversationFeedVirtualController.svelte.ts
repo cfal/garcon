@@ -15,6 +15,7 @@ import type {
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import type {
 	VirtualListSnapshot,
+	VirtualMeasurementAnchor,
 	VirtualMutationAnchor,
 	VirtualResumeTarget,
 	VirtualTransactionRecord,
@@ -104,6 +105,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#appliedDataRevision: number;
 	#layoutMutationToken = 0;
 	#targetToken = 0;
+	#readingRestore: { kind: 'item'; token: number; key: string; viewportOffset?: number } | null = null;
 	#endRestoreEpoch = 0;
 	#activeTargetScrolls = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
@@ -598,25 +600,35 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			if (!key) return 'target-missing';
 			const releaseTarget = this.options.retention.acquire(key, 'target');
 			try {
-				const align = options.viewportOffset === undefined ? (options.align ?? 'center') : 'start';
-				this.#virt.scrollToIndex(resolved.index, { align });
+				const { viewportOffset } = options;
+				const align = viewportOffset === undefined ? (options.align ?? 'center') : 'start';
+				if (viewportOffset !== undefined && target.kind !== 'dom-anchor') {
+					// The saved clip can lie beyond the row's estimated height until it measures.
+					this.#readingRestore = { kind: 'item', token, key, viewportOffset };
+					this.#virt.scrollToAnchor(key, viewportOffset);
+				} else {
+					this.#virt.scrollToIndex(resolved.index, { align });
+				}
 				return await settleConversationTarget({
 					root: () => this.options.virtualRoot,
 					rowId: resolved.innerRowId,
 					viewport: () => this.options.viewport,
 					align,
-					viewportOffset: options.viewportOffset,
+					viewportOffset,
 					isCurrent: () => token === this.#targetToken,
 					isReady: () => this.isReady(),
 					scrollBy: (delta) => {
 						this.#virt.scrollBy(delta);
 					},
 					onSettledNode: (node) => {
+						// Once measurable, the inner node owns alignment; sizes still pin the wrapper's start.
+						if (this.#readingRestore?.token === token) delete this.#readingRestore.viewportOffset;
 						const wrapper = node.closest<HTMLElement>('[data-chat-virtual-item]');
 						if (wrapper) this.#virt.remeasure(wrapper);
 					},
 				});
 			} finally {
+				if (this.#readingRestore?.token === token) this.#readingRestore = null;
 				releaseTarget();
 			}
 		} finally {
@@ -913,7 +925,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			: null;
 	}
 
-	#measurementAnchor(): 'geometric' | 'end' {
+	#measurementAnchor(): VirtualMeasurementAnchor {
+		if (this.#readingRestore?.token === this.#targetToken) return this.#readingRestore;
 		return this.#configuredPinned &&
 			this.#configuredGeometry.endBehavior === 'restore-if-pinned' &&
 			this.#activeTargetScrolls === 0
