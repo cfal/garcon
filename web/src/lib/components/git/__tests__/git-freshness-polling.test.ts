@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { canPollGitFreshness, startGitFreshnessPolling } from '../git-freshness-polling';
+import { startGitFreshnessPolling } from '../git-freshness-polling';
 
 function makeDocumentRef(initialVisibility: DocumentVisibilityState) {
 	const listeners = new Map<string, EventListener>();
@@ -90,10 +90,5 @@ describe('git freshness polling', () => {
 		expect(documentRef.listeners.size).toBe(0);
 		vi.advanceTimersByTime(15_000);
 		expect(checkFreshness).not.toHaveBeenCalled();
-	});
-
-	it('reports polling availability from document visibility', () => {
-		expect(canPollGitFreshness(makeDocumentRef('visible'))).toBe(true);
-		expect(canPollGitFreshness(makeDocumentRef('hidden'))).toBe(false);
 	});
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { GitRemoteStatus } from '$lib/api/git.js';
 import { GitRepositoryController } from '$lib/git/targets/git-repository-controller.svelte.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
@@ -13,40 +13,14 @@ vi.stubGlobal('localStorage', {
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitStatus: vi.fn(),
-	getGitRefs: vi.fn().mockResolvedValue({ refs: [] }),
 	getRemoteStatus: vi.fn().mockResolvedValue({}),
 	getGitRemotes: vi
 		.fn()
 		.mockResolvedValue({ remotes: [{ name: 'origin', url: 'git@github.com:user/repo.git' }] }),
-	generateCommitMessage: vi.fn(),
-	gitCommit: vi.fn(),
-	gitInitialCommit: vi.fn(),
-	gitCheckoutRef: vi.fn(),
-	gitCreateBranch: vi.fn(),
-	gitFetch: vi.fn(),
-	gitPull: vi.fn(),
 	gitPush: vi.fn(),
-	gitDiscard: vi.fn(),
-	gitDeleteUntracked: vi.fn(),
 }));
 
-vi.mock('$lib/paraglide/messages.js', () => ({
-	git_changes_modified: () => 'Modified',
-	git_changes_added: () => 'Added',
-	git_changes_deleted: () => 'Deleted',
-	git_changes_untracked: () => 'Untracked',
-}));
-
-import {
-	getGitStatus,
-	getGitRefs,
-	getRemoteStatus,
-	gitCommit,
-	gitCheckoutRef,
-	gitPull,
-	gitPush,
-	gitDiscard,
-} from '$lib/api/git.js';
+import { getGitStatus, getRemoteStatus, gitPush } from '$lib/api/git.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -72,93 +46,20 @@ function makeRemoteStatus(branch: string): GitRemoteStatus {
 }
 
 describe('GitRepositoryController', () => {
+	let branches: GitBranchSelectorState;
 	let controller: GitRepositoryController;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		controller = new GitRepositoryController({
-			branches: new GitBranchSelectorState(),
-			surfaceId: 'singleton:git',
-		});
+		branches = new GitBranchSelectorState();
+		controller = new GitRepositoryController(branches);
 		controller.resetForProject(
 			{ executorId: 'local', projectPath: '/project' },
 			{ deferMetadata: true },
 		);
 	});
 
-	describe('fetchGitStatus', () => {
-		it('populates status and branch on success', async () => {
-			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'main',
-				hasCommits: true,
-				modified: ['a.txt', 'b.txt'],
-				added: [],
-				deleted: [],
-				untracked: [],
-			});
-			await controller.fetchGitStatus({ executorId: 'local', projectPath: '/project' });
-			expect(controller.currentBranch).toBe('main');
-			expect(controller.gitStatus?.modified).toEqual(['a.txt', 'b.txt']);
-			expect(controller.isLoading).toBe(false);
-		});
-
-		it('sets error status on API error', async () => {
-			controller.resetForProject(
-				{ executorId: 'local', projectPath: '/bad-path' },
-				{ deferMetadata: true },
-			);
-			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: '',
-				hasCommits: false,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-				error: 'Not a git repo',
-				details: 'fatal: not a git repository',
-			});
-			await controller.fetchGitStatus({ executorId: 'local', projectPath: '/bad-path' });
-			expect(controller.gitStatus?.error).toBe('Not a git repo');
-			expect(controller.currentBranch).toBe('');
-		});
-	});
-
-	describe('deferred metadata', () => {
-		it('does not fetch branch list or remote status during deferred project reset', () => {
-			controller.currentBranch = 'main';
-			controller.resetForProject(
-				{ executorId: 'local', projectPath: '/project' },
-				{ deferMetadata: true },
-			);
-
-			expect(controller.currentBranch).toBe('main');
-			expect(getGitStatus).not.toHaveBeenCalled();
-			expect(getGitRefs).not.toHaveBeenCalled();
-			expect(getRemoteStatus).not.toHaveBeenCalled();
-		});
-
-		it('loads branches when branch dropdown opens', async () => {
-			await controller.openBranchDropdown({ executorId: 'local', projectPath: '/project' });
-
-			expect(controller.showBranchDropdown).toBe(true);
-			expect(getGitRefs).toHaveBeenCalledWith(
-				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
-				{
-					query: '',
-					limit: 200,
-					sort: { key: 'name', direction: 'asc' },
-					signal: expect.any(AbortSignal),
-				},
-			);
-		});
-
-		it('keeps full and deferred metadata refreshes free of ref loads', () => {
-			controller.refreshAll({ executorId: 'local', projectPath: '/project' });
-			controller.refreshDeferredMetadata({ executorId: 'local', projectPath: '/project' });
-
-			expect(getGitRefs).not.toHaveBeenCalled();
-		});
-	});
+	afterEach(() => controller.dismissError());
 
 	describe('remote status loading', () => {
 		it('ignores stale remote status responses after a newer fetch starts', async () => {
@@ -226,11 +127,11 @@ describe('GitRepositoryController', () => {
 
 			await controller.fetchRemoteStatus({ executorId: 'local', projectPath: '/project' });
 
-			expect(controller.currentBranch).toBe('main');
+			expect(branches.currentBranch).toBe('main');
 		});
 
 		it('does not overwrite an explicit current branch from remote status', async () => {
-			controller.currentBranch = 'feature';
+			branches.currentBranch = 'feature';
 			controller.resetForProject(
 				{ executorId: 'local', projectPath: '/project' },
 				{ deferMetadata: true },
@@ -239,7 +140,7 @@ describe('GitRepositoryController', () => {
 
 			await controller.fetchRemoteStatus({ executorId: 'local', projectPath: '/project' });
 
-			expect(controller.currentBranch).toBe('feature');
+			expect(branches.currentBranch).toBe('feature');
 		});
 
 		it('clears remote status without logging an executor outage', async () => {
@@ -271,10 +172,6 @@ describe('GitRepositoryController', () => {
 
 	describe('project retargeting', () => {
 		it('clears project-scoped presentation and draft state', () => {
-			controller.commitMessage = 'commit project A';
-			controller.expandedFiles = new Set(['a.txt']);
-			controller.selectedFiles = new Set(['a.txt']);
-			controller.confirmAction = { type: 'discard', file: 'a.txt' };
 			controller.pushPrompt = {
 				project: { executorId: 'local', projectPath: '/project' },
 				branch: 'main',
@@ -287,17 +184,13 @@ describe('GitRepositoryController', () => {
 				{ deferMetadata: true },
 			);
 
-			expect(controller.commitMessage).toBe('');
-			expect(controller.expandedFiles.size).toBe(0);
-			expect(controller.selectedFiles.size).toBe(0);
-			expect(controller.confirmAction).toBeNull();
 			expect(controller.pushPrompt).toBeNull();
 		});
 
 		it('does not publish an accepted action from the previous project', async () => {
 			const action = deferred<{ success: boolean }>();
-			vi.mocked(gitPull).mockReturnValueOnce(action.promise);
-			const pending = controller.handlePull({ executorId: 'local', projectPath: '/project' });
+			vi.mocked(gitPush).mockReturnValueOnce(action.promise);
+			const pending = controller.handlePush({ executorId: 'local', projectPath: '/project' });
 
 			controller.resetForProject(
 				{ executorId: 'local', projectPath: '/project-b' },
@@ -308,107 +201,11 @@ describe('GitRepositoryController', () => {
 
 			expect(getGitStatus).not.toHaveBeenCalled();
 			expect(getRemoteStatus).not.toHaveBeenCalled();
-			expect(controller.gitStatus).toBeNull();
-			expect(controller.isPulling).toBe(false);
+			expect(controller.isPushing).toBe(false);
 		});
 	});
 
-	describe('file selection', () => {
-		it('toggleFileSelected adds and removes', () => {
-			controller.toggleFileSelected('a.txt');
-			expect(controller.selectedFiles.has('a.txt')).toBe(true);
-			controller.toggleFileSelected('a.txt');
-			expect(controller.selectedFiles.has('a.txt')).toBe(false);
-		});
-
-		it('selectAllFiles selects all file types', () => {
-			controller.gitStatus = {
-				branch: 'main',
-				hasCommits: true,
-				modified: ['a.txt'],
-				added: ['b.txt'],
-				deleted: ['c.txt'],
-				untracked: ['d.txt'],
-			};
-			controller.selectAllFiles();
-			expect(controller.selectedFiles.size).toBe(4);
-		});
-
-		it('deselectAllFiles clears selection', () => {
-			controller.selectedFiles = new Set(['a.txt', 'b.txt']);
-			controller.deselectAllFiles();
-			expect(controller.selectedFiles.size).toBe(0);
-		});
-	});
-
-	describe('handleCommit', () => {
-		it('commits selected files and resets on success', async () => {
-			vi.mocked(gitCommit).mockResolvedValue({
-				success: true,
-				output: 'committed',
-				commitScope: 'selected-files',
-				indexSynchronized: true,
-			});
-			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'main',
-				hasCommits: true,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-			});
-			controller.commitMessage = 'test commit';
-			controller.selectedFiles = new Set(['a.txt']);
-
-			await controller.handleCommit({ executorId: 'local', projectPath: '/project' });
-
-			expect(gitCommit).toHaveBeenCalledWith(
-				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
-				'test commit',
-				['a.txt'],
-			);
-			expect(controller.commitMessage).toBe('');
-			expect(controller.selectedFiles.size).toBe(0);
-		});
-
-		it('does nothing when no files selected', async () => {
-			controller.commitMessage = 'test';
-			controller.selectedFiles = new Set();
-			await controller.handleCommit({ executorId: 'local', projectPath: '/project' });
-			expect(gitCommit).not.toHaveBeenCalled();
-		});
-
-		it('does nothing when message is empty', async () => {
-			controller.commitMessage = '';
-			controller.selectedFiles = new Set(['a.txt']);
-			await controller.handleCommit({ executorId: 'local', projectPath: '/project' });
-			expect(gitCommit).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('handleSwitchBranch', () => {
-		it('updates currentBranch on success', async () => {
-			vi.mocked(gitCheckoutRef).mockResolvedValue({ success: true });
-			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'feature',
-				hasCommits: true,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-			});
-			await controller.handleSwitchBranch(
-				{ executorId: 'local', projectPath: '/project' },
-				'feature',
-				undefined,
-				'/project',
-			);
-			expect(controller.currentBranch).toBe('feature');
-			expect(controller.showBranchDropdown).toBe(false);
-		});
-	});
-
-	describe('confirmAndExecute', () => {
+	describe('handlePush', () => {
 		it.each(['suspend', 'switch'] as const)(
 			'publishes uncertain push failures for the captured target after %s',
 			async (transition) => {
@@ -446,56 +243,13 @@ describe('GitRepositoryController', () => {
 			},
 		);
 
-		it('returns true for a successful confirmed pull', async () => {
-			vi.mocked(gitPull).mockResolvedValue({ success: true });
-			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'main',
-				hasCommits: true,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-			});
-			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
-			controller.confirmAction = { type: 'pull' };
-
-			const ok = await controller.confirmAndExecute({
-				executorId: 'local',
-				projectPath: '/project',
-			});
-
-			expect(ok).toBe(true);
-			expect(gitPull).toHaveBeenCalledWith(
-				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
-			);
-			expect(controller.confirmAction).toBeNull();
-		});
-
-		it('returns true for a successful confirmed push', async () => {
-			vi.mocked(gitPush).mockResolvedValue({ success: true });
-			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'main',
-				hasCommits: true,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-			});
-			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
-			controller.confirmAction = { type: 'push' };
-
-			const ok = await controller.confirmAndExecute({
-				executorId: 'local',
-				projectPath: '/project',
-			});
-
-			expect(ok).toBe(true);
-			expect(gitPush).toHaveBeenCalledWith(
-				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
-				undefined,
-				undefined,
-			);
-			expect(controller.confirmAction).toBeNull();
+		it('refreshes remote status only after a successful push', async () => {
+			const project = { executorId: 'local', projectPath: '/project' };
+			vi.mocked(gitPush).mockResolvedValueOnce({ success: true });
+			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
+			await expect(controller.handlePush(project, 'origin', 'main')).resolves.toBe(true);
+			expect(getRemoteStatus).toHaveBeenCalledExactlyOnceWith(project);
+			expect(getGitStatus).not.toHaveBeenCalled();
 		});
 
 		it('sends the confirmed branch so the executor can reject a changed HEAD', async () => {
@@ -506,50 +260,32 @@ describe('GitRepositoryController', () => {
 			expect(controller.lastError).toBe('Branch changed');
 		});
 
-		it('returns true for a successful confirmed discard', async () => {
-			vi.mocked(gitDiscard).mockResolvedValue({ success: true });
-			vi.mocked(getGitStatus).mockResolvedValue({
-				branch: 'main',
-				hasCommits: true,
-				modified: [],
-				added: [],
-				deleted: [],
-				untracked: [],
-			});
-			controller.selectedFiles = new Set(['a.txt']);
-			controller.confirmAction = { type: 'discard', file: 'a.txt' };
-
-			const ok = await controller.confirmAndExecute({
-				executorId: 'local',
-				projectPath: '/project',
-			});
-
-			expect(ok).toBe(true);
-			expect(gitDiscard).toHaveBeenCalledWith(
-				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
-				'a.txt',
-			);
-			expect(controller.selectedFiles.has('a.txt')).toBe(false);
-		});
-
-		it('returns false and surfaces an error for a failed confirmed push', async () => {
-			vi.mocked(gitPush).mockResolvedValue({ success: false, error: 'rejected' });
-			controller.confirmAction = { type: 'push' };
-
-			const ok = await controller.confirmAndExecute({
-				executorId: 'local',
-				projectPath: '/project',
-			});
-
-			expect(ok).toBe(false);
-			expect(controller.lastError).toBe('rejected');
-			expect(controller.confirmAction).toBeNull();
+		it('cancels the error timer on dismiss, suspend and reset', async () => {
+			vi.useFakeTimers();
+			try {
+				const project = { executorId: 'local', projectPath: '/project' };
+				for (const clear of [
+					() => controller.dismissError(),
+					() => controller.suspend(),
+					() => controller.resetForProject(project, { deferMetadata: true }),
+				]) {
+					vi.mocked(gitPush).mockResolvedValueOnce({ success: false, error: 'rejected' });
+					await expect(controller.handlePush(project)).resolves.toBe(false);
+					expect(controller.lastError).toBe('rejected');
+					expect(vi.getTimerCount()).toBe(1);
+					clear();
+					expect(vi.getTimerCount()).toBe(0);
+					expect(controller.lastError).toBeNull();
+				}
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 	});
 
 	describe('preparePush', () => {
 		it('captures the branch and selects the default remote', async () => {
-			controller.currentBranch = 'main';
+			branches.currentBranch = 'main';
 			controller.remoteStatus = {
 				hasRemote: true,
 				hasUpstream: true,
@@ -567,7 +303,7 @@ describe('GitRepositoryController', () => {
 		});
 
 		it('prepares push data when no upstream exists', async () => {
-			controller.currentBranch = 'feature-branch';
+			branches.currentBranch = 'feature-branch';
 			controller.remoteStatus = {
 				hasRemote: true,
 				hasUpstream: false,
@@ -579,26 +315,12 @@ describe('GitRepositoryController', () => {
 			};
 			await controller.preparePush({ executorId: 'local', projectPath: '/project' });
 			expect(controller.pushPrompt?.branch).toBe('feature-branch');
-			expect(controller.confirmAction).toBeNull();
 		});
 
 		it('does nothing when no remote', async () => {
 			controller.remoteStatus = null;
 			await controller.preparePush({ executorId: 'local', projectPath: '/project' });
 			expect(controller.pushPrompt).toBeNull();
-		});
-	});
-
-	describe('getStatusLabel', () => {
-		it('returns correct labels for known statuses', () => {
-			expect(controller.getStatusLabel('M')).toBe('Modified');
-			expect(controller.getStatusLabel('A')).toBe('Added');
-			expect(controller.getStatusLabel('D')).toBe('Deleted');
-			expect(controller.getStatusLabel('U')).toBe('Untracked');
-		});
-
-		it('returns raw status for unknown codes', () => {
-			expect(controller.getStatusLabel('X')).toBe('X');
 		});
 	});
 });

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
-import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/__tests__/array-git-virtual-review-row-source.js';
 import { installGitVirtualDiffTestLayout } from './git-virtual-diff-test-layout.js';
 import GitCommitVirtualDiffSurface from '../GitCommitVirtualDiffSurface.svelte';
 

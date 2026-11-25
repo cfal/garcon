@@ -116,7 +116,7 @@ function snapshot(
 function bodiesForPaths(paths: string[], fingerprintForPath = (path: string) => `fp-${path}`) {
 	return {
 		status: 'ready' as const,
-		documentId: 'doc',
+		documentId: 'doc-abcdef123',
 		files: Object.fromEntries(
 			paths.map((path) => [
 				path,
@@ -335,7 +335,7 @@ describe('GitHistoryController', () => {
 			.mockResolvedValueOnce(snapshot('abcdef123', 'fp-b'));
 		vi.mocked(getGitCommitFileBodies).mockResolvedValue({
 			status: 'document-expired',
-			documentId: 'expired-doc',
+			documentId: 'doc-abcdef123',
 			message: 'This review expired.',
 		});
 		const history = new GitHistoryController();

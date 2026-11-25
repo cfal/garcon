@@ -144,6 +144,13 @@ export function markGitReviewViewportReady(documentId: string): void {
 	pruneCompletedDocument(documentId, document);
 }
 
+export function pendingGitReviewViewportMilestones(documentId: string) {
+	const document = documents.get(documentId);
+	return document
+		? { firstRow: !document.firstRowMeasured, viewportReady: !document.viewportReadyMeasured }
+		: null;
+}
+
 function markDocumentMilestone(documentId: string, milestone: string): void {
 	const timing = browserPerformance();
 	const document = documents.get(documentId);

@@ -12,12 +12,10 @@
 		type GitChangedFileTreeRow,
 	} from '$lib/git/review/git-changed-file-tree.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { indexesInRange, currentAnchor } from './git-virtual-list.js';
+	import { statusToIndexStatus } from '$lib/git/review/git-commit-file-status.js';
 	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
-	import {
-		virtualItems as selectVirtualItems,
-		type VirtualMutationAnchor,
-		type VirtualRange,
-	} from '$lib/virt/virtual-list-types.js';
+	import { virtualItems as selectVirtualItems } from '$lib/virt/virtual-list-types.js';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 
 	interface GitChangedFileTreeProps {
@@ -38,9 +36,9 @@
 
 	const treeId = $props.id();
 	let listRef = $state<HTMLDivElement | null>(null);
-	let collapsedDirectories = $state(new Set<string>());
+	let collapsedDirectories = $state.raw(new Set<string>());
 	let focusedRowKey = $state<string | null>(null);
-	let previousNormalizedFilter = $state('');
+	let previousNormalizedFilter = '';
 	const rowHeight = 30;
 	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 	let tree = $derived(buildGitChangedFileTree(files));
@@ -88,7 +86,7 @@
 				kind: 'update',
 				keys: nextRows.map((row) => row.key),
 				estimates: nextRows.map(() => rowHeight),
-				anchor: currentAnchor(),
+				anchor: currentAnchor(virtual),
 			});
 		});
 	});
@@ -103,42 +101,6 @@
 
 	function rowElementId(index: number): string {
 		return `${treeId}-row-${index}`;
-	}
-
-	function indexesInRange(range: VirtualRange | null): number[] {
-		return range
-			? Array.from(
-					{ length: range.endIndex - range.startIndex + 1 },
-					(_, offset) => range.startIndex + offset,
-				)
-			: [];
-	}
-
-	function currentAnchor(): VirtualMutationAnchor {
-		const position = virtual.viewportPosition;
-		const item = position
-			? virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
-			: undefined;
-		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
-	}
-
-	function statusCode(status: GitCommitFileStatus): string {
-		switch (status) {
-			case 'added':
-				return 'A';
-			case 'deleted':
-				return 'D';
-			case 'renamed':
-				return 'R';
-			case 'copied':
-				return 'C';
-			case 'type-changed':
-				return 'T';
-			case 'modified':
-				return 'M';
-			default:
-				return '?';
-		}
 	}
 
 	function statusDescription(status: GitCommitFileStatus): string {
@@ -410,7 +372,7 @@
 										)}"
 										aria-hidden="true"
 									>
-										{statusCode(row.node.file.status)}
+										{statusToIndexStatus(row.node.file.status)}
 									</span>
 									<span class="min-w-0 truncate">{row.node.name}</span>
 								</button>

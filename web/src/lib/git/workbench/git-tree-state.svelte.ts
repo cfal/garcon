@@ -13,36 +13,35 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 
 export class GitTreeState {
-	tree = $state<GitTreeNode[]>([]);
+	tree = $state.raw<GitTreeNode[]>([]);
 	isLoadingTree = $state(false);
 	treeSearchQuery = $state('');
 	hasCommits = $state(true);
 	statsState = $state<GitTreeStatsState>('pending');
-	collapsedDirs = $state(new Set<string>());
+	collapsedDirs = $state.raw(new Set<string>());
 	treePaneWidthPx = $state(DEFAULT_GIT_FILE_TREE_WIDTH);
 	selectedFile = $state<string | null>(null);
 	activeTab = $state<GitDiffTab>('unstaged');
 	hideGenerated = $state(false);
 	hideOtherTabFiles = $state(false);
-	private filePathsValue = $state<string[]>([]);
-	private stagedFileNodesValue = $state<GitTreeNode[]>([]);
-	private unstagedFilePathsValue = $state<string[]>([]);
-	private stagedFilePathsValue = $state<string[]>([]);
+	private filePathsValue = $state.raw<string[]>([]);
+	private stagedFileNodesValue = $state.raw<GitTreeNode[]>([]);
+	private unstagedFilePathsValue = $state.raw<string[]>([]);
+	private stagedFilePathsValue = $state.raw<string[]>([]);
 	private fileNodeByPath = new Map<string, GitTreeNode>();
 
-	get filteredTree(): GitTreeNode[] {
-		return filterTreeForWorkbench(
-			compactTree(filterTreeNodes(this.tree, this.treeSearchQuery)),
-			(node) => this.shouldShowFileNode(node),
-		);
-	}
+	filteredTree = $derived.by(() =>
+		filterTreeForWorkbench(compactTree(filterTreeNodes(this.tree, this.treeSearchQuery)), (node) =>
+			this.shouldShowFileNode(node),
+		),
+	);
 
 	get totalChangedFiles(): number {
-		return countFiles(this.tree);
+		return this.filePathsValue.length;
 	}
 
 	get stagedFiles(): string[] {
-		return this.stagedFileNodes.map((node) => node.path);
+		return this.stagedFilePathsValue;
 	}
 
 	get stagedFileNodes(): GitTreeNode[] {
@@ -53,13 +52,13 @@ export class GitTreeState {
 		return this.filePathsValue;
 	}
 
-	get visibleFilePaths(): string[] {
+	visibleFilePaths = $derived.by(() => {
 		const paths =
 			this.activeTab === 'staged' ? this.stagedFilePathsValue : this.unstagedFilePathsValue;
 		if (!this.treeSearchQuery) return paths.filter((path) => this.shouldShowFilePath(path));
 		const visible = new Set(collectFilePaths(this.filteredTree));
 		return paths.filter((path) => visible.has(path) && this.shouldShowFilePath(path));
-	}
+	});
 
 	get visibleChangedFiles(): number {
 		return this.visibleFilePaths.length;
@@ -265,37 +264,7 @@ function visitTree(nodes: GitTreeNode[], visitor: (node: GitTreeNode) => void): 
 	}
 }
 
-export function collectStagedNodes(nodes: GitTreeNode[]): GitTreeNode[] {
-	const result: GitTreeNode[] = [];
-	for (const node of nodes) {
-		if (node.kind === 'file' && node.staged) result.push(node);
-		else if (node.children) result.push(...collectStagedNodes(node.children));
-	}
-	return result;
-}
-
-export function countFiles(nodes: GitTreeNode[]): number {
-	let count = 0;
-	for (const node of nodes) {
-		if (node.kind === 'file') count++;
-		else if (node.children) count += countFiles(node.children);
-	}
-	return count;
-}
-
-export function countFilesByPredicate(
-	nodes: GitTreeNode[],
-	predicate: (node: GitTreeNode) => boolean,
-): number {
-	let count = 0;
-	for (const node of nodes) {
-		if (node.kind === 'file' && predicate(node)) count++;
-		else if (node.children) count += countFilesByPredicate(node.children, predicate);
-	}
-	return count;
-}
-
-export function collectFilePaths(nodes: GitTreeNode[]): string[] {
+function collectFilePaths(nodes: GitTreeNode[]): string[] {
 	const result: string[] = [];
 	for (const node of nodes) {
 		if (node.kind === 'file') {
@@ -307,22 +276,7 @@ export function collectFilePaths(nodes: GitTreeNode[]): string[] {
 	return result;
 }
 
-export function collectFilePathsByPredicate(
-	nodes: GitTreeNode[],
-	predicate: (node: GitTreeNode) => boolean,
-): string[] {
-	const result: string[] = [];
-	for (const node of nodes) {
-		if (node.kind === 'file' && predicate(node)) {
-			result.push(node.path);
-		} else if (node.children) {
-			result.push(...collectFilePathsByPredicate(node.children, predicate));
-		}
-	}
-	return result;
-}
-
-export function compactTree(nodes: GitTreeNode[]): GitTreeNode[] {
+function compactTree(nodes: GitTreeNode[]): GitTreeNode[] {
 	return nodes.map((node) => {
 		if (node.kind !== 'directory' || !node.children) return node;
 		let children = compactTree(node.children);
@@ -339,7 +293,7 @@ export function compactTree(nodes: GitTreeNode[]): GitTreeNode[] {
 	});
 }
 
-export function filterTreeNodes(nodes: GitTreeNode[], query: string): GitTreeNode[] {
+function filterTreeNodes(nodes: GitTreeNode[], query: string): GitTreeNode[] {
 	const normalizedQuery = query.toLowerCase();
 	const result: GitTreeNode[] = [];
 	for (const node of nodes) {
@@ -355,15 +309,4 @@ export function filterTreeNodes(nodes: GitTreeNode[], query: string): GitTreeNod
 		}
 	}
 	return result;
-}
-
-export function findTreeNode(nodes: GitTreeNode[], filePath: string): GitTreeNode | undefined {
-	for (const node of nodes) {
-		if (node.path === filePath) return node;
-		if (node.children) {
-			const found = findTreeNode(node.children, filePath);
-			if (found) return found;
-		}
-	}
-	return undefined;
 }

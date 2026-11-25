@@ -1,7 +1,6 @@
 import type { GitProjectTarget } from '$lib/api/git-client.js';
 import { sameGitProject } from '$lib/git/targets/git-target.js';
 import {
-	getGitWorkingTreeFingerprint,
 	getGitWorkbenchSnapshot,
 	type GitDiffTab,
 	type GitTreeNode,
@@ -13,6 +12,7 @@ import { GitLineSelectionState } from '$lib/git/review/git-line-selection.svelte
 import { GitReviewDrafts } from '$lib/git/review/git-review-drafts.svelte.js';
 import { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
 import { GitStagingActions } from '$lib/git/workbench/git-staging-actions.svelte.js';
+import { GitWorkbenchFreshnessTracker } from './git-workbench-freshness-tracker.svelte.js';
 import { GitTreeState } from '$lib/git/workbench/git-tree-state.svelte.js';
 import {
 	DEFAULT_REFRESH_OPTIONS,
@@ -58,17 +58,15 @@ export class GitWorkbenchStore {
 
 	private lastTargetKey = '';
 	private refreshGeneration = 0;
-	private scheduledRefresh: ReturnType<typeof setTimeout> | null = null;
+	private errorTimeout: ReturnType<typeof setTimeout> | null = null;
 	private refreshPromise: Promise<void> | null = null;
 	private snapshotLoadAbort: AbortController | null = null;
-	private freshnessGeneration = 0;
-	private freshnessAbort: AbortController | null = null;
+	private readonly freshness = new GitWorkbenchFreshnessTracker();
 	private localGitMutationDepth = 0;
 	private mutationContextGeneration = 0;
 	private localGitMutationTarget: GitProjectTarget | null = null;
 	private localGitMutationSnapshotApplied = false;
 	private documentRecoveryAttempted = false;
-	private scrollPositions = new Map<string, number>();
 
 	private readonly treeState: GitTreeState;
 	private readonly virtualReview: GitVirtualReviewDocumentController;
@@ -81,11 +79,6 @@ export class GitWorkbenchStore {
 	private lastErrorValue = $state<string | null>(null);
 	private repositoryErrorValue = $state<string | null>(null);
 	private hasCompletedInitialLoadValue = $state(false);
-	loadedWorkbenchFingerprint = $state<string | null>(null);
-	latestWorkbenchFingerprint = $state<string | null>(null);
-	isExternallyStale = $state(false);
-	isCheckingFreshness = $state(false);
-	freshnessError = $state<string | null>(null);
 	isReconcilingLocalGitMutation = $state(false);
 
 	constructor(private readonly options: GitWorkbenchStoreOptions = {}) {
@@ -190,6 +183,8 @@ export class GitWorkbenchStore {
 	}
 
 	set lastError(value: string | null) {
+		if (this.errorTimeout !== null) clearTimeout(this.errorTimeout);
+		this.errorTimeout = null;
 		this.lastErrorValue = value;
 	}
 
@@ -256,14 +251,6 @@ export class GitWorkbenchStore {
 		this.surfaceError(message);
 	}
 
-	scheduleRefresh(options: GitWorkbenchRefreshOptions, delayMs = 350): void {
-		this.cancelScheduledRefresh();
-		this.scheduledRefresh = setTimeout(() => {
-			this.scheduledRefresh = null;
-			void this.refresh(options);
-		}, delayMs);
-	}
-
 	async refresh(options: GitWorkbenchRefreshOptions): Promise<void> {
 		if (this.refreshPromise) {
 			this.snapshotLoadAbort?.abort();
@@ -288,66 +275,57 @@ export class GitWorkbenchStore {
 	}
 
 	suspend(): void {
-		this.cancelScheduledRefresh();
+		this.dismissError();
 		this.snapshotLoadAbort?.abort();
 		this.refreshGeneration++;
 		this.treeState.isLoadingTree = false;
-		this.abortFreshnessCheck();
+		this.freshness.abort();
 		this.virtualReview.suspend();
 		this.porcelain.cancelActiveLoad();
 		this.initialCommit.reset();
 		this.stagingActions.cancelDiscard();
 		this.lineSelection.clearSelection();
-		this.isExternallyStale = true;
+		this.freshness.isStale = true;
+	}
+
+	get loadedWorkbenchFingerprint(): string | null {
+		return this.freshness.loadedFingerprint;
+	}
+
+	get latestWorkbenchFingerprint(): string | null {
+		return this.freshness.latestFingerprint;
+	}
+
+	get isExternallyStale(): boolean {
+		return this.freshness.isStale;
+	}
+
+	get freshnessError(): string | null {
+		return this.freshness.error;
 	}
 
 	async checkFreshness(project: GitProjectTarget): Promise<void> {
-		if (!project || !this.loadedWorkbenchFingerprint || this.isExternallyStale) return;
-		if (this.isReconcilingLocalGitMutation || this.refreshPromise || this.isCheckingFreshness)
+		if (
+			this.isReconcilingLocalGitMutation ||
+			this.refreshPromise ||
+			!sameGitProject(this.target, project)
+		)
 			return;
 
-		const target = this.target;
-		if (!target || !sameGitProject(target, project)) return;
-
-		const requestTargetKey = targetKey(target);
-		const requestProject = target;
-		const generation = ++this.freshnessGeneration;
-		this.freshnessAbort?.abort();
-		const controller = new AbortController();
-		this.freshnessAbort = controller;
-		this.isCheckingFreshness = true;
-
-		try {
-			const result = await getGitWorkingTreeFingerprint(project, { signal: controller.signal });
-			if (!this.isCurrentFreshnessLoad(requestTargetKey, requestProject, generation)) return;
-			if (this.isReconcilingLocalGitMutation) return;
-			if (result.status !== 'ready') {
-				this.freshnessError = result.status === 'unknown' ? result.message : null;
-				return;
-			}
-			this.freshnessError = null;
-			this.latestWorkbenchFingerprint = result.fingerprint;
-			this.isExternallyStale = result.fingerprint !== this.loadedWorkbenchFingerprint;
-		} catch (error) {
-			if (
-				isAbortError(error) ||
-				!this.isCurrentFreshnessLoad(requestTargetKey, requestProject, generation)
-			) {
-				return;
-			}
-			this.freshnessError = error instanceof Error ? error.message : String(error);
-		} finally {
-			if (this.freshnessAbort === controller) this.freshnessAbort = null;
-			if (this.isCurrentFreshnessLoad(requestTargetKey, requestProject, generation)) {
-				this.isCheckingFreshness = false;
-			}
-		}
+		const requestTargetKey = targetKey(this.target);
+		await this.freshness.check(
+			project,
+			() =>
+				!this.isReconcilingLocalGitMutation &&
+				targetKey(this.target) === requestTargetKey &&
+				sameGitProject(this.target, project),
+		);
 	}
 
 	markExternallyStale(reason: 'stale' | 'document-expired' = 'stale'): void {
 		if (!this.loadedWorkbenchFingerprint) return;
 		if (this.isReconcilingLocalGitMutation) return;
-		this.isExternallyStale = true;
+		this.freshness.isStale = true;
 		if (reason !== 'document-expired' || this.documentRecoveryAttempted || !this.target) return;
 		this.documentRecoveryAttempted = true;
 		void this.refresh({
@@ -473,14 +451,6 @@ export class GitWorkbenchStore {
 		}
 	}
 
-	saveScrollPosition(filePath: string, position: number): void {
-		this.scrollPositions.set(filePath, position);
-	}
-
-	getScrollPosition(filePath: string): number {
-		return this.scrollPositions.get(filePath) ?? 0;
-	}
-
 	reset(): void {
 		this.target = null;
 		this.lastTargetKey = '';
@@ -504,7 +474,7 @@ export class GitWorkbenchStore {
 		const requestTab = this.treeState.activeTab;
 		const requestContext = this.virtualReview.contextLines;
 		const previousSelectedFile = this.treeState.selectedFile;
-		this.abortFreshnessCheck();
+		this.freshness.abort();
 		this.snapshotLoadAbort?.abort();
 		const controller = new AbortController();
 		this.snapshotLoadAbort = controller;
@@ -535,7 +505,7 @@ export class GitWorkbenchStore {
 				return;
 			this.hasCompletedInitialLoadValue = true;
 			this.repositoryError = null;
-			if (this.loadedWorkbenchFingerprint !== null) this.isExternallyStale = true;
+			if (this.loadedWorkbenchFingerprint !== null) this.freshness.isStale = true;
 			this.surfaceError(
 				`Failed to load Git workbench: ${error instanceof Error ? error.message : String(error)}`,
 			);
@@ -558,7 +528,7 @@ export class GitWorkbenchStore {
 		if (this.isReconcilingLocalGitMutation) this.localGitMutationSnapshotApplied = true;
 
 		if (snapshot.status === 'not-git-repository') {
-			this.clearFreshnessState();
+			this.freshness.reset();
 			this.repositoryError = snapshot.message;
 			this.lastError = null;
 			this.treeState.applyTree([], true, 'loaded');
@@ -568,10 +538,7 @@ export class GitWorkbenchStore {
 			return;
 		}
 
-		this.loadedWorkbenchFingerprint = snapshot.workbenchFingerprint;
-		this.latestWorkbenchFingerprint = snapshot.workbenchFingerprint;
-		this.isExternallyStale = false;
-		this.freshnessError = null;
+		this.freshness.applyFingerprint(snapshot.workbenchFingerprint);
 		this.repositoryError = null;
 		this.treeState.applyTree(
 			snapshot.tree.root,
@@ -646,9 +613,7 @@ export class GitWorkbenchStore {
 
 	private surfaceError(message: string): void {
 		this.lastError = message;
-		setTimeout(() => {
-			if (this.lastError === message) this.lastError = null;
-		}, 6000);
+		this.errorTimeout = setTimeout(() => this.dismissError(), 6000);
 	}
 
 	private isCurrentSnapshotLoad(
@@ -662,16 +627,6 @@ export class GitWorkbenchStore {
 		if (this.treeState.activeTab !== tab) return false;
 		if (this.virtualReview.contextLines !== contextLines) return false;
 		return this.target?.projectPath === target.projectPath;
-	}
-
-	private isCurrentFreshnessLoad(
-		requestTargetKey: string,
-		project: GitProjectTarget,
-		generation: number,
-	): boolean {
-		if (generation !== this.freshnessGeneration) return false;
-		if (targetKey(this.target) !== requestTargetKey) return false;
-		return sameGitProject(this.target, project);
 	}
 
 	private selectFirstVisibleFileForActiveTab(): void {
@@ -694,9 +649,8 @@ export class GitWorkbenchStore {
 
 	private resetForTargetChange(): void {
 		this.mutationContextGeneration++;
-		this.cancelScheduledRefresh();
 		this.clearLocalGitMutationState();
-		this.clearFreshnessState();
+		this.freshness.reset();
 		this.treeState.reset();
 		this.virtualReview.reset();
 		this.treeState.selectedFile = null;
@@ -709,31 +663,9 @@ export class GitWorkbenchStore {
 		this.repositoryError = null;
 		this.hasCompletedInitialLoadValue = false;
 		this.documentRecoveryAttempted = false;
-		this.scrollPositions.clear();
 		this.snapshotLoadAbort?.abort();
 		this.snapshotLoadAbort = null;
 		this.refreshGeneration++;
-	}
-
-	private cancelScheduledRefresh(): void {
-		if (!this.scheduledRefresh) return;
-		clearTimeout(this.scheduledRefresh);
-		this.scheduledRefresh = null;
-	}
-
-	private abortFreshnessCheck(): void {
-		this.freshnessGeneration += 1;
-		this.freshnessAbort?.abort();
-		this.freshnessAbort = null;
-		this.isCheckingFreshness = false;
-	}
-
-	private clearFreshnessState(): void {
-		this.abortFreshnessCheck();
-		this.loadedWorkbenchFingerprint = null;
-		this.latestWorkbenchFingerprint = null;
-		this.isExternallyStale = false;
-		this.freshnessError = null;
 	}
 
 	private beginLocalGitMutation(project: GitProjectTarget): void {
@@ -741,7 +673,7 @@ export class GitWorkbenchStore {
 			this.localGitMutationTarget = project;
 			this.localGitMutationSnapshotApplied = false;
 			this.isReconcilingLocalGitMutation = true;
-			this.abortFreshnessCheck();
+			this.freshness.abort();
 		}
 		this.localGitMutationDepth += 1;
 	}

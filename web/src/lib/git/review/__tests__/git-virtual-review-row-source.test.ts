@@ -86,6 +86,45 @@ function expectEveryRowPresent(source: GitVirtualReviewRowSource): void {
 }
 
 describe('Git virtual review row source', () => {
+	it('reuses selection-key arrays across structural sources for the same patch and tab', () => {
+		const file = summary('file.ts', 12);
+		const bodies = { [file.path]: { ...indexedBody(file.path, 12), patchDigest: 'synthetic' } };
+		const setup = options([file], bodies);
+		const rowFrom = (mode: 'unified' | 'split', tab: 'unstaged' | 'staged') => {
+			const source = buildGitVirtualReviewRowSource({
+				...setup,
+				diffMode: mode,
+				interaction: {
+					kind: 'workbench',
+					activeTab: tab,
+					selectedLineKeys: new Set(),
+					composerState: {
+						open: false,
+						focusPending: false,
+						filePath: '',
+						side: 'after',
+						line: 0,
+						body: '',
+						severity: 'note',
+					},
+				},
+			});
+			const first = source.rowAt(2);
+			const second = source.rowAt(3);
+			if (first?.kind !== 'unified-row' && first?.kind !== 'split-row')
+				throw new Error('Expected diff row');
+			expect(second).toHaveProperty('actionTarget');
+			if (second?.kind === 'unified-row' || second?.kind === 'split-row') {
+				expect(first.actionTarget).toBe(second.actionTarget);
+			}
+			return first;
+		};
+		const keys = rowFrom('unified', 'unstaged').selectableLineKeys();
+		expect(keys).toHaveLength(12);
+		expect(rowFrom('split', 'unstaged').selectableLineKeys()).toBe(keys);
+		expect(rowFrom('unified', 'staged').selectableLineKeys()).not.toEqual(keys);
+	});
+
 	it('resolves only requested rows from a 100,000-row document', () => {
 		const first = summary('first.txt', 49_999);
 		const second = summary('second.txt', 49_999);
@@ -259,18 +298,21 @@ describe('Git virtual review row source', () => {
 	it('changes measurement revision only for structural or height-affecting inputs', () => {
 		const file = summary('file.txt', 2);
 		const baseOptions = options([file], {});
-		const baseRevision = buildGitVirtualReviewRowSource(baseOptions).measurementRevision;
-		const withLoading = {
+		const source = buildGitVirtualReviewRowSource({
 			...baseOptions,
-			loadingBodies: new Set(['file.txt']),
-		};
-		const withFocus = {
-			...baseOptions,
-			focusedFilePath: 'file.txt',
-		};
-
-		expect(buildGitVirtualReviewRowSource(withLoading).measurementRevision).toBe(baseRevision);
-		expect(buildGitVirtualReviewRowSource(withFocus).measurementRevision).toBe(baseRevision);
+			get loadingBodies() {
+				return baseOptions.loadingBodies;
+			},
+			get focusedFilePath() {
+				return baseOptions.focusedFilePath;
+			},
+		});
+		const baseRevision = source.measurementRevision;
+		baseOptions.loadingBodies = new Set(['file.txt']);
+		baseOptions.focusedFilePath = 'file.txt';
+		expect(source.rowAt(0)).toMatchObject({ isFocused: true });
+		expect(source.rowAt(1)).toMatchObject({ loadState: 'loading' });
+		expect(source.measurementRevision).toBe(baseRevision);
 
 		const changedDocument = options([file], {});
 		changedDocument.summary.documentId = 'document-b';
@@ -309,21 +351,14 @@ describe('Git virtual review row source', () => {
 				},
 			},
 		};
-		const composerOpen = {
-			...composerClosed,
-			interaction: {
-				...composerClosed.interaction,
-				composerState: {
-					...composerClosed.interaction.composerState,
-					open: true,
-					filePath: 'file.txt',
-					line: 1,
-				},
-			},
-		};
-		expect(buildGitVirtualReviewRowSource(composerOpen).measurementRevision).not.toBe(
-			buildGitVirtualReviewRowSource(composerClosed).measurementRevision,
-		);
+		const commentable = buildGitVirtualReviewRowSource(composerClosed);
+		const closedRevision = commentable.measurementRevision;
+		Object.assign(composerClosed.interaction.composerState, {
+			open: true,
+			filePath: 'file.txt',
+			line: 1,
+		});
+		expect(commentable.measurementRevision).not.toBe(closedRevision);
 	});
 
 	it('joins syntax by file and diff line without changing virtualization identity', () => {
@@ -379,18 +414,26 @@ describe('Git virtual review row source', () => {
 			segmentCount: 4,
 		};
 		const baseOptions = options([file], { [file.path]: body });
-		const plain = buildGitVirtualReviewRowSource(baseOptions);
 		const highlighted = buildGitVirtualReviewRowSource({
 			...baseOptions,
-			syntaxResults: { [file.path]: syntax },
+			get syntaxResults() {
+				return baseOptions.syntaxResults;
+			},
 		});
 
-		expect(highlighted.rowCount).toBe(plain.rowCount);
-		expect(highlighted.measurementRevision).toBe(plain.measurementRevision);
-		for (let index = 0; index < plain.rowCount; index += 1) {
-			expect(highlighted.rowKey(index)).toBe(plain.rowKey(index));
-			expect(highlighted.estimateRowHeight(index, 20)).toBe(plain.estimateRowHeight(index, 20));
-			expect(highlighted.rowAt(index)?.id).toBe(plain.rowAt(index)?.id);
+		const revision = highlighted.measurementRevision;
+		const keys = Array.from({ length: highlighted.rowCount }, (_, index) => [
+			highlighted.rowKey(index),
+			highlighted.estimateRowHeight(index, 20),
+			highlighted.rowAt(index)?.id,
+		]);
+		baseOptions.syntaxResults = { [file.path]: syntax };
+		expect(highlighted.measurementRevision).toBe(revision);
+		expect(highlighted.rowCount).toBe(keys.length);
+		for (const [index, [key, height, id]] of keys.entries()) {
+			expect(highlighted.rowKey(index)).toBe(key);
+			expect(highlighted.estimateRowHeight(index, 20)).toBe(height);
+			expect(highlighted.rowAt(index)?.id).toBe(id);
 		}
 		expect(highlighted.rowAt(2)).toMatchObject({
 			kind: 'unified-row',

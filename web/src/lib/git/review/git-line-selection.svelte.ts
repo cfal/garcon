@@ -33,8 +33,24 @@ export function makeLineSelectionKey(
 	return encodeLineSelectionKey({ filePath, tab, side, diffLineIndex });
 }
 
+function targetKey(filePath: string, tab: GitDiffTab): string {
+	return `${tab}\0${filePath}`;
+}
+
+function sameProvenance(a: GitDiffActionTarget, b: GitDiffActionTarget): boolean {
+	return (
+		a.mode === b.mode &&
+		a.contextLines === b.contextLines &&
+		a.proof.bodyFingerprint === b.proof.bodyFingerprint &&
+		a.proof.patchDigest === b.proof.patchDigest &&
+		a.proof.document.documentId === b.proof.document.documentId &&
+		a.proof.document.executorId === b.proof.document.executorId &&
+		a.proof.document.instanceId === b.proof.document.instanceId
+	);
+}
+
 export class GitLineSelectionState {
-	selectedLineKeys = $state(new Set<string>());
+	selectedLineKeys = $state.raw(new Set<string>());
 	private targets = new Map<string, GitDiffActionTarget>();
 
 	get hasSelection(): boolean {
@@ -64,23 +80,28 @@ export class GitLineSelectionState {
 		if (!this.captureTarget(endKey, target)) return;
 		const next = new Set(this.selectedLineKeys);
 		for (let index = from; index <= to; index++) {
-			if (this.captureTarget(allKeys[index], target)) next.add(allKeys[index]);
+			const key = allKeys[index];
+			const parsed = decodeLineSelectionKey(key);
+			if (parsed?.filePath === target.filePath && parsed.tab === target.tab) next.add(key);
 		}
 		this.selectedLineKeys = next;
 	}
 
 	clearSelection(): void {
-		this.selectedLineKeys = new Set();
+		if (this.hasSelection) this.selectedLineKeys = new Set();
 		this.targets.clear();
 	}
 
 	pruneToFilePaths(paths: Set<string>): void {
-		this.selectedLineKeys = new Set(
-			Array.from(this.selectedLineKeys).filter((rawKey) => {
-				const parsed = decodeLineSelectionKey(rawKey);
-				return parsed ? paths.has(parsed.filePath) : false;
-			}),
-		);
+		const previous = this.selectedLineKeys;
+		let next: Set<string> | undefined;
+		for (const key of previous) {
+			const parsed = decodeLineSelectionKey(key);
+			if (parsed && paths.has(parsed.filePath)) continue;
+			(next ??= new Set(previous)).delete(key);
+		}
+		if (!next) return;
+		this.selectedLineKeys = next;
 		this.pruneTargets();
 	}
 
@@ -91,7 +112,7 @@ export class GitLineSelectionState {
 				return !parsed || parsed.filePath !== filePath || parsed.tab !== tab;
 			}),
 		);
-		this.targets.delete(JSON.stringify([filePath, tab]));
+		this.targets.delete(targetKey(filePath, tab));
 	}
 
 	groupSelectedLineIndicesByTarget(mode: GitDiffActionMode): Array<{
@@ -102,9 +123,9 @@ export class GitLineSelectionState {
 		for (const rawKey of this.selectedLineKeys) {
 			const parsed = decodeLineSelectionKey(rawKey);
 			if (!parsed) continue;
-			const target = this.targets.get(JSON.stringify([parsed.filePath, parsed.tab]));
+			const groupKey = targetKey(parsed.filePath, parsed.tab);
+			const target = this.targets.get(groupKey);
 			if (!target || target.mode !== mode) continue;
-			const groupKey = `${parsed.filePath}|${parsed.tab}|${mode}`;
 			const existing = grouped.get(groupKey) ?? {
 				target,
 				lineIndices: [],
@@ -123,7 +144,7 @@ export class GitLineSelectionState {
 		const retained = new Set(
 			Array.from(this.selectedLineKeys).flatMap((key) => {
 				const parsed = decodeLineSelectionKey(key);
-				return parsed ? [JSON.stringify([parsed.filePath, parsed.tab])] : [];
+				return parsed ? [targetKey(parsed.filePath, parsed.tab)] : [];
 			}),
 		);
 		for (const key of this.targets.keys()) if (!retained.has(key)) this.targets.delete(key);
@@ -132,9 +153,9 @@ export class GitLineSelectionState {
 	private captureTarget(key: string, target: GitDiffActionTarget): boolean {
 		const parsed = decodeLineSelectionKey(key);
 		if (!parsed || parsed.filePath !== target.filePath || parsed.tab !== target.tab) return false;
-		const id = JSON.stringify([parsed.filePath, parsed.tab]);
+		const id = targetKey(parsed.filePath, parsed.tab);
 		const previous = this.targets.get(id);
-		if (previous && JSON.stringify(previous) !== JSON.stringify(target)) {
+		if (previous && !sameProvenance(previous, target)) {
 			this.clearSelectionForFile(parsed.filePath, parsed.tab);
 		}
 		this.targets.set(id, target);

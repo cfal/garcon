@@ -58,7 +58,7 @@ async function readyWorkbench() {
 	controller.setProjectState(availableProject('/project'));
 	controller.setPresentationVisible(true);
 	await controller.target.activate();
-	controller.repository.currentBranch = 'main';
+	controller.target.branches.currentBranch = 'main';
 	controller.repository.remoteStatus = {
 		hasRemote: true,
 		hasUpstream: false,
@@ -105,7 +105,7 @@ describe('GitWorkbenchPanel', () => {
 			controller.target.branchChangePending = true;
 			if (change === 'completed checkout') {
 				await tick();
-				controller.repository.currentBranch = 'next';
+				controller.target.branches.currentBranch = 'next';
 				controller.target.branchChangePending = false;
 			}
 		} else if (change === 'conflicting remote status and return') {
@@ -114,10 +114,10 @@ describe('GitWorkbenchPanel', () => {
 			controller.repository.remoteStatus!.branch = 'main';
 		} else if (change.startsWith('external checkout')) {
 			// History publishes the branch without starting a checkout in this panel.
-			controller.repository.currentBranch = 'next';
+			controller.target.branches.currentBranch = 'next';
 			if (change === 'external checkout and return') {
 				await tick();
-				controller.repository.currentBranch = 'main';
+				controller.target.branches.currentBranch = 'main';
 			}
 		} else if (change === 'unmount') {
 			view.unmount();
@@ -170,10 +170,10 @@ describe('GitWorkbenchPanel', () => {
 		const props = { controller, presentation: 'window-main' as const };
 		render(GitWorkbenchPanel, props);
 		await openPush();
-		controller.repository.currentBranch = 'next';
+		controller.target.branches.currentBranch = 'next';
 		await tick();
 		expect(screen.queryByRole('dialog')).toBeNull();
-		controller.repository.currentBranch = 'main';
+		controller.target.branches.currentBranch = 'main';
 		await tick();
 		expect(screen.queryByRole('dialog')).toBeNull();
 		controller.dispose();

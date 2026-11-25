@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { GitRenderedDiffRow } from '$lib/git/review/git-rendered-diff-types.js';
 import { makeLineSelectionKey } from '$lib/git/review/git-line-selection.svelte.js';
 import {
-	buildSplitDiffRows,
-	buildSplitDiffRowViews,
-	buildUnifiedDiffRowViews,
+	buildSplitDiffRowView,
+	buildUnifiedDiffRowView,
 	renderUnifiedDiffRow,
 	type GitDiffComposerDraft,
+	type SplitDiffRow,
 } from '$lib/git/review/git-diff-rows.js';
 import type { GitDiffFileSyntaxResult } from '$lib/git/review/git-diff-syntax.js';
 
@@ -79,6 +79,33 @@ function buildUnifiedDiffRows(rows: GitRenderedDiffRow[]) {
 	return rows.map(renderUnifiedDiffRow);
 }
 
+function splitRows(): SplitDiffRow[] {
+	return [
+		{ key: 'header', isHeader: true, left: null, right: null },
+		{
+			key: 'context',
+			isHeader: false,
+			hunkIndex: 0,
+			left: { kind: 'context', line: 1, text: 'const a = 1;', diffLineIndex: 0 },
+			right: { kind: 'context', line: 1, text: 'const a = 1;', diffLineIndex: 0 },
+		},
+		{
+			key: 'pair',
+			isHeader: false,
+			hunkIndex: 0,
+			left: { kind: 'del', line: 2, text: 'const b = 2;', diffLineIndex: 1 },
+			right: { kind: 'add', line: 2, text: 'const b = 3;', diffLineIndex: 2 },
+		},
+		{
+			key: 'addition',
+			isHeader: false,
+			hunkIndex: 0,
+			left: { kind: 'empty', line: null, text: '', diffLineIndex: -1 },
+			right: { kind: 'add', line: 3, text: 'const c = 4;', diffLineIndex: 3 },
+		},
+	];
+}
+
 function syntaxResult(): GitDiffFileSyntaxResult {
 	return {
 		cacheKey: 'syntax',
@@ -139,28 +166,21 @@ describe('git diff rows', () => {
 		expect(rows[3].key).toBe('line:2:add:2');
 	});
 
-	it('pairs adjacent delete and add rows for split mode', () => {
-		const splitRows = buildSplitDiffRows(buildUnifiedDiffRows(makeReviewData()));
-
-		expect(splitRows).toHaveLength(5);
-		expect(splitRows[0]).toMatchObject({ isHeader: true, headerText: '@@ -1,3 +1,4 @@' });
-		expect(splitRows[2].left).toMatchObject({ kind: 'del', line: 2, text: 'const b = 2;' });
-		expect(splitRows[2].right).toMatchObject({ kind: 'add', line: 2, text: 'const b = 3;' });
-		expect(splitRows[3].left).toMatchObject({ kind: 'empty', line: null });
-		expect(splitRows[3].right).toMatchObject({ kind: 'add', line: 3, text: 'const c = 4;' });
-	});
-
 	it('exposes selectable keys in visual order', () => {
 		const rows = buildUnifiedDiffRows(makeReviewData());
 
-		const views = buildUnifiedDiffRowViews({
-			rows,
-			filePath: 'src/app.ts',
-			activeTab: 'unstaged',
-			readOnly: false,
-			selectedLineKeys: new Set(),
-			composerTarget: null,
-		});
+		const views = rows.map((row) =>
+			buildUnifiedDiffRowView(
+				{
+					filePath: 'src/app.ts',
+					activeTab: 'unstaged',
+					readOnly: false,
+					selectedLineKeys: new Set(),
+					composerTarget: null,
+				},
+				row,
+			),
+		);
 		expect(views.flatMap((row) => row.selectionKey ?? [])).toEqual([
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'before', 1),
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'after', 2),
@@ -180,14 +200,18 @@ describe('git diff rows', () => {
 			severity: 'warning',
 		};
 
-		const views = buildUnifiedDiffRowViews({
-			rows,
-			filePath: 'src/app.ts',
-			activeTab: 'unstaged',
-			readOnly: false,
-			selectedLineKeys,
-			composerTarget,
-		});
+		const views = rows.map((row) =>
+			buildUnifiedDiffRowView(
+				{
+					filePath: 'src/app.ts',
+					activeTab: 'unstaged',
+					readOnly: false,
+					selectedLineKeys,
+					composerTarget,
+				},
+				row,
+			),
+		);
 
 		expect(views[3].bgClass).toBe('bg-interactive-accent/20');
 		expect(views[4].showComposer).toBe(true);
@@ -196,17 +220,21 @@ describe('git diff rows', () => {
 	});
 
 	it('decorates split cells with side-specific selection targets', () => {
-		const rows = buildSplitDiffRows(buildUnifiedDiffRows(makeReviewData()));
+		const rows = splitRows();
 		const selectedLineKeys = new Set([makeLineSelectionKey('src/app.ts', 'unstaged', 'before', 1)]);
 
-		const views = buildSplitDiffRowViews({
-			rows,
-			filePath: 'src/app.ts',
-			activeTab: 'unstaged',
-			readOnly: false,
-			selectedLineKeys,
-			composerTarget: null,
-		});
+		const views = rows.map((row) =>
+			buildSplitDiffRowView(
+				{
+					filePath: 'src/app.ts',
+					activeTab: 'unstaged',
+					readOnly: false,
+					selectedLineKeys,
+					composerTarget: null,
+				},
+				row,
+			),
+		);
 
 		expect(views[2].left?.selectionKey).toBe(
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'before', 1),
@@ -219,15 +247,19 @@ describe('git diff rows', () => {
 	});
 
 	it('projects before and after syntax segments onto unified rows', () => {
-		const views = buildUnifiedDiffRowViews({
-			rows: buildUnifiedDiffRows(makeReviewData()),
-			filePath: 'src/app.ts',
-			activeTab: 'unstaged',
-			readOnly: false,
-			selectedLineKeys: new Set(),
-			composerTarget: null,
-			syntaxResult: syntaxResult(),
-		});
+		const views = buildUnifiedDiffRows(makeReviewData()).map((row) =>
+			buildUnifiedDiffRowView(
+				{
+					filePath: 'src/app.ts',
+					activeTab: 'unstaged',
+					readOnly: false,
+					selectedLineKeys: new Set(),
+					composerTarget: null,
+					syntaxResult: syntaxResult(),
+				},
+				row,
+			),
+		);
 
 		expect(views[0].segments).toBeUndefined();
 		expect(views[1].segments?.[0].className).toBe('cm-code-keyword');
@@ -238,15 +270,19 @@ describe('git diff rows', () => {
 	});
 
 	it('projects each split cell from its own syntax side', () => {
-		const views = buildSplitDiffRowViews({
-			rows: buildSplitDiffRows(buildUnifiedDiffRows(makeReviewData())),
-			filePath: 'src/app.ts',
-			activeTab: 'unstaged',
-			readOnly: false,
-			selectedLineKeys: new Set(),
-			composerTarget: null,
-			syntaxResult: syntaxResult(),
-		});
+		const views = splitRows().map((row) =>
+			buildSplitDiffRowView(
+				{
+					filePath: 'src/app.ts',
+					activeTab: 'unstaged',
+					readOnly: false,
+					selectedLineKeys: new Set(),
+					composerTarget: null,
+					syntaxResult: syntaxResult(),
+				},
+				row,
+			),
+		);
 
 		expect(views[0].left).toBeNull();
 		expect(views[1].left?.segments?.[0].className).toBe('cm-code-name');

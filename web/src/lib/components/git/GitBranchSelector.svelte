@@ -1,12 +1,3 @@
-<script module lang="ts">
-	let nextBranchSelectorId = 0;
-
-	function createBranchSelectorListboxId(): string {
-		nextBranchSelectorId += 1;
-		return `git-branch-listbox-${nextBranchSelectorId}`;
-	}
-</script>
-
 <script lang="ts">
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
@@ -93,7 +84,7 @@
 	const isSwitchDialogOpen = $derived(pendingSwitchRef !== null);
 	let wasOpen = false;
 
-	const listboxId = createBranchSelectorListboxId();
+	const listboxId = $props.id();
 	const currentBranchLabel = $derived(currentBranch || remoteStatus?.branch || 'Branch');
 	const resolvedTriggerClass = $derived(
 		cn(

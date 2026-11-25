@@ -47,7 +47,7 @@ export class GitComparisonController {
 	toKind = $state<GitComparisonToKind>('working-tree');
 	toRevision = $state('HEAD');
 	mode = $state<GitComparisonMode>('direct');
-	snapshot = $state<GitComparisonSnapshotReady | null>(null);
+	snapshot = $state.raw<GitComparisonSnapshotReady | null>(null);
 	isLoading = $state(false);
 	error = $state<string | null>(null);
 	bodyError = $state<string | null>(null);

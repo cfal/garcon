@@ -1016,7 +1016,7 @@ describe('GitDiffDocumentController', () => {
 		);
 		controller.openCommentComposer('a.ts', 'after', 12);
 		const patch = 'diff --git a/a.ts b/a.ts\n@@ -0,0 +12 @@\n+new line\n';
-		controller.fileBodies = {
+		controller.bodies.fileBodies = {
 			'a.ts': {
 				...body('a.ts'),
 				renderedRowCount: 2,

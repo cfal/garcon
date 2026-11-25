@@ -21,10 +21,9 @@
 		readGitDiffDocumentFileTreeVisible,
 		readGitFileTreeWidth,
 	} from '$lib/git/surface/git-file-tree-preferences.js';
-	import { cn } from '$lib/utils/cn';
 	import GitChangedFileTree from './GitChangedFileTree.svelte';
 	import GitCommitVirtualDiffSurface from './GitCommitVirtualDiffSurface.svelte';
-	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
+	import GitSplitReviewLayout from './GitSplitReviewLayout.svelte';
 	import { gitContainerBreakpoints } from './git-container-presentation.js';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -128,9 +127,6 @@
 	);
 	let isSinglePane = $derived(containerPresentation === 'narrow');
 	let isWide = $derived(containerPresentation === 'wide');
-	let filePaneHidden = $derived(
-		(isSinglePane && singlePane !== 'files') || (isWide && !fileTreeVisible),
-	);
 	let diffViewportActive = $derived(active && (!isSinglePane || singlePane === 'diff'));
 	let virtualEmptyMessage = $derived(
 		fileFilter.trim() ? m.git_diff_document_no_filter_matches() : emptyDocumentLabel,
@@ -205,24 +201,16 @@
 				{/each}
 			</div>
 		{/if}
-		<div
-			class={cn('relative min-h-0 flex-1 overflow-hidden', isWide ? 'grid' : 'flex')}
-			style={isWide
-				? `grid-template-columns: ${fileTreeVisible ? `${treePaneWidthPx}px 6px minmax(0,1fr)` : '0px minmax(0,1fr)'}; grid-template-rows: minmax(0,1fr);`
-				: undefined}
-			data-git-diff-document-panes
+		<GitSplitReviewLayout
+			variant="document"
+			wide={isWide}
+			{singlePane}
+			{fileTreeVisible}
+			treeWidth={treePaneWidthPx}
+			onResize={previewTreePaneWidth}
+			onResizeCommit={commitTreePaneWidth}
 		>
-			<div
-				class={cn(
-					'flex min-h-0 flex-col overflow-hidden bg-background',
-					isWide && fileTreeVisible && 'border-r border-border',
-					isSinglePane && 'absolute inset-0',
-					filePaneHidden && 'invisible pointer-events-none',
-				)}
-				aria-hidden={filePaneHidden}
-				inert={filePaneHidden}
-				data-git-history-files-pane
-			>
+			{#snippet renderFiles()}
 				<GitChangedFileTree
 					{files}
 					{fileFilter}
@@ -230,24 +218,8 @@
 					{onFileFilterChange}
 					onSelectFile={handleSelectFile}
 				/>
-			</div>
-			{#if isWide && fileTreeVisible}
-				<GitFileTreeResizeHandle
-					width={treePaneWidthPx}
-					onResize={previewTreePaneWidth}
-					onResizeCommit={commitTreePaneWidth}
-				/>
-			{/if}
-			<div
-				class={cn(
-					'flex min-h-0 min-w-0 flex-col overflow-hidden',
-					isSinglePane ? 'absolute inset-0' : 'flex-1',
-					isSinglePane && singlePane !== 'diff' && 'invisible pointer-events-none',
-				)}
-				aria-hidden={isSinglePane && singlePane !== 'diff'}
-				inert={isSinglePane && singlePane !== 'diff'}
-				data-git-history-diff-pane
-			>
+			{/snippet}
+			{#snippet renderDiff()}
 				<GitCommitVirtualDiffSurface
 					{documentId}
 					active={diffViewportActive}
@@ -271,8 +243,8 @@
 					{onOpenChat}
 					emptyMessage={virtualEmptyMessage}
 				/>
-			</div>
-		</div>
+			{/snippet}
+		</GitSplitReviewLayout>
 	{:else if isLoading}
 		<div class="flex h-32 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
 			<div class="flex items-center gap-2">

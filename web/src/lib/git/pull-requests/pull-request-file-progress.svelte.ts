@@ -1,8 +1,8 @@
 import type { PullRequestDetail } from '$lib/api/pull-requests.js';
 
 export class PullRequestFileProgress {
-	viewed = $state<Set<string>>(new Set());
-	collapsed = $state<Set<string>>(new Set());
+	viewed = $state.raw<Set<string>>(new Set());
+	collapsed = $state.raw<Set<string>>(new Set());
 	#reviewId: string | null = null;
 	#head: string | null = null;
 	#fingerprints = new Map<string, string>();
@@ -12,10 +12,12 @@ export class PullRequestFileProgress {
 		const head = detail?.headRefOid ?? null;
 		const files = detail?.files ?? [];
 		if (
-			this.#reviewId === reviewId && this.#head === head &&
+			this.#reviewId === reviewId &&
+			this.#head === head &&
 			this.#fingerprints.size === files.length &&
 			files.every((file) => this.#fingerprints.get(file.path) === file.bodyFingerprint)
-		) return;
+		)
+			return;
 		this.#reviewId = reviewId;
 		this.#head = head;
 		this.#fingerprints = new Map(files.map((file) => [file.path, file.bodyFingerprint]));
