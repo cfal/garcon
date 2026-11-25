@@ -131,7 +131,13 @@
 					chatOrderGroupFor(chat),
 					request.chatId,
 					request.placement,
-					() => resolve({ success: true, chatId: request.chatId, orderGroup: chatOrderGroupFor(chat), changed: true }),
+					() =>
+						resolve({
+							success: true,
+							chatId: request.chatId,
+							orderGroup: chatOrderGroupFor(chat),
+							changed: true,
+						}),
 					reject,
 				);
 			}),
@@ -161,14 +167,16 @@
 		{onNewChat}
 		{displayOptions}
 		onToggleProjectCollapsed={handleProjectCollapseToggle}
-		onChatSelect={() => {}}
-		onDeleteChat={() => {}}
-		onStartRenameChat={() => {}}
-		onShowDetails={() => {}}
-		onForkChat={() => {}}
-		onShareChat={() => {}}
-		onTogglePinned={() => {}}
-		onToggleArchive={() => {}}
+		actions={{
+			onChatSelect: () => {},
+			onDeleteChat: () => {},
+			onStartRenameChat: () => {},
+			onTogglePinned: () => {},
+			onToggleArchive: () => {},
+			onShowDetails: () => {},
+			onForkChat: () => {},
+			onShareChat: () => {},
+		}}
 		{reorder}
 		{onSortChatOrder}
 		newWindowEdges={workspaceSplitAdmissions()}

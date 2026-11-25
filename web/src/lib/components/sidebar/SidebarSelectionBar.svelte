@@ -49,7 +49,7 @@
 <div
 	class={cn(
 		'absolute inset-x-0 bottom-0 z-40',
-		'bg-card/95 backdrop-blur-sm border-t border-border',
+		'bg-card/95 [:root:not([data-overlay-backdrop-effects=disabled])_&]:backdrop-blur-sm border-t border-border',
 		'px-3 py-2 flex flex-col gap-1.5',
 		'shadow-[0_-2px_8px_rgba(0,0,0,0.08)]',
 		'animate-in slide-in-from-bottom-2 duration-200',

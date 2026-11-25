@@ -6,7 +6,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 export const SINGLE_LINE_CHAT_ROW_HEIGHT = 40;
 export const COMPACT_CHAT_ROW_HEIGHT = 62;
 export const DESKTOP_CHAT_ROW_HEIGHT = 76;
-export const PROJECT_PATH_LINE_HEIGHT = 18;
+const PROJECT_PATH_LINE_HEIGHT = 18;
 export const PROJECT_HEADER_ROW_HEIGHT = 32;
 export const SECTION_HEADER_ROW_HEIGHT = 28;
 export const EXECUTOR_HEADER_ROW_HEIGHT = 36;

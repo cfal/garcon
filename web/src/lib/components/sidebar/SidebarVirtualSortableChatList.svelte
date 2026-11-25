@@ -1,11 +1,8 @@
 <script lang="ts">
+	import type { SidebarRowActions } from './sidebar-row-actions.js';
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import {
-		dropTargetForElements,
-		monitorForElements,
-	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getAppShell, getWorkspaceWindowDnd } from '$lib/context';
@@ -49,13 +46,17 @@
 	} from './sidebar-drop-targets';
 	import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
-	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
-	import { SidebarVirtualChatListController } from './SidebarVirtualChatListController.svelte.js';
+	import { SidebarVirtualChatListController } from './SidebarVirtualChatListController.js';
 	import { SidebarWorkspaceChatDragBridge } from './sidebar-workspace-chat-drag-bridge.js';
+	import { SidebarTouchReorderController } from './sidebar-touch-reorder-controller.js';
+	import {
+		bindSidebarAutoScroll,
+		bindSidebarDesktopReorder,
+	} from './sidebar-desktop-reorder-controller.js';
 
 	interface SidebarVirtualSortableChatListProps {
+		actions: SidebarRowActions;
 		rows: SidebarVirtualRow[];
 		viewportRef: HTMLElement | null;
 		viewportHeight: number;
@@ -71,26 +72,13 @@
 		reorder: SidebarOrderController;
 		onPersistReorder: (request: SidebarChatReorderRequest) => void;
 		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
-		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chat: ChatSessionRecord) => void;
-		onStartRenameChat: (chat: ChatSessionRecord) => void;
-		onTogglePinned: (chatId: string) => void;
-		onToggleArchive: (chatId: string) => void;
-		isArchiveMutationPending?: (chatId: string) => boolean;
-		onShowDetails: (chat: ChatSessionRecord) => void;
-		onForkChat: (sourceChatId: string) => void;
-		onShareChat: (chat: ChatSessionRecord) => void;
-		onTagClick?: (tag: string) => void;
-		onManageTags?: (chat: ChatSessionRecord) => void;
-		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onNewProjectChat?: (project: NewChatProjectTarget) => void;
-		onEnterMultiSelect?: (chatId: string) => void;
-		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
 	}
 
 	let {
+		actions,
 		rows,
 		viewportRef,
 		viewportHeight,
@@ -106,23 +94,9 @@
 		reorder,
 		onPersistReorder,
 		onSortChatOrder,
-		onChatSelect,
-		onDeleteChat,
-		onStartRenameChat,
-		onTogglePinned,
-		onToggleArchive,
-		isArchiveMutationPending = () => false,
-		onShowDetails,
-		onForkChat,
-		onShareChat,
-		onTagClick,
-		onManageTags,
-		onOpenInNewWindow,
 		newWindowEdges,
 		onToggleProjectCollapsed,
 		onNewProjectChat,
-		onEnterMultiSelect,
-		onMultiSelectToggle,
 	}: SidebarVirtualSortableChatListProps = $props();
 
 	const appShell = getAppShell();
@@ -130,35 +104,12 @@
 	const instanceId = Symbol('sidebar-chat-list');
 	const desktopBottomPadding = 16;
 	const mobileBottomPadding = 112;
-	const touchLongPressMs = 360;
-	const touchMoveCancelThresholdPx = 10;
-	const touchAutoScrollEdgePx = 56;
-	const touchAutoScrollMaxPx = 18;
 
 	let activeDrop = $state<{ chatId: string; edge: Edge | null } | null>(null);
 	let draggingChatId = $state<string | null>(null);
 	let dragScopeKey: string | null = null;
-	let listEl = $state<HTMLElement | null>(null);
 	let listWidth = $state(0);
 	let lastValidDrop: SidebarDropInstruction | null = null;
-	let touchDrag: {
-		identifier: number;
-		sourceChatId: string;
-		sourceList: PersistedChatOrderGroup;
-		sourceScopeKey: string;
-		startX: number;
-		startY: number;
-		currentX: number;
-		currentY: number;
-		timer: ReturnType<typeof setTimeout>;
-		activated: boolean;
-	} | null = null;
-	let touchAutoScrollFrame: number | null = null;
-	let suppressTouchClickUntil = 0;
-	let touchSelectionGuard: {
-		body: Record<string, string>;
-		documentElement: Record<string, string>;
-	} | null = null;
 	let separatorPixelRatio = $state(1);
 	let pendingRecenter = $state<string | null>(null);
 	let bottomPadding = $derived(isMobile ? mobileBottomPadding : desktopBottomPadding);
@@ -196,7 +147,7 @@
 			untrack(() => {
 				workspaceChatDrag.endIfOwned(draggingChatId!);
 				reorder.cancel();
-				cancelTouchDrag();
+				touchReorder.cancel();
 				clearDragPresentation();
 			});
 			return;
@@ -210,7 +161,7 @@
 		) {
 			untrack(() => {
 				reorder.cancel();
-				cancelTouchDrag();
+				touchReorder.cancel();
 				activeDrop = null;
 				lastValidDrop = null;
 			});
@@ -295,17 +246,6 @@
 		return cleanup;
 	});
 	$effect(() => {
-		const element = viewportRef;
-		if (!element) return;
-		return dropTargetForElements({
-			element,
-			canDrop: ({ source }) =>
-				reorderEnabled &&
-				isSidebarChatDragData(source.data) &&
-				source.data.instanceId === instanceId,
-		});
-	});
-	$effect(() => {
 		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter))
 			pendingRecenter = null;
 	});
@@ -315,21 +255,18 @@
 	);
 	$effect(() => {
 		const element = autoScrollViewport;
-		if (!element) return;
-		let disposed = false;
-		let cleanup: (() => void) | undefined;
-		void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
-			if (disposed) return;
-			cleanup = module.autoScrollForElements({
-				element,
-				canScroll: ({ source }) => reorderEnabled && isSidebarChatDragData(source.data),
-				getAllowedAxis: () => 'vertical',
-			});
+		if (isMobile || !element) return;
+		return bindSidebarAutoScroll(element, instanceId, () => reorderEnabled);
+	});
+	$effect(() => {
+		const viewport = viewportRef;
+		if (isMobile || !viewport) return;
+		return bindSidebarDesktopReorder(viewport, {
+			instanceId,
+			canReorder: () => reorderEnabled,
+			preview: previewSidebarDrop,
+			finish: finishSidebarDrop,
 		});
-		return () => {
-			disposed = true;
-			cleanup?.();
-		};
 	});
 
 	function clearDragPresentation(): void {
@@ -341,7 +278,7 @@
 
 	function startSidebarDrag(row: SidebarVirtualChatRow): void {
 		if (!dragEnabled) return;
-		if (touchDrag) cancelTouchDrag();
+		touchReorder.cancel();
 		clearDragPresentation();
 		draggingChatId = row.chat.id;
 		dragScopeKey = row.reorderScopeKey;
@@ -352,15 +289,8 @@
 	}
 
 	function cancelUnmountedDragSource(chatId: string): void {
-		const ownsTouchDrag = touchDrag?.sourceChatId === chatId;
-		const ownsNativeDrag = draggingChatId === chatId && !(ownsTouchDrag && touchDrag?.activated);
-		if (!ownsTouchDrag && !ownsNativeDrag) return;
-		if (rows.some((row) => row.type === 'chat' && row.chat.id === chatId)) {
-			if (touchDrag?.sourceChatId === chatId && !touchDrag.activated) cancelTouchDrag();
-			return;
-		}
-		if (ownsTouchDrag) cancelTouchDrag();
-		if (!ownsNativeDrag) return;
+		touchReorder.sourceUnmounted(chatId);
+		if (draggingChatId !== chatId || chatRowForId(chatId)) return;
 		// Window-only drags (derived sort modes) survive a source row unmount: a
 		// real drop still reaches the list-level monitor and ends the drag there,
 		// and a cancelled drag is recovered by pragmatic's broken-drag detection.
@@ -527,257 +457,53 @@
 		return null;
 	}
 
-	function touchForEvent(event: TouchEvent): Touch | null {
-		if (!touchDrag) return null;
-		for (const touch of Array.from(event.changedTouches)) {
-			if (touch.identifier === touchDrag.identifier) return touch;
-		}
-		return null;
-	}
-
-	function touchSourceDragData(current: {
-		sourceChatId: string;
-		sourceList: PersistedChatOrderGroup;
-		sourceScopeKey: string;
-	}): SidebarChatDragData {
-		return getSidebarChatDragData({
-			chatId: current.sourceChatId,
-			list: current.sourceList,
-			index: -1,
-			instanceId,
-			reorderScopeKey: current.sourceScopeKey,
-		});
-	}
-
-	function previewTouchDrop(clientX: number, clientY: number): void {
-		const current = touchDrag;
-		if (!current) return;
-		previewPointDrop(touchSourceDragData(current), clientX, clientY);
-	}
-
-	function stopTouchAutoScroll(): void {
-		if (touchAutoScrollFrame === null) return;
-		cancelAnimationFrame(touchAutoScrollFrame);
-		touchAutoScrollFrame = null;
-	}
-
-	function runTouchAutoScroll(): void {
-		touchAutoScrollFrame = null;
-		const current = touchDrag;
-		if (!current?.activated || !viewportRef) return;
-		const rect = viewportRef.getBoundingClientRect();
-		let delta = 0;
-		if (current.currentY < rect.top + touchAutoScrollEdgePx) {
-			const distance = Math.max(0, rect.top + touchAutoScrollEdgePx - current.currentY);
-			delta = -Math.ceil(Math.min(touchAutoScrollMaxPx, distance / 3));
-		} else if (current.currentY > rect.bottom - touchAutoScrollEdgePx) {
-			const distance = Math.max(0, current.currentY - (rect.bottom - touchAutoScrollEdgePx));
-			delta = Math.ceil(Math.min(touchAutoScrollMaxPx, distance / 3));
-		}
-		if (delta === 0) return;
-		virtual.scrollBy(delta);
-		previewTouchDrop(current.currentX, current.currentY);
-		touchAutoScrollFrame = requestAnimationFrame(runTouchAutoScroll);
-	}
-
-	function scheduleTouchAutoScroll(): void {
-		if (touchAutoScrollFrame !== null) return;
-		touchAutoScrollFrame = requestAnimationFrame(runTouchAutoScroll);
-	}
-
-	function setInlineStyle(element: HTMLElement, property: string, value: string): void {
-		if (value) {
-			element.style.setProperty(property, value);
-		} else {
-			element.style.removeProperty(property);
-		}
-	}
-
-	function captureSelectionGuardStyle(element: HTMLElement): Record<string, string> {
-		return {
-			userSelect: element.style.getPropertyValue('user-select'),
-			webkitUserSelect: element.style.getPropertyValue('-webkit-user-select'),
-			webkitTouchCallout: element.style.getPropertyValue('-webkit-touch-callout'),
-		};
-	}
-
-	function applySelectionGuardStyle(element: HTMLElement): void {
-		element.style.setProperty('user-select', 'none');
-		element.style.setProperty('-webkit-user-select', 'none');
-		element.style.setProperty('-webkit-touch-callout', 'none');
-	}
-
-	function restoreSelectionGuardStyle(element: HTMLElement, values: Record<string, string>): void {
-		setInlineStyle(element, 'user-select', values.userSelect ?? '');
-		setInlineStyle(element, '-webkit-user-select', values.webkitUserSelect ?? '');
-		setInlineStyle(element, '-webkit-touch-callout', values.webkitTouchCallout ?? '');
-	}
-
-	function enableTouchSelectionGuard(): void {
-		if (touchSelectionGuard) return;
-		touchSelectionGuard = {
-			body: captureSelectionGuardStyle(document.body),
-			documentElement: captureSelectionGuardStyle(document.documentElement),
-		};
-		applySelectionGuardStyle(document.body);
-		applySelectionGuardStyle(document.documentElement);
-	}
-
-	function restoreTouchSelectionGuard(): void {
-		if (!touchSelectionGuard) return;
-		restoreSelectionGuardStyle(document.body, touchSelectionGuard.body);
-		restoreSelectionGuardStyle(document.documentElement, touchSelectionGuard.documentElement);
-		touchSelectionGuard = null;
-	}
-
-	function clearDocumentSelection(): void {
-		window.getSelection()?.removeAllRanges();
-	}
-
-	function removeTouchDragListeners(): void {
-		window.removeEventListener('touchmove', handleTouchMove);
-		window.removeEventListener('touchend', handleTouchEnd);
-		window.removeEventListener('touchcancel', handleTouchCancel);
-		window.removeEventListener('contextmenu', handleTouchContextMenu, true);
-	}
-
-	function clearTouchDrag(): void {
-		if (touchDrag) clearTimeout(touchDrag.timer);
-		touchDrag = null;
-		stopTouchAutoScroll();
-		removeTouchDragListeners();
-		restoreTouchSelectionGuard();
-	}
-
-	function cancelTouchDrag(): void {
-		const current = touchDrag;
-		if (current?.activated) {
-			reorder.cancel();
-			workspaceChatDrag.endIfOwned(current.sourceChatId);
+	const touchReorder = new SidebarTouchReorderController({
+		canActivate: () => reorderEnabled && draggingChatId === null,
+		viewport: () => viewportRef,
+		scrollBy: (delta) => virtual.scrollBy(delta),
+		resolveSource(target) {
+			const element = rowElementFromTarget(target);
+			if (!element) return null;
+			const chatId = element.dataset.sidebarVirtualRow;
+			const list = rowListFromElement(element);
+			const reorderScopeKey = rowScopeFromElement(element);
+			if (
+				!chatId ||
+				!list ||
+				!reorderScopeKey ||
+				!chatRowForId(chatId)?.reorderScopeIds.includes(chatId)
+			)
+				return null;
+			return getSidebarChatDragData({ chatId, list, reorderScopeKey, index: -1, instanceId });
+		},
+		onActivate(source) {
 			clearDragPresentation();
-		}
-		clearTouchDrag();
-	}
-
-	function activateTouchDrag(): void {
-		const current = touchDrag;
-		if (!current || current.activated || !reorderEnabled) return;
-		current.activated = true;
-		clearDocumentSelection();
-		clearDragPresentation();
-		draggingChatId = current.sourceChatId;
-		dragScopeKey = current.sourceScopeKey;
-		reorder.begin(current.sourceList, current.sourceChatId, {
-			ids: chatRowForId(current.sourceChatId)?.reorderScopeIds ?? [current.sourceChatId],
-		});
-		workspaceChatDrag.begin(current.sourceChatId);
-		previewTouchDrop(current.currentX, current.currentY);
-		scheduleTouchAutoScroll();
-	}
-
-	function handleTouchStart(event: TouchEvent): void {
-		if (!reorderEnabled || draggingChatId !== null || event.touches.length !== 1) return;
-		const rowEl = rowElementFromTarget(event.target);
-		if (!rowEl) return;
-		const sourceChatId = rowEl.dataset.sidebarVirtualRow;
-		const sourceList = rowListFromElement(rowEl);
-		const sourceScopeKey = rowScopeFromElement(rowEl);
-		const touch = event.changedTouches[0];
-		if (!sourceChatId || !sourceList || !sourceScopeKey || !touch) return;
-		if (!chatRowForId(sourceChatId)?.reorderScopeIds.includes(sourceChatId)) return;
-
-		clearTouchDrag();
-		enableTouchSelectionGuard();
-		touchDrag = {
-			identifier: touch.identifier,
-			sourceChatId,
-			sourceList,
-			sourceScopeKey,
-			startX: touch.clientX,
-			startY: touch.clientY,
-			currentX: touch.clientX,
-			currentY: touch.clientY,
-			activated: false,
-			timer: setTimeout(activateTouchDrag, touchLongPressMs),
-		};
-		window.addEventListener('touchmove', handleTouchMove, { passive: false });
-		window.addEventListener('touchend', handleTouchEnd, { passive: false });
-		window.addEventListener('touchcancel', handleTouchCancel, { passive: false });
-		window.addEventListener('contextmenu', handleTouchContextMenu, true);
-	}
-
-	function handleTouchMove(event: TouchEvent): void {
-		const current = touchDrag;
-		const touch = touchForEvent(event);
-		if (!current || !touch) return;
-		current.currentX = touch.clientX;
-		current.currentY = touch.clientY;
-
-		if (!current.activated) {
-			const dx = touch.clientX - current.startX;
-			const dy = touch.clientY - current.startY;
-			if (Math.hypot(dx, dy) > touchMoveCancelThresholdPx) {
-				cancelTouchDrag();
+			draggingChatId = source.chatId;
+			dragScopeKey = source.reorderScopeKey;
+			reorder.begin(source.list, source.chatId, {
+				ids: chatRowForId(source.chatId)?.reorderScopeIds ?? [source.chatId],
+			});
+			workspaceChatDrag.begin(source.chatId);
+		},
+		onMove: previewPointDrop,
+		onFinish(source, x, y) {
+			const context = pointDropContext(source, x, y);
+			const instruction = fallbackInstructionForPointContext(source, context);
+			if (instruction) {
+				applySidebarDropInstruction(instruction);
+				persistReorderRequest(reorder.finish(source.list));
+			} else {
+				reorder.cancel();
 			}
-			return;
-		}
-
-		event.preventDefault();
-		clearDocumentSelection();
-		previewTouchDrop(touch.clientX, touch.clientY);
-		scheduleTouchAutoScroll();
-	}
-
-	function finishActiveTouchDrag(event: TouchEvent): void {
-		const current = touchDrag;
-		if (!current) return;
-		const touch = touchForEvent(event);
-		const clientX = touch?.clientX ?? current.currentX;
-		const clientY = touch?.clientY ?? current.currentY;
-
-		if (!current.activated) {
-			clearTouchDrag();
-			return;
-		}
-
-		event.preventDefault();
-		clearDocumentSelection();
-		suppressTouchClickUntil = performance.now() + 500;
-		const sourceData = touchSourceDragData(current);
-		const context = pointDropContext(sourceData, clientX, clientY);
-		const instruction = fallbackInstructionForPointContext(sourceData, context);
-
-		if (instruction) {
-			applySidebarDropInstruction(instruction);
-			persistReorderRequest(reorder.finish(current.sourceList));
-		} else {
+			workspaceChatDrag.endIfOwned(source.chatId);
+			clearDragPresentation();
+		},
+		onCancel(source) {
 			reorder.cancel();
-		}
-
-		workspaceChatDrag.endIfOwned(current.sourceChatId);
-		clearDragPresentation();
-		clearTouchDrag();
-	}
-
-	function handleTouchEnd(event: TouchEvent): void {
-		finishActiveTouchDrag(event);
-	}
-
-	function handleTouchCancel(): void {
-		cancelTouchDrag();
-	}
-
-	function handleTouchContextMenu(event: Event): void {
-		if (touchDrag?.activated || performance.now() < suppressTouchClickUntil) {
-			event.preventDefault();
-		}
-	}
-
-	function suppressSyntheticTouchClick(event: MouseEvent): void {
-		if (performance.now() >= suppressTouchClickUntil) return;
-		event.preventDefault();
-		event.stopPropagation();
-	}
+			workspaceChatDrag.endIfOwned(source.chatId);
+			clearDragPresentation();
+		},
+	});
 
 	function scrollChatIntoView(chatId: string): boolean {
 		const target = sidebarScrollTargetForChat(rows, chatId);
@@ -792,28 +518,16 @@
 		}
 		return untrack(() => virtual.scrollToIndex(target.index)).kind === 'scheduled';
 	}
-	function getMoveToBoundary(
-		row: SidebarVirtualChatRow,
-		boundary: 'start' | 'end',
-	): (() => void) | undefined {
-		if (!reorderEnabled) return undefined;
-		const order = row.reorderScopeIds;
-		const index = order.indexOf(row.chat.id);
-		const boundaryIndex = boundary === 'start' ? 0 : order.length - 1;
-		if (index < 0 || index === boundaryIndex) return undefined;
-		return () =>
-			persistReorderRequest(
-				reorder.moveToBoundary({ list: row.list, chatId: row.chat.id, boundary }),
-			);
+	function moveToBoundary(row: SidebarVirtualChatRow, boundary: 'start' | 'end'): void {
+		if (!reorderEnabled) return;
+		persistReorderRequest(
+			reorder.moveToBoundary({ list: row.list, chatId: row.chat.id, boundary }),
+		);
 	}
 
-	function getMoveAdjacent(row: SidebarVirtualChatRow, offset: -1 | 1): (() => void) | undefined {
-		if (!reorderEnabled) return undefined;
-		const index = row.reorderScopeIds.indexOf(row.chat.id);
-		const target = index >= 0 ? row.reorderScopeIds[index + offset] : undefined;
-		if (!target) return undefined;
-		return () =>
-			persistReorderRequest(reorder.moveAdjacent({ list: row.list, chatId: row.chat.id, offset }));
+	function moveAdjacent(row: SidebarVirtualChatRow, offset: -1 | 1): void {
+		if (!reorderEnabled) return;
+		persistReorderRequest(reorder.moveAdjacent({ list: row.list, chatId: row.chat.id, offset }));
 	}
 
 	onMount(() =>
@@ -823,38 +537,10 @@
 		}),
 	);
 
-	onMount(() =>
-		monitorForElements({
-			canMonitor: ({ source }) =>
-				isSidebarChatDragData(source.data) && source.data.instanceId === instanceId,
-			onDrag: ({ source, location }) => {
-				previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
-			},
-			onDropTargetChange: ({ source, location }) => {
-				previewSidebarDrop(source.data, location.current.dropTargets, location.current.input);
-			},
-			onDrop: ({ source, location }) => {
-				finishSidebarDrop(source.data, location.current.dropTargets, location.current.input);
-			},
-		}),
-	);
-
 	onMount(() => {
 		syncSeparatorPixelRatio();
 		window.addEventListener('resize', syncSeparatorPixelRatio);
 		return () => window.removeEventListener('resize', syncSeparatorPixelRatio);
-	});
-
-	onMount(() => {
-		const element = listEl;
-		if (!element) return;
-		element.addEventListener('touchstart', handleTouchStart, { passive: true });
-		element.addEventListener('click', suppressSyntheticTouchClick, true);
-		return () => {
-			element.removeEventListener('touchstart', handleTouchStart);
-			element.removeEventListener('click', suppressSyntheticTouchClick, true);
-			cancelTouchDrag();
-		};
 	});
 
 	onDestroy(() => {
@@ -867,7 +553,7 @@
 </script>
 
 <div
-	bind:this={listEl}
+	{@attach touchReorder.attach}
 	bind:clientWidth={listWidth}
 	class="relative min-h-full"
 	style={`height:${totalHeight}px;`}
@@ -945,28 +631,11 @@
 						isDragging={draggingChatId === row.chat.id}
 						onDragStart={startSidebarDrag}
 						onDragSourceUnmount={cancelUnmountedDragSource}
-						onDragUpdate={previewSidebarDrop}
-						onDropOnRow={finishSidebarDrop}
-						{onChatSelect}
-						{onDeleteChat}
-						{onStartRenameChat}
-						{onTogglePinned}
-						{onToggleArchive}
-						isArchiveMutationPending={isArchiveMutationPending(row.chat.id)}
-						{onShowDetails}
-						{onForkChat}
-						{onShareChat}
-						{onTagClick}
-						{onManageTags}
-						{onOpenInNewWindow}
+						{actions}
 						{newWindowEdges}
-						onEnterMultiSelect={row.contextOnly ? undefined : onEnterMultiSelect}
-						onMultiSelectToggle={row.contextOnly ? undefined : onMultiSelectToggle}
-						onMoveToTop={getMoveToBoundary(row, 'start')}
-						onMoveUp={getMoveAdjacent(row, -1)}
-						onMoveDown={getMoveAdjacent(row, 1)}
+						onMoveToBoundary={moveToBoundary}
+						onMoveAdjacent={moveAdjacent}
 						{moveBoundaryLabels}
-						onMoveToBottom={getMoveToBoundary(row, 'end')}
 						onSortChatOrder={displayOptions.sortMode === 'manual' && !reorder.busy
 							? onSortChatOrder
 							: undefined}

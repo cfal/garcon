@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { SidebarRowActions } from './sidebar-row-actions.js';
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { typographyScale } from '$lib/theme/typography.js';
 	import { tick, untrack } from 'svelte';
@@ -19,7 +20,7 @@
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
-	import { SidebarController, type SidebarBulkAction } from './sidebar-controller.svelte';
+	import { SidebarController, type SidebarBulkAction } from './sidebar-controller';
 	import { SidebarBulkDeleteState } from './sidebar-bulk-delete-state.svelte';
 	import { SidebarChatSelectionState } from '$lib/components/sidebar/sidebar-chat-selection-state.svelte.js';
 	import { addTagToQuery } from '$shared/chat-filter-query';
@@ -134,6 +135,30 @@
 		},
 	});
 
+	const rowActions: SidebarRowActions = {
+		onEnterMultiSelect: enterMultiSelect,
+		onMultiSelectToggle: handleMultiSelectToggle,
+		onChatSelect: handleChatClick,
+		onDeleteChat: (chat) => onRequestDeleteChat(chat),
+		onStartRenameChat: (chat) => onRequestRenameChat(chat),
+		onTogglePinned: (id) => {
+			void onTogglePinned(id);
+		},
+		onToggleArchive: (id) => {
+			void onToggleArchive(id);
+		},
+		isArchiveMutationPending: (id) => isArchiveMutationPending(id),
+		onShowDetails: (chat) => onShowDetails(chat),
+		onForkChat: (id) => {
+			void onForkChat(id);
+		},
+		onShareChat: (chat) => onShareChat(chat),
+		onTagClick: handleTagClick,
+		onManageTags: (chat) => onManageTags(chat),
+		get onOpenInNewWindow() {
+			return onOpenChatInNewWindow;
+		},
+	};
 	const selection = new SidebarChatSelectionState();
 	const bulkDelete = new SidebarBulkDeleteState();
 	const minuteClock = getMinuteClock();
@@ -319,9 +344,12 @@
 		try {
 			const tiled = await onTileWorkingChats(chatIds);
 			if (tiled < chatIds.length) {
-				notifications.info(m.notifications_chats_partially_tiled({ tiled, total: chatIds.length }), {
-					key: 'tile-working-chats',
-				});
+				notifications.info(
+					m.notifications_chats_partially_tiled({ tiled, total: chatIds.length }),
+					{
+						key: 'tile-working-chats',
+					},
+				);
 			} else {
 				notifications.dismissKey('tile-working-chats');
 			}
@@ -399,7 +427,9 @@
 			activeQuery={sidebarSearch.activeQuery}
 			onOpenSearchDialog={() => sidebarSearch.openSearchDialog()}
 			onCreateChat={handlePrimaryAction}
-			onTileWorkingChats={canTileWorkingChats && onTileWorkingChats ? handleTileWorkingChats : undefined}
+			onTileWorkingChats={canTileWorkingChats && onTileWorkingChats
+				? handleTileWorkingChats
+				: undefined}
 			onMarkAllRead={() => {
 				void handleMarkAllRead();
 			}}
@@ -422,8 +452,11 @@
 			role="status"
 		>
 			<span>{m.sidebar_order_refresh_pending()}</span>
-			<Button variant="ghost" size="sm" disabled={reorder.recovering} onclick={() => void reorder.recover()}
-				>{m.sidebar_order_refresh_retry()}</Button
+			<Button
+				variant="ghost"
+				size="sm"
+				disabled={reorder.recovering}
+				onclick={() => void reorder.recover()}>{m.sidebar_order_refresh_retry()}</Button
 			>
 		</div>
 	{/if}
@@ -444,26 +477,7 @@
 			onToggleProjectCollapsed={(key) =>
 				projectCollapse.toggle(key, localSettings.collapseDelegatedChatsByDefault)}
 			onNewProjectChat={handleNewProjectChat}
-			onEnterMultiSelect={enterMultiSelect}
-			onMultiSelectToggle={handleMultiSelectToggle}
-			onChatSelect={handleChatClick}
-			onDeleteChat={onRequestDeleteChat}
-			onStartRenameChat={onRequestRenameChat}
-			onTogglePinned={(id) => {
-				void onTogglePinned(id);
-			}}
-			onToggleArchive={(id) => {
-				void onToggleArchive(id);
-			}}
-			{isArchiveMutationPending}
-			{onShowDetails}
-			onForkChat={(id) => {
-				void onForkChat(id);
-			}}
-			{onShareChat}
-			onTagClick={handleTagClick}
-			{onManageTags}
-			onOpenInNewWindow={onOpenChatInNewWindow}
+			actions={rowActions}
 			{newWindowEdges}
 			onSortChatOrder={handleSortChatOrder}
 		/>

@@ -46,7 +46,7 @@ export type GlobalShortcutOverrides = Partial<
 	Record<GlobalShortcutId, GlobalShortcutBinding | null>
 >;
 
-export interface GlobalShortcutDefinition {
+interface GlobalShortcutDefinition {
 	id: GlobalShortcutId;
 	context: 'workspace' | 'chat' | 'file';
 	defaultBinding: GlobalShortcutBinding;
@@ -356,7 +356,7 @@ function bindingsEqual(first: GlobalShortcutBinding, second: GlobalShortcutBindi
 	);
 }
 
-export interface AssignGlobalShortcutResult {
+interface AssignGlobalShortcutResult {
 	overrides: GlobalShortcutOverrides;
 	unassignedIds: GlobalShortcutId[];
 }

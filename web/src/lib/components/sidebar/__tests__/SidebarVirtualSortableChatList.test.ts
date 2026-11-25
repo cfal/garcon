@@ -5,7 +5,7 @@ import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/el
 
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
-import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
+import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.js';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installResizeObserverHarness, ResizeObserverHarness } from './resize-observer-harness.js';
 import ResponsiveSurfaceActionsTestHost from './ResponsiveSurfaceActionsTestHost.svelte';
 import ResponsiveSurfaceActions from '../ResponsiveSurfaceActions.svelte';
@@ -48,6 +48,26 @@ describe('ResponsiveSurfaceActions', () => {
 			expect(button.classList).toContain(showLabel ? 'px-2' : 'px-0');
 		},
 	);
+
+	it('observes new measurement controls but does not remeasure state-only changes', async () => {
+		const save = { id: 'save', label: 'Save', icon: Save, onclick: () => {} };
+		const view = render(ResponsiveSurfaceActions, { menuLabel: 'File actions', actions: [save] });
+		const measure = view.container.querySelector<HTMLElement>(
+			'[data-surface-action-measure="save"]',
+		);
+		if (!measure) throw new Error('Expected save measurement control');
+		const read = vi.spyOn(measure, 'getBoundingClientRect');
+		await Promise.resolve();
+		read.mockClear();
+		await view.rerender({ actions: [{ ...save, busy: true, disabled: true, title: 'Saving' }] });
+		expect(read).not.toHaveBeenCalled();
+		await view.rerender({ actions: [save, { ...save, id: 'other' }] });
+		const added = view.container.querySelector('[data-surface-action-measure="other"]');
+		if (!added) throw new Error('Expected new measurement control');
+		expect(ResizeObserverHarness.instances.some((observer) => observer.observed.has(added))).toBe(
+			true,
+		);
+	});
 
 	it('keeps one persistent menu and moves lower-priority actions into it', async () => {
 		const { container } = render(ResponsiveSurfaceActionsTestHost);

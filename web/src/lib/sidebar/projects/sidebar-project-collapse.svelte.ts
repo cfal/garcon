@@ -70,10 +70,17 @@ function isCurrentGroupKey(
 }
 
 export class SidebarProjectCollapseStore {
-	collapsedProjectKeys = $state<Set<string>>(new Set());
-	expandedDelegationKeys = $state<Set<string>>(new Set());
+	collapsedProjectKeys = $state.raw<Set<string>>(new Set());
+	expandedDelegationKeys = $state.raw<Set<string>>(new Set());
+	#lastPrune:
+		| {
+				keys: ReadonlySet<string>;
+				chats: ReadonlyMap<string, Pick<ChatSessionRecord, 'projectPath' | 'executorId'>>;
+		  }
+		| undefined;
 	#storageListener = (event: StorageEvent) => {
-		if (event.key === storageKey) this.#restore();
+		if (event.key !== null && event.key !== storageKey) return;
+		if (event.storageArea === window.localStorage) this.#restore();
 	};
 
 	constructor() {
@@ -122,6 +129,16 @@ export class SidebarProjectCollapseStore {
 	}
 
 	pruneGroupChoices(chats: readonly ChatSessionRecord[]): void {
+		const previous = this.#lastPrune;
+		if (
+			previous?.keys === this.collapsedProjectKeys &&
+			previous.chats.size === chats.length &&
+			chats.every((chat) => {
+				const old = previous.chats.get(chat.id);
+				return old && old.projectPath === chat.projectPath && old.executorId === chat.executorId;
+			})
+		)
+			return;
 		const keys = [...this.collapsedProjectKeys];
 		if (keys.every((key) => key.startsWith(DELEGATION_KEY_PREFIX))) return;
 		const chatIds = new Set(chats.map((chat) => chat.id));
@@ -139,6 +156,12 @@ export class SidebarProjectCollapseStore {
 				key.startsWith(DELEGATION_KEY_PREFIX) || isCurrentGroupKey(key, chatIds, entriesByField),
 		);
 		this.#replaceChoices(new Set(retained), this.expandedDelegationKeys);
+		this.#lastPrune = {
+			keys: this.collapsedProjectKeys,
+			chats: new Map(
+				chats.map(({ id, projectPath, executorId }) => [id, { projectPath, executorId }]),
+			),
+		};
 	}
 
 	snapshot(): SidebarProjectCollapseSnapshot {

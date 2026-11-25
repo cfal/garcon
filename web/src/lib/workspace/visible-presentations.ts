@@ -23,7 +23,7 @@ export interface VisibleChatPresentation {
 	readonly windowId: WorkspaceWindowId | null;
 }
 
-export interface VisiblePresentationOptions {
+interface VisiblePresentationOptions {
 	readonly includeDialog?: boolean;
 }
 
@@ -117,8 +117,9 @@ export function fullscreenHiddenChatPresentations(
 	mode: 'desktop' | 'mobile',
 ): VisibleChatPresentation[] {
 	if (mode !== 'desktop' || !snapshot.fullscreenWindowId) return [];
-	return visibleChatPresentations({ ...snapshot, fullscreenWindowId: null }, mode)
-		.filter(item => item.windowId !== snapshot.fullscreenWindowId);
+	return visibleChatPresentations({ ...snapshot, fullscreenWindowId: null }, mode).filter(
+		(item) => item.windowId !== snapshot.fullscreenWindowId,
+	);
 }
 
 function visibleDesktopPresentationKeys(

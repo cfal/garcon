@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SidebarController, type SidebarControllerDeps } from '../sidebar-controller.svelte';
+import { SidebarController, type SidebarControllerDeps } from '../sidebar-controller';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 vi.mock('$lib/api/chats.js', () => ({

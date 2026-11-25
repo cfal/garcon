@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { ArchiveUndoController } from '$lib/chat/actions/archive-undo-controller.js';
-	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack, type ComponentProps } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { appPathname } from '$lib/deployment/paths';
 	import { page } from '$app/state';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import Sidebar from '../sidebar/Sidebar.svelte';
@@ -34,21 +33,17 @@
 		getChatSessions,
 		getAppShell,
 		getWs,
-		getExecutors,
 		getLocalSettings,
-		getRemoteSettings,
 		getNotifications,
 		getSidebarSearch,
 		getWorkspaceCoordinator,
-		getSingletonSurfaces,
 		setChatDrafts,
 		setNewChatPromptDrafts,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { WsConnectionNotificationPresenter } from '$lib/ws/connection-notifications';
-	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
-	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
-	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
+	import { resolveAdjacentChatId } from './app-shell-chat-navigation';
+	import { bindAppShellRoute } from './app-shell-route-sync.svelte.js';
 	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
 	import CombinationRefreshDialog from '../settings/CombinationRefreshDialog.svelte';
@@ -56,16 +51,7 @@
 	import { bindMobileViewport } from './mobile-viewport-binding';
 	import { ChatActionController } from '$lib/components/chat/chat-action-controller.svelte';
 	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
-	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
-	import HandoffForkDialog from '$lib/components/chat/HandoffForkDialog.svelte';
-	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
-	import ChatParentDialog from '$lib/components/chat/ChatParentDialog.svelte';
-	import {
-		executorPinnedProjectPaths,
-		togglePinnedProjectPathOptimistically,
-	} from '$lib/project-paths/pinned-project-path-settings.js';
-	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
-	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
+	import AppShellChatDialogs from './AppShellChatDialogs.svelte';
 	import SidebarSearchDialogs from '$lib/components/sidebar/search/SidebarSearchDialogs.svelte';
 	import type {
 		SearchResultNavigationPort,
@@ -87,13 +73,8 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const ws = getWs();
-	const executors = getExecutors();
 	const localSettings = getLocalSettings();
-	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
-	const singletonSurfaces = getSingletonSurfaces();
-	const routeTicketId = $derived(selectedTicketFromUrl(page.url));
-	let handledTicketLink: string | null = null;
 	const sidebarSearch = getSidebarSearch();
 	const workspace = getWorkspaceCoordinator();
 	const hoverCapability = new MediaQuery(HOVER_CAPABLE_MEDIA_QUERY);
@@ -157,7 +138,9 @@
 		viewportWidth === undefined ? undefined : viewportWidth <= 768,
 	);
 	let mobileKeyboardVisible = $state(false);
-	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
+	let reloadSelectedChatFn: ((chatId: string) => Promise<void>) | null = null;
+	let sidebarPreviewWidth = $state<number | null>(null);
+	const sidebarWidth = $derived(sidebarPreviewWidth ?? localSettings.sidebarWidth);
 	let searchResultNavigation: SearchResultNavigationPort | null = null;
 	let searchSelectionVersion = 0;
 	const workspaceFullscreen = $derived(
@@ -212,7 +195,7 @@
 	);
 	let notificationDesktopInlineStartPx = $derived(
 		!isMobile && !hideChatList && !chatListAutohideActive && localSettings.chatListDock === 'left'
-			? localSettings.sidebarWidth + 16
+			? sidebarWidth + 16
 			: 16,
 	);
 	const sidebarMounted = $derived(!isMobile || appShell.sidebarOpen);
@@ -247,78 +230,7 @@
 		},
 	});
 
-	$effect(() => {
-		const id = routeTicketId;
-		if (!id) {
-			handledTicketLink = null;
-			return;
-		}
-		if (id === handledTicketLink) return;
-		handledTicketLink = id;
-		let canceled = false;
-		untrack(() => {
-			void workspace
-				.openSingletonAsTab('tickets', workspace.currentWindowId)
-				.then(() => {
-					if (!canceled) singletonSurfaces.tickets().select(id);
-				})
-				.catch((error) =>
-					notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
-				);
-		});
-		return () => {
-			canceled = true;
-		};
-	});
-
-	$effect(() => {
-		if (routeTicketId) return;
-		const chatId = page.params.id as string | undefined;
-		const selectedChatId = selectedChatIdFromRoute(appPathname(page.url.pathname), chatId);
-		if (selectedChatId === undefined) return;
-		untrack(() => chatNavigation.handleRouteChat(selectedChatId));
-	});
-
-	$effect(() => {
-		if (routeTicketId) return;
-		const lastSelectedChatId = sessions.lastSelectedChatId;
-		const target = restoreChatIdForBareRoute({
-			pathname: appPathname(page.url.pathname),
-			routeChatId: page.params.id as string | undefined,
-			isLoadingChats: sessions.isLoadingChats,
-			lastSelectedChatId,
-			lastSelectedChatExists: lastSelectedChatId ? sessions.hasChat(lastSelectedChatId) : false,
-			selectedChatId: sessions.selectedChatId,
-		});
-		if (!target) return;
-		untrack(() => void chatNavigation.showChatInCurrentWindow(target, { navigate: true }));
-	});
-
-	$effect(() => {
-		const currentWindowId = workspace.currentWindowId;
-		const chatId = workspace.focusedChatId;
-		if (
-			!chatId ||
-			!shouldSynchronizeFocusedChat({
-				focusedWindowId: currentWindowId,
-				focusedChatId: chatId,
-				focusedChatExists: sessions.hasChat(chatId),
-				selectedChatId: sessions.selectedChatId,
-				pendingChatTarget: chatNavigation.pendingChatTarget,
-				pendingWindowId: chatNavigation.pendingWindowId,
-			})
-		) {
-			return;
-		}
-		untrack(() => void chatNavigation.synchronizeFocusedChat(chatId));
-	});
-
-	$effect(() => {
-		const selected = sessions.selectedChat;
-		if (!selected || selected.status === 'draft') return;
-		const chatId = selected.id;
-		untrack(() => sessions.rememberSelectedChat(chatId));
-	});
+	bindAppShellRoute(chatNavigation);
 
 	$effect(() => {
 		const matches = mobileBreakpointMatches;
@@ -355,6 +267,7 @@
 	});
 
 	$effect(() => {
+		if (!isMobile) return;
 		const unbindViewport = bindMobileViewport((metrics) => {
 			mobileKeyboardVisible = metrics.keyboardVisible;
 			appShell.keyboardHeight = metrics.keyboardHeight;
@@ -362,6 +275,7 @@
 		if (!unbindViewport) return;
 		return () => {
 			unbindViewport();
+			mobileKeyboardVisible = false;
 			appShell.keyboardHeight = 0;
 		};
 	});
@@ -550,22 +464,14 @@
 		chatActionDialogs.requestTags(chat, m.sidebar_chats_new_chat());
 	}
 
-	async function confirmChatTags(
-		chatId: string,
-		baseTags: readonly string[],
-		tags: string[],
-	): Promise<void> {
-		await chatActionController.updateTags(chatId, baseTags, tags);
-		chatActionDialogs.closeTagDialog();
-	}
-
 	const workspaceChatActions = {
 		requestDelete: requestDeleteChat,
 		requestRename: requestRenameChat,
 		requestDetails: requestDetailsChat,
 		requestShare: requestShareChat,
 		requestProjectPath: requestProjectPathChat,
-		requestParent: (chat: ChatSessionRecord) => chatActionDialogs.requestParent(chat, m.sidebar_chats_new_chat()),
+		requestParent: (chat: ChatSessionRecord) =>
+			chatActionDialogs.requestParent(chat, m.sidebar_chats_new_chat()),
 		configurePreambles(chat: ChatSessionRecord, transcriptViewId: string): void {
 			appShell.openChatPreambleSelection(chat.id, transcriptViewId);
 		},
@@ -636,9 +542,7 @@
 		if (chatListAutohide.revealed) desktopChatListPanelElement?.focus();
 	}
 
-	function collapseAutohiddenChatListOnWorkspaceInteraction(node: HTMLElement): {
-		destroy(): void;
-	} {
+	function collapseAutohiddenChatListOnWorkspaceInteraction(node: HTMLElement): () => void {
 		function handlePointerEnter(): void {
 			chatListAutohide.collapseUnlessEngaged(desktopChatListPanelElement);
 		}
@@ -649,13 +553,36 @@
 
 		node.addEventListener('pointerenter', handlePointerEnter);
 		node.addEventListener('pointerdown', handlePointerDown);
-		return {
-			destroy() {
-				node.removeEventListener('pointerenter', handlePointerEnter);
-				node.removeEventListener('pointerdown', handlePointerDown);
-			},
+		return () => {
+			node.removeEventListener('pointerenter', handlePointerEnter);
+			node.removeEventListener('pointerdown', handlePointerDown);
 		};
 	}
+
+	const sidebarActions = {
+		onNewChat: handleNewChat,
+		onNewProjectChat: (project) => openNewChatDialog({ project }),
+		onLocallyDeleteChat: locallyDeleteChat,
+		onQuietRefresh: quietRefresh,
+		onRequestDeleteChat: requestDeleteChat,
+		onRequestRenameChat: requestRenameChat,
+		onTogglePinned: (id) => chatActionController.togglePinned(id),
+		onToggleArchive: (id) => chatActionController.toggleArchive(id),
+		isArchiveMutationPending: (id) => sessions.isArchiveMutationPending(id),
+		startArchivingChats: (chatIds) => archiveUndo.startArchivingChats(chatIds),
+		startUnarchivingChats: (chatIds) => archiveUndo.startUnarchivingChats(chatIds),
+		onShowDetails: requestDetailsChat,
+		onForkChat: (id) => chatActionController.forkChat(id),
+		onShareChat: requestShareChat,
+		onManageTags: requestTagsChat,
+		onTileWorkingChats: (chatIds) => workspace.tileChats(chatIds),
+		onChatListAutohideChange: handleChatListAutohideChange,
+		onShowScheduledPrompts: () => appShell.openScheduledPrompts(),
+		onShowPreambles: () => appShell.openPreambles(),
+		onShowSnippets: () => appShell.openSnippets(),
+		onShowUsage: () => void handleShowUsage(),
+		onShowSettings: () => appShell.openSettings(),
+	} satisfies Partial<ComponentProps<typeof Sidebar>>;
 </script>
 
 {#snippet sidebarContent(isMobile: boolean, onChatSelect: (chatId: string) => void)}
@@ -673,30 +600,9 @@
 		rosterReady={sessions.chatListStatus === 'ready'}
 		{isMobile}
 		{onChatSelect}
-		onNewChat={handleNewChat}
-		onNewProjectChat={(project) => openNewChatDialog({ project })}
-		onLocallyDeleteChat={locallyDeleteChat}
-		onQuietRefresh={quietRefresh}
-		onRequestDeleteChat={requestDeleteChat}
-		onRequestRenameChat={requestRenameChat}
-		onTogglePinned={(id) => chatActionController.togglePinned(id)}
-		onToggleArchive={(id) => chatActionController.toggleArchive(id)}
-		isArchiveMutationPending={(id) => sessions.isArchiveMutationPending(id)}
-		startArchivingChats={(chatIds) => archiveUndo.startArchivingChats(chatIds)}
-		startUnarchivingChats={(chatIds) => archiveUndo.startUnarchivingChats(chatIds)}
-		onShowDetails={requestDetailsChat}
-		onForkChat={(id) => chatActionController.forkChat(id)}
-		onShareChat={requestShareChat}
-		onManageTags={requestTagsChat}
+		{...sidebarActions}
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
-		onTileWorkingChats={(chatIds) => workspace.tileChats(chatIds)}
 		chatListAutohideAvailable={hoverCapability.current}
-		onChatListAutohideChange={handleChatListAutohideChange}
-		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
-		onShowPreambles={() => appShell.openPreambles()}
-		onShowSnippets={() => appShell.openSnippets()}
-		onShowUsage={() => void handleShowUsage()}
-		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>
 {/snippet}
@@ -722,9 +628,7 @@
 		class:order-first={dock === 'left'}
 		class:order-last={dock === 'right'}
 		class:pointer-events-none={hideChatList}
-		style:width={hideChatList || chatListAutohide.active
-			? '0px'
-			: `${localSettings.sidebarWidth}px`}
+		style:width={hideChatList || chatListAutohide.active ? '0px' : `${sidebarWidth}px`}
 		aria-hidden={hideChatList}
 		inert={hideChatList}
 	>
@@ -759,7 +663,7 @@
 			class:end-0={chatListAutohide.active && dock === 'right'}
 			class:border-s={dividerEdge === 'start' && !hideChatList}
 			class:border-e={dividerEdge === 'end' && !hideChatList}
-			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
+			style:width={chatListAutohide.active ? `${sidebarWidth}px` : undefined}
 			tabindex="-1"
 			aria-hidden={desktopChatListHidden}
 			inert={desktopChatListHidden}
@@ -768,8 +672,9 @@
 			{#if !hideChatList}
 				<ResizeHandle
 					edge={dividerEdge}
-					width={localSettings.sidebarWidth}
-					onResize={(width) => localSettings.set('sidebarWidth', width)}
+					width={sidebarWidth}
+					onPreview={(width) => (sidebarPreviewWidth = width)}
+					onCommit={(width) => localSettings.set('sidebarWidth', width)}
 				/>
 			{/if}
 		</div>
@@ -817,7 +722,7 @@
 		<div
 			data-workspace-content
 			class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-			use:collapseAutohiddenChatListOnWorkspaceInteraction
+			{@attach collapseAutohiddenChatListOnWorkspaceInteraction}
 		>
 			<div class="min-h-0 flex-1 overflow-hidden">
 				<WorkspaceRoot
@@ -840,72 +745,7 @@
 
 <SidebarSearchDialogs chats={sessions.orderedChats} onSelectResult={handleSearchResultSelect} />
 
-<ChatActionDialogs
-	chatDeleteConfirmation={chatActionDialogs.chatDeleteConfirmation}
-	onCancelDelete={() => chatActionDialogs.clearDeleteConfirmation()}
-	onConfirmDelete={() => {
-		void chatActionController.confirmDelete(chatActionDialogs);
-	}}
-	chatRenameConfirmation={chatActionDialogs.chatRenameConfirmation}
-	onCancelRename={() => chatActionDialogs.clearRename()}
-	onConfirmRename={(newName) => {
-		void chatActionController.confirmRename(chatActionDialogs, newName);
-	}}
-	chatDetailsDialog={chatActionDialogs.chatDetailsDialog}
-	onCloseDetails={() => chatActionDialogs.closeDetails()}
-/>
-
-<HandoffForkDialog
-	open={chatActionController.handoffForkConfirmation.isOpen}
-	onCancel={() => chatActionController.handoffForkConfirmation.cancel()}
-	onConfirm={() => chatActionController.handoffForkConfirmation.confirm()}
-/>
-
-<ChatProjectPathDialog
-	projectPathDialog={chatActionDialogs.chatProjectPathDialog}
-	projectBasePath={appShell.projectBasePath}
-	pinnedProjectPaths={executorPinnedProjectPaths(
-		remoteSettings.snapshot,
-		chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
-	)}
-	onTogglePinnedProjectPath={async (path) => {
-		await togglePinnedProjectPathOptimistically(remoteSettings, path, {
-			executorId: chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
-		});
-	}}
-	{isMobile}
-	onClose={() => chatActionDialogs.closeProjectPathDialog()}
-	onConfirm={(target, projectPath) => chatActionController.updateProjectPath(target, projectPath)}
-/>
-
-<ChatParentDialog
-	parentDialog={chatActionDialogs.parentDialog}
-	chats={sessions.orderedChats}
-	isConnected={ws.isConnected}
-	executorLabel={(id) => executors.label(id)}
-	onRefresh={quietRefresh}
-	onClose={() => chatActionDialogs.closeParentDialog()}
-	onConfirm={(chatId, parentChatId) => chatActionController.setParent(chatId, parentChatId)}
-/>
-
-<SidebarTagDialog
-	tagDialog={chatActionDialogs.tagDialog}
-	allKnownTags={sidebarSearch.allKnownTags}
-	currentTags={chatActionDialogs.tagDialog
-		? sessions.byId[chatActionDialogs.tagDialog.chatId]?.tags
-		: undefined}
-	reconciliationKind={chatActionDialogs.tagDialog
-		? sessions.tagReconciliationKind(chatActionDialogs.tagDialog.chatId)
-		: null}
-	onClose={() => chatActionDialogs.closeTagDialog()}
-	onSave={confirmChatTags}
-	onRetryReconciliation={(chatId) => sessions.retryTagReconciliation(chatId)}
-/>
-
-<ShareChatDialog
-	chatId={chatActionDialogs.shareChatDialog?.chatId ?? null}
-	onClose={() => chatActionDialogs.closeShareDialog()}
-/>
+<AppShellChatDialogs {chatActionDialogs} {chatActionController} {isMobile} />
 
 <NewChatDialog />
 <FileDirtyUnloadGuard />

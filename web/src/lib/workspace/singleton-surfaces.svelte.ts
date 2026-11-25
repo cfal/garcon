@@ -1,9 +1,13 @@
 import {
 	PORTABLE_SINGLETON_KINDS,
+	isProjectSingletonKind,
 	type PortableSingletonKind,
 } from '$lib/workspace/surface-types.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
-import { FilesSurfaceController, type FilesExecutorsPort } from '$lib/files/surface/files-surface-controller.svelte.js';
+import {
+	FilesSurfaceController,
+	type FilesExecutorsPort,
+} from '$lib/files/surface/files-surface-controller.svelte.js';
 import type { GitSurfaceControllerDeps } from '$lib/git/surface/git-surface-controller-deps.js';
 import { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
 import { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
@@ -20,7 +24,6 @@ import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.
 import { UsageController } from '$lib/usage/usage-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
-
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
 	createPullRequests(): PullRequestsStore;
@@ -30,6 +33,17 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	executors?: FilesExecutorsPort;
 }
 
+class WorkspaceGitHistory extends GitHistorySurfaceController {
+	pruneExecutors(executorIds: ReadonlySet<string>): void {
+		this.target.pruneExecutors(executorIds);
+	}
+}
+
+class WorkspaceGitCompare extends GitCompareSurfaceController {
+	pruneExecutors(executorIds: ReadonlySet<string>): void {
+		this.target.pruneExecutors(executorIds);
+	}
+}
 
 export interface SingletonControllerByKind {
 	git: GitWorkbenchSurfaceController;
@@ -59,19 +73,7 @@ export class SingletonSurfaceRegistry {
 	readonly #factories: SingletonControllerFactories;
 	#projectState: WorkspaceProjectState = { kind: 'absent' };
 	#filesProjectState: WorkspaceProjectState = { kind: 'absent' };
-	#visible: Record<PortableSingletonKind, boolean> = {
-		git: false,
-		'git-history': false,
-		'git-compare': false,
-		'pull-requests': false,
-		files: false,
-		commit: false,
-		'chat-map': false,
-		'chat-canvas': false,
-		'chat-board': false,
-		tickets: false,
-		usage: false,
-	};
+	#visible: Partial<Record<PortableSingletonKind, boolean>> = {};
 	#hasVisibleProjectSurface = $state(false);
 	readonly #canvasExitGuard = new CanvasExitGuard(
 		browserCanvasRecovery,
@@ -83,8 +85,8 @@ export class SingletonSurfaceRegistry {
 		this.#factories = {
 			tickets: () => this.deps.createTickets(),
 			git: () => new GitWorkbenchSurfaceController(this.deps),
-			'git-history': () => new GitHistorySurfaceController(this.deps),
-			'git-compare': () => new GitCompareSurfaceController(this.deps),
+			'git-history': () => new WorkspaceGitHistory(this.deps),
+			'git-compare': () => new WorkspaceGitCompare(this.deps),
 			files: () => new FilesSurfaceController(this.deps.executors),
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
@@ -168,16 +170,7 @@ export class SingletonSurfaceRegistry {
 
 	pruneGitExecutors(executorIds: ReadonlySet<string>): void {
 		for (const { controller } of this.#controllers.values()) {
-			if (
-				controller instanceof GitWorkbenchSurfaceController ||
-				controller instanceof CommitController
-			)
-				controller.pruneExecutors(executorIds);
-			else if (
-				controller instanceof GitHistorySurfaceController ||
-				controller instanceof GitCompareSurfaceController
-			)
-				controller.target.pruneExecutors(executorIds);
+			controller.pruneExecutors?.(executorIds);
 		}
 	}
 
@@ -217,14 +210,7 @@ export class SingletonSurfaceRegistry {
 
 	#updateVisibleProjectSurface(): void {
 		this.#hasVisibleProjectSurface = PORTABLE_SINGLETON_KINDS.some(
-			(candidate) =>
-				candidate !== 'chat-map' &&
-				candidate !== 'chat-canvas' &&
-				candidate !== 'chat-board' &&
-				candidate !== 'tickets' &&
-				candidate !== 'pull-requests' &&
-				candidate !== 'usage' &&
-				this.#visible[candidate],
+			(kind) => this.#visible[kind] && isProjectSingletonKind(kind),
 		);
 	}
 
@@ -241,7 +227,7 @@ export class SingletonSurfaceRegistry {
 		const destroyRoot = $effect.root(() => {
 			controller = this.#factories[kind]();
 			controller.setProjectState(kind === 'files' ? this.#filesProjectState : this.#projectState);
-			controller.setPresentationVisible(this.#visible[kind]);
+			controller.setPresentationVisible(this.#visible[kind] ?? false);
 		});
 		this.#controllers.set(kind, { controller, destroyRoot });
 		return controller;

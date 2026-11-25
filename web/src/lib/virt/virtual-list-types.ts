@@ -30,6 +30,25 @@ export interface VirtualListSnapshot {
 	readonly sizerSize: number;
 	readonly positions: VirtualPositionView;
 }
+
+export function indexesInRange(range: VirtualRange | null): number[] {
+	return range
+		? Array.from(
+				{ length: range.endIndex - range.startIndex + 1 },
+				(_, offset) => range.startIndex + offset,
+			)
+		: [];
+}
+
+export function currentAnchor(
+	positions: VirtualPositionView,
+	position: VirtualViewportPosition | null,
+) {
+	const item = position && positions.itemAtOffset(position.paintedOffset);
+	return position && item
+		? { key: item.key, offset: position.paintedOffset - item.start, size: item.size }
+		: null;
+}
 export function virtualItems(
 	snapshot: VirtualListSnapshot,
 	indexes: readonly number[],

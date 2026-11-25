@@ -63,23 +63,35 @@ export class WorkspaceDomainBindings {
 			});
 
 			$effect(() => {
-				const projectState = deps.workspaceContext.projectState;
-				deps.gitQuickSummary.setEnabled(composerStatusBarNeedsGit(deps.localSettings));
+				const enabled = composerStatusBarNeedsGit(deps.localSettings);
+				untrack(() => deps.gitQuickSummary.setEnabled(enabled));
+			});
+
+			const projectState = $derived(deps.workspaceContext.projectState);
+			const currentProject = $derived(
+				projectState.kind === 'available' ? projectState.project : null,
+			);
+			const projectPath = $derived(currentProject?.projectPath ?? null);
+			const executorId = $derived(effectiveExecutorId(currentProject?.executorId));
+			const project = $derived(projectPath ? { executorId, projectPath } : null);
+
+			$effect(() => {
+				if (projectState.kind === 'resolving') return;
+				const nextProject = project;
+				untrack(() => deps.gitQuickSummary.setProject(nextProject));
+			});
+
+			const branch = $derived(deps.gitQuickSummary.summaryFor(project)?.branch);
+			$effect(() => {
 				if (projectState.kind === 'resolving') {
 					untrack(() => deps.gitBranchActions.closeNewBranchDialog());
 					return;
 				}
-				const currentProject = projectState.kind === 'available' ? projectState.project : null;
-				const projectPath = currentProject?.projectPath ?? null;
-				const executorId = effectiveExecutorId(currentProject?.executorId);
-				const project = projectPath ? { executorId, projectPath } : null;
-				deps.gitQuickSummary.setProject(project);
-				deps.gitBranchActions.setProject(
-					projectPath,
-					deps.gitQuickSummary.summaryFor(project)?.branch,
-					currentProject?.effectiveProjectKey ?? null,
-					executorId,
-				);
+				const path = projectPath;
+				const currentBranch = branch;
+				const key = currentProject?.effectiveProjectKey ?? null;
+				const id = executorId;
+				untrack(() => deps.gitBranchActions.setProject(path, currentBranch, key, id));
 			});
 
 			$effect(() => {

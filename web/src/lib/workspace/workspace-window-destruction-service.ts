@@ -1,6 +1,10 @@
 import type { WorkspaceFiles, WorkspaceSingletons } from './workspace-resource-ports.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
-import * as m from '$lib/paraglide/messages.js';
+import {
+	disposeClosedSurface,
+	prepareSurfaceClose,
+	type SurfaceCloseGuardRequest,
+} from './workspace-surface-lifecycle.js';
 import type {
 	SurfaceDescriptor,
 	WorkspaceLayoutReader,
@@ -17,13 +21,6 @@ interface ReservationSet<T> {
 	delete(value: T): unknown;
 }
 
-interface CloseGuardRequest {
-	surfaceId: string;
-	title: string;
-	description: string;
-	confirmLabel: string;
-}
-
 interface WorkspaceWindowDestructionServiceDeps {
 	layout: WorkspaceLayoutReader;
 	files: WorkspaceFiles;
@@ -35,7 +32,7 @@ interface WorkspaceWindowDestructionServiceDeps {
 		surfaceIds: readonly string[],
 		plan: WorkspaceMutationPlan,
 	): Promise<boolean>;
-	confirmClose(request: CloseGuardRequest): Promise<boolean>;
+	confirmClose(request: SurfaceCloseGuardRequest): Promise<boolean>;
 	clearAttachmentError(surfaceId: string): void;
 	afterTerminalReleased(terminalId: string): Promise<void>;
 	onTerminalLauncherDismissed?(): void;
@@ -112,22 +109,10 @@ export class WorkspaceWindowDestructionService {
 		let removedDescriptors = descriptorsForSurfaces(initial, affectedSurfaceIds);
 		let releasedTerminalIds: string[] = [];
 		let removalPlanned = false;
-		let releaseCanvasClose: (() => void) | null = null;
-		let releaseFileCloses: (() => void) | null = null;
+		let releaseClose: (() => void) | null = null;
 		try {
-			if (
-				removedDescriptors.some(
-					(surface) => surface.type === 'singleton' && surface.kind === 'chat-canvas',
-				)
-			) {
-				const canvas = this.deps.singletons.chatCanvasIfPresent();
-				if (canvas) {
-					releaseCanvasClose = await canvas.prepareClose();
-					if (!releaseCanvasClose) return false;
-				}
-			}
-			releaseFileCloses = await this.#prepareDestruction(removedDescriptors);
-			if (!releaseFileCloses) return false;
+			releaseClose = await prepareSurfaceClose(this.deps, removedDescriptors);
+			if (!releaseClose) return false;
 			const plan: WorkspaceMutationPlan = (latest) => {
 				removalPlanned = false;
 				const latestWindows = collectWindowNodes(latest.desktopRoot);
@@ -152,7 +137,10 @@ export class WorkspaceWindowDestructionService {
 			releasedTerminalIds = removedDescriptors.flatMap((surface) =>
 				surface.type === 'terminal' ? [surface.terminalId] : [],
 			);
-			await this.#disposeRemovedDescriptors(removedDescriptors);
+			for (const surface of removedDescriptors) {
+				const disposal = disposeClosedSurface(this.deps, surface);
+				if (disposal) await disposal;
+			}
 			if (current) {
 				const snapshot = this.deps.layout.snapshot;
 				const focusWindow = focusWindowId
@@ -162,8 +150,7 @@ export class WorkspaceWindowDestructionService {
 			}
 			return true;
 		} finally {
-			releaseCanvasClose?.();
-			releaseFileCloses?.();
+			releaseClose?.();
 			for (const windowId of reservedWindowIds) this.deps.windowReservations.delete(windowId);
 			for (const surfaceId of affectedSurfaceIds) this.deps.surfaceReservations.delete(surfaceId);
 			for (const terminalId of releasedTerminalIds) {
@@ -197,77 +184,6 @@ export class WorkspaceWindowDestructionService {
 		if (surface.type === 'singleton' && surface.kind === 'tickets')
 			return this.deps.singletons.ticketsIfPresent()?.drafts.pending ?? false;
 		return false;
-	}
-
-	async #prepareDestruction(
-		descriptors: readonly SurfaceDescriptor[],
-	): Promise<(() => void) | null> {
-		const ticketSurface = descriptors.find(
-			(surface) => surface.type === 'singleton' && surface.kind === 'tickets',
-		);
-		if (ticketSurface) {
-			const tickets = this.deps.singletons.ticketsIfPresent();
-			if (tickets?.drafts.pending) return null;
-			tickets?.drafts.flush();
-			if (
-				tickets?.drafts.needsExitGuard &&
-				!(await this.deps.confirmClose({
-					surfaceId: ticketSurface.id,
-					title: m.tickets_close_surface_title(),
-					description: m.tickets_close_surface_description(),
-					confirmLabel: m.tickets_close_surface(),
-				}))
-			)
-				return null;
-		}
-		const commit = descriptors.find(
-			(surface): surface is Extract<SurfaceDescriptor, { type: 'singleton'; kind: 'commit' }> =>
-				surface.type === 'singleton' && surface.kind === 'commit',
-		);
-		if (commit) {
-			const controller = this.deps.singletons.commitIfPresent();
-			if (controller && !controller.canClose) return null;
-			const draftCount = controller?.retainedDraftCount ?? 0;
-			if (
-				draftCount > 0 &&
-				!(await this.deps.confirmClose({
-					surfaceId: commit.id,
-					title: m.commit_surface_close_title(),
-					description:
-						draftCount === 1
-							? m.commit_surface_close_drafts_singular()
-							: m.commit_surface_close_drafts_plural({ count: draftCount }),
-					confirmLabel: m.commit_surface_discard_close(),
-				}))
-			) {
-				return null;
-			}
-		}
-		const fileSessionIds = descriptors.flatMap((surface) =>
-			surface.type === 'file' ? [surface.fileSessionId] : [],
-		);
-		return this.deps.files.prepareDestructiveViews(fileSessionIds, 'close');
-	}
-
-	async #disposeRemovedDescriptors(descriptors: readonly SurfaceDescriptor[]): Promise<void> {
-		for (const surface of descriptors) {
-			this.deps.clearAttachmentError(surface.id);
-			if (surface.type === 'file') {
-				await this.deps.files.destroy(surface.fileSessionId);
-				continue;
-			}
-			if (surface.type === 'terminal') continue;
-			if (surface.type === 'terminal-launcher') {
-				this.deps.onTerminalLauncherDismissed?.();
-				continue;
-			}
-			if (surface.type === 'singleton') {
-				if (surface.kind === 'commit') {
-					this.deps.singletons.commitIfPresent()?.discardDrafts();
-				}
-				this.deps.singletons.disposeSurface(surface.kind);
-			}
-		}
 	}
 }
 

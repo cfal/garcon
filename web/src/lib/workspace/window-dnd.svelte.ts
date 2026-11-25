@@ -68,8 +68,9 @@ export function resolveWorkspaceWindowCenterDropResult(
 }
 
 export class WorkspaceWindowDndController {
-	payload = $state<WorkspaceDragPayload | null>(null);
-	activeTarget = $state<WorkspaceWindowDropTarget | null>(null);
+	payload = $state.raw<WorkspaceDragPayload | null>(null);
+	activeTarget = $state.raw<WorkspaceWindowDropTarget | null>(null);
+	#tabDirections = new WeakMap<HTMLElement, boolean>();
 	#chatDropTargets = $state.raw<
 		ReadonlyMap<
 			string,
@@ -127,6 +128,7 @@ export class WorkspaceWindowDndController {
 		sourceIndex: number,
 		event: DragEvent,
 	): void {
+		this.#tabDirections = new WeakMap();
 		this.payload = { kind: 'surface-tab', surfaceId, sourceWindowId, sourceIndex };
 		this.activeTarget = null;
 		if (!event.dataTransfer) return;
@@ -165,7 +167,7 @@ export class WorkspaceWindowDndController {
 		if (event.dataTransfer) {
 			event.dataTransfer.dropEffect = target && !target.blockedReason ? 'move' : 'none';
 		}
-		this.activeTarget = target;
+		this.#setActiveTarget(target);
 	}
 
 	handleWindowDragLeave(event: DragEvent): void {
@@ -223,7 +225,7 @@ export class WorkspaceWindowDndController {
 		event.preventDefault();
 		event.stopPropagation();
 		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-		this.activeTarget = target;
+		this.#setActiveTarget(target);
 	}
 
 	handleTabListDragOver(windowId: WorkspaceWindowId, event: DragEvent): void {
@@ -233,7 +235,7 @@ export class WorkspaceWindowDndController {
 		event.preventDefault();
 		event.stopPropagation();
 		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-		this.activeTarget = target;
+		this.#setActiveTarget(target);
 	}
 
 	handleTabDrop(
@@ -265,6 +267,29 @@ export class WorkspaceWindowDndController {
 		const blockedReason = this.#blockedReason(windowId, zone);
 		if (blockedReason === null) return null;
 		return { kind: 'window', windowId, zone, blockedReason };
+	}
+
+	#setActiveTarget(target: WorkspaceWindowDropTarget | null): void {
+		const current = this.activeTarget;
+		if (current === target) return;
+		if (current && target && current.windowId === target.windowId) {
+			if (
+				current.kind === 'window' &&
+				target.kind === 'window' &&
+				current.zone === target.zone &&
+				current.blockedReason === target.blockedReason
+			)
+				return;
+			if (
+				current.kind === 'tab' &&
+				target.kind === 'tab' &&
+				current.index === target.index &&
+				current.referenceSurfaceId === target.referenceSurfaceId &&
+				current.position === target.position
+			)
+				return;
+		}
+		this.activeTarget = target;
 	}
 
 	#blockedReason(
@@ -313,9 +338,14 @@ export class WorkspaceWindowDndController {
 				position: 'before',
 			};
 		}
-		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		const element = event.currentTarget as HTMLElement;
+		const rect = element.getBoundingClientRect();
 		const pointerAfterMidpoint = event.clientX >= rect.left + rect.width / 2;
-		const rtl = getComputedStyle(event.currentTarget as HTMLElement).direction === 'rtl';
+		let rtl = this.#tabDirections.get(element);
+		if (rtl === undefined) {
+			rtl = getComputedStyle(element).direction === 'rtl';
+			this.#tabDirections.set(element, rtl);
+		}
 		const position = pointerAfterMidpoint !== rtl ? 'after' : 'before';
 		const order = workspaceWindow.tabs.order.filter((surfaceId) => surfaceId !== payload.surfaceId);
 		const referenceIndex = order.indexOf(referenceSurfaceId);

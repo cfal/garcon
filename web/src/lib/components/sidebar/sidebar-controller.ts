@@ -100,7 +100,6 @@ export class SidebarController {
 			case 'unarchive':
 				return availableChats.filter((chat) => chat.isArchived).map((chat) => chat.id);
 		}
-		return [];
 	}
 
 	private resolveArchiveSelection(

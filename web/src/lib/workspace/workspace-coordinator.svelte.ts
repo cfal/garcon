@@ -1,7 +1,11 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import type { ForkOpenPlacementPreference } from '$lib/stores/local-settings.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
-import type { WorkspaceFiles, WorkspaceSingletons, WorkspaceTerminals } from './workspace-resource-ports.js';
+import type {
+	WorkspaceFiles,
+	WorkspaceSingletons,
+	WorkspaceTerminals,
+} from './workspace-resource-ports.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import { resolveProjectPath, type ProjectResolver } from './workspace-project-path-resolution.js';
 import {
@@ -35,7 +39,6 @@ import type {
 	FilePlacementResult,
 } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
-import * as m from '$lib/paraglide/messages.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.js';
 import { FileDialogCoordinator } from './file-dialog-coordinator.js';
 import { TerminalPlacementService } from './terminal-placement-service.js';
@@ -44,6 +47,7 @@ import type { ChatSurfaceTransferPort } from './chat-surface-transfer.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 import { WorkspaceTabMovementService } from './workspace-tab-movement-service.js';
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
+import { disposeClosedSurface, prepareSurfaceClose } from './workspace-surface-lifecycle.js';
 import { WorkspaceChatPlacementService } from './workspace-chat-placement.js';
 import {
 	clampWorkspacePartitionRatio,
@@ -575,57 +579,21 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		const ownedFocus =
 			this.focusOwner.kind !== 'chat-list' && this.focusOwner.surfaceId === surfaceId;
 		this.#reservedSurfaceIds.add(surfaceId);
-		let releaseCanvasClose: (() => void) | null = null;
-		let releaseFileClose: (() => void) | null = null;
+		const lifecycle = {
+			files: this.#deps.files,
+			singletons: this.#deps.singletons,
+			confirmClose: (request: NonNullable<WorkspaceCoordinator['closeGuardRequest']>) =>
+				this.#confirmClose(request),
+			clearAttachmentError: (id: string) => this.#presentation.clearAttachmentError(id),
+			onTerminalLauncherDismissed: this.#deps.onTerminalLauncherDismissed,
+		};
+		let releaseClose: (() => void) | null = null;
 		try {
-			if (surface.type === 'singleton' && surface.kind === 'tickets') {
-				const tickets = this.#deps.singletons.ticketsIfPresent();
-				if (tickets?.drafts.pending) return false;
-				tickets?.drafts.flush();
-				if (
-					tickets?.drafts.needsExitGuard &&
-					!(await this.#confirmClose({
-						surfaceId,
-						title: m.tickets_close_surface_title(),
-						description: m.tickets_close_surface_description(),
-						confirmLabel: m.tickets_close_surface(),
-					}))
-				)
-					return false;
-			}
-			if (surface.type === 'singleton' && surface.kind === 'chat-canvas') {
-				const canvas = this.#deps.singletons.chatCanvasIfPresent();
-				if (canvas) {
-					releaseCanvasClose = await canvas.prepareClose();
-					if (!releaseCanvasClose) return false;
-				}
-			}
-			if (surface.type === 'singleton' && surface.kind === 'commit') {
-				const commit = this.#deps.singletons.commitIfPresent();
-				if (commit && !commit.canClose) return false;
-				const draftCount = commit?.retainedDraftCount ?? 0;
-				if (
-					draftCount > 0 &&
-					!(await this.#confirmClose({
-						surfaceId,
-						title: m.commit_surface_close_title(),
-						description:
-							draftCount === 1
-								? m.commit_surface_close_drafts_singular()
-								: m.commit_surface_close_drafts_plural({ count: draftCount }),
-						confirmLabel: m.commit_surface_discard_close(),
-					}))
-				) {
-					return false;
-				}
-			}
-			if (surface.type === 'file') {
-				releaseFileClose = await this.#deps.files.prepareDestructiveViews(
-					[surface.fileSessionId],
-					'close',
-				);
-				if (!releaseFileClose) return false;
-			}
+			const preparation = prepareSurfaceClose(lifecycle, [surface]);
+			// Unguarded closes queue publication before competing placement requests.
+			releaseClose =
+				preparation === null || typeof preparation === 'function' ? preparation : await preparation;
+			if (!releaseClose) return false;
 			const sourceWindowId = this.#presentation.windowOf(surfaceId);
 			const wasDialog = this.layout.snapshot.dialogFileSurfaceId === surfaceId;
 			const dialogReturnSurfaceId = wasDialog ? this.#fileDialog.returnSurfaceId : null;
@@ -663,14 +631,9 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 					? await this.#presentation.commit(removalPlan)
 					: await this.#presentation.commitDestroyedRemovals([surfaceId], removalPlan);
 			if (removalBlocked) return false;
-			this.#presentation.clearAttachmentError(surfaceId);
 			if (wasDialog) this.#fileDialog.clearReturnSurface();
-			if (surface.type === 'file') await this.#deps.files.destroy(surface.fileSessionId);
-			if (surface.type === 'terminal-launcher') this.#deps.onTerminalLauncherDismissed?.();
-			if (surface.type === 'singleton') {
-				if (surface.kind === 'commit') this.#deps.singletons.commitIfPresent()?.discardDrafts();
-				this.#deps.singletons.disposeSurface(surface.kind);
-			}
+			const disposal = disposeClosedSurface(lifecycle, surface);
+			if (disposal) await disposal;
 			if (!current) return true;
 			const shouldRestorePresentation = ownedFocus || wasDialog || mobileFallbackId !== null;
 			if (!shouldRestorePresentation) return true;
@@ -686,8 +649,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 			this.#presentation.focusPresentedSurface(fallbackSurfaceId);
 			return true;
 		} finally {
-			releaseCanvasClose?.();
-			releaseFileClose?.();
+			releaseClose?.();
 			this.#reservedSurfaceIds.delete(surfaceId);
 			if (surface.type === 'terminal') {
 				await this.#terminalPlacement.afterPlacementReleased(surface.terminalId);
