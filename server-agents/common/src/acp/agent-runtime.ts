@@ -30,6 +30,7 @@ import { AcpClient } from './client.js';
 import { AcpRpcError } from './errors.js';
 import type {
   AcpJsonRpcId,
+  AcpSessionPromptResult,
   AcpSessionRequestPermission,
   AcpSessionUpdateNotification,
 } from './protocol.js';
@@ -307,13 +308,30 @@ export class AcpAgentRuntime {
     if (turn.session.id !== request.agentSessionId || turn.session.chatId !== request.chatId) {
       return rejectedSteer('turn-changed', 'The steering target belongs to another session');
     }
-    while (turn.steerDecision) await turn.steerDecision;
-    const rejection = this.#steerRejection(turn);
-    if (rejection) return rejection;
-    await request.prepareDelivery();
-    while (turn.steerDecision) await turn.steerDecision;
-    // Checked and sent without an await between them, so the prompt cannot miss the turn's end.
-    return this.#steerRejection(turn) ?? this.#sendSteer(turn, request.input);
+    turn.steersInFlight += 1;
+    try {
+      return await this.#steerTurn(turn, request);
+    } finally {
+      turn.steersInFlight -= 1;
+      this.#closePromptsIfDrained(turn);
+    }
+  }
+
+  async #steerTurn(turn: AcpTurnContext, request: RuntimeSteerRequest): Promise<AgentSteerResult> {
+    // Taken before delivery is prepared, so nothing waits between preparing and sending.
+    while (turn.steerSlot) await turn.steerSlot;
+    const slot = Promise.withResolvers<void>();
+    turn.steerSlot = slot.promise;
+    try {
+      const rejection = this.#steerRejection(turn);
+      if (rejection) return rejection;
+      await request.prepareDelivery();
+      // Checked and sent without an await between them, so the prompt cannot miss the turn's end.
+      return this.#steerRejection(turn) ?? await this.#sendSteer(turn, request.input);
+    } finally {
+      turn.steerSlot = null;
+      slot.resolve();
+    }
   }
 
   #steerRejection(turn: AcpTurnContext): AgentSteerResult | null {
@@ -323,6 +341,7 @@ export class AcpAgentRuntime {
     const session = turn.session;
     if (
       turn.completed
+      || turn.promptsClosed
       || turn.aborted
       || turn.sourceRetired
       || session.retired
@@ -338,45 +357,51 @@ export class AcpAgentRuntime {
     return null;
   }
 
-  // The agent accepts the steer by settling the prompt it supersedes, which
-  // hands the turn to the steer's prompt. An error on the steer's prompt while
-  // the superseded one still runs is a refusal that leaves the turn unchanged.
+  // The agent accepts the steer by settling a prompt the steer supersedes, and
+  // refuses it with an error on the steer's prompt while those still run. With
+  // none open, as when the turn's prompt settled while this steer was held, the
+  // agent runs the steer as the next prompt, so a written steer is accepted.
   #sendSteer(turn: AcpTurnContext, input: string): Promise<AgentSteerResult> {
-    const session = turn.session;
-    const superseded = turn.ownerPrompt;
-    // Unset only until the call that sends the turn's first prompt returns.
-    if (!superseded) return Promise.resolve(rejectedSteer('turn-changed', 'The active turn has not sent its prompt'));
+    const superseded = [...turn.openPrompts];
     const decision = Promise.withResolvers<AgentSteerResult>();
-    let supersededSettled = false;
-    const prompt = session.client.promptSession({
-      sessionId: session.id,
+    const accept = () => decision.resolve({ kind: 'accepted' });
+    const prompt = turn.session.client.promptSession({
+      sessionId: turn.session.id,
       prompt: [{ type: 'text', text: input }],
-    });
-    turn.ownerPrompt = prompt;
-    turn.steerDecision = decision.promise;
-    superseded.then(() => {
-      supersededSettled = true;
-      decision.resolve({ kind: 'accepted' });
-    }, (error: unknown) => {
-      supersededSettled = true;
-      decision.resolve(unconfirmedSteer(humanizeError(error)));
-    });
-    prompt.then(() => decision.resolve({ kind: 'accepted' }), (error: unknown) => {
-      if (supersededSettled) return;
-      if (turn.ownerPrompt === prompt) turn.ownerPrompt = superseded;
-      decision.resolve(error instanceof AcpRpcError
+    }, superseded.length === 0 ? accept : undefined);
+    this.#trackTurnPrompt(turn, prompt);
+    // A superseded prompt that fails is an earlier refused steer or a lost
+    // transport, which the steer's own prompt then reports.
+    for (const open of superseded) open.then(accept, () => {});
+    prompt.then(accept, (error: unknown) => decision.resolve(
+      error instanceof AcpRpcError && superseded.some((open) => turn.openPrompts.has(open))
         ? rejectedSteer('provider-rejected', error.message)
-        : unconfirmedSteer(humanizeError(error)));
-    });
+        : unconfirmedSteer(humanizeError(error)),
+    ));
     const timer = setTimeout(() => decision.resolve(unconfirmedSteer(
       `${this.#policy.agentId} did not confirm the steering input within ${this.#steerDecisionTimeoutMs}ms`,
     )), this.#steerDecisionTimeoutMs);
     timer.unref?.();
-    // Registered first, so a waiting steer finds the decision cleared when it wakes.
-    return decision.promise.finally(() => {
-      clearTimeout(timer);
-      if (turn.steerDecision === decision.promise) turn.steerDecision = null;
-    });
+    return decision.promise.finally(() => clearTimeout(timer));
+  }
+
+  // Registered before any decision handler, so those see this prompt's settlement in `openPrompts`.
+  #trackTurnPrompt(turn: AcpTurnContext, prompt: Promise<AcpSessionPromptResult>): void {
+    turn.openPrompts.add(prompt);
+    const settle = (failure: { readonly error: unknown } | null) => {
+      turn.openPrompts.delete(prompt);
+      // A failure while another prompt still runs is the agent refusing this one.
+      if (!failure || turn.openPrompts.size === 0) turn.promptFailure = failure;
+      this.#closePromptsIfDrained(turn);
+    };
+    prompt.then(() => settle(null), (error: unknown) => settle({ error }));
+  }
+
+  // Closes in the same step that observes the drain, so no later steer can pass its checks.
+  #closePromptsIfDrained(turn: AcpTurnContext): void {
+    if (turn.promptsClosed || turn.openPrompts.size > 0 || turn.steersInFlight > 0) return;
+    turn.promptsClosed = true;
+    turn.promptsDrained.resolve();
   }
 
   #announceSteerable(turn: AcpTurnContext): void {
@@ -557,7 +582,7 @@ export class AcpAgentRuntime {
       if (turn.aborted) return;
       assertAcpExecutionOpen(request);
       if (session.retired) throw new Error(`${this.#policy.agentId} ACP process exited before the prompt was sent`);
-      let owner = turn.ownerPrompt = session.client.promptSession({
+      this.#trackTurnPrompt(turn, session.client.promptSession({
         sessionId: session.id,
         prompt,
       }, () => {
@@ -568,15 +593,10 @@ export class AcpAgentRuntime {
         if (turn.aborted) this.abort(session.id);
         onExecutionStarted?.();
         this.#announceSteerable(turn);
-      });
-      // A steer takes the turn over from the prompt it supersedes, so the turn
-      // ends with its latest prompt. Nothing awaits between the last check and
-      // the turn's completion, so no steer can be sent after it.
-      for (;;) {
-        await owner;
-        if (turn.ownerPrompt === owner) break;
-        owner = turn.ownerPrompt!;
-      }
+      }));
+      // Steers extend the turn, so it ends when all of its prompts have settled.
+      await turn.promptsDrained.promise;
+      if (turn.promptFailure) throw turn.promptFailure.error;
       const reportedFailure = this.#canRouteSource(turn) ? this.#converter.takeTurnFailure?.(session.id) : null;
       if (reportedFailure && !turn.aborted) {
         failureMessage = reportedFailure;
@@ -649,8 +669,12 @@ export class AcpAgentRuntime {
       sourceRetired: false,
       settled: Promise.withResolvers<void>(),
       cancelTimer: null,
-      ownerPrompt: null,
-      steerDecision: null,
+      openPrompts: new Set(),
+      steersInFlight: 0,
+      steerSlot: null,
+      promptFailure: null,
+      promptsDrained: Promise.withResolvers<void>(),
+      promptsClosed: false,
     };
   }
 

@@ -9,6 +9,7 @@ import { AcpTransport, type AcpProcess } from '@garcon/server-agent-common/acp/t
 import {
   runtimeOperation,
   type AgentRuntimeEvent,
+  type RuntimeSteerRequest,
 } from '@garcon/server-agent-common/execution/runtime-events';
 import type { AntigravityConfig } from '../../../config.ts';
 import { AntigravityAcpEventConverter } from '../antigravity-acp-event-converter.ts';
@@ -271,6 +272,19 @@ function waitFor(predicate: () => boolean): Promise<void> {
 
 function runEnded(events: readonly AgentRuntimeEvent[]) {
   return events.filter((event) => event.type === 'run-ended');
+}
+
+function steerRequest(runtime: AcpAgentRuntime, agentSessionId: string): RuntimeSteerRequest {
+  return {
+    chatId: 'chat-1',
+    projectPath: '/work',
+    agentSessionId,
+    nativeSession: null,
+    target: runtime.captureSteerTarget(agentSessionId),
+    input: 'Also do this.',
+    clientMessageId: 'steer-1',
+    prepareDelivery: async () => {},
+  };
 }
 
 describe('Antigravity ACP runtime', () => {
@@ -1588,6 +1602,96 @@ describe('Antigravity ACP runtime', () => {
     expect(agent.requests('session/new')).toHaveLength(1);
     runtime.shutdown();
   });
+
+  it('folds an accepted steer into the running turn, which ends when the steer settles', async () => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      agent.onPrompt(() => {});
+      const started = await runtime.startSession(request());
+
+      const steered = await runtime.steer(steerRequest(runtime, started.agentSessionId));
+      agent.update(started.agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Did both.' } });
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length > 0);
+
+      expect(steered).toEqual({ kind: 'accepted' });
+      expect(agent.requests('session/prompt')[1]?.params).toEqual({
+        sessionId: started.agentSessionId,
+        prompt: [{ type: 'text', text: 'Also do this.' }],
+      });
+      expect(runEnded(events)).toEqual([expect.objectContaining({
+        outcome: 'finished',
+        finalResponse: { type: 'text', text: 'Did both.' },
+      })]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('delivers a steer whose turn finished while the steer was being prepared', async () => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      agent.onPrompt(() => {});
+      const started = await runtime.startSession(request());
+      const prepared = Promise.withResolvers<void>();
+      const preparing = Promise.withResolvers<void>();
+
+      const steering = runtime.steer({
+        ...steerRequest(runtime, started.agentSessionId),
+        prepareDelivery: () => {
+          preparing.resolve();
+          return prepared.promise;
+        },
+      });
+      await preparing.promise;
+      agent.endPrompt();
+      await Bun.sleep(10);
+      const endedBeforeDelivery = runEnded(events).length;
+      prepared.resolve();
+      const steered = await steering;
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length > 0);
+
+      expect(endedBeforeDelivery).toBe(0);
+      expect(steered).toEqual({ kind: 'accepted' });
+      expect(agent.requests('session/prompt')).toHaveLength(2);
+      expect(runEnded(events)).toEqual([expect.objectContaining({ outcome: 'finished' })]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('keeps the original prompt in charge of the turn when agy refuses a steer', async () => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      agent.onPrompt(() => {});
+      agent.refusesOverlappingPrompts = true;
+      const started = await runtime.startSession(request());
+
+      const steered = await runtime.steer(steerRequest(runtime, started.agentSessionId));
+      const runningAfterRefusal = runtime.isRunning(started.agentSessionId);
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length > 0);
+
+      expect(steered).toEqual({ kind: 'rejected', reason: 'provider-rejected', message: 'Can\'t add this prompt to session' });
+      expect(runningAfterRefusal).toBe(true);
+      expect(runEnded(events)).toEqual([expect.objectContaining({ outcome: 'finished' })]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('offers no steering target while a permission answer is pending', async () => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      agent.onPrompt((fake, sessionId) => fake.requestPermission(sessionId, 'tool-1'));
+      const started = await runtime.startSession(request());
+      await waitFor(() => events.some((event) => event.type === 'permission'));
+      const permission = events.find((event) => event.type === 'permission');
+      if (permission?.type !== 'permission' || !permission.decision) throw new Error('Expected a permission request');
+
+      const whilePending = runtime.captureSteerTarget(started.agentSessionId);
+      await permission.decision.respond({ allow: true });
+
+      expect(whilePending).toBeNull();
+      expect(runtime.captureSteerTarget(started.agentSessionId)).not.toBeNull();
+      expect(events.filter((event) => event.type === 'steerable')).toHaveLength(2);
+    } finally { runtime.shutdown(); }
+  });
 });
 
 describe('Antigravity one-shot query', () => {
@@ -1685,76 +1789,5 @@ describe('Antigravity one-shot query', () => {
     expect(agent.received.find((message) => message.id === 'permission-1')?.result).toEqual({
       outcome: { outcome: 'selected', optionId: 'deny' },
     });
-  });
-  it('folds an accepted steer into the running turn, which ends when the steer settles', async () => {
-    const { agent, runtime, events, request } = harness();
-    agent.onPrompt(() => {});
-    const started = await runtime.startSession(request());
-
-    const steered = await runtime.steer({
-      chatId: 'chat-1',
-      projectPath: '/work',
-      agentSessionId: started.agentSessionId,
-      nativeSession: null,
-      target: runtime.captureSteerTarget(started.agentSessionId),
-      input: 'Also do this.',
-      clientMessageId: 'steer-1',
-      prepareDelivery: async () => {},
-    });
-    agent.update(started.agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Did both.' } });
-    agent.endPrompt();
-    await waitFor(() => runEnded(events).length > 0);
-
-    expect(steered).toEqual({ kind: 'accepted' });
-    expect(agent.requests('session/prompt')[1]?.params).toEqual({
-      sessionId: started.agentSessionId,
-      prompt: [{ type: 'text', text: 'Also do this.' }],
-    });
-    expect(runEnded(events)).toEqual([expect.objectContaining({
-      outcome: 'finished',
-      finalResponse: { type: 'text', text: 'Did both.' },
-    })]);
-  });
-
-  it('keeps the original prompt in charge of the turn when agy refuses a steer', async () => {
-    const { agent, runtime, events, request } = harness();
-    agent.onPrompt(() => {});
-    agent.refusesOverlappingPrompts = true;
-    const started = await runtime.startSession(request());
-
-    const steered = await runtime.steer({
-      chatId: 'chat-1',
-      projectPath: '/work',
-      agentSessionId: started.agentSessionId,
-      nativeSession: null,
-      target: runtime.captureSteerTarget(started.agentSessionId),
-      input: 'Also do this.',
-      clientMessageId: 'steer-1',
-      prepareDelivery: async () => {},
-    });
-    const runningAfterRefusal = runtime.isRunning(started.agentSessionId);
-    agent.endPrompt();
-    await waitFor(() => runEnded(events).length > 0);
-
-    expect(steered).toEqual({ kind: 'rejected', reason: 'provider-rejected', message: 'Can\'t add this prompt to session' });
-    expect(runningAfterRefusal).toBe(true);
-    expect(runEnded(events)).toEqual([expect.objectContaining({ outcome: 'finished' })]);
-  });
-
-  it('offers no steering target while a permission answer is pending', async () => {
-    const { agent, runtime, events, request } = harness();
-    agent.onPrompt((fake, sessionId) => fake.requestPermission(sessionId, 'tool-1'));
-    const started = await runtime.startSession(request());
-    await waitFor(() => events.some((event) => event.type === 'permission'));
-    const permission = events.find((event) => event.type === 'permission');
-    if (permission?.type !== 'permission' || !permission.decision) throw new Error('Expected a permission request');
-
-    const whilePending = runtime.captureSteerTarget(started.agentSessionId);
-    await permission.decision.respond({ allow: true });
-
-    expect(whilePending).toBeNull();
-    expect(runtime.captureSteerTarget(started.agentSessionId)).not.toBeNull();
-    expect(events.filter((event) => event.type === 'steerable')).toHaveLength(2);
-    runtime.shutdown();
   });
 });

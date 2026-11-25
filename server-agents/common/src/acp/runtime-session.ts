@@ -51,11 +51,18 @@ export interface AcpTurnContext {
   sourceRetired: boolean;
   readonly settled: PromiseWithResolvers<void>;
   cancelTimer: ReturnType<typeof setTimeout> | null;
-  // The prompt whose settlement ends the turn. A steer takes it over once the
-  // agent settles the prompt that steer superseded.
-  ownerPrompt: Promise<AcpSessionPromptResult> | null;
-  // The steer the agent has not yet accepted or refused; later steers wait for it.
-  steerDecision: Promise<unknown> | null;
+  // Prompts of this turn the agent has not settled. Each steer adds one.
+  readonly openPrompts: Set<Promise<AcpSessionPromptResult>>;
+  // Steers between their target check and the agent's decision. They hold the
+  // turn open, so a steer recorded in the transcript still reaches the agent.
+  steersInFlight: number;
+  // Held by one steer at a time, from its checks to the agent's decision.
+  steerSlot: Promise<void> | null;
+  // The failure of the turn's last settled prompt, unless that was a refused steer.
+  promptFailure: { readonly error: unknown } | null;
+  // Resolved, and `promptsClosed` set, once no prompt is open and no steer is in flight.
+  readonly promptsDrained: PromiseWithResolvers<void>;
+  promptsClosed: boolean;
 }
 
 type AcpRuntimeSessionIdentity = Pick<AcpAgentRuntimeSession,
