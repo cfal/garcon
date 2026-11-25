@@ -452,6 +452,29 @@ describe('SlashCommandMenu', () => {
 		expect(onSelect).toHaveBeenCalledWith('compact');
 	});
 
+	it('resets the highlighted command when reopened with the same query', async () => {
+		const onSelect = vi.fn();
+		const onClose = vi.fn();
+		const view = render(SlashCommandMenuTestHost, {
+			...baseProps, isVisible: true, query: '', onSelect, onClose,
+		});
+		const compact = () => screen.getByText('/compact').closest('[role="option"]');
+		expect(compact()?.getAttribute('aria-selected')).toBe('true');
+		expect(view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'ArrowDown' }))).toBe(true);
+		await tick();
+		expect(compact()?.getAttribute('aria-selected')).toBe('false');
+
+		expect(view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+		expect(onClose).toHaveBeenCalledOnce();
+		await view.rerender({ isVisible: false });
+		expect(screen.queryByRole('listbox')).toBeNull();
+		await view.rerender({ isVisible: true });
+
+		expect(compact()?.getAttribute('aria-selected')).toBe('true');
+		expect(view.component.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true);
+		expect(onSelect).toHaveBeenCalledWith('compact');
+	});
+
 	it('shows the empty state when nothing matches', () => {
 		render(SlashCommandMenuTestHost, {
 			...baseProps,

@@ -45,6 +45,8 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			'todo-write-tool-use',
 			'todo-read-tool-use',
 			'task-tool-use',
+			'background-task-tool-use',
+			'agent-message-tool-use',
 			'codex-subagent-tool-use',
 			'update-plan-tool-use',
 			'write-stdin-tool-use',
@@ -72,6 +74,14 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 		for (const type of expected) {
 			expect(TOOL_DISPLAY_REGISTRY[type]).toBeDefined();
 		}
+	});
+
+	it('displays task operations without claiming the target stopped or inventing output', () => {
+		const { input, result } = TOOL_DISPLAY_REGISTRY['background-task-tool-use'];
+		expect(input.getLabel?.({ action: 'stop' })).toBe('Request stop');
+		expect(input.getValue?.({ action: 'send_input', taskId: 'job', input: 'ok\n' })).toBe('job\nInput: "ok\\n"');
+		expect(result?.getContentProps?.({ content: {} })?.content).toBe('');
+		expect(result?.getContentProps?.({ content: { raw: 'Task is running' } })?.content).toBe('Task is running');
 	});
 
 	it('uses canonical type keys for core tools', () => {

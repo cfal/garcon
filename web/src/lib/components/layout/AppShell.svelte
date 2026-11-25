@@ -3,6 +3,8 @@
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Button } from '$lib/components/ui/button';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { appPathname } from '$lib/deployment/paths';
@@ -915,6 +917,18 @@
 {#if appShell.showSettings}
 	{#await lazySettings() then { default: Settings }}
 		<Settings />
+	{:catch}
+		<Dialog.Root open onOpenChange={(open) => { if (!open) appShell.closeSettings(); }}>
+			<Dialog.Content class="max-w-sm">
+				<Dialog.Header>
+					<Dialog.Title>{m.settings_title()}</Dialog.Title>
+					<Dialog.Description>{m.settings_load_failed_reload()}</Dialog.Description>
+				</Dialog.Header>
+				<Dialog.Footer>
+					<Button onclick={() => window.location.reload()}>{m.common_reload_application()}</Button>
+				</Dialog.Footer>
+			</Dialog.Content>
+		</Dialog.Root>
 	{/await}
 {/if}
 

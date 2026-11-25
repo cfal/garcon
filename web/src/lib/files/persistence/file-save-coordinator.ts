@@ -20,6 +20,9 @@ export class FileSaveCoordinator {
 		controller: AbortController,
 		expectedRevision: FileRevision,
 	): Promise<void> {
+		if (!document.executorAvailable) throw new Error(m.file_command_executor_unavailable());
+		if (controller.signal.aborted || document.saveController !== controller)
+			throw new Error(m.file_save_unconfirmed());
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const result = await Promise.race([
