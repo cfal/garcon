@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { chromium, type Locator, type Page } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import type { PersistedWorkspaceLayoutV2 } from '../../../common/workspace-layout.js';
+import type { ThemePreference } from '../../../web/src/lib/theme/themes.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { seedCombinedAnchorHistory } from '../../support/combined-anchor-history.js';
 import {
@@ -473,10 +474,17 @@ async function verifyWorkspaceChromeThemes(
   focusedWindowId: string,
   inactiveWindowId: string,
 ): Promise<void> {
-  const originalClasses = await page.evaluate(() => ({
-    dark: document.documentElement.classList.contains('dark'),
-    themeId: document.documentElement.dataset.theme,
-  }));
+  const originalPreference = await page.evaluate((): ThemePreference | null =>
+    JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}').themePreference ?? null);
+  const applyPreference = (themePreference: ThemePreference | null) => page.evaluate(preference => {
+    const key = 'pref_local_settings';
+    const settings = JSON.parse(localStorage.getItem(key) ?? '{}');
+    if (preference) settings.themePreference = preference;
+    else delete settings.themePreference;
+    const newValue = JSON.stringify(settings);
+    localStorage.setItem(key, newValue);
+    window.dispatchEvent(new StorageEvent('storage', { key, newValue, storageArea: localStorage }));
+  }, themePreference);
   const scenarios = [
     {
       themeId: 'classic-light',
@@ -526,16 +534,15 @@ async function verifyWorkspaceChromeThemes(
       selectedTabColor: 'rgb(46, 46, 46)',
       inactiveSelectedTabColor: 'rgb(31, 31, 31)',
     },
-  ];
+  ] as const;
 
   try {
     for (const scenario of scenarios) {
-      await page.evaluate(({ dark, themeId }) => {
-        document.documentElement.dataset.theme = themeId;
-        document.documentElement.classList.toggle('dark', dark);
-      }, scenario);
+      await applyPreference({ mode: 'fixed', themeId: scenario.themeId });
       await page.waitForFunction(
         ({
+          themeId,
+          dark,
           expectedFocusedWindowId,
           expectedInactiveWindowId,
           activeColor,
@@ -556,6 +563,8 @@ async function verifyWorkspaceChromeThemes(
             `[data-workspace-window-id="${expectedInactiveWindowId}"] [role="tab"][aria-selected="true"]`,
           );
           return (
+            document.documentElement.dataset.theme === themeId &&
+            document.documentElement.classList.contains('dark') === dark &&
             focused != null &&
             inactive != null &&
             focusedTab != null &&
@@ -567,6 +576,8 @@ async function verifyWorkspaceChromeThemes(
           );
         },
         {
+          themeId: scenario.themeId,
+          dark: scenario.dark,
           expectedFocusedWindowId: focusedWindowId,
           expectedInactiveWindowId: inactiveWindowId,
           activeColor: scenario.activeColor,
@@ -625,11 +636,7 @@ async function verifyWorkspaceChromeThemes(
       });
     }
   } finally {
-    await page.evaluate(({ dark, themeId }) => {
-      if (themeId) document.documentElement.dataset.theme = themeId;
-      else delete document.documentElement.dataset.theme;
-      document.documentElement.classList.toggle('dark', dark);
-    }, originalClasses);
+    await applyPreference(originalPreference);
   }
 }
 
