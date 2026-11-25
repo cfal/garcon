@@ -8,6 +8,7 @@ import {
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
 	BashToolUseMessage,
+	BackgroundTaskToolUseMessage,
 	ClaudeMonitorToolUseMessage,
 	ClaudeToolSearchToolUseMessage,
 	CodexSubagentToolUseMessage,
@@ -33,6 +34,15 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('shows a stop request and target without a blank disclosure for an empty success', () => {
+		const toolMessage = new BackgroundTaskToolUseMessage('', 'stop', 'stop', 'job-1');
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
+		expect(screen.getByText('Request stop')).toBeTruthy();
+		expect(screen.getByText('job-1')).toBeTruthy();
+		const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'result', toolResult: { content: {}, isError: false } });
+		expect(container.textContent?.trim()).toBe('');
+		expect(container.querySelector('button')).toBeNull();
+	});
 	it('renders the destination and literal body of an agent message', () => {
 		const toolMessage = new AgentMessageToolUseMessage('', 'send', 'agent-2', '<b>unformatted</b>');
 		render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
@@ -88,6 +98,8 @@ describe('ChatToolEventRenderer', () => {
 		new ClaudeToolSearchToolUseMessage('', 'invalid-search', ''),
 		new ClaudeMonitorToolUseMessage('', 'invalid-monitor', ''),
 		new UpdatePlanToolUseMessage('', 'invalid-plan', [{ content: 'Check', status: 'pending' }]),
+		new BackgroundTaskToolUseMessage('', 'missing-task', 'status', 'job-1'),
+		new AgentMessageToolUseMessage('', 'failed-send', 'agent-2', 'Hello'),
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
 		new EditToolUseMessage('', 'invalid-edit', ''),
