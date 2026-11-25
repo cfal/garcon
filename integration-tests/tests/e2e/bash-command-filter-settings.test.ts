@@ -32,7 +32,7 @@ describe('Lightpanda hidden Bash command settings', () => {
 
       await app.open();
       await fixture.waitForSpaWebSocket();
-      await app.setRecentActivitySort(true);
+      await app.setRecentActivitySort(false);
       await openRemoteSettings(app);
       await fixture.page.waitForFunction(
         () => document.querySelector('[data-testid="hidden-bash-command-patterns"]')
@@ -113,7 +113,7 @@ describe('Lightpanda hidden Bash command settings', () => {
           unknown
         >,
       );
-      expect(localSettings).toHaveProperty('sidebarSortMode', 'recent');
+      expect(localSettings).toHaveProperty('sidebarSortMode', 'manual');
       expect(localSettings).not.toHaveProperty('hiddenBashCommandPatterns');
 
       const connectionCount = await fixture.spaWebSocketConnectionCount();
