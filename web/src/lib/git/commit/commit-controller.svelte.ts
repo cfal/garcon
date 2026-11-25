@@ -20,19 +20,14 @@ import {
 	findCommitTreeNode,
 	flattenCommitFileNodes,
 	reconcileCommitTreeAfterStage,
-	type QuickCommitStageMode,
 } from './commit-tree-reconciliation.js';
 
-const COLD_COMMIT_SNAPSHOT_LIMIT = 8;
-
-export interface QuickCommitPathIntent {
-	path: string;
-	desiredSelected: boolean;
-	actualSelected: boolean;
-	isRunning: boolean;
-	runningMode: QuickCommitStageMode | null;
-	error: string | null;
-}
+import { CommitDraftSnapshotCache } from './commit-draft-snapshot-cache.js';
+import {
+	CommitStageQueue,
+	type QuickCommitPathIntent,
+	type QuickCommitStageBatch,
+} from './commit-stage-queue.js';
 
 export interface CommitControllerDeps extends GitSurfaceControllerDeps {
 	refreshSummary?: () => Promise<void>;
@@ -49,25 +44,13 @@ export interface CommitControllerDeps extends GitSurfaceControllerDeps {
 	}) => Promise<T>;
 }
 
-interface CommitTargetSnapshot {
-	tree: GitTreeNode[];
-	intents: Record<string, QuickCommitPathIntent>;
-	message: string;
-	accessedAt: number;
-}
-
 type QueueAction = 'generate' | 'commit' | null;
 type QuickCommitTreeLoadState = 'idle' | 'initial-loading' | 'refreshing';
 
-interface QuickCommitStageBatch {
-	mode: QuickCommitStageMode;
-	paths: string[];
-}
-
 export class CommitController implements PortableSingletonController {
 	readonly target: GitTargetSessionController;
-	tree = $state<GitTreeNode[]>([]);
-	intents = $state<Record<string, QuickCommitPathIntent>>({});
+	tree = $state.raw<GitTreeNode[]>([]);
+	intents = $state.raw<Record<string, QuickCommitPathIntent>>({});
 	readonly fileNodes = $derived.by(() => flattenCommitFileNodes(this.tree));
 	#message = $state('');
 	#messageRevision = 0;
@@ -88,12 +71,9 @@ export class CommitController implements PortableSingletonController {
 	lastError = $state<string | null>(null);
 	isPresentationVisible = $state(false);
 
-	private queue: string[] = [];
-	private forcedStagePaths = new Set<string>();
-	private queueSettledPromise: Promise<void> | null = null;
-	private resolveQueueSettled: (() => void) | null = null;
+	private readonly queue = new CommitStageQueue();
 	private shouldRefreshAfterDrain = false;
-	private snapshots = new Map<string, CommitTargetSnapshot>();
+	private readonly snapshots = new CommitDraftSnapshotCache();
 	private activationPromise: Promise<void> | null = null;
 	private disposed = false;
 	private contextGeneration = 0;
@@ -160,17 +140,17 @@ export class CommitController implements PortableSingletonController {
 		return this.treeLoadState === 'refreshing';
 	}
 
-	get hasPendingStageOperations(): boolean {
+	hasPendingStageOperations = $derived.by<boolean>(() => {
 		return Object.values(this.intents).some(
 			(item) => item.isRunning || (!item.error && item.desiredSelected !== item.actualSelected),
 		);
-	}
+	});
 
-	get hasErrors(): boolean {
+	hasErrors = $derived.by<boolean>(() => {
 		return Object.values(this.intents).some((item) => Boolean(item.error));
-	}
+	});
 
-	get treeErrorMessage(): string | null {
+	treeErrorMessage = $derived.by<string | null>(() => {
 		const fileErrors = Object.values(this.intents)
 			.filter((item) => Boolean(item.error))
 			.map((item) => item.error as string);
@@ -185,23 +165,23 @@ export class CommitController implements PortableSingletonController {
 			});
 		}
 		return this.fileErrorSummary(fileErrors);
-	}
+	});
 
-	get desiredSelectedFiles(): string[] {
+	desiredSelectedFiles = $derived.by<string[]>(() => {
 		return Object.values(this.intents)
 			.filter((item) => item.desiredSelected)
 			.map((item) => item.path);
-	}
+	});
 
-	get actualSelectedFiles(): string[] {
+	actualSelectedFiles = $derived.by<string[]>(() => {
 		return Object.values(this.intents)
 			.filter((item) => item.actualSelected)
 			.map((item) => item.path);
-	}
+	});
 
-	get selectedFileCount(): number {
+	selectedFileCount = $derived.by<number>(() => {
 		return this.desiredSelectedFiles.length;
-	}
+	});
 
 	get totalAdditions(): number {
 		return this.selectedChangeStats.additions;
@@ -211,7 +191,7 @@ export class CommitController implements PortableSingletonController {
 		return this.selectedChangeStats.deletions;
 	}
 
-	get canCommit(): boolean {
+	canCommit = $derived.by<boolean>(() => {
 		return (
 			this.isRepositoryReady &&
 			this.message.trim().length > 0 &&
@@ -219,14 +199,10 @@ export class CommitController implements PortableSingletonController {
 			!this.isCommitting &&
 			!this.hasErrors
 		);
-	}
+	});
 
 	get retainedDraftCount(): number {
-		let count = this.message.trim() ? 1 : 0;
-		for (const [key, snapshot] of this.snapshots) {
-			if (key !== this.target.identity && snapshot.message.trim()) count += 1;
-		}
-		return count;
+		return Number(Boolean(this.message.trim())) + this.snapshots.countDrafts(this.target.identity);
 	}
 
 	get canClose(): boolean {
@@ -235,22 +211,6 @@ export class CommitController implements PortableSingletonController {
 			!this.isCommitting &&
 			!this.isGeneratingMessage &&
 			!this.isProcessingQueue
-		);
-	}
-
-	async setContext(effectiveProjectKey: string | null, projectPath: string | null): Promise<void> {
-		this.target.setProjectState(
-			effectiveProjectKey && projectPath
-				? {
-						kind: 'available',
-						project: {
-							target: { kind: 'path', executorId: 'local', projectPath },
-							chatId: effectiveProjectKey,
-							effectiveProjectKey,
-							projectPath,
-						},
-					}
-				: { kind: 'absent' },
 		);
 	}
 
@@ -279,9 +239,7 @@ export class CommitController implements PortableSingletonController {
 
 	discardDrafts(): void {
 		this.message = '';
-		for (const [key, snapshot] of this.snapshots) {
-			this.snapshots.set(key, { ...snapshot, message: '' });
-		}
+		this.snapshots.discardDrafts();
 	}
 
 	resetAfterClose(): void {
@@ -294,8 +252,7 @@ export class CommitController implements PortableSingletonController {
 	dispose(): void {
 		this.disposed = true;
 		this.saveCurrentSnapshot();
-		this.queue = [];
-		this.forcedStagePaths.clear();
+		this.queue.reset();
 		this.isPresentationVisible = false;
 		this.target.dispose();
 	}
@@ -306,25 +263,22 @@ export class CommitController implements PortableSingletonController {
 
 	togglePath(path: string, desiredSelected: boolean): void {
 		if (!this.isRepositoryReady) return;
-		const queued = this.enqueueStageIntent(path, desiredSelected);
-		if (queued) void this.drainQueue();
+		this.enqueueStageIntents([path], desiredSelected);
 	}
 
 	toggleDirectory(path: string, desiredSelected: boolean): void {
 		if (!this.isRepositoryReady) return;
 		const node = findCommitTreeNode(this.tree, path);
 		if (!node) return;
-		let queued = false;
-		for (const file of flattenCommitFileNodes([node])) {
-			queued = this.enqueueStageIntent(file.path, desiredSelected) || queued;
-		}
-		if (queued) void this.drainQueue();
+		this.enqueueStageIntents(
+			flattenCommitFileNodes([node]).map((file) => file.path),
+			desiredSelected,
+		);
 	}
 
 	includeUnstaged(path: string): void {
 		if (!this.isRepositoryReady) return;
-		const queued = this.enqueueStageIntent(path, true, true);
-		if (queued) void this.drainQueue();
+		this.enqueueStageIntents([path], true, true);
 	}
 
 	operationLabelForPath(path: string): string {
@@ -502,7 +456,7 @@ export class CommitController implements PortableSingletonController {
 	}
 
 	async waitForQueue(): Promise<boolean> {
-		await this.queueSettledPromise;
+		await this.queue.settled;
 		return !this.hasPendingStageOperations && !this.hasErrors;
 	}
 
@@ -511,8 +465,8 @@ export class CommitController implements PortableSingletonController {
 		const generation = this.contextGeneration;
 		this.isProcessingQueue = true;
 		try {
-			while (generation === this.contextGeneration && this.queue.length > 0) {
-				const batch = this.collectNextBatch();
+			while (generation === this.contextGeneration && this.queue.size > 0) {
+				const batch = this.queue.takeBatch(this.intents);
 				if (!batch) break;
 				await this.applyStageBatch(batch);
 			}
@@ -521,47 +475,13 @@ export class CommitController implements PortableSingletonController {
 				this.isProcessingQueue = false;
 				if (this.shouldRefreshAfterDrain) {
 					this.shouldRefreshAfterDrain = false;
-					this.markQueueSettled();
+					this.queue.finish(this.hasPendingStageOperations);
 					this.startRefreshAfterMutation();
 				} else {
-					this.markQueueSettled();
+					this.queue.finish(this.hasPendingStageOperations);
 				}
 			}
 		}
-	}
-
-	private collectNextBatch(): QuickCommitStageBatch | null {
-		let mode: QuickCommitStageMode | null = null;
-		const paths: string[] = [];
-		const remaining: string[] = [];
-
-		for (const path of this.queue) {
-			const item = this.intents[path];
-			const forceStage = this.forcedStagePaths.has(path);
-			const nextMode = forceStage
-				? 'stage'
-				: item && item.desiredSelected !== item.actualSelected
-					? item.desiredSelected
-						? 'stage'
-						: 'unstage'
-					: null;
-
-			if (!item || !nextMode) {
-				this.forcedStagePaths.delete(path);
-				continue;
-			}
-
-			if (!mode) mode = nextMode;
-			if (nextMode === mode) {
-				paths.push(path);
-				this.forcedStagePaths.delete(path);
-			} else {
-				remaining.push(path);
-			}
-		}
-
-		this.queue = remaining;
-		return mode && paths.length > 0 ? { mode, paths } : null;
 	}
 
 	private async applyStageBatch(batch: QuickCommitStageBatch): Promise<void> {
@@ -571,13 +491,11 @@ export class CommitController implements PortableSingletonController {
 		const targetIdentity = this.target.identity;
 		const generation = this.contextGeneration;
 		if (!project || !projectPath || !effectiveProjectKey || !targetIdentity) return;
-		for (const path of batch.paths) {
-			this.setIntent(path, {
-				isRunning: true,
-				runningMode: batch.mode,
-				error: null,
-			});
-		}
+		this.patchIntents(batch.paths, () => ({
+			isRunning: true,
+			runningMode: batch.mode,
+			error: null,
+		}));
 		this.pendingMutationCount += 1;
 		try {
 			if (!this.isRepositoryReady)
@@ -601,12 +519,10 @@ export class CommitController implements PortableSingletonController {
 				return;
 			}
 			this.reconcilePathsAfterStage(batch.paths, batch.mode === 'stage');
-			for (const path of batch.paths) {
-				this.setIntent(path, {
-					actualSelected: batch.mode === 'stage',
-					error: null,
-				});
-			}
+			this.patchIntents(batch.paths, () => ({
+				actualSelected: batch.mode === 'stage',
+				error: null,
+			}));
 			this.shouldRefreshAfterDrain = true;
 			if (!this.deps.runMutation) {
 				this.deps.markProjectChanged?.(project.executorId, effectiveProjectKey, projectPath);
@@ -616,27 +532,15 @@ export class CommitController implements PortableSingletonController {
 			const message = error instanceof Error ? error.message : String(error);
 			const uncertain =
 				error instanceof ApiError && error.errorCode === 'GIT_MUTATION_OUTCOME_UNKNOWN';
-			const failedPaths = uncertain
-				? new Set([...batch.paths, ...this.queue])
-				: new Set(batch.paths);
-			this.queue = this.queue.filter((path) => !failedPaths.has(path));
-			for (const path of failedPaths) {
-				this.forcedStagePaths.delete(path);
-				const current = this.intents[path];
-				this.setIntent(path, {
-					desiredSelected: uncertain
-						? (current?.desiredSelected ?? false)
-						: (current?.actualSelected ?? false),
-					error: message,
-				});
-			}
+			this.patchIntents(this.queue.removeFailed(batch, uncertain), (current) => ({
+				desiredSelected: uncertain ? current.desiredSelected : current.actualSelected,
+				error: message,
+			}));
 			this.shouldRefreshAfterDrain = true;
 		} finally {
 			this.pendingMutationCount -= 1;
 			if (this.isCurrentTarget(targetIdentity, generation)) {
-				for (const path of batch.paths) {
-					this.setIntent(path, { isRunning: false, runningMode: null });
-				}
+				this.patchIntents(batch.paths, () => ({ isRunning: false, runningMode: null }));
 			}
 		}
 	}
@@ -723,8 +627,7 @@ export class CommitController implements PortableSingletonController {
 		for (const node of flattenCommitFileNodes(tree)) {
 			const actualSelected = Boolean(node.staged);
 			const previousIntent = previous[node.path];
-			const hasPendingOperation =
-				Boolean(previousIntent?.isRunning) || this.queue.includes(node.path);
+			const hasPendingOperation = Boolean(previousIntent?.isRunning) || this.queue.has(node.path);
 			const shouldPreserveDesired =
 				preserveDesired &&
 				Boolean(previousIntent) &&
@@ -774,28 +677,30 @@ export class CommitController implements PortableSingletonController {
 		});
 	}
 
-	private setIntent(path: string, patch: Partial<QuickCommitPathIntent>): void {
-		const current = this.intents[path];
-		if (!current) return;
-		this.intents = {
-			...this.intents,
-			[path]: { ...current, ...patch },
-		};
+	private patchIntents(
+		paths: Iterable<string>,
+		patch: (intent: QuickCommitPathIntent) => Partial<QuickCommitPathIntent> | null,
+	): void {
+		const previous = this.intents;
+		let next: Record<string, QuickCommitPathIntent> | undefined;
+		for (const path of paths) {
+			const intent = previous[path];
+			if (!intent) continue;
+			const update = patch(intent);
+			if (update) (next ??= { ...previous })[path] = { ...intent, ...update };
+		}
+		if (next) this.intents = next;
 	}
 
-	private enqueueStageIntent(path: string, desiredSelected: boolean, forceStage = false): boolean {
-		const item = this.intents[path];
-		if (!item) return false;
-		this.setIntent(path, {
-			desiredSelected,
-			error: null,
+	private enqueueStageIntents(paths: Iterable<string>, desired: boolean, force = false): void {
+		let queued = false;
+		this.patchIntents(paths, (intent) => {
+			queued = this.queue.enqueue(intent, desired, force) || queued;
+			return intent.desiredSelected !== desired || intent.error
+				? { desiredSelected: desired, error: null }
+				: null;
 		});
-		if (forceStage) this.forcedStagePaths.add(path);
-		const needsOperation = forceStage || item.actualSelected !== desiredSelected || item.isRunning;
-		if (!needsOperation) return false;
-		if (!this.queue.includes(path)) this.queue.push(path);
-		this.markQueueActive();
-		return true;
+		if (queued) void this.drainQueue();
 	}
 
 	private reconcilePathsAfterStage(paths: string[], desiredSelected: boolean): void {
@@ -803,33 +708,14 @@ export class CommitController implements PortableSingletonController {
 		if (result.changed) this.tree = result.nodes;
 	}
 
-	private markQueueActive(): void {
-		if (this.queueSettledPromise) return;
-		this.queueSettledPromise = new Promise((resolve) => {
-			this.resolveQueueSettled = resolve;
-		});
-	}
-
-	private markQueueSettled(): void {
-		if (!this.queueSettledPromise || this.hasPendingStageOperations || this.queue.length > 0)
-			return;
-		this.resolveQueueSettled?.();
-		this.queueSettledPromise = null;
-		this.resolveQueueSettled = null;
-	}
-
 	private resetForTargetIdentity(identity: string | null, preserveMessage: boolean): void {
 		const message = preserveMessage ? this.message : '';
 		this.contextGeneration += 1;
 		this.treeValidated = false;
-		this.resolveQueueSettled?.();
+		this.queue.reset();
 		this.loadedTargetIdentity = identity;
 		this.tree = [];
 		this.intents = {};
-		this.queue = [];
-		this.forcedStagePaths = new Set();
-		this.queueSettledPromise = null;
-		this.resolveQueueSettled = null;
 		this.shouldRefreshAfterDrain = false;
 		this.activationPromise = null;
 		this.treeLoadState = this.projectPath ? 'initial-loading' : 'idle';
@@ -906,31 +792,21 @@ export class CommitController implements PortableSingletonController {
 	private saveCurrentSnapshot(): void {
 		const key = this.loadedTargetIdentity;
 		if (!key || !this.projectPath) return;
-		this.snapshots.delete(key);
-		this.snapshots.set(key, {
-			tree: this.tree,
-			intents: this.intents,
-			message: this.message,
-			accessedAt: Date.now(),
-		});
-		this.pruneSnapshots();
+		this.snapshots.save(
+			key,
+			{ tree: this.tree, intents: this.intents, message: this.message },
+			this.target.identity,
+		);
 	}
 
 	pruneExecutors(executorIds: ReadonlySet<string>): void {
 		this.target.pruneExecutors(executorIds);
-		for (const [key, snapshot] of this.snapshots) {
-			if (executorIds.has(JSON.parse(key)[0])) continue;
-			if (snapshot.message.trim()) {
-				this.snapshots.set(key, { ...snapshot, tree: [], intents: {} });
-			} else this.snapshots.delete(key);
-		}
+		this.snapshots.pruneExecutors(executorIds);
 	}
 
 	private restoreSnapshot(key: string): void {
-		const snapshot = this.snapshots.get(key);
+		const snapshot = this.snapshots.restore(key);
 		if (!snapshot) return;
-		this.snapshots.delete(key);
-		this.snapshots.set(key, { ...snapshot, accessedAt: Date.now() });
 		this.tree = snapshot.tree;
 		this.intents = Object.fromEntries(
 			Object.entries(snapshot.intents).map(([path, intent]) => [
@@ -947,18 +823,6 @@ export class CommitController implements PortableSingletonController {
 			]),
 		);
 		this.message = snapshot.message;
-	}
-
-	private pruneSnapshots(): void {
-		let retained = 0;
-		for (const [key, snapshot] of [...this.snapshots].reverse()) {
-			if (key === this.target.identity) continue;
-			retained += 1;
-			if (retained <= COLD_COMMIT_SNAPSHOT_LIMIT) continue;
-			if (snapshot.message.trim()) {
-				this.snapshots.set(key, { ...snapshot, tree: [], intents: {} });
-			} else this.snapshots.delete(key);
-		}
 	}
 
 	private isCurrentTarget(identity: string, generation: number): boolean {

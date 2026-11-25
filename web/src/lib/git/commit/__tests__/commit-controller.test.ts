@@ -158,6 +158,22 @@ function targetCandidate(
 	};
 }
 
+function setProject(
+	controller: CommitController,
+	effectiveProjectKey: string,
+	projectPath: string,
+) {
+	return controller.setProjectState({
+		kind: 'available',
+		project: {
+			target: { kind: 'path', executorId: 'local', projectPath },
+			chatId: effectiveProjectKey,
+			effectiveProjectKey,
+			projectPath,
+		},
+	});
+}
+
 function makeController(overrides: Partial<CommitControllerDeps> = {}) {
 	return new CommitController({
 		...createGitSurfaceTestDeps(),
@@ -331,7 +347,7 @@ describe('CommitController', () => {
 	it('initializes checked state from staged files only', async () => {
 		const controller = makeController();
 
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		expect(controller.intentFor('staged.ts')?.desiredSelected).toBe(true);
@@ -348,7 +364,7 @@ describe('CommitController', () => {
 			refreshSummary: vi.fn().mockReturnValue(summary.promise),
 		});
 
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		const openPromise = controller.setPresentationVisible(true);
 
 		expect(controller.isPresentationVisible).toBe(true);
@@ -384,7 +400,7 @@ describe('CommitController', () => {
 				]),
 			);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		controller.togglePath('unstaged.ts', true);
@@ -414,7 +430,7 @@ describe('CommitController', () => {
 			directoryPrefix: 'src/app',
 		});
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		await controller.generateMessage();
@@ -462,7 +478,7 @@ describe('CommitController', () => {
 
 	it('retains commit text after an uncertain mutation without replaying it', async () => {
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 		controller.message = 'Preserved commit';
 		mockedApi.gitCommitIndex.mockRejectedValueOnce(
@@ -483,7 +499,7 @@ describe('CommitController', () => {
 		const staging = deferred<{ success: boolean }>();
 		mockedApi.gitStagePaths.mockReturnValueOnce(staging.promise);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 		controller.message = 'Preserved commit';
 		controller.togglePath('unstaged.ts', true);
@@ -502,7 +518,7 @@ describe('CommitController', () => {
 	it('preserves the mutation failure when summary reconciliation also fails', async () => {
 		const refreshSummary = vi.fn().mockResolvedValue(undefined);
 		const controller = makeController({ refreshSummary });
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 		controller.message = 'Preserved commit';
 		mockedApi.gitCommitIndex.mockRejectedValueOnce(
@@ -519,7 +535,7 @@ describe('CommitController', () => {
 		const generated = deferred<{ message: string }>();
 		mockedApi.generateCommitMessage.mockReturnValueOnce(generated.promise);
 		const controller = makeController();
-		await controller.setContext('/project-a', '/project-a');
+		await setProject(controller, '/project-a', '/project-a');
 		await controller.setPresentationVisible(true);
 
 		const generation = controller.generateMessage();
@@ -529,7 +545,7 @@ describe('CommitController', () => {
 				['staged.ts'],
 			);
 		});
-		await controller.setContext('/project-b', '/project-b');
+		await setProject(controller, '/project-b', '/project-b');
 		generated.resolve({ message: 'message for project A' });
 		await generation;
 
@@ -542,13 +558,13 @@ describe('CommitController', () => {
 		const stage = deferred<{ success: boolean }>();
 		mockedApi.gitStagePaths.mockReturnValueOnce(stage.promise);
 		const controller = makeController();
-		await controller.setContext('/project-a', '/project-a');
+		await setProject(controller, '/project-a', '/project-a');
 		await controller.setPresentationVisible(true);
 		controller.togglePath('unstaged.ts', true);
 		controller.message = 'project A commit';
 		const commit = controller.commit();
 
-		await controller.setContext('/project-b', '/project-b');
+		await setProject(controller, '/project-b', '/project-b');
 		stage.resolve({ success: true });
 		await expect(commit).resolves.toBe(false);
 		expect(mockedApi.gitCommitIndex).not.toHaveBeenCalled();
@@ -561,7 +577,7 @@ describe('CommitController', () => {
 			snapshot([fileNode('staged.ts', { staged: true, hasUnstaged: false })]),
 		);
 		const controller = makeController({ refreshSummary });
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 		controller.message = 'test: commit';
 		mockedApi.getGitWorkbenchSnapshot.mockClear();
@@ -586,7 +602,7 @@ describe('CommitController', () => {
 			snapshot([fileNode('staged.ts', { staged: true, hasUnstaged: false })]),
 		);
 		const controller = makeController({ refreshSummary });
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 		controller.message = 'test: commit';
 		mockedApi.getGitWorkbenchSnapshot.mockResolvedValueOnce(snapshot([]));
@@ -601,7 +617,7 @@ describe('CommitController', () => {
 	it('keeps the controller open when staging fails', async () => {
 		mockedApi.gitStagePaths.mockRejectedValueOnce(new Error('index locked'));
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		controller.togglePath('unstaged.ts', true);
@@ -625,7 +641,7 @@ describe('CommitController', () => {
 			)
 			.mockReturnValueOnce(refresh.promise);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		controller.togglePath('unstaged.ts', true);
@@ -656,7 +672,7 @@ describe('CommitController', () => {
 			)
 			.mockReturnValueOnce(refresh.promise);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		controller.togglePath('unstaged.ts', true);
@@ -698,7 +714,7 @@ describe('CommitController', () => {
 				]),
 			);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		controller.toggleDirectory('src', true);
@@ -732,7 +748,7 @@ describe('CommitController', () => {
 				]),
 			);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		controller.toggleDirectory('src', false);
@@ -757,7 +773,7 @@ describe('CommitController', () => {
 			]),
 		);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		controller.toggleDirectory('src', true);
@@ -779,7 +795,7 @@ describe('CommitController', () => {
 			)
 			.mockReturnValueOnce(refresh.promise);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 
 		const refreshPromise = controller.refreshTree();
@@ -814,7 +830,7 @@ describe('CommitController', () => {
 			]),
 		);
 		const controller = makeController();
-		await controller.setContext('/project', '/project');
+		await setProject(controller, '/project', '/project');
 		await controller.setPresentationVisible(true);
 		controller.message = 'Project draft';
 
@@ -838,7 +854,7 @@ describe('CommitController', () => {
 			snapshot([fileNode('synthetic.ts', { staged: true, hasUnstaged: false })]),
 		);
 		const controller = makeController();
-		await controller.setContext('/repo/0', '/repo/0');
+		await setProject(controller, '/repo/0', '/repo/0');
 		await controller.setPresentationVisible(true);
 		for (const [index, target] of targets.entries()) {
 			await controller.target.selectTarget(target);
@@ -867,7 +883,7 @@ describe('CommitController', () => {
 			targets: [project, worktree],
 		});
 		const controller = makeController();
-		await controller.setContext('chat', '/project');
+		await setProject(controller, 'chat', '/project');
 		await controller.setPresentationVisible(true);
 		await controller.target.selectTarget(worktree);
 		await vi.waitFor(() => expect(controller.target.isLoadingTargets).toBe(false));

@@ -1,5 +1,5 @@
 import type { GitChangeStats, GitTreeNode } from '$lib/api/git.js';
-import type { QuickCommitPathIntent } from './commit-controller.svelte.js';
+import type { QuickCommitPathIntent } from './commit-stage-queue.js';
 import { commitStatsForNode } from './commit-tree-reconciliation.js';
 
 export const COMMIT_TREE_ROW_HEIGHT = 28;

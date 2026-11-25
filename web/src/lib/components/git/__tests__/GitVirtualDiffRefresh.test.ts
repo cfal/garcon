@@ -9,7 +9,7 @@ import type {
 	GitVirtualUnifiedRow,
 	GitVirtualCollectionLimitRow,
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
-import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/__tests__/array-git-virtual-review-row-source.js';
 import { measureVirtualRow } from '../git-virtual-row-measurement.js';
 import {
 	FakeVirtualListController,

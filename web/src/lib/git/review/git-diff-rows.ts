@@ -99,18 +99,7 @@ export interface SplitDiffRowView {
 	right: SplitDiffCellView | null;
 }
 
-interface BuildUnifiedRowViewsOptions {
-	rows: RenderedDiffRow[];
-	filePath: string;
-	activeTab: GitDiffTab;
-	readOnly: boolean;
-	selectedLineKeys: Set<string>;
-	composerTarget: GitDiffComposerTarget | null;
-	syntaxResult?: GitDiffFileSyntaxResult;
-}
-
-interface BuildSplitRowViewsOptions {
-	rows: SplitDiffRow[];
+interface DiffRowViewOptions {
 	filePath: string;
 	activeTab: GitDiffTab;
 	readOnly: boolean;
@@ -146,102 +135,8 @@ export function renderUnifiedDiffRow(row: GitRenderedDiffRow): RenderedDiffRow {
 	};
 }
 
-export function buildSplitDiffRows(rows: RenderedDiffRow[]): SplitDiffRow[] {
-	const result: SplitDiffRow[] = [];
-	let rowIndex = 0;
-	let currentHunkIndex = 0;
-	let pairedRowIndex = 0;
-
-	while (rowIndex < rows.length) {
-		const row = rows[rowIndex];
-
-		if (row.kind === 'hunk-header') {
-			currentHunkIndex = row.hunkIndex;
-			result.push({
-				key: `split:${row.key}`,
-				isHeader: true,
-				headerText: row.beforeText,
-				hunkIndex: row.hunkIndex,
-				left: null,
-				right: null,
-			});
-			rowIndex++;
-			continue;
-		}
-
-		if (row.kind === 'context') {
-			result.push({
-				key: `split:${row.key}`,
-				isHeader: false,
-				hunkIndex: currentHunkIndex,
-				left: {
-					kind: 'context',
-					line: row.beforeLine,
-					text: row.beforeText,
-					diffLineIndex: row.diffLineIndex,
-				},
-				right: {
-					kind: 'context',
-					line: row.afterLine,
-					text: row.afterText || row.beforeText,
-					diffLineIndex: row.diffLineIndex,
-				},
-			});
-			rowIndex++;
-			continue;
-		}
-
-		const deletions: RenderedDiffRow[] = [];
-		const additions: RenderedDiffRow[] = [];
-
-		while (rowIndex < rows.length && rows[rowIndex].kind === 'del') {
-			deletions.push(rows[rowIndex]);
-			rowIndex++;
-		}
-		while (rowIndex < rows.length && rows[rowIndex].kind === 'add') {
-			additions.push(rows[rowIndex]);
-			rowIndex++;
-		}
-
-		const maxLength = Math.max(deletions.length, additions.length);
-		for (let pairIndex = 0; pairIndex < maxLength; pairIndex++) {
-			const deletion = deletions[pairIndex];
-			const addition = additions[pairIndex];
-			result.push({
-				key: `split:pair:${pairedRowIndex++}:${deletion?.key ?? 'empty'}:${addition?.key ?? 'empty'}`,
-				isHeader: false,
-				hunkIndex: currentHunkIndex,
-				left: deletion
-					? {
-							kind: 'del',
-							line: deletion.beforeLine,
-							text: deletion.beforeText,
-							diffLineIndex: deletion.diffLineIndex,
-						}
-					: { kind: 'empty', line: null, text: '', diffLineIndex: -1 },
-				right: addition
-					? {
-							kind: 'add',
-							line: addition.afterLine,
-							text: addition.afterText,
-							diffLineIndex: addition.diffLineIndex,
-						}
-					: { kind: 'empty', line: null, text: '', diffLineIndex: -1 },
-			});
-		}
-	}
-
-	return result;
-}
-
-export function buildUnifiedDiffRowViews(
-	options: BuildUnifiedRowViewsOptions,
-): UnifiedDiffRowView[] {
-	return options.rows.map((row) => buildUnifiedDiffRowView(options, row));
-}
-
 export function buildUnifiedDiffRowView(
-	options: Omit<BuildUnifiedRowViewsOptions, 'rows'>,
+	options: DiffRowViewOptions,
 	row: RenderedDiffRow,
 ): UnifiedDiffRowView {
 	const selectionKey = getUnifiedSelectionKey(row, options.filePath, options.activeTab);
@@ -258,8 +153,8 @@ export function buildUnifiedDiffRowView(
 		selectionKey,
 		bgClass: rowBgClass(row.kind, isSelected, showComposer),
 		lineNumClass: lineNumClass(row.kind),
-		textClass: unifiedTextClass(row.kind),
-		textPrefix: unifiedTextPrefix(row.kind),
+		textClass: textClass(row.kind),
+		textPrefix: textPrefix(row.kind),
 		text: unifiedText(row),
 		...(segments ? { segments } : {}),
 		showComposer,
@@ -269,12 +164,8 @@ export function buildUnifiedDiffRowView(
 	};
 }
 
-export function buildSplitDiffRowViews(options: BuildSplitRowViewsOptions): SplitDiffRowView[] {
-	return options.rows.map((row) => buildSplitDiffRowView(options, row));
-}
-
 export function buildSplitDiffRowView(
-	options: Omit<BuildSplitRowViewsOptions, 'rows'>,
+	options: DiffRowViewOptions,
 	row: SplitDiffRow,
 ): SplitDiffRowView {
 	return {
@@ -291,7 +182,7 @@ function buildSplitCellView(
 	cell: SplitDiffCell,
 	side: GitDiffSide,
 	hunkIndex: number,
-	options: Omit<BuildSplitRowViewsOptions, 'rows'>,
+	options: DiffRowViewOptions,
 ): SplitDiffCellView {
 	const selectionKey = getSplitCellSelectionKey(cell, side, options.filePath, options.activeTab);
 	const isSelectable = !options.readOnly && selectionKey !== null;
@@ -306,9 +197,9 @@ function buildSplitCellView(
 		isSelectable,
 		selectionKey,
 		bgClass: splitCellBgClass(cell.kind, isSelected, isComposerTarget),
-		lineNumClass: splitLineNumClass(cell.kind),
-		textClass: splitTextClass(cell.kind),
-		textPrefix: splitTextPrefix(cell.kind),
+		lineNumClass: lineNumClass(cell.kind),
+		textClass: textClass(cell.kind),
+		textPrefix: textPrefix(cell.kind),
 		...(segments ? { segments } : {}),
 		contextTarget: getSplitContextTarget(cell, side, hunkIndex),
 	};
@@ -462,7 +353,7 @@ function splitCellBgClass(
 	}
 }
 
-function lineNumClass(kind: GitDiffRowKind): string {
+function lineNumClass(kind: GitDiffRowKind | 'empty'): string {
 	switch (kind) {
 		case 'add':
 			return 'text-diff-add-line-num';
@@ -473,36 +364,13 @@ function lineNumClass(kind: GitDiffRowKind): string {
 	}
 }
 
-function splitLineNumClass(kind: SplitDiffCell['kind']): string {
-	switch (kind) {
-		case 'add':
-			return 'text-diff-add-line-num';
-		case 'del':
-			return 'text-diff-del-line-num';
-		default:
-			return 'text-foreground/70';
-	}
-}
-
-function unifiedTextClass(kind: GitDiffRowKind): string {
+function textClass(kind: GitDiffRowKind | 'empty'): string {
 	if (kind === 'add') return 'text-diff-add-fg';
 	if (kind === 'del') return 'text-diff-del-fg';
 	return 'text-foreground';
 }
 
-function splitTextClass(kind: SplitDiffCell['kind']): string {
-	if (kind === 'add') return 'text-diff-add-fg';
-	if (kind === 'del') return 'text-diff-del-fg';
-	return 'text-foreground';
-}
-
-function unifiedTextPrefix(kind: GitDiffRowKind): string {
-	if (kind === 'add') return '+';
-	if (kind === 'del') return '-';
-	return '\u00a0';
-}
-
-function splitTextPrefix(kind: SplitDiffCell['kind']): string {
+function textPrefix(kind: GitDiffRowKind | 'empty'): string {
 	if (kind === 'add') return '+';
 	if (kind === 'del') return '-';
 	return '\u00a0';

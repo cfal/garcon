@@ -4,7 +4,6 @@
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Minus from '@lucide/svelte/icons/minus';
-	import X from '@lucide/svelte/icons/x';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import ChevronUp from '@lucide/svelte/icons/chevron-up';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -13,7 +12,7 @@
 	import GitGraph from '@lucide/svelte/icons/git-graph';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import GitFileTree from './GitFileTree.svelte';
-	import GitFileTreeResizeHandle from './GitFileTreeResizeHandle.svelte';
+	import GitSplitReviewLayout from './GitSplitReviewLayout.svelte';
 	import GitFileTreeToggleButton from './GitFileTreeToggleButton.svelte';
 	import GitVirtualDiffSurface from './GitVirtualDiffSurface.svelte';
 	import GitPorcelainPanel from './GitPorcelainPanel.svelte';
@@ -30,7 +29,6 @@
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { buildGitWorkbenchCommentMessage } from '$lib/git/workbench/git-workbench-comment-message.js';
 	import { buildGitReviewBodyCommentContext } from '$lib/git/review/git-review-comment-context.js';
-	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getTransientLayers, getWorkspaceShortcuts } from '$lib/context';
 	import { singletonSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
@@ -85,6 +83,8 @@
 		Boolean(activeTarget) && (!isWorkbenchTargetCurrent || wb.isInitialLoadPending),
 	);
 	let files = $derived(wb.files);
+	let previousFile = $derived(files.previousVisibleFile());
+	let nextFile = $derived(files.nextVisibleFile());
 	let review = $derived(wb.review);
 	let selection = $derived(wb.selection);
 	let staging = $derived(wb.staging);
@@ -105,9 +105,6 @@
 		isMobile || containerPresentationForWidth(containerWidth, gitContainerBreakpoints) !== 'wide'
 			? 'narrow'
 			: 'wide',
-	);
-	let filePaneHidden = $derived(
-		containerPresentation === 'wide' ? !fileTreeVisible : singlePane !== 'files',
 	);
 	let diffViewportActive = $derived(
 		active && (containerPresentation === 'wide' || singlePane === 'diff'),
@@ -367,7 +364,7 @@
 		<button
 			type="button"
 			onclick={handlePreviousFile}
-			disabled={!files.previousVisibleFile() || files.previousVisibleFile() === files.selectedFile}
+			disabled={!previousFile || previousFile === files.selectedFile}
 			class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
 			title={m.git_previous_file()}
 			aria-label={m.git_previous_file()}
@@ -377,7 +374,7 @@
 		<button
 			type="button"
 			onclick={handleNextFile}
-			disabled={!files.nextVisibleFile() || files.nextVisibleFile() === files.selectedFile}
+			disabled={!nextFile || nextFile === files.selectedFile}
 			class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
 			title={m.git_next_file()}
 			aria-label={m.git_next_file()}
@@ -499,21 +496,6 @@
 		data-git-layout={containerPresentation}
 		{@attach observeWorkbenchWidth}
 	>
-		{#if wb.lastError}
-			<div
-				class="px-3 py-1.5 border-b border-status-error-border bg-status-error/10 flex items-center gap-2"
-			>
-				<AlertTriangle class="w-3.5 h-3.5 text-status-error-foreground shrink-0" />
-				<span class="text-xs text-status-error-foreground flex-1 truncate">{wb.lastError}</span>
-				<button
-					onclick={() => wb.dismissError()}
-					class="p-0.5 rounded hover:bg-muted transition-colors"
-				>
-					<X class="w-3 h-3 text-status-error-foreground" />
-				</button>
-			</div>
-		{/if}
-
 		{#if wb.repositoryError}
 			<div
 				class="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 py-12"
@@ -571,57 +553,27 @@
 					{/each}
 				</div>
 			{/if}
-			<div
-				class={cn(
-					'relative min-h-0 flex-1 overflow-hidden',
-					containerPresentation === 'wide' ? 'grid' : 'flex',
-				)}
-				style={containerPresentation === 'wide'
-					? `grid-template-columns: ${fileTreeVisible ? `${files.treePaneWidthPx}px 6px minmax(0,1fr)` : '0px minmax(0,1fr)'}; grid-template-rows: minmax(0,1fr);`
-					: undefined}
-				data-git-wide-layout={containerPresentation === 'wide' ? '' : undefined}
+			<GitSplitReviewLayout
+				variant="workbench"
+				wide={containerPresentation === 'wide'}
+				{singlePane}
+				{fileTreeVisible}
+				treeWidth={files.treePaneWidthPx}
+				onResize={(width) => files.previewTreePaneWidth(width)}
+				onResizeCommit={(width) => files.setTreePaneWidth(width)}
 			>
-				<div
-					class={cn(
-						'flex min-h-0 flex-col overflow-hidden bg-background',
-						containerPresentation === 'wide' && fileTreeVisible && 'border-r border-border',
-						containerPresentation === 'narrow' && 'absolute inset-0',
-						filePaneHidden && 'invisible pointer-events-none',
-					)}
-					aria-hidden={filePaneHidden}
-					inert={filePaneHidden}
-					data-git-files-pane
-				>
+				{#snippet renderFiles()}
 					<div class="min-h-0 flex-1 overflow-hidden">
 						{@render fileTree(containerPresentation !== 'wide')}
 					</div>
-				</div>
-				{#if containerPresentation === 'wide' && fileTreeVisible}
-					<GitFileTreeResizeHandle
-						width={files.treePaneWidthPx}
-						onResize={(width) => files.previewTreePaneWidth(width)}
-						onResizeCommit={(width) => files.setTreePaneWidth(width)}
-					/>
-				{/if}
-				<div
-					class={cn(
-						'flex min-h-0 min-w-0 flex-col overflow-hidden',
-						containerPresentation === 'narrow' && 'absolute inset-0',
-						containerPresentation === 'narrow' &&
-							singlePane !== 'diff' &&
-							'invisible pointer-events-none',
-						containerPresentation !== 'wide' && 'flex-1',
-					)}
-					aria-hidden={containerPresentation === 'narrow' && singlePane !== 'diff'}
-					inert={containerPresentation === 'narrow' && singlePane !== 'diff'}
-					data-git-diff-pane
-				>
+				{/snippet}
+				{#snippet renderDiff()}
 					{@render diffPane(
 						containerPresentation === 'wide' ? 5 : 3,
 						containerPresentation === 'narrow',
 					)}
-				</div>
-			</div>
+				{/snippet}
+			</GitSplitReviewLayout>
 		{/if}
 	</div>
 

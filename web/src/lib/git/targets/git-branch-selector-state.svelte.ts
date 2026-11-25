@@ -37,14 +37,14 @@ export class GitBranchSelectorState {
 	currentProjectPath = $state<string | null>(null);
 	currentEffectiveProjectKey = $state<string | null>(null);
 	currentBranch = $state('');
-	refs = $state<GitRefOption[]>([]);
+	refs = $state.raw<GitRefOption[]>([]);
 	branchSort = $state<GitRefSort>(readGitBranchSortPreference());
 	isLoadingBranches = $state(false);
 	showBranchDropdown = $state(false);
 	showNewBranchModal = $state(false);
 	newBranchName = $state('');
 	newBranchBaseRef = $state('');
-	newBranchRefs = $state<GitRefOption[]>([]);
+	newBranchRefs = $state.raw<GitRefOption[]>([]);
 	newBranchCurrentBranch = $state('');
 	newBranchProjectPath = $state<string | null>(null);
 	newBranchEffectiveProjectKey = $state<string | null>(null);
@@ -65,16 +65,6 @@ export class GitBranchSelectorState {
 
 	get branches(): string[] {
 		return this.refs.map((ref) => ref.name);
-	}
-
-	set branches(value: string[]) {
-		this.refs = value.map((branch) => ({
-			name: branch,
-			ref: branch,
-			kind: 'local-branch',
-			updatedAt: null,
-			isCurrent: branch === this.currentBranch,
-		}));
 	}
 
 	setProject(
@@ -293,7 +283,8 @@ export class GitBranchSelectorState {
 		const projectContextGeneration = this.projectContextGeneration;
 		const executorId = this.executorId;
 		try {
-			const execute = () => gitCheckoutRef({ executorId, projectPath }, refOption.ref, refOption.kind);
+			const execute = () =>
+				gitCheckoutRef({ executorId, projectPath }, refOption.ref, refOption.kind);
 			const data = this.options.runMutation
 				? await this.options.runMutation(
 						surfaceId,

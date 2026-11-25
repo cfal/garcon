@@ -1,8 +1,5 @@
 import { GIT_FRESHNESS_POLL_MS } from '$lib/api/git.js';
-import {
-	canPollVisibility,
-	startVisibilityPolling,
-} from '$lib/components/shared/visibility-polling.js';
+import { startVisibilityPolling } from '$lib/components/shared/visibility-polling.js';
 
 interface FreshnessPollingDocument {
 	visibilityState: DocumentVisibilityState;
@@ -17,12 +14,6 @@ interface GitFreshnessPollingOptions {
 	intervalMs?: number;
 	setIntervalFn?: typeof setInterval;
 	clearIntervalFn?: typeof clearInterval;
-}
-
-export function canPollGitFreshness(
-	documentRef: Pick<FreshnessPollingDocument, 'visibilityState'> | undefined = globalThis.document,
-): boolean {
-	return canPollVisibility(documentRef);
 }
 
 export function startGitFreshnessPolling({

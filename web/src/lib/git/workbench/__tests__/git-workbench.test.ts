@@ -317,17 +317,18 @@ describe('GitWorkbenchStore', () => {
 			expect(mockedApi.getGitWorkingTreeFingerprint).toHaveBeenCalledTimes(1);
 		});
 
-		it('cancels a scheduled refresh when the workbench resets', async () => {
+		it('cancels the error timer when dismissing, suspending or resetting', async () => {
 			await wb.setTarget(makeTarget('/project'));
-			mockedApi.getGitWorkbenchSnapshot.mockClear();
 			vi.useFakeTimers();
 			try {
-				wb.scheduleRefresh({ reason: 'manual' }, 100);
-				wb.reset();
-
-				await vi.advanceTimersByTimeAsync(100);
-
-				expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+				for (const clear of [() => wb.dismissError(), () => wb.suspend(), () => wb.reset()]) {
+					const timers = vi.getTimerCount();
+					wb.reportError('Synthetic error');
+					expect(vi.getTimerCount()).toBe(timers + 1);
+					clear();
+					expect(vi.getTimerCount()).toBeLessThanOrEqual(timers);
+					expect(wb.lastError).toBeNull();
+				}
 			} finally {
 				vi.useRealTimers();
 			}

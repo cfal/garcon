@@ -26,8 +26,7 @@ import { PullRequestFileProgress } from './pull-request-file-progress.svelte.js'
 
 export type PullRequestDetailTab = 'review' | 'changes' | 'checks';
 type ReviewActionTarget =
-	| { kind: 'review'; runId: null }
-	| { kind: 'stop' | 'post'; runId: string };
+	{ kind: 'review'; runId: null } | { kind: 'stop' | 'post'; runId: string };
 
 export interface PullRequestsStoreDeps {
 	reviews: PullRequestReviewsStore;
@@ -56,15 +55,15 @@ export class PullRequestsStore implements PortableSingletonController {
 	repositoryFilter = $state<string | null>(null);
 	selectedKey = $state<string | null>(null);
 	tab = $state<PullRequestDetailTab>('review');
-	detail = $state<PullRequestDetail | null>(null);
+	detail = $state.raw<PullRequestDetail | null>(null);
 	isDetailLoading = $state(false);
 	detailError = $state<string | null>(null);
-	runs = $state<PullRequestReviewRun[]>([]);
+	runs = $state.raw<PullRequestReviewRun[]>([]);
 	nextRunsCursor = $state<string | null>(null);
 	isRunsLoading = $state(false);
 	isMoreRunsLoading = $state(false);
 	runsError = $state<string | null>(null);
-	selectedRun = $state<PullRequestReviewRunDetail | null>(null);
+	selectedRun = $state.raw<PullRequestReviewRunDetail | null>(null);
 	isRunLoading = $state(false);
 	runError = $state<string | null>(null);
 	// The run shown in the Review tab; null shows the latest.
@@ -75,28 +74,28 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.reviews = deps.reviews;
 	}
 
-	get groups(): PullRequestInboxGroup[] {
+	groups = $derived.by<PullRequestInboxGroup[]>(() => {
 		return groupInbox(this.reviews.inbox, {
 			query: this.query,
 			repositoryId: this.repositoryFilter,
 		});
-	}
+	});
 
-	get selectedEntry(): PullRequestReviewInboxEntry | null {
+	selectedEntry = $derived.by<PullRequestReviewInboxEntry | null>(() => {
 		return this.reviews.inbox.find((entry) => inboxEntryKey(entry) === this.selectedKey) ?? null;
-	}
+	});
 
-	get selectedRepository(): PullRequestReviewRepository | null {
+	selectedRepository = $derived.by<PullRequestReviewRepository | null>(() => {
 		const entry = this.selectedEntry;
 		return entry ? this.reviews.repository(entry.repositoryId) : null;
-	}
+	});
 
 	get hasSelection(): boolean {
 		return this.selectedKey !== null;
 	}
 
 	get pendingReviewAction(): ReviewActionTarget | null {
-		return this.selectedKey ? this.#pendingActions.get(this.selectedKey) ?? null : null;
+		return this.selectedKey ? (this.#pendingActions.get(this.selectedKey) ?? null) : null;
 	}
 
 	get reviewActionError(): string | null {
@@ -122,7 +121,8 @@ export class PullRequestsStore implements PortableSingletonController {
 		this.#pendingActions.set(key, target);
 		this.#actionFailure = null;
 		try {
-			if (target.kind === 'review') await this.reviews.review(entry.repositoryId, entry.pull.number);
+			if (target.kind === 'review')
+				await this.reviews.review(entry.repositoryId, entry.pull.number);
 			else if (target.kind === 'stop') await this.reviews.stop(target.runId);
 			else await this.reviews.post(target.runId);
 		} catch (error) {
@@ -137,7 +137,7 @@ export class PullRequestsStore implements PortableSingletonController {
 		}
 	}
 
-	get shownRun(): PullRequestReviewRunDetail | null {
+	shownRun = $derived.by<PullRequestReviewRunDetail | null>(() => {
 		const latest = this.selectedEntry?.latestRun;
 		const selected = this.selectedRunId
 			? (this.runs.find((run) => run.id === this.selectedRunId) ?? this.selectedRun)
@@ -158,7 +158,7 @@ export class PullRequestsStore implements PortableSingletonController {
 			...summary,
 			review: this.selectedRun?.id === summary.id ? this.selectedRun.review : null,
 		};
-	}
+	});
 
 	// The inbox does not follow the chat's project.
 	setProjectState(): void {}

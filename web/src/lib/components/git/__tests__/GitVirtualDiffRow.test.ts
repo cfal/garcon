@@ -216,15 +216,19 @@ describe('GitVirtualDiffRow', () => {
 
 	it('keeps modifier-click line selection without opening review', async () => {
 		const addedRow = findUnifiedRow('add');
+		const selectableLineKeys = vi.fn(addedRow.selectableLineKeys);
 		const onAddCommentForFile = vi.fn();
 		const onToggleLineSelection = vi.fn();
-		renderRow(addedRow, {
-			interaction: {
-				...renderRowInteraction(),
-				onAddComment: onAddCommentForFile,
-				onToggleLineSelection,
+		renderRow(
+			{ ...addedRow, selectableLineKeys },
+			{
+				interaction: {
+					...renderRowInteraction(),
+					onAddComment: onAddCommentForFile,
+					onToggleLineSelection,
+				},
 			},
-		});
+		);
 
 		await fireEvent.click(screen.getByText('+new line'), { ctrlKey: true });
 
@@ -233,6 +237,35 @@ describe('GitVirtualDiffRow', () => {
 			addedRow.actionTarget,
 		);
 		expect(onAddCommentForFile).not.toHaveBeenCalled();
+		expect(selectableLineKeys).not.toHaveBeenCalled();
+	});
+
+	it('enumerates selectable lines only for shift-click with a selection anchor', async () => {
+		const row = findUnifiedRow('add');
+		const keys = row.selectableLineKeys();
+		const selectableLineKeys = vi.fn(() => keys);
+		const onSelectLineRange = vi.fn();
+		renderRow(
+			{ ...row, selectableLineKeys },
+			{
+				interaction: {
+					...renderRowInteraction(),
+					selectedLineKeys: new Set([keys[0]]),
+					onSelectLineRange,
+				},
+			},
+		);
+		const line = screen.getByText('+new line');
+		await fireEvent.click(line);
+		expect(selectableLineKeys).not.toHaveBeenCalled();
+		await fireEvent.click(line, { shiftKey: true });
+		expect(selectableLineKeys).toHaveBeenCalledOnce();
+		expect(onSelectLineRange).toHaveBeenCalledWith(
+			keys[0],
+			row.view.selectionKey,
+			keys,
+			row.actionTarget,
+		);
 	});
 
 	it('isolates the unified stage button from review activation', async () => {

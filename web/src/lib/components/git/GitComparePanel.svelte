@@ -2,14 +2,11 @@
 	import { untrack } from 'svelte';
 	import type { GitCompareSurfaceController } from '$lib/git/review/git-compare-surface.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
-	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
-	import { resolveGitEditorRoot } from '$lib/git/surface/git-editor-root.js';
 	import {
-		getFileSessions,
-		getLocalSettings,
-		getTransientLayers,
-		getWorkspaceCoordinator,
-	} from '$lib/context';
+		createGitPanelEditorAction,
+		observeGitPanelInvalidation,
+	} from './git-panel-actions.svelte.js';
+	import { getLocalSettings, getTransientLayers, getWorkspaceCoordinator } from '$lib/context';
 	import { singletonSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
 	import GitCompareToolbar from './GitCompareToolbar.svelte';
@@ -30,7 +27,6 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
-	const fileSessions = getFileSessions();
 	const localSettings = getLocalSettings();
 	const transientLayers = getTransientLayers();
 	const comparison = $derived(controller.comparison);
@@ -55,13 +51,10 @@
 		});
 	});
 
-	$effect(() => {
-		if (!presentationVisible) return;
-		const key = controller.target.effectiveProjectKey;
-		if (!key) return;
-		const version = gitProjectInvalidations.version(controller.target.executorId);
-		untrack(() => void controller.refreshForInvalidation(key, version));
-	});
+	observeGitPanelInvalidation(
+		() => presentationVisible,
+		() => controller,
+	);
 
 	function editComparison(): void {
 		if (!controller.target.canChangeTarget) return;
@@ -74,22 +67,12 @@
 		if (activeTarget) void comparison.refresh(activeTarget);
 	}
 
-	function openInEditor(relativePath: string, line: number): void {
-		if (!projectPath || !activeTarget) return;
-		void fileSessions.open({
-			executorId: activeTarget.executorId,
-			fileRootPath: resolveGitEditorRoot({
-				activeProjectPath: projectPath,
-				targetRepoRoot: activeTarget?.repoRoot,
-				reviewRepoRoot: comparison.snapshot?.repoRoot,
-			}),
-			relativePath,
-			mode: 'code',
-			origin: presentation,
-			reason: 'user-open',
-			line,
-		});
-	}
+	const openInEditor = createGitPanelEditorAction({
+		projectPath: () => projectPath,
+		target: () => activeTarget,
+		presentation: () => presentation,
+		reviewRepoRoot: () => comparison.snapshot?.repoRoot,
+	});
 </script>
 
 <div class="relative flex h-full min-h-0 flex-col bg-background">

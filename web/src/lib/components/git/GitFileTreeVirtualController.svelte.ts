@@ -6,12 +6,12 @@ import {
 	gitWorkbenchTreeRowKey,
 	type GitWorkbenchTreeRow,
 } from '$lib/git/workbench/git-workbench-tree-rows.js';
+import { indexesInRange, currentAnchor } from './git-virtual-list.js';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
 	virtualItems as selectVirtualItems,
 	type VirtualItem,
 	type VirtualListSnapshot,
-	type VirtualMutationAnchor,
 	type VirtualRange,
 } from '$lib/virt/virtual-list-types.js';
 
@@ -22,14 +22,6 @@ interface GitFileTreeVirtualControllerOptions {
 	get viewportElement(): HTMLElement | null;
 	get onSelectFile(): (path: string) => void;
 	get onToggleDir(): (path: string) => void;
-}
-
-function indexesInRange(range: VirtualRange | null): number[] {
-	if (!range) return [];
-	return Array.from(
-		{ length: range.endIndex - range.startIndex + 1 },
-		(_, offset) => range.startIndex + offset,
-	);
 }
 
 function indexWithinRange(index: number, range: VirtualRange): number {
@@ -72,7 +64,7 @@ export class GitFileTreeVirtualController {
 					kind: 'update',
 					keys: rows.map((row) => row.key),
 					estimates: rows.map(() => GIT_WORKBENCH_TREE_ROW_HEIGHT),
-					anchor: this.#currentAnchor(),
+					anchor: currentAnchor(this.#virtual),
 				});
 				if (result.kind === 'rejected') {
 					console.error(`Git file tree virtualization rejected source geometry: ${result.reason}`);
@@ -202,14 +194,6 @@ export class GitFileTreeVirtualController {
 
 	destroy(): void {
 		this.#virtual.destroy();
-	}
-
-	#currentAnchor(): VirtualMutationAnchor {
-		const position = this.#virtual.viewportPosition;
-		const item = position
-			? this.#virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
-			: undefined;
-		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
 	}
 
 	#revealSelectedRow(index: number): void {

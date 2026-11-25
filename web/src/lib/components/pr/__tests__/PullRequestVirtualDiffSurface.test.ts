@@ -2,8 +2,8 @@ import { render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getLocalSettings } from '$lib/context';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-import { buildUnifiedDiffRowViews } from '$lib/git/review/git-diff-rows.js';
-import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { buildUnifiedDiffRowView } from '$lib/git/review/git-diff-rows.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/__tests__/array-git-virtual-review-row-source.js';
 import { installGitVirtualDiffTestLayout } from '$lib/components/git/__tests__/git-virtual-diff-test-layout.js';
 import PullRequestVirtualDiffSurface from '../PullRequestVirtualDiffSurface.svelte';
 
@@ -17,25 +17,25 @@ describe('PullRequestVirtualDiffSurface', () => {
 		const settings = createLocalSettingsStore();
 		settings.gitDiffFontSize = 'default';
 		vi.mocked(getLocalSettings).mockReturnValue(settings);
-		const [view] = buildUnifiedDiffRowViews({
-			rows: [
-				{
-					key: 'line:1',
-					kind: 'add',
-					beforeLine: null,
-					afterLine: 1,
-					beforeText: '',
-					afterText: 'Synthetic addition',
-					hunkIndex: 0,
-					diffLineIndex: 0,
-				},
-			],
-			filePath: 'example.ts',
-			activeTab: 'unstaged',
-			readOnly: true,
-			selectedLineKeys: new Set(),
-			composerTarget: null,
-		});
+		const view = buildUnifiedDiffRowView(
+			{
+				filePath: 'example.ts',
+				activeTab: 'unstaged',
+				readOnly: true,
+				selectedLineKeys: new Set(),
+				composerTarget: null,
+			},
+			{
+				key: 'line:1',
+				kind: 'add',
+				beforeLine: null,
+				afterLine: 1,
+				beforeText: '',
+				afterText: 'Synthetic addition',
+				hunkIndex: 0,
+				diffLineIndex: 0,
+			},
+		);
 		const source = arrayGitVirtualReviewRowSource([
 			{
 				kind: 'unified-row',

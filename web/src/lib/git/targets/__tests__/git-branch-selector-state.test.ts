@@ -105,7 +105,9 @@ describe('GitBranchSelectorState', () => {
 
 	it('reuses branch data for the same project and resets on project changes', () => {
 		branchSelector.setProject('/project-a', 'main');
-		branchSelector.branches = ['main'];
+		branchSelector.refs = [
+			{ name: 'main', ref: 'main', kind: 'local-branch', updatedAt: null, isCurrent: true },
+		];
 		branchSelector.showBranchDropdown = true;
 
 		branchSelector.setProject('/project-a', 'feature');

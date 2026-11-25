@@ -53,8 +53,12 @@
 			},
 			visibleFilePaths: filePaths,
 			fileBodies: diff.fileBodies,
-			syntaxResults: diff.syntax.results,
-			loadingBodies: diff.loadingBodies,
+			get syntaxResults() {
+				return diff.syntax.results;
+			},
+			get loadingBodies() {
+				return diff.loadingBodies;
+			},
 			focusedFilePath: null,
 			diffMode: 'unified',
 			contextLines: 3,
