@@ -950,16 +950,25 @@ describe('VirtualListController', () => {
 		expect(test.writes).toBe(1);
 	});
 
-	it('uses the visible row when the requested measurement anchor is absent', () => {
-		const test = harness({ measurementAnchor: { kind: 'item', key: 'missing' } });
+	it('falls back to the visible row when a pending measurement anchor is removed', () => {
+		const test = harness({ measurementAnchor: { kind: 'item', key: 'reader' } });
 		test.controller.apply({
-			kind: 'update', keys: ['before', 'visible', 'tail'], estimates: [100, 100, 300],
+			kind: 'update', keys: ['before', 'visible', 'reader', 'tail'], estimates: [100, 100, 100, 500],
 			anchor: { kind: 'none' },
 		});
-		test.setPhysicalScrollTop(110);
-		test.mountItem('before', 140);
+		const before = test.mountItem('before', 100);
+		test.controller.scrollToAnchor('reader', 10);
 		test.environment.flushMicrotasks();
-		expect(test.viewport.scrollTop).toBe(150);
+		expect(test.viewport.scrollTop).toBe(190);
+
+		test.environment.observer.emit(before.element, 120);
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'visible', 'tail'], estimates: [100, 100, 500],
+			anchor: { kind: 'none' },
+		});
+		test.environment.observer.emit(before.element, 150);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(240);
 	});
 
 	it('preserves a pending navigation target through a resize batch', () => {

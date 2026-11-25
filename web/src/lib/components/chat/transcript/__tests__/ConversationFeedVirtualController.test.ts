@@ -355,6 +355,41 @@ describe('ConversationFeedVirtualController', () => {
 		expect(writes).toEqual([]);
 	});
 
+	it('hands measurement ownership to a second restore after the first has written', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const runtime = await import('../conversation-feed-virtual-runtime.js');
+		const settleTarget = runtime.settleConversationTarget;
+		const finishFirst = Promise.withResolvers<void>();
+		using settle = vi.spyOn(runtime, 'settleConversationTarget');
+		// Delays the first request's cleanup until the second owns the viewport.
+		settle.mockImplementationOnce(async input => {
+			const result = await settleTarget(input);
+			await finishFirst.promise;
+			return result;
+		});
+		const first = observeReadingTarget(exposure, 3);
+		first.node.dataset.chatLayoutPending = 'true';
+		const previous = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -8 });
+		await first.firstWrite;
+
+		const second = observeReadingTarget(exposure, 5);
+		second.node.dataset.chatLayoutPending = 'true';
+		const current = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-5' }, { viewportOffset: 10 });
+		await second.firstWrite;
+		finishFirst.resolve();
+		expect(await previous).toBe('cancelled');
+		const preceding = second.view.querySelector<HTMLElement>('[data-chat-virtual-item][data-index="4"]')!;
+		Object.defineProperty(preceding, 'offsetHeight', { configurable: true, value: 80 });
+		ResizeObserverHarness.emit(second.view, second.view.clientWidth, second.view.clientHeight);
+		await nextFrame();
+		const offsetBeforeSettlement = second.node.getBoundingClientRect().top;
+		delete second.node.dataset.chatLayoutPending;
+		expect(await current).toBe('completed');
+		expect(offsetBeforeSettlement).toBe(10);
+		expect(first.writes).toEqual([128]);
+		expect(second.writes).toEqual([190, 230]);
+	});
+
 	it('centers ordinary navigation but preserves an explicit zero reader offset', async () => {
 		const { exposure } = await renderController({ initialPinned: false });
 		const view = exposure.viewport()!;
@@ -369,6 +404,28 @@ describe('ConversationFeedVirtualController', () => {
 		writes.length = 0;
 		expect(await exposure.controller.scrollToTarget(target, { viewportOffset: 0 })).toBe('completed');
 		expect(writes).toEqual([exposure.controller.snapshot.positions.itemAt(3)!.start]);
+	});
+
+	it.each(['row', 'dom-anchor'] as const)('keeps geometric measurement during aligned %s navigation', async kind => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const view = exposure.viewport()!;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await settleController();
+		const { node, firstWrite, writes } = observeReadingTarget(exposure, 11);
+		const maximum = view.scrollHeight - view.clientHeight;
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget(
+			{ kind, id: 'row-11' }, kind === 'dom-anchor' ? { viewportOffset: 6.5 } : {},
+		);
+		await firstWrite;
+		const belowTop = view.querySelector<HTMLElement>('[data-chat-virtual-item][data-index="9"]')!;
+		ResizeObserverHarness.emit(belowTop, view.clientWidth, 80);
+		await nextFrame();
+		const writesBeforeSettlement = [...writes];
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(exposure.controller.snapshot.positions.itemAt(9)?.size).toBe(80);
+		expect(writesBeforeSettlement).toEqual([maximum]);
 	});
 
 	it('leaves the reader in control when they scroll after the first restore write', async () => {

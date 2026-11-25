@@ -152,15 +152,13 @@ export class VirtualListTransaction {
 		if (mutation.kind === 'reset-measurements') this.geometry.resetMeasurements();
 		this.geometry.setItems(mutation.keys, mutation.estimates);
 		this.#driver?.pruneKeys((key) => this.geometry.indexOf(key) !== undefined);
-		if (mutation.anchor.kind === 'item-remap') {
-			const pendingCommit = this.#pendingCommit;
-			const pendingAnchor = pendingCommit?.measurementAnchor;
-			if (pendingCommit && pendingAnchor?.kind === 'item' && pendingAnchor.key === mutation.anchor.oldKey) {
-				pendingCommit.measurementAnchor = {
-					kind: 'item',
-					key: mutation.anchor.newKey,
-				};
-			}
+		const pendingCommit = this.#pendingCommit;
+		if (pendingCommit?.measurementAnchor?.kind === 'item') {
+			const key = pendingCommit.measurementAnchor.key;
+			const nextKey = mutation.anchor.kind === 'item-remap' && mutation.anchor.oldKey === key
+				? mutation.anchor.newKey : key;
+			if (this.geometry.indexOf(nextKey) === undefined) delete pendingCommit.measurementAnchor;
+			else if (nextKey !== key) pendingCommit.measurementAnchor = { kind: 'item', key: nextKey };
 		}
 		if (this.#suspended) return { kind: 'applied' };
 
