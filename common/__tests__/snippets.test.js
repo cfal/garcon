@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  SNIPPET_EXPANDED_MAX_LENGTH,
   snippetTemplateUsesChatId,
+  snippetTemplateUsesCurrentDate,
+  snippetTemplateUsesCurrentDateLocal,
   snippetTemplateUsesProjectPath,
   normalizeExpandSnippetRequest,
 } from '../snippets.js';
+import {
+  preambleContentUsesChatId,
+  preambleContentUsesCurrentDate,
+  preambleContentUsesCurrentDateLocal,
+} from '../preambles.js';
+import {
+  expandScheduledSnippetTemplate,
+  expandSnippetTemplate,
+  ScheduledSnippetBoundaryError,
+  SnippetExpansionError,
+} from '../snippet-template.js';
+import { TEMPLATE_VALIDATION_VALUES } from '../template-tokens.js';
 
 describe('snippetTemplateUsesProjectPath', () => {
   it('detects an unescaped project path token', () => {
@@ -48,5 +63,61 @@ describe('snippetTemplateUsesChatId', () => {
     expect(snippetTemplateUsesChatId('Send from {{chat_id}}')).toBe(true);
     expect(snippetTemplateUsesChatId('Keep \\{{chat_id}} literal')).toBe(false);
     expect(snippetTemplateUsesChatId('Review {{arguments}}')).toBe(false);
+  });
+});
+
+describe('snippet and preamble date token detection', () => {
+  it('detects only active current date tokens in snippets', () => {
+    expect(snippetTemplateUsesCurrentDate('Date {{current_date}}')).toBe(true);
+    expect(snippetTemplateUsesCurrentDate('Keep \\{{current_date}} literal')).toBe(false);
+    expect(snippetTemplateUsesCurrentDate('Local {{current_date_local}}')).toBe(false);
+    expect(snippetTemplateUsesCurrentDateLocal('Local {{current_date_local}}')).toBe(true);
+    expect(snippetTemplateUsesCurrentDateLocal('Keep \\{{current_date_local}} literal')).toBe(false);
+    expect(snippetTemplateUsesCurrentDateLocal('UTC {{current_date}}')).toBe(false);
+  });
+
+  it('detects only runtime tokens in preambles and ignores snippet-only tokens', () => {
+    expect(preambleContentUsesChatId('Chat {{chat_id}}')).toBe(true);
+    expect(preambleContentUsesChatId('Literal \\{{chat_id}} and {{project_path}}')).toBe(false);
+    expect(preambleContentUsesCurrentDate('UTC {{current_date}}')).toBe(true);
+    expect(preambleContentUsesCurrentDate('Literal \\{{current_date}}')).toBe(false);
+    expect(preambleContentUsesCurrentDateLocal('Local {{current_date_local}}')).toBe(true);
+    expect(preambleContentUsesCurrentDateLocal('Literal \\{{current_date_local}}')).toBe(false);
+  });
+});
+
+describe('shared snippet template expansion', () => {
+  it('expands snippet templates and reports oversized expansions with SnippetExpansionError', () => {
+    expect(
+      expandSnippetTemplate('Review {{arguments}} in {{chat_id}} (\\{{current_date}})', {
+        arguments: 'API',
+        projectPath: '',
+        context: { ...TEMPLATE_VALIDATION_VALUES, chat_id: 'chat-1' },
+      }),
+    ).toBe('Review API in chat-1 ({{current_date}})');
+
+    expect(() =>
+      expandSnippetTemplate('{{arguments}}{{arguments}}', {
+        arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH),
+        projectPath: '',
+        context: TEMPLATE_VALIDATION_VALUES,
+      }),
+    ).toThrow(SnippetExpansionError);
+  });
+
+  it('expands scheduled snippet templates and reports deferred boundary errors', () => {
+    expect(
+      expandScheduledSnippetTemplate('Review {{arguments}} on {{current_date}}', {
+        arguments: '{{chat_id}}',
+        projectPath: '',
+      }),
+    ).toBe('Review \\{{chat_id}} on {{current_date}}');
+
+    expect(() =>
+      expandScheduledSnippetTemplate('{{arguments}}{{current_date}}', {
+        arguments: 'report\\',
+        projectPath: '',
+      }),
+    ).toThrow(ScheduledSnippetBoundaryError);
   });
 });
