@@ -1,4 +1,13 @@
-import { LOCAL_STORAGE_KEYS, SESSION_STORAGE_KEYS } from '$lib/utils/local-persistence';
+import {
+	LOCAL_STORAGE_KEYS,
+	LOCAL_STORAGE_PREFIXES,
+	SESSION_STORAGE_KEYS,
+} from '$lib/utils/local-persistence';
+import {
+	CHAT_TRANSCRIPT_INDEX_KEY,
+	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX,
+} from '$lib/utils/local-storage-cache-recovery';
+import { CREDENTIAL_PENDING_KEY } from './session.js';
 import {
 	readBrowserLogoutEpoch,
 	canClearBrowserData,
@@ -17,9 +26,9 @@ const TAB_EPOCH_KEY = 'garcon.tab-logout-epoch';
 const tabKeys = new Set<string>(Object.values(SESSION_STORAGE_KEYS));
 const localKeys = new Set<string>([
 	...Object.values(LOCAL_STORAGE_KEYS),
-	'garcon.credential-update-pending',
+	CREDENTIAL_PENDING_KEY,
 	'garcon-tickets-preferences-v1',
-	'chat_snapshot_index_v3',
+	CHAT_TRANSCRIPT_INDEX_KEY,
 ]);
 
 function removeMatching(storage: Storage, matches: (key: string) => boolean): void {
@@ -123,8 +132,8 @@ export async function clearBrowserPrivateData(logout: BrowserLogout): Promise<bo
 			localStorage,
 			(key) =>
 				localKeys.has(key) ||
-				key.startsWith('chat_draft_') ||
-				key.startsWith('chat_snapshot_') ||
+				key.startsWith(LOCAL_STORAGE_PREFIXES.chatDraft) ||
+				key.startsWith(CHAT_TRANSCRIPT_SNAPSHOT_PREFIX) ||
 				key.startsWith('garcon_terminal_client_identity_claim_v1:'),
 		);
 	} catch {

@@ -1,8 +1,7 @@
 declare const self: ServiceWorkerGlobalScope;
 
 import { openNotificationChat } from '../service-worker-notifications.js';
-import { version } from '$app/env';
-import { immutable, assets } from '$app/manifest';
+import { dev, version } from '$app/env';
 import { stripBasePath } from '../../../common/base-path.js';
 import {
 	withNavigationTimeout,
@@ -10,17 +9,19 @@ import {
 	precacheAppShell,
 	preserveCachedFonts,
 	shouldCacheNavigationResponse,
-	type ServiceWorkerPrecacheManifest,
 } from '../service-worker-helpers.js';
+
+// Injected by runtime-shell.ts from the static shell's Vite import graph.
+declare const __GARCON_PRECACHE__: {
+	readonly eager: readonly string[];
+	readonly fonts: readonly string[];
+};
 
 // The same build can be served at different runtime mounts.
 const base = new URL(self.registration.scope).pathname.replace(/\/$/, '');
 const CACHE_PREFIX = `garcon:${encodeURIComponent(base)}:`;
 const CACHE_NAME = `${CACHE_PREFIX}${version}`;
-const PRECACHE_MANIFEST: ServiceWorkerPrecacheManifest = {
-	build: immutable.map(({ path }) => `${base}/${path}`),
-	files: assets.map(({ path }) => `${base}/${path}`),
-};
+const precache = dev ? { eager: [], fonts: [] } : __GARCON_PRECACHE__;
 
 self.addEventListener('notificationclick', (event) => {
 	event.notification.close();
@@ -56,7 +57,7 @@ self.addEventListener('install', (event) => {
 	event.waitUntil(
 		caches
 			.open(CACHE_NAME)
-			.then((cache) => precacheAppShell(cache, PRECACHE_MANIFEST, base))
+			.then((cache) => precacheAppShell(cache, precache.eager, base))
 			.then(() => self.skipWaiting()),
 	);
 });
@@ -68,6 +69,7 @@ self.addEventListener('activate', (event) => {
 			.keys()
 			.then(async (keys) => {
 				const current = await caches.open(CACHE_NAME);
+				const fonts = precache.fonts.map((path) => `${base}/${path}`);
 				await Promise.all(
 					keys
 						.filter((name) => {
@@ -75,7 +77,7 @@ self.addEventListener('activate', (event) => {
 							return legacyRootCache || (name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME);
 						})
 						.map(async (name) => {
-							await preserveCachedFonts(current, await caches.open(name), PRECACHE_MANIFEST);
+							await preserveCachedFonts(current, await caches.open(name), fonts);
 							await caches.delete(name);
 						}),
 				);

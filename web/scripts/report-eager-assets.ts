@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { renderRuntimeShell } from '../../common/runtime-shell.js';
-import { assertEagerAssetBudget, assertLazyRendererAssets, collectEagerAssets, type ManifestEntry } from './eager-assets.js';
+import { assertEagerAssetBudget, assertLazyRendererAssets, collectEagerAssets, linkedAssets, type ManifestEntry } from './eager-assets.js';
 
 interface AssetReport {
 	file: string;
@@ -16,25 +16,6 @@ const indexPath = path.join(buildRoot, 'index.html');
 
 function readJson<T>(filePath: string): T {
 	return JSON.parse(readFileSync(filePath, 'utf8')) as T;
-}
-
-function normalizedAssetPath(href: string): string {
-	const normalized = href.replace(/^\//, '').split(/[?#]/, 1)[0];
-	if (!normalized || normalized.split('/').includes('..')) {
-		throw new Error(`Invalid build asset path: ${href}`);
-	}
-	return normalized;
-}
-
-function linkedAssets(html: string, relation: 'modulepreload' | 'stylesheet'): string[] {
-	const assets: string[] = [];
-	for (const match of html.matchAll(/<link\b[^>]*>/g)) {
-		const tag = match[0];
-		if (!new RegExp(`\\brel=["']${relation}["']`).test(tag)) continue;
-		const href = tag.match(/\bhref=["']([^"']+)["']/)?.[1];
-		if (href) assets.push(normalizedAssetPath(href));
-	}
-	return assets;
 }
 
 function reportAssets(
@@ -85,10 +66,23 @@ const eagerJs = reportAssets(
 	manifest,
 );
 const eagerCss = reportAssets(eagerCssFiles, keysByFile, manifest);
+const workspaceEntry = Object.values(manifest).find(({ name }) => name === 'WorkspaceBoot');
 if (process.argv.includes('--check')) {
 	assertLazyRendererAssets(eagerJs);
+	if (!workspaceEntry || eagerFiles.has(workspaceEntry.file)) {
+		throw new Error('Authenticated workspace must remain outside the public shell');
+	}
+	const workspace = collectEagerAssets([workspaceEntry.file], [], manifest);
+	const workspaceJs = reportAssets([...workspace.files].filter((file) => file.endsWith('.js')), keysByFile, manifest);
+	assertLazyRendererAssets(workspaceJs);
 	assertEagerAssetBudget(sumBytes(eagerJs), sumBytes(eagerCss));
 }
+const worker = readFileSync(path.join(buildRoot, 'service-worker.js'), 'utf8');
+const precacheJson = worker.split('\n', 1)[0].match(/^const __GARCON_PRECACHE__ = (.*);$/)?.[1];
+if (!precacheJson) throw new Error('Service worker is missing the eager precache manifest');
+const { eager } = JSON.parse(precacheJson) as { eager: string[] };
+const precachedAssets = reportAssets(['index.html', ...eager], keysByFile, manifest);
+if (process.argv.includes('--check')) assertLazyRendererAssets(precachedAssets);
 const allJs = reportAssets(
 	collectFiles(buildRoot)
 		.filter((file) => file.endsWith('.js'))
@@ -113,6 +107,7 @@ console.log(
 			preloadedJs: { count: preloadJs.length, bytes: sumBytes(preloadJs), assets: preloadJs },
 			eagerJs: { count: eagerJs.length, bytes: sumBytes(eagerJs), assets: eagerJs },
 			eagerCss: { count: eagerCss.length, bytes: sumBytes(eagerCss), assets: eagerCss },
+			precachedShell: { count: precachedAssets.length, bytes: sumBytes(precachedAssets) },
 			allJs: { count: allJs.length, bytes: sumBytes(allJs) },
 		},
 		null,

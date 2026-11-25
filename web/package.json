@@ -110,7 +110,6 @@
 		"@tiptap/pm": "3.32.0",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/addon-web-links": "^0.12.0",
-		"@xterm/addon-webgl": "^0.19.0",
 		"@xterm/xterm": "^6.0.0",
 		"@xyflow/svelte": "1.7.0",
 		"bits-ui": "2.22.0",
