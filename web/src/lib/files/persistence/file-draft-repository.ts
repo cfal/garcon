@@ -70,7 +70,8 @@ export interface FileDraftRepository {
 	putDraft(record: FileDraft): Promise<void>;
 	deleteDraft(documentId: string, canDelete?: (current: FileDraft) => boolean): Promise<void>;
 	getDrafts(userNamespace: string, deploymentId: string): Promise<FileDraftSummary[]>;
-	getDraftSummary(documentId: string): Promise<FileDraftSummary | null>;
+	// Starts the read synchronously on the open connection, without opening storage.
+	snapshotDraftVersion(documentId: string): Promise<FileDraftVersion | null>;
 	getDraft(documentId: string): Promise<FileDraft | null>;
 	clearDrafts(userNamespace: string, deploymentId: string): Promise<void>;
 	putRecent(record: FileRecentLocationV1): Promise<void>;
@@ -88,14 +89,24 @@ export function createFileDraftRepository(
 ): FileDraftRepository {
 	if (!indexedDb) return createMemoryFileDraftRepository(false);
 	let databasePromise: Promise<IDBDatabase> | null = null;
+	let readyDatabase: IDBDatabase | null = null;
 	const open = () => {
 		if (!databasePromise) {
 			const opening = openDatabase(indexedDb, () => {
-				if (databasePromise === opening) databasePromise = null;
-			}).catch((error) => {
-				if (databasePromise === opening) databasePromise = null;
-				throw error;
-			});
+				if (databasePromise === opening) {
+					databasePromise = null;
+					readyDatabase = null;
+				}
+			}).then(
+				(database) => {
+					if (databasePromise === opening) readyDatabase = database;
+					return database;
+				},
+				(error) => {
+					if (databasePromise === opening) databasePromise = null;
+					throw error;
+				},
+			);
 			databasePromise = opening;
 		}
 		return databasePromise;
@@ -150,9 +161,10 @@ export function createFileDraftRepository(
 				deploymentId,
 			);
 		},
-		async getDraftSummary(documentId) {
+		async snapshotDraftVersion(documentId) {
+			if (!readyDatabase) return null;
 			return runTransaction(
-				await open(),
+				readyDatabase,
 				FILE_DRAFT_SUMMARY_STORE_NAME,
 				'readonly',
 				async (store) =>
@@ -230,6 +242,7 @@ export function createFileDraftRepository(
 				() => undefined,
 			);
 			databasePromise = null;
+			readyDatabase = null;
 		},
 	};
 }
@@ -260,9 +273,9 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 				latestDrafts([...drafts.values()].map(summarizeFileDraft), userNamespace, deploymentId),
 			);
 		},
-		async getDraftSummary(documentId) {
+		async snapshotDraftVersion(documentId) {
 			const draft = drafts.get(documentId);
-			return draft ? summarizeFileDraft(draft) : null;
+			return draft ? { savedAt: draft.savedAt, checkpointId: draft.checkpointId } : null;
 		},
 		async getDraft(documentId) {
 			return structuredClone(drafts.get(documentId) ?? null);
