@@ -371,7 +371,7 @@ export class FileSessionRegistry {
 	): Promise<void> {
 		const drafts = this.#drafts;
 		await this.#saves.submit(document, content, controller, revision);
-		if (!document.dirty && drafts === this.#drafts) drafts?.confirmSave(document, content);
+		if (drafts === this.#drafts) drafts?.confirmSave(document, content);
 	}
 
 	async refresh(sessionId: string): Promise<void> {
