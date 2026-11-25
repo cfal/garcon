@@ -8,6 +8,8 @@ import {
   runtimeRows,
   type AgentRuntimeEvent,
   type AgentRuntimeOperation,
+  type RuntimeSteerRequest,
+  type RuntimeSteerTarget,
 } from '../execution/runtime-events.js';
 import {
   assertAcpExecutionOpen,
@@ -18,10 +20,17 @@ import {
   type AcpStartedSession,
   type AcpStartRequest,
 } from './runtime-types.js';
-import { AgentIntegrationError, type AgentLogger } from '@garcon/server-agent-interface';
+import {
+  AgentIntegrationError,
+  type AgentLogger,
+  type AgentSteerRejectionReason,
+  type AgentSteerResult,
+} from '@garcon/server-agent-interface';
 import { AcpClient } from './client.js';
+import { AcpRpcError } from './errors.js';
 import type {
   AcpJsonRpcId,
+  AcpSessionPromptResult,
   AcpSessionRequestPermission,
   AcpSessionUpdateNotification,
 } from './protocol.js';
@@ -56,12 +65,15 @@ import {
 
 // How long a cancelled prompt may take to settle before the next turn replaces its process.
 const DEFAULT_CANCEL_SETTLE_TIMEOUT_MS = 10_000;
+// How long the agent may take to settle the prompt a steer superseded, or to refuse the steer.
+const DEFAULT_STEER_DECISION_TIMEOUT_MS = 15_000;
 
 export interface AcpAgentRuntimeOptions {
   converter: AcpEventConverter;
   createTransport?: () => AcpTransport;
   logger?: AgentLogger;
   cancelSettleTimeoutMs?: number;
+  steerDecisionTimeoutMs?: number;
 }
 
 interface PendingResume {
@@ -84,7 +96,9 @@ export class AcpAgentRuntime {
   #createTransport: () => AcpTransport;
   #logger: AgentLogger;
   #cancelSettleTimeoutMs: number;
+  #steerDecisionTimeoutMs: number;
   #sessions = new Map<string, AcpAgentRuntimeSession>();
+  #steerTargets = new WeakMap<RuntimeSteerTarget, AcpTurnContext>();
   #restores = new Map<string, { chatId: string; settled: Promise<void> }>();
   #pendingResumes = new Set<PendingResume>();
   #lifetime = new AbortController();
@@ -106,6 +120,7 @@ export class AcpAgentRuntime {
     this.#createTransport = options.createTransport ?? (() => new AcpTransport());
     this.#logger = options.logger ?? SILENT_LOGGER;
     this.#cancelSettleTimeoutMs = options.cancelSettleTimeoutMs ?? DEFAULT_CANCEL_SETTLE_TIMEOUT_MS;
+    this.#steerDecisionTimeoutMs = options.steerDecisionTimeoutMs ?? DEFAULT_STEER_DECISION_TIMEOUT_MS;
   }
 
   async startSession(request: AcpStartRequest): Promise<AcpStartedSession> {
@@ -278,6 +293,122 @@ export class AcpAgentRuntime {
       }));
   }
 
+  captureSteerTarget(agentSessionId: string): RuntimeSteerTarget | null {
+    const turn = this.#sessions.get(agentSessionId)?.activeTurn;
+    if (!turn || this.#steerRejection(turn)) return null;
+    const target = Object.freeze({});
+    this.#steerTargets.set(target, turn);
+    return target;
+  }
+
+  async steer(request: RuntimeSteerRequest): Promise<AgentSteerResult> {
+    const turn = request.target ? this.#steerTargets.get(request.target) : undefined;
+    if (!turn) return rejectedSteer('no-active-turn', 'No active turn');
+    this.#steerTargets.delete(request.target!);
+    if (turn.session.id !== request.agentSessionId || turn.session.chatId !== request.chatId) {
+      return rejectedSteer('turn-changed', 'The steering target belongs to another session');
+    }
+    turn.steersInFlight += 1;
+    try {
+      return await this.#steerTurn(turn, request);
+    } finally {
+      turn.steersInFlight -= 1;
+      this.#closePromptsIfDrained(turn);
+    }
+  }
+
+  async #steerTurn(turn: AcpTurnContext, request: RuntimeSteerRequest): Promise<AgentSteerResult> {
+    // Taken before delivery is prepared, so nothing waits between preparing and sending.
+    while (turn.steerSlot) await turn.steerSlot;
+    const slot = Promise.withResolvers<void>();
+    turn.steerSlot = slot.promise;
+    try {
+      const rejection = this.#steerRejection(turn);
+      if (rejection) return rejection;
+      await request.prepareDelivery();
+      // Checked and sent without an await between them, so the prompt cannot miss the turn's end.
+      return this.#steerRejection(turn) ?? await this.#sendSteer(turn, request.input);
+    } finally {
+      turn.steerSlot = null;
+      slot.resolve();
+    }
+  }
+
+  #steerRejection(turn: AcpTurnContext): AgentSteerResult | null {
+    if (!this.#policy.steersWithOverlappingPrompts) {
+      return rejectedSteer('turn-not-steerable', `${this.#policy.agentId} does not take steering input`);
+    }
+    const session = turn.session;
+    if (
+      turn.completed
+      || turn.promptsClosed
+      || turn.aborted
+      || turn.sourceRetired
+      || session.retired
+      || session.activeTurn !== turn
+      || !session.client.isConnected
+    ) {
+      return rejectedSteer('turn-changed', 'The active turn changed');
+    }
+    // The agent refuses an overlapping prompt until the answer arrives.
+    if (turn.pendingPermissions.size > 0) {
+      return rejectedSteer('turn-not-steerable', 'The active turn is waiting for a permission answer');
+    }
+    return null;
+  }
+
+  // The agent accepts the steer by settling a prompt the steer supersedes, and
+  // refuses it with an error on the steer's prompt while those still run. With
+  // none open, as when the turn's prompt settled while this steer was held, the
+  // agent runs the steer as the next prompt, so a written steer is accepted.
+  #sendSteer(turn: AcpTurnContext, input: string): Promise<AgentSteerResult> {
+    const superseded = [...turn.openPrompts];
+    const decision = Promise.withResolvers<AgentSteerResult>();
+    const accept = () => decision.resolve({ kind: 'accepted' });
+    const prompt = turn.session.client.promptSession({
+      sessionId: turn.session.id,
+      prompt: [{ type: 'text', text: input }],
+    }, superseded.length === 0 ? accept : undefined);
+    this.#trackTurnPrompt(turn, prompt);
+    // A superseded prompt that fails is an earlier refused steer or a lost
+    // transport, which the steer's own prompt then reports.
+    for (const open of superseded) open.then(accept, () => {});
+    prompt.then(accept, (error: unknown) => decision.resolve(
+      error instanceof AcpRpcError && superseded.some((open) => turn.openPrompts.has(open))
+        ? rejectedSteer('provider-rejected', error.message)
+        : unconfirmedSteer(humanizeError(error)),
+    ));
+    const timer = setTimeout(() => decision.resolve(unconfirmedSteer(
+      `${this.#policy.agentId} did not confirm the steering input within ${this.#steerDecisionTimeoutMs}ms`,
+    )), this.#steerDecisionTimeoutMs);
+    timer.unref?.();
+    return decision.promise.finally(() => clearTimeout(timer));
+  }
+
+  // Registered before any decision handler, so those see this prompt's settlement in `openPrompts`.
+  #trackTurnPrompt(turn: AcpTurnContext, prompt: Promise<AcpSessionPromptResult>): void {
+    turn.openPrompts.add(prompt);
+    const settle = (failure: { readonly error: unknown } | null) => {
+      turn.openPrompts.delete(prompt);
+      // A failure while another prompt still runs is the agent refusing this one.
+      if (!failure || turn.openPrompts.size === 0) turn.promptFailure = failure;
+      this.#closePromptsIfDrained(turn);
+    };
+    prompt.then(() => settle(null), (error: unknown) => settle({ error }));
+  }
+
+  // Closes in the same step that observes the drain, so no later steer can pass its checks.
+  #closePromptsIfDrained(turn: AcpTurnContext): void {
+    if (turn.promptsClosed || turn.openPrompts.size > 0 || turn.steersInFlight > 0) return;
+    turn.promptsClosed = true;
+    turn.promptsDrained.resolve();
+  }
+
+  #announceSteerable(turn: AcpTurnContext): void {
+    if (this.#steerRejection(turn)) return;
+    this.#publishTurnEvent(turn, { type: 'steerable' });
+  }
+
   async #resolvePermission(
     pending: PendingPermissionRequest,
     decision: PermissionDecisionPayload,
@@ -291,6 +422,7 @@ export class AcpAgentRuntime {
     );
     this.#pendingPermissions.delete(pending);
     pending.turn.pendingPermissions.delete(pending);
+    this.#announceSteerable(pending.turn);
   }
 
   updateSessionSettings(agentSessionId: string, patch: AcpSessionSettingsPatch): void {
@@ -450,7 +582,7 @@ export class AcpAgentRuntime {
       if (turn.aborted) return;
       assertAcpExecutionOpen(request);
       if (session.retired) throw new Error(`${this.#policy.agentId} ACP process exited before the prompt was sent`);
-      await session.client.promptSession({
+      this.#trackTurnPrompt(turn, session.client.promptSession({
         sessionId: session.id,
         prompt,
       }, () => {
@@ -460,7 +592,11 @@ export class AcpAgentRuntime {
         // A cooperative Stop during pipe backpressure can now cancel the delivered prompt.
         if (turn.aborted) this.abort(session.id);
         onExecutionStarted?.();
-      });
+        this.#announceSteerable(turn);
+      }));
+      // Steers extend the turn, so it ends when all of its prompts have settled.
+      await turn.promptsDrained.promise;
+      if (turn.promptFailure) throw turn.promptFailure.error;
       const reportedFailure = this.#canRouteSource(turn) ? this.#converter.takeTurnFailure?.(session.id) : null;
       if (reportedFailure && !turn.aborted) {
         failureMessage = reportedFailure;
@@ -533,6 +669,12 @@ export class AcpAgentRuntime {
       sourceRetired: false,
       settled: Promise.withResolvers<void>(),
       cancelTimer: null,
+      openPrompts: new Set(),
+      steersInFlight: 0,
+      steerSlot: null,
+      promptFailure: null,
+      promptsDrained: Promise.withResolvers<void>(),
+      promptsClosed: false,
     };
   }
 
@@ -831,4 +973,13 @@ export class AcpAgentRuntime {
       timestamp: new Date().toISOString(),
     };
   }
+}
+
+function rejectedSteer(reason: AgentSteerRejectionReason, message: string): AgentSteerResult {
+  return { kind: 'rejected', reason, message };
+}
+
+// The steer was written, so the agent may have taken it.
+function unconfirmedSteer(message: string): AgentSteerResult {
+  return { kind: 'failed', outcome: 'unknown', message };
 }

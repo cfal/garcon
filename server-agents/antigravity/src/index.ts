@@ -10,6 +10,7 @@ import {
 import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
 import { getArtificialAgentSessionId } from '@garcon/server-agent-common/chats/artificial-native-path';
+import { createAgentSteering } from '@garcon/server-agent-common/execution/control-adapters';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createIntegrationLifecycle } from '@garcon/server-agent-common/lifecycle/integration-lifecycle';
 import { createScopedAgentLogger } from '@garcon/server-agent-common/logging/scoped-agent-logger';
@@ -91,7 +92,7 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;
-  readonly steering = null;
+  readonly steering: NonNullable<AgentIntegration['steering']>;
   readonly endpoints = null;
   readonly singleQuery: NonNullable<AgentIntegration['singleQuery']>;
 
@@ -117,6 +118,10 @@ export default class AntigravityAgentIntegration implements AgentIntegration {
     this.execution = producer.execution;
     this.producers = producer.producers;
     this.permissions = producer.permissions;
+    this.steering = createAgentSteering(producer, {
+      captureTarget: (agentSessionId) => runtime.captureSteerTarget(agentSessionId),
+      steer: (request) => runtime.steer(request),
+    });
     this.nativeSessions = createAntigravityNativeSessions(nativeSessions, runtime);
     this.catalog = account.catalog;
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions });

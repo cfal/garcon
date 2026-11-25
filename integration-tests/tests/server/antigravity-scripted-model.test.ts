@@ -154,7 +154,7 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       expect(antigravity.models.find((model) => model.value === ANTIGRAVITY_TEST_MODEL)?.label)
         .toBe('Gemini 3.1 Pro (Low)');
       expect(antigravity.authLoginSupported).toBe(true);
-      expect(antigravity.supportsSteering).toBe(false);
+      expect(antigravity.supportsSteering).toBe(true);
       const authUrl = `/api/v1/agents/auth?agent=antigravity&executorId=${encodeURIComponent(fixture.client.executorId)}`;
       const retired = await rejectionOf(fixture.client.get(`${authUrl}&loginInstance=retired-test-worker`));
       expect(retired).toMatchObject({ status: 409, body: { errorCode: 'LOGIN_INSTANCE_CHANGED' } });
@@ -204,6 +204,37 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       }]);
       model.assertSettled();
     }, { serverEnvironment });
+  }, TURN_TIMEOUT_MS);
+
+  test('keeps an answer whole when the model interleaves thought parts with it', async () => {
+    const { model } = requireEnvironment();
+    const hash = marker('HASH');
+    const half = Math.floor(hash.length / 2);
+    // Each text boundary falls inside Markdown, as a streamed answer's can.
+    model.scriptTurn([
+      geminiThought('Checking the merge.'),
+      geminiText('- **Merged:** at `'),
+      geminiThought(' Then the deploy.'),
+      geminiText(hash.slice(0, half)),
+      geminiThought(' Then the status.'),
+      geminiText(`${hash.slice(half)}\`.\n- **Deployed:** **Not`),
+      geminiThought(' Done.'),
+      geminiText(' started**.'),
+    ], { frameIntervalMs: 50 });
+    await withIntegrationFixture('antigravity-scripted-interleaved-thought', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedAntigravityStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'summarize the release',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, afterIndex: cursor });
+      const messages = (await fixture.client.getMessages(chatId)).messages;
+      expect(assistantContents(messages)).toEqual([`- **Merged:** at \`${hash}\`.\n- **Deployed:** **Not started**.`]);
+      // Where thinking rows split depends on how agy batches the frames.
+      expect(messagesOfType(messages, 'thinking').map((message) => message.content).join(' '))
+        .toBe('Checking the merge. Then the deploy. Then the status. Done.');
+      model.assertSettled();
+    }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
   test('offers no selectable models when the executor lacks agy', async () => {
@@ -356,7 +387,7 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
-  test('rejects explicit steering and delivers a queued image on the next turn', async () => {
+  test('delivers a queued image on the next turn', async () => {
     const { model } = requireEnvironment();
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOod9ACAAIrAOpAC706AAAAAElFTkSuQmCC';
     const firstPrompt = marker('FIRST_INPUT');
@@ -371,10 +402,6 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       }));
       await withTimeout(held.requested, LIVE_TURN_TIMEOUT_MS, () => 'agy did not dispatch the first turn');
       const cursor = fixture.client.markEvents();
-      expect(await rejectionOf(fixture.client.steer({
-        chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
-        content: 'unsupported steer', whenTurnUnavailable: 'queue',
-      }))).toMatchObject({ status: 422, body: { errorCode: 'OPERATION_UNSUPPORTED' } });
       const queued = await fixture.client.enqueue({
         chatId, clientRequestId: crypto.randomUUID(), content: queuedPrompt,
         images: [{ name: 'pixel.png', mimeType: 'image/png', data: `data:image/png;base64,${png}` }],
