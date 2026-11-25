@@ -1,15 +1,5 @@
-<script module lang="ts">
-	let fuseImport: Promise<typeof import('fuse.js')> | undefined;
-
-	function loadFuse() {
-		return (fuseImport ??= import('fuse.js').catch((error: unknown) => {
-			fuseImport = undefined;
-			throw error;
-		}));
-	}
-</script>
-
 <script lang="ts">
+	import Fuse from 'fuse.js';
 	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
 	import { flushSync } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -44,9 +34,6 @@
 	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let optionList = $state<HTMLDivElement>();
-	type FuseConstructor = typeof import('fuse.js').default;
-	let loadedFuse: FuseConstructor | undefined;
-	let Fuse = $state.raw<FuseConstructor>();
 	let opener: HTMLElement | null = null;
 
 	let commandContext = $derived(commandRegistry.context());
@@ -68,31 +55,15 @@
 	}
 
 	let fuse = $derived(
-		Fuse &&
-			new Fuse(commands, {
-				keys: [
-					'label',
-					'description',
-					{ name: 'category', getFn: (item) => categoryLabels[item.category]() },
-				],
-				threshold: 0.4,
-				includeScore: true,
-			}),
+		new Fuse(commands, {
+			keys: ['label', 'description', { name: 'category', getFn: (item) => categoryLabels[item.category]() }],
+			threshold: 0.4,
+		}),
 	);
 
 	let filteredCommands = $derived.by(() => {
-		const needle = query.trim().toLowerCase();
-		if (needle) {
-			if (fuse)
-				return fuse.search(query, { limit: searchResultLimit }).map((result) => result.item);
-			return commands
-				.filter((command) =>
-					[command.label, command.description, categoryLabels[command.category]()].some((field) =>
-						field?.toLowerCase().includes(needle),
-					),
-				)
-				.slice(0, searchResultLimit);
-		}
+		const needle = query.trim();
+		if (needle) return fuse.search(needle, { limit: searchResultLimit }).map((result) => result.item);
 		return commands
 			.filter(
 				(command, index) =>
@@ -111,19 +82,11 @@
 	}
 
 	function handleQueryInput(e: Event) {
-		// A late import takes effect on the next edit, not under a pending click or Enter.
-		Fuse = loadedFuse;
 		query = (e.target as HTMLInputElement).value;
 		selectedIndex = 0;
 	}
 
 	function open() {
-		if (!loadedFuse) {
-			void loadFuse().then(
-				({ default: SearchIndex }) => { loadedFuse = SearchIndex; },
-				(error: unknown) => console.warn('Fuzzy command search failed to load:', error),
-			);
-		}
 		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		transientLayers.open('main-inert', () => {
 			commands = captureCommands();

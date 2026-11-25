@@ -2,10 +2,12 @@
 	import * as m from '$lib/paraglide/messages.js';
 	// Renders a todo/plan list as a compact checklist.
 
-	import type { TodoItem } from '$lib/types/chat';
+	import type { PlanStep } from '$shared/chat-types';
+	import CircleMinus from '@lucide/svelte/icons/circle-minus';
+	import CircleX from '@lucide/svelte/icons/circle-x';
 
 	interface Props {
-		todos: TodoItem[] | undefined;
+		todos: PlanStep[] | undefined;
 		isResult?: boolean;
 	}
 
@@ -16,7 +18,7 @@
 
 {#if items.length > 0}
 	<ul class="mt-1 space-y-0.5">
-		{#each items as item (item.content)}
+		{#each items as item, index (index)}
 			<li class="flex items-start gap-1.5 text-xs">
 				{#if item.status === 'completed'}
 					<svg
@@ -44,6 +46,12 @@
 						<circle cx="12" cy="12" r="9" stroke-width="2" fill="none" opacity="0.3" />
 					</svg>
 					<span class="text-foreground font-medium">{item.content}</span>
+				{:else if item.status === 'failed'}
+					<CircleX class="w-3.5 h-3.5 mt-px shrink-0 text-destructive" />
+					<span>{m.chat_plan_step_failed()}: {item.content}</span>
+				{:else if item.status === 'skipped'}
+					<CircleMinus class="w-3.5 h-3.5 mt-px shrink-0 text-muted-foreground" />
+					<span class="text-muted-foreground">{m.chat_plan_step_skipped()}: {item.content}</span>
 				{:else}
 					<svg
 						class="w-3.5 h-3.5 mt-px flex-shrink-0 text-muted-foreground"
