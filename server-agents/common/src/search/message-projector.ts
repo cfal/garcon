@@ -19,6 +19,9 @@ interface ExtractionBudget {
   truncated: boolean;
 }
 
+interface PreferredFields { readonly [key: string]: PreferredFields | null }
+const TOOL_RESULT_FIELDS: PreferredFields = { raw: null, rawOutput: { output: null } };
+
 function assertNever(value: never): never {
   throw new Error(`Unhandled transcript search message type: ${String(value)}`);
 }
@@ -60,7 +63,7 @@ function boundedUnknownText(
     truncated: false,
   },
   depth = 0,
-  firstKey?: string,
+  preferred?: PreferredFields | null,
 ): string {
   if (budget.remaining <= 0) return '';
   if (budget.remainingNodes <= 0) {
@@ -86,7 +89,7 @@ function boundedUnknownText(
   if (budget.seen.has(value)) return '';
   budget.seen.add(value);
   const parts: string[] = [];
-  const appendChild = (key: string | null, childValue: unknown): void => {
+  const appendChild = (key: string | null, childValue: unknown, childFields?: PreferredFields | null): void => {
     if (budget.remaining <= 0) return;
     if (parts.length > 0) {
       parts.push(' ');
@@ -102,7 +105,7 @@ function boundedUnknownText(
         budget.remaining -= 1;
       }
     }
-    const child = boundedUnknownText(childValue, budget, depth + 1);
+    const child = boundedUnknownText(childValue, budget, depth + 1, childFields);
     if (child) parts.push(child);
   };
   if (Array.isArray(value)) {
@@ -113,9 +116,13 @@ function boundedUnknownText(
     if (index < value.length) budget.truncated = true;
   } else {
     const record = value as Record<string, unknown>;
-    if (firstKey && Object.prototype.hasOwnProperty.call(record, firstKey)) appendChild(firstKey, record[firstKey]);
+    if (preferred) {
+      for (const key of Object.keys(preferred)) {
+        if (Object.hasOwn(record, key)) appendChild(key, record[key], preferred[key]);
+      }
+    }
     for (const key in record) {
-      if (key === firstKey || !Object.prototype.hasOwnProperty.call(record, key)) continue;
+      if ((preferred && Object.hasOwn(preferred, key)) || !Object.hasOwn(record, key)) continue;
       appendChild(key, record[key]);
       if (budget.remaining <= 0 || budget.remainingNodes <= 0) {
         budget.truncated = true;
@@ -145,7 +152,7 @@ function boundedToolResult(value: unknown, budget: ExtractionBudget): string {
   if (typeof value !== 'string') {
     const nestedBudget = { ...budget, remaining: limit };
     // Indexes the user-visible diagnostic before supplementary tool payloads.
-    const text = boundedUnknownText(value, nestedBudget, 0, 'raw');
+    const text = boundedUnknownText(value, nestedBudget, 0, TOOL_RESULT_FIELDS);
     budget.remainingNodes = nestedBudget.remainingNodes;
     budget.truncated ||= nestedBudget.truncated;
     return text;
