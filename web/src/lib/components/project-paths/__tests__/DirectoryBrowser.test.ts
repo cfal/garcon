@@ -57,6 +57,7 @@ it('keeps trailing spaces when filtering directory names', async () => {
 		executorId: 'local', currentPath: '/repo/project ', basePath: '/repo', isMobile: false, onSelect: vi.fn(), onClose: vi.fn(),
 	});
 	await waitFor(() => expect(view.getAllByRole('button', { name: 'project' })).toHaveLength(1));
+	expect(view.container.querySelector<HTMLElement>('[data-slot="directory-browser-dismiss"]')?.tabIndex).toBe(-1);
 	view.unmount();
 });
 
