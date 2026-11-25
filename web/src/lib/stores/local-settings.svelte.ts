@@ -135,6 +135,7 @@ export const HIDEABLE_TOOL_GROUPS = [
 			'todo-write-tool-use',
 			'todo-read-tool-use',
 			'task-tool-use',
+			'background-task-tool-use',
 			'codex-subagent-tool-use',
 			'update-plan-tool-use',
 			'enter-plan-mode-tool-use',

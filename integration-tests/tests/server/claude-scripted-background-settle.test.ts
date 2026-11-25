@@ -30,6 +30,33 @@ describe('scripted Claude background settlement', () => {
     environment?.dispose();
   });
 
+  test('keeps a rejected TaskStop paired with its target on live delivery and native reload', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const { model, serverEnvironment } = environment;
+    const prompt = 'Check the synthetic task';
+    const reply = 'No such task';
+    model.scriptTurn([claudeToolUse('toolu_discover_stop', 'ToolSearch', { query: 'select:TaskStop' })]);
+    model.scriptTurn([claudeToolUse('toolu_stop', 'TaskStop', { task_id: 'missing-job' })]);
+    model.scriptTurn([claudeText(reply)]);
+    await withIntegrationFixture('claude-scripted-task-stop', async fixture => {
+      const chatId = fixture.newChatId();
+      const afterIndex = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: prompt, permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex });
+      const live = await fixture.client.getMessages(chatId);
+      const reloaded = await reloadUntilNativeStableAfterPrompt(fixture, chatId, prompt);
+      for (const { messages } of [live, reloaded]) {
+        expect(messagesOfType(messages, 'background-task-tool-use')).toMatchObject([
+          { toolId: 'toolu_stop', action: 'stop', taskId: 'missing-job' },
+        ]);
+        expect(messagesOfType(messages, 'tool-result').find(row => row.toolId === 'toolu_stop')?.isError).toBe(true);
+      }
+      model.assertSettled();
+    }, { serverEnvironment });
+  }, 120_000);
+
   test('keeps fork internals out of the main transcript through peer and task continuations', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;

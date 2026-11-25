@@ -1,5 +1,6 @@
 import {
   BashToolUseMessage,
+  BackgroundTaskToolUseMessage,
   EditToolUseMessage,
   ExternalToolUseMessage,
   GlobToolUseMessage,
@@ -137,6 +138,14 @@ export function convertAntigravityToolUse(
       const query = stringField(input, 'query', 'Query');
       if (query === undefined) break;
       return new WebSearchToolUseMessage(timestamp, id, query);
+    }
+    case 'manage_task': {
+      const action = field(input, 'Action', 'action');
+      if (action === 'stop') break; // The native stop action is named kill.
+      const row = BackgroundTaskToolUseMessage.fromFields(timestamp, id, action === 'kill' ? 'stop' : action,
+        field(input, 'TaskId', 'task_id'), field(input, 'Input', 'input'));
+      if (row) return row;
+      break;
     }
     case 'invoke_subagent': {
       const role = stringField(input, 'Role', 'role');

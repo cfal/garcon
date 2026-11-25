@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	BashToolUseMessage,
+	BackgroundTaskToolUseMessage,
 	ExecToolUseMessage,
 	WaitToolUseMessage,
 	ReadToolUseMessage,
@@ -56,6 +57,13 @@ function roundTrip<T>(message: T): T {
 }
 
 describe('tool-use serialization round-trip', () => {
+	it('preserves task targets and literal input and rejects unrecognized actions', () => {
+		const msg = new BackgroundTaskToolUseMessage(TS, 'call', 'send_input', 'job-id', '\n');
+		expect(roundTrip(msg)).toEqual(msg);
+		expect(roundTrip(new BackgroundTaskToolUseMessage(TS, 'list', 'list')).taskId).toBeUndefined();
+		expect(parseChatMessage({ ...msg, action: 'invented' })).toBeNull();
+	});
+
 	it('BashToolUseMessage preserves command and description', () => {
 		const msg = new BashToolUseMessage(TS, 'id-1', 'ls -la', 'List files');
 		const parsed = roundTrip(msg);

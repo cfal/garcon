@@ -435,6 +435,32 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
+  test('publishes background task requests and pairs even empty or failed replies by call ID', async () => {
+    const { model } = requireEnvironment();
+    model.scriptTurn([geminiFunctionCall('list-call', 'manage_task', { Action: 'list' })]);
+    model.scriptTurn([geminiFunctionCall('status-call', 'manage_task', { Action: 'status', TaskId: 'missing-job' })]);
+    model.scriptTurn([geminiText('Finished checking tasks.')]);
+    await withIntegrationFixture('antigravity-background-tasks', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedAntigravityStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'Check background tasks',
+      }));
+      expect(await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      })).toMatchObject({ type: 'agent-run-finished', outcome: 'finished' });
+      const { messages } = await fixture.client.getMessages(chatId);
+      expect(messages.map(entry => entry.message).filter(message => 'toolId' in message)).toMatchObject([
+        { toolId: 'list-call', type: 'background-task-tool-use', action: 'list' },
+        { toolId: 'list-call', type: 'tool-result', content: {}, isError: false },
+        { toolId: 'status-call', type: 'background-task-tool-use', action: 'status', taskId: 'missing-job' },
+        { toolId: 'status-call', type: 'tool-result', content: { status: 'failed' }, isError: true },
+      ]);
+      expect(messagesOfType(messages, 'tool-result')[0]?.content).toEqual({});
+      model.assertSettled();
+    }, withScriptedAntigravity());
+  }, TURN_TIMEOUT_MS);
+
   test('reports a nonzero command as a tool error, not a failed turn', async () => {
     const { model } = requireEnvironment();
     const output = 'synthetic-command-output';

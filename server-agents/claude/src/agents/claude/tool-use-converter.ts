@@ -3,6 +3,7 @@
 
 import {
   BashToolUseMessage,
+  BackgroundTaskToolUseMessage,
   ReadToolUseMessage,
   EditToolUseMessage,
   WriteToolUseMessage,
@@ -203,6 +204,12 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
 
     case 'todoread':
       return new TodoReadToolUseMessage(ts, toolId);
+
+    case 'taskstop': {
+      const taskId = asString(input.task_id ?? input.shell_id);
+      if (!taskId) break;
+      return new BackgroundTaskToolUseMessage(ts, toolId, 'stop', taskId);
+    }
 
     case 'agent':
     case 'task':

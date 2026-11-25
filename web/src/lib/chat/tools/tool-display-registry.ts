@@ -49,6 +49,7 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'todo-write-tool-use': 'TodoWrite',
 	'todo-read-tool-use': 'TodoRead',
 	'task-tool-use': 'Task',
+	'background-task-tool-use': 'Background task',
 	'codex-subagent-tool-use': 'Subagent',
 	'update-plan-tool-use': 'UpdatePlan',
 	'write-stdin-tool-use': 'WriteStdin',
@@ -564,6 +565,28 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				const todos = coerceTodoItems(content.items || content.todos);
 				return { todos, isResult: true };
 			},
+		},
+	},
+
+	'background-task-tool-use': {
+		input: {
+			mode: 'inline',
+			getLabel: ({ action }) => {
+				switch (action) {
+					case 'list': return 'List background tasks';
+					case 'status': return 'Check task status';
+					case 'stop': return 'Request stop';
+					case 'send_input': return 'Send task input';
+					default: return 'Background task';
+				}
+			},
+			getValue: ({ taskId, input }) => [taskId, input].filter(Boolean).join('\n'),
+			wrapText: true,
+		},
+		result: {
+			mode: 'collapsible',
+			contentKind: 'text',
+			getContentProps: (result) => ({ content: extractContentString(result.content), format: 'plain' }),
 		},
 	},
 

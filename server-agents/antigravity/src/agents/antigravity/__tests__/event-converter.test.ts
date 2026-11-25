@@ -23,6 +23,25 @@ function plain(messages: readonly object[]) {
 }
 
 describe('AntigravityAcpEventConverter', () => {
+  it.each([
+    [{ Action: 'list' }, { action: 'list' }],
+    [{ Action: 'kill', TaskId: 'job-1' }, { action: 'stop', taskId: 'job-1' }],
+    [{ action: 'status', task_id: 'job-1' }, { action: 'status', taskId: 'job-1' }],
+    [{ Action: 'send_input', TaskId: 'job-1', Input: '\n' }, { action: 'send_input', taskId: 'job-1', input: '\n' }],
+  ])('normalizes background task input %j', (input, expected) => {
+    const converter = new AntigravityAcpEventConverter();
+    const rows = converter.fromSessionUpdate(toolCall('call', 'manage_task', 'other', input), context);
+    expect(rows).toMatchObject([{ type: 'background-task-tool-use', toolId: 'call', ...expected }]);
+  });
+
+  it.each([{ Action: 'kill' }, { Action: 'send_input', TaskId: 'job' }, { Action: 'future' }])(
+    'keeps unsupported task input %j intact', (input) => {
+      const converter = new AntigravityAcpEventConverter();
+      expect(converter.fromSessionUpdate(toolCall('call', 'manage_task', 'other', input), context))
+        .toMatchObject([{ type: 'external-tool-use', input }]);
+    },
+  );
+
   it('buffers text and thinking until a tool call or the end of the turn', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);

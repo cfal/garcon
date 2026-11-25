@@ -272,6 +272,29 @@ export class TodoReadToolUseMessage {
   ) {}
 }
 
+export type BackgroundTaskAction = 'list' | 'status' | 'stop' | 'send_input';
+
+export class BackgroundTaskToolUseMessage {
+  readonly type = 'background-task-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public action: BackgroundTaskAction,
+    public taskId?: string,
+    public input?: string,
+  ) {}
+
+  static fromFields(timestamp: string, toolId: string, action: unknown, taskId?: unknown, input?: unknown) {
+    if (action !== 'list' && action !== 'status' && action !== 'stop' && action !== 'send_input') return null;
+    if (taskId !== undefined && typeof taskId !== 'string') return null;
+    if (input !== undefined && typeof input !== 'string') return null;
+    if (action !== 'list' && !taskId) return null;
+    if (action === 'send_input' && input === undefined) return null;
+    return new BackgroundTaskToolUseMessage(timestamp, toolId, action, taskId, input);
+  }
+}
+
 export class TaskToolUseMessage {
   readonly type = 'task-tool-use' as const;
 
@@ -785,6 +808,7 @@ export type ToolUseChatMessage =
   | TodoWriteToolUseMessage
   | TodoReadToolUseMessage
   | TaskToolUseMessage
+  | BackgroundTaskToolUseMessage
   | CodexSubagentToolUseMessage
   | UpdatePlanToolUseMessage
   | WriteStdinToolUseMessage
@@ -981,6 +1005,9 @@ const TOOL_USE_MESSAGE_PARSERS = {
 
   'todo-read-tool-use': (data) =>
     new TodoReadToolUseMessage(str(data.timestamp), str(data.toolId)),
+
+  'background-task-tool-use': (data) =>
+    BackgroundTaskToolUseMessage.fromFields(str(data.timestamp), str(data.toolId), data.action, data.taskId, data.input),
 
   'task-tool-use': (data) =>
     new TaskToolUseMessage(
