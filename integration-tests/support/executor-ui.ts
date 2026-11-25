@@ -3,17 +3,22 @@ import { clickInlineComposerButton } from './composer-actions.js';
 import { performLightpandaAction } from './lightpanda-action.js';
 
 export async function openModelSelector(page: Page, scope = '[role="dialog"]'): Promise<void> {
-  const selector = `${scope} button[data-slot="model-selector-trigger"]:not(:disabled)`;
-  const menu = `${scope} :is([data-composer-overflow="settings"], [data-slot="model-selector-overflow"]):not([hidden])`;
-  const model = '[role="menuitem"][data-composer-control="model"]';
-  await performLightpandaAction(async () => {
-    if (await clickInlineComposerButton(page, selector)) return;
+  const trigger = `${scope} button[data-slot="model-selector-trigger"]:not(:disabled)`;
+
+  async function clickModelControl() {
+    // A lost inline reply must reach the expansion check, not dispatch another click.
+    if (await clickInlineComposerButton(page, trigger)) return;
+
+    const overflowTrigger = `${scope} :is([data-composer-overflow="settings"], [data-slot="model-selector-overflow"]):not([hidden])`;
+    const modelItem = '[role="menuitem"][data-composer-control="model"]';
     await performLightpandaAction(
-      () => page.$eval(menu, (button) => (button as HTMLButtonElement).click()),
-      () => page.waitForSelector(model),
+      () => page.$eval(overflowTrigger, (button) => (button as HTMLButtonElement).click()),
+      () => page.waitForSelector(modelItem),
     );
-    await page.$eval(model, (item) => (item as HTMLElement).click());
-  }, () => page.waitForSelector(`${selector}[aria-expanded="true"]`));
+    await page.$eval(modelItem, (item) => (item as HTMLElement).click());
+  }
+
+  await performLightpandaAction(clickModelControl, () => page.waitForSelector(`${trigger}[aria-expanded="true"]`));
 }
 
 export async function selectModelOption(page: Page, label: string): Promise<void> {

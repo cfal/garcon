@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import * as filesystem from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -816,25 +816,26 @@ describe('integration support contracts', () => {
     const lostReply = new ProtocolError();
     lostReply.originalMessage = 'Promise was collected';
     const calls: string[] = [];
-    const act = async () => { calls.push('act'); throw lostReply; };
-    await performLightpandaAction(act, async () => { calls.push('confirm'); });
+    const act = async () => {
+      calls.push('act');
+      throw lostReply;
+    };
+    await performLightpandaAction(act, async () => calls.push('confirm'));
     expect(calls).toEqual(['act', 'confirm']);
 
     const missing = new Error('Expected menu did not open');
-    expect(await rejectionOf(performLightpandaAction(act, async () => { throw missing; }))).toBe(missing);
+    const error = await rejectionOf(performLightpandaAction(act, () => Promise.reject(missing)));
+    expect(error).toBe(missing);
   });
 
   test('propagates other Lightpanda action errors without confirming', async () => {
     const nearMatch = new ProtocolError();
     nearMatch.originalMessage = 'Promise was collected.';
     for (const failure of [new Error('Promise was collected'), nearMatch]) {
-      let confirmed = false;
-      const error = await rejectionOf(performLightpandaAction(
-        async () => { throw failure; },
-        async () => { confirmed = true; },
-      ));
+      const confirm = mock(async () => {});
+      const error = await rejectionOf(performLightpandaAction(() => Promise.reject(failure), confirm));
       expect(error).toBe(failure);
-      expect(confirmed).toBe(false);
+      expect(confirm).not.toHaveBeenCalled();
     }
   });
 
