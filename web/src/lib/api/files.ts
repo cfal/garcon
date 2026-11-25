@@ -110,7 +110,7 @@ function buildProjectQuery(params: {
 /** Reads file content as text. */
 export async function readText(
 	params: FilePathParams,
-	options?: RequestInit,
+	options?: ApiFetchOptions,
 ): Promise<ReadTextResponse> {
 	const qs = buildFileQuery(params);
 	const payload = await apiGet<unknown>(`/api/v1/files/text?${qs}`, options);
@@ -121,7 +121,7 @@ export async function readText(
 
 export async function getFileRevision(
 	params: FilePathParams,
-	options?: RequestInit,
+	options?: ApiFetchOptions,
 ): Promise<FileRevisionResponse> {
 	const qs = buildFileQuery(params);
 	const payload = await apiGet<unknown>(`/api/v1/files/revision?${qs}`, options);
@@ -132,7 +132,7 @@ export async function getFileRevision(
 
 export async function resolveFileIdentity(
 	params: FileIdentityParams,
-	options?: RequestInit,
+	options?: ApiFetchOptions,
 ): Promise<FileIdentityResponse> {
 	const query = buildFileQuery({
 		executorId: params.executorId,
@@ -170,7 +170,7 @@ export async function saveText(
 /** Fetches and validates one directory under the configured project base. */
 export async function getTree(
 	params: FileTreeParams = {},
-	options?: RequestInit,
+	options?: ApiFetchOptions,
 ): Promise<FileTreeResponse> {
 	const query = new URLSearchParams();
 	if (params.executorId) query.set('executorId', params.executorId);
@@ -186,7 +186,7 @@ export async function getTree(
 /** Fetches a flat file list for a project. */
 export async function getFileList(
 	params: ProjectParams = {},
-	options?: RequestInit,
+	options?: ApiFetchOptions,
 ): Promise<FileEntry[]> {
 	const qs = buildProjectQuery(params);
 	const url = `/api/v1/files/list${qs ? `?${qs}` : ''}`;
@@ -201,7 +201,7 @@ export function getContentUrl(params: FilePathParams): string {
 
 export async function readContent(
 	params: FilePathParams,
-	options?: RequestInit,
+	options?: ApiFetchOptions,
 ): Promise<{ blob: Blob; revision: FileRevision }> {
 	const response = await apiFetch(getContentUrl(params), options);
 	if (!response.ok) await parseApiResponse<never>(response);
