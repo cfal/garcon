@@ -48,9 +48,9 @@ async function fixture(
 ) {
 	let currentProcessing = processing;
 	const connection = openPushFixture();
-	const delivery = { show: vi.fn(), close: vi.fn() } satisfies Pick<
+	const delivery = { show: vi.fn(), close: vi.fn(), closeOwned: vi.fn() } satisfies Pick<
 		BrowserNotificationDeliveryPort,
-		'show' | 'close'
+		'show' | 'close' | 'closeOwned'
 	>;
 	const router = new BrowserNotificationsRouter(connection.ws, delivery, {
 		enabled: () => enabled,
@@ -66,6 +66,7 @@ async function fixture(
 	for (const message of messages) connection.send(message);
 	await Promise.resolve();
 	return {
+		router,
 		delivery,
 		send: connection.send,
 		setProcessing: (next: boolean) => {
@@ -75,6 +76,22 @@ async function fixture(
 }
 
 describe('root browser notifications routing', () => {
+	it('closes the permission on remove even when this tab never saw its upsert', async () => {
+		const f = await fixture([]);
+		f.send(permission('remove'));
+		expect(f.delivery.close).toHaveBeenCalledExactlyOnceWith(
+			'permission:synthetic-instance:background:occurrence',
+		);
+	});
+	it.each(['remove', 'clear-run'] as const)('leaves peer notifications alone on disconnect until authoritative %s', async (kind) => {
+		const f = await fixture([permission()], true, true);
+		expect(f.delivery.show).not.toHaveBeenCalled();
+		f.router.releasePermissions();
+		expect(f.delivery.closeOwned).toHaveBeenCalledExactlyOnceWith('permission:synthetic-instance:background:occurrence');
+		expect(f.delivery.close).not.toHaveBeenCalled();
+		f.send(permission(kind));
+		expect(f.delivery.close).toHaveBeenCalledExactlyOnceWith('permission:synthetic-instance:background:occurrence');
+	});
 	it('suppresses intermediate queued completion and notifies after the queue becomes idle', async () => {
 		const completed = new AgentRunFinishedMessage(
 			'background',

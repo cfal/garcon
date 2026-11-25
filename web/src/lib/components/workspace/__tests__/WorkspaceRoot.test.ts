@@ -42,11 +42,14 @@ import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { panelMounts } from './ConversationPanelTestStub.svelte';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
-const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn(), getCombinedChatMessages: vi.fn() }));
+const chatApiMocks = vi.hoisted(() => ({
+	getChatMessages: vi.fn(),
+	getCombinedChatMessages: vi.fn(),
+}));
 
 vi.mock('$lib/context', () => ({
 	getAuth: () => ({ token: null }),
-	getSidebarSearch: () => ({ discardStaleTranscriptResult: vi.fn() }),
+	getSidebarSearch: () => ({ transcript: { discardStaleTranscriptResult: vi.fn() } }),
 	setTicketSourceNavigation: () => {},
 	getAppShell: () => testContext.current?.appShell,
 	getChatSessions: () => testContext.current?.sessions,
@@ -150,7 +153,10 @@ function emptyChatHistory(request: ChatMessagesRequest) {
 	};
 }
 
-function installContext({ composerStatusBarGitProjects = false }: { composerStatusBarGitProjects?: boolean } = {}) {
+function installContext({
+	composerStatusBarGitProjects = false,
+	supportsUpdateProjectPath = false,
+}: { composerStatusBarGitProjects?: boolean; supportsUpdateProjectPath?: boolean } = {}) {
 	const initial = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
 		{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-a' },
 	]);
@@ -470,9 +476,15 @@ function installContext({ composerStatusBarGitProjects = false }: { composerStat
 		surfaceFrames: new SurfaceFrameRegistry(),
 		fileSessions: {
 			get: () => null,
-			get guardRequest() { return null; },
-			get overwriteRequest() { return null; },
-			get thresholdRequest() { return null; },
+			get guardRequest() {
+				return null;
+			},
+			get overwriteRequest() {
+				return null;
+			},
+			get thresholdRequest() {
+				return null;
+			},
 		},
 		terminals,
 		localSettings,
@@ -486,10 +498,12 @@ function installContext({ composerStatusBarGitProjects = false }: { composerStat
 		},
 		processingReconciler: { addPresentation: () => () => {} },
 		modelCatalog: {
-			forExecutor() { return this; },
+			forExecutor() {
+				return this;
+			},
 			supportsFork: () => false,
 			supportsForkWhileRunning: () => false,
-			supportsUpdateProjectPath: () => false,
+			supportsUpdateProjectPath: () => supportsUpdateProjectPath,
 		},
 		gitBranchActions: { showNewBranchModal: false },
 		gitQuickSummary: {
@@ -539,8 +553,8 @@ function renderRoot(isMobile = false) {
 
 function useChatCatalog(records: ChatSessionRecord[]) {
 	const sessions = new ChatSessionsStore();
-	sessions.byId = Object.fromEntries(records.map(chat => [chat.id, chat]));
-	sessions.order = records.map(chat => chat.id);
+	sessions.byId = Object.fromEntries(records.map((chat) => [chat.id, chat]));
+	sessions.order = records.map((chat) => chat.id);
 	sessions.isLoadingChats = false;
 	sessions.selectedChatId = 'chat-a';
 	testContext.current!.sessions = sessions;
@@ -582,13 +596,22 @@ describe('WorkspaceRoot', () => {
 			emptyChatHistory(request),
 		);
 		chatApiMocks.getCombinedChatMessages.mockReset();
-		chatApiMocks.getCombinedChatMessages.mockImplementation(async (request: TranscriptAnchorRequest) => ({
-			chatId: request.chatId, transcriptViewId: `view-${request.chatId}`,
-			historyState: { kind: 'complete' }, direction: request.direction,
-			lastOrdinal: 0, watermarkOrdinal: 0, startOrdinal: 1, endOrdinal: 1,
-			anchorsRemaining: request.anchorsRemaining, pageStatus: 'exhausted',
-			messages: [], resendCandidates: [],
-		}));
+		chatApiMocks.getCombinedChatMessages.mockImplementation(
+			async (request: TranscriptAnchorRequest) => ({
+				chatId: request.chatId,
+				transcriptViewId: `view-${request.chatId}`,
+				historyState: { kind: 'complete' },
+				direction: request.direction,
+				lastOrdinal: 0,
+				watermarkOrdinal: 0,
+				startOrdinal: 1,
+				endOrdinal: 1,
+				anchorsRemaining: request.anchorsRemaining,
+				pageStatus: 'exhausted',
+				messages: [],
+				resendCandidates: [],
+			}),
+		);
 		vi.stubGlobal('ResizeObserver', undefined);
 	});
 
@@ -731,21 +754,41 @@ describe('WorkspaceRoot', () => {
 
 	it('does not reconcile four unchanged panels for an unplaced chat completion', async () => {
 		const { layout } = installContext();
-		const sessions = useChatCatalog(['a', 'b', 'c', 'd', 'e'].map(id => chat(`chat-${id}`, id)));
+		const sessions = useChatCatalog(['a', 'b', 'c', 'd', 'e'].map((id) => chat(`chat-${id}`, id)));
 		sessions.applyProcessingEvent('chat-c', 'running');
 		sessions.patchChat('chat-c', { activityStatus: 'working' });
 		const place = (changes: WorkspaceLayoutMutation[]) =>
-			expect(layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, changes))).toBe(true);
+			expect(layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, changes))).toBe(
+				true,
+			);
 		place([
 			{ type: 'set-window-chat', windowId: 'window-files', chatId: 'chat-b' },
-			{ type: 'open-chat-in-new-window', targetWindowId: 'window-main', edge: 'bottom',
-				newWindowId: 'window-d', partitionId: 'partition-d', chatId: 'chat-d' },
-			{ type: 'open-chat-in-new-window', targetWindowId: 'window-files', edge: 'bottom',
-				newWindowId: 'window-e', partitionId: 'partition-e', chatId: 'chat-e' },
+			{
+				type: 'open-chat-in-new-window',
+				targetWindowId: 'window-main',
+				edge: 'bottom',
+				newWindowId: 'window-d',
+				partitionId: 'partition-d',
+				chatId: 'chat-d',
+			},
+			{
+				type: 'open-chat-in-new-window',
+				targetWindowId: 'window-files',
+				edge: 'bottom',
+				newWindowId: 'window-e',
+				partitionId: 'partition-e',
+				chatId: 'chat-e',
+			},
 		]);
 		renderRoot();
-		await waitFor(() => expect(screen.getAllByTestId('conversation-panel').map(n =>
-			n.dataset.transcriptViewId).sort()).toEqual(['view-chat-a', 'view-chat-b', 'view-chat-d', 'view-chat-e']));
+		await waitFor(() =>
+			expect(
+				screen
+					.getAllByTestId('conversation-panel')
+					.map((n) => n.dataset.transcriptViewId)
+					.sort(),
+			).toEqual(['view-chat-a', 'view-chat-b', 'view-chat-d', 'view-chat-e']),
+		);
 		const registry = testContext.current!.conversationPanels as ConversationPanelRegistry;
 		const original = panelMounts.map(({ panel }) => panel);
 		expect(original).toHaveLength(4);
@@ -789,7 +832,9 @@ describe('WorkspaceRoot', () => {
 	});
 
 	it('keeps visible project resolution stable across chat record updates', async () => {
-		const { layout, fetchProjectResolution } = installContext({ composerStatusBarGitProjects: true });
+		const { layout, fetchProjectResolution } = installContext({
+			composerStatusBarGitProjects: true,
+		});
 		renderRoot();
 		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledOnce());
 		const sessions = testContext.current?.sessions as {
@@ -824,28 +869,41 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getByRole('menuitem', { name: m.sidebar_tooltips_delete_chat() })).toBeTruthy();
 	});
 
-	it.each([false, true])('closes a tab context menu when its chat changes (multiple tabs: %s)', async (multipleTabs) => {
-		const { layout } = installContext();
-		if (multipleTabs) {
-			layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [{
-				type: 'register-surface',
-				surface: portableSingletonDescriptor('chat-map'),
-				windowId: 'window-main',
-			}]));
-		}
-		renderRoot();
-		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
-		expect(await screen.findByRole('menuitem', { name: m.chat_parent_title() })).toBeTruthy();
-		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
-			{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-b' },
-		]));
-		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
-		expect(chatActions.requestParent).not.toHaveBeenCalled();
+	it.each([false, true])(
+		'closes a tab context menu when its chat changes (multiple tabs: %s)',
+		async (multipleTabs) => {
+			const { layout } = installContext();
+			if (multipleTabs) {
+				layout.publish(
+					layout.revision,
+					reduceWorkspaceLayout(layout.snapshot, [
+						{
+							type: 'register-surface',
+							surface: portableSingletonDescriptor('chat-map'),
+							windowId: 'window-main',
+						},
+					]),
+				);
+			}
+			renderRoot();
+			await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat A' }));
+			expect(await screen.findByRole('menuitem', { name: m.chat_parent_title() })).toBeTruthy();
+			layout.publish(
+				layout.revision,
+				reduceWorkspaceLayout(layout.snapshot, [
+					{ type: 'set-window-chat', windowId: 'window-main', chatId: 'chat-b' },
+				]),
+			);
+			await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+			expect(chatActions.requestParent).not.toHaveBeenCalled();
 
-		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
-		await fireEvent.click(await screen.findByRole('menuitem', { name: m.chat_parent_title() }));
-		expect(chatActions.requestParent).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-b' }));
-	});
+			await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
+			await fireEvent.click(await screen.findByRole('menuitem', { name: m.chat_parent_title() }));
+			expect(chatActions.requestParent).toHaveBeenCalledWith(
+				expect.objectContaining({ id: 'chat-b' }),
+			);
+		},
+	);
 
 	it.each(['chat', 'surface'] as const)(
 		'closes the window menu when its %s identity changes',
@@ -912,7 +970,9 @@ describe('WorkspaceRoot', () => {
 		);
 		await fireEvent.contextMenu(screen.getByRole('tab', { name: 'Chat B' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: m.chat_parent_title() }));
-		expect(chatActions.requestParent).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat-b' }));
+		expect(chatActions.requestParent).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 'chat-b' }),
+		);
 	});
 
 	it('adds terminal actions to both tab menus', async () => {
@@ -1230,53 +1290,101 @@ describe('WorkspaceRoot', () => {
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
 	});
 
-	it.each(['chat', 'viewport'])('does not mount an outgoing mobile chat in a fullscreen-hidden desktop host on %s change', async change => {
-		const { layout } = installContext();
-		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
-			{ type: 'open-chat-in-new-window', chatId: 'chat-b', targetWindowId: 'window-main',
-				edge: 'right', newWindowId: 'window-2', partitionId: 'partition-1' },
-			{ type: 'set-fullscreen-window', windowId: 'window-main' },
-			{ type: 'set-mobile-presentation', activeId: chatViewSurfaceId(change === 'viewport' ? 'window-2' : 'window-main'), returnStack: [] },
-		]));
-		const { container, rerender } = renderRoot(true);
-		await tick();
-		const desktopMounts: Node[] = [];
-		const observer = new MutationObserver(records => {
-			for (const record of records) {
-				if (!(record.target instanceof Element) || !record.target.closest('[data-workspace-window-id="window-2"]')) continue;
-				for (const node of record.addedNodes) {
-					if (node instanceof Element && (node.matches('[data-testid="conversation-panel"]') ||
-						node.querySelector('[data-testid="conversation-panel"]'))) desktopMounts.push(node);
+	it.each(['chat', 'viewport'])(
+		'does not mount an outgoing mobile chat in a fullscreen-hidden desktop host on %s change',
+		async (change) => {
+			const { layout } = installContext();
+			layout.publish(
+				layout.revision,
+				reduceWorkspaceLayout(layout.snapshot, [
+					{
+						type: 'open-chat-in-new-window',
+						chatId: 'chat-b',
+						targetWindowId: 'window-main',
+						edge: 'right',
+						newWindowId: 'window-2',
+						partitionId: 'partition-1',
+					},
+					{ type: 'set-fullscreen-window', windowId: 'window-main' },
+					{
+						type: 'set-mobile-presentation',
+						activeId: chatViewSurfaceId(change === 'viewport' ? 'window-2' : 'window-main'),
+						returnStack: [],
+					},
+				]),
+			);
+			const { container, rerender } = renderRoot(true);
+			await tick();
+			const desktopMounts: Node[] = [];
+			const observer = new MutationObserver((records) => {
+				for (const record of records) {
+					if (
+						!(record.target instanceof Element) ||
+						!record.target.closest('[data-workspace-window-id="window-2"]')
+					)
+						continue;
+					for (const node of record.addedNodes) {
+						if (
+							node instanceof Element &&
+							(node.matches('[data-testid="conversation-panel"]') ||
+								node.querySelector('[data-testid="conversation-panel"]'))
+						)
+							desktopMounts.push(node);
+					}
 				}
-			}
-		});
-		observer.observe(container, { childList: true, subtree: true });
-		if (change === 'viewport') await rerender({ isMobile: false, chatActions });
-		else layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
-			{ type: 'set-mobile-presentation', activeId: chatViewSurfaceId('window-2'), returnStack: [] },
-		]));
-		await tick();
-		await Promise.resolve();
-		observer.disconnect();
-		expect(desktopMounts).toEqual([]);
-		expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1);
-	});
+			});
+			observer.observe(container, { childList: true, subtree: true });
+			if (change === 'viewport') await rerender({ isMobile: false, chatActions });
+			else
+				layout.publish(
+					layout.revision,
+					reduceWorkspaceLayout(layout.snapshot, [
+						{
+							type: 'set-mobile-presentation',
+							activeId: chatViewSurfaceId('window-2'),
+							returnStack: [],
+						},
+					]),
+				);
+			await tick();
+			await Promise.resolve();
+			observer.disconnect();
+			expect(desktopMounts).toEqual([]);
+			expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1);
+		},
+	);
 
 	it('mounts a retained desktop chat only once when handed to mobile', async () => {
 		const { layout } = installContext();
-		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
-			{ type: 'open-chat-in-new-window', chatId: 'chat-b', targetWindowId: 'window-main',
-				edge: 'right', newWindowId: 'window-2', partitionId: 'partition-1' },
-			{ type: 'set-mobile-presentation', activeId: chatViewSurfaceId('window-2'), returnStack: [] },
-		]));
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{
+					type: 'open-chat-in-new-window',
+					chatId: 'chat-b',
+					targetWindowId: 'window-main',
+					edge: 'right',
+					newWindowId: 'window-2',
+					partitionId: 'partition-1',
+				},
+				{
+					type: 'set-mobile-presentation',
+					activeId: chatViewSurfaceId('window-2'),
+					returnStack: [],
+				},
+			]),
+		);
 		const { rerender } = renderRoot();
 		const panels = testContext.current?.conversationPanels as ConversationPanelRegistry;
 		const panel = panels.panel(chatViewSurfaceId('window-2'))!;
 		await waitFor(() => expect(panel.transcript.isLoadingMessages).toBe(false));
 		panel.attachPresentation(panelPresentation({ kind: 'end' }));
-		layout.publish(layout.revision, reduceWorkspaceLayout(layout.snapshot, [
-			{ type: 'set-fullscreen-window', windowId: 'window-main' },
-		]));
+		layout.publish(
+			layout.revision,
+			reduceWorkspaceLayout(layout.snapshot, [
+				{ type: 'set-fullscreen-window', windowId: 'window-main' },
+			]),
+		);
 		await tick();
 		expect(panels.panel(chatViewSurfaceId('window-2'))).toBe(panel);
 		expect(panel.isPresentationVisible).toBe(false);
@@ -1701,6 +1809,18 @@ describe('WorkspaceRoot', () => {
 			expect(workspace.closeSurface).not.toHaveBeenCalled();
 		},
 	);
+
+	it('opens the selected chat folder picker from a desktop portable surface', async () => {
+		installContext({ supportsUpdateProjectPath: true });
+		const { container } = renderRoot();
+		const files = container.querySelector('[data-workspace-window-id="window-files"]');
+		if (!(files instanceof HTMLElement)) throw new Error('Expected the desktop Files window');
+
+		await fireEvent.click(within(files).getByRole('button', { name: 'Choose chat folder' }));
+		expect(chatActions.requestProjectPath).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 'chat-a' }),
+		);
+	});
 
 	it('fullscreen hides other windows and restores their exact keyed layout on exit', async () => {
 		const { layout } = installContext();

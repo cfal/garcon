@@ -67,7 +67,7 @@ export function mapWindows(
 	};
 }
 
-export function replaceWindowNode(
+function replaceWindowNode(
 	node: DesktopWorkspaceNode,
 	windowId: WorkspaceWindowId,
 	replacement: DesktopWorkspaceNode,
@@ -127,7 +127,7 @@ export function insertWindowAtEdge(
 	return replaceWindowNode(root, targetWindowId, partition);
 }
 
-export interface BalancedWindowRow {
+interface BalancedWindowRow {
 	readonly root: DesktopWorkspaceNode;
 	readonly columnCount: number;
 	readonly windowIds: readonly WorkspaceWindowId[];
@@ -191,17 +191,17 @@ export interface WorkspaceWindowRect {
 	readonly height: number;
 }
 
-export interface WorkspaceWindowRectEntry {
+interface WorkspaceWindowRectEntry {
 	readonly workspaceWindow: WorkspaceWindowNode;
 	readonly rect: WorkspaceWindowRect;
 }
 
-export interface WorkspacePartitionRectEntry {
+interface WorkspacePartitionRectEntry {
 	readonly partition: WorkspacePartitionNode;
 	readonly bounds: WorkspaceWindowRect;
 }
 
-export interface WorkspaceWindowTreeGeometry {
+interface WorkspaceWindowTreeGeometry {
 	readonly windows: readonly WorkspaceWindowRectEntry[];
 	readonly partitions: readonly WorkspacePartitionRectEntry[];
 }

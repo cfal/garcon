@@ -63,6 +63,7 @@ vi.mock('$lib/context', () => ({
 	getWorkbenchCommands: () => testContext.current?.commands,
 	getSingletonSurfaces: () => testContext.current?.singletons,
 	getTransientLayers: () => testContext.current?.transientLayers,
+	getOptionalTransientLayers: () => testContext.current?.transientLayers,
 	getWs: () => testContext.current?.ws,
 	setChatDrafts: chatDraftContext.set,
 	setNewChatPromptDrafts: vi.fn(),
@@ -102,9 +103,6 @@ vi.mock('$lib/components/chat/HandoffForkDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/chat/ChatProjectPathDialog.svelte', async () => ({
-	default: (await import('./AppShellGenericStub.svelte')).default,
-}));
-vi.mock('$lib/components/chat/ChatParentDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('$lib/components/chat/ShareChatDialog.svelte', async () => ({
@@ -322,10 +320,16 @@ describe('AppShell responsive workspace binding', () => {
 		searchNavigationPort.cancel.mockClear();
 	});
 
-	it.each(['pageshow', 'visibilitychange', 'resize'])(
-		'restores CSS viewport sizing on %s without a visual viewport event',
-		async (resumeEvent) => {
-			setViewportWidth(390, false);
+	it.each([
+		['pageshow', 390, false],
+		['visibilitychange', 390, false],
+		['resize', 390, true],
+		['resize', 1024, false],
+	] as const)(
+		'restores CSS viewport sizing on %s at %ipx (hover: %s)',
+		async (resumeEvent, width, canHover) => {
+			setViewportWidth(width, false);
+			hoverMediaQuery.setMatches(canHover);
 			vi.stubGlobal('innerHeight', 800);
 			const viewport = Object.assign(new EventTarget(), {
 				height: 756,
@@ -379,6 +383,19 @@ describe('AppShell responsive workspace binding', () => {
 			expect(appShell.keyboardHeight).toBe(0);
 		},
 	);
+
+	it('returns focus to the original transcript if the parent picker trigger disappears', async () => {
+		installContext([chat('child')]);
+		render(AppShell);
+		const trigger = screen.getByRole('button', { name: 'Open parent picker' });
+		const viewport = screen.getByRole('button', { name: 'Transcript' });
+		trigger.focus();
+		await fireEvent.click(trigger);
+		await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('combobox')));
+		trigger.remove();
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(document.activeElement).toBe(viewport));
+	});
 
 	it('waits for the dialog close update and only opens the newest selection', async () => {
 		installContext();

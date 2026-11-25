@@ -9,6 +9,48 @@ import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.
 type TerminalReconnectScope = typeof globalThis & { __terminalSocket?: WebSocket };
 type TerminalDrainScope = TerminalReconnectScope & { __releaseTerminalTimers?: () => number };
 
+test('a duplicated tab cannot reclaim a terminal from a tab using storage coordination', async () => {
+  await withChromiumFixture('terminal-mixed-tab-ownership', async ({ page, integration, assertNoBrowserErrors }) => {
+    await page.addInitScript(() => {
+      globalThis.BroadcastChannel = new Proxy(globalThis.BroadcastChannel, {
+        construct(Target, args: ConstructorParameters<typeof BroadcastChannel>) {
+          if (args[0] === 'garcon-terminal-client-identity-v1') throw new DOMException('Unavailable', 'NotSupportedError');
+          return new Target(...args);
+        },
+      });
+    });
+    const ownerFrames: TerminalStreamServerMessage[] = [];
+    page.on('websocket', socket => socket.on('framereceived', frame => {
+      const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
+      if (message) ownerFrames.push(message);
+    }));
+    await page.goto(integration.garcon.baseUrl);
+    await clickWorkspaceWindowAddAction(page, 'New Terminal');
+    await browserExpect.poll(() => ownerFrames.some(message => message.type === 'terminal-attached')).toBe(true);
+    const ownerId = await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'));
+    expect(ownerId).toBeTruthy();
+
+    const opened = page.waitForEvent('popup');
+    await page.evaluate(() => { window.open('about:blank', '_blank'); });
+    const copy = await opened;
+    try {
+      expect(await copy.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBe(ownerId);
+      const peerFrames: TerminalStreamServerMessage[] = [];
+      copy.on('websocket', socket => socket.on('framereceived', frame => {
+        const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
+        if (message) peerFrames.push(message);
+      }));
+      await copy.goto(integration.garcon.baseUrl);
+      await browserExpect.poll(() => peerFrames.some(message =>
+        message.type === 'terminal-error' && message.code === 'terminal-takeover-required',
+      )).toBe(true);
+      expect(await copy.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).not.toBe(ownerId);
+      expect(peerFrames.some(message => message.type === 'terminal-attached')).toBe(false);
+    } finally { await copy.close(); }
+    assertNoBrowserErrors();
+  });
+}, 60_000);
+
 test('a saturated renderer drains and automatically replays real PTY output', async () => {
   await withChromiumFixture('terminal-renderer-backpressure', async ({ page, integration, assertNoBrowserErrors }, markPhase) => {
     const finished = join(integration.dirs.project, 'burst-finished');

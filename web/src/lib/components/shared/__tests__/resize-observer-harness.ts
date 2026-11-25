@@ -38,6 +38,22 @@ export class ResizeObserverHarness implements ResizeObserver {
 		width: number,
 		height = 0,
 	): void {
+		ResizeObserverHarness.emitBatch(observer, [{ target, width, height }]);
+	}
+
+	static emitBatch(
+		observer: ResizeObserverHarness,
+		sizes: readonly { target: Element; width: number; height?: number }[],
+	): void {
+		observer.callback(
+			sizes.map(({ target, width, height = 0 }) =>
+				ResizeObserverHarness.entry(target, width, height),
+			),
+			observer,
+		);
+	}
+
+	private static entry(target: Element, width: number, height: number): ResizeObserverEntry {
 		const contentRect = {
 			x: 0,
 			y: 0,
@@ -50,14 +66,13 @@ export class ResizeObserverHarness implements ResizeObserver {
 			toJSON: () => ({ width, height }),
 		} satisfies DOMRectReadOnly;
 		const boxSize = { inlineSize: width, blockSize: height } satisfies ResizeObserverSize;
-		const entry = {
+		return {
 			target,
 			contentRect,
 			borderBoxSize: [boxSize],
 			contentBoxSize: [boxSize],
 			devicePixelContentBoxSize: [boxSize],
-		} satisfies ResizeObserverEntry;
-		observer.callback([entry], observer);
+		};
 	}
 }
 

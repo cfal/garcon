@@ -90,6 +90,13 @@ export function sidebarProjectKey(path: string, executorId?: string | null): str
 	return projectKey(effectiveExecutorId(executorId), normalizeProjectPath(path));
 }
 
+function groupLookupKey(executorId: string, normalizedPath: string): string {
+	// Removing a path segment or its trailing slash can expose whitespace and another slash.
+	return normalizedPath.trimEnd() === normalizedPath
+		? projectKey(executorId, normalizedPath)
+		: sidebarProjectKey(normalizedPath, executorId);
+}
+
 interface SidebarProject {
 	key: string;
 	executorId: string;
@@ -115,8 +122,7 @@ function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean) {
 	for (const [executorId, paths] of byExecutor) {
 		const groups = new Map<string, SidebarProject | undefined>();
 		for (const [rawPath, project] of paths) {
-			// A trailing slash can expose whitespace: group the normalized spelling, retain the label.
-			const key = sidebarProjectKey(project.normalizedPath, executorId);
+			const key = groupLookupKey(executorId, project.normalizedPath);
 			if (!groups.has(key)) {
 				let group = byKey.get(key);
 				let path = project.normalizedPath;
@@ -124,7 +130,7 @@ function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean) {
 					const separator = path.lastIndexOf('/');
 					if (separator < 0) break;
 					path = separator === 0 ? '/' : path.slice(0, separator);
-					group = byKey.get(sidebarProjectKey(path, executorId)) ?? group;
+					group = byKey.get(groupLookupKey(executorId, path)) ?? group;
 				}
 				groups.set(key, group);
 			}
@@ -237,8 +243,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		return (
 			(left.normalizedPath || 'Unknown project').localeCompare(
 				right.normalizedPath || 'Unknown project',
-			) ||
-			left.executorId.localeCompare(right.executorId)
+			) || left.executorId.localeCompare(right.executorId)
 		);
 	};
 	const compareChats = (a: string, b: string): number => {
@@ -335,10 +340,11 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				const path = [...task.path, [field, value] as const];
 				const key = sidebarGroupCollapseKey(task.parentId, path);
 				const isCollapsed = !filtered && Boolean(input.collapsedProjectKeys?.has(key));
-				const ranges = ids.map((id) => forest.branches.get(id)!).sort((a, b) => a.start - b.start);
+				let ranges: { start: number; end: number }[] | undefined;
 				const containsChat = (id: string): boolean => {
 					const target = forest.branches.get(id);
 					if (!target) return false;
+					ranges ??= ids.map((id) => forest.branches.get(id)!).sort((a, b) => a.start - b.start);
 					let low = 0;
 					let high = ranges.length;
 					while (low < high) {
@@ -413,13 +419,13 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				isPinned: list === 'pinned',
 				isArchived: list === 'archived',
 				executorGrouped: task.executorGrouped,
-				reorderScopeKey: scopeKeys[list] ??= JSON.stringify([
+				reorderScopeKey: (scopeKeys[list] ??= JSON.stringify([
 					input.nestDelegatedChats,
 					input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
 					task.parentId,
 					list,
 					task.path,
-				]),
+				])),
 				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
 				contextOnly,
 				section,
@@ -440,19 +446,26 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			tasks.push({ kind: 'chat', row });
 		}
 	}
-	const pathsByName = new Map<string, Set<string>>();
-	const projectNameKey = (row: Extract<SidebarVirtualRow, { type: 'project-header' }>) =>
-		JSON.stringify([effectiveExecutorId(row.executorId), splitProjectPath(row.projectPath).name]);
+	const projectsByName = new Map<
+		string,
+		{
+			paths: Set<string>;
+			rows: Extract<SidebarVirtualRow, { type: 'project-header' }>[];
+		}
+	>();
 	for (const row of model.rows) {
 		if (row.type !== 'project-header') continue;
-		const name = projectNameKey(row);
-		const paths = pathsByName.get(name) ?? new Set();
-		paths.add(normalizeProjectPath(row.projectPath));
-		pathsByName.set(name, paths);
+		const name = JSON.stringify([
+			effectiveExecutorId(row.executorId),
+			splitProjectPath(row.projectPath).name,
+		]);
+		let group = projectsByName.get(name);
+		if (!group) projectsByName.set(name, (group = { paths: new Set(), rows: [] }));
+		group.paths.add(row.projectKey);
+		group.rows.push(row);
 	}
-	for (const row of model.rows)
-		if (row.type === 'project-header')
-			row.showParentPath = pathsByName.get(projectNameKey(row))!.size > 1;
+	for (const { paths, rows } of projectsByName.values())
+		for (const row of rows) row.showParentPath = paths.size > 1;
 	return model;
 }
 

@@ -110,6 +110,7 @@ describe('SidebarProjectCollapseStore', () => {
 		window.dispatchEvent(
 			new StorageEvent('storage', {
 				key: storageKey,
+				storageArea: localStorage,
 				newValue: localStorage.getItem(storageKey),
 			}),
 		);
@@ -121,6 +122,16 @@ describe('SidebarProjectCollapseStore', () => {
 			collapsedProjectKeys: ['path:/workspace/synced'],
 			expandedDelegationKeys: ['delegation:synced'],
 		});
+	});
+
+	it('ignores session storage and restores defaults on local storage clear', () => {
+		const store = createTestStore();
+		store.setCollapsed('delegation:parent', true);
+		localStorage.clear();
+		window.dispatchEvent(new StorageEvent('storage', { storageArea: sessionStorage, key: null }));
+		expect(store.isCollapsed('delegation:parent')).toBe(true);
+		window.dispatchEvent(new StorageEvent('storage', { storageArea: localStorage, key: null }));
+		expect(store.isCollapsed('delegation:parent')).toBe(false);
 	});
 
 	it('restores explicit branch choices independently of the current default', () => {

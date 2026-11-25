@@ -259,13 +259,23 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		});
 	const windowsFitHost: WorkspaceWindowsFitResolver = (root, windowIds) =>
 		workspaceWindowsFitHost(root, windowIds, hostGeometry.size);
+	const partitionsByRoot = new WeakMap<
+		WorkspaceLayoutSnapshot['desktopRoot'],
+		Map<string, ReturnType<typeof computeWindowRects>['partitions'][number]>
+	>();
 	const resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver = (
 		snapshot,
 		partitionId,
 	) => {
-		const entry = computeWindowRects(snapshot.desktopRoot).partitions.find(
-			(candidate) => candidate.partition.id === partitionId,
-		);
+		const root = snapshot.desktopRoot;
+		let partitions = partitionsByRoot.get(root);
+		if (!partitions) {
+			partitions = new Map(
+				computeWindowRects(root).partitions.map((entry) => [entry.partition.id, entry]),
+			);
+			partitionsByRoot.set(root, partitions);
+		}
+		const entry = partitions.get(partitionId);
 		if (!entry) return null;
 		const size = hostGeometry.size;
 		let partitionAxisPixels: number | null = null;

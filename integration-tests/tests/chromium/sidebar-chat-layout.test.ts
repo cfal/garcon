@@ -76,6 +76,22 @@ async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promis
   });
 }
 
+test('the first direct pointer click opens an unprepared row menu', async () => {
+  await withChromiumFixture('sidebar-first-pointer-menu', async ({ page, integration }) => {
+    const chatId = integration.newChatId();
+    const turn = await integration.client.startDirectChat({ chatId, content: 'Synthetic row',
+      projectPath: integration.executionDirs.project, agent: integration.directAgents.openAi });
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.goto(integration.garcon.baseUrl);
+    const trigger = page.locator(`[data-sidebar-virtual-row="${chatId}"] button[aria-haspopup="menu"]`);
+    await trigger.hover();
+    await page.mouse.down();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await page.mouse.up();
+    await browserExpect(page.getByRole('menu')).toBeVisible();
+  });
+});
+
 test('inherited groups omit headers while differing groups retain full internal indentation', async () => {
   await withChromiumFixture('sidebar-inherited-groups', async ({ page, integration, assertNoBrowserErrors }) => {
     const { a, a1 } = await createSidebarDelegationFixture(integration);

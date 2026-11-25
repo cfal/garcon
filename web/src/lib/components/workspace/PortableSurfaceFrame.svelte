@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { fromAction } from 'svelte/attachments';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import X from '@lucide/svelte/icons/x';
 	import {
@@ -55,6 +56,16 @@
 				surface.kind === 'pull-requests' ||
 				surface.kind === 'usage'),
 	);
+	const attachFrame = fromAction(surfaceFrame, () => ({
+		registry: surfaceFrames,
+		surfaceId: surface.id,
+		host: presentation,
+		version: workspace.frameVersion(surface.id),
+		renderer: frameBridge,
+		waitForRenderer:
+			(surface.type === 'terminal' && shouldWaitForTerminalRenderer(terminalSession)) ||
+			(surface.type === 'file' && shouldWaitForFileRenderer(fileSession)),
+	}));
 </script>
 
 <div
@@ -71,16 +82,7 @@
 	class:invisible={!visible}
 	class:pointer-events-none={!visible}
 	{style}
-	use:surfaceFrame={{
-		registry: surfaceFrames,
-		surfaceId: surface.id,
-		host: presentation,
-		version: workspace.frameVersion(surface.id),
-		renderer: frameBridge,
-		waitForRenderer:
-			(surface.type === 'terminal' && shouldWaitForTerminalRenderer(terminalSession)) ||
-			(surface.type === 'file' && shouldWaitForFileRenderer(fileSession)),
-	}}
+	{@attach attachFrame}
 >
 	{#if workspace.attachmentErrors[surface.id]}
 		<SurfaceErrorState

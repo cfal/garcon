@@ -74,9 +74,7 @@
 	let previousChatIds: string[] = [];
 	let pendingAnchor: { chatId: string; offsetRatio: number; scrollTop: number } | null = null;
 	let useVirtualResults = $derived(filteredChats.length > SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD);
-	let resultsBusy = $derived(
-		loadingMoreTranscriptResults || transcriptSearchRevalidating,
-	);
+	let resultsBusy = $derived(loadingMoreTranscriptResults || transcriptSearchRevalidating);
 	let footerLabel = $derived.by(() => {
 		if (transcriptSearchRevalidating) return m.sidebar_search_updating_results();
 		if (transcriptSearchRevalidationError) return m.sidebar_search_retry_update();
@@ -87,8 +85,9 @@
 		return m.sidebar_search_all_loaded();
 	});
 	let footerActionable = $derived(
-		Boolean(transcriptSearchRevalidationError || transcriptSearchPageError || hasMoreTranscriptResults)
-			&& !resultsBusy,
+		Boolean(
+			transcriptSearchRevalidationError || transcriptSearchPageError || hasMoreTranscriptResults,
+		) && !resultsBusy,
 	);
 	const virtualWindow = new FixedVirtualWindow({
 		get itemCount() {
@@ -135,11 +134,13 @@
 	}
 
 	function canLoadAutomatically(): boolean {
-		return showTranscriptPagination
-			&& hasMoreTranscriptResults
-			&& !resultsBusy
-			&& !transcriptSearchPageError
-			&& !transcriptSearchRevalidationError;
+		return (
+			showTranscriptPagination &&
+			hasMoreTranscriptResults &&
+			!resultsBusy &&
+			!transcriptSearchPageError &&
+			!transcriptSearchRevalidationError
+		);
 	}
 
 	function loadAutomatically(): void {
@@ -158,13 +159,14 @@
 		void requestFooterAction();
 	}
 
-	$effect(() => {
-		return virtualWindow.bindViewport();
-	});
-
 	// Tracks browser-owned viewport metrics that Svelte cannot derive.
 	$effect(() => {
-		return virtualWindow.observeViewport();
+		const unbind = virtualWindow.bindViewport();
+		const unobserve = virtualWindow.observeViewport();
+		return () => {
+			unobserve?.();
+			unbind?.();
+		};
 	});
 
 	$effect(() => {
@@ -237,22 +239,27 @@
 	});
 
 	$effect(() => {
-		rowHeight;
-		filteredChats;
+		const height = rowHeight;
+		const chats = filteredChats;
+		const viewport = viewportRef;
 		revalidationVersion;
+		let disposed = false;
 		void tick().then(() => {
-			const viewport = viewportRef;
+			if (disposed || viewport !== viewportRef) return;
 			const anchor = pendingAnchor;
 			if (viewport && anchor) {
-				const index = filteredChats.findIndex((chat) => chat.id === anchor.chatId);
+				const index = chats.findIndex((chat) => chat.id === anchor.chatId);
 				viewport.scrollTop =
-					index >= 0 ? index * rowHeight + anchor.offsetRatio * rowHeight : anchor.scrollTop;
+					index >= 0 ? index * height + anchor.offsetRatio * height : anchor.scrollTop;
 				virtualWindow.scrollTop = viewport.scrollTop;
 			}
 			pendingAnchor = null;
-			previousRowHeight = rowHeight;
-			previousChatIds = filteredChats.map((chat) => chat.id);
+			previousRowHeight = height;
+			previousChatIds = chats.map((chat) => chat.id);
 		});
+		return () => {
+			disposed = true;
+		};
 	});
 </script>
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack, type Component, type Snippet } from 'svelte';
+	import type { Component, Snippet } from 'svelte';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import {
 		DropdownMenu,
@@ -52,17 +52,18 @@
 	let menuTrigger = $state<HTMLElement | null>(null);
 	let visibleActionIds = $state.raw<ReadonlySet<string> | null>(null);
 	const visibleActions = $derived(
-		actions.filter((action) =>
-			(visibleActionIds ?? new Set(actions.map(({ id }) => id))).has(action.id),
-		),
+		visibleActionIds === null
+			? actions
+			: actions.filter((action) => visibleActionIds?.has(action.id)),
 	);
 	const overflowActions = $derived(
-		actions.filter(
-			(action) => !(visibleActionIds ?? new Set(actions.map(({ id }) => id))).has(action.id),
-		),
+		visibleActionIds === null ? [] : actions.filter((action) => !visibleActionIds?.has(action.id)),
 	);
 	const hasPersistentMenuContent = $derived(Boolean(menuContent) || Boolean(menuLeadingContent));
 	const showMenu = $derived(hasPersistentMenuContent || overflowActions.length > 0);
+	const layoutKey = $derived(
+		JSON.stringify(actions.map(({ id, renderKey, priority }) => [id, renderKey, priority])),
+	);
 
 	function actionClass(action: ResponsiveSurfaceAction): string {
 		return cn(
@@ -98,7 +99,7 @@
 			rail
 				.querySelector<HTMLElement>('[data-surface-action-overflow-measure]')
 				?.getBoundingClientRect().width ?? 0;
-		visibleActionIds = selectVisibleSurfaceActionIds({
+		const next = selectVisibleSurfaceActionIds({
 			actions: actions.map(({ id, priority = 100 }) => ({ id, priority })),
 			availableWidth: actionRoot.clientWidth,
 			widths,
@@ -106,42 +107,34 @@
 			menuVisibility: hasPersistentMenuContent ? 'persistent' : 'overflow',
 			gap,
 		});
+		if (visibleActionIds?.size === next.size && [...next].every((id) => visibleActionIds?.has(id)))
+			return;
+		visibleActionIds = next;
 	}
 
 	$effect(() => {
+		layoutKey;
+		hasPersistentMenuContent;
 		const actionRoot = root;
 		const rail = measurementRail;
 		if (!actionRoot || !rail || typeof ResizeObserver === 'undefined') return;
-		const observer = new ResizeObserver(recompute);
+		let disposed = false;
+		const refresh = () => {
+			if (!disposed) recompute();
+		};
+		const observer = new ResizeObserver(refresh);
 		observer.observe(actionRoot);
 		observer.observe(rail);
-		for (const element of rail.querySelectorAll<HTMLElement>('[data-surface-action-measure]')) {
+		for (const element of rail.querySelectorAll<HTMLElement>(
+			'[data-surface-action-measure], [data-surface-action-overflow-measure]',
+		)) {
 			observer.observe(element);
 		}
-		queueMicrotask(recompute);
-		return () => observer.disconnect();
-	});
-
-	$effect(() => {
-		actions
-			.map(
-				({
-					id,
-					renderKey,
-					label,
-					title,
-					disabled,
-					busy,
-					priority,
-					showLabel,
-					variant,
-					iconClass,
-					buttonClass,
-				}) =>
-					`${id}:${renderKey}:${label}:${title}:${disabled}:${busy}:${priority}:${showLabel}:${variant}:${iconClass}:${buttonClass}`,
-			)
-			.join('|');
-		untrack(() => queueMicrotask(recompute));
+		queueMicrotask(refresh);
+		return () => {
+			disposed = true;
+			observer.disconnect();
+		};
 	});
 </script>
 

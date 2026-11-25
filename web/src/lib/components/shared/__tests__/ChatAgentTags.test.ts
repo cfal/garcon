@@ -59,6 +59,34 @@ describe('ChatAgentTags', () => {
 		expect(agent.classList.contains('whitespace-nowrap')).toBe(true);
 	});
 
+	it.each([{ tags: [] }, { tags: ['hidden'], tagLimit: 0 }])(
+		'skips the measurement rail and observations without visible tags (%o)',
+		(props) => {
+			const { container } = render(ChatAgentTags, {
+				agentId: 'claude',
+				wrap: 'two-lines',
+				...props,
+			});
+			expect(container.querySelector('[data-slot="chat-agent-tags-measurement"]')).toBeNull();
+			expect(ResizeObserverHarness.instances).toHaveLength(0);
+		},
+	);
+
+	it('fits tags and the overflow control using the rendered column gap', async () => {
+		const { container } = render(ChatAgentTags, {
+			agentId: 'claude', tags: ['a', 'b', 'c'], tagLimit: 2, wrap: 'two-lines',
+		});
+		const root = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags"]')!;
+		const rail = container.querySelector('[data-slot="chat-agent-tags-measurement"]')!;
+		root.style.columnGap = '5px';
+		for (const chip of rail.children) {
+			chip.getBoundingClientRect = () => new DOMRect(0, 0, 48, 16);
+		}
+		ResizeObserverHarness.emit(root, 100);
+		await Promise.resolve();
+		expect(root.textContent).toContain('+3');
+	});
+
 	it('keeps the measured overflow control visible for long tags in a narrow card', async () => {
 		const tags = Array.from({ length: 7 }, (_, index) => `long-tag-${index + 1}`);
 		const { container } = render(ChatAgentTags, {
@@ -96,6 +124,28 @@ describe('ChatAgentTags', () => {
 		expect(within(root).getByRole('button', { name: '+5' })).toBeTruthy();
 	});
 
+	it('measures a row only once when the rail and container resize together', () => {
+		const { container } = render(ChatAgentTags, {
+			agentId: 'claude',
+			tags: ['one'],
+			wrap: 'two-lines',
+		});
+		const root = container.querySelector('[data-slot="chat-agent-tags"]');
+		const rail = container.querySelector('[data-slot="chat-agent-tags-measurement"]');
+		const tag = container.querySelector('[data-chat-agent-tags-tag-measure]');
+		if (!root || !rail || !tag) throw new Error('Expected measurement rail and contents');
+		const observer = ResizeObserverHarness.instances.find((instance) =>
+			instance.observed.has(rail),
+		);
+		if (!observer) throw new Error('Expected shared size observer');
+		const readTagWidth = vi.spyOn(tag, 'getBoundingClientRect');
+		ResizeObserverHarness.emitBatch(observer, [
+			{ target: rail, width: 100 },
+			{ target: root, width: 80 },
+		]);
+		expect(readTagWidth).toHaveBeenCalledTimes(1);
+	});
+
 	it('retains fractional root width when measurement content resizes', async () => {
 		const tags = [
 			'customer-experience',
@@ -115,9 +165,7 @@ describe('ChatAgentTags', () => {
 		});
 		await Promise.resolve();
 		const root = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags"]');
-		const rail = container.querySelector<HTMLElement>(
-			'[data-slot="chat-agent-tags-measurement"]',
-		);
+		const rail = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags-measurement"]');
 		const agentMeasure = container.querySelector<HTMLElement>(
 			'[data-chat-agent-tags-agent-measure]',
 		);

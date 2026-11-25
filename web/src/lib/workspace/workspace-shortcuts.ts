@@ -14,6 +14,7 @@ import {
 	closestWorkspaceScrollRegion,
 	scrollWorkspaceRegion,
 	WORKSPACE_SCROLL_REGION_SELECTOR,
+	workspaceScrollRegionRevision,
 	workspaceScrollRegionRole,
 	type WorkspaceHalfPageDirection,
 } from './workspace-scroll-region.js';
@@ -74,7 +75,9 @@ export class WorkspaceShortcutDispatcher {
 	readonly #localOwners = new Map<HTMLElement, Set<WorkspaceLocalShortcutOwner>>();
 	#toggleCommandMenu: (() => void) | null = null;
 	#userInteractionGeneration = 0;
-	#lastInteractedScrollRegion: HTMLElement | null = null;
+	#lastInteractedScrollRegion?: WeakRef<HTMLElement>;
+	#lastWheelTarget?: WeakRef<Element>;
+	#lastWheelRegionRevision = -1;
 	#pendingPointerFocus: { region: HTMLElement } | null = null;
 
 	constructor(private readonly deps: WorkspaceShortcutDeps) {}
@@ -121,6 +124,23 @@ export class WorkspaceShortcutDispatcher {
 		target: EventTarget | null,
 		interaction: WorkspaceScrollInteraction,
 	): void {
+		if (interaction === 'wheel') {
+			const revision = workspaceScrollRegionRevision();
+			if (
+				!(target instanceof Element) ||
+				target !== this.#lastWheelTarget?.deref() ||
+				revision !== this.#lastWheelRegionRevision ||
+				!this.#lastInteractedScrollRegion?.deref()?.contains(target)
+			) {
+				const region = closestWorkspaceScrollRegion(target);
+				this.#lastWheelTarget = target instanceof Element ? new WeakRef(target) : undefined;
+				this.#lastInteractedScrollRegion = region ? new WeakRef(region) : undefined;
+				this.#lastWheelRegionRevision = revision;
+			}
+			this.#pendingPointerFocus = null;
+			return;
+		}
+		this.#lastWheelTarget = undefined;
 		const region = closestWorkspaceScrollRegion(target);
 		const availableRegion = region && this.#isScrollRegionAvailable(region) ? region : null;
 		if (interaction === 'focus') {
@@ -137,10 +157,8 @@ export class WorkspaceShortcutDispatcher {
 		}
 		if (interaction === 'pointer') {
 			this.#pendingPointerFocus = availableRegion ? { region: availableRegion } : null;
-		} else if (interaction === 'wheel') {
-			this.#pendingPointerFocus = null;
 		}
-		this.#lastInteractedScrollRegion = availableRegion;
+		this.#lastInteractedScrollRegion = availableRegion ? new WeakRef(availableRegion) : undefined;
 	}
 
 	matchesGlobalShortcut(id: GlobalShortcutId, event: KeyboardEvent): boolean {
@@ -149,11 +167,10 @@ export class WorkspaceShortcutDispatcher {
 	}
 
 	handle(event: KeyboardEvent): void {
-		if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
-		const topTransientKind = this.deps.transients.topVisibleKind();
+		if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.key === 'Process') return;
 		if (
 			event.key === 'Escape' &&
-			topTransientKind === 'file-dialog' &&
+			this.deps.transients.topVisibleKind() === 'file-dialog' &&
 			this.#isLocallyOwned(event)
 		) {
 			return;
@@ -168,15 +185,17 @@ export class WorkspaceShortcutDispatcher {
 			return;
 		}
 		if (this.#isLocallyOwned(event)) return;
+		if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) return;
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		const ownerDescriptor =
 			owner.kind === 'surface' || owner.kind === 'window-chrome'
 				? this.deps.workspace.layout.surface(owner.surfaceId)
 				: null;
+		let ownerIsPresented: boolean | undefined;
 		const terminalOwnsInput =
 			explicitOwner?.kind === 'surface' &&
-			this.deps.workspace.isSurfacePresented(explicitOwner.surfaceId) &&
-			this.deps.workspace.layout.surface(explicitOwner.surfaceId)?.type === 'terminal';
+			ownerDescriptor?.type === 'terminal' &&
+			(ownerIsPresented = this.deps.workspace.isSurfacePresented(explicitOwner.surfaceId));
 		if (matches('toggle-command-palette') && (!terminalOwnsInput || event.metaKey)) {
 			event.preventDefault();
 			this.#toggleCommandMenu?.();
@@ -221,24 +240,26 @@ export class WorkspaceShortcutDispatcher {
 			this.deps.workspace.cycleWindowFocus(owner);
 			return;
 		}
-		if (matches('navigate-tab-left') || matches('navigate-tab-right')) {
-			const handled = matches('navigate-tab-left')
+		const navigateTabLeft = matches('navigate-tab-left');
+		if (navigateTabLeft || matches('navigate-tab-right')) {
+			const handled = navigateTabLeft
 				? this.deps.workspace.focusPreviousTabInFocusedWindow(owner)
 				: this.deps.workspace.focusNextTabInFocusedWindow(owner);
 			if (handled) event.preventDefault();
 			return;
 		}
-		if (matches('navigate-chat-above') || matches('navigate-chat-below')) {
+		const navigateChatAbove = matches('navigate-chat-above');
+		if (navigateChatAbove || matches('navigate-chat-below')) {
 			if (owner.kind === 'chat-list') {
 				event.preventDefault();
-				if (matches('navigate-chat-above')) this.deps.navigation.requestNavigateChatAbove();
+				if (navigateChatAbove) this.deps.navigation.requestNavigateChatAbove();
 				else this.deps.navigation.requestNavigateChatBelow();
 			}
 			return;
 		}
 		if (owner.kind === 'surface' || owner.kind === 'window-chrome') {
-			if (!this.deps.workspace.isSurfacePresented(owner.surfaceId)) return;
-			const descriptor = this.deps.workspace.layout.surface(owner.surfaceId);
+			if (!(ownerIsPresented ?? this.deps.workspace.isSurfacePresented(owner.surfaceId))) return;
+			const descriptor = ownerDescriptor;
 			if (descriptor?.type === 'terminal') return;
 			if (descriptor?.type === 'file') {
 				const commandContext = { viewId: descriptor.fileSessionId, surfaceId: descriptor.id };
@@ -315,7 +336,7 @@ export class WorkspaceShortcutDispatcher {
 				this.#ownersMatch(owner, this.#ownerForTarget(region)) &&
 				(!restrictToTopModal || this.deps.transients.ownsTopModalTarget(region)),
 		);
-		const lastRegion = this.#lastInteractedScrollRegion;
+		const lastRegion = this.#lastInteractedScrollRegion?.deref();
 		const region =
 			(lastRegion && regions.includes(lastRegion) ? lastRegion : null) ??
 			regions.find((candidate) => workspaceScrollRegionRole(candidate) === 'primary') ??

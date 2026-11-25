@@ -4,20 +4,22 @@ export const MAX_MOBILE_RETURN_TARGETS = 32;
 export const WORKSPACE_WINDOW_RESOURCE_CEILING = 25;
 export const MIN_PARTITION_RATIO = 0.15;
 export const MAX_PARTITION_RATIO = 0.85;
-export const PORTABLE_SINGLETON_KINDS = [
-	'git',
-	'git-history',
-	'git-compare',
-	'pull-requests',
-	'files',
-	'commit',
-	'chat-map',
-	'chat-canvas',
-	'chat-board',
-	'tickets',
-	'usage',
-] as const;
-export const TRANSIENT_MOBILE_SINGLETON_KINDS = ['git-history', 'git-compare'] as const;
+const singletonMetadata = {
+	git: { project: true, transientMobile: false },
+	'git-history': { project: true, transientMobile: true },
+	'git-compare': { project: true, transientMobile: true },
+	'pull-requests': { project: false, transientMobile: false },
+	files: { project: true, transientMobile: false },
+	commit: { project: true, transientMobile: false },
+	'chat-map': { project: false, transientMobile: false },
+	'chat-canvas': { project: false, transientMobile: false },
+	'chat-board': { project: false, transientMobile: false },
+	tickets: { project: false, transientMobile: false },
+	usage: { project: false, transientMobile: false },
+} as const;
+export const PORTABLE_SINGLETON_KINDS = Object.keys(
+	singletonMetadata,
+) as readonly PortableSingletonKind[];
 
 // Prefixes keep durable layout identities disjoint from reserved mobile and dialog hosts.
 export type WorkspaceWindowId = `window-${string}`;
@@ -38,8 +40,12 @@ export type FocusOwner =
 	| { kind: 'chat-list' }
 	| { kind: 'window-chrome'; windowId: WorkspaceWindowId; surfaceId: string };
 
-export type PortableSingletonKind = (typeof PORTABLE_SINGLETON_KINDS)[number];
-export type TransientMobileSingletonKind = (typeof TRANSIENT_MOBILE_SINGLETON_KINDS)[number];
+export type PortableSingletonKind = keyof typeof singletonMetadata;
+export type TransientMobileSingletonKind = {
+	[K in PortableSingletonKind]: (typeof singletonMetadata)[K]['transientMobile'] extends true
+		? K
+		: never;
+}[PortableSingletonKind];
 
 export type PortableSingletonDescriptor = {
 	[K in PortableSingletonKind]: {
@@ -126,11 +132,16 @@ export interface WorkspaceLayoutReader {
 }
 
 export interface WorkspaceLayoutCommitPort {
+	// Publishes a snapshot already validated by the layout reducer.
 	publish(expectedRevision: number, next: WorkspaceLayoutSnapshot): boolean;
 }
 
 export type WorkspaceLayoutMutation =
-	| { type: 'tile-chats'; partitionId: WorkspacePartitionId; rows: readonly (readonly WorkspaceChatTile[])[] }
+	| {
+			type: 'tile-chats';
+			partitionId: WorkspacePartitionId;
+			rows: readonly (readonly WorkspaceChatTile[])[];
+	  }
 	| {
 			type: 'merge-window';
 			sourceWindowId: WorkspaceWindowId;
@@ -229,7 +240,11 @@ export function portableSingletonDescriptor(
 export function isTransientMobileSingletonKind(
 	kind: PortableSingletonKind,
 ): kind is TransientMobileSingletonKind {
-	return TRANSIENT_MOBILE_SINGLETON_KINDS.includes(kind as TransientMobileSingletonKind);
+	return singletonMetadata[kind].transientMobile;
+}
+
+export function isProjectSingletonKind(kind: PortableSingletonKind): boolean {
+	return singletonMetadata[kind].project;
 }
 
 export function terminalSurfaceId(terminalId: string): string {

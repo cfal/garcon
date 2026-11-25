@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { tick } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
@@ -122,9 +122,11 @@
 	let isProcessing = $derived(session.isProcessing);
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	const branchDescriptionId = $props.id();
-	const branchActivity = $derived(branch && branch.activity > chatActivityTimeMs(session)
-		? m.sidebar_branch_activity({ time: new Date(branch.activity).toLocaleString() })
-		: undefined);
+	const branchActivity = $derived(
+		branch && branch.activity > chatActivityTimeMs(session)
+			? m.sidebar_branch_activity({ time: new Date(branch.activity).toLocaleString() })
+			: undefined,
+	);
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
@@ -166,10 +168,25 @@
 	let rightClickPos = $state<{ x: number; y: number } | null>(null);
 	let isAtCursor = $derived(rightClickPos !== null);
 
-	// Resets cursor anchor when the menu closes so the 3-dots button reappears.
-	$effect(() => {
-		if (!menuOpen) rightClickPos = null;
-	});
+	let menuMounted = $state(false);
+	let menuTrigger = $state<HTMLButtonElement | null>(null);
+	const menuTriggerClass = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground';
+
+	function prepareMenu(): void {
+		if (!isMobile && !isMultiSelectMode) menuMounted = true;
+	}
+
+	function openDesktopMenu(): void {
+		menuMounted = true;
+		menuOpen = true;
+	}
+
+	async function prepareFocusedMenu(event: FocusEvent & { currentTarget: HTMLButtonElement }): Promise<void> {
+		if (!event.currentTarget.matches(':focus-visible')) return;
+		prepareMenu();
+		await tick();
+		if (document.activeElement === document.body) menuTrigger?.focus({ preventScroll: true });
+	}
 
 	// Positions the dropdown anchor at the cursor for desktop right-click.
 	function handleRightClick(e: MouseEvent) {
@@ -177,6 +194,7 @@
 		e.preventDefault();
 		if (!itemEl) return;
 		const rect = itemEl.getBoundingClientRect();
+		menuMounted = true;
 		rightClickPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
 		menuOpen = true;
 	}
@@ -243,15 +261,15 @@
 	}
 
 	// Scroll-to-selected on explicit chat navigation requests.
-	onMount(() =>
-		appShell.onSidebarRecenterRequested(() => {
-			if (!enableRecenterOnRequest) return;
+	$effect(() => {
+		if (!enableRecenterOnRequest) return;
+		return appShell.onSidebarRecenterRequested(() => {
 			if (!isSelected || !itemEl) return;
 			requestAnimationFrame(() => {
 				if (itemEl) scrollIntoViewport(itemEl);
 			});
-		}),
-	);
+		});
+	});
 </script>
 
 {#snippet stateBadge()}
@@ -390,6 +408,9 @@
 				draggable={canNativeDrag ? true : undefined}
 				ondragstart={canNativeDrag ? handleDragStart : undefined}
 				ondragend={canNativeDrag ? handleDragEnd : undefined}
+				onpointerenter={prepareMenu}
+				onpointerdown={prepareMenu}
+				onfocus={prepareMenu}
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full h-full justify-start pr-2 font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
@@ -428,50 +449,76 @@
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>
-			<DropdownMenu bind:open={menuOpen}>
-				<DropdownMenuTrigger
-					data-sidebar-touch-drag-ignore
-					class={isAtCursor
-						? 'block w-px h-px opacity-0 pointer-events-none'
-						: 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground'}
-					aria-label={m.sidebar_chat_more_actions()}
-					tabindex={isAtCursor ? -1 : 0}
+			{#if isMobile || menuMounted}
+				<DropdownMenu
+					bind:open={menuOpen}
+					onOpenChange={(open) => {
+						if (!open) rightClickPos = null;
+					}}
 				>
-					{#if !isAtCursor}
-						<EllipsisVertical class="h-3.5 w-3.5" />
-					{/if}
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
-					<SidebarChatMenu
-						delegatedChatsCollapsed={branch?.isCollapsed}
-						{onToggleDelegatedChats}
-						{session}
-						{isPinned}
-						{isArchived}
-						{canFork}
-						{canForkNow}
-						{onEnterMultiSelect}
-						{onMoveUp}
-						{onMoveDown}
-						{moveBoundaryLabels}
-						{onMoveToTop}
-						{onMoveToBottom}
-						{onSortChatOrder}
-						{onOpenInNewWindow}
-						{newWindowEdges}
-						{hasChatPlacement}
-						{onTogglePinned}
-						{onToggleArchive}
-						{isArchiveMutationPending}
-						onRename={requestRename}
-						onDetails={requestDetails}
-						onShare={() => onShareChat(session)}
-						onManageTags={onManageTags ? () => onManageTags(session) : undefined}
-						onFork={() => onForkChat(session.id)}
-						onDelete={requestDelete}
-					/>
-				</DropdownMenuContent>
-			</DropdownMenu>
+					<DropdownMenuTrigger
+						bind:ref={menuTrigger}
+						data-sidebar-touch-drag-ignore
+						class={isAtCursor
+							? 'block w-px h-px opacity-0 pointer-events-none'
+							: menuTriggerClass}
+						aria-label={m.sidebar_chat_more_actions()}
+						tabindex={isAtCursor ? -1 : 0}
+					>
+						{#if !isAtCursor}
+							<EllipsisVertical class="h-3.5 w-3.5" />
+						{/if}
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
+						<SidebarChatMenu
+							delegatedChatsCollapsed={branch?.isCollapsed}
+							{onToggleDelegatedChats}
+							{session}
+							{isPinned}
+							{isArchived}
+							{canFork}
+							{canForkNow}
+							{onEnterMultiSelect}
+							{onMoveUp}
+							{onMoveDown}
+							{moveBoundaryLabels}
+							{onMoveToTop}
+							{onMoveToBottom}
+							{onSortChatOrder}
+							{onOpenInNewWindow}
+							{newWindowEdges}
+							{hasChatPlacement}
+							{onTogglePinned}
+							{onToggleArchive}
+							{isArchiveMutationPending}
+							onRename={requestRename}
+							onDetails={requestDetails}
+							onShare={() => onShareChat(session)}
+							onManageTags={onManageTags ? () => onManageTags(session) : undefined}
+							onFork={() => onForkChat(session.id)}
+							onDelete={requestDelete}
+						/>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			{:else}
+				<button
+					type="button"
+					data-sidebar-touch-drag-ignore
+					class={menuTriggerClass}
+					aria-label={m.sidebar_chat_more_actions()}
+					aria-haspopup="menu"
+					aria-expanded="false"
+					onfocus={prepareFocusedMenu}
+					onclick={openDesktopMenu}
+					onkeydown={(event) => {
+						if (event.key !== 'ArrowDown') return;
+						event.preventDefault();
+						openDesktopMenu();
+					}}
+				>
+					<EllipsisVertical class="h-3.5 w-3.5" />
+				</button>
+			{/if}
 		</div>
 	{/if}
 </div>

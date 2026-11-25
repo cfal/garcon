@@ -49,9 +49,11 @@ export class TerminalClientIdentity {
 				this.#channel = null;
 			}
 		}
-		window.addEventListener('storage', this.#storage);
+		if (this.#channel === null) {
+			window.addEventListener('storage', this.#storage);
+			this.#scanFallbackClaims();
+		}
 		window.addEventListener('pagehide', this.#pageHide, { once: true });
-		this.#scanFallbackClaims();
 		this.#beginClaim();
 	}
 
@@ -128,7 +130,7 @@ export class TerminalClientIdentity {
 			localStorage.setItem(key, JSON.stringify(message));
 			const timer = setTimeout(() => {
 				this.#fallbackCleanupTimers.delete(key);
-				setTimeout(() => this.#removeFallbackClaim(key), 0);
+				this.#removeFallbackClaim(key);
 			}, CLAIM_WINDOW_MS);
 			this.#fallbackCleanupTimers.set(key, timer);
 		} catch {

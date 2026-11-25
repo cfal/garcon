@@ -33,7 +33,7 @@
 
 	function getNotificationClasses(notification: AppNotification): string {
 		return cn(
-			'pointer-events-auto flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 shadow-lg backdrop-blur-sm',
+			'pointer-events-auto flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 shadow-lg [:root:not([data-overlay-backdrop-effects=disabled])_&]:backdrop-blur-sm',
 			notification.tone === 'error'
 				? 'border-status-error-border bg-status-error text-status-error-foreground'
 				: 'border-status-info-border bg-status-info text-status-info-foreground',

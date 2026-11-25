@@ -2,6 +2,8 @@ import type { Attachment } from 'svelte/attachments';
 import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
+	currentAnchor,
+	indexesInRange,
 	virtualItems as selectVirtualItems,
 	type VirtualIndexScrollResult,
 	type VirtualItem,
@@ -21,12 +23,6 @@ interface SidebarVirtualGeometryUpdate {
 	readonly chatFontScale: number;
 	readonly rowHeight: number | undefined;
 	readonly overscan: number;
-}
-
-interface SidebarNormalizedAnchor {
-	readonly key: string;
-	readonly offset: number;
-	readonly size: number;
 }
 
 export class SidebarVirtualChatListController {
@@ -71,16 +67,18 @@ export class SidebarVirtualChatListController {
 			!sizingOptionsChanged &&
 			this.#overscan === input.overscan &&
 			source?.keys.length === input.rows.length &&
-			input.rows.every((row, i) =>
-				row.key === source.keys[i] && this.#estimateRow(row, input) === source.estimates[i]
+			input.rows.every(
+				(row, i) =>
+					row.key === source.keys[i] && this.#estimateRow(row, input) === source.estimates[i],
 			)
-		) return;
+		)
+			return;
 		this.#lastEstimatedLayout = input.chatItemLayout;
 		this.#lastShowProjectPath = input.showProjectPath;
 		this.#lastChatFontScale = input.chatFontScale;
 		this.#overscan = input.overscan;
 		const normalizedAnchor =
-			sizingOptionsChanged && input.rowHeight === undefined ? this.#normalizedAnchor() : null;
+			sizingOptionsChanged && input.rowHeight === undefined ? this.#anchor() : null;
 		const nextSource = {
 			keys: input.rows.map((row) => row.key),
 			estimates: input.rows.map((row) => this.#estimateRow(row, input)),
@@ -107,14 +105,7 @@ export class SidebarVirtualChatListController {
 	}
 
 	items(snapshot: VirtualListSnapshot, rows: readonly SidebarVirtualRow[]): readonly VirtualItem[] {
-		const range = snapshot.overscanRange;
-		const indexes = range
-			? Array.from(
-					{ length: range.endIndex - range.startIndex + 1 },
-					(_, offset) => range.startIndex + offset,
-				)
-			: [];
-		const visibleItems = selectVirtualItems(snapshot, indexes);
+		const visibleItems = selectVirtualItems(snapshot, indexesInRange(snapshot.overscanRange));
 		if (visibleItems.length > 0 || rows.length === 0) return visibleItems;
 		const fallbackCount = Math.min(rows.length, Math.max(24, this.#overscan * 2 + 8));
 		return selectVirtualItems(
@@ -147,23 +138,12 @@ export class SidebarVirtualChatListController {
 	}
 
 	#currentAnchor(): VirtualMutationAnchor {
-		const position = this.#virt.viewportPosition;
-		const item = position
-			? this.#virt.snapshot.positions.itemAtOffset(position.paintedOffset)
-			: undefined;
+		const item = this.#anchor();
 		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
 	}
 
-	#normalizedAnchor(): SidebarNormalizedAnchor | null {
+	#anchor() {
 		const position = this.#virt.viewportPosition;
-		const item = position
-			? this.#virt.snapshot.positions.itemAtOffset(position.paintedOffset)
-			: undefined;
-		if (!item) return null;
-		return {
-			key: item.key,
-			offset: position!.paintedOffset - item.start,
-			size: item.size,
-		};
+		return position ? currentAnchor(this.#virt.snapshot.positions, position) : null;
 	}
 }

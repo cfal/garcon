@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import {
-	resolveWindowTabCapacity,
-	resolveWindowTabPresentation,
-	WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH,
-} from '../workspace-window-tab-layout';
+import { resolveWindowTabPresentation, sameTabPresentation } from '../workspace-window-tab-layout';
+import { workspaceWindowTitlebarMetrics } from '../workspace-window-chrome';
+
+const inlineCloseReservedWidth = workspaceWindowTitlebarMetrics(0).inlineCloseReservedWidthPx;
 
 const order = ['chat-view:window-main', 'singleton:git', 'singleton:files', 'terminal:1'];
 const widths = new Map(order.map((surfaceId) => [surfaceId, 80]));
@@ -47,7 +46,7 @@ describe('resolveWindowTabPresentation', () => {
 
 	it('reserves close-control width before choosing truncated labels', () => {
 		const trailingReservedWidths = new Map(
-			order.map((surfaceId) => [surfaceId, WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH]),
+			order.map((surfaceId) => [surfaceId, inlineCloseReservedWidth]),
 		);
 
 		expect(
@@ -120,9 +119,7 @@ describe('resolveWindowTabPresentation', () => {
 			activeTitleId,
 			widths: new Map(order.map((id) => [id, 160])),
 			gap: 2,
-			trailingReservedWidths: new Map(
-				order.map((id) => [id, WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH]),
-			),
+			trailingReservedWidths: new Map(order.map((id) => [id, inlineCloseReservedWidth])),
 		};
 
 		it.each([
@@ -231,49 +228,17 @@ describe('resolveWindowTabPresentation', () => {
 	});
 });
 
-describe('resolveWindowTabCapacity', () => {
-	it('subtracts fixed actions and auxiliary content from the left-aligned rail', () => {
-		expect(
-			resolveWindowTabCapacity({
-				containerWidth: 500,
-				actionsWidth: 82,
-				auxiliaryWidth: 110,
-				gap: 6,
-				railChromeWidth: 6,
-			}),
-		).toEqual({
-			railWidth: 302,
-			contentWidth: 296,
-		});
-	});
-
-	it('uses the actual action width without symmetric centering', () => {
-		expect(
-			resolveWindowTabCapacity({
-				containerWidth: 500,
-				actionsWidth: 100,
-				auxiliaryWidth: 72,
-				gap: 6,
-				railChromeWidth: 6,
-			}),
-		).toEqual({
-			railWidth: 322,
-			contentWidth: 316,
-		});
-	});
-
-	it('clamps rail and content capacity at zero', () => {
-		expect(
-			resolveWindowTabCapacity({
-				containerWidth: 120,
-				actionsWidth: 96,
-				auxiliaryWidth: 80,
-				gap: 6,
-				railChromeWidth: 6,
-			}),
-		).toEqual({
-			railWidth: 0,
-			contentWidth: 0,
-		});
+describe('sameTabPresentation', () => {
+	it('recognizes an equal projection without hiding active-title changes', () => {
+		const before = {
+			visibleIds: ['one', 'two'],
+			labelMode: 'active-title',
+			activeTitleId: 'one',
+		} as const;
+		expect(sameTabPresentation(before, { ...before, visibleIds: [...before.visibleIds] })).toBe(
+			true,
+		);
+		expect(sameTabPresentation(before, { ...before, activeTitleId: 'two' })).toBe(false);
+		expect(sameTabPresentation(before, { ...before, visibleIds: ['two', 'one'] })).toBe(false);
 	});
 });

@@ -41,7 +41,7 @@ interface ChatBinding {
 }
 
 class ProjectResolutionRecord {
-	snapshot = $state<ProjectResolutionSnapshot>({ kind: 'unchecked' });
+	snapshot = $state.raw<ProjectResolutionSnapshot>({ kind: 'unchecked' });
 	#request: PendingResolution | null = null;
 	#disposed = false;
 

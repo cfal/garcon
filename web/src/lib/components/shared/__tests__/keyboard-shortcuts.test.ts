@@ -279,6 +279,28 @@ describe('KeyboardShortcuts', () => {
 		expect(onContextualScroll).not.toHaveBeenCalled();
 	});
 
+	it('reuses the wheel target lookup while rechecking visibility at shortcut dispatch', () => {
+		const onPrimaryScroll = vi.fn();
+		const onContextualScroll = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			focusOwner: 'chat',
+			onPrimaryScroll,
+			onContextualScroll,
+		});
+		const child = screen.getByTestId('contextual-content');
+		const region = child.parentElement;
+		if (!region) throw new Error('Expected contextual scroll region');
+		const closest = vi.spyOn(child, 'closest');
+		for (let i = 0; i < 10; i++) child.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+		expect(closest).toHaveBeenCalledTimes(1);
+		region.setAttribute('aria-hidden', 'true');
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, cancelable: true }));
+		expect(onPrimaryScroll).toHaveBeenCalledExactlyOnceWith('later');
+		expect(onContextualScroll).not.toHaveBeenCalled();
+	});
+
 	it('stops non-terminal view handlers after consuming a half-page shortcut', () => {
 		const onPrimaryScroll = vi.fn();
 		render(KeyboardShortcutsHost, {
@@ -791,7 +813,7 @@ describe('KeyboardShortcuts', () => {
 		expect(onLocalKeydown).not.toHaveBeenCalled();
 	});
 
-	it.each([{ isComposing: true }, { keyCode: 229 }])('keeps composing Escape inside a modal editor (%j)', (composition) => {
+	it.each([{ isComposing: true }, { keyCode: 229 }, { key: 'Process' }])('keeps composing input inside a modal editor (%j)', (composition) => {
 		const onTransientEscape = vi.fn();
 		const onLocalKeydown = vi.fn();
 		render(KeyboardShortcutsHost, {

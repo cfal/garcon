@@ -134,7 +134,9 @@
 			</label>
 
 			<div class="space-y-2">
-				<span class="text-sm font-medium text-foreground">{m.sidebar_saved_search_visibility()}</span>
+				<span class="text-sm font-medium text-foreground"
+					>{m.sidebar_saved_search_visibility()}</span
+				>
 				<label class="flex items-center gap-2 text-sm">
 					<input
 						type="checkbox"
@@ -165,7 +167,7 @@
 			</div>
 
 			{#if validationError}
-				<p class="text-sm text-destructive">{validationError}</p>
+				<p class="text-sm text-destructive" role="alert">{validationError}</p>
 			{/if}
 		</div>
 

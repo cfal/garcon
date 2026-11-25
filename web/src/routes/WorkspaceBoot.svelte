@@ -272,8 +272,12 @@
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).
 	let fileRecoveryInitialized = false;
+	let missedSettingsUpdates = false;
 	$effect(() => {
-		if (auth.isAuthenticated) {
+		if (!visible) {
+			missedSettingsUpdates = true;
+			untrack(() => ws.pause('workspace-inactive'));
+		} else if (auth.isAuthenticated) {
 			const token = auth.token;
 			const authDisabled = auth.authDisabled;
 			if (!fileRecoveryInitialized) {
@@ -287,7 +291,7 @@
 				}
 			}
 			untrack(() => ws.connect(token, authDisabled));
-		} else untrack(() => ws.pauseForAuth());
+		} else untrack(() => ws.pause('missing-auth'));
 	});
 
 	let presentationOwnerKey: string | null = null;
@@ -330,7 +334,7 @@
 	});
 
 	const browserNotifications = new BrowserNotificationService({
-		enabled: () => localSettings.browserNotifications,
+		enabled: () => visible && ws.isConnected && localSettings.browserNotifications,
 		openChat: gotoChat,
 		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
 	});
@@ -350,7 +354,14 @@
 	onMount(() => {
 		browserNotifications.start();
 		return ws.onConnectionChange((connected) => {
-			if (!connected) browserNotificationsRouter.clearPermissions();
+			if (!connected) {
+				missedSettingsUpdates = true;
+				browserNotificationsRouter.releasePermissions();
+			} else if (missedSettingsUpdates) {
+				missedSettingsUpdates = false;
+				void remoteSettings.refreshLatest().catch((error: unknown) =>
+					console.warn('Failed to refresh remote settings after reconnect:', error));
+			}
 		});
 	});
 	onMount(() =>
