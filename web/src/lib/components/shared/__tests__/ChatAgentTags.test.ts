@@ -72,6 +72,21 @@ describe('ChatAgentTags', () => {
 		},
 	);
 
+	it('fits tags and the overflow control using the rendered column gap', async () => {
+		const { container } = render(ChatAgentTags, {
+			agentId: 'claude', tags: ['a', 'b', 'c'], tagLimit: 2, wrap: 'two-lines',
+		});
+		const root = container.querySelector<HTMLElement>('[data-slot="chat-agent-tags"]')!;
+		const rail = container.querySelector('[data-slot="chat-agent-tags-measurement"]')!;
+		root.style.columnGap = '5px';
+		for (const chip of rail.children) {
+			chip.getBoundingClientRect = () => new DOMRect(0, 0, 48, 16);
+		}
+		ResizeObserverHarness.emit(root, 100);
+		await Promise.resolve();
+		expect(root.textContent).toContain('+3');
+	});
+
 	it('keeps the measured overflow control visible for long tags in a narrow card', async () => {
 		const tags = Array.from({ length: 7 }, (_, index) => `long-tag-${index + 1}`);
 		const { container } = render(ChatAgentTags, {

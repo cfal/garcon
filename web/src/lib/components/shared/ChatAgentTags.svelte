@@ -26,7 +26,6 @@
 	}: Props = $props();
 
 	const OVERFLOW_CLASS = 'shrink-0 text-[10px] text-muted-foreground';
-	const TAG_GAP_PX = 4;
 	let root: HTMLDivElement | undefined = $state();
 	let measurementRail: HTMLDivElement | undefined = $state();
 	let measuredVisibleTagCount: number | null = $state(null);
@@ -57,7 +56,7 @@
 			: undefined,
 	);
 
-	function measureVisibleTags(rail: HTMLElement, availableWidth: number, totalTagCount: number) {
+	function measureVisibleTags(row: HTMLElement, rail: HTMLElement, availableWidth: number, totalTagCount: number) {
 		if (availableWidth <= 0) return;
 		const agentWidth =
 			rail
@@ -76,13 +75,14 @@
 				overflowWidths.set(hiddenCount, element.getBoundingClientRect().width);
 			}
 		}
+		const gap = Number.parseFloat(getComputedStyle(row).columnGap);
 		const count = selectFittingTagPrefix({
 			availableWidth,
 			agentWidth,
 			tagWidths,
 			totalTagCount,
 			overflowWidths,
-			gap: TAG_GAP_PX,
+			gap: Number.isFinite(gap) ? gap : 4,
 			maxRows: 2,
 		});
 		return () => (measuredVisibleTagCount = count);
@@ -100,7 +100,7 @@
 		measurementKey;
 		const totalTagCount = tags.length;
 		let availableWidth = 0;
-		const measure = () => measureVisibleTags(rail, availableWidth, totalTagCount);
+		const measure = () => measureVisibleTags(actionRoot, rail, availableWidth, totalTagCount);
 		const stopRootObservation = observeChatAgentTagsSize(actionRoot, (entry) => {
 			availableWidth = entry.contentRect.width;
 			return measure;
