@@ -41,7 +41,7 @@
 
 	let isOpen = $state(false);
 	let query = $state('');
-	let highlightedId = $state<string | null>(null);
+	let highlighted = $state.raw<WorkbenchCommand | null>(null);
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let optionList = $state<HTMLDivElement>();
 	let Fuse = $state.raw<typeof import('fuse.js').default>();
@@ -78,7 +78,7 @@
 			}),
 	);
 
-	let filteredCommands = $derived.by(() => {
+	let matches = $derived.by(() => {
 		const needle = query.trim().toLowerCase();
 		if (needle) {
 			if (fuse)
@@ -98,7 +98,11 @@
 			)
 			.slice(0, searchResultLimit);
 	});
-	let selectedIndex = $derived(highlightedId === null ? 0 : filteredCommands.findIndex(item => item.id === highlightedId));
+	// Loading the fuzzy index must not replace a command the user already chose.
+	let filteredCommands = $derived(highlighted && !matches.includes(highlighted)
+		? [highlighted, ...matches.slice(0, searchResultLimit - 1)]
+		: matches);
+	let selectedIndex = $derived(highlighted ? filteredCommands.indexOf(highlighted) : 0);
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
 
 	function isEnabled(command: WorkbenchCommand): boolean {
@@ -111,7 +115,7 @@
 
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
-		highlightedId = null;
+		highlighted = null;
 	}
 
 	function open() {
@@ -128,7 +132,7 @@
 			commands = captureCommands();
 			isOpen = true;
 			query = '';
-			highlightedId = null;
+			highlighted = null;
 		});
 	}
 
@@ -137,6 +141,7 @@
 		flushSync(() => {
 			isOpen = false;
 			commands = [];
+			highlighted = null;
 			query = '';
 		});
 		if (document.activeElement === document.body) opener?.focus({ preventScroll: true });
@@ -175,10 +180,10 @@
 		}
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			highlightedId = filteredCommands[Math.min(selectedIndex + 1, filteredCommands.length - 1)]?.id ?? null;
+			highlighted = filteredCommands[Math.min(selectedIndex + 1, filteredCommands.length - 1)] ?? null;
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			highlightedId = filteredCommands[Math.max(selectedIndex - 1, 0)]?.id ?? null;
+			highlighted = filteredCommands[Math.max(selectedIndex - 1, 0)] ?? null;
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			if (selectedCommand) selectItem(selectedCommand);
@@ -271,11 +276,11 @@
 								? 'bg-accent text-accent-foreground'
 								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
-							onfocus={() => (highlightedId = item.id)}
+							onfocus={() => (highlighted = item)}
 							onmouseenter={(event) => {
 								// A focused result owns native Enter and Space activation.
 								if (!event.currentTarget.parentElement?.contains(document.activeElement)) {
-									highlightedId = item.id;
+									highlighted = item;
 								}
 							}}
 						>

@@ -140,8 +140,9 @@ function createCatalog(count: number): ChatSessionsStore {
 it('retains a keyboard highlight when fuzzy matching replaces the initial results', async () => {
 	const gate = Promise.withResolvers<void>();
 	mocks.fuseReady = gate.promise;
-	const candidates = ['Open', 'Open document', 'Opeen'].map(label => ({
-		id: label, label, category: 'File' as const, isEnabled: () => true, run: vi.fn(),
+	const candidates = ['Open', 'Document', 'Opeen'].map(label => ({
+		id: label, label, description: label === 'Document' ? 'Details '.repeat(30) + 'open' : '',
+		category: 'File' as const, isEnabled: () => true, run: vi.fn(),
 	}));
 	vi.spyOn(commandRegistry, 'paletteCandidates').mockReturnValue(candidates);
 	const invoke = vi.spyOn(commandRegistry, 'invoke').mockResolvedValue(true);
@@ -151,9 +152,10 @@ it('retains a keyboard highlight when fuzzy matching replaces the initial result
 		const input = await screen.findByRole('combobox');
 		await fireEvent.input(input, { target: { value: 'open' } });
 		await fireEvent.keyDown(input, { key: 'ArrowDown' });
-		expect(screen.getByRole('option', { selected: true }).textContent).toContain('Open document');
+		expect(screen.getByRole('option', { selected: true }).textContent).toContain('Document');
 		gate.resolve();
 		await screen.findByRole('option', { name: /Opeen/ });
+		expect(input.getAttribute('aria-activedescendant')).toBe(screen.getByRole('option', { selected: true }).id);
 		await fireEvent.keyDown(input, { key: 'Enter' });
 		expect(invoke).toHaveBeenCalledWith(candidates[1], expect.anything());
 	} finally {
