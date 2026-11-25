@@ -234,7 +234,12 @@ export class VirtualListTransaction {
 			dom.scrollTop > dom.physicalMaximum && dom.scrollTop <= dom.physicalMaximum + 1;
 		const measurementDom = roundedBottom ? { ...dom, inPhysicalBounds: true } : dom;
 		const { delta, changedCount } = this.geometry.measureMany(accepted);
-		const correction = changedCount === 0 ? 0 : this.#measurementCorrection(anchor, measurementDom, delta);
+		const start = anchor.kind === 'item' ? this.geometry.item(anchor.index)!.start : 0;
+		const correction = anchor.kind === 'end' ? delta : anchor.kind === 'item' ? start - anchor.start : 0;
+		// The seek is a destination, not a geometry change to restore on cancellation.
+		const exactOffset = changedCount > 0 && anchor.kind === 'item' && anchor.viewportOffset !== undefined &&
+			measurementDom?.inPhysicalBounds && this.#deviation.value === 0 && this.#activity === 'idle'
+			? start - anchor.viewportOffset : undefined;
 		this.#applyCorrection({
 			source,
 			provenance: anchor.kind === 'end' ? 'follow' : 'measurement',
@@ -242,6 +247,7 @@ export class VirtualListTransaction {
 			anchorIndex: anchor.kind === 'item' ? anchor.index : null,
 			anchorStart: anchor.kind === 'item' ? anchor.start - this.#deviation.value : null,
 			correction,
+			exactOffset,
 			dom: measurementDom,
 			started,
 			followEnd: anchor.kind === 'end',
@@ -275,7 +281,7 @@ export class VirtualListTransaction {
 
 		let correction = dom.leadingOffset - this.#lastDom.leadingOffset;
 		let clampedRemainder = 0;
-		if (boundsChanged && this.#deviation.value !== 0 && dom.scrollTop !== this.#lastDom.scrollTop) {
+		if (boundsChanged && this.#deviation.value !== 0 && wasPhysicallyClamped(this.#lastDom, dom)) {
 			const logicalMaximum = Math.max(0, this.geometry.totalSize() - dom.viewportSize);
 			const desired = clamp(this.#lastLogicalOffset, 0, logicalMaximum);
 			const solvedDeviation = desired - (dom.scrollTop - dom.leadingOffset);
@@ -307,7 +313,7 @@ export class VirtualListTransaction {
 			previous &&
 			(dom.viewportSize !== previous.viewportSize ||
 				dom.physicalMaximum !== previous.physicalMaximum);
-		if (boundsChanged && this.#deviation.value !== 0 && dom.scrollTop !== previous.scrollTop) {
+		if (boundsChanged && this.#deviation.value !== 0 && wasPhysicallyClamped(previous, dom)) {
 			this.viewportChanged(true);
 			return;
 		}
@@ -472,6 +478,7 @@ export class VirtualListTransaction {
 		anchorIndex: number | null;
 		anchorStart: number | null;
 		correction: number;
+		exactOffset?: number;
 		dom: VirtualDomGeometry | null;
 		started: number;
 		followEnd: boolean;
@@ -509,7 +516,7 @@ export class VirtualListTransaction {
 			return;
 		}
 
-		if (decision.kind === 'settled') {
+		if (decision.kind === 'settled' && input.exactOffset === undefined) {
 			const revision = this.#snapshot.revision;
 			const intendedLogicalOffset =
 				this.#pendingCommit && input.dom
@@ -521,32 +528,34 @@ export class VirtualListTransaction {
 			return;
 		}
 
-		const target: PendingTarget =
-			input.followEnd || pendingCorrection?.target.kind === 'end'
-				? { kind: 'end' }
-				: {
-						kind: 'relative',
-						offset:
-							(input.dom && pendingCorrection
-								? this.#physicalOffsetForTarget(pendingCorrection.target, input.dom)
-								: (input.dom?.scrollTop ?? 0)) + decision.amount,
-						leadingOffset: input.dom?.leadingOffset ?? 0,
-					};
+		const amount = decision.kind === 'redeem' ? decision.amount : 0;
+		let target: PendingTarget;
+		if (input.followEnd || pendingCorrection?.target.kind === 'end') {
+			target = { kind: 'end' };
+		} else if (input.exactOffset !== undefined) {
+			target = { kind: 'logical', offset: input.exactOffset };
+		} else if (input.source === 'viewport' && pendingCorrection?.target.kind === 'logical') {
+			// A logical target already resolves against the new leading inset at commit.
+			target = pendingCorrection.target;
+		} else {
+			const from = input.dom && pendingCorrection
+				? this.#physicalOffsetForTarget(pendingCorrection.target, input.dom)
+				: (input.dom?.scrollTop ?? 0);
+			target = { kind: 'relative', offset: from + amount, leadingOffset: input.dom?.leadingOffset ?? 0 };
+		}
 		this.#publish(
 			input.dom,
 			true,
 			false,
 			input.dom ? this.#logicalOffsetForTarget(target, input.dom) : undefined,
 		);
-		record.redeemed = true;
-		let measurementAnchor: VirtualMutationAnchor;
-		if (input.source !== 'items') {
-			measurementAnchor = pendingCorrection?.measurementAnchor ?? input.anchor;
-		} else if (input.anchor.kind === 'item-remap') {
-			measurementAnchor = { kind: 'item', key: input.anchor.newKey };
-		} else {
-			measurementAnchor = input.anchor;
-		}
+		record.redeemed = decision.kind === 'redeem';
+		const measurementAnchor: VirtualMutationAnchor = input.anchor.kind === 'item-remap'
+			? { kind: 'item', key: input.anchor.newKey }
+			: input.source !== 'items' && input.anchor.kind === 'none'
+				? pendingCorrection?.measurementAnchor ?? input.anchor
+				: input.anchor;
+		const restoreValue = (pendingCorrection?.restoreDeviation?.value ?? 0) + amount;
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
 			source,
@@ -554,13 +563,8 @@ export class VirtualListTransaction {
 			target,
 			measurementAnchor,
 			barriers: 0,
-			restoreDeviation:
-				pendingCorrection?.provenance === 'navigation'
-					? null
-					: {
-							value: (pendingCorrection?.restoreDeviation?.value ?? 0) + decision.amount,
-							pendingSince: input.started,
-						},
+			restoreDeviation: pendingNavigation || Math.abs(restoreValue) < Number.EPSILON
+				? null : { value: restoreValue, pendingSince: input.started },
 			record,
 		});
 	}
@@ -574,23 +578,6 @@ export class VirtualListTransaction {
 		const item = this.geometry.item(index);
 		if (!item) return { kind: 'none' };
 		return { kind: 'item', key: oldKey, nextKey, index, start: item.start };
-	}
-
-	#measurementCorrection(anchor: CapturedAnchor, dom: VirtualDomGeometry | null, sizeDelta: number): number {
-		if (anchor.kind === 'end') return sizeDelta;
-		if (anchor.kind !== 'item') return 0;
-		const start = this.geometry.item(anchor.index)!.start;
-		if (
-			anchor.viewportOffset === undefined || !dom?.inPhysicalBounds ||
-			this.#deviation.value !== 0 || this.#activity !== 'idle'
-		) {
-			return start - anchor.start;
-		}
-		// The updated sizer has not committed yet. Only the write phase knows the attainable offset.
-		const position = this.#pendingCommit
-			? this.#physicalOffsetForTarget(this.#pendingCommit.target, dom)
-			: dom.scrollTop;
-		return dom.leadingOffset + start - anchor.viewportOffset - position;
 	}
 
 	#captureMeasurementAnchor(
@@ -791,20 +778,16 @@ export class VirtualListTransaction {
 		commit.record.intendedScrollTop = intended;
 		commit.record.leadingOffsetAfter = dom.leadingOffset;
 		commit.record.published = true;
-		if (commit.provenance === 'measurement' && commit.measurementAnchor?.kind === 'item') {
-			const policy = this.options.getMeasurementAnchor();
-			const atTarget = intended === dom.scrollTop ||
-				(intended === dom.physicalMaximum && Math.abs(intended - dom.scrollTop) <= 1);
-			if (
-				typeof policy === 'object' && policy.key === commit.measurementAnchor.key &&
-				policy.viewportOffset !== undefined && atTarget
-			) {
-				commit.record.attainedScrollTop = dom.scrollTop;
-				commit.record.clampedRemainder += intended - dom.scrollTop;
-				this.#publishScrollPosition(dom);
-				this.#emitRecord(commit.record);
-				return;
-			}
+		if (
+			commit.provenance === 'measurement' && commit.target.kind === 'logical' &&
+			(intended === dom.scrollTop ||
+				(intended === dom.physicalMaximum && Math.abs(intended - dom.scrollTop) <= 1))
+		) {
+			commit.record.attainedScrollTop = dom.scrollTop;
+			commit.record.clampedRemainder += intended - dom.scrollTop;
+			this.#publishScrollPosition(dom);
+			this.#emitRecord(commit.record);
+			return;
 		}
 		this.#writeScroll(intended, commit.record);
 	}
@@ -909,6 +892,12 @@ function validateMutation(
 
 function clamp(value: number, minimum: number, maximum: number): number {
 	return Math.min(maximum, Math.max(minimum, value));
+}
+
+function wasPhysicallyClamped(previous: VirtualDomGeometry, current: VirtualDomGeometry): boolean {
+	const attainable = clamp(previous.scrollTop, 0, current.physicalMaximum);
+	return previous.scrollTop !== current.scrollTop && previous.scrollTop !== attainable &&
+		Math.abs(current.scrollTop - attainable) <= 1;
 }
 
 function rangesEqual(left: VirtualRange | null, right: VirtualRange | null): boolean {

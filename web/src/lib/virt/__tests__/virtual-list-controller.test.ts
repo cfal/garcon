@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createVirtualListHarness } from './virtual-list-test-harness';
+import type { VirtualMeasurementAnchor } from '../virtual-list-types';
 
 const active: Array<ReturnType<typeof createVirtualListHarness>> = [];
 
@@ -971,6 +972,28 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(240);
 	});
 
+	it('uses the new reader rather than a pending projection anchor for subsequent measurements', () => {
+		let policy: VirtualMeasurementAnchor = 'geometric';
+		const test = harness({ viewportSize: 200, get measurementAnchor() { return policy; } });
+		const keys = ['before', 'other', 'reader', 'tail'];
+		const estimates = [50, 50, 100, 500];
+		test.controller.apply({ kind: 'update', keys, estimates, anchor: { kind: 'none' } });
+		const before = test.mountItem('before', 50);
+		const other = test.mountItem('other', 50);
+		test.environment.flushMicrotasks();
+		test.controller.apply({
+			kind: 'update', keys: ['prepended', ...keys], estimates: [20, ...estimates], anchor: { kind: 'item', key: 'other' },
+		});
+		policy = { kind: 'item', key: 'reader', viewportOffset: 200 };
+		test.environment.observer.emit(before.element, 60);
+		policy = 'geometric';
+		test.environment.observer.emit(other.element, 50);
+		expect(test.records.at(-1)).toMatchObject({ source: 'resize', anchorIndex: 3 });
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(0);
+		expect(test.writes).toBe(0);
+	});
+
 	it.each([
 		{ offset: 100, before: 90, tailEstimate: 500, tail: 500, first: 0, expected: 0 },
 		{ offset: 100, before: 130, tailEstimate: 500, tail: 500, first: 0, expected: 30 },
@@ -1011,6 +1034,27 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(80);
 	});
 
+	it.each([
+		{ offset: -60, estimates: [400, 40, 40], growing: 'reader', size: 240, paintedStart: 400, sizer: 680, afterInput: 279 },
+		{ offset: 100, estimates: [50, 100, 500], growing: 'before', size: 60, paintedStart: 50, sizer: 650, afterInput: 60 },
+	])('cancels the exact seek without turning it into visual deviation: %j', scenario => {
+		const { offset, estimates, growing, size, paintedStart, sizer, afterInput } = scenario;
+		const keys = ['before', 'reader', 'tail'];
+		const test = harness({ viewportSize: 200, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: offset } });
+		test.controller.apply({ kind: 'update', keys, estimates, anchor: { kind: 'none' } });
+		const mounted = test.mountItem(growing, estimates[keys.indexOf(growing)]);
+		test.controller.scrollToAnchor('reader', offset);
+		test.environment.flushMicrotasks();
+		test.environment.observer.emit(mounted.element, size);
+		test.viewport.dispatchEvent(new WheelEvent('wheel'));
+		test.environment.flushMicrotasks();
+		expect(test.controller.snapshot.positions.itemAt(1)!.start).toBe(paintedStart);
+		expect(test.controller.snapshot.sizerSize).toBe(sizer);
+		test.setPhysicalScrollTop(offset < 0 ? 279 : 50);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(afterInput);
+	});
+
 	it.each([200.8, 201.2])('resumes a bottom-clamped reader after the browser attains %f', attained => {
 		const test = harness({ viewportSize: 359, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: -300 } });
 		test.controller.apply({
@@ -1021,9 +1065,35 @@ describe('VirtualListController', () => {
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(201);
 		test.setPhysicalScrollTop(attained);
+		const before = test.mountItem('before', 360);
+		const tail = test.mountItem('tail', 100);
+		test.environment.flushMicrotasks();
+		test.environment.observer.emit(before.element, 350);
+		test.environment.observer.emit(tail.element, 110);
+		test.environment.flushMicrotasks();
+		expect(test.writes).toBe(1);
+		expect(test.viewport.scrollTop).toBe(attained);
 		test.mountItem('reader', 500);
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(601);
+	});
+
+	it.each(['row', 'viewport'])('commits the reader start and leading inset together after a %s resize', source => {
+		const test = harness({ viewportSize: 200, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: -50 } });
+		test.controller.apply({
+			kind: 'update', keys: ['a', 'b', 'reader', 'tail'], estimates: [100, 100, 100, 600], anchor: { kind: 'none' },
+		});
+		const a = test.mountItem('a', 100);
+		test.controller.scrollToAnchor('reader', -50);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(250);
+		test.environment.observer.emit(a.element, 150);
+		test.setLeadingOffset(10);
+		if (source === 'row') test.environment.observer.emit(a.element, 180);
+		else test.emitViewportResize();
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(source === 'row' ? 340 : 310);
+		expect(test.writes).toBe(2);
 	});
 
 	it('preserves a pending navigation target through a resize batch', () => {

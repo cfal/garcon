@@ -117,7 +117,7 @@ export function createVirtualListHarness(options?: {
 	let writes = 0;
 	const controller = new VirtualListController({
 		overscan: options?.overscan ?? 1,
-		measurementAnchor: options?.measurementAnchor ?? 'geometric',
+		get measurementAnchor() { return options?.measurementAnchor ?? 'geometric'; },
 		initialViewportSize: options?.initialViewportSize ?? viewportSize,
 		measureElement: options?.measureElement,
 		environment,

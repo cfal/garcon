@@ -352,6 +352,15 @@ describe('ConversationFeedVirtualController', () => {
 		expect(writes).toEqual([280, 473]);
 	});
 
+	it('keeps the keyed row pinned through its first ready remeasurement', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { node, writes } = observeReadingTarget(exposure, 3);
+		Object.defineProperty(node.parentElement!, 'offsetHeight', { configurable: true, value: 120 });
+		expect(await exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -60.25 })).toBe('completed');
+		expect(exposure.controller.snapshot.positions.itemAt(3)?.size).toBe(120);
+		expect(writes).toEqual([180.25]);
+	});
+
 	it.each([[0, 14.5], [11, -12.25]])('clamps the first restore write at row %i', async (index, viewportOffset) => {
 		const { exposure } = await renderController({ initialPinned: false });
 		const { view, writes } = observeReadingTarget(exposure, index);
