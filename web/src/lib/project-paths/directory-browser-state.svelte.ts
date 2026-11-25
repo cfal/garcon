@@ -244,7 +244,7 @@ export class DirectoryBrowserState {
 		const target = this.#target;
 		void this.#reloads;
 		const abort = new AbortController();
-		void browseDirectory(directory, abort.signal, executorId).then(
+		void browseDirectory(directory, { signal: abort.signal }, executorId).then(
 			(entries) => {
 				if (!abort.signal.aborted) this.#listed = { target, listing: { status: 'ready', entries } };
 			},

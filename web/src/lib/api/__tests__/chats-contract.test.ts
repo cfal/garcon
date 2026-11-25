@@ -13,6 +13,7 @@ import {
 	runChat,
 	generateChatTitle,
 	forkRunChat,
+	selfHandoffRunChat,
 	stopChat,
 	interruptAndSendChat,
 	sendPermissionDecision,
@@ -36,6 +37,7 @@ import {
 import type { ChatListResponse } from '$shared/chat-list';
 import type { CommandErrorCode } from '$shared/chat-command-contracts';
 import { CHAT_STOP_OUTCOMES } from '$shared/chat-types';
+import { AGENT_HANDOFF_HTTP_TIMEOUT_MS } from '$shared/handoff-timeouts';
 import { ApiError } from '../client';
 
 vi.stubGlobal('localStorage', {
@@ -463,7 +465,24 @@ describe('chats API contract', () => {
 		});
 	});
 
-	it('uses the extended timeout only for a fenced agent handoff', async () => {
+	it('allows self-handoff preparation more than the default HTTP timeout and still supports abort', async () => {
+		const timeout = vi.spyOn(AbortSignal, 'timeout');
+		const abort = new AbortController();
+		fetchMock.mockResolvedValueOnce(Response.json({ status: 'accepted' }));
+		await selfHandoffRunChat({
+			clientRequestId: 'handoff-request',
+			clientMessageId: 'handoff-message',
+			sourceChatId: 'source-chat',
+			chatId: 'target-chat',
+			command: 'Continue',
+		}, { signal: abort.signal });
+		expect(timeout).toHaveBeenCalledWith(AGENT_HANDOFF_HTTP_TIMEOUT_MS);
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/handoff-run');
+		abort.abort();
+		expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+	});
+
+	it('uses the extended timeout for a fenced agent handoff', async () => {
 		const timeout = vi.spyOn(AbortSignal, 'timeout');
 		const response = {
 			success: true as const,

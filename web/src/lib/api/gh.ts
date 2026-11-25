@@ -1,7 +1,7 @@
 import type { GhStatusResponse } from '$shared/gh';
-import { apiGet, ApiError, type ApiFetchOptions } from './client.js';
-import { isRecord } from '$shared/json';
+import { apiGet, type ApiFetchOptions } from './client.js';
 import type { GitExecutorScope } from '$shared/git-execution';
+import { assertGitResponseScope } from './git-client.js';
 
 export type { GhStatusResponse };
 
@@ -10,18 +10,8 @@ export async function ghApiGet<T>(
 	url: string,
 	options?: ApiFetchOptions,
 ): Promise<T & GitExecutorScope> {
-	const result = await apiGet<T & GitExecutorScope>(url, options);
-	if (
-		!isRecord(result) ||
-		result.executorId !== executorId ||
-		typeof result.instanceId !== 'string' ||
-		!result.instanceId
-	)
-		throw new ApiError(
-			502,
-			'GitHub returned a different executor or invalid serving instance.',
-			'GIT_INVALID_RESULT',
-		);
+	const result = await apiGet<T>(url, options);
+	assertGitResponseScope(result, executorId, 'GitHub');
 	return result;
 }
 

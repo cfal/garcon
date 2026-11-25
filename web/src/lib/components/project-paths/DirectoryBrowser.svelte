@@ -21,6 +21,7 @@
 	import { DirectoryBrowserState } from '$lib/project-paths/directory-browser-state.svelte.js';
 	import { splitTypedDirectoryPath } from '$lib/project-paths/directory-location.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
 	interface DirectoryBrowserProps {
 		executorContextKey?: string;
@@ -49,6 +50,7 @@
 		isMobile,
 	}: DirectoryBrowserProps = $props();
 	const transientLayers = getTransientLayers();
+	const popoverId = allocateTransientLayerId('directory-browser-popover');
 	const executors = getExecutors();
 	// An executor that cannot create directories safely does not offer the controls.
 	const supportsCreation = $derived(executors.supportsDirectoryCreation(executorId));
@@ -460,6 +462,7 @@
 	<button
 		type="button"
 		data-slot="directory-browser-dismiss"
+		tabindex="-1"
 		class="fixed inset-0 z-20 border-0 bg-transparent p-0"
 		onclick={() => onClose(lastChosenPath === currentPath ? 'select' : 'dismiss')}
 		aria-label={m.editor_actions_close()}
@@ -473,7 +476,7 @@
 		onkeydown={handlePopoverKeydown}
 		{@attach transientLayerAttachment({
 			registry: transientLayers,
-			id: 'directory-browser-popover',
+			id: popoverId,
 			kind: 'popover',
 			modality: 'nonmodal',
 			onEscape: handleLayerEscape,

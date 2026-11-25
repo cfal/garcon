@@ -210,30 +210,27 @@ export interface GenerateCommitMessageResponse {
 	directoryPrefix?: string;
 }
 
-function projectParam(target: GitProjectTarget): string {
-	return gitProjectQuery(target);
-}
-
-export async function getGitStatus(target: GitProjectTarget): Promise<GitStatus> {
-	return gitApiGet<GitStatus>(target, `/api/v1/git/status?${projectParam(target)}`);
+export async function getGitStatus(target: GitProjectTarget, options?: ApiFetchOptions): Promise<GitStatus> {
+	return gitApiGet<GitStatus>(target, `/api/v1/git/status?${gitProjectQuery(target)}`, options);
 }
 
 export async function gitCommit(
 	target: GitProjectTarget,
 	message: string,
 	files: string[],
+	options?: ApiFetchOptions,
 ): Promise<GitCommitResponse> {
 	return gitApiMutation<GitCommitResponse>(target, '/api/v1/git/commit', {
 		...gitProjectFields(target),
 		message,
 		files,
-	});
+	}, options);
 }
 
-export async function gitInitialCommit(target: GitProjectTarget): Promise<SuccessResponse> {
+export async function gitInitialCommit(target: GitProjectTarget, options?: ApiFetchOptions): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/initial-commit', {
 		...gitProjectFields(target),
-	});
+	}, options);
 }
 
 export type GetGitRefsOptions = ApiFetchOptions & {
@@ -261,24 +258,26 @@ export async function gitCheckoutRef(
 	target: GitProjectTarget,
 	ref: string,
 	refKind?: GitRefKind,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/checkout', {
 		...gitProjectFields(target),
 		ref,
 		refKind,
-	});
+	}, options);
 }
 
 export async function gitCreateBranch(
 	target: GitProjectTarget,
 	branch: string,
-	options: { baseRef?: string } = {},
+	options: ApiFetchOptions & { baseRef?: string } = {},
 ): Promise<SuccessResponse> {
+	const { baseRef, ...fetchOptions } = options;
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/create-branch', {
 		...gitProjectFields(target),
 		branch,
-		baseRef: options.baseRef,
-	});
+		baseRef,
+	}, fetchOptions);
 }
 
 export async function getGitHistoryCommits(
@@ -354,68 +353,73 @@ export async function getGitCommitFileBodies(
 export async function generateCommitMessage(
 	target: GitProjectTarget,
 	files: string[],
+	options?: ApiFetchOptions,
 ): Promise<GenerateCommitMessageResponse> {
 	return apiPost(
 		'/api/v1/git/generate-commit-message',
 		{ ...gitProjectFields(target), files },
-		{ timeoutMs: 120_000 },
+		{ timeoutMs: 120_000, ...options },
 	);
 }
 
-export async function getRemoteStatus(target: GitProjectTarget): Promise<GitRemoteStatus> {
-	return gitApiGet<GitRemoteStatus>(target, `/api/v1/git/remote-status?${projectParam(target)}`);
+export async function getRemoteStatus(target: GitProjectTarget, options?: ApiFetchOptions): Promise<GitRemoteStatus> {
+	return gitApiGet<GitRemoteStatus>(target, `/api/v1/git/remote-status?${gitProjectQuery(target)}`, options);
 }
 
-export async function gitFetch(target: GitProjectTarget): Promise<SuccessResponse> {
+export async function gitFetch(target: GitProjectTarget, options?: ApiFetchOptions): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/fetch', {
 		...gitProjectFields(target),
-	});
+	}, options);
 }
 
-export async function gitPull(target: GitProjectTarget): Promise<SuccessResponse> {
+export async function gitPull(target: GitProjectTarget, options?: ApiFetchOptions): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/pull', {
 		...gitProjectFields(target),
-	});
+	}, options);
 }
 
 export async function gitPush(
 	target: GitProjectTarget,
 	remote?: string,
 	remoteBranch?: string,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/push', {
 		...gitProjectFields(target),
 		remote,
 		remoteBranch,
-	});
+	}, options);
 }
 
 export type GitRemoteEntry = Wire.RemoteInfo;
 
 export async function getGitRemotes(
 	target: GitProjectTarget,
+	options?: ApiFetchOptions,
 ): Promise<{ remotes: GitRemoteEntry[]; error?: string }> {
 	return gitApiGet<{ remotes: GitRemoteEntry[]; error?: string }>(
 		target,
-		`/api/v1/git/remotes?${projectParam(target)}`,
+		`/api/v1/git/remotes?${gitProjectQuery(target)}`,
+		options,
 	);
 }
 
-export async function gitDiscard(target: GitProjectTarget, file: string): Promise<SuccessResponse> {
+export async function gitDiscard(target: GitProjectTarget, file: string, options?: ApiFetchOptions): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/discard', {
 		...gitProjectFields(target),
 		file,
-	});
+	}, options);
 }
 
 export async function gitDeleteUntracked(
 	target: GitProjectTarget,
 	file: string,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/delete-untracked', {
 		...gitProjectFields(target),
 		file,
-	});
+	}, options);
 }
 
 // Workbench API
@@ -508,7 +512,7 @@ export async function getGitConflicts(
 ): Promise<{ conflicts: GitConflictFile[] }> {
 	return gitApiGet<{ conflicts: GitConflictFile[] }>(
 		target,
-		`/api/v1/git/conflicts?${projectParam(target)}`,
+		`/api/v1/git/conflicts?${gitProjectQuery(target)}`,
 		options,
 	);
 }
@@ -520,7 +524,7 @@ export async function getGitConflictDetails(
 ): Promise<GitConflictDetails> {
 	return gitApiGet<GitConflictDetails>(
 		target,
-		`/api/v1/git/conflict-details?${projectParam(target)}&file=${encodeURIComponent(file)}`,
+		`/api/v1/git/conflict-details?${gitProjectQuery(target)}&file=${encodeURIComponent(file)}`,
 		options,
 	);
 }
@@ -529,22 +533,24 @@ export async function gitAcceptConflictSide(
 	target: GitProjectTarget,
 	file: string,
 	side: 'ours' | 'theirs',
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/conflict/accept', {
 		...gitProjectFields(target),
 		file,
 		side,
-	});
+	}, options);
 }
 
 export async function gitMarkConflictResolved(
 	target: GitProjectTarget,
 	file: string,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/conflict/resolve', {
 		...gitProjectFields(target),
 		file,
-	});
+	}, options);
 }
 
 export async function getGitStashes(
@@ -553,7 +559,7 @@ export async function getGitStashes(
 ): Promise<{ stashes: GitStashEntry[] }> {
 	return gitApiGet<{ stashes: GitStashEntry[] }>(
 		target,
-		`/api/v1/git/stashes?${projectParam(target)}`,
+		`/api/v1/git/stashes?${gitProjectQuery(target)}`,
 		options,
 	);
 }
@@ -562,12 +568,13 @@ export async function gitCreateStash(
 	target: GitProjectTarget,
 	message = '',
 	includeUntracked = false,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/create', {
 		...gitProjectFields(target),
 		message,
 		includeUntracked,
-	});
+	}, options);
 }
 
 function stashFields(target: GitProjectTarget, stash: GitStashTarget) {
@@ -577,33 +584,39 @@ function stashFields(target: GitProjectTarget, stash: GitStashTarget) {
 export async function gitApplyStash(
 	target: GitProjectTarget,
 	stash: GitStashTarget,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(
 		target,
 		'/api/v1/git/stash/apply',
 		stashFields(target, stash),
+		options,
 	);
 }
 
 export async function gitPopStash(
 	target: GitProjectTarget,
 	stash: GitStashTarget,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(
 		target,
 		'/api/v1/git/stash/pop',
 		stashFields(target, stash),
+		options,
 	);
 }
 
 export async function gitDropStash(
 	target: GitProjectTarget,
 	stash: GitStashTarget,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(
 		target,
 		'/api/v1/git/stash/drop',
 		stashFields(target, stash),
+		options,
 	);
 }
 
@@ -615,7 +628,7 @@ export async function getGitFileHistory(
 ): Promise<{ commits: GitFileHistoryEntry[] }> {
 	return gitApiGet<{ commits: GitFileHistoryEntry[] }>(
 		target,
-		`/api/v1/git/file-history?${projectParam(target)}&file=${encodeURIComponent(file)}&limit=${limit}`,
+		`/api/v1/git/file-history?${gitProjectQuery(target)}&file=${encodeURIComponent(file)}&limit=${limit}`,
 		options,
 	);
 }
@@ -629,7 +642,7 @@ export async function getGitBlame(
 ): Promise<{ lines: GitBlameLine[]; truncated: boolean }> {
 	return gitApiGet<{ lines: GitBlameLine[]; truncated: boolean }>(
 		target,
-		`/api/v1/git/blame?${projectParam(target)}&file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}&limit=${limit}`,
+		`/api/v1/git/blame?${gitProjectQuery(target)}&file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}&limit=${limit}`,
 		options,
 	);
 }
@@ -641,7 +654,7 @@ export async function getGitGraph(
 ): Promise<{ commits: GitGraphCommit[] }> {
 	return gitApiGet<{ commits: GitGraphCommit[] }>(
 		target,
-		`/api/v1/git/graph?${projectParam(target)}&limit=${limit}`,
+		`/api/v1/git/graph?${gitProjectQuery(target)}&limit=${limit}`,
 		options,
 	);
 }
@@ -652,7 +665,7 @@ export async function getGitTargetCandidates(
 ): Promise<{ targets: GitTargetCandidate[] }> {
 	return gitApiGet<{ targets: GitTargetCandidate[] }>(
 		target,
-		`/api/v1/git/targets?${projectParam(target)}`,
+		`/api/v1/git/targets?${gitProjectQuery(target)}`,
 		options,
 	);
 }
@@ -664,6 +677,7 @@ export async function gitStageSelection(
 	lineIndices: number[],
 	contextLines: number,
 	proof: GitSelectionProof,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stage-selection', {
 		...gitProjectFields(target),
@@ -672,7 +686,7 @@ export async function gitStageSelection(
 		selection: { lineIndices },
 		contextLines,
 		...proof,
-	});
+	}, options);
 }
 
 export async function gitStageHunk(
@@ -682,6 +696,7 @@ export async function gitStageHunk(
 	hunkIndex: number,
 	contextLines: number,
 	proof: GitSelectionProof,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stage-hunk', {
 		...gitProjectFields(target),
@@ -690,7 +705,7 @@ export async function gitStageHunk(
 		hunkIndex,
 		contextLines,
 		...proof,
-	});
+	}, options);
 }
 
 export async function getGitWorktrees(
@@ -699,7 +714,7 @@ export async function getGitWorktrees(
 ): Promise<Wire.GitResults['getWorktrees'] & GitExecutorScope> {
 	return gitApiGet<{ worktrees: GitWorktreeItem[] }>(
 		target,
-		`/api/v1/git/worktrees?${projectParam(target)}`,
+		`/api/v1/git/worktrees?${gitProjectQuery(target)}`,
 		options,
 	);
 }
@@ -709,41 +724,45 @@ export type GitWorktreeCreation = Omit<Wire.CreateWorktreeOptions, 'projectPath'
 export async function gitCreateWorktree(
 	target: GitProjectTarget,
 	creation: GitWorktreeCreation,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse & GitExecutorScope> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/worktrees/create', {
 		...gitProjectFields(target),
 		...creation,
-	});
+	}, options);
 }
 
 export async function gitRevertCommit(
 	target: GitProjectTarget,
 	commit: string,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/revert-commit', {
 		...gitProjectFields(target),
 		commit,
-	});
+	}, options);
 }
 
 export async function gitCommitIndex(
 	target: GitProjectTarget,
 	message: string,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/commit-index', {
 		...gitProjectFields(target),
 		message,
-	});
+	}, options);
 }
 
 export async function gitStagePaths(
 	target: GitProjectTarget,
 	paths: string[],
 	mode: GitStageMode,
+	options?: ApiFetchOptions,
 ): Promise<SuccessResponse> {
 	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stage-paths', {
 		...gitProjectFields(target),
 		paths,
 		mode,
-	});
+	}, options);
 }

@@ -209,12 +209,3 @@ export async function reorderSavedSearches(
 ): Promise<{ success: boolean }> {
 	return apiPut('/api/v1/app/saved-searches/reorder', { oldOrder, newOrder });
 }
-
-export interface ChatFolderFilter {
-	textTokens: string[];
-	tags: string[][];
-	agents: string[];
-	models: string[];
-	status?: 'active' | 'unread';
-	project: string[];
-}

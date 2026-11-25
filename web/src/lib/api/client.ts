@@ -26,7 +26,7 @@ function withTimeout(
 	};
 }
 
-/** Wraps fetch with Authorization header, JSON content type (unless FormData),
+/** Wraps fetch with Authorization header, JSON content type for request bodies,
  *  and a configurable timeout (default 30s). */
 export async function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
 	if (!canDispatchAuthenticated())
@@ -35,7 +35,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}): Prom
 	const token = getAuthToken();
 
 	const headers = new Headers(fetchOptions.headers);
-	if (!(fetchOptions.body instanceof FormData) && !headers.has('Content-Type')) {
+	if (fetchOptions.body != null && !headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');
 	}
 	if (token && !headers.has('Authorization')) {
@@ -93,6 +93,22 @@ export function isIntermediaryResponse(error: ApiError): boolean {
 		error.errorCode === undefined &&
 		(error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500)
 	);
+}
+
+export function isDefiniteMutationFailure(
+	error: unknown,
+	options: {
+		unknownCode?: string;
+		clientErrorOnly?: 'coded' | 'envelope';
+	} = {},
+): error is ApiError {
+	if (!(error instanceof ApiError) || isIntermediaryResponse(error)) return false;
+	if (options.unknownCode !== undefined && error.errorCode === options.unknownCode) return false;
+	if (!options.clientErrorOnly) return true;
+	if (error.status < 400 || error.status >= 500) return false;
+	return options.clientErrorOnly === 'envelope'
+		? isHttpErrorResponse(error.payload)
+		: Boolean(error.errorCode);
 }
 
 export function isTransientRequestFailure(error: unknown): boolean {
@@ -204,20 +220,6 @@ export async function apiDelete<T>(
 		...options,
 		method: 'DELETE',
 		body: body !== undefined ? JSON.stringify(body) : undefined,
-	});
-	return parseApiResponse<T>(response);
-}
-
-/** Sends a POST with FormData body (no JSON.stringify). */
-export async function apiPostForm<T>(
-	url: string,
-	body: FormData,
-	options?: ApiFetchOptions,
-): Promise<T> {
-	const response = await apiFetch(url, {
-		...options,
-		method: 'POST',
-		body,
 	});
 	return parseApiResponse<T>(response);
 }

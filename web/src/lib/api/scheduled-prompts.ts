@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPut, ApiError, ApiMutationOutcomeUnknownError, type ApiFetchOptions } from './client.js';
+import { apiDelete, apiGet, apiPost, apiPut, ApiMutationOutcomeUnknownError, isDefiniteMutationFailure, type ApiFetchOptions } from './client.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	parseRenderScheduledPromptResponse,
@@ -90,7 +90,7 @@ async function createPrompt(url: string, request: CreateScheduledPromptRequest |
 		return result;
 	} catch (error) {
 		// Even a coded 500 can follow a committed schedule whose durability is uncertain.
-		if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.errorCode) throw error;
+		if (isDefiniteMutationFailure(error, { clientErrorOnly: 'coded' })) throw error;
 		throw new ApiMutationOutcomeUnknownError(m.scheduled_prompts_creation_unconfirmed(), { cause: error });
 	}
 }

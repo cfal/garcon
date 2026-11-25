@@ -14,7 +14,7 @@ import {
 	parseApiResponse,
 	ApiError,
 	ApiMutationOutcomeUnknownError,
-	isIntermediaryResponse,
+	isDefiniteMutationFailure,
 } from './client.js';
 export type { AuthUser, AuthStatusResponse } from '$shared/auth';
 export type LoginResponse = AuthSessionResponse;
@@ -105,7 +105,7 @@ async function changeCredentials(
 			),
 		);
 	} catch (error) {
-		if (error instanceof ApiError && !isIntermediaryResponse(error)) throw error;
+		if (isDefiniteMutationFailure(error)) throw error;
 		throw new ApiMutationOutcomeUnknownError('The credential change may have completed.', {
 			cause: error,
 		});

@@ -1,13 +1,12 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
 import {
-	ApiError,
 	ApiMutationOutcomeUnknownError,
 	apiFetch,
 	apiGet,
 	apiPost,
 	apiPut,
-	isIntermediaryResponse,
+	isDefiniteMutationFailure,
 	parseApiResponse,
 	type ApiFetchOptions,
 } from './client.js';
@@ -214,16 +213,12 @@ export async function readContent(
 /** Fetches the directories inside one directory for the directory browser. */
 export async function browseDirectory(
 	path: string,
-	signal?: AbortSignal,
+	options?: ApiFetchOptions,
 	executorId?: string | null,
 ): Promise<DirectoryEntry[]> {
 	const query = new URLSearchParams({ path });
 	if (executorId) query.set('executorId', executorId);
-	const response = await apiFetch(`/api/v1/files/browse?${query}`, {
-		signal,
-	});
-	if (!response.ok) await parseApiResponse<never>(response);
-	const payload = await response.json();
+	const payload = await apiGet<unknown>(`/api/v1/files/browse?${query}`, options);
 	const entries = Array.isArray(payload) ? payload.map(parseDirectoryEntry) : null;
 	if (!entries || entries.some((entry) => entry === null)) {
 		throw new Error('Invalid directory browse payload');
@@ -233,25 +228,19 @@ export async function browseDirectory(
 
 /** Creates one directory inside an existing parent on the selected executor.
  *  Rejects with ApiMutationOutcomeUnknownError when the directory may exist. */
-export async function createDirectory(params: CreateDirectoryParams): Promise<DirectoryEntry> {
+export async function createDirectory(params: CreateDirectoryParams, options?: ApiFetchOptions): Promise<DirectoryEntry> {
 	const query = new URLSearchParams({ path: params.parentPath });
 	if (params.executorId) query.set('executorId', params.executorId);
 	try {
 		const payload = await apiPost<unknown>(`/api/v1/files/directories?${query}`, {
 			name: params.name,
-		});
+		}, options);
 		const created = parseDirectoryEntry(payload);
 		if (!created) throw new ApiMutationOutcomeUnknownError('Invalid directory creation response');
 		return created;
 	} catch (error) {
 		if (error instanceof ApiMutationOutcomeUnknownError) throw error;
-		if (
-			error instanceof ApiError &&
-			!isIntermediaryResponse(error) &&
-			error.errorCode !== 'FILE_CREATE_OUTCOME_UNKNOWN'
-		) {
-			throw error;
-		}
+		if (isDefiniteMutationFailure(error, { unknownCode: 'FILE_CREATE_OUTCOME_UNKNOWN' })) throw error;
 		throw new ApiMutationOutcomeUnknownError(
 			'The directory creation outcome could not be confirmed.',
 			{ cause: error },
