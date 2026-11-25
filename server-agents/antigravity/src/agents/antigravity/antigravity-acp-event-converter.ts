@@ -99,10 +99,12 @@ function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): T
 
 function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
   const name = call.name || previous?.name || null;
-  const partial = !name || isAgentWork(name) || call.isMcp || previous?.isMcp;
   let input = call.input;
-  if (previous && !Object.keys(input).length) input = previous.input;
-  else if (previous && partial) input = { ...previous.input, ...input };
+  if (previous) {
+    if (!Object.keys(input).length) input = previous.input;
+    else if (!previous.name || isAgentWork(name) || name === 'call_mcp_tool' || call.isMcp || previous.isMcp ||
+      asString(previous.input.server) || asString(previous.input.tool)) input = { ...previous.input, ...input };
+  }
   return {
     ...call,
     name,
@@ -123,7 +125,8 @@ function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean 
   if (!Object.keys(call.input).length) return true;
   if (row.type === 'mcp-tool-use') return false;
   if (call.isMcp || !call.name) return true;
-  return row.type === 'external-tool-use' && isAgentWork(call.name);
+  return row.type === 'external-tool-use' && (isAgentWork(call.name) || call.name === 'call_mcp_tool' ||
+    !!(asString(call.input.server) || asString(call.input.tool)));
 }
 
 export class AntigravityAcpEventConverter implements AcpEventConverter {
@@ -214,6 +217,12 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
 
   releaseSession(sessionId: string): void {
     this.#sessions.delete(sessionId);
+  }
+
+  flushPending(context: AcpSessionUpdateContext): ChatMessage[] {
+    const session = this.#sessions.get(context.sessionId);
+    if (!session?.deferred.size) return [];
+    return [...this.#emitDeferred(session, context.timestamp), ...this.#flush(session, context.timestamp)];
   }
 
   takeTurnFailure(sessionId: string): string | null {

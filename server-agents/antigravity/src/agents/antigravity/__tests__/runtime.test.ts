@@ -672,6 +672,39 @@ describe('Antigravity ACP runtime', () => {
     } finally { runtime.shutdown(); }
   });
 
+  it('publishes pending rows separately so an aggregate flush cannot exceed the executor frame limit', async () => {
+    const { agent, runtime, events, request } = harness();
+    const value = 'x'.repeat(512 * 1024);
+    const count = 33;
+    agent.onPrompt((fake, id) => {
+      for (let i = 0; i < count; i++) fake.update(id, { sessionUpdate: 'tool_call', toolCallId: `pending-${i}`, rawInput: { value } });
+      fake.endPrompt();
+    });
+    try {
+      await runtime.startSession(request());
+      await waitFor(() => runEnded(events).length === 1);
+      expect(events.filter(event => event.type === 'rows').map(event => event.rows.map(row => row.message)))
+        .toMatchObject(Array.from({ length: count }, (_, i) => [{ toolId: `pending-${i}` }]));
+    } finally { runtime.shutdown(); }
+  });
+
+  it.each(['default', 'bypassPermissions'] as const)('orders pending tools at durable but not automatic permissions (%s)', async mode => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, id) => {
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'send', name: 'send_message', rawInput: { Recipient: 'peer' } });
+      fake.requestPermission(id, 'cmd');
+      fake.update(id, { sessionUpdate: 'tool_call_update', toolCallId: 'send', status: 'completed', rawInput: { Message: 'Hello' } });
+      fake.endPrompt();
+    });
+    try {
+      await runtime.startSession(request({ permissionMode: mode }));
+      await waitFor(() => runEnded(events).length === 1);
+      const order = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => String(row.message.type)) :
+        event.type === 'permission' && event.lifecycle.kind === 'requested' ? ['permission'] : []);
+      expect(order).toEqual(mode === 'default' ? ['external-tool-use', 'permission', 'tool-result'] : ['agent-message-tool-use', 'tool-result']);
+    } finally { runtime.shutdown(); }
+  });
+
   it('sends an image-only message without an empty text part', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());

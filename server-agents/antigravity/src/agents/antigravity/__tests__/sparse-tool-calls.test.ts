@@ -98,6 +98,9 @@ test('waits for the second half of an MCP envelope even after seeing its marker'
   expect(s.patch('mcp', { _meta: { is_mcp_tool_call: true }, rawInput: { server: 'docs' } })).toEqual([]);
   expect(s.patch('mcp', { rawInput: { tool: 'lookup' }, status: 'completed' }))
     .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }, { type: 'tool-result' }]);
+  s.start('late-name', { rawInput: { server: 'docs' } });
+  expect(s.patch('late-name', { name: 'mcp_docs_lookup', rawInput: { tool: 'lookup' }, status: 'completed' }))
+    .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }, { type: 'tool-result' }]);
 });
 
 test('does not present an inferred checklist as the identity of a permission request', () => {

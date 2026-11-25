@@ -720,6 +720,7 @@ export class AcpAgentRuntime {
     turn.detachSourceListeners.push(session.client.onStderr((line) => {
       if (!this.#canRouteSource(turn)) return;
       if (!line.trim()) return;
+      this.#flushBeforeRuntimeRow(turn);
       this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), line)]);
     }));
   }
@@ -888,14 +889,18 @@ export class AcpAgentRuntime {
     turn: AcpTurnContext,
     messages: ChatMessage[],
   ): void {
-    if (messages.length === 0 || turn.sourceRetired) return;
-    this.#publishTurnEvent(turn, {
-      type: 'rows',
-      rows: runtimeRows(messages),
-    });
+    // Each row travels on its own: one flush can contain more than a remote
+    // frame even when every row fits. The relay bounds an individual row.
+    for (const message of messages) this.#publishTurnEvent(turn, { type: 'rows', rows: runtimeRows([message]) });
+  }
+
+  #flushBeforeRuntimeRow(turn: AcpTurnContext): void {
+    if (!this.#canRouteSource(turn)) return;
+    this.#publishMessages(turn, this.#converter.flushPending?.(this.#sessionUpdateContext(turn)) ?? []);
   }
 
   #publishTurnEvent(turn: AcpTurnContext, event: AgentRuntimeEvent): void {
+    if (event.type === 'permission') this.#flushBeforeRuntimeRow(turn);
     if (turn.sourceRetired) return;
     try {
       turn.operation.publish(event);
