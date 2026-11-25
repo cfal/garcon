@@ -36,6 +36,7 @@ const TAB_EPOCH_KEY = 'garcon.tab-logout-epoch';
 const tabKeys = new Set<string>(Object.values(SESSION_STORAGE_KEYS));
 const localKeys = new Set<string>([
 	...Object.values(LOCAL_STORAGE_KEYS),
+	'pref_model_catalog_v3', // Delete retired account data without hydrating it.
 	CREDENTIAL_PENDING_KEY,
 	TICKET_PREFERENCES_STORAGE_KEY,
 	CHAT_TRANSCRIPT_INDEX_KEY,

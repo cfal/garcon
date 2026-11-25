@@ -21,6 +21,7 @@ it('clears Garcon credentials, drafts, snapshots and paths without clearing unre
 	vi.stubGlobal('indexedDB', undefined);
 	for (const key of [
 		'bearer-token',
+		'pref_model_catalog_v3',
 		'chat_draft_test',
 		'chat_snapshot_test',
 		'chat_snapshot_index_v3',
