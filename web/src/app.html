@@ -46,6 +46,8 @@
 		/>
 		<link rel="manifest" href="/site.webmanifest" />
 		<title>Garcon</title>
+		<script id="garcon-theme-stylesheets" type="application/json">{}</script>
+		<!-- Keeps first-paint settings synchronous; theme-bootstrap.logic.test.ts checks parity. -->
 		<script>
 			(() => {
 				const profiles = {
@@ -121,6 +123,11 @@
 					themeId = preference.lightThemeId;
 				}
 				const profile = profiles[themeId];
+				const href = JSON.parse(document.getElementById('garcon-theme-stylesheets').textContent)[themeId];
+				if (href) {
+					// A parser-inserted stylesheet blocks rendering even on browsers without blocking="render".
+					document.write(`<link rel="stylesheet" data-garcon-theme="${themeId}" href="${href}">`);
+				}
 				const root = document.documentElement;
 				root.dataset.theme = themeId;
 				root.dataset.themeAppearance = terminalAppearance ? 'terminal' : 'standard';

@@ -1,20 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TranscriptSearchStatusController } from '../transcript-search-status-controller';
 import type { getTranscriptSearchStatus } from '$lib/api/chats';
-import { WsConnection } from '$lib/ws/connection.svelte';
+import { openPushFixture } from '$lib/ws/__tests__/push-fixture';
 import type { TranscriptSearchStatusV1, TranscriptSearchStatusResponse } from '$shared/chat-search';
 
-const { drain, cleanup, createDrainCursor } = vi.hoisted(() => {
-	const drain = vi.fn();
-	const cleanup = vi.fn();
-	return {
-		drain,
-		cleanup,
-		createDrainCursor: vi.fn(() => ({ drain, cleanup })),
-	};
-});
+const fixtures: ReturnType<typeof openPushFixture>[] = [];
 
-vi.mock('$lib/ws/drain', () => ({ createDrainCursor }));
+function connect() {
+	const connection = openPushFixture();
+	fixtures.push(connection);
+	return connection;
+}
 
 const status = {
 	version: 1,
@@ -47,56 +43,38 @@ const httpStatus = {
 } satisfies TranscriptSearchStatusResponse;
 
 describe('TranscriptSearchStatusController', () => {
-	beforeEach(() => {
-		vi.clearAllMocks();
-		drain.mockReturnValue([]);
-		createDrainCursor.mockReturnValue({ drain, cleanup });
+	afterEach(() => {
+		for (const fixture of fixtures.splice(0).reverse()) fixture.close();
 	});
 
-	it('forwards only the latest transcript search status in a drain', () => {
+	it('delivers each valid push immediately until unsubscribed', () => {
+		const connection = connect();
 		const next = { ...status, chats: { ...status.chats, indexed: 4 } };
 		const onStatus = vi.fn();
-		drain.mockReturnValue([
-			{ data: { type: 'transcript-search-status', status } },
-			{ data: { type: 'settings-changed', settings: {} } },
-			{ data: { type: 'transcript-search-status', status: next } },
-		]);
-		const controller = new TranscriptSearchStatusController(new WsConnection(), onStatus);
+		const controller = new TranscriptSearchStatusController(connection.ws, onStatus);
 
 		controller.start();
-		controller.tick();
-
-		expect(onStatus).toHaveBeenCalledOnce();
-		expect(onStatus).toHaveBeenCalledWith(next);
-	});
-
-	it('ignores unrelated frames and releases its drain cursor', () => {
-		const onStatus = vi.fn();
-		drain.mockReturnValue([{ data: { type: 'chat-session-created', chatId: 'chat-1' } }]);
-		const controller = new TranscriptSearchStatusController(new WsConnection(), onStatus);
-
 		controller.start();
-		controller.tick();
+		connection.send({ type: 'transcript-search-status', status });
+		connection.send({ type: 'settings-changed', settings: {} });
+		connection.send({ type: 'transcript-search-status', status: {} });
+		connection.send({ type: 'transcript-search-status', status: next });
 		controller.destroy();
+		connection.send({ type: 'transcript-search-status', status });
 
-		expect(onStatus).not.toHaveBeenCalled();
-		expect(cleanup).toHaveBeenCalledOnce();
+		expect(onStatus.mock.calls).toEqual([[status], [next]]);
 	});
 
 	it('keeps newer WebSocket status when an older HTTP response arrives', async () => {
 		const pending = Promise.withResolvers<TranscriptSearchStatusResponse>();
 		const getStatus = vi.fn<typeof getTranscriptSearchStatus>().mockReturnValue(pending.promise);
 		const onStatus = vi.fn();
-		const controller = new TranscriptSearchStatusController(
-			new WsConnection(),
-			onStatus,
-			getStatus,
-		);
+		const connection = connect();
+		const controller = new TranscriptSearchStatusController(connection.ws, onStatus, getStatus);
 		controller.start();
 		const refreshing = controller.refresh();
 		const pushed = { ...status, phase: 'ready' as const };
-		drain.mockReturnValue([{ data: { type: 'transcript-search-status', status: pushed } }]);
-		controller.tick();
+		connection.send({ type: 'transcript-search-status', status: pushed });
 		pending.resolve(httpStatus);
 		await refreshing;
 		expect(onStatus).toHaveBeenCalledExactlyOnceWith(pushed);
@@ -112,11 +90,7 @@ describe('TranscriptSearchStatusController', () => {
 			.mockReturnValueOnce(first.promise)
 			.mockReturnValueOnce(second.promise);
 		const onStatus = vi.fn();
-		const controller = new TranscriptSearchStatusController(
-			new WsConnection(),
-			onStatus,
-			getStatus,
-		);
+		const controller = new TranscriptSearchStatusController(connect().ws, onStatus, getStatus);
 		controller.start();
 		const older = controller.refresh();
 		const newer = controller.refresh();
@@ -135,11 +109,7 @@ describe('TranscriptSearchStatusController', () => {
 			const pending = Promise.withResolvers<TranscriptSearchStatusResponse>();
 			const getStatus = vi.fn<typeof getTranscriptSearchStatus>().mockReturnValue(pending.promise);
 			const onStatus = vi.fn();
-			const controller = new TranscriptSearchStatusController(
-				new WsConnection(),
-				onStatus,
-				getStatus,
-			);
+			const controller = new TranscriptSearchStatusController(connect().ws, onStatus, getStatus);
 			controller.start();
 			const refreshing = controller.refresh();
 			controller[cleanupMethod]();
@@ -157,11 +127,7 @@ describe('TranscriptSearchStatusController', () => {
 			.mockResolvedValueOnce(httpStatus)
 			.mockRejectedValueOnce(new Error('Offline'));
 		const onStatus = vi.fn();
-		const controller = new TranscriptSearchStatusController(
-			new WsConnection(),
-			onStatus,
-			getStatus,
-		);
+		const controller = new TranscriptSearchStatusController(connect().ws, onStatus, getStatus);
 		controller.start();
 		await controller.refresh();
 		await controller.refresh();

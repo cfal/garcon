@@ -7,7 +7,7 @@ test('recent-activity sidebar renders active and background renames without relo
   await withE2eFixture('sidebar-rename', async (fixture) => {
     await fixture.page.evaluateOnNewDocument(seedLocalSettings, {
       sidebarSortMode: 'recent',
-      sidebarGrouping: 'none',
+      sidebarGroupingFields: [],
     });
     await fixture.page.evaluateOnNewDocument(() => {
       const originalFetch = globalThis.fetch.bind(globalThis);

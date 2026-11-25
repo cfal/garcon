@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const deployment = vi.hoisted(() => ({ base: '' }));
-vi.mock('$app/env', () => ({ version: 'test' }));
-vi.mock('$app/manifest', () => ({ immutable: [], assets: [] }));
+vi.mock('$app/env', () => ({ dev: false, version: 'test' }));
 
 interface FetchEventPort {
 	request: Request;
@@ -70,6 +69,7 @@ describe('installed service worker fetch handler', () => {
 	beforeEach(() => {
 		vi.resetModules();
 		deployment.base = '';
+		vi.stubGlobal('__GARCON_PRECACHE__', { eager: [], immutable: [] });
 	});
 	afterEach(() => {
 		vi.useRealTimers();
@@ -139,6 +139,24 @@ describe('installed service worker fetch handler', () => {
 		await event.lifetimes[0];
 		expect(network).not.toHaveBeenCalled();
 		expect(cache.put).not.toHaveBeenCalled();
+	});
+
+	it('caches lazy chunks on demand and serves them on later offline visits', async () => {
+		const { cache, network, dispatch } = harness();
+		await installWorker();
+		const path = '/_app/immutable/chunks/optional.js';
+		network.mockResolvedValueOnce(new Response('lazy JS'));
+		const first = dispatch(path);
+		expect(await (await first.response).text()).toBe('lazy JS');
+		await Promise.all(first.lifetimes);
+		expect(cache.put.mock.calls[0][0]).toBe(first.request);
+		cache.match.mockResolvedValueOnce(cache.put.mock.calls[0][1]);
+
+		network.mockRejectedValue(new Error('offline'));
+		const offline = dispatch(path);
+		expect(await (await offline.response).text()).toBe('lazy JS');
+		await Promise.all(offline.lifetimes);
+		expect(network).toHaveBeenCalledOnce();
 	});
 
 	it.each(['/api/v1/chats', '/ws', '/site.webmanifest', '/_app/version.json'])(

@@ -17,6 +17,7 @@ test('pauses and resumes a scheduled prompt through the SPA', async () => {
     await app.open();
     await fixture.waitForSpaWebSocket();
     const open = async () => {
+      await app.waitForButton('More actions');
       await app.clickButton('More actions');
       await app.waitForMenuItemEnabled('Scheduled prompts');
       await app.clickMenuItem('Scheduled prompts');

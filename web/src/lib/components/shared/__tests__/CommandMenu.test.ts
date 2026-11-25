@@ -24,6 +24,7 @@ type CommandMenuWorkspacePort = Pick<
 >;
 
 const mocks = vi.hoisted(() => ({
+	fuseReady: undefined as Promise<void> | undefined,
 	workspace: {
 		terminalCreationExecutorId: 'local',
 		isMobile: false as boolean,
@@ -45,6 +46,11 @@ const mocks = vi.hoisted(() => ({
 		register: () => () => undefined,
 	},
 }));
+
+vi.mock('fuse.js', async (load) => {
+	await mocks.fuseReady;
+	return load<typeof import('fuse.js')>();
+});
 
 vi.mock('$lib/context', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/context')>()),
@@ -130,6 +136,53 @@ function createCatalog(count: number): ChatSessionsStore {
 	}
 	return sessions;
 }
+
+it('retains a keyboard highlight when fuzzy matching replaces the initial results', async () => {
+	const gate = Promise.withResolvers<void>();
+	mocks.fuseReady = gate.promise;
+	const candidates = ['Open', 'Document', 'Opeen'].map(label => ({
+		id: label, label, description: label === 'Document' ? 'Details '.repeat(30) + 'open' : '',
+		category: 'File' as const, isEnabled: () => true, run: vi.fn(),
+	}));
+	vi.spyOn(commandRegistry, 'paletteCandidates').mockReturnValue(candidates);
+	const invoke = vi.spyOn(commandRegistry, 'invoke').mockResolvedValue(true);
+	try {
+		const { component } = render(CommandMenu);
+		component.toggle();
+		const input = await screen.findByRole('combobox');
+		await fireEvent.input(input, { target: { value: 'open' } });
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
+		expect(screen.getByRole('option', { selected: true }).textContent).toContain('Document');
+		const initialOptions = screen.getAllByRole('option');
+		gate.resolve();
+		await screen.findByRole('option', { name: /Opeen/ });
+		const highlighted = screen.getByRole('option', { selected: true });
+		expect(input.getAttribute('aria-activedescendant')).toBe(highlighted.id);
+		const rows = screen.getAllByRole('option');
+		expect(rows.slice(0, initialOptions.length)).toEqual(initialOptions);
+		const neighbor = screen.getByRole('option', { name: /Opeen/ });
+		highlighted.focus();
+		await fireEvent.pointerDown(neighbor);
+		await fireEvent.focus(neighbor);
+		expect(screen.getAllByRole('option')).toEqual(rows);
+		await fireEvent.pointerUp(neighbor);
+		await fireEvent.focus(highlighted);
+		input.focus();
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(invoke).toHaveBeenCalledWith(candidates[1], expect.anything());
+	} finally {
+		gate.resolve();
+		mocks.fuseReady = undefined;
+	}
+});
+
+it('loads fuzzy matching after opening the palette', async () => {
+	const { component } = render(CommandMenu);
+	component.toggle();
+	const input = await screen.findByRole('combobox');
+	await fireEvent.input(input, { target: { value: 'settngs' } });
+	expect(await screen.findByRole('option', { name: /settings/i })).toBeTruthy();
+});
 
 it('keeps static command lookup independent of the chat catalog and caches candidates per opening', async () => {
 	const sessions = createCatalog(120);

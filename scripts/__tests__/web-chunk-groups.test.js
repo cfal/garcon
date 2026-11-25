@@ -11,6 +11,7 @@ test('keeps application helpers out of optional vendor groups', () => {
   const vendor = groups.find(group => group.debugName === 'vendor-by-package');
   expect(vendor.name('/app/web/src/lib/highlighting/codemirror-language-registry.ts')).toBeUndefined();
   expect(vendor.name('/app/node_modules/@xterm/xterm/index.js')).toBe('vendor-xterm');
+  expect(vendor.name('/app/node_modules/fuse.js/dist/fuse.mjs')).toBe('vendor-fuse');
   const helper = groups.find(group => group.name === 'vite-runtime');
   expect(helper.test('\0vite/preload-helper.js')).toBe(true);
   expect(helper.priority).toBeGreaterThan(groups.find(group => group.name === 'vendor-codemirror-core').priority);
@@ -19,9 +20,11 @@ test('keeps application helpers out of optional vendor groups', () => {
 test('vendor groups have timing labels without replacing their chunk names', async () => {
   const modules = new Map([
     ['entry', `export const terminal = () => import('/fixture/node_modules/@xterm/xterm/index.js');
-export const math = () => import('/fixture/node_modules/katex/index.js');`],
+export const math = () => import('/fixture/node_modules/katex/index.js');
+export const search = () => import('/fixture/node_modules/fuse.js/dist/fuse.mjs');`],
     ['/fixture/node_modules/@xterm/xterm/index.js', 'export const terminal = "terminal";'],
     ['/fixture/node_modules/katex/index.js', 'export const math = "math";'],
+    ['/fixture/node_modules/fuse.js/dist/fuse.mjs', 'export const search = "search";'],
   ]);
   const warnings = [];
   const bundle = await rolldown({
@@ -41,7 +44,7 @@ export const math = () => import('/fixture/node_modules/katex/index.js');`],
     });
     expect(warnings.filter(({ code }) => code === 'MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME')).toEqual([]);
     const vendors = output.filter((file) => file.type === 'chunk' && file.name.startsWith('vendor-'));
-    expect(vendors.map((file) => file.name).sort()).toEqual(['vendor-katex', 'vendor-xterm']);
+    expect(vendors.map((file) => file.name).sort()).toEqual(['vendor-fuse', 'vendor-katex', 'vendor-xterm']);
   } finally {
     await bundle.close();
   }

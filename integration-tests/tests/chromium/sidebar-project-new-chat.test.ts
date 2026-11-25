@@ -19,7 +19,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await context.addInitScript(() => {
         const preferences = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
         localStorage.setItem('pref_local_settings', JSON.stringify({
-          ...preferences, sidebarGrouping: 'project',
+          ...preferences, sidebarGroupingFields: ['executor', 'project'].map(field => ({ field, enabled: true })),
           composerStatusBarGitProjects: false, composerStatusBarNonGitProjects: false,
         }));
       });

@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BrowserNotificationsRouter } from '../browser-notifications-router.js';
 import { AgentRunFinishedMessage, ChatTransientFeedMutationMessage } from '$shared/ws-events';
 import { BashToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
-import type { WsMessageLog } from '$lib/ws/drain';
+import { openPushFixture } from '$lib/ws/__tests__/push-fixture';
 import type { BrowserNotificationDeliveryPort } from '$lib/notifications/browser-notifications.js';
 
 function permission(kind: 'upsert' | 'remove' | 'clear-run' = 'upsert') {
@@ -32,30 +32,42 @@ function permission(kind: 'upsert' | 'remove' | 'clear-run' = 'upsert') {
 	);
 }
 
-function fixture(messages: unknown[], enabled = true, focused = false, processing = false, allowsNotifications = true) {
+let dispose: (() => void) | undefined;
+
+afterEach(() => {
+	dispose?.();
+	dispose = undefined;
+});
+
+async function fixture(
+	messages: unknown[],
+	enabled = true,
+	focused = false,
+	processing = false,
+	allowsNotifications = true,
+) {
 	let currentProcessing = processing;
-	const ws = {
-		messages: messages.map((data) => ({
-			data: JSON.parse(JSON.stringify(data)),
-			timestamp: Date.now(),
-		})),
-		trimOffset: 0,
-		trimConsumedMessages: () => {},
-		registerCursor: vi.fn(() => vi.fn()),
-	} satisfies WsMessageLog;
-	const delivery = { show: vi.fn(), close: vi.fn() } satisfies Pick<BrowserNotificationDeliveryPort, 'show' | 'close'>;
-	const router = new BrowserNotificationsRouter(ws, delivery, {
+	const connection = openPushFixture();
+	const delivery = { show: vi.fn(), close: vi.fn() } satisfies Pick<
+		BrowserNotificationDeliveryPort,
+		'show' | 'close'
+	>;
+	const router = new BrowserNotificationsRouter(connection.ws, delivery, {
 		enabled: () => enabled,
 		isFocused: () => focused,
 		isChatProcessing: () => currentProcessing,
 		allowsNotifications: () => allowsNotifications,
 	});
+	dispose = () => {
+		router.destroy();
+		connection.close();
+	};
 	router.start();
-	router.tick();
+	for (const message of messages) connection.send(message);
+	await Promise.resolve();
 	return {
-		ws,
 		delivery,
-		router,
+		send: connection.send,
 		setProcessing: (next: boolean) => {
 			currentProcessing = next;
 		},
@@ -63,7 +75,7 @@ function fixture(messages: unknown[], enabled = true, focused = false, processin
 }
 
 describe('root browser notifications routing', () => {
-	it('suppresses intermediate queued completion and notifies after the queue becomes idle', () => {
+	it('suppresses intermediate queued completion and notifies after the queue becomes idle', async () => {
 		const completed = new AgentRunFinishedMessage(
 			'background',
 			0,
@@ -72,34 +84,21 @@ describe('root browser notifications routing', () => {
 			undefined,
 			'finished',
 		);
-		const busy = fixture([completed], true, false, true);
+		const busy = await fixture([completed], true, false, true);
 		expect(busy.delivery.show).not.toHaveBeenCalled();
 		busy.setProcessing(false);
-		busy.ws.messages.push({
-			data: JSON.parse(
-				JSON.stringify(
-					new AgentRunFinishedMessage(
-						'background',
-						0,
-						'next-turn',
-						undefined,
-						undefined,
-						'finished',
-					),
-				),
-			),
-			timestamp: Date.now(),
-		});
-		busy.router.tick();
+		busy.send(
+			new AgentRunFinishedMessage('background', 0, 'next-turn', undefined, undefined, 'finished'),
+		);
 		expect(busy.delivery.show).toHaveBeenCalledWith(
 			'Garcon: chat completed',
 			'background',
 			'completion:background:next-turn',
 		);
 		expect(busy.delivery.show).toHaveBeenCalledOnce();
-		busy.router.destroy();
+
 	});
-	it('suppresses completion and permission notifications without conversational policy', () => {
+	it('suppresses completion and permission notifications without conversational policy', async () => {
 		const completed = new AgentRunFinishedMessage(
 			'background',
 			0,
@@ -108,28 +107,24 @@ describe('root browser notifications routing', () => {
 			undefined,
 			'finished',
 		);
-		const f = fixture([completed, permission()], true, false, false, false);
+		const f = await fixture([completed, permission()], true, false, false, false);
 		expect(f.delivery.show).not.toHaveBeenCalled();
-		f.router.destroy();
+
 	});
 	it.each(['remove', 'clear-run'] as const)(
 		'closes permission notifications resolved by %s in a later tick',
-		(kind) => {
-			const f = fixture([permission()]);
+		async (kind) => {
+			const f = await fixture([permission()]);
 			expect(f.delivery.show).toHaveBeenCalledOnce();
-			f.ws.messages.push({
-				data: JSON.parse(JSON.stringify(permission(kind))),
-				timestamp: Date.now(),
-			});
-			f.router.tick();
+			f.send(permission(kind));
 			expect(f.delivery.close).toHaveBeenCalledWith(
 				'permission:synthetic-instance:background:occurrence',
 			);
 			expect(f.delivery.show).toHaveBeenCalledOnce();
-			f.router.destroy();
+
 		},
 	);
-	it('notifies background completions and live permissions once without private text', () => {
+	it('notifies background completions and live permissions once without private text', async () => {
 		const completed = new AgentRunFinishedMessage(
 			'background',
 			0,
@@ -138,40 +133,40 @@ describe('root browser notifications routing', () => {
 			undefined,
 			'finished',
 		);
-		const f = fixture([completed, completed, permission(), permission()]);
+		const f = await fixture([completed, completed, permission(), permission()]);
 		expect(f.delivery.show.mock.calls.map((call) => call[0])).toEqual([
 			'Garcon: chat completed',
 			'Garcon: permission needed',
 		]);
 		expect(JSON.stringify(f.delivery.show.mock.calls)).not.toContain('synthetic-command');
-		f.router.tick();
+		await Promise.resolve();
 		expect(f.delivery.show).toHaveBeenCalledTimes(2);
-		f.router.destroy();
+
 	});
 	it.each(['remove', 'clear-run'] as const)(
-		'suppresses a permission resolved by %s in the same drain',
-		(kind) => {
-			const f = fixture([permission(), permission(kind)]);
+		'suppresses a permission resolved by %s in the same burst',
+		async (kind) => {
+			const f = await fixture([permission(), permission(kind)]);
 			expect(f.delivery.show).not.toHaveBeenCalled();
-			f.router.destroy();
+
 		},
 	);
-	it('ignores snapshots, durable permission history, failed/interrupted completions', () => {
-		const f = fixture([
+	it('ignores snapshots, durable permission history, failed/interrupted completions', async () => {
+		const f = await fixture([
 			{ type: 'chat-transient-feed-snapshot', rows: [permission()] },
 			{ type: 'chat-messages', messages: [permission()] },
 			new AgentRunFinishedMessage('background', 0, 'turn', undefined, undefined, 'interrupted'),
 			new AgentRunFinishedMessage('background', 1, 'turn', undefined, undefined, 'finished'),
 		]);
 		expect(f.delivery.show).not.toHaveBeenCalled();
-		f.router.destroy();
+
 	});
 	it.each([
 		[false, false],
 		[true, true],
-	])('suppresses delivery with enabled=%s and focused=%s', (enabled, focused) => {
-		const f = fixture([permission()], enabled, focused);
+	])('suppresses delivery with enabled=%s and focused=%s', async (enabled, focused) => {
+		const f = await fixture([permission()], enabled, focused);
 		expect(f.delivery.show).not.toHaveBeenCalled();
-		f.router.destroy();
+
 	});
 });

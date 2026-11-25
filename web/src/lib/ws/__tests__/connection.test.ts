@@ -4,6 +4,7 @@ import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-type
 import type { ChatSessionsPort } from '$lib/chat/sessions/chat-sessions-contract';
 import { ChatProcessingReconciler } from '../chat-processing-reconciler.svelte';
 import { WsConnection } from '../connection.svelte';
+import { createDrainCursor } from '../drain';
 
 vi.mock('$lib/api/client', () => ({
 	getAuthToken: vi.fn(() => 'stored-token'),
@@ -112,6 +113,36 @@ describe('WsConnection', () => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
 		vi.stubGlobal('WebSocket', originalWebSocket);
+	});
+
+	it('bounds a stalled drain without dropping pushes or corrupting its next read', () => {
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const ws = new WsConnection();
+		const drain = createDrainCursor(ws);
+		const receive = vi.fn();
+		const unsubscribe = ws.onMessageType('tickets-invalidated', receive);
+		try {
+			ws.connect('token');
+			mockSockets[0].open();
+			for (let revision = 1; revision <= 3000; revision++) {
+				mockSockets[0].message({ type: 'tickets-invalidated', revision });
+			}
+			expect(receive).toHaveBeenCalledTimes(3000);
+			expect(warning).toHaveBeenCalledWith(expect.stringContaining('buffer exceeded'));
+			expect(ws.messages.length).toBeLessThan(3000);
+			const retained = drain.drain();
+			expect(retained[0].data.revision).toBeGreaterThan(1);
+			expect(retained.at(-1)?.data.revision).toBe(3000);
+			expect(ws.messages).toHaveLength(0);
+
+			unsubscribe();
+			mockSockets[0].message({ type: 'tickets-invalidated', revision: 3001 });
+			expect(receive).toHaveBeenCalledTimes(3000);
+			expect(drain.drain().map((message) => message.data.revision)).toEqual([3001]);
+		} finally {
+			drain.cleanup();
+			ws.disconnect();
+		}
 	});
 
 	it('retains each socket attempt start across delayed open events and correlated replies', async () => {

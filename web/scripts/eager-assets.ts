@@ -6,6 +6,17 @@ export interface ManifestEntry {
 	css?: string[];
 }
 
+export function linkedAssets(html: string, relation: 'modulepreload' | 'stylesheet'): string[] {
+	const assets: string[] = [];
+	for (const match of html.matchAll(/<link\b[^>]*>/g)) {
+		const tag = match[0];
+		if (!new RegExp(`\\brel=["']${relation}["']`).test(tag)) continue;
+		const href = tag.match(/\bhref=["']\/(?!\/)([^"'?#]+)(?:[?#][^"']*)?["']/)?.[1];
+		if (href && !href.split('/').includes('..')) assets.push(href);
+	}
+	return assets;
+}
+
 export function collectEagerAssets(
 	preloadedFiles: readonly string[],
 	stylesheets: readonly string[],
@@ -37,7 +48,8 @@ export function collectEagerAssets(
 export function assertLazyRendererAssets(assets: readonly { file: string; names: readonly string[] }[]): void {
 	const eagerRenderers = assets.filter(({ names }) => names.some(name =>
 		name.startsWith('vendor-cm-lang-') || name.startsWith('vendor-codemirror') ||
-		name === 'vendor-cm-legacy-modes' || name === 'vendor-xterm' || name === 'vendor-canvas',
+		name === 'vendor-cm-legacy-modes' || name === 'vendor-xterm' || name === 'vendor-canvas' ||
+		name === 'vendor-fuse',
 	));
 	if (eagerRenderers.length > 0) {
 		throw new Error(`Optional renderer chunks must remain lazy: ${eagerRenderers.map(asset => asset.file).join(', ')}`);

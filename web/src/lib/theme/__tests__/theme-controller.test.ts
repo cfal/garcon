@@ -1,5 +1,5 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { TYPOGRAPHY_SURFACES } from '../typography';
 import ThemeControllerTestHost from './ThemeControllerTestHost.svelte';
@@ -197,6 +197,49 @@ describe('ThemeController', () => {
 			expect(rendered.setEditorPresentation).toHaveBeenCalledOnce();
 			expect(rendered.setTerminalPresentation).toHaveBeenCalledOnce();
 		}
+	});
+
+	it('keeps the current palette until the desired stylesheet loads and ignores stale completions', async () => {
+		installMatchMedia();
+		const manifest = document.createElement('script');
+		manifest.id = 'garcon-theme-stylesheets';
+		manifest.type = 'application/json';
+		manifest.textContent = JSON.stringify({
+			'rose-dark': '/nested/_app/rose-dark.css',
+			'neko-light': '/nested/_app/neko-light.css',
+		});
+		document.head.append(manifest);
+		// Happy DOM rejects external sheets automatically; the test drives their load events.
+		const insert = vi.spyOn(manifest, 'after').mockImplementation(() => {});
+		onTestFinished(() => insert.mockRestore());
+		function lastStylesheet() {
+			const link = insert.mock.lastCall?.[0];
+			if (!(link instanceof HTMLLinkElement)) throw new Error('Expected a stylesheet link');
+			return link;
+		}
+		const rendered = renderController({ mode: 'fixed', themeId: 'phosphor-light' });
+		await waitFor(() => expect(rendered.setEditorPresentation).toHaveBeenCalledOnce());
+		flushSync(() => rendered.component.setPreference({ mode: 'fixed', themeId: 'rose-dark' }));
+		const rose = lastStylesheet();
+		expect(rose.rel).toBe('stylesheet');
+		expect(rose.getAttribute('href')).toBe('/nested/_app/rose-dark.css');
+		flushSync(() => rendered.component.setPreference({ mode: 'fixed', themeId: 'neko-light' }));
+		expect(document.documentElement.dataset.theme).toBe('phosphor-light');
+		rose.dispatchEvent(new Event('load'));
+		await Promise.resolve();
+		expect(document.documentElement.dataset.theme).toBe('phosphor-light');
+
+		const neko = lastStylesheet();
+		expect(neko.dataset.garconTheme).toBe('neko-light');
+		neko.dispatchEvent(new Event('error'));
+		await waitFor(() => expect(rendered.reportError).toHaveBeenCalledOnce());
+		expect(document.documentElement.dataset.theme).toBe('phosphor-light');
+		flushSync(() => window.dispatchEvent(new Event('online')));
+		const retry = lastStylesheet();
+		expect(retry).not.toBe(neko);
+		retry.dispatchEvent(new Event('load'));
+		await waitFor(() => expect(document.documentElement.dataset.theme).toBe('neko-light'));
+		expect(rendered.setEditorPresentation).toHaveBeenCalledTimes(2);
 	});
 
 	it('projects only the changed font and clears its override on reset', async () => {

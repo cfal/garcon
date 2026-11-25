@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('$app/env', () => ({ version: 'current' }));
-vi.mock('$app/manifest', () => ({
-	immutable: [{ path: '_app/immutable/entry/start.js' }],
-	assets: [{ path: 'icons/app.png' }, { path: 'site.webmanifest' }],
-}));
+vi.mock('$app/env', () => ({ dev: false, version: 'current' }));
 
 describe('service worker activation', () => {
 	beforeEach(() => {
 		vi.resetModules();
+		vi.stubGlobal('__GARCON_PRECACHE__', {
+			eager: ['_app/immutable/entry/start.js'],
+			immutable: ['_app/immutable/assets/test.woff2'],
+		});
 	});
 
 	afterEach(() => {
@@ -30,9 +30,9 @@ describe('service worker activation', () => {
 			const storage = {
 				open: vi
 					.fn()
-					.mockResolvedValue({ match: vi.fn().mockResolvedValue(undefined) } satisfies Pick<
+					.mockResolvedValue({ keys: vi.fn().mockResolvedValue([]), match: vi.fn().mockResolvedValue(undefined) } satisfies Pick<
 						Cache,
-						'match'
+						'keys' | 'match'
 					>),
 				keys: vi.fn<CacheStorage['keys']>().mockResolvedValue(names),
 				delete: vi.fn<CacheStorage['delete']>().mockReturnValue(pendingDelete.promise),
@@ -67,12 +67,11 @@ describe('service worker activation', () => {
 	);
 
 	it.each(['', '/tools/garcon'])(
-		'precaches Kit 3 manifest paths at mount "%s"',
+		'precaches injected eager paths at mount "%s"',
 		async (basePath) => {
 			const cache = {
 				addAll: vi.fn<Cache['addAll']>().mockResolvedValue(undefined),
-				add: vi.fn<Cache['add']>().mockResolvedValue(undefined),
-			} satisfies Pick<Cache, 'addAll' | 'add'>;
+			} satisfies Pick<Cache, 'addAll'>;
 			const scope = new EventTarget();
 			const skipWaiting = vi.fn().mockResolvedValue(undefined);
 			vi.stubGlobal('self', {
@@ -93,7 +92,6 @@ describe('service worker activation', () => {
 				`${basePath}/`,
 				`${basePath}/_app/immutable/entry/start.js`,
 			]);
-			expect(cache.add).toHaveBeenCalledExactlyOnceWith(`${basePath}/icons/app.png`);
 			expect(skipWaiting).toHaveBeenCalledOnce();
 		},
 	);

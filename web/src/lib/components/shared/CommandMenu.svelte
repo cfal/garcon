@@ -1,8 +1,18 @@
+<script module lang="ts">
+	let fuseImport: Promise<typeof import('fuse.js')> | undefined;
+
+	function loadFuse() {
+		return (fuseImport ??= import('fuse.js').catch((error: unknown) => {
+			fuseImport = undefined;
+			throw error;
+		}));
+	}
+</script>
+
 <script lang="ts">
 	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
 	import { flushSync } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import Fuse from 'fuse.js';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
@@ -31,8 +41,11 @@
 
 	let isOpen = $state(false);
 	let query = $state('');
-	let selectedIndex = $state(0);
+	let highlighted = $state.raw<WorkbenchCommand | null>(null);
+	let retainedOrder = $state.raw<readonly WorkbenchCommand[] | null>(null);
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let optionList = $state<HTMLDivElement>();
+	let Fuse = $state.raw<typeof import('fuse.js').default>();
 	let opener: HTMLElement | null = null;
 
 	let commandContext = $derived(commandRegistry.context());
@@ -54,27 +67,43 @@
 	}
 
 	let fuse = $derived(
-		new Fuse(commands, {
-			keys: [
-				'label',
-				'description',
-				{ name: 'category', getFn: (item) => categoryLabels[item.category]() },
-			],
-			threshold: 0.4,
-			includeScore: true,
-		}),
+		Fuse &&
+			new Fuse(commands, {
+				keys: [
+					'label',
+					'description',
+					{ name: 'category', getFn: (item) => categoryLabels[item.category]() },
+				],
+				threshold: 0.4,
+				includeScore: true,
+			}),
 	);
 
-	let filteredCommands = $derived(
-		query.trim()
-			? fuse.search(query, { limit: searchResultLimit }).map((r) => r.item)
-			: commands
-					.filter(
-						(command, index) =>
-							!command.id.startsWith(CHAT_OPEN_COMMAND_PREFIX) || index < recentChatLimit,
-					)
-					.slice(0, searchResultLimit),
-	);
+	let matches = $derived.by(() => {
+		const needle = query.trim().toLowerCase();
+		if (needle) {
+			if (fuse)
+				return fuse.search(query, { limit: searchResultLimit }).map((result) => result.item);
+			return commands
+				.filter((command) =>
+					[command.label, command.description, categoryLabels[command.category]()].some((field) =>
+						field?.toLowerCase().includes(needle),
+					),
+				)
+				.slice(0, searchResultLimit);
+		}
+		return commands
+			.filter(
+				(command, index) =>
+					!command.id.startsWith(CHAT_OPEN_COMMAND_PREFIX) || index < recentChatLimit,
+			)
+			.slice(0, searchResultLimit);
+	});
+	// Appends new matches without moving the options already being navigated.
+	let filteredCommands = $derived(retainedOrder
+		? [...new Set([...retainedOrder, ...matches])].slice(0, searchResultLimit)
+		: matches);
+	let selectedIndex = $derived(highlighted ? filteredCommands.indexOf(highlighted) : 0);
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
 
 	function isEnabled(command: WorkbenchCommand): boolean {
@@ -87,16 +116,26 @@
 
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
-		selectedIndex = 0;
+		highlighted = null;
+		retainedOrder = null;
 	}
 
 	function open() {
+		if (!Fuse) {
+			void loadFuse().then(
+				({ default: SearchIndex }) => {
+					if (!Fuse && highlighted && query.trim()) retainedOrder = matches;
+					Fuse = SearchIndex;
+				},
+				(error: unknown) => console.warn('Fuzzy command search failed to load:', error),
+			);
+		}
 		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		transientLayers.open('main-inert', () => {
 			commands = captureCommands();
 			isOpen = true;
 			query = '';
-			selectedIndex = 0;
+			highlighted = null;
 		});
 	}
 
@@ -105,6 +144,8 @@
 		flushSync(() => {
 			isOpen = false;
 			commands = [];
+			highlighted = null;
+			retainedOrder = null;
 			query = '';
 		});
 		if (document.activeElement === document.body) opener?.focus({ preventScroll: true });
@@ -143,10 +184,10 @@
 		}
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
+			highlighted = filteredCommands[Math.min(selectedIndex + 1, filteredCommands.length - 1)] ?? null;
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			selectedIndex = Math.max(selectedIndex - 1, 0);
+			highlighted = filteredCommands[Math.max(selectedIndex - 1, 0)] ?? null;
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			if (selectedCommand) selectItem(selectedCommand);
@@ -166,7 +207,7 @@
 
 	$effect(() => {
 		if (!isOpen) return;
-		const el = document.querySelector(`[data-cmd-index="${selectedIndex}"]`);
+		const el = optionList?.querySelector(`[data-cmd-index="${selectedIndex}"]`);
 		el?.scrollIntoView({ block: 'nearest' });
 	});
 </script>
@@ -213,7 +254,12 @@
 				</Dialog.Close>
 			</div>
 
-			<div id={listId} class="max-h-[300px] overflow-y-auto p-2" role="listbox">
+			<div
+				bind:this={optionList}
+				id={listId}
+				class="max-h-[300px] overflow-y-auto p-2"
+				role="listbox"
+			>
 				{#if filteredCommands.length === 0}
 					<div class="px-4 py-8 text-center text-sm text-muted-foreground">
 						{m.command_no_matching()}
@@ -221,23 +267,24 @@
 				{:else}
 					{#each filteredCommands as item, i (item.id)}
 						{@const Icon = getCategoryIcon(item.category)}
+						{@const enabled = isEnabled(item)}
 						<button
 							id={optionIdFor(item.id)}
 							data-cmd-index={i}
 							role="option"
 							aria-selected={i === selectedIndex}
-							aria-disabled={!isEnabled(item)}
-							disabled={!isEnabled(item)}
+							aria-disabled={!enabled}
+							disabled={!enabled}
 							class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 {i ===
 							selectedIndex
 								? 'bg-accent text-accent-foreground'
 								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
-							onfocus={() => (selectedIndex = i)}
+							onfocus={() => (highlighted = item)}
 							onmouseenter={(event) => {
 								// A focused result owns native Enter and Space activation.
 								if (!event.currentTarget.parentElement?.contains(document.activeElement)) {
-									selectedIndex = i;
+									highlighted = item;
 								}
 							}}
 						>
