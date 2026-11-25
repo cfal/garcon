@@ -125,19 +125,16 @@ describe('findFreshSelectableSnippetByShortName', () => {
 	});
 
 	it('blocks local lookup during a retry GET and reflects restored lower-revision catalogs immediately', async () => {
-		let resolveSnippetRetry!: (value: SnippetsSnapshot) => void;
+		const retryRead = Promise.withResolvers<SnippetsSnapshot>();
 		const snippetsStore = new SnippetsStore({
 			get: vi
-				.fn()
-				.mockImplementationOnce(
-					() =>
-						new Promise<SnippetsSnapshot>((resolve) => {
-							resolveSnippetRetry = resolve;
-						}),
-				)
+				.fn<() => Promise<SnippetsSnapshot>>()
+				.mockReturnValueOnce(retryRead.promise)
 				.mockResolvedValueOnce({
 					revision: 1,
-					snippets: [makeSnippet({ id: 'restored-1', shortName: 'restored', template: 'Restored body' })],
+					snippets: [
+						makeSnippet({ id: 'restored-1', shortName: 'restored', template: 'Restored body' }),
+					],
 				}),
 		});
 		snippetsStore.applySnapshot({
@@ -148,51 +145,32 @@ describe('findFreshSelectableSnippetByShortName', () => {
 			get: vi.fn().mockResolvedValueOnce({ revision: 1, preambles: [] } satisfies PreamblesSnapshot),
 		});
 		preamblesStore.applySnapshot({ revision: 3, preambles: [makePreamble()] });
+		const liveStores = {
+			wsConnected: true,
+			snippets: snippetsStore,
+			preambles: preamblesStore,
+		};
 
 		const retrying = snippetsStore.refresh();
-		expect(
-			findFreshSelectableSnippetByShortName('probe', {
-				wsConnected: true,
-				snippets: snippetsStore,
-				preambles: preamblesStore,
-			}),
-		).toBeNull();
+		expect(findFreshSelectableSnippetByShortName('probe', liveStores)).toBeNull();
 
-		resolveSnippetRetry({
+		retryRead.resolve({
 			revision: 3,
 			snippets: [makeSnippet({ shortName: 'probe', template: 'Updated probe' })],
 		});
 		await retrying;
-		expect(
-			findFreshSelectableSnippetByShortName('probe', {
-				wsConnected: true,
-				snippets: snippetsStore,
-				preambles: preamblesStore,
-			}),
-		).toMatchObject({ source: 'snippet', body: 'Updated probe' });
+		expect(findFreshSelectableSnippetByShortName('probe', liveStores)).toMatchObject({
+			source: 'snippet',
+			body: 'Updated probe',
+		});
 
 		await Promise.all([snippetsStore.refreshIfLoaded(), preamblesStore.refreshIfLoaded()]);
-		expect(
-			findFreshSelectableSnippetByShortName('probe', {
-				wsConnected: true,
-				snippets: snippetsStore,
-				preambles: preamblesStore,
-			}),
-		).toBeNull();
-		expect(
-			findFreshSelectableSnippetByShortName('restored', {
-				wsConnected: true,
-				snippets: snippetsStore,
-				preambles: preamblesStore,
-			}),
-		).toMatchObject({ source: 'snippet', body: 'Restored body' });
-		expect(
-			findFreshSelectableSnippetByShortName('context', {
-				wsConnected: true,
-				snippets: snippetsStore,
-				preambles: preamblesStore,
-			}),
-		).toBeNull();
+		expect(findFreshSelectableSnippetByShortName('probe', liveStores)).toBeNull();
+		expect(findFreshSelectableSnippetByShortName('restored', liveStores)).toMatchObject({
+			source: 'snippet',
+			body: 'Restored body',
+		});
+		expect(findFreshSelectableSnippetByShortName('context', liveStores)).toBeNull();
 	});
 });
 
@@ -219,20 +197,17 @@ describe('catalogMatchesSelectableSnippet', () => {
 		expect(catalogMatchesSelectableSnippet(preRestoreItem, null)).toBe(false);
 		expect(catalogMatchesSelectableSnippet(preRestoreItem, snippetsStore)).toBe(true);
 
-		// Revision regresses 3 -> 2 (deleted in restored backup).
 		await snippetsStore.refreshIfLoaded();
 		expect(catalogMatchesSelectableSnippet(preRestoreItem, snippetsStore)).toBe(false);
 
-		// Revision recovers 2 -> 3 with restored template: previously captured item still mismatches.
 		await snippetsStore.refreshIfLoaded();
 		expect(snippetsStore.hasFreshSnapshot).toBe(true);
 		expect(catalogMatchesSelectableSnippet(preRestoreItem, snippetsStore)).toBe(false);
 
-		// Fresh selection captured after 3 -> 2 -> 3 recovery matches.
 		const postRecoveryItem = snippetToSelectable(snippetsStore.snippets[0]!);
 		expect(catalogMatchesSelectableSnippet(postRecoveryItem, snippetsStore)).toBe(true);
 
-		// Same-revision restore (3 -> 3) with changed template invalidates the captured selection even with identical updatedAt.
+		// Same-revision restore (3 -> 3) invalidates the captured item even when updatedAt is unchanged.
 		await snippetsStore.reconcileAfterReconnect();
 		expect(catalogMatchesSelectableSnippet(postRecoveryItem, snippetsStore)).toBe(false);
 		expect(
@@ -243,14 +218,12 @@ describe('catalogMatchesSelectableSnippet', () => {
 	it('rejects items when the owning catalog is refreshing, errored, or updated for preambles', async () => {
 		const preamble = makePreamble();
 		const captured = preambleToSelectable(preamble)!;
-		let resolveRead!: (value: PreamblesSnapshot) => void;
+		const read = Promise.withResolvers<PreamblesSnapshot>();
 		const store = new PreamblesStore({
-			get: vi.fn(
-				() =>
-					new Promise<PreamblesSnapshot>((resolve) => {
-						resolveRead = resolve;
-					}),
-			),
+			get: vi
+				.fn<() => Promise<PreamblesSnapshot>>()
+				.mockReturnValueOnce(read.promise)
+				.mockRejectedValueOnce(new Error('offline')),
 		});
 		store.applySnapshot({ revision: 1, preambles: [preamble] });
 		expect(catalogMatchesSelectableSnippet(captured, store)).toBe(true);
@@ -258,15 +231,19 @@ describe('catalogMatchesSelectableSnippet', () => {
 		const refreshing = store.refresh();
 		expect(catalogMatchesSelectableSnippet(captured, store)).toBe(false);
 
-		resolveRead({
+		read.resolve({
 			revision: 1,
 			preambles: [{ ...preamble, content: 'Restored preamble content' }],
 		});
 		await refreshing;
 		expect(catalogMatchesSelectableSnippet(captured, store)).toBe(false);
-		expect(
-			catalogMatchesSelectableSnippet(preambleToSelectable(store.preambles[0]!)!, store),
-		).toBe(true);
+
+		const refreshedItem = preambleToSelectable(store.preambles[0]!)!;
+		expect(catalogMatchesSelectableSnippet(refreshedItem, store)).toBe(true);
+
+		await store.refreshIfLoaded();
+		expect(store.error).toBe('offline');
+		expect(catalogMatchesSelectableSnippet(refreshedItem, store)).toBe(false);
 	});
 });
 

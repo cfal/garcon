@@ -1,4 +1,5 @@
 import {
+  SNIPPET_ERROR_CODES,
   SNIPPET_EXPANDED_MAX_LENGTH,
   SNIPPET_TEMPLATE_VARIABLES,
 } from './snippets.js';
@@ -19,7 +20,7 @@ export interface SnippetTemplateValues {
 }
 
 export class SnippetExpansionError extends Error {
-  readonly code = 'SNIPPET_EXPANSION_TOO_LONG' as const;
+  readonly code = SNIPPET_ERROR_CODES.expansionTooLong;
 
   constructor() {
     super(`Expanded snippet exceeds ${SNIPPET_EXPANDED_MAX_LENGTH} characters`);
@@ -28,7 +29,7 @@ export class SnippetExpansionError extends Error {
 }
 
 export class ScheduledSnippetBoundaryError extends Error {
-  readonly code = 'SNIPPET_VALIDATION_FAILED' as const;
+  readonly code = SNIPPET_ERROR_CODES.validationFailed;
 
   constructor() {
     super('Scheduled snippet replacements must not create or escape adjacent template variables. Add a separator.');

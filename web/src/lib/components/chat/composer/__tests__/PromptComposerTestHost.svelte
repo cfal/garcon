@@ -473,39 +473,29 @@
 			}
 		});
 	}
-	const snippetsStore = createSnippetsStore({
-		get: async () => {
-			snippetLoadCount += 1;
-			if (loadSnippets) return loadSnippets();
-			return {
-				revision: 1,
-				snippets: [
-					{
-						id: 'snippet-review',
-						shortName: 'review',
-						template: snippetTemplate,
-						defaultArguments: snippetDefaultArguments,
-						createdAt: '2026-01-01T00:00:00.000Z',
-						updatedAt: '2026-01-01T00:00:00.000Z',
-					},
-				],
-			};
-		},
-	});
-	if (untrack(() => preloadSnippets)) {
-		snippetsStore.applySnapshot({
+	function reviewSnapshot(): SnippetsSnapshot {
+		return {
 			revision: 1,
 			snippets: [
 				{
 					id: 'snippet-review',
 					shortName: 'review',
-					template: untrack(() => snippetTemplate),
-					defaultArguments: untrack(() => snippetDefaultArguments),
+					template: snippetTemplate,
+					defaultArguments: snippetDefaultArguments,
 					createdAt: '2026-01-01T00:00:00.000Z',
 					updatedAt: '2026-01-01T00:00:00.000Z',
 				},
 			],
-		});
+		};
+	}
+	const snippetsStore = createSnippetsStore({
+		get: async () => {
+			snippetLoadCount += 1;
+			return loadSnippets ? loadSnippets() : reviewSnapshot();
+		},
+	});
+	if (untrack(() => preloadSnippets)) {
+		snippetsStore.applySnapshot(untrack(reviewSnapshot));
 	}
 	untrack(() => onSnippets?.(snippetsStore));
 	setSnippets(snippetsStore);

@@ -1541,7 +1541,7 @@ describe('NewChatForm', () => {
 		expect(clientChatId.createClientChatId).not.toHaveBeenCalled();
 	});
 
-	it('expands /s locally in new-chat drafts when WS is connected and falls back for date tokens or offline WS', async () => {
+	it('expands /s locally in new-chat drafts when WS is connected and reuses the prospective chat ID on submit', async () => {
 		stubMatchMedia(false);
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat, {

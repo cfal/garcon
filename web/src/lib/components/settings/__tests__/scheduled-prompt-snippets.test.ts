@@ -1,68 +1,52 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ScheduledPromptSnippets } from '../scheduled-prompt-snippets.svelte';
 import { expandSnippet } from '$lib/api/snippets.js';
-import { selectableSnippets, type SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
+import {
+	preambleToSelectable,
+	snippetToSelectable,
+	type SelectableSnippet,
+} from '$lib/snippets/selectable-snippet.js';
 import { catalogMatchesSelectableSnippet } from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 
 vi.mock('$lib/api/snippets.js', () => ({ expandSnippet: vi.fn() }));
 const expand = vi.mocked(expandSnippet);
-const item = selectableSnippets(
-	[
-		{
-			id: 'review',
-			shortName: 'review',
-			template: 'Review {{arguments}} in {{project_path}} {{chat_id}}',
-			defaultArguments: 'API',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		},
-	],
-	[],
-)[0];
-const localItem = selectableSnippets(
-	[
-		{
-			id: 'daily',
-			shortName: 'daily',
-			template: 'Review {{arguments}} for {{chat_id}} on {{current_date}} / {{current_date_local}}',
-			defaultArguments: 'API',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		},
-	],
-	[],
-)[0];
-const preambleItem = selectableSnippets(
-	[],
-	[
-		{
-			id: '00000000-0000-4000-8000-000000000001',
-			enabled: true,
-			title: 'Daily context',
-			snippetShortName: 'context',
-			content: 'Chat {{chat_id}} on {{current_date}} / {{current_date_local}}',
-			scope: { type: 'global' },
-			agentIds: [],
-			tagFilter: { mode: 'any', tags: [] },
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		},
-	],
-)[0];
-const boundaryItem = selectableSnippets(
-	[
-		{
-			id: 'boundary',
-			shortName: 'boundary',
-			template: '{{arguments}}{{current_date}}',
-			defaultArguments: '',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		},
-	],
-	[],
-)[0];
+const item = snippetToSelectable({
+	id: 'review',
+	shortName: 'review',
+	template: 'Review {{arguments}} in {{project_path}} {{chat_id}}',
+	defaultArguments: 'API',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+});
+const localItem = snippetToSelectable({
+	id: 'daily',
+	shortName: 'daily',
+	template: 'Review {{arguments}} for {{chat_id}} on {{current_date}} / {{current_date_local}}',
+	defaultArguments: 'API',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+});
+const preambleItem = preambleToSelectable({
+	id: '00000000-0000-4000-8000-000000000001',
+	enabled: true,
+	title: 'Daily context',
+	snippetShortName: 'context',
+	content: 'Chat {{chat_id}} on {{current_date}} / {{current_date_local}}',
+	scope: { type: 'global' },
+	agentIds: [],
+	tagFilter: { mode: 'any', tags: [] },
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+})!;
+const boundaryItem = snippetToSelectable({
+	id: 'boundary',
+	shortName: 'boundary',
+	template: '{{arguments}}{{current_date}}',
+	defaultArguments: '',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+});
 const response = {
 	success: true as const,
 	source: 'snippet' as const,
@@ -76,8 +60,7 @@ const response = {
 
 function fixture(
 	options: {
-		matchesCatalogItem?: ((item: SelectableSnippet) => boolean) | undefined;
-		omitMatcher?: boolean;
+		matchesCatalogItem?: (item: SelectableSnippet) => boolean;
 		onInsert?: (text: string, caret: number) => Promise<void>;
 	} = {},
 ) {
@@ -98,7 +81,7 @@ function fixture(
 				target: { type: 'new-chat' as const, projectPath: '/repo' },
 			};
 		},
-		...(options.omitMatcher ? {} : { matchesCatalogItem: options.matchesCatalogItem ?? (() => true) }),
+		...(options.matchesCatalogItem ? { matchesCatalogItem: options.matchesCatalogItem } : {}),
 		onInsert,
 		onPendingChange,
 		onSourceChanged,
@@ -113,7 +96,7 @@ beforeEach(() => {
 
 describe('scheduled prompt snippets', () => {
 	it('replaces the selection and supplies the caret while blocking save during expansion', async () => {
-		const { controller, onInsert, onPendingChange } = fixture();
+		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
 		controller.open(7, 15);
 		expect(await controller.insert(item, 'API')).toBe('inserted');
 		expect(expand.mock.calls[0][0]).toEqual({
@@ -129,7 +112,7 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('expands scheduled snippets without project_path locally without hitting the server', async () => {
-		const { controller, onInsert, onPendingChange } = fixture();
+		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
 		controller.open(7, 15);
 		expect(await controller.insert(localItem, '{{chat_id}}')).toBe('inserted');
 		expect(expand).not.toHaveBeenCalled();
@@ -141,7 +124,7 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('inserts named preambles verbatim locally in scheduled prompts', async () => {
-		const { controller, onInsert, onPendingChange } = fixture();
+		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
 		controller.open(7, 15);
 		expect(await controller.insert(preambleItem, '')).toBe('inserted');
 		expect(expand).not.toHaveBeenCalled();
@@ -153,7 +136,6 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('falls back to the server when the captured selection no longer matches the catalog after a restore', async () => {
-		if (localItem.source !== 'snippet') throw new Error('expected snippet fixture');
 		const store = new SnippetsStore({
 			get: vi
 				.fn()
@@ -170,7 +152,7 @@ describe('scheduled prompt snippets', () => {
 				}),
 		});
 		store.applySnapshot({ revision: 3, snippets: [localItem.snippet] });
-		const capturedItem = selectableSnippets(store.snippets, [])[0]!;
+		const capturedItem = snippetToSelectable(store.snippets[0]!);
 		const { controller, onInsert } = fixture({
 			matchesCatalogItem: (selected) => catalogMatchesSelectableSnippet(selected, store),
 		});
@@ -194,7 +176,7 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('rejects ambiguous deferred token boundaries locally without calling the server', async () => {
-		const { controller, onInsert, onPendingChange } = fixture();
+		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
 		controller.open(7, 15);
 		expect(await controller.insert(boundaryItem, 'report\\')).toBe('failed');
 		expect(expand).not.toHaveBeenCalled();
@@ -203,8 +185,8 @@ describe('scheduled prompt snippets', () => {
 		expect(controller.error).toContain('Add a separator');
 	});
 
-	it('falls back to the server when no catalog matcher is provided and catches local insertion errors', async () => {
-		const { controller: unmatched, onInsert: unmatchedInsert } = fixture({ omitMatcher: true });
+	it('falls back to the server when no catalog matcher is provided', async () => {
+		const { controller, onInsert } = fixture();
 		expand.mockResolvedValueOnce({
 			...response,
 			sourceId: localItem.id,
@@ -212,19 +194,25 @@ describe('scheduled prompt snippets', () => {
 			shortName: localItem.shortName,
 			expandedText: 'Server expanded',
 		});
-		unmatched.open(7, 15);
-		expect(await unmatched.insert(localItem, 'API')).toBe('inserted');
+		controller.open(7, 15);
+		expect(await controller.insert(localItem, 'API')).toBe('inserted');
 		expect(expand).toHaveBeenCalledOnce();
-		expect(unmatchedInsert).toHaveBeenCalledWith('Before Server expanded after', 'Before Server expanded'.length);
+		expect(onInsert).toHaveBeenCalledWith(
+			'Before Server expanded after',
+			'Before Server expanded'.length,
+		);
+	});
 
-		const { controller: failingLocal, onPendingChange } = fixture({
+	it('catches unexpected errors thrown during local insertion without toggling pending state', async () => {
+		const { controller, onPendingChange } = fixture({
+			matchesCatalogItem: () => true,
 			onInsert: async () => {
 				throw new Error('insert callback failed');
 			},
 		});
-		failingLocal.open(7, 15);
-		expect(await failingLocal.insert(localItem, 'API')).toBe('failed');
-		expect(failingLocal.error).toBe('insert callback failed');
+		controller.open(7, 15);
+		expect(await controller.insert(localItem, 'API')).toBe('failed');
+		expect(controller.error).toBe('insert callback failed');
 		expect(onPendingChange).not.toHaveBeenCalled();
 	});
 

@@ -2,7 +2,6 @@ import { ApiError } from '$lib/api/client.js';
 import type { SnippetCommandParseResult } from '$lib/chat/composer/slash-commands.js';
 import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
-import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 import {
 	catalogMatchesSelectableSnippet,
 	findFreshSelectableSnippetByShortName,
@@ -20,7 +19,15 @@ import {
 } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { ExpandSnippetResponse, SnippetExpansionContext } from '$shared/snippets';
+import type {
+	ExpandSnippetResponse,
+	SnippetArgumentsInput,
+	SnippetExpansionContext,
+} from '$shared/snippets';
+
+interface RefreshableCatalog {
+	refreshIfLoaded(): Promise<void>;
+}
 
 export interface ComposerSnippetServerContext<Prepared> {
 	readonly requestContext: SnippetExpansionContext;
@@ -28,8 +35,8 @@ export interface ComposerSnippetServerContext<Prepared> {
 }
 
 export interface ComposerSnippetControllerOptions<Prepared> {
-	readonly snippets: SnippetCatalogLookup & Pick<SnippetsStoreLike, 'refreshIfLoaded'>;
-	readonly preambles: PreambleCatalogLookup & Pick<PreamblesStore, 'refreshIfLoaded'>;
+	readonly snippets: SnippetCatalogLookup & RefreshableCatalog;
+	readonly preambles: PreambleCatalogLookup & RefreshableCatalog;
 	readonly notifications: Pick<NotificationsStore, 'error'>;
 	readonly isWsConnected: () => boolean;
 	readonly getExecutionKey: () => string;
@@ -50,25 +57,6 @@ export interface ComposerSnippetControllerOptions<Prepared> {
 	readonly onMissingProjectPath?: () => void;
 	readonly onExpanded: (text: string, caret: number) => Promise<void> | void;
 	readonly onSettled: () => Promise<void> | void;
-}
-
-interface SnippetsStoreLike {
-	refreshIfLoaded(): Promise<void>;
-}
-
-function replaceSnippetText(
-	sourceText: string,
-	start: number,
-	end: number,
-	range: { start: number; end: number } | null,
-	expandedText: string,
-) {
-	return range
-		? applySnippetTriggerReplacement(sourceText, range, expandedText)
-		: {
-				text: sourceText.slice(0, start) + expandedText + sourceText.slice(end),
-				caret: start + expandedText.length,
-			};
 }
 
 // Coordinates palette and slash-command snippet expansion for immediate composers,
@@ -94,9 +82,11 @@ export class ComposerSnippetController<Prepared> {
 		const selection = this.options.getSelection();
 		if (this.options.isTransformPending() || !selection) return 'cancelled';
 		const sourceExecutionKey = this.options.getExecutionKey();
+		const replacementRange = range ?? { start: selection.start, end: selection.end };
 		this.options.beforeExpand?.();
 		const owningCatalog =
 			snippet.source === 'snippet' ? this.options.snippets : this.options.preambles;
+		const argumentsInput: SnippetArgumentsInput = { type: 'value', value: argumentsText };
 		try {
 			const hasProjectPath = this.options.hasProjectPath();
 			if (!hasProjectPath && this.options.onMissingProjectPath) {
@@ -105,42 +95,33 @@ export class ComposerSnippetController<Prepared> {
 				return 'cancelled';
 			}
 			const sourceText = this.options.getText();
-			const start = range?.start ?? selection.start;
-			const end = range?.end ?? selection.end;
-			if (hasProjectPath && catalogMatchesSelectableSnippet(snippet, owningCatalog)) {
-				const local = tryExpandSelectableSnippetLocally(
-					snippet,
-					{ type: 'value', value: argumentsText },
-					{ kind: 'immediate', getChatId: () => this.options.getLocalChatId() },
+			const applyExpanded = (expandedText: string) => {
+				const replacement = applySnippetTriggerReplacement(
+					sourceText,
+					replacementRange,
+					expandedText,
 				);
+				return this.options.onExpanded(replacement.text, replacement.caret);
+			};
+			if (hasProjectPath && catalogMatchesSelectableSnippet(snippet, owningCatalog)) {
+				const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
+					kind: 'immediate',
+					getChatId: () => this.options.getLocalChatId(),
+				});
 				if (local.kind === 'expanded') {
-					const replacement = replaceSnippetText(sourceText, start, end, range, local.expandedText);
-					await this.options.onExpanded(replacement.text, replacement.caret);
+					await applyExpanded(local.expandedText);
 					return 'inserted';
 				}
 				if (local.kind === 'error') {
-					this.options.notifications.error(m.snippets_expand_error({ detail: local.message }));
-					await this.options.onSettled();
+					await this.#notifyAndSettle(m.snippets_expand_error({ detail: local.message }));
 					return 'failed';
 				}
 			}
-			const result = await this.#expansion.runPrepared(snippet.shortName, async (signal) => {
-				const operation = await this.options.prepareServerContext(signal);
-				return {
-					request: {
-						shortName: snippet.shortName,
-						arguments: { type: 'value', value: argumentsText },
-						context: operation.requestContext,
-					},
-					prepared: operation.prepared,
-				};
-			});
+			const result = await this.#expandOnServer(snippet.shortName, argumentsInput);
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
-				if (snippet.source === 'snippet') void this.options.snippets.refreshIfLoaded();
-				else void this.options.preambles.refreshIfLoaded();
-				this.options.notifications.error(m.snippets_changed_before_expansion());
-				await this.options.onSettled();
+				void owningCatalog.refreshIfLoaded();
+				await this.#notifyAndSettle(m.snippets_changed_before_expansion());
 				return 'cancelled';
 			}
 			if (
@@ -150,14 +131,7 @@ export class ComposerSnippetController<Prepared> {
 			) {
 				return 'cancelled';
 			}
-			const replacement = replaceSnippetText(
-				sourceText,
-				start,
-				end,
-				range,
-				result.response.expandedText,
-			);
-			await this.options.onExpanded(replacement.text, replacement.caret);
+			await applyExpanded(result.response.expandedText);
 			return 'inserted';
 		} catch (error) {
 			await this.#reportServerError(error);
@@ -178,39 +152,28 @@ export class ComposerSnippetController<Prepared> {
 				this.options.onMissingProjectPath();
 				return;
 			}
-			if (hasProjectPath) {
-				const item = findFreshSelectableSnippetByShortName(command.shortName, {
-					wsConnected: this.options.isWsConnected(),
-					snippets: this.options.snippets,
-					preambles: this.options.preambles,
+			const item = hasProjectPath
+				? findFreshSelectableSnippetByShortName(command.shortName, {
+						wsConnected: this.options.isWsConnected(),
+						snippets: this.options.snippets,
+						preambles: this.options.preambles,
+					})
+				: null;
+			if (item) {
+				const local = tryExpandSelectableSnippetLocally(item, command.arguments, {
+					kind: 'immediate',
+					getChatId: () => this.options.getLocalChatId(),
 				});
-				if (item) {
-					const local = tryExpandSelectableSnippetLocally(item, command.arguments, {
-						kind: 'immediate',
-						getChatId: () => this.options.getLocalChatId(),
-					});
-					if (local.kind === 'expanded') {
-						await this.options.onExpanded(local.expandedText, local.expandedText.length);
-						return;
-					}
-					if (local.kind === 'error') {
-						this.options.notifications.error(m.snippets_expand_error({ detail: local.message }));
-						await this.options.onSettled();
-						return;
-					}
+				if (local.kind === 'expanded') {
+					await this.options.onExpanded(local.expandedText, local.expandedText.length);
+					return;
+				}
+				if (local.kind === 'error') {
+					await this.#notifyAndSettle(m.snippets_expand_error({ detail: local.message }));
+					return;
 				}
 			}
-			const result = await this.#expansion.runPrepared(command.shortName, async (signal) => {
-				const operation = await this.options.prepareServerContext(signal);
-				return {
-					request: {
-						shortName: command.shortName,
-						arguments: command.arguments,
-						context: operation.requestContext,
-					},
-					prepared: operation.prepared,
-				};
-			});
+			const result = await this.#expandOnServer(command.shortName, command.arguments);
 			if (result.kind !== 'expanded') return;
 			if (
 				!this.options.isConversationInput() ||
@@ -229,12 +192,30 @@ export class ComposerSnippetController<Prepared> {
 		}
 	}
 
+	#expandOnServer(shortName: string, argumentsInput: SnippetArgumentsInput) {
+		return this.#expansion.runPrepared(shortName, async (signal) => {
+			const operation = await this.options.prepareServerContext(signal);
+			return {
+				request: {
+					shortName,
+					arguments: argumentsInput,
+					context: operation.requestContext,
+				},
+				prepared: operation.prepared,
+			};
+		});
+	}
+
+	async #notifyAndSettle(message: string): Promise<void> {
+		this.options.notifications.error(message);
+		await this.options.onSettled();
+	}
+
 	async #reportServerError(error: unknown): Promise<void> {
 		if (error instanceof ApiError && error.status === 404) {
 			void this.options.snippets.refreshIfLoaded();
 			void this.options.preambles.refreshIfLoaded();
 		}
-		this.options.notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-		await this.options.onSettled();
+		await this.#notifyAndSettle(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
 	}
 }

@@ -54,21 +54,21 @@ export class ScheduledPromptSnippets {
 		const key = this.options.interactionKey;
 		const source = this.options.prompt;
 		const range = this.palette.trigger ?? this.#selection;
+		const argumentsInput = { type: 'value', value: argumentsText } as const;
+		const insertExpanded = async (expandedText: string): Promise<'inserted'> => {
+			const replacement = applySnippetTriggerReplacement(source, range, expandedText);
+			this.palette.complete();
+			await this.options.onInsert(replacement.text, replacement.caret);
+			return 'inserted';
+		};
 		this.error = null;
 		let pendingNotified = false;
 		try {
-			if (this.options.matchesCatalogItem?.(snippet) === true) {
-				const local = tryExpandSelectableSnippetLocally(
-					snippet,
-					{ type: 'value', value: argumentsText },
-					{ kind: 'scheduled' },
-				);
-				if (local.kind === 'expanded') {
-					const replacement = applySnippetTriggerReplacement(source, range, local.expandedText);
-					this.palette.complete();
-					await this.options.onInsert(replacement.text, replacement.caret);
-					return 'inserted';
-				}
+			if (this.options.matchesCatalogItem?.(snippet)) {
+				const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
+					kind: 'scheduled',
+				});
+				if (local.kind === 'expanded') return await insertExpanded(local.expandedText);
 				if (local.kind === 'error') {
 					this.error = local.message;
 					return 'failed';
@@ -78,7 +78,7 @@ export class ScheduledPromptSnippets {
 			this.options.onPendingChange(true);
 			const result = await this.expansion.run({
 				shortName: snippet.shortName,
-				arguments: { type: 'value', value: argumentsText },
+				arguments: argumentsInput,
 				context,
 			});
 			if (
@@ -102,14 +102,7 @@ export class ScheduledPromptSnippets {
 					result.response.contextExecutorId !== (target.executorId ?? 'local'))
 			)
 				return 'cancelled';
-			const replacement = applySnippetTriggerReplacement(
-				source,
-				range,
-				result.response.expandedText,
-			);
-			this.palette.complete();
-			await this.options.onInsert(replacement.text, replacement.caret);
-			return 'inserted';
+			return await insertExpanded(result.response.expandedText);
 		} catch (error) {
 			if (key !== this.options.interactionKey) return 'cancelled';
 			this.error = error instanceof Error ? error.message : String(error);

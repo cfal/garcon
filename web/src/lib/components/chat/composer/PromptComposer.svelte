@@ -75,10 +75,7 @@
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
-	import {
-		PromptComposerProjectState,
-		type PromptComposerSnippetContext,
-	} from './prompt-composer-project-state.svelte.js';
+	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
 	import type { PromptComposerProps } from './prompt-composer-props.js';
 	import { PromptComposerRecallController } from './prompt-composer-recall-controller';
 
@@ -181,8 +178,7 @@
 		void recallIdentity;
 		promptRecall.reset();
 	});
-	const snippetExpansion: ComposerSnippetController<PromptComposerSnippetContext> =
-		new ComposerSnippetController({
+	const snippetExpansion = new ComposerSnippetController({
 		snippets,
 		preambles,
 		notifications,

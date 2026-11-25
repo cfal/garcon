@@ -2145,7 +2145,7 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
 	});
 
-	it('expands /s locally when WS is connected and the catalog is loaded, and falls back when disconnected or using dates', async () => {
+	it('expands /s locally when WS is connected and the catalog is loaded, and falls back when disconnected', async () => {
 		const onsubmit = vi.fn();
 		const { component, rerender } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-local-slash',

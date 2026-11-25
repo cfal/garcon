@@ -123,8 +123,7 @@
 	});
 	const canAttachAttachments = $derived(hasChatAttachmentSupport(attachmentSupport));
 	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
-	const snippetExpansion: ComposerSnippetController<{ projectPath: string }> =
-		new ComposerSnippetController({
+	const snippetExpansion = new ComposerSnippetController({
 		snippets,
 		preambles,
 		notifications,
@@ -148,12 +147,12 @@
 					projectPath,
 					executorId,
 				},
-				prepared: { projectPath },
+				prepared: projectPath,
 			};
 		},
-		matchesServerContext: (prepared, response) =>
-			form.nonblankPath === prepared.projectPath &&
-			response.contextProjectPath === prepared.projectPath &&
+		matchesServerContext: (projectPath, response) =>
+			form.nonblankPath === projectPath &&
+			response.contextProjectPath === projectPath &&
 			response.contextExecutorId === form.executorId,
 		onExpanded: async (text, caret) => {
 			form.firstMessage = text;

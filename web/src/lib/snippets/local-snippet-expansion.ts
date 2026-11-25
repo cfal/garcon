@@ -21,7 +21,10 @@ import {
 	type Snippet,
 	type SnippetArgumentsInput,
 } from '$shared/snippets';
-import { runtimeTemplateValues, TemplateExpansionTooLongError } from '$shared/template-tokens';
+import {
+	TEMPLATE_VALIDATION_VALUES,
+	TemplateExpansionTooLongError,
+} from '$shared/template-tokens';
 import {
 	preambleToSelectable,
 	snippetToSelectable,
@@ -46,8 +49,6 @@ export interface PreambleCatalogLookup {
 	readonly hasFreshSnapshot: boolean;
 	readonly preambles: readonly Preamble[];
 }
-
-const UNUSED_DATE = new Date(0);
 
 // Returns true when the owning catalog holds a settled snapshot whose entry still matches
 // the captured selection, so edits, restores, or in-flight refreshes while a dialog is open
@@ -79,7 +80,7 @@ export function catalogMatchesSelectableSnippet(
 }
 
 // Finds a snippet or named preamble for slash-command fast-path expansion only when the
-// owning catalog holds an uncontradicted, settled snapshot backed by a live WebSocket.
+// owning catalog holds a settled snapshot backed by a live WebSocket.
 export function findFreshSelectableSnippetByShortName(
 	shortName: string,
 	options: {
@@ -102,8 +103,6 @@ export function findFreshSelectableSnippetByShortName(
 	return null;
 }
 
-// Expands a snippet or named preamble locally when all active tokens can be resolved
-// authoritatively on the client; otherwise signals callers to fall back to the server.
 export function tryExpandSelectableSnippetLocally(
 	item: SelectableSnippet,
 	argumentsInput: SnippetArgumentsInput,
@@ -141,10 +140,11 @@ function expandPreambleLocally(
 	try {
 		return {
 			kind: 'expanded',
-			expandedText: renderPreambleContent(
-				preamble.content,
-				runtimeTemplateValues(chatId, UNUSED_DATE),
-			),
+			// Active date tokens already fell back above, so placeholder dates are never substituted.
+			expandedText: renderPreambleContent(preamble.content, {
+				...TEMPLATE_VALIDATION_VALUES,
+				chat_id: chatId,
+			}),
 		};
 	} catch (error) {
 		if (error instanceof TemplateExpansionTooLongError) {
@@ -169,24 +169,26 @@ function expandSnippetLocally(
 	) {
 		return { kind: 'fallback' };
 	}
-	const argumentsText =
-		argumentsInput.type === 'default' ? snippet.defaultArguments : argumentsInput.value;
+	const values = {
+		arguments: argumentsInput.type === 'default' ? snippet.defaultArguments : argumentsInput.value,
+		projectPath: '',
+	};
 	try {
-		const expandedText =
-			mode.kind === 'scheduled'
-				? expandScheduledSnippetTemplate(template, {
-						arguments: argumentsText,
-						projectPath: '',
-					})
-				: expandSnippetTemplate(template, {
-						arguments: argumentsText,
-						projectPath: '',
-						context: runtimeTemplateValues(
-							snippetTemplateUsesChatId(template) ? mode.getChatId() : '',
-							UNUSED_DATE,
-						),
-					});
-		return { kind: 'expanded', expandedText };
+		if (mode.kind === 'scheduled') {
+			return {
+				kind: 'expanded',
+				expandedText: expandScheduledSnippetTemplate(template, values),
+			};
+		}
+		const chatId = snippetTemplateUsesChatId(template) ? mode.getChatId() : '';
+		return {
+			kind: 'expanded',
+			expandedText: expandSnippetTemplate(template, {
+				...values,
+				// Active date tokens already fell back above, so placeholder dates are never substituted.
+				context: { ...TEMPLATE_VALIDATION_VALUES, chat_id: chatId },
+			}),
+		};
 	} catch (error) {
 		if (error instanceof SnippetExpansionError || error instanceof ScheduledSnippetBoundaryError) {
 			return { kind: 'error', message: error.message };

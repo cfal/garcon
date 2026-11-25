@@ -403,7 +403,7 @@ describe('snippet service', () => {
     });
   });
 
-  it('rejects unusable defaults and maps oversized default expansion errors', async () => {
+  it('rejects unusable defaults, oversized arguments, and oversized expanded output', async () => {
     const { service } = await serviceFixture();
     await expect(
       service.create({
@@ -424,15 +424,16 @@ describe('snippet service', () => {
         defaultArguments: 'x'.repeat(32_000),
       },
     });
+    const context = {
+      type: 'new-chat',
+      chatId: PROSPECTIVE_CHAT_ID,
+      projectPath: '/draft/repo',
+    };
     await expect(
       service.expand({
         shortName: 'large',
         arguments: { type: 'default' },
-        context: {
-          type: 'new-chat',
-          chatId: PROSPECTIVE_CHAT_ID,
-          projectPath: '/draft/repo',
-        },
+        context,
       }),
     ).rejects.toMatchObject({
       code: 'SNIPPET_EXPANSION_TOO_LONG',
@@ -442,11 +443,7 @@ describe('snippet service', () => {
       service.expand({
         shortName: 'large',
         arguments: { type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
-        context: {
-          type: 'new-chat',
-          chatId: PROSPECTIVE_CHAT_ID,
-          projectPath: '/draft/repo',
-        },
+        context,
       }),
     ).rejects.toMatchObject({
       code: 'SNIPPET_VALIDATION_FAILED',
