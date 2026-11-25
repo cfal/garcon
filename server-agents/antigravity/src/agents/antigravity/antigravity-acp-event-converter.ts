@@ -30,6 +30,7 @@ const EXECUTOR_ERROR = 'agent executor error: ';
 interface TrackedCall extends AntigravityToolCall {
   readonly rawOutput?: unknown;
   readonly content?: readonly Record<string, unknown>[];
+  readonly contentIsNewer: boolean;
 }
 
 interface DeferredCall {
@@ -72,19 +73,25 @@ function isAgentWork(name: string | null): boolean {
   return name === 'manage_task' || name === 'update_steps' || name === 'send_message';
 }
 
-function reportedResult(call: TrackedCall): ToolResultMessage['content'] {
+function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): ToolResultMessage['content'] {
   const name = call.isMcp ? null : call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
   const agentWork = isAgentWork(name);
-  const raw = call.rawOutput;
-  const blocks = call.content ?? [];
-  const output = asString(raw) ?? asString(asObject(raw).output);
-  const text = output?.trim() ? output : blocks.map(block => asString(asObject(block.content).text) ?? '').filter(Boolean).join('\n');
+  const raw = agentWork ? call.rawOutput : terminal.rawOutput;
+  const blocks = agentWork || Array.isArray(terminal.content) ? (call.content ?? []) : [];
+  const output = (agentWork ? asString(raw) : undefined) ?? asString(asObject(raw).output) ?? '';
+  const blockText = blocks.map(block => asString(asObject(block.content).text) ?? '').filter(Boolean).join('\n');
+  // A fresh diagnostic takes precedence over an independent progress field,
+  // even if the final frame supplies only the status.
+  const text = output.trim() && !(call.contentIsNewer && blockText.trim()) ? output : blockText;
+  const distinct = output.trim() !== '' && blockText.trim() !== '' && output !== blockText;
   const result: ToolResultMessage['content'] = {};
-  if (agentWork && raw != null && typeof raw !== 'string' &&
-      (typeof raw !== 'object' || Array.isArray(raw) || Object.keys(asObject(raw)).some(key => key !== 'output' || output === undefined))) {
+  const structured = raw != null && typeof raw !== 'string' && (typeof raw !== 'object' || Array.isArray(raw) ||
+    Object.keys(asObject(raw)).some(key => key !== 'output' || typeof asObject(raw).output !== 'string'));
+  if (agentWork && (structured || (distinct && text === blockText))) {
     result.rawOutput = raw;
   }
-  if (agentWork && blocks.some(block => block.type !== 'content' || asObject(block.content).type !== 'text')) result.items = blocks;
+  if (agentWork && ((distinct && text === output) ||
+      blocks.some(block => block.type !== 'content' || asObject(block.content).type !== 'text'))) result.items = blocks;
   const normalized = antigravityToolResultText(name ?? '', text);
   if (normalized.trim()) result.raw = normalized;
   return result;
@@ -106,6 +113,7 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
     // ACP patches rawOutput and content independently. Null rawOutput is unchanged;
     // an explicit content array replaces its predecessor, including an empty one.
     rawOutput: update?.rawOutput ?? previous?.rawOutput,
+    contentIsNewer: update?.rawOutput != null ? false : Array.isArray(update?.content) || !!previous?.contentIsNewer,
     content: Array.isArray(update?.content)
       ? update.content.map(asObject).filter(block => block.type !== 'diff') : previous?.content,
   };
@@ -143,7 +151,8 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       calls.set(call.toolCallId, resolved);
       evictOldestToolEntry(calls);
     }
-    return convertAntigravityToolUse(context.timestamp, resolved);
+    // A provisional display title is not evidence of what the user is approving.
+    return convertAntigravityToolUse(context.timestamp, { ...resolved, planTitle: null });
   }
 
   fromSessionUpdate(
@@ -255,7 +264,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const exitCode = name === 'run_command' ? asObject(call.rawOutput).exit_code : undefined;
     const commandFailed = typeof exitCode === 'number' && exitCode !== 0;
     const failed = status !== 'completed' || commandFailed;
-    const content = reportedResult(call);
+    const content = reportedResult(call, update);
     if (!Object.keys(content).length && failed) {
       if (commandFailed) content.exitCode = exitCode;
       else content.status = status;

@@ -100,6 +100,36 @@ test('waits for the second half of an MCP envelope even after seeing its marker'
     .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }, { type: 'tool-result' }]);
 });
 
+test('does not present an inferred checklist as the identity of a permission request', () => {
+  const s = session();
+  s.start('preview', { title: 'Run update_steps', rawInput: { steps: [] } });
+  expect(s.permission('preview')).toMatchObject({ type: 'unknown-tool-use', input: { steps: [] } });
+  expect(s.patch('preview', { _meta: { is_mcp_tool_call: true }, rawInput: { server: 'docs', tool: 'lookup' }, status: 'completed' }))
+    .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }, { type: 'tool-result' }]);
+  s.start('plan', { title: 'Run update_steps', rawInput: { steps: [] } });
+  s.permission('plan');
+  expect(s.end()).toMatchObject([{ type: 'update-plan-tool-use', todos: [] }]);
+});
+
+test('keeps the terminal diagnostic visible even when another output field reported progress', () => {
+  const s = session();
+  const blocks = (text: string) => [{ type: 'content', content: { type: 'text', text } }];
+  const send = { name: 'send_message', rawInput: { Recipient: 'peer', Message: 'Hello' } };
+  const progress = { output: 'In progress' };
+  s.start('send', { ...send, rawOutput: progress });
+  expect(s.patch('send', { status: 'failed', content: blocks('Operation refused') }))
+    .toMatchObject([{ content: { raw: 'Operation refused', rawOutput: progress }, isError: true }]);
+  s.start('sparse', { ...send, rawOutput: progress });
+  s.patch('sparse', { content: blocks('Operation refused') });
+  expect(s.patch('sparse', { status: 'failed' })).toMatchObject([{ content: { raw: 'Operation refused', rawOutput: progress } }]);
+  s.start('reverse', { ...send, content: blocks('In progress') });
+  expect(s.patch('reverse', { status: 'failed', rawOutput: 'Operation refused' }))
+    .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') }, isError: true }]);
+  s.start('edit', { name: 'replace_file_content', rawInput: { TargetFile: '/work/file' }, rawOutput: progress });
+  expect(s.patch('edit', { status: 'failed', content: blocks('Operation refused') })[0])
+    .toEqual(expect.objectContaining({ content: { raw: 'Operation refused' }, isError: true }));
+});
+
 test('publishes the oldest incomplete call rather than losing it when the pending budget fills', () => {
   const s = session();
   for (let i = 0; i < 512; i++) expect(s.start(`call-${i}`, {})).toEqual([]);
@@ -127,6 +157,8 @@ test('does not store proposed edit diffs as successful or failed tool output', (
   expect(s.start('edit', { ...edit, content, status: 'completed' }).at(-1)).toEqual(expect.objectContaining({ content: {}, isError: false }));
   s.start('proposal', { ...edit, content });
   expect(s.patch('proposal', { status: 'failed' })[0]).toEqual(expect.objectContaining({ content: { status: 'failed' }, isError: true }));
+  expect(s.start('native', { ...edit, status: 'completed', rawOutput: 'Opaque native payload' }).at(-1))
+    .toEqual(expect.objectContaining({ content: {}, isError: false }));
 });
 
 test('publishes waiting calls before the first transcript frame for a permission-only ID', () => {
