@@ -207,9 +207,12 @@ export class CodeEditorController {
 	#syntaxLabel = $state<string>(m.editor_status_plain_text());
 	readonly #handleScroll = (): void => {
 		const view = this.#view;
-		if (!view) return;
-		this.session.editorScrollSnapshot = null;
-		this.#captureScrollOffsets(view);
+		if (!view?.scrollDOM.isConnected) return;
+		if (this.session.textScrollTop !== view.scrollDOM.scrollTop ||
+			this.session.textScrollLeft !== view.scrollDOM.scrollLeft) {
+			// A renderer can be removed before detach; pixels alone cannot restore wrapped lines.
+			this.#captureScroll(view);
+		}
 	};
 
 	constructor(

@@ -6,6 +6,48 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
 
 describe('File editor controls', () => {
+  test('restores the visible wrapped line after returning from preview at a different width', async () => {
+    await withChromiumFixture('file-editor-wrapped-anchor', async ({ page, integration }) => {
+      await page.addInitScript(seedLocalSettings, { codeEditorWordWrap: true });
+      await page.setViewportSize({ width: 1800, height: 900 });
+      const name = 'wrapped.md';
+      const lines = Array.from({ length: 400 }, (_, i) => `Line ${i + 1}: ${'synthetic text '.repeat(35)}`);
+      await writeFile(join(integration.dirs.project, name), lines.join('\n'));
+      const chatId = integration.newChatId();
+      const started = await integration.client.startDirectChat({
+        chatId, content: 'Editor anchor fixture', projectPath: integration.dirs.project,
+        agent: integration.directAgents.openAi,
+      });
+      await integration.client.waitForTurnTerminal(chatId, started.turnId);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+      await page.locator('[data-file-tree-entry-text]').filter({ hasText: name }).click();
+      const surface = page.locator('[data-workspace-surface-id^="file:"][aria-hidden="false"]');
+      const edit = surface.getByRole('button', { name: 'Edit', exact: true });
+      await edit.click();
+      const scroller = surface.locator('.cm-scroller');
+      const visibleLine = () => scroller.evaluate(element => {
+        const y = element.getBoundingClientRect().top + 8;
+        const line = [...element.querySelectorAll('.cm-line')].find(node => {
+          const bounds = node.getBoundingClientRect();
+          return bounds.top <= y && bounds.bottom > y;
+        });
+        return Number(line?.textContent?.match(/^Line (\d+):/)?.[1] ?? 0);
+      });
+      const width = await scroller.evaluate(element => {
+        element.scrollTop = 8000;
+        return element.clientWidth;
+      });
+      await browserExpect.poll(visibleLine).toBeGreaterThan(10);
+      const anchor = await visibleLine();
+      await surface.getByRole('button', { name: 'View', exact: true }).click();
+      await scroller.waitFor({ state: 'detached' });
+      await page.setViewportSize({ width: 3000, height: 900 });
+      await edit.click();
+      await browserExpect.poll(() => scroller.evaluate(element => element.clientWidth)).toBeGreaterThan(width);
+      await browserExpect.poll(visibleLine).toBe(anchor);
+    });
+  }, 60_000);
+
   test.each([false, true])('keeps checkbox indicators tied to selection with Terminal UI Style %s', async (terminalAppearance) => {
     await withChromiumFixture(`file-editor-checkbox-hover-${terminalAppearance}`, async ({ page, integration }) => {
       await page.addInitScript(seedLocalSettings, {

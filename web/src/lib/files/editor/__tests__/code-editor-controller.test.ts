@@ -393,7 +393,7 @@ describe('CodeEditorController', () => {
 		firstScroller.scrollLeft = 9;
 		firstScroller.scrollTop = 24;
 		for (let tick = 0; tick < 10; tick++) firstScroller.dispatchEvent(new Event('scroll'));
-		expect(snapshot).not.toHaveBeenCalled();
+		expect(snapshot).toHaveBeenCalledOnce();
 		firstParent.remove();
 		controller.prepareRendererTransfer();
 		const secondLease = controller.attach(secondParent);
