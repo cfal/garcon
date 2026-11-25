@@ -27,7 +27,7 @@ import {
 	sidebarProjectKey,
 } from '$lib/sidebar/display/sidebar-row-model';
 import { chat, delegated, projectionInput } from '$lib/sidebar/display/__tests__/sidebar-fixtures';
-import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
+import { normalizeSidebarGroupingFields } from '$lib/sidebar/display/sidebar-preferences';
 import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -1414,7 +1414,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		]);
 	});
 
-	it.each(['project-and-activity', 'activity', 'status'] as const)(
+	it.each([[['executor', 'activity', 'project']], [['executor', 'activity']], [['executor', 'status']]])(
 		'preserves the metadata-free single-line layout for %s grouping',
 		(grouping) => {
 			const projectPath = '/tmp/inactive-project';
@@ -1427,7 +1427,7 @@ describe('SidebarVirtualSortableChatList', () => {
 					}),
 				],
 				displayOptions: {
-					groupingFields: migrateSidebarGrouping(grouping),
+					groupingFields: normalizeSidebarGroupingFields(grouping.map((field) => ({ field, enabled: true }))),
 					inactivityDuration: '3-days',
 					chatItemLayout: 'single-line',
 				},

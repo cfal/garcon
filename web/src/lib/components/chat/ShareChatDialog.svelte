@@ -79,7 +79,7 @@
 			showRevokeConfirm = false;
 			onClose();
 		} catch {
-			if (isCurrent(id, generation)) error = 'Failed to revoke share';
+			if (isCurrent(id, generation)) error = m.share_dialog_revoke_failed();
 		} finally {
 			if (isCurrent(id, generation)) isRevoking = false;
 		}

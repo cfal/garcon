@@ -160,7 +160,7 @@
 								type="button"
 								class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
 								onclick={() => moveSearch(search.id, -1)}
-								aria-label={`Move ${search.title || search.query} up`}
+								aria-label={m.sidebar_saved_searches_move_up({ search: search.title || search.query })}
 								disabled={i === 0}
 							>
 								<ChevronUp class="w-3.5 h-3.5" />
@@ -169,7 +169,7 @@
 								type="button"
 								class="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
 								onclick={() => moveSearch(search.id, 1)}
-								aria-label={`Move ${search.title || search.query} down`}
+								aria-label={m.sidebar_saved_searches_move_down({ search: search.title || search.query })}
 								disabled={i === searches.length - 1}
 							>
 								<ChevronDown class="w-3.5 h-3.5" />

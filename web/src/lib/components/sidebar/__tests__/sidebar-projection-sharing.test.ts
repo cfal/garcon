@@ -1,4 +1,4 @@
-import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
+import { defaultSidebarGroupingFields } from '$lib/sidebar/display/sidebar-preferences';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
@@ -58,7 +58,7 @@ afterEach(cleanup);
 it('shares one row projection after a chat is created or deleted', async () => {
 	const view = render(SidebarHost, {
 		chats: [chat],
-		sidebarGroupingFields: migrateSidebarGrouping('none'),
+		sidebarGroupingFields: defaultSidebarGroupingFields(),
 		autoLoadSavedSearches: false,
 	});
 	expect(screen.getByText(chat.title)).toBeTruthy();

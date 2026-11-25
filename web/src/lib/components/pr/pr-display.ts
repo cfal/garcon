@@ -20,20 +20,20 @@ export interface PrBadge {
 }
 
 export function prStateBadge(state: PullRequestState, isDraft: boolean): PrBadge {
-	if (isDraft) return { label: 'Draft', class: 'bg-muted text-muted-foreground' };
-	if (state === 'merged') return { label: 'Merged', class: 'bg-pr-merged/15 text-pr-merged' };
-	if (state === 'closed') return { label: 'Closed', class: 'bg-git-deleted/15 text-git-deleted' };
-	return { label: 'Open', class: 'bg-git-added/15 text-git-added' };
+	if (isDraft) return { label: m.pull_request_draft(), class: 'bg-muted text-muted-foreground' };
+	if (state === 'merged') return { label: m.pull_request_state_merged(), class: 'bg-pr-merged/15 text-pr-merged' };
+	if (state === 'closed') return { label: m.pull_request_state_closed(), class: 'bg-git-deleted/15 text-git-deleted' };
+	return { label: m.pull_request_state_open(), class: 'bg-git-added/15 text-git-added' };
 }
 
 export function checksStateLabel(state: PullRequestChecksState): string {
 	switch (state) {
 		case 'passing':
-			return 'Checks passing';
+			return m.pull_request_checks_state_passing();
 		case 'failing':
-			return 'Checks failing';
+			return m.pull_request_checks_state_failing();
 		case 'pending':
-			return 'Checks running';
+			return m.pull_request_checks_state_running();
 		default:
 			return '';
 	}
@@ -55,13 +55,13 @@ export function checksStateClass(state: PullRequestChecksState): string {
 export function fileStatusLabel(status: string): string {
 	switch (status) {
 		case 'A':
-			return 'Added';
+			return m.git_diff_document_status_added();
 		case 'D':
-			return 'Deleted';
+			return m.git_diff_document_status_deleted();
 		case 'R':
-			return 'Renamed';
+			return m.git_diff_document_status_renamed();
 		default:
-			return 'Modified';
+			return m.git_diff_document_status_modified();
 	}
 }
 

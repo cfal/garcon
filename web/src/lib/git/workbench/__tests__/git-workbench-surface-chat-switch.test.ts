@@ -23,7 +23,7 @@ vi.mock('$lib/api/git.js', () => ({
 		fingerprint: 'v1:baseline',
 		changedPathCount: 0,
 	}),
-	getGitReviewFileBodies: vi.fn().mockResolvedValue({ status: 'ready', files: {} }),
+	getGitReviewDocumentFileBodies: vi.fn().mockResolvedValue({ status: 'ready', files: {} }),
 	getGitStatus: vi.fn().mockResolvedValue({
 		branch: 'main',
 		hasCommits: true,
@@ -41,7 +41,6 @@ vi.mock('$lib/api/git.js', () => ({
 
 vi.mock('$lib/api/git-comparison.js', () => ({
 	getGitComparisonSnapshot: vi.fn(),
-	getGitComparisonFileBodies: vi.fn().mockResolvedValue({ status: 'ready', files: {} }),
 	getGitComparisonFreshness: vi.fn().mockResolvedValue({ status: 'ready', changedEndpoints: [] }),
 }));
 

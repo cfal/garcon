@@ -26,6 +26,7 @@ it('clears Garcon credentials, drafts, snapshots and paths without clearing unre
 		'chat_snapshot_index_v3',
 		'workspace_layout_v2',
 		'garcon-tickets-preferences-v1',
+		'garcon_terminal_client_identity_claim_v1:document:probe:1',
 		'garcon.credential-update-pending',
 	])
 		localStorage.setItem(key, 'private');

@@ -119,7 +119,8 @@ describe('ExecutorsStore', () => {
 		expect(executors.isReady(remoteExecutor.id)).toBe(true);
 	});
 
-	it('distinguishes disabled, waiting, and offline states', () => {
+	it('labels each executor availability state', () => {
+		expect(executorStatus(remoteExecutor)).toBe('Ready');
 		expect(executorStatus({ ...remoteExecutor, enabled: false })).toBe('Disabled');
 		expect(executorStatus({ ...remoteExecutor, availability: 'offline' })).toBe('Waiting for connection');
 		expect(executorStatus({ ...remoteExecutor, availability: 'reconnecting' })).toBe('Reconnecting');

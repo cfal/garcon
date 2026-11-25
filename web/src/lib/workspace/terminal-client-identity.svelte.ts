@@ -4,9 +4,9 @@ import {
 	setSessionStorageItem,
 } from '$lib/utils/local-persistence.js';
 import { createRandomId } from '$lib/utils/random-id.js';
+import { TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX } from './terminal-client-storage.js';
 
 const CHANNEL_NAME = 'garcon-terminal-client-identity-v1';
-const FALLBACK_STORAGE_PREFIX = 'garcon_terminal_client_identity_claim_v1:';
 const CLAIM_WINDOW_MS = 200;
 
 type IdentityMessage = {
@@ -26,13 +26,13 @@ export class TerminalClientIdentity {
 	#channel: BroadcastChannel | null = null;
 	#claimTimer: ReturnType<typeof setTimeout> | null = null;
 	#fallbackCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	#resolveReady: ((clientId: string) => void) | null = null;
-	readonly ready = new Promise<string>((resolve) => {
+	#resolveReady: ((clientId: string | null) => void) | null = null;
+	readonly ready = new Promise<string | null>((resolve) => {
 		this.#resolveReady = resolve;
 	});
 	#pageHide = () => this.destroy();
 	#storage = (event: StorageEvent) => {
-		if (!event.key?.startsWith(FALLBACK_STORAGE_PREFIX) || !event.newValue) return;
+		if (!event.key?.startsWith(TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX) || !event.newValue) return;
 		try {
 			this.#receive(JSON.parse(event.newValue));
 		} catch {
@@ -59,6 +59,8 @@ export class TerminalClientIdentity {
 
 	destroy(): void {
 		this.established = false;
+		this.#resolveReady?.(null);
+		this.#resolveReady = null;
 		if (this.#claimTimer) clearTimeout(this.#claimTimer);
 		this.#claimTimer = null;
 		this.#channel?.close();
@@ -125,7 +127,7 @@ export class TerminalClientIdentity {
 			this.#channel.postMessage(message);
 			return;
 		}
-		const key = `${FALLBACK_STORAGE_PREFIX}${this.documentId}:${type}:${message.sentAt}:${createRandomId()}`;
+		const key = `${TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX}${this.documentId}:${type}:${message.sentAt}:${createRandomId()}`;
 		try {
 			localStorage.setItem(key, JSON.stringify(message));
 			const timer = setTimeout(() => {
@@ -143,7 +145,7 @@ export class TerminalClientIdentity {
 			const now = Date.now();
 			const keys = Array.from({ length: localStorage.length }, (_, index) =>
 				localStorage.key(index),
-			).filter((key): key is string => Boolean(key?.startsWith(FALLBACK_STORAGE_PREFIX)));
+			).filter((key): key is string => Boolean(key?.startsWith(TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX)));
 			for (const key of keys) {
 				const raw = localStorage.getItem(key);
 				if (!raw) continue;

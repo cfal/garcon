@@ -1,3 +1,5 @@
+import * as m from '$lib/paraglide/messages.js';
+import { getLocale } from '$lib/paraglide/runtime.js';
 import type {
 	GitReviewBodyPurpose,
 	GitReviewBodyState,
@@ -357,8 +359,8 @@ export class GitReviewBodyStore {
 		const reason = decision.reason ?? 'collection-too-many-rows';
 		const message =
 			reason === 'collection-too-many-bytes'
-				? 'Cannot load this file within the collection patch byte limit.'
-				: `Stopped loading after ${decision.loadedRows.toLocaleString()} rendered rows.`;
+				? m.git_review_collection_patch_bytes_limit()
+				: m.git_review_collection_rows_limit({ count: decision.loadedRows.toLocaleString(getLocale()) });
 		next[filePath] = {
 			path: body.path,
 			bodyFingerprint: body.bodyFingerprint,

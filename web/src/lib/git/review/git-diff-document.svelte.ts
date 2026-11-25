@@ -1,6 +1,6 @@
+import { errorMessage } from '$lib/utils/error-message.js';
 import type {
 	GitCommitFileSummary,
-	GitDiffFileRequest,
 	GitReviewCollectionLimit,
 	GitReviewDocumentLimits,
 	GitReviewDocumentIndexedFileBodiesResponse,
@@ -46,7 +46,7 @@ export type GitDiffDocumentBodyResponse = GitReviewDocumentIndexedFileBodiesResp
 
 export type GitDiffDocumentBodyLoader = (
 	snapshot: GitDiffDocumentSnapshot,
-	files: GitDiffFileRequest[],
+	files: string[],
 	purpose: GitReviewBodyPurpose,
 	signal: AbortSignal,
 	publish: (result: GitDiffDocumentBodyResponse, paths: string[]) => void,
@@ -211,14 +211,9 @@ export class GitDiffDocumentController {
 		this.bodies.configure(() => ({
 			cacheScope: () => JSON.stringify([snapshot.documentId, this.contextLines]),
 			isCurrent: () => this.isCurrent(generation, snapshot.documentId),
-			load: (paths, purpose, signal, publish) => {
-				const requests = paths.map((path) => {
-					const summary = this.summaryForFile(path);
-					return { path, ...(summary?.originalPath ? { originalPath: summary.originalPath } : {}) };
-				});
-				return options.loadBodies(snapshot, requests, purpose, signal, publish);
-			},
-			onError: (error) => options.onError(error instanceof Error ? error.message : String(error)),
+			load: (paths, purpose, signal, publish) =>
+				options.loadBodies(snapshot, paths, purpose, signal, publish),
+			onError: (error) => options.onError(errorMessage(error)),
 			onReady: options.onBodyLoadSuccess,
 			onStale: (result) => {
 				this.markStale(result.message);

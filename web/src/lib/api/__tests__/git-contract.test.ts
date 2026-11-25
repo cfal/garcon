@@ -15,10 +15,9 @@ import {
 	getGitWorkbenchSnapshot,
 	getGitWorkingTreeFingerprint,
 	getGitQuickSummary,
-	getGitReviewFileBodies,
+	getGitReviewDocumentFileBodies,
 	getGitHistoryCommits,
 	getGitCommitSnapshot,
-	getGitCommitFileBodies,
 	getGitConflictDetails,
 	getGitTargetCandidates,
 	gitStageSelection,
@@ -31,7 +30,6 @@ import {
 	gitRevertCommit,
 } from '../git';
 import {
-	getGitComparisonFileBodies,
 	getGitComparisonFreshness,
 	getGitComparisonSnapshot,
 } from '../git-comparison';
@@ -665,17 +663,16 @@ describe('git API contract', () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it('getGitReviewFileBodies posts document-scoped file body requests', async () => {
+	it('getGitReviewDocumentFileBodies posts document-scoped file body requests', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({ status: 'document-expired', documentId: 'doc', message: 'Expired' }),
 		);
 
-		await getGitReviewFileBodies(
+		await getGitReviewDocumentFileBodies(
 			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ ...scope, documentId: 'doc' },
 			['a.ts', 'b.ts'],
-			'staged',
-			3,
+			'prefetch',
 		);
 
 		const [url, opts] = fetchMock.mock.calls[0];
@@ -765,22 +762,18 @@ describe('git API contract', () => {
 		});
 	});
 
-	it('getGitCommitFileBodies posts commit file body requests', async () => {
+	it('passes cancellation to the review document body request', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({ status: 'document-expired', documentId: 'doc', message: 'Expired' }),
 		);
 		const controller = new AbortController();
 
-		await getGitCommitFileBodies(
+		await getGitReviewDocumentFileBodies(
 			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ ...scope, documentId: 'doc' },
-			'abc',
-			[{ path: 'renamed.ts', originalPath: 'a.ts' }],
-			{
-				parent: null,
-				context: 4,
-				signal: controller.signal,
-			},
+			['renamed.ts'],
+			'prefetch',
+			{ signal: controller.signal },
 		);
 
 		const [url, opts] = fetchMock.mock.calls[0];
@@ -829,7 +822,7 @@ describe('git API contract', () => {
 		});
 	});
 
-	it('getGitComparisonFileBodies posts frozen endpoint identity and rename paths', async () => {
+	it('surfaces stale review document bodies', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'stale',
@@ -839,13 +832,11 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await getGitComparisonFileBodies(
+		const result = await getGitReviewDocumentFileBodies(
 			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ ...scope, documentId: 'comparison-doc' },
-			'from-hash',
-			{ kind: 'working-tree', fingerprint: 'v1:old' },
-			[{ path: 'new.ts', originalPath: 'old.ts' }],
-			{ context: 3 },
+			['new.ts'],
+			'prefetch',
 		);
 
 		expect(result.status).toBe('stale');

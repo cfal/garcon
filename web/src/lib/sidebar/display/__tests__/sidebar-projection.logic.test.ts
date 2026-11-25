@@ -7,7 +7,6 @@ import {
 } from '../sidebar-row-model';
 import { buildSidebarDelegationForest } from '../sidebar-delegation';
 import {
-	migrateSidebarGrouping,
 	normalizeSidebarGroupingFields,
 	SIDEBAR_GROUPING_FIELDS,
 	type SidebarGroupingField,
@@ -28,12 +27,6 @@ function permutations(fields: readonly SidebarGroupingField[]): SidebarGroupingF
 }
 
 describe('sidebar display preferences', () => {
-	it.each(['constructor', '__proto__', 'unknown', null, {}, 4])(
-		'ignores malformed legacy preference %j',
-		(value) => {
-			expect(migrateSidebarGrouping(value).every((field) => !field.enabled)).toBe(true);
-		},
-	);
 	it('normalizes unknown and duplicate fields without losing disabled positions', () => {
 		expect(
 			normalizeSidebarGroupingFields([
@@ -48,17 +41,6 @@ describe('sidebar display preferences', () => {
 			{ field: 'executor', enabled: false },
 			{ field: 'activity', enabled: false },
 		]);
-	});
-	it.each([
-		['none', []],
-		['project', ['executor', 'project']],
-		['activity', ['executor', 'activity']],
-		['status', ['executor', 'status']],
-		['project-and-activity', ['executor', 'activity', 'project']],
-	])('migrates %s exactly once', (preset, expected) => {
-		const migrated = migrateSidebarGrouping(preset);
-		expect(normalizeSidebarGroupingFields(migrated)).toEqual(migrated);
-		expect(migrated.filter((field) => field.enabled).map((field) => field.field)).toEqual(expected);
 	});
 });
 

@@ -2,6 +2,7 @@ import { untrack } from 'svelte';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ExpandSnippetResponse, SnippetExpansionContext } from '$shared/snippets';
 import { projectTargetKey, type ProjectTarget } from '$shared/project-resolution';
+import { composerProjectTarget } from '$lib/chat/composer/composer-availability.js';
 import type {
 	ProjectResolutionSnapshot,
 	ProjectResolutionStore,
@@ -46,18 +47,7 @@ export class PromptComposerProjectState {
 	}
 
 	get target(): ProjectTarget | null {
-		const chat = this.deps.selectedChat;
-		if (!chat?.projectPath) return null;
-		const execution = this.deps.executionTarget;
-		if (
-			execution &&
-			(execution.executorId !== (chat.executorId ?? 'local') || execution.projectPath !== chat.projectPath)
-		) {
-			return { kind: 'path', ...execution };
-		}
-		return chat.status === 'draft'
-			? { kind: 'path', executorId: chat.executorId, projectPath: chat.projectPath }
-			: { kind: 'chat', chatId: chat.id, executorId: chat.executorId, projectPath: chat.projectPath };
+		return composerProjectTarget(this.deps.selectedChat, this.deps.executionTarget);
 	}
 
 	get snapshot(): ProjectResolutionSnapshot {
@@ -74,13 +64,6 @@ export class PromptComposerProjectState {
 
 	get completionProjectPath(): string {
 		return this.snapshot.kind === 'available' ? (this.target?.projectPath ?? '') : '';
-	}
-
-	retry(): void {
-		const target = this.target;
-		if (!target) return;
-		const lease = this.deps.projectResolution.retain(target);
-		void lease.retry().finally(() => lease.release());
 	}
 
 	matchesSnippetContext(operation: PromptComposerSnippetContext, response: Pick<ExpandSnippetResponse, 'contextExecutorId' | 'contextProjectPath'>): boolean {

@@ -1,3 +1,5 @@
+import * as m from '$lib/paraglide/messages.js';
+import { errorMessage } from '$lib/utils/error-message.js';
 import { parseHttpTicketMutationRequest, type TicketMutationPayload } from '$shared/ticket-commands';
 import type { TicketWriteResult } from '$shared/tickets';
 import { ApiError } from '$lib/api/client.js';
@@ -49,7 +51,7 @@ export class TicketDraftState {
 		this.#snapshot = snapshot;
 		this.dirty = recovered;
 		if (snapshot.frozen)
-			this.error = 'Save not confirmed. Retry the same request or copy the draft.';
+			this.error = m.tickets_draft_save_unconfirmed();
 	}
 
 	get current(): TicketDraftSnapshot {
@@ -141,7 +143,7 @@ export class TicketDraftState {
 			this.#snapshot = { ...this.current, frozen: submission };
 			await this.#send(submission, false);
 		} catch (error) {
-			this.error = error instanceof Error ? error.message : 'Invalid ticket input';
+			this.error = errorMessage(error, m.tickets_draft_invalid_input());
 		}
 	}
 
@@ -173,8 +175,8 @@ export class TicketDraftState {
 				this.error = error.message;
 			} else
 				this.error = this.storeChanged
-					? 'The ticket store changed. Copy or discard this draft; it cannot be submitted into the replacement store.'
-					: 'Save not confirmed. Retry the same request or copy the draft.';
+					? m.tickets_draft_recovery_store_changed()
+					: m.tickets_draft_save_unconfirmed();
 			if (this.conflict && this.isCurrentPartition) await this.deps.onConflict?.(this);
 		} finally {
 			this.pending = false;
@@ -185,7 +187,7 @@ export class TicketDraftState {
 			try {
 				this.deps.onConfirmed(confirmation);
 			} catch {
-				this.error = 'Saved. Refresh Tickets to load the current server values.';
+				this.error = m.tickets_draft_saved_refresh();
 			}
 		} else if (this.storeChanged && this.isCurrentPartition) this.deps.onStoreChanged?.();
 	}
@@ -213,9 +215,7 @@ export class TicketDraftState {
 			this.recoveryWarning = null;
 		} catch (error) {
 			this.recoveryWarning =
-				error instanceof Error
-					? error.message
-					: 'Draft recovery is unavailable. Copy the text before leaving.';
+				errorMessage(error, m.tickets_draft_recovery_copy_before_leaving());
 		}
 	}
 

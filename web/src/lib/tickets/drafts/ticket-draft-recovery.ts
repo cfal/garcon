@@ -1,3 +1,5 @@
+import { TICKET_DRAFT_STORAGE_PREFIX } from '../ticket-storage.js';
+import * as m from '$lib/paraglide/messages.js';
 import { normalizeStoredTicketRequest } from '$shared/ticket-stored';
 import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
 import {
@@ -76,10 +78,9 @@ export interface TicketRecoveryPort {
 	discard(partition: TicketDraftPartition, key: string): void;
 }
 
-const prefix = 'garcon-ticket-draft-v1:';
 export const TICKET_RECOVERY_CAPACITY = 20;
 const partitionPrefix = (partition: TicketDraftPartition) =>
-	`${prefix}${encodeURIComponent(JSON.stringify([partition.storeId, partition.viewerKey]))}:`;
+	`${TICKET_DRAFT_STORAGE_PREFIX}${encodeURIComponent(JSON.stringify([partition.storeId, partition.viewerKey]))}:`;
 const draftKey = (draft: TicketDraftSnapshot) =>
 	partitionPrefix(draft) + encodeURIComponent(draft.id);
 
@@ -105,7 +106,7 @@ export function requireDraftMutation(
 		(action === 'create' ? draft.ticketId !== null : payload.ticketId !== draft.ticketId) ||
 		(action === 'comment-edit' && payload.commentId !== draft.commentId)
 	) {
-		throw new Error('Mutation does not belong to this editor');
+		throw new Error(m.tickets_draft_invalid_mutation());
 	}
 }
 
@@ -192,9 +193,9 @@ export function createTicketRecovery(storage: () => Storage): TicketRecoveryPort
 			const partitions = new Map<string, TicketDraftPartition>();
 			for (let index = 0; index < target.length; index++) {
 				const key = target.key(index);
-				if (!key?.startsWith(prefix)) continue;
+				if (!key?.startsWith(TICKET_DRAFT_STORAGE_PREFIX)) continue;
 				try {
-					const tuple = JSON.parse(decodeURIComponent(key.slice(prefix.length).split(':')[0]!));
+					const tuple = JSON.parse(decodeURIComponent(key.slice(TICKET_DRAFT_STORAGE_PREFIX.length).split(':')[0]!));
 					if (!Array.isArray(tuple) || tuple.length !== 2 || tuple[1] !== viewerKey) continue;
 					const storeId = ticketUuid(tuple[0], 'storeId');
 					partitions.set(storeId, { storeId, viewerKey });
@@ -231,7 +232,7 @@ export function createTicketRecovery(storage: () => Storage): TicketRecoveryPort
 			const key = draftKey(draft);
 			if (target.getItem(key) === null && this.list(draft).length >= TICKET_RECOVERY_CAPACITY) {
 				throw new Error(
-					'Ticket draft recovery is full. Copy or discard a retained draft before saving another.',
+					m.tickets_draft_recovery_save_full(),
 				);
 			}
 			target.setItem(key, JSON.stringify(draft));
@@ -243,7 +244,7 @@ export function createTicketRecovery(storage: () => Storage): TicketRecoveryPort
 		discard(partition, key) {
 			if (!canPersistBrowserData()) return;
 			if (!key.startsWith(partitionPrefix(partition)))
-				throw new Error('Recovery entry belongs to another account or store');
+				throw new Error(m.tickets_draft_recovery_wrong_partition());
 			storage().removeItem(key);
 		},
 	};

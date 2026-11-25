@@ -36,6 +36,7 @@ import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/worksp
 import { findWorkspaceChatPlacement } from '$lib/workspace/workspace-chat-placement.js';
 import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
@@ -1534,6 +1535,9 @@ describe('WorkspaceRoot', () => {
 
 	it('keeps one composer mounted and hidden during anchor-selection reconciliation', async () => {
 		const { layout, runtime } = installContext();
+		const catalog = new ModelCatalogStore();
+		catalog.error = 'Catalog unavailable';
+		testContext.current!.modelCatalog = catalog;
 		layout.publish(
 			layout.revision,
 			reduceWorkspaceLayout(layout.snapshot, [
@@ -1551,6 +1555,9 @@ describe('WorkspaceRoot', () => {
 		const composer = screen.getByTestId('chat-surface-stub');
 		const composerLayer = container.querySelector('[data-workspace-live-chat-body]')?.parentElement;
 		if (!composerLayer) throw new Error('Expected composer layer');
+		expect(composer.dataset.availabilityNotice).toBe('catalog-failed');
+		expect(screen.getByRole('button', { name: 'Panel chat-a' }).dataset.composerNoticeChat)
+			.toBe('chat-a');
 		const sessions = testContext.current?.sessions as {
 			selectedChatId: string | null;
 			selectedChat: ChatSessionRecord | null;
@@ -1564,6 +1571,8 @@ describe('WorkspaceRoot', () => {
 
 		expect(screen.getByTestId('chat-surface-stub')).toBe(composer);
 		expect(composer.dataset.visible).toBe('false');
+		expect(composer.dataset.availabilityNotice).toBeUndefined();
+		expect(container.querySelector('[data-composer-notice-chat]')).toBeNull();
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('true');
 		expect(composerLayer.hasAttribute('inert')).toBe(true);
 
@@ -1573,6 +1582,9 @@ describe('WorkspaceRoot', () => {
 
 		expect(screen.getByTestId('chat-surface-stub')).toBe(composer);
 		expect(composer.dataset.visible).toBe('true');
+		expect(composer.dataset.availabilityNotice).toBe('catalog-failed');
+		expect(screen.getByRole('button', { name: 'Panel chat-b' }).dataset.composerNoticeChat)
+			.toBe('chat-b');
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('false');
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
 	});

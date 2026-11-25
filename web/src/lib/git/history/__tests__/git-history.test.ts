@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-	getGitCommitFileBodies,
+	getGitReviewDocumentFileBodies,
 	getGitCommitSnapshot,
 	getGitHistoryCommits,
 	type GitCommitFileSummary,
 } from '$lib/api/git.js';
 import {
-	getGitComparisonFileBodies,
 	getGitComparisonSnapshot,
 	type GitComparisonSnapshotReady,
 } from '$lib/api/git-comparison.js';
@@ -16,7 +15,7 @@ import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 vi.mock('$lib/api/git.js', () => ({
 	getGitHistoryCommits: vi.fn(),
 	getGitCommitSnapshot: vi.fn(),
-	getGitCommitFileBodies: vi.fn(),
+	getGitReviewDocumentFileBodies: vi.fn(),
 }));
 
 vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
@@ -25,7 +24,6 @@ vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
 		...actual,
 		getGitComparisonFreshness: vi.fn(),
 		getGitComparisonSnapshot: vi.fn(),
-		getGitComparisonFileBodies: vi.fn(),
 	};
 });
 
@@ -189,14 +187,7 @@ function comparisonSnapshot(): GitComparisonSnapshotReady {
 describe('GitHistoryController', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		vi.mocked(getGitCommitFileBodies).mockResolvedValue(body());
-		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
-			status: 'ready',
-			documentId: 'comparison-doc',
-			files: {},
-			errors: {},
-			deferredFiles: [],
-		});
+		vi.mocked(getGitReviewDocumentFileBodies).mockResolvedValue(body());
 	});
 
 	it('loads the initial commit list', async () => {
@@ -314,12 +305,12 @@ describe('GitHistoryController', () => {
 
 		expect(history.screen).toBe('commit');
 		expect(history.commitSnapshot?.commit.hash).toBe('abcdef123');
-		expect(getGitCommitFileBodies).toHaveBeenCalledWith(
+		expect(getGitReviewDocumentFileBodies).toHaveBeenCalledWith(
 			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			{ executorId: 'local', instanceId: 'test-instance', documentId: 'doc-abcdef123' },
-			'abcdef123',
-			[{ path: 'a.ts' }],
-			expect.objectContaining({ parent: 'parent', context: 5 }),
+			['a.ts'],
+			'visible',
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(history.fileBodies['a.ts']?.bodyState).toBe('loaded');
 		expect(
@@ -333,7 +324,7 @@ describe('GitHistoryController', () => {
 		vi.mocked(getGitCommitSnapshot)
 			.mockResolvedValueOnce(snapshot('abcdef123', 'fp-a'))
 			.mockResolvedValueOnce(snapshot('abcdef123', 'fp-b'));
-		vi.mocked(getGitCommitFileBodies).mockResolvedValue({
+		vi.mocked(getGitReviewDocumentFileBodies).mockResolvedValue({
 			status: 'document-expired',
 			documentId: 'doc-abcdef123',
 			message: 'This review expired.',
@@ -344,7 +335,7 @@ describe('GitHistoryController', () => {
 		history.openCommit({ executorId: 'local', projectPath: '/project' }, 'abcdef123');
 
 		await vi.waitFor(() => expect(getGitCommitSnapshot).toHaveBeenCalledTimes(2));
-		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(getGitReviewDocumentFileBodies).toHaveBeenCalledTimes(2));
 		expect(getGitCommitSnapshot).toHaveBeenCalledTimes(2);
 		expect(history.commitError).toBe('This review expired.');
 	});
@@ -382,7 +373,7 @@ describe('GitHistoryController', () => {
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(
 			snapshot('abcdef123', 'fp-a', { files, firstBodyCandidates }),
 		);
-		vi.mocked(getGitCommitFileBodies)
+		vi.mocked(getGitReviewDocumentFileBodies)
 			.mockReturnValueOnce(firstVisible.promise)
 			.mockReturnValueOnce(prefetch.promise)
 			.mockResolvedValueOnce(bodiesForPaths(['file-8.ts']));
@@ -390,11 +381,11 @@ describe('GitHistoryController', () => {
 		history.resetForProject({ executorId: 'local', projectPath: '/project' });
 
 		history.openCommit({ executorId: 'local', projectPath: '/project' }, 'abcdef123');
-		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2));
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[3]).toEqual([{ path: 'file-0.ts' }]);
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.purpose).toBe('visible');
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[1]?.[4]?.purpose).toBe('prefetch');
-		const firstSignal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
+		await vi.waitFor(() => expect(getGitReviewDocumentFileBodies).toHaveBeenCalledTimes(2));
+		expect(vi.mocked(getGitReviewDocumentFileBodies).mock.calls[0]?.[2]).toEqual(['file-0.ts']);
+		expect(vi.mocked(getGitReviewDocumentFileBodies).mock.calls[0]?.[3]).toBe('visible');
+		expect(vi.mocked(getGitReviewDocumentFileBodies).mock.calls[1]?.[3]).toBe('prefetch');
+		const firstSignal = vi.mocked(getGitReviewDocumentFileBodies).mock.calls[0]?.[4]?.signal;
 		history.handleBodyDemand({
 			kind: 'viewport',
 			documentId: history.commitSnapshot!.documentId,
@@ -402,26 +393,26 @@ describe('GitHistoryController', () => {
 		});
 
 		expect(firstSignal?.aborted).toBe(false);
-		expect(getGitCommitFileBodies).toHaveBeenCalledTimes(2);
+		expect(getGitReviewDocumentFileBodies).toHaveBeenCalledTimes(2);
 		firstVisible.resolve(bodiesForPaths(['file-0.ts']));
 		await vi.waitFor(() => {
 			expect(history.fileBodies['file-8.ts']?.bodyState).toBe('loaded');
-			expect(getGitCommitFileBodies).toHaveBeenCalledTimes(3);
+			expect(getGitReviewDocumentFileBodies).toHaveBeenCalledTimes(3);
 		});
-		expect(vi.mocked(getGitCommitFileBodies).mock.calls[2]?.[3]).toEqual([{ path: 'file-8.ts' }]);
+		expect(vi.mocked(getGitReviewDocumentFileBodies).mock.calls[2]?.[2]).toEqual(['file-8.ts']);
 		prefetch.resolve(bodiesForPaths(firstBodyCandidates.slice(1)));
 	});
 
 	it('still aborts an active body batch when leaving commit details', async () => {
 		const pendingBody = deferred<ReturnType<typeof body>>();
 		vi.mocked(getGitCommitSnapshot).mockResolvedValue(snapshot('abcdef123'));
-		vi.mocked(getGitCommitFileBodies).mockReturnValueOnce(pendingBody.promise);
+		vi.mocked(getGitReviewDocumentFileBodies).mockReturnValueOnce(pendingBody.promise);
 		const history = new GitHistoryController();
 		history.resetForProject({ executorId: 'local', projectPath: '/project' });
 
 		history.openCommit({ executorId: 'local', projectPath: '/project' }, 'abcdef123');
-		await vi.waitFor(() => expect(getGitCommitFileBodies).toHaveBeenCalledOnce());
-		const signal = vi.mocked(getGitCommitFileBodies).mock.calls[0]?.[4]?.signal;
+		await vi.waitFor(() => expect(getGitReviewDocumentFileBodies).toHaveBeenCalledOnce());
+		const signal = vi.mocked(getGitReviewDocumentFileBodies).mock.calls[0]?.[4]?.signal;
 		history.focusFile({ executorId: 'local', projectPath: '/project' }, 'a.ts');
 		expect(history.scrollRequest?.filePath).toBe('a.ts');
 
@@ -533,7 +524,7 @@ describe('GitHistoryController', () => {
 		vi.mocked(getGitCommitSnapshot)
 			.mockReturnValueOnce(stale.promise)
 			.mockResolvedValueOnce(snapshot('bbbbbbb123', 'fp-b'));
-		vi.mocked(getGitCommitFileBodies).mockResolvedValue(body('fp-b'));
+		vi.mocked(getGitReviewDocumentFileBodies).mockResolvedValue(body('fp-b'));
 		const history = new GitHistoryController();
 		history.resetForProject({ executorId: 'local', projectPath: '/project' });
 
@@ -569,7 +560,7 @@ describe('GitHistoryController', () => {
 		await flushPromises();
 		history.backToList();
 
-		expect(getGitCommitFileBodies).toHaveBeenCalled();
+		expect(getGitReviewDocumentFileBodies).toHaveBeenCalled();
 		expect(history.screen).toBe('list');
 		expect(history.listPosition).toEqual({
 			scrollTop: 320,

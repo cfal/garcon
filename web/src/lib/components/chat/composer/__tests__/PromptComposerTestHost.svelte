@@ -3,7 +3,7 @@
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import PromptComposer from '../PromptComposer.svelte';
 	import ComposerAvailabilityNotice from '../ComposerAvailabilityNotice.svelte';
-	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
+	import { presentComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
 	import { chatDockFrameClass } from '$lib/chat/conversation/chat-max-width.js';
 	import ConversationPanelStatusDock from '../../ConversationPanelStatusDock.svelte';
 	import { onDestroy, untrack } from 'svelte';
@@ -107,7 +107,6 @@
 		onAbort?: () => void;
 		onCommit?: () => void;
 		onChooseProjectFolder?: (chatId: string) => void;
-		onAvailabilityNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 	}
 
 	let {
@@ -150,10 +149,8 @@
 		onAbort = () => {},
 		onCommit = () => {},
 		onChooseProjectFolder,
-		onAvailabilityNoticeChange,
 	}: Props = $props();
 
-	let composerNotice = $state.raw<ComposerAvailabilityNoticePresentation | null>(null);
 	const chatDrafts = new ChatDraftStore();
 	const composer = new ComposerState(chatDrafts, {
 		get activeChatId() {
@@ -435,7 +432,20 @@
 		findEndpoint: () => null,
 		refreshIfStale: () => Promise.resolve(),
 	} as unknown as ModelCatalogStore;
-	setModelCatalog(untrack(() => catalog ?? fallbackCatalog));
+	const rootCatalog = untrack(() => catalog ?? fallbackCatalog);
+	setModelCatalog(rootCatalog);
+	const composerNotice = $derived(presentComposerAvailabilityNotice({
+		get chat() { return selectedChat; },
+		get visible() { return isVisible; },
+		agent,
+		executors,
+		catalog: rootCatalog,
+		projects: projectResolution,
+		get onChooseProjectFolder() { return onChooseProjectFolder; },
+	}));
+	export function getComposerNotice() {
+		return composerNotice;
+	}
 	setRemoteSettings({
 		get snapshot() {
 			return remoteSettingsSnapshot;
@@ -563,11 +573,7 @@
 	{composerEditorOpenRequestId}
 	{directAdmissionPending}
 	{requiresQueuedSubmission}
-	{onChooseProjectFolder}
-	onAvailabilityNoticeChange={(notice) => {
-		composerNotice = notice;
-		onAvailabilityNoticeChange?.(notice);
-	}}
+	availabilityNotice={composerNotice?.notice ?? null}
 	resendCandidates={transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />

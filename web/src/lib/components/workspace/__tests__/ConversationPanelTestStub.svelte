@@ -8,6 +8,7 @@
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 	import type { ConversationPanelActions } from '$lib/components/chat/conversation-panel-actions.js';
 	import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 	let {
 		chat,
@@ -17,6 +18,7 @@
 		ownsComposer,
 		actions,
 		composerInsetPx = 0,
+		composerNotice,
 	}: {
 		chat: ChatSessionRecord;
 		panel: ConversationPanelRegistration;
@@ -25,6 +27,7 @@
 		ownsComposer: boolean;
 		actions: ConversationPanelActions | null;
 		composerInsetPx?: number;
+		composerNotice?: ComposerAvailabilityNoticePresentation | null;
 	} = $props();
 	untrack(() => panelMounts.push({ panel, visible: panel.isPresentationVisible }));
 </script>
@@ -38,6 +41,7 @@
 	data-command-owner={isCommandOwner}
 	data-owns-composer={ownsComposer}
 	data-composer-inset={composerInsetPx}
+	data-composer-notice-chat={composerNotice?.chatId}
 	onclick={() => void actions?.pauseQueue(surfaceId, chat.id)}
 >
 	Panel {chat.id}

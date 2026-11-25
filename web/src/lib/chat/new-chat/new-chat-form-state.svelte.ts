@@ -289,7 +289,7 @@ export class NewChatFormState {
 	}
 
 	get modelSelectionError(): string | null {
-		if (!this.executorReady) return 'Executor is unavailable';
+		if (!this.executorReady) return m.chat_executor_handoff_executor_unavailable();
 		if (this.modelSelectionPending) return null;
 		if (!this.modelCatalogValidated)
 			return this.#modelCatalog.error ?? m.model_selector_unavailable();
@@ -637,7 +637,7 @@ export class NewChatFormState {
 	/** Validates and builds the config, returning null if validation fails. */
 	buildConfig(): NewChatConfig | null {
 		if (!this.executorReady) {
-			this.error = 'Executor is unavailable';
+			this.error = m.chat_executor_handoff_executor_unavailable();
 			return null;
 		}
 		if (!this.settingsLoaded) {

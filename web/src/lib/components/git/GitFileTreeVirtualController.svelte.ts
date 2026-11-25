@@ -6,7 +6,7 @@ import {
 	gitWorkbenchTreeRowKey,
 	type GitWorkbenchTreeRow,
 } from '$lib/git/workbench/git-workbench-tree-rows.js';
-import { indexesInRange, currentAnchor } from './git-virtual-list.js';
+import { indexesInRange, currentMutationAnchor } from '$lib/virt/virtual-list-types.js';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
 	virtualItems as selectVirtualItems,
@@ -64,7 +64,7 @@ export class GitFileTreeVirtualController {
 					kind: 'update',
 					keys: rows.map((row) => row.key),
 					estimates: rows.map(() => GIT_WORKBENCH_TREE_ROW_HEIGHT),
-					anchor: currentAnchor(this.#virtual),
+					anchor: currentMutationAnchor(this.#virtual.snapshot.positions, this.#virtual.viewportPosition),
 				});
 				if (result.kind === 'rejected') {
 					console.error(`Git file tree virtualization rejected source geometry: ${result.reason}`);

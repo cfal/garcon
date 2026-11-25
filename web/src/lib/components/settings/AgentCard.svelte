@@ -177,7 +177,7 @@
 								<Button
 									variant="ghost"
 									size="icon-sm"
-									aria-label="Open verification link"
+									aria-label={m.settings_agents_open_verification_link()}
 									onclick={() => window.open(deviceAuth.url, '_blank', 'noopener,noreferrer')}
 								>
 									<ExternalLinkIcon class="size-3.5" />

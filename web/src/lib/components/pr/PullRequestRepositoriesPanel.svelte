@@ -7,7 +7,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch/index.js';
 	import type { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte.js';
-	import { getExecutors } from '$lib/context';
+	import { getExecutors, getMinuteClock } from '$lib/context';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import { cn } from '$lib/utils/cn';
 	import { effectiveExecutorId } from '$shared/executors';
@@ -25,11 +25,10 @@
 	}
 
 	let { reviews, onOpenChat }: Props = $props();
-	let currentTime = $state(new Date());
+	const minuteClock = getMinuteClock();
+	const currentTime = $derived(minuteClock.currentTime);
 	onMount(() => {
 		void reviews.ensureLoaded();
-		const timer = setInterval(() => (currentTime = new Date()), 60_000);
-		return () => clearInterval(timer);
 	});
 	const executors = getExecutors();
 
