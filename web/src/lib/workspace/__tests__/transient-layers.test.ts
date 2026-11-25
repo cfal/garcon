@@ -143,7 +143,7 @@ describe('TransientLayerRegistry', () => {
 		menu.remove();
 	});
 
-	it.each([{ isComposing: true }, { key: 'Process' }])('leaves composing input to the active input method (%j)', (composition) => {
+	it.each([{ isComposing: true }, { keyCode: 229 }, { key: 'Process' }])('leaves composing input to the active input method (%j)', (composition) => {
 		const layers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 		const dialog = document.createElement('div');
 		document.body.append(dialog);

@@ -168,7 +168,7 @@ export class WorkspaceShortcutDispatcher {
 	}
 
 	handle(event: KeyboardEvent): void {
-		if (event.defaultPrevented || event.isComposing || event.key === 'Process') return;
+		if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.key === 'Process') return;
 		if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) return;
 		if (
 			event.key === 'Escape' &&

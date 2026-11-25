@@ -813,7 +813,7 @@ describe('KeyboardShortcuts', () => {
 		expect(onLocalKeydown).not.toHaveBeenCalled();
 	});
 
-	it.each([{ isComposing: true }, { key: 'Process' }])('keeps composing input inside a modal editor (%j)', (composition) => {
+	it.each([{ isComposing: true }, { keyCode: 229 }, { key: 'Process' }])('keeps composing input inside a modal editor (%j)', (composition) => {
 		const onTransientEscape = vi.fn();
 		const onLocalKeydown = vi.fn();
 		render(KeyboardShortcutsHost, {
