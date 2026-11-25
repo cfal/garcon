@@ -78,7 +78,7 @@ test('merges rawOutput and content as independent ACP fields and treats null raw
     .toEqual(expect.objectContaining({ content: { rawOutput }, isError: false }));
   s.start('text', { ...list, rawOutput: 'Previous', content: [{ type: 'content', content: { type: 'text', text: 'Diagnostic' } }] });
   expect(s.patch('text', { status: 'failed', rawOutput: {} })[0])
-    .toEqual(expect.objectContaining({ content: { raw: 'Diagnostic' }, isError: true }));
+    .toEqual(expect.objectContaining({ content: { raw: 'Diagnostic', status: 'failed' }, isError: true }));
 });
 
 test('retains adjacent incomplete calls and their intervening prose until an actual row must publish', () => {
@@ -137,11 +137,19 @@ test('keeps the terminal diagnostic visible even when another output field repor
     .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') } }]);
   s.start('structured', { ...send, content: blocks('In progress') });
   expect(s.patch('structured', { status: 'failed', rawOutput: { reason: 'Operation refused' } })[0])
-    .toEqual(expect.objectContaining({ content: { rawOutput: { reason: 'Operation refused' }, items: blocks('In progress') } }));
+    .toEqual(expect.objectContaining({ content: { rawOutput: { reason: 'Operation refused' }, items: blocks('In progress'), status: 'failed' } }));
   s.start('repeated-data', { ...send, rawOutput: { delivered: 0 } });
   s.patch('repeated-data', { content: blocks('Operation refused') });
   expect(s.patch('repeated-data', { status: 'failed', rawOutput: { delivered: 0 } })[0])
-    .toEqual(expect.objectContaining({ content: { raw: 'Operation refused', rawOutput: { delivered: 0 } } }));
+    .toEqual(expect.objectContaining({ content: { raw: 'Operation refused', rawOutput: { delivered: 0 }, status: 'failed' } }));
+  s.start('retry', { ...send, rawOutput: { output: 'Operation refused', attempt: 1 } });
+  s.patch('retry', { content: blocks('Retrying') });
+  expect(s.patch('retry', { status: 'failed', rawOutput: { output: 'Operation refused', attempt: 2 } })[0])
+    .toEqual(expect.objectContaining({ content: { raw: 'Operation refused', rawOutput: { output: 'Operation refused', attempt: 2 },
+      items: blocks('Retrying'), status: 'failed' } }));
+  s.start('cancel', { ...send, content: blocks('Sending') });
+  expect(s.patch('cancel', { status: 'cancelled' })[0])
+    .toEqual(expect.objectContaining({ content: { raw: 'Sending', status: 'cancelled' }, isError: true }));
   s.start('reverse', { ...send, content: blocks('In progress') });
   expect(s.patch('reverse', { status: 'failed', rawOutput: 'Operation refused' }))
     .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') }, isError: true }]);

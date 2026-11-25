@@ -98,6 +98,7 @@ function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): T
   const text = output.trim() && !(agentWork && call.contentIsNewer && blockText.trim()) ? output : blockText;
   const distinct = output.trim() !== '' && blockText.trim() !== '' && output !== blockText;
   const result: ToolResultMessage['content'] = {};
+  if (agentWork && terminal.status !== 'completed') result.status = terminal.status;
   const structured = agentWork && isStructuredOutput(raw);
   const structuredIsPrimary = structured && !output.trim() && !call.contentIsNewer;
   if (agentWork && (structured || (distinct && text === blockText))) {
@@ -127,8 +128,9 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
   const blockText = content === previous?.content ? priorText
     : (content ?? []).map(block => asString(asObject(block.content).text)).filter(Boolean).join('\n');
   const rawText = rawOutputText(rawOutput);
-  const rawChanged = rawText !== rawOutputText(previous?.rawOutput) ||
-    (rawOutput !== previous?.rawOutput && !rawText && isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
+  const rawTextChanged = rawText !== rawOutputText(previous?.rawOutput);
+  const rawChanged = rawTextChanged || (rawOutput !== previous?.rawOutput &&
+    isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
   return {
     ...call,
     name,
@@ -139,7 +141,7 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
     rawOutput,
     content,
     blockText,
-    contentIsNewer: blockText !== priorText ? !(rawChanged && rawText.trim()) : !rawChanged && !!previous?.contentIsNewer,
+    contentIsNewer: blockText !== priorText ? !(rawTextChanged && rawText.trim()) : !rawChanged && !!previous?.contentIsNewer,
   };
 }
 

@@ -41,8 +41,12 @@ export function resolveToolResultDisplayRule(
 	tool?: ToolUseChatMessage,
 ): ToolResultDisplayRule | undefined {
 	const isAgentWork = tool?.type === 'background-task-tool-use' || tool?.type === 'agent-message-tool-use';
-	if (toolResult?.isError === true && (isAgentWork || hasEmptyRequiredInput(tool) || tool?.type === 'update-plan-tool-use')) {
-		return FAILED_RESULT_RULE;
+	const reportsStatus = isAgentWork || tool?.type === 'update-plan-tool-use';
+	if (toolResult?.isError === true && (reportsStatus || hasEmptyRequiredInput(tool))) {
+		const status = reportsStatus && (toolResult.content as { status?: unknown } | undefined)?.status;
+		return typeof status === 'string' && status
+			? { ...FAILED_RESULT_RULE, title: `${m.chat_message_error()}: ${status}` }
+			: FAILED_RESULT_RULE;
 	}
 	if (isAgentWork && toolResult && Object.keys(toolResult.content ?? {}).length === 0) return undefined;
 	if (tool?.type === 'update-plan-tool-use' && toolResult && Object.keys(toolResult.content ?? {}).length > 0) return TEXT_RESULT_RULE;

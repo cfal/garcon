@@ -68,6 +68,13 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('Operation refused')).toBeTruthy();
 	});
 
+	it('shows the reported cancellation alongside retained progress', () => {
+		render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hello'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { status: 'cancelled', raw: 'Sending' }, isError: true } });
+		expect(screen.getByText(/Error: cancelled/)).toBeTruthy();
+		expect(screen.getByText('Sending')).toBeTruthy();
+	});
+
 	it('shows the structured plan result even when the provider also reports text', () => {
 		render(ChatToolEventRenderer, { toolMessage: new UpdatePlanToolUseMessage('', 'plan', []), mode: 'result',
 			autoExpandTools: true, toolResult: { content: { raw: 'Plan submitted', rawOutput: { updated: 1, ignored: 2 } }, isError: false } });
