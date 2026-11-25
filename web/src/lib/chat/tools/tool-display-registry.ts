@@ -3,19 +3,25 @@
 
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { ToolDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
+import type { ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import {
 	diffProps,
 	extractContentString,
 	fileTitlePresenter,
 	readRangePresenter,
-	reportedToolResultText,
+	reportedResultProps,
 	webFetchSecondaryPresenter,
 } from '$lib/chat/tools/tool-display-presenters.js';
 
 type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
 
 const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...' : s);
+
+const REPORTED_RESULT_RULE: ToolResultDisplayRule = {
+	mode: 'collapsible',
+	contentKind: 'text',
+	getContentProps: reportedResultProps,
+};
 
 function filesFoundTitle(count: number): string {
 	return count === 1 ? m.chat_tool_file_found() : m.chat_tool_files_found({ count });
@@ -578,11 +584,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			contentKind: 'text',
 			getContentProps: ({ message }) => ({ content: message, format: 'plain' }),
 		},
-		result: {
-			mode: 'collapsible',
-			contentKind: 'text',
-			getContentProps: (result) => ({ content: reportedToolResultText(result.content), format: 'plain' }),
-		},
+		result: REPORTED_RESULT_RULE,
 	},
 
 	'background-task-tool-use': {
@@ -600,11 +602,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			getValue: ({ taskId, input }) => [taskId, typeof input === 'string' ? `Input: ${JSON.stringify(input)}` : undefined].filter(Boolean).join('\n'),
 			wrapText: true,
 		},
-		result: {
-			mode: 'collapsible',
-			contentKind: 'text',
-			getContentProps: (result) => ({ content: reportedToolResultText(result.content), format: 'plain' }),
-		},
+		result: REPORTED_RESULT_RULE,
 	},
 
 	'task-tool-use': {

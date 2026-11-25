@@ -73,24 +73,33 @@ export function reportedToolResultText(content: unknown): string {
 	if (!content || typeof content !== 'object') return '';
 	const { raw, rawOutput, items } = content as Record<string, unknown>;
 	const text = typeof raw === 'string' ? raw : '';
-	if (rawOutput !== undefined) {
-		if (rawOutput && typeof rawOutput === 'object' && 'output' in rawOutput && typeof rawOutput.output === 'string') {
-			const { output, ...metadata } = rawOutput;
-			const hasMetadata = Object.keys(metadata).length > 0;
-			if (!text || text === output) {
-				const details = hasMetadata ? JSON.stringify(metadata, null, 2) : '';
-				if (!/\S/.test(output)) return details;
-				return details ? output + '\n\n' + details : output;
-			}
-			if (!hasMetadata) return text;
+	if (rawOutput === undefined) {
+		if (text) return text;
+		if (Array.isArray(items)) {
+			const lines = items.filter(item => item?.type === 'text' && typeof item.text === 'string').map(item => item.text);
+			const body = lines.join('\n');
+			if (body) return body;
 		}
-		if (!text) return JSON.stringify(rawOutput, null, 2);
-		// A second plain output string is supplementary progress, not another result.
-		if (typeof rawOutput !== 'string') return text + '\n\n' + JSON.stringify(rawOutput, null, 2);
+		return extractContentString(content);
 	}
-	if (text) return text;
-	const parts = Array.isArray(items) ? items.flatMap(item => item?.type === 'text' && typeof item.text === 'string' ? [item.text] : []) : [];
-	return parts.join('\n') || extractContentString(content);
+	if (rawOutput && typeof rawOutput === 'object' && 'output' in rawOutput && typeof rawOutput.output === 'string') {
+		const { output, ...metadata } = rawOutput;
+		const hasMetadata = Object.keys(metadata).length > 0;
+		if (!text || text === output) {
+			const details = hasMetadata ? JSON.stringify(metadata, null, 2) : '';
+			if (!/\S/.test(output)) return details;
+			return details ? output + '\n\n' + details : output;
+		}
+		if (!hasMetadata) return text;
+	}
+	// A second plain output string is supplementary progress, not another result.
+	if (text && typeof rawOutput === 'string') return text;
+	const details = JSON.stringify(rawOutput, null, 2);
+	return text ? text + '\n\n' + details : details;
+}
+
+export function reportedResultProps(result: ToolPayload) {
+	return { content: reportedToolResultText(result.content), format: 'plain' };
 }
 
 /** Derives a short file name from a tool input's filePath field. */
