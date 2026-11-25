@@ -6,7 +6,8 @@
 	import type { CanvasSession } from '$lib/chat-canvas/canvas-session.svelte';
 	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-	import { getWorkspaceShortcuts } from '$lib/context';
+	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
+	import { getMinuteClock, getWorkspaceShortcuts } from '$lib/context';
 	import { setCanvasView } from '$lib/context/canvas-context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { CanvasEditorState } from './canvas-editor-state.svelte';
@@ -20,7 +21,7 @@
 	let {
 		session,
 		controller,
-		chats,
+		sessions,
 		visible,
 		presentation,
 		onopen,
@@ -28,7 +29,7 @@
 	}: {
 		session: CanvasSession;
 		controller: CanvasController;
-		chats: readonly ChatSessionRecord[];
+		sessions: Pick<ChatSessionsStore, 'byId' | 'orderedChats'>;
 		visible: boolean;
 		presentation: string;
 		onopen: (id: string) => void;
@@ -44,28 +45,42 @@
 		},
 	});
 	const content = $derived(session.document.content);
-	const chatsById = $derived(
-		visible ? Object.fromEntries(chats.map((chat) => [chat.id, chat])) : {},
-	);
+	const canvasChatIds = $derived(new Set(content.nodes.flatMap((node) =>
+		node.type === 'chat' ? [node.chatId] : [],
+	)));
+	let previousChats: Record<string, ChatSessionRecord> = Object.create(null);
+	const chatsById = $derived.by(() => {
+		if (!visible) return {};
+		const byId = sessions.byId;
+		const matching: ChatSessionRecord[] = [];
+		for (const id of canvasChatIds) {
+			if (Object.hasOwn(byId, id)) matching.push(byId[id]!);
+		}
+		if (
+			Object.keys(previousChats).length === matching.length &&
+			matching.every((chat) => previousChats[chat.id] === chat)
+		) return previousChats;
+		previousChats = Object.fromEntries(matching.map((chat) => [chat.id, chat]));
+		return previousChats;
+	});
 	const boxes = $derived(content.nodes.filter((node) => node.type === 'box'));
 	const editing = $derived(!disabled && (presentation !== 'mobile' || ui.touchEditing));
 	const selectedBox = $derived(
 		content.nodes.find((node) => node.type === 'box' && ui.selectedIds.has(node.id))?.id ?? '',
 	);
-	const matches = $derived(
-		ui.query.trim()
-			? content.nodes
-					.filter((node) => {
-						const label =
-							node.type === 'box'
-								? node.title
-								: `${chatsById[node.chatId]?.title ?? ''} ${chatsById[node.chatId]?.projectPath ?? ''} ${chatsById[node.chatId]?.tags.join(' ') ?? ''}`;
-						return label.toLowerCase().includes(ui.query.toLowerCase());
-					})
-					.slice(0, 20)
-			: [],
-	);
-	let currentTime = $state(new Date());
+	const matches = $derived.by(() => {
+		const query = ui.query.toLowerCase();
+		if (!query.trim()) return [];
+		return content.nodes.filter((node) => {
+			const chat = node.type === 'chat' ? chatsById[node.chatId] : undefined;
+			const label = node.type === 'box'
+				? node.title
+				: `${chat?.title ?? ''} ${chat?.projectPath ?? ''} ${chat?.tags.join(' ') ?? ''}`;
+			return label.toLowerCase().includes(query);
+		}).slice(0, 20);
+	});
+	const minuteClock = getMinuteClock();
+	const currentTime = $derived(minuteClock.currentTime);
 	let diagram = $state<CanvasFlow>();
 	let keyboardScope = $state<HTMLElement>();
 	let listScrollTop = $state(0);
@@ -96,12 +111,6 @@
 	$effect(() => {
 		void content;
 		untrack(() => ui.reconcile());
-	});
-	$effect(() => {
-		if (!visible) return;
-		currentTime = new Date();
-		const timer = setInterval(() => (currentTime = new Date()), 60_000);
-		return () => clearInterval(timer);
 	});
 	function select(id: string) {
 		ui.select(new Set([id]));
@@ -285,7 +294,7 @@
 		{:else if dialog.kind === 'chats'}
 			<CanvasChatPicker
 				{visible}
-				{chats}
+				chats={sessions.orderedChats}
 				{boxes}
 				initialBox={dialog.boxId}
 				capacity={CANVAS_MAX_NODES - content.nodes.length}

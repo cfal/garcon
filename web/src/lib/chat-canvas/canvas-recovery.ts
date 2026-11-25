@@ -1,5 +1,5 @@
 import { parseChatCanvas, type ChatCanvas } from '$shared/chat-canvas';
-import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
+import { canPersistBrowserData, isBrowserDataCurrent } from '$lib/utils/browser-data-lifetime';
 
 export interface CanvasRecoveryPort {
 	list(): ChatCanvas[];
@@ -8,7 +8,8 @@ export interface CanvasRecoveryPort {
 	remove(id: string): void;
 }
 
-const prefix = 'chat-canvas-recovery-v1:';
+const prefix = 'chat-canvas-recovery-v1:viewer:';
+const capacity = 32;
 
 function parseRecovery(raw: string, id: string): ChatCanvas {
 	const canvas = parseChatCanvas(JSON.parse(raw));
@@ -16,35 +17,58 @@ function parseRecovery(raw: string, id: string): ChatCanvas {
 	return canvas;
 }
 
-// Tab-scoped drafts prevent one client from overwriting or clearing another client’s unsaved work.
-export const browserCanvasRecovery: CanvasRecoveryPort = {
-	list() {
-		const storage = globalThis.sessionStorage;
-		const drafts: ChatCanvas[] = [];
+// Captures the viewer for the lifetime of the controller, including late saves.
+export function createBrowserCanvasRecovery(viewer: () => string | null): CanvasRecoveryPort {
+	const owner = viewer();
+	const scope = `${prefix}${encodeURIComponent(owner ?? '')}:`;
+	const canRead = () => owner !== null && viewer() === owner && isBrowserDataCurrent();
+	const keys = (storage: Storage) => {
+		const scoped: string[] = [];
 		for (let index = 0; index < storage.length; index += 1) {
 			const key = storage.key(index);
-			if (!key?.startsWith(prefix)) continue;
-			const raw = storage.getItem(key);
-			if (!raw) continue;
-			try {
-				drafts.push(parseRecovery(raw, key.slice(prefix.length)));
-			} catch {
-				// Preserves malformed entries for recovery without hiding readable drafts.
-			}
+			if (key?.startsWith(scope)) scoped.push(key);
 		}
-		return drafts;
-	},
-	read(id) {
-		const raw = globalThis.sessionStorage.getItem(prefix + id);
-		if (!raw) return null;
-		return parseRecovery(raw, id);
-	},
-	write(canvas) {
-		if (!canPersistBrowserData()) return;
-		globalThis.sessionStorage.setItem(prefix + canvas.id, JSON.stringify(canvas));
-	},
-	remove(id) {
-		if (!canPersistBrowserData()) return;
-		globalThis.sessionStorage.removeItem(prefix + id);
-	},
-};
+		return scoped;
+	};
+	function read(storage: Storage, key: string): ChatCanvas | null {
+		const raw = storage.getItem(key);
+		if (raw === null) return null;
+		try {
+			return parseRecovery(raw, key.slice(scope.length));
+		} catch {
+			if (canPersistBrowserData()) {
+				try {
+					storage.removeItem(key);
+				} catch {
+					// Malformed data is never exposed, even when storage will not remove it.
+				}
+			}
+			return null;
+		}
+	}
+	return {
+		list() {
+			if (!canRead()) return [];
+			const storage = globalThis.sessionStorage;
+			return keys(storage).flatMap((key) => read(storage, key) ?? []);
+		},
+		read(id) {
+			return canRead() ? read(globalThis.sessionStorage, scope + id) : null;
+		},
+		write(canvas) {
+			if (!canRead() || !canPersistBrowserData()) throw new Error('Canvas recovery is unavailable');
+			const storage = globalThis.sessionStorage;
+			const key = scope + canvas.id;
+			if (storage.getItem(key) === null) {
+				const scoped = keys(storage);
+				if (scoped.length >= capacity && scoped.filter((entry) => read(storage, entry) !== null).length >= capacity) {
+					throw new Error('Canvas recovery is full');
+				}
+			}
+			storage.setItem(key, JSON.stringify(canvas));
+		},
+		remove(id) {
+			if (canRead() && canPersistBrowserData()) globalThis.sessionStorage.removeItem(scope + id);
+		},
+	};
+}

@@ -376,12 +376,21 @@ describe('Chromium Chat Board interactions', () => {
       await fixture.page.getByRole('tab', { name: `Ready ${CHAT_COUNT}`, exact: true }).click();
       await expectLaneScroll(fixture, READY_COLUMN_ID, settledReadyScrollTop, 1);
 
+      markPhase('remembering a lane at a fractional breakpoint width');
+      await constrainBoardWidth(fixture, 559.75);
+      await settledLaneScrollTop(fixture, READY_COLUMN_ID);
+      await setLaneScroll(fixture, READY_COLUMN_ID, 0.85);
+      const fractionalScrollTop = await settledLaneScrollTop(fixture, READY_COLUMN_ID);
+      await fixture.page.getByRole('tab', { name: `Review ${CHAT_COUNT}`, exact: true }).click();
+      await fixture.page.getByRole('tab', { name: `Ready ${CHAT_COUNT}`, exact: true }).click();
+      await expectLaneScroll(fixture, READY_COLUMN_ID, fractionalScrollTop);
+
       markPhase('restoring both lanes after leaving narrow presentation');
       await constrainBoardWidth(fixture, null);
       await fixture.page
         .locator('[data-chat-board-panel]:not([data-presentation-band="narrow"])')
         .waitFor();
-      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
+      await expectLaneScroll(fixture, READY_COLUMN_ID, fractionalScrollTop);
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
 
       markPhase('coalescing consecutive presentation changes');
@@ -398,7 +407,7 @@ describe('Chromium Chat Board interactions', () => {
         await fixture.page.locator('[data-chat-board-panel][data-presentation-band="wide"]').waitFor();
         await expectTransitionFocus(fixture, READY_COLUMN_ID, focusedChatId);
       }
-      await expectLaneScroll(fixture, READY_COLUMN_ID, readyScrollTop);
+      await expectLaneScroll(fixture, READY_COLUMN_ID, fractionalScrollTop);
       await expectLaneScroll(fixture, REVIEW_COLUMN_ID, reviewScrollTop);
 
       markPhase('retaining an offscreen focus bookmark across the mobile host remount');

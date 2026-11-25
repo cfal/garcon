@@ -50,7 +50,7 @@ function setup() {
 		}),
 	} satisfies CanvasApiPort;
 	const memory = recoveryMemory();
-	const controller = new CanvasController(api, memory.port);
+	const controller = new CanvasController(memory.port, api);
 	controllers.add(controller);
 	const guard = new CanvasExitGuard(memory.port, () => controller.session);
 	guard.activate();
@@ -443,6 +443,19 @@ describe('CanvasController', () => {
 		expect(controller.canvases.some((entry) => entry.id === id)).toBe(true);
 		controller.dispose();
 	});
+
+	it.each([new ApiError(404, 'Deleted'), new ApiError(500, 'Corrupt', 'CANVAS_CORRUPT')])(
+		'preserves the server error when reading the recovery draft fails: %s',
+		async (error) => {
+			const { controller, api, memory } = setup();
+			api.get.mockRejectedValueOnce(error);
+			vi.spyOn(memory.port, 'read').mockImplementationOnce(() => { throw new SyntaxError('Malformed draft'); });
+			await controller.open('board');
+			expect(controller.error).toBe(error.message);
+			expect(controller.session).toBeNull();
+			controller.dispose();
+		},
+	);
 
 	it.each([new ApiError(404, 'Deleted'), new ApiError(500, 'Corrupt', 'CANVAS_CORRUPT')])(
 		'offers local recovery when the original board is unavailable: %s',

@@ -225,7 +225,7 @@
 					{m.tickets_created_outside()}
 					<button
 						class="ticket-text-button"
-						onclick={() => controller.setQuery({ includeClosed: true })}
+						onclick={() => controller.revealCreatedTicket()}
 						>{m.tickets_reveal()}</button
 					>
 				</div>{/if}

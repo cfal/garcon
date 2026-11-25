@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
+import { createBrowserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery';
 import { ApiError } from '$lib/api/client.js';
 import { getFileRevision, saveText } from '$lib/api/files.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
@@ -143,6 +144,7 @@ function assembleWorkspaceServices(
 	const executors = new ExecutorsStore();
 	executors.applySnapshot([localExecutor]);
 	const services = createWorkspaceServices({
+		canvasRecovery: createBrowserCanvasRecovery(() => 'local'),
 		pullRequestReviews: new PullRequestReviewsStore(),
 		executors,
 		localProjectBasePath: () => '/workspace',

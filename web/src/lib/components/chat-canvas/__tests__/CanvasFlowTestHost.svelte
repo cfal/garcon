@@ -2,6 +2,7 @@
 	import { SvelteFlowProvider, type useStore } from '@xyflow/svelte';
 	import type { CanvasSession } from '$lib/chat-canvas/canvas-session.svelte';
 	import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
+	import { recoveryMemory } from '$lib/chat-canvas/__tests__/canvas-fixtures';
 	import { setCanvasView } from '$lib/context/canvas-context';
 	import CanvasFlow from '../CanvasFlow.svelte';
 	import type { CanvasFlowNode } from '../canvas-node-types';
@@ -19,7 +20,7 @@
 		onselect?: (ids: ReadonlySet<string>) => void;
 		onstore?: (store: ReturnType<typeof useStore<CanvasFlowNode>>) => void;
 	} = $props();
-	const controller = new CanvasController();
+	const controller = new CanvasController(recoveryMemory().port);
 	setCanvasView({
 		get document() {
 			return session.document;

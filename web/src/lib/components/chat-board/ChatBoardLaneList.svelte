@@ -56,6 +56,8 @@
 
 	const mountedBoardId = untrack(() => boardId);
 	const mountedColumnId = untrack(() => columnId);
+	const mountedScrollTop = untrack(() => initialScrollTop);
+	let restoreOrigin = $state.raw(untrack(() => mountedScrollTop > 0 ? occurrences[0]?.key : undefined));
 	const scrollRegion = nativeWorkspaceScrollRegion('contextual');
 	const virtual = new VirtualListController({
 		initialViewportSize: 720,
@@ -63,7 +65,8 @@
 			return 6;
 		},
 		get measurementAnchor() {
-			return 'geometric' as const;
+			// A saved pixel offset is relative to the lane origin, not the first estimated visible row.
+			return restoreOrigin ? { kind: 'item' as const, key: restoreOrigin } : 'geometric' as const;
 		},
 	});
 	let viewportRef = $state<HTMLDivElement | null>(null);
@@ -147,8 +150,18 @@
 
 	$effect(() => {
 		if (!viewportRef) return;
-		viewportRef.scrollTop = initialScrollTop;
+		viewportRef.scrollTop = mountedScrollTop;
 		virtual.refreshLayout();
+	});
+
+	$effect(() => {
+		if (!restoreOrigin || !viewportRef) return;
+		// Each geometry publication restarts the wait through the next ResizeObserver delivery.
+		void virtual.snapshot.revision;
+		let frame = requestAnimationFrame(() => {
+			frame = requestAnimationFrame(() => (restoreOrigin = undefined));
+		});
+		return () => cancelAnimationFrame(frame);
 	});
 
 	$effect(() => {
@@ -163,6 +176,8 @@
 					isChatBoardCardDragData(source.data) && source.data.instanceId === instanceId,
 				getAllowedAxis: () => 'vertical',
 			});
+		}).catch(() => {
+			// Dragging remains usable without auto-scroll.
 		});
 		return () => {
 			disposed = true;
@@ -191,6 +206,7 @@
 		const viewport = viewportRef;
 		if (!viewport?.isConnected) return;
 		if (viewport.closest('[aria-hidden="true"], [inert]')) return;
+		if (viewport.scrollTop !== mountedScrollTop) restoreOrigin = undefined;
 		onScrollTopChange(mountedBoardId, mountedColumnId, viewport.scrollTop);
 	}
 

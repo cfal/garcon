@@ -11,7 +11,7 @@ import { canvasSummary } from '$shared/chat-canvas';
 import { ApiError } from '$lib/api/client.js';
 import * as api from '$lib/api/chat-canvases.js';
 import { CanvasSession } from './canvas-session.svelte.js';
-import { browserCanvasRecovery, type CanvasRecoveryPort } from './canvas-recovery.js';
+import type { CanvasRecoveryPort } from './canvas-recovery.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
@@ -53,8 +53,8 @@ export class CanvasController implements PortableSingletonController {
 	#pendingCreate: CreateCanvasRequest | null = null;
 
 	constructor(
+		private readonly recovery: CanvasRecoveryPort,
 		private readonly api: CanvasApiPort = defaultApi,
-		private readonly recovery: CanvasRecoveryPort = browserCanvasRecovery,
 	) {}
 
 	async activate(): Promise<void> {
@@ -244,7 +244,12 @@ export class CanvasController implements PortableSingletonController {
 				(error.status !== 404 && error.errorCode !== 'CANVAS_CORRUPT')
 			)
 				throw error;
-			const draft = this.recovery.read(id);
+			let draft: ChatCanvas | null;
+			try {
+				draft = this.recovery.read(id);
+			} catch {
+				throw error;
+			}
 			if (!draft) throw error;
 			canvas = draft;
 			recovered = true;

@@ -83,7 +83,8 @@
 	let forcedOutdated = $state(false);
 	let currentChat = $derived(sessions.byId[occurrence.chat.id] ?? null);
 	let tagsChanged = $derived(
-		Boolean(currentChat) && JSON.stringify(currentChat?.tags) !== JSON.stringify(baseTags),
+		currentChat !== null && (currentChat.tags.length !== baseTags.length ||
+			currentChat.tags.some((tag, index) => tag !== baseTags[index])),
 	);
 	let outdated = $derived(
 		forcedOutdated || controller.catalog.revision !== baseRevision || tagsChanged,

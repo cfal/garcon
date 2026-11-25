@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	import { setMinuteClock } from '$lib/context';
+	import { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 	import { untrack } from 'svelte';
 	import ScheduledPromptsSection from '../ScheduledPromptsSection.svelte';
 	import { setChatSessions, setModelCatalog, setScheduledPrompts } from '$lib/context';
@@ -11,6 +14,10 @@
 	import type { ChatListEntry } from '$shared/chat-list';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { ScheduledPrompt, ScheduledPromptRunLogEntry } from '$shared/scheduled-prompts';
+
+	const minuteClock = new MinuteClockStore();
+	setMinuteClock(minuteClock);
+	onDestroy(() => minuteClock.destroy());
 
 	let {
 		executors,

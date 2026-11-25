@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
+import { canvasRecoveryKey } from '../../support/canvas-recovery-key.js';
 import { CANVAS_MAX_COUNT, type ChatCanvas, type CanvasListResponse } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
@@ -21,6 +22,29 @@ async function saved(page: Page): Promise<void> {
 }
 
 describe('Chromium canvas recovery', () => {
+  test('keeps a closed canvas draft protected while the workspace requires sign-in', async () => {
+    await withChromiumFixture('canvas-reauth-recovery', async ({ page, integration, withExpectedConsoleErrors }) => {
+      const draft = await integration.client.post<ChatCanvas>(endpoint, {
+        id: 'offline', content: { title: 'Synthetic draft', nodes: [], connections: [] },
+      });
+      await page.goto(integration.garcon.baseUrl);
+      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
+      await page.evaluate(({ key, draft }) => sessionStorage.setItem(key, JSON.stringify(draft)), {
+        key: canvasRecoveryKey(integration.garcon.authToken, draft.id), draft,
+      });
+      const wouldWarn = () => page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+      expect(await wouldWarn()).toBe(true);
+      await page.route('**/api/v1/auth/user', route => route.fulfill({
+        status: 401, json: { success: false, error: 'Session expired', errorCode: 'AUTH_SESSION_INVALID', retryable: false },
+      }));
+      await withExpectedConsoleErrors(['Failed to load resource: the server responded with a status of 401 (Unauthorized)'], async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('online')));
+        await page.locator('dialog').getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+        expect(await wouldWarn()).toBe(true);
+      });
+    });
+  }, 60_000);
+
   test('frees a catalog slot and recovers a local draft when its server file is corrupt', async () => {
     await withChromiumFixture('canvas-corrupt-draft-recovery', async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {
       const original = await integration.client.post<ChatCanvas>(endpoint, {
@@ -34,9 +58,10 @@ describe('Chromium canvas recovery', () => {
           connections: [],
         },
       } satisfies ChatCanvas;
-      await page.addInitScript((recovery) => {
-        sessionStorage.setItem(`chat-canvas-recovery-v1:${recovery.id}`, JSON.stringify(recovery));
-      }, draft);
+      const draftKey = canvasRecoveryKey(integration.garcon.authToken, draft.id);
+      await page.addInitScript(({ draftKey, draft }) => {
+        sessionStorage.setItem(draftKey, JSON.stringify(draft));
+      }, { draftKey, draft });
       const file = join(integration.dirs.workspace, 'chat-canvases/damaged.json');
       await writeFile(file, '{broken');
       await Promise.all(Array.from({ length: CANVAS_MAX_COUNT - 1 }, (_, index) => {
@@ -60,7 +85,7 @@ describe('Chromium canvas recovery', () => {
       await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
       await page.getByRole('dialog').waitFor({ state: 'hidden' });
       await page.getByRole('button', { name: 'Load latest', exact: true }).waitFor();
-      expect(await page.evaluate(() => sessionStorage.getItem('chat-canvas-recovery-v1:damaged'))).not.toBeNull();
+      expect(await page.evaluate(key => sessionStorage.getItem(key), draftKey)).not.toBeNull();
 
       markPhase('freeing a slot without discarding the conflicted draft');
       await page.locator('[data-canvas-panel] header').getByRole('button', { name: 'Save as copy', exact: true }).click();
@@ -98,7 +123,7 @@ describe('Chromium canvas recovery', () => {
       const recovered = await integration.client.get<ChatCanvas>(`${endpoint}?id=${recoveredId}`);
       expect(recovered.content).toEqual({ ...draft.content, title: 'Recovered copy' });
       expect(await readFile(file, 'utf8')).toBe('{broken');
-      expect(await page.evaluate(() => sessionStorage.getItem('chat-canvas-recovery-v1:damaged'))).toBeNull();
+      expect(await page.evaluate(key => sessionStorage.getItem(key), draftKey)).toBeNull();
       const expectedFailure = 'console.error: Failed to load resource: the server responded with a status of 500 (Internal Server Error)';
       const expectedLimit = 'console.error: Failed to load resource: the server responded with a status of 409 (Conflict)';
       expect(browserErrors.filter((error) => error === expectedFailure)).toHaveLength(3);

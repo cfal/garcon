@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setMinuteClock } from '$lib/context';
+	import { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import AutomationSettingsSection from '../AutomationSettingsSection.svelte';
@@ -17,6 +19,10 @@
 	import { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { setTestLocalSettingsStore } from './local-settings-test-context';
 	import { onDestroy, untrack } from 'svelte';
+
+	const minuteClock = new MinuteClockStore();
+	setMinuteClock(minuteClock);
+	onDestroy(() => minuteClock.destroy());
 
 	interface Props {
 		section?: 'all' | 'general' | 'automation' | 'notifications';

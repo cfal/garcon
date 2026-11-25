@@ -195,7 +195,7 @@
 	{:else if surface.type === 'singleton' && surface.kind === 'chat-canvas'}
 		{@const controller = singletonSurfaces.chatCanvas()}
 		{#await chatCanvasRenderer() then ChatCanvasSurface}
-			<ChatCanvasSurface {controller} chats={sessions.orderedChats} {visible} {presentation} />
+			<ChatCanvasSurface {controller} {sessions} {visible} {presentation} />
 		{/await}
 	{:else if surface.type === 'singleton' && surface.kind === 'tickets'}
 		{@const controller = singletonSurfaces.tickets()}

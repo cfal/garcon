@@ -4,7 +4,7 @@
 		Background,
 		ConnectionMode,
 		useSvelteFlow,
-		useStore,
+		type useStore,
 		abortInteractions,
 		type Edge,
 		type Connection,
@@ -22,6 +22,7 @@
 	import { flowNodes, flowEdges } from './canvas-flow-model';
 	import CanvasBoxNode from './CanvasBoxNode.svelte';
 	import CanvasChatNode from './CanvasChatNode.svelte';
+	import CanvasFlowStoreBinding from './CanvasFlowStoreBinding.svelte';
 
 	let {
 		session,
@@ -42,7 +43,7 @@
 	} = $props();
 	const nodeTypes = { canvasBox: CanvasBoxNode, canvasChat: CanvasChatNode };
 	const flow = useSvelteFlow<CanvasFlowNode>();
-	const flowStore = $derived(useStore<CanvasFlowNode>());
+	let flowStore = $state.raw<ReturnType<typeof useStore<CanvasFlowNode>>>();
 	const dnd = getWorkspaceWindowDnd();
 	// The engine's initial selection notification must reflect the retained document.
 	let nodes = $state.raw<CanvasFlowNode[]>(untrack(() => flowNodes(session.document.content, selectedIds)));
@@ -58,7 +59,7 @@
 
 	$effect(() => {
 		const liveIds = new Set(session.document.content.nodes.map((node) => node.id));
-		const sources = [flowStore.clickConnectStartHandle, flowStore.connection.fromHandle];
+		const sources = [flowStore?.clickConnectStartHandle, flowStore?.connection.fromHandle];
 		if (
 			sources.some((source) => source && !liveIds.has(source.nodeId)) ||
 			draggedIds.some((id) => !liveIds.has(id))
@@ -138,13 +139,13 @@
 	}
 
 	function beginInteraction() {
-		flowStore.clickConnectStartHandle = null;
+		if (flowStore) flowStore.clickConnectStartHandle = null;
 		interactionCancelled = false;
 		releaseInteraction ??= session.beginInteraction();
 	}
 	function endInteraction() {
 		// Click connections retain a separate source handle after pointer cancellation.
-		flowStore.clickConnectStartHandle = null;
+		if (flowStore) flowStore.clickConnectStartHandle = null;
 		draggedIds = [];
 		releaseInteraction?.();
 		releaseInteraction = null;
@@ -152,7 +153,7 @@
 	function cancelInteraction() {
 		interactionCancelled = true;
 		try {
-			abortInteractions(flowStore.domNode);
+			abortInteractions(flowStore?.domNode);
 		} finally {
 			nodes = flowNodes(session.document.content, selectedIds);
 			endInteraction();
@@ -282,6 +283,7 @@
 		onmovestart={rememberViewport}
 		onmove={rememberViewport}
 	>
+		<CanvasFlowStoreBinding onReady={(store) => { flowStore = store; }} />
 		<Background patternColor="hsl(var(--border))" gap={24} />
 	</SvelteFlow>
 </div>

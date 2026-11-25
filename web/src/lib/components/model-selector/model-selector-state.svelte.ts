@@ -80,13 +80,15 @@ export class ModelSelectorState {
 	#draftOriginExecutorId: string | null = null;
 
 	readonly #options: ModelSelectorStateOptions;
-	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
-	#sourcesCacheVersion: string | null = null;
-	#sourcesCacheLocale: string | null = null;
+	#sourcesCache = new WeakMap<ModelCatalogStore, {
+		key: string;
+		locale: string;
+		sources: Map<SessionAgentId, ModelSourceOption[]>;
+	}>();
 	#rowsCache = new Map<string, RowsCache>();
 	#rowsCacheVersion: string | null = null;
 	#rowsCacheLocale: string | null = null;
-	#filterCache = new WeakMap<ModelSelectorRow[], Map<string, FilteredModelRowsResult>>();
+	#filterCache = new WeakMap<ModelSelectorRow[], { query: string; result: FilteredModelRowsResult }>();
 
 	constructor(options: ModelSelectorStateOptions) {
 		this.#options = options;
@@ -180,7 +182,6 @@ export class ModelSelectorState {
 		this.draftModelValue = '';
 		this.activeSourceKey = null;
 		this.query = '';
-		this.#sourcesCache.clear();
 		this.#rowsCache.clear();
 		this.showBrowsePane();
 		const catalog = this.modelCatalog;
@@ -249,21 +250,21 @@ export class ModelSelectorState {
 		return shouldShowSourcePickerForAgent(this.modelCatalog, agentId, this.sourcesFor(agentId));
 	}
 
-	sourcesFor(agentId: SessionAgentId): ModelSourceOption[] {
-		const catalogVersion = this.modelCatalog.version ?? 0;
+	sourcesFor(agentId: SessionAgentId, catalog = this.modelCatalog, executorId = this.executorId): ModelSourceOption[] {
+		const catalogVersion = catalog.version ?? 0;
 		const locale = getLocale();
-		const catalogKey = JSON.stringify([this.executorId, catalogVersion]);
-		if (this.#sourcesCacheVersion !== catalogKey || this.#sourcesCacheLocale !== locale) {
-			this.#sourcesCache.clear();
-			this.#sourcesCacheVersion = catalogKey;
-			this.#sourcesCacheLocale = locale;
+		const catalogKey = `${executorId}\0${catalogVersion}`;
+		let entry = this.#sourcesCache.get(catalog);
+		if (entry?.key !== catalogKey || entry.locale !== locale) {
+			entry = { key: catalogKey, locale, sources: new Map() };
+			this.#sourcesCache.set(catalog, entry);
 		}
 
-		const cached = this.#sourcesCache.get(agentId);
+		const cached = entry.sources.get(agentId);
 		if (cached) return cached;
 
-		const sources = buildModelSources(this.modelCatalog, agentId);
-		this.#sourcesCache.set(agentId, sources);
+		const sources = buildModelSources(catalog, agentId);
+		entry.sources.set(agentId, sources);
 		return sources;
 	}
 
@@ -315,7 +316,7 @@ export class ModelSelectorState {
 	get modelRows(): ModelSelectorRow[] {
 		const catalogVersion = this.modelCatalog.version ?? 0;
 		const locale = getLocale();
-		const catalogKey = JSON.stringify([this.executorId, catalogVersion]);
+		const catalogKey = `${this.executorId}\0${catalogVersion}`;
 		if (this.#rowsCacheVersion !== catalogKey || this.#rowsCacheLocale !== locale) {
 			this.#rowsCache.clear();
 			this.#rowsCacheVersion = catalogKey;
@@ -354,16 +355,11 @@ export class ModelSelectorState {
 	get filteredModelRows(): FilteredModelRowsResult {
 		const rows = this.modelRows;
 		const query = this.query;
-		const cachedByQuery = this.#filterCache.get(rows);
-		const cached = cachedByQuery?.get(query);
-		if (cached) {
-			return cached;
-		}
+		const cached = this.#filterCache.get(rows);
+		if (cached?.query === query) return cached.result;
 
 		const result = filterModelRows(rows, query);
-		const nextByQuery = cachedByQuery ?? new Map<string, FilteredModelRowsResult>();
-		nextByQuery.set(query, result);
-		this.#filterCache.set(rows, nextByQuery);
+		this.#filterCache.set(rows, { query, result });
 		return result;
 	}
 
@@ -388,7 +384,7 @@ export class ModelSelectorState {
 			.join(' / ');
 	}
 
-	get draftSelection(): SelectionView {
+	draftSelection: SelectionView = $derived.by(() => {
 		const agentId = this.open && this.draftAgentId ? this.draftAgentId : this.value.agentId;
 		const modelValue =
 			this.open && this.draftModelValue !== null
@@ -402,19 +398,19 @@ export class ModelSelectorState {
 			modelEndpointId: this.open ? null : this.value.modelEndpointId,
 			sourceKey: this.activeSourceKey,
 		});
-	}
+	});
 
-	get committedSelection(): SelectionView {
+	committedSelection: SelectionView = $derived.by(() => {
 		const catalog = this.committedCatalog;
 		const modelValue = currentModelValue(catalog, this.value);
 		const selectedModel = catalog.getModelForSelection(this.value.agentId, modelValue, this.value.modelEndpointId);
-		const sources = buildModelSources(catalog, this.value.agentId);
+		const sources = this.sourcesFor(this.value.agentId, catalog, this.committedExecutorId);
 		const sourceKey = selectedModel ? modelSourceKeyFor(this.value.agentId, selectedModel) : null;
 		const source = sources.find((item) => item.key === sourceKey) ?? null;
 		const modelLabelSource = shouldShowSourceLabelForAgent(catalog, this.value.agentId, source, sources) ? source : null;
 		return { agentId: this.value.agentId, agentLabel: catalog.getAgentLabel(this.value.agentId), modelValue,
 			sourceKey, source, selectedModel, modelLabelSource, modelLabel: modelDisplayLabel(selectedModel, modelValue, modelLabelSource) };
-	}
+	});
 
 	openDraft(): void {
 		if (this.open) return;

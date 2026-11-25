@@ -243,7 +243,7 @@ describe('remote settings sections', () => {
 		});
 	});
 
-	it('creates and resolves a Telegram recipient link without exposing a chat ID field', async () => {
+	it('retries a failed Telegram setup link and resolves it without exposing a chat ID field', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeRemoteSettingsSnapshot({
@@ -261,7 +261,9 @@ describe('remote settings sections', () => {
 			}),
 		);
 		setTestRemoteSettingsStore(store);
-		vi.mocked(beginTelegramRecipientLink).mockResolvedValueOnce({
+		vi.mocked(beginTelegramRecipientLink)
+			.mockRejectedValueOnce(new Error('Could not create the setup link'))
+			.mockResolvedValueOnce({
 			success: true,
 			linkUrl: 'https://t.me/garcon_bot?start=abc',
 			settings: makeRemoteSettingsSnapshot({
@@ -305,6 +307,10 @@ describe('remote settings sections', () => {
 		await waitFor(() => {
 			expect(beginTelegramRecipientLink).toHaveBeenCalledWith();
 		});
+		expect(await screen.findByText('Could not create the setup link')).toBeTruthy();
+		expect(beginTelegramRecipientLink).toHaveBeenCalledOnce();
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		expect(beginTelegramRecipientLink).toHaveBeenCalledTimes(2);
 		const setupLink = await screen.findByRole('link', {
 			name: 'https://t.me/garcon_bot?start=abc',
 		});
@@ -329,6 +335,52 @@ describe('remote settings sections', () => {
 		expect(
 			sendTestButton.compareDocumentPosition(testSentLine) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+	});
+
+	async function startTelegramToggle() {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(makeRemoteSettingsSnapshot({
+			ui: { notifications: { telegram: { enabled: false } } },
+			telegram: {
+				botTokenAvailable: true,
+				botUsername: 'setup_bot',
+				botFirstName: 'Setup',
+				recipientUsername: 'recipient',
+				recipientDisplayName: 'Recipient',
+				recipientLinked: true,
+				pendingLink: false,
+				linkUrl: null,
+			},
+		}));
+		setTestRemoteSettingsStore(store);
+		const pending = Promise.withResolvers<Awaited<ReturnType<typeof updateRemoteSettings>>>();
+		vi.mocked(updateRemoteSettings).mockReturnValueOnce(pending.promise);
+		const panel = render(RemoteSettingsSectionTestHost);
+		const toggle = screen.getByRole('switch', { name: 'Telegram notifications' });
+		await fireEvent.click(toggle);
+		return { panel, toggle, pending, store };
+	}
+
+	it('applies a successful Telegram toggle after its panel unmounts without a settings broadcast', async () => {
+		const { panel, pending, store } = await startTelegramToggle();
+		panel.unmount();
+		const settings = makeRemoteSettingsSnapshot({
+			version: 2, telegram: store.snapshot!.telegram,
+			ui: { notifications: { telegram: { enabled: true } } },
+		});
+		pending.resolve({ success: true, settings });
+		await waitFor(() => expect(store.snapshot?.ui.notifications?.telegram?.enabled).toBe(true));
+	});
+
+	it('reports a failed Telegram toggle without allowing a second update while pending', async () => {
+		const { pending, toggle } = await startTelegramToggle();
+		expect(toggle.hasAttribute('disabled')).toBe(true);
+		await fireEvent.click(toggle);
+		expect(updateRemoteSettings).toHaveBeenCalledOnce();
+		pending.reject(new Error('Settings could not be saved'));
+		expect(await screen.findByText('Settings could not be saved')).toBeTruthy();
+		expect(toggle.getAttribute('aria-checked')).toBe('false');
+		expect(toggle.hasAttribute('disabled')).toBe(false);
 	});
 
 	it('renders prompt refinement after commit generation without an enabled switch', async () => {
@@ -1120,9 +1172,7 @@ describe('remote settings sections', () => {
 
 		const input = await screen.findByLabelText('Bot token');
 		expect(screen.queryByRole('button', { name: /test token/i })).toBeNull();
-		expect(
-			(screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled,
-		).toBe(true);
+		expect(screen.queryByRole('button', { name: /clear token/i })).toBeNull();
 		await fireEvent.input(input, { target: { value: 'secret-token' } });
 		await fireEvent.click(screen.getByRole('button', { name: /save token/i }));
 
@@ -1179,9 +1229,7 @@ describe('remote settings sections', () => {
 		expect(store.snapshot?.ui.notifications?.telegram?.enabled).toBe(false);
 		expect(screen.getByRole('button', { name: /save token/i })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: /test token/i })).toBeNull();
-		expect(
-			(screen.getByRole('button', { name: /clear token/i }) as HTMLButtonElement).disabled,
-		).toBe(true);
+		expect(screen.queryByRole('button', { name: /clear token/i })).toBeNull();
 	});
 
 	it('shows the token validation error code when saving fails', async () => {
