@@ -218,7 +218,6 @@ export class VirtualListTransaction {
 		if (accepted.length === 0) return;
 		const dom = this.#driver?.read() ?? this.#lastDom;
 		const started = this.options.environment.now();
-		const oldTotal = this.geometry.totalSize();
 		const firstMeasurements = new Set<string>();
 		for (const measurement of accepted) {
 			if (this.geometry.measuredSize(measurement.key) === undefined)
@@ -229,8 +228,13 @@ export class VirtualListTransaction {
 			return;
 		}
 		const anchor = this.#captureMeasurementAnchor(dom, firstMeasurements);
-		this.geometry.measureMany(accepted);
-		const correction = this.#measurementCorrection(anchor, dom, this.geometry.totalSize() - oldTotal);
+		// A zoomed pane can attain a fractional bottom beyond its integer CSSOM maximum.
+		const roundedBottom = dom && !dom.inPhysicalBounds && this.#activity === 'idle' &&
+			anchor.kind === 'item' && anchor.viewportOffset !== undefined &&
+			dom.scrollTop > dom.physicalMaximum && dom.scrollTop <= dom.physicalMaximum + 1;
+		const measurementDom = roundedBottom ? { ...dom, inPhysicalBounds: true } : dom;
+		const { delta, changedCount } = this.geometry.measureMany(accepted);
+		const correction = changedCount === 0 ? 0 : this.#measurementCorrection(anchor, measurementDom, delta);
 		this.#applyCorrection({
 			source,
 			provenance: anchor.kind === 'end' ? 'follow' : 'measurement',
@@ -238,7 +242,7 @@ export class VirtualListTransaction {
 			anchorIndex: anchor.kind === 'item' ? anchor.index : null,
 			anchorStart: anchor.kind === 'item' ? anchor.start - this.#deviation.value : null,
 			correction,
-			dom,
+			dom: measurementDom,
 			started,
 			followEnd: anchor.kind === 'end',
 		});
@@ -307,9 +311,7 @@ export class VirtualListTransaction {
 			this.viewportChanged(true);
 			return;
 		}
-		this.#lastDom = dom;
-		this.#lastLogicalOffset = dom.scrollTop - dom.leadingOffset + this.#deviation.value;
-		this.#publish(dom);
+		this.#publishScrollPosition(dom);
 		if (this.#deviation.value !== 0 && this.#activity === 'idle' && dom.inPhysicalBounds) {
 			this.#queueViewportChanged();
 		}
@@ -577,20 +579,18 @@ export class VirtualListTransaction {
 	#measurementCorrection(anchor: CapturedAnchor, dom: VirtualDomGeometry | null, sizeDelta: number): number {
 		if (anchor.kind === 'end') return sizeDelta;
 		if (anchor.kind !== 'item') return 0;
-		const startDelta = this.geometry.item(anchor.index)!.start - anchor.start;
-		if (anchor.viewportOffset === undefined || !dom || this.#deviation.value !== 0) return startDelta;
-
-		// A clamped seek preserves the attainable part of the saved offset, not its initial error.
-		const desired = dom.leadingOffset + anchor.start - anchor.viewportOffset;
-		const attainable = clamp(desired, 0, dom.physicalMaximum);
+		const start = this.geometry.item(anchor.index)!.start;
+		if (
+			anchor.viewportOffset === undefined || !dom?.inPhysicalBounds ||
+			this.#deviation.value !== 0 || this.#activity !== 'idle'
+		) {
+			return start - anchor.start;
+		}
+		// The updated sizer has not committed yet. Only the write phase knows the attainable offset.
 		const position = this.#pendingCommit
 			? this.#physicalOffsetForTarget(this.#pendingCommit.target, dom)
 			: dom.scrollTop;
-		if (attainable === desired || position !== attainable) return startDelta;
-		const nextMaximum = dom.physicalMaximum > 0
-			? Math.max(0, dom.physicalMaximum + sizeDelta)
-			: Math.max(0, dom.leadingOffset + this.geometry.totalSize() - dom.viewportSize);
-		return clamp(desired + startDelta, 0, nextMaximum) - attainable;
+		return dom.leadingOffset + start - anchor.viewportOffset - position;
 	}
 
 	#captureMeasurementAnchor(
@@ -791,6 +791,21 @@ export class VirtualListTransaction {
 		commit.record.intendedScrollTop = intended;
 		commit.record.leadingOffsetAfter = dom.leadingOffset;
 		commit.record.published = true;
+		if (commit.provenance === 'measurement' && commit.measurementAnchor?.kind === 'item') {
+			const policy = this.options.getMeasurementAnchor();
+			const atTarget = intended === dom.scrollTop ||
+				(intended === dom.physicalMaximum && Math.abs(intended - dom.scrollTop) <= 1);
+			if (
+				typeof policy === 'object' && policy.key === commit.measurementAnchor.key &&
+				policy.viewportOffset !== undefined && atTarget
+			) {
+				commit.record.attainedScrollTop = dom.scrollTop;
+				commit.record.clampedRemainder += intended - dom.scrollTop;
+				this.#publishScrollPosition(dom);
+				this.#emitRecord(commit.record);
+				return;
+			}
+		}
 		this.#writeScroll(intended, commit.record);
 	}
 
@@ -817,14 +832,16 @@ export class VirtualListTransaction {
 		this.#ownedFrame = this.options.environment.requestAnimationFrame(() => {
 			if (this.#ownedEpoch !== epoch) return;
 			const dom = driver.read();
-			if (dom) {
-				this.#lastDom = dom;
-				this.#lastLogicalOffset = dom.scrollTop - dom.leadingOffset + this.#deviation.value;
-				this.#publish(dom);
-			}
+			if (dom) this.#publishScrollPosition(dom);
 			this.#ownsScrollPosition = false;
 			this.#ownedFrame = null;
 		});
+	}
+
+	#publishScrollPosition(dom: VirtualDomGeometry): void {
+		this.#lastDom = dom;
+		this.#lastLogicalOffset = dom.scrollTop - dom.leadingOffset + this.#deviation.value;
+		this.#publish(dom);
 	}
 
 	#record(

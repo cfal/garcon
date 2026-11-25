@@ -993,6 +993,39 @@ describe('VirtualListController', () => {
 		expect(test.writes).toBe(expected === first ? 1 : 2);
 	});
 
+	it('resolves a clipped reader against committed bounds, not overflow from a resizing wrapper', () => {
+		const test = harness({ viewportSize: 216, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: -50 } });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'reader', 'growing', 'tail'], estimates: [50, 100, 60, 16],
+			anchor: { kind: 'none' },
+		});
+		const growing = test.mountItem('growing', 60);
+		test.controller.scrollToAnchor('reader', -50);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(10);
+
+		test.setPhysicalScrollHeight(280);
+		test.environment.observer.emit(growing.element, 130);
+		test.setPhysicalScrollHeight(null);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(80);
+	});
+
+	it.each([200.8, 201.2])('resumes a bottom-clamped reader after the browser attains %f', attained => {
+		const test = harness({ viewportSize: 359, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: -300 } });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'reader', 'tail'], estimates: [360, 100, 100],
+			anchor: { kind: 'none' },
+		});
+		test.controller.scrollToAnchor('reader', -300);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(201);
+		test.setPhysicalScrollTop(attained);
+		test.mountItem('reader', 500);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(601);
+	});
+
 	it('preserves a pending navigation target through a resize batch', () => {
 		const test = harness({ viewportSize: 100, overscan: 0 });
 		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);

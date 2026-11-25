@@ -337,6 +337,21 @@ describe('ConversationFeedVirtualController', () => {
 		expect(node.getBoundingClientRect().top).toBe(6.5);
 	});
 
+	it('hands a released bottom clamp to the ready inner node without stacking two corrections', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { node, writes, firstWrite, setInset } = observeReadingTarget(exposure, 10);
+		const wrapper = node.closest<HTMLElement>('[data-chat-virtual-item]')!;
+		Object.defineProperty(wrapper, 'offsetHeight', { configurable: true, value: 240 });
+		setInset(13);
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-10' }, { viewportOffset: -60 });
+		await firstWrite;
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(node.getBoundingClientRect().top).toBe(-60);
+		expect(writes).toEqual([280, 473]);
+	});
+
 	it.each([[0, 14.5], [11, -12.25]])('clamps the first restore write at row %i', async (index, viewportOffset) => {
 		const { exposure } = await renderController({ initialPinned: false });
 		const { view, writes } = observeReadingTarget(exposure, index);

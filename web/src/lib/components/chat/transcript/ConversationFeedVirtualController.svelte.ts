@@ -105,7 +105,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#appliedDataRevision: number;
 	#layoutMutationToken = 0;
 	#targetToken = 0;
-	#readingRestore: { token: number; key: string; viewportOffset: number } | null = null;
+	#readingRestore: { kind: 'item'; token: number; key: string; viewportOffset?: number } | null = null;
 	#endRestoreEpoch = 0;
 	#activeTargetScrolls = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
@@ -603,7 +603,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 				const align = options.viewportOffset === undefined ? (options.align ?? 'center') : 'start';
 				if (options.viewportOffset !== undefined && target.kind !== 'dom-anchor') {
 					// The saved clip can lie beyond the row's estimated height until it measures.
-					this.#readingRestore = { token, key, viewportOffset: options.viewportOffset };
+					this.#readingRestore = { kind: 'item', token, key, viewportOffset: options.viewportOffset };
 					this.#virt.scrollToAnchor(key, options.viewportOffset);
 				} else {
 					this.#virt.scrollToIndex(resolved.index, { align });
@@ -620,6 +620,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 						this.#virt.scrollBy(delta);
 					},
 					onSettledNode: (node) => {
+						// Once measurable, the inner node owns alignment; sizes still pin the wrapper's start.
+						if (this.#readingRestore?.token === token) delete this.#readingRestore.viewportOffset;
 						const wrapper = node.closest<HTMLElement>('[data-chat-virtual-item]');
 						if (wrapper) this.#virt.remeasure(wrapper);
 					},
@@ -923,10 +925,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	}
 
 	#measurementAnchor(): VirtualMeasurementAnchor {
-		if (this.#readingRestore?.token === this.#targetToken) {
-			const { key, viewportOffset } = this.#readingRestore;
-			return { kind: 'item', key, viewportOffset };
-		}
+		if (this.#readingRestore?.token === this.#targetToken) return this.#readingRestore;
 		return this.#configuredPinned &&
 			this.#configuredGeometry.endBehavior === 'restore-if-pinned' &&
 			this.#activeTargetScrolls === 0
