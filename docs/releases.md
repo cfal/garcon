@@ -21,6 +21,11 @@ flowchart LR
 
 ## Prepare And Rehearse
 
+**Canvas recovery rollout hold:** Before tagging or deploying the first build
+with viewer-scoped recovery, send the [save-before-upgrade notice](release-notes.md)
+to affected users and give them time to save their drafts in the original client.
+Publishing the release notes alongside the new build is not advance notice.
+
 1. Update root `package.json`, `native/package.json`, and the native Cargo package
    version together. Regenerate `bun.lock` with `bun install --lockfile-only` and
    the local `garcon-native` Cargo lock entry with

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ChatCanvas } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { canvasRecoveryKey } from '../../support/canvas-recovery-key.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
 for (const interruption of ['blur', 'pointercancel', 'hide'] as const) {
@@ -111,9 +112,9 @@ for (const removal of ['delete', 'reload'] as const) {
             nodes: original.content.nodes.filter((node) => node.id !== 'a'),
           },
         });
-        await page.addInitScript((draft) => {
-          sessionStorage.setItem(`chat-canvas-recovery-v1:${draft.id}`, JSON.stringify(draft));
-        }, original);
+        await page.addInitScript(({ key, draft }) => {
+          sessionStorage.setItem(key, JSON.stringify(draft));
+        }, { key: canvasRecoveryKey(integration.garcon.authToken, original.id), draft: original });
       }
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await collapseCanonicalFilesWindow(page);

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
+import { canvasRecoveryKey } from '../../support/canvas-recovery-key.js';
 import { CANVAS_MAX_COUNT, type ChatCanvas, type CanvasListResponse } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
@@ -21,7 +22,30 @@ async function saved(page: Page): Promise<void> {
 }
 
 describe('Chromium canvas recovery', () => {
-  test('recovers a legacy same-tab draft and frees a catalog slot when its server file is corrupt', async () => {
+  test('keeps a closed canvas draft protected while the workspace requires sign-in', async () => {
+    await withChromiumFixture('canvas-reauth-recovery', async ({ page, integration, withExpectedConsoleErrors }) => {
+      const draft = await integration.client.post<ChatCanvas>(endpoint, {
+        id: 'offline', content: { title: 'Synthetic draft', nodes: [], connections: [] },
+      });
+      await page.goto(integration.garcon.baseUrl);
+      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
+      await page.evaluate(({ key, draft }) => sessionStorage.setItem(key, JSON.stringify(draft)), {
+        key: canvasRecoveryKey(integration.garcon.authToken, draft.id), draft,
+      });
+      const wouldWarn = () => page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+      expect(await wouldWarn()).toBe(true);
+      await page.route('**/api/v1/auth/user', route => route.fulfill({
+        status: 401, json: { success: false, error: 'Session expired', errorCode: 'AUTH_SESSION_INVALID', retryable: false },
+      }));
+      await withExpectedConsoleErrors(['Failed to load resource: the server responded with a status of 401 (Unauthorized)'], async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('online')));
+        await page.locator('dialog').getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+        expect(await wouldWarn()).toBe(true);
+      });
+    });
+  }, 60_000);
+
+  test('recovers a scoped same-tab draft and frees a catalog slot when its server file is corrupt', async () => {
     await withChromiumFixture('canvas-corrupt-draft-recovery', async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {
       const original = await integration.client.post<ChatCanvas>(endpoint, {
         id: 'damaged', content: { title: 'Original', nodes: [], connections: [] },
@@ -34,7 +58,7 @@ describe('Chromium canvas recovery', () => {
           connections: [],
         },
       } satisfies ChatCanvas;
-      const draftKey = `chat-canvas-recovery-v1:${draft.id}`;
+      const draftKey = canvasRecoveryKey(integration.garcon.authToken, draft.id);
       const previousDocument = new URL('/canvas-draft-before-upgrade', integration.garcon.baseUrl).href;
       await page.route(previousDocument, route => route.fulfill({
         contentType: 'text/html',
@@ -50,7 +74,7 @@ describe('Chromium canvas recovery', () => {
         const healthy = { ...original, id: `healthy-${index}`, content: { ...original.content, title: `Healthy ${index}` } } satisfies ChatCanvas;
         return writeFile(join(integration.dirs.workspace, `chat-canvases/${healthy.id}.json`), JSON.stringify(healthy));
       }));
-      markPhase('opening a legacy draft after same-tab navigation');
+      markPhase('opening a scoped draft after same-tab navigation');
       await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
       await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
       await collapseCanonicalFilesWindow(page);

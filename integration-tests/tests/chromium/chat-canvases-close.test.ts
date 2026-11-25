@@ -4,9 +4,9 @@ import type { ChatCanvas, CanvasListResponse } from '../../../common/chat-canvas
 import { withChromiumFixture, type ChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 import { Deferred } from '../../support/deferred.js';
+import { canvasRecoveryKey } from '../../support/canvas-recovery-key.js';
 
 const endpoint = '/api/v1/chat-canvases';
-const draftKey = 'chat-canvas-recovery-v1:diagram';
 
 async function openCanvas({ page, integration }: ChromiumFixture) {
   await integration.client.post(endpoint, {
@@ -116,6 +116,7 @@ test('awaits an in-flight save before closing and reopening Canvas', async () =>
 test('preserves a clean remotely deleted board on exit and protects its draft after closing Canvas', async () => {
   await withChromiumFixture('canvas-close-conflict-backup', async (fixture) => {
     const { page, integration } = fixture;
+    const draftKey = canvasRecoveryKey(integration.garcon.authToken, 'diagram');
     await openCanvas(fixture);
     await integration.client.delete(endpoint, { id: 'diagram', expectedRevision: 1 });
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));

@@ -1,6 +1,8 @@
-## Canvas Drafts Before A Future Upgrade
+## Canvas: Save Unsaved Changes Before Upgrading
 
-This release does not change Canvas draft recovery. Before a future upgrade that introduces viewer-scoped recovery, return to the original signed-in tab, open Canvas, and resolve any unsaved work there. Save the edits or save a copy, then verify that the result is saved before upgrading. Older drafts stored only in the tab will not be imported by viewer-scoped recovery. Saved canvases are unaffected.
+Before upgrading from a build with tab-only Canvas recovery, reopen each Canvas with unsaved changes in the original tab or app window while it is still running the old client. Wait for **Saved**. If a save conflict prevents that, use **Save as copy** and confirm the copy shows **Saved**. Do this before reloading, closing the tab or window, or logging out. Canvases already saved to the server are unaffected.
+
+If you've already upgraded, the new client cannot safely display, copy, export, or assign old recovery drafts to anyone, even in the same tab. Those drafts do not identify who wrote them. Upgrading does not erase them, but logging out clears local Canvas recovery drafts in both formats.
 
 ## Downloads And Qualification
 

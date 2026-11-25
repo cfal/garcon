@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { browserCanvasRecovery } from '../canvas-recovery';
+import { createBrowserCanvasRecovery } from '../canvas-recovery';
 import { canvas } from './canvas-fixtures';
 
 function storage(): Storage {
@@ -22,15 +22,56 @@ function storage(): Storage {
 
 afterEach(() => vi.unstubAllGlobals());
 
+const browserCanvasRecovery = createBrowserCanvasRecovery(() => 'viewer-a');
+
 describe('canvas recovery ownership', () => {
-	it('isolates malformed drafts without removing them or hiding valid drafts', () => {
+	it('keeps separate viewer drafts and fences a late write by the previous viewer', () => {
+		vi.stubGlobal('sessionStorage', storage());
+		let viewer = 'viewer-a';
+		const first = createBrowserCanvasRecovery(() => viewer);
+		first.write(canvas({ ...canvas().content, title: 'Viewer A' }));
+		viewer = 'viewer-b';
+		const second = createBrowserCanvasRecovery(() => viewer);
+		expect(first.list()).toEqual([]);
+		expect(second.read('board')).toBeNull();
+		second.write(canvas({ ...canvas().content, title: 'Viewer B' }));
+		expect(() => first.write(canvas())).toThrow('unavailable');
+		first.remove('board');
+		expect(second.read('board')?.content.title).toBe('Viewer B');
+		viewer = 'viewer-a';
+		expect(first.read('board')?.content.title).toBe('Viewer A');
+	});
+
+	it('bounds entries without silently evicting unsaved work', () => {
+		vi.stubGlobal('sessionStorage', storage());
+		for (let i = 0; i < 32; i += 1) browserCanvasRecovery.write({ ...canvas(), id: `board-${i}` });
+		expect(() => browserCanvasRecovery.write(canvas())).toThrow('full');
+		expect(browserCanvasRecovery.list()).toHaveLength(32);
+		browserCanvasRecovery.write({ ...canvas(), id: 'board-0' });
+		expect(browserCanvasRecovery.list()).toHaveLength(32);
+	});
+
+	it('does not read or claim an unowned draft', () => {
 		const tab = storage();
 		vi.stubGlobal('sessionStorage', tab);
-		tab.setItem('chat-canvas-recovery-v1:bad', '{');
+		const key = 'chat-canvas-recovery-v1:board';
+		const draft = JSON.stringify(canvas());
+		tab.setItem(key, draft);
+		expect(browserCanvasRecovery.list()).toEqual([]);
+		expect(browserCanvasRecovery.read('board')).toBeNull();
+		browserCanvasRecovery.write(canvas());
+		browserCanvasRecovery.remove('board');
+		expect(tab.getItem(key)).toBe(draft);
+	});
+
+	it('removes malformed drafts without hiding valid drafts', () => {
+		const tab = storage();
+		vi.stubGlobal('sessionStorage', tab);
+		tab.setItem('chat-canvas-recovery-v1:viewer:viewer-a:bad', '{');
 		browserCanvasRecovery.write(canvas());
 		browserCanvasRecovery.write({ ...canvas(), id: 'second' });
 		expect(browserCanvasRecovery.list().map((draft) => draft.id)).toEqual(['board', 'second']);
-		expect(tab.getItem('chat-canvas-recovery-v1:bad')).toBe('{');
+		expect(tab.getItem('chat-canvas-recovery-v1:viewer:viewer-a:bad')).toBeNull();
 	});
 
 	it('keeps one tab’s pending edits when another tab saves the same canvas', () => {
