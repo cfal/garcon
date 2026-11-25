@@ -25,7 +25,7 @@ test('handoffs and shares retain task intent, agent destinations, and unsuccessf
 test('handoff distinguishes cleared, finished and actionable plans without calling a completed step current', () => {
   const plan = (todos: UpdatePlanToolUseMessage['todos']) => projectToolUseSummary(new UpdatePlanToolUseMessage('now', 'plan', todos));
   expect(plan(undefined).text).toBe('');
-  expect(plan([]).text).toBe('Plan cleared');
+  expect(plan([]).text).toBe('Empty plan snapshot');
   expect(plan([{ content: 'Build', status: 'completed' }]).text).toBe('1 item(s), all completed');
   expect(plan([{ content: 'Build', status: 'completed' }, { content: 'Publish', status: 'pending' }]).text).toBe('next: Publish');
   const long = plan([{ content: 'x'.repeat(500), status: 'failed' },

@@ -747,7 +747,7 @@ function extractToolDetail(message: ToolUseChatMessage): string {
 }
 
 function summarizePlan(steps: readonly PlanStep[] | undefined): ProjectedToolUseSummary {
-  if (!steps?.length) return { text: steps ? 'Plan cleared' : '', abridged: false };
+  if (!steps?.length) return { text: steps ? 'Empty plan snapshot' : '', abridged: false };
   const parts: string[] = [];
   let abridged = false;
   const current = steps.find(step => step.status === 'in_progress');
