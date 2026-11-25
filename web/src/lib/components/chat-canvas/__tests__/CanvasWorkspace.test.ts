@@ -78,7 +78,7 @@ describe('CanvasWorkspace visibility', () => {
 			),
 		} satisfies CanvasSessionPort;
 		const session = new CanvasSession(original, api, recoveryMemory().port, vi.fn());
-		const controller = new CanvasController(recoveryMemory().port);
+		const controller = new CanvasController();
 		controller.view = 'list';
 		const sessions = canvasRoster(chat);
 		const ordered = vi.spyOn(sessions, 'orderedChats', 'get');
@@ -171,7 +171,7 @@ describe('CanvasWorkspace retention', () => {
 				update: async (request) => canvas(request.content, request.expectedRevision + 1),
 			} satisfies CanvasSessionPort;
 			const session = new CanvasSession(original, api, recoveryMemory().port, vi.fn());
-			const controller = new CanvasController(recoveryMemory().port);
+			const controller = new CanvasController();
 			controller.view = mode;
 			try {
 				const view = render(CanvasWorkspace, {

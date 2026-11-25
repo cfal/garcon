@@ -1,3 +1,7 @@
+## Canvas Drafts Before A Future Upgrade
+
+This release does not change Canvas draft recovery. Before a future upgrade that introduces viewer-scoped recovery, return to the original signed-in tab, open Canvas, and resolve any unsaved work there. Save the edits or save a copy, then verify that the result is saved before upgrading. Older drafts stored only in the tab will not be imported by viewer-scoped recovery. Saved canvases are unaffected.
+
 ## Downloads And Qualification
 
 Server archives: Linux x64 and Windows x64. Standalone CLI: Linux x64. Linux executable runtime smoke is required; the Windows server is build-only.
