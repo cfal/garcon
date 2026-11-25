@@ -122,11 +122,12 @@ describe('FileDraftCoordinator', () => {
 	});
 
 	it.each([
-		{ saved: 'saved before close', reopen: false },
-		{ saved: '', reopen: true },
+		{ saved: 'saved before close', scenario: 'close' },
+		{ saved: '', scenario: 'reopen' },
+		{ saved: 'before refresh', scenario: 'refresh and edit' },
 	])(
 		'uses the latest file lifetime when cleanup finishes after close (%j)',
-		async ({ saved, reopen }) => {
+		async ({ saved, scenario }) => {
 			const { repository, coordinator } = harness();
 			const peer = new FileDraftCoordinator({
 				repository,
@@ -151,9 +152,14 @@ describe('FileDraftCoordinator', () => {
 			try {
 				const saving = coordinator.settle(value);
 				await started.promise;
+				if (scenario === 'refresh and edit') {
+					value.baseline = 'refreshed from disk';
+					value.content = 'new local edit';
+					vi.spyOn(repository, 'putDraft').mockRejectedValueOnce(new Error('Quota exceeded'));
+				}
 				coordinator.closeDocument(value);
 				value.dispose();
-				if (reopen) {
+				if (scenario === 'reopen') {
 					const next = document();
 					next.baseline = 'new Save';
 					next.content = next.baseline;
@@ -164,7 +170,7 @@ describe('FileDraftCoordinator', () => {
 				await saving;
 				await coordinator.flush();
 				expect((await repository.getDraft(draft.documentId))?.content).toBe(
-					reopen ? saved : undefined,
+					scenario === 'close' ? undefined : saved,
 				);
 			} finally {
 				gate.resolve();

@@ -232,6 +232,7 @@ export class FileDraftCoordinator {
 	#checkpoint(pending: PendingCheckpoint): Promise<void> {
 		this.#clearTimers(pending);
 		const document = pending.document;
+		if (pending.savedContent !== document.baseline) pending.savedContent = undefined;
 		if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
 			return Promise.resolve();
 		const documentId = pending.documentId;
@@ -251,7 +252,6 @@ export class FileDraftCoordinator {
 			: null;
 		if (!record) {
 			this.#queuedCheckpoints.delete(documentId);
-			if (pending.savedContent !== document.baseline) pending.savedContent = undefined;
 			if (
 				pending.savedContent === undefined &&
 				!this.#writes.has(documentId) &&
