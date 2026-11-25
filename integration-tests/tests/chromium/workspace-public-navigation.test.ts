@@ -70,3 +70,40 @@ test('Back to a share closes only this workspace socket; returning reconciles wi
     await browserExpect(page.getByRole('region', { name: 'Pinned paths' }).getByRole('button', { name: pin, exact: true })).toBeVisible();
   });
 }, 120_000);
+
+test('returning from a share refreshes settings even if the first socket never reported open', async () => {
+  await withChromiumFixture('workspace-public-before-open', async ({ page, integration }) => {
+    const { client, garcon, directAgents, executionDirs } = integration;
+    const chatId = integration.newChatId();
+    const started = await client.startDirectChat({ chatId, content: 'Shared synthetic chat',
+      agent: directAgents.openAi, projectPath: executionDirs.project });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    const share = await client.post<ShareChatResponse>('/api/v1/chats/share', { chatId });
+    await page.goto(new URL(share.shareUrl, garcon.baseUrl).href);
+    await page.evaluate(() => {
+      let first = true;
+      window.WebSocket = class extends WebSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          if (!first || new URL(url, location.href).pathname !== '/ws') return;
+          first = false;
+          this.addEventListener('open', event => {
+            event.stopImmediatePropagation();
+            document.documentElement.dataset.firstOpenHeld = 'true';
+          });
+          this.addEventListener('message', event => event.stopImmediatePropagation());
+        }
+      };
+    });
+    const settingsRead = () => page.waitForResponse(response =>
+      new URL(response.url()).pathname === '/api/v1/app/settings' && response.ok());
+    await Promise.all([settingsRead(), page.locator('a[href="/"]').first().click()]);
+    await browserExpect(page.locator('html')).toHaveAttribute('data-first-open-held', 'true');
+    await page.goBack();
+    await page.getByText('echo:Shared synthetic chat', { exact: true }).waitFor();
+    const pin = '/projects/changed-before-first-connection';
+    await client.put('/api/v1/app/settings', { paths: { pinnedProjectPaths: [pin] } });
+    const [settings] = await Promise.all([settingsRead(), page.goForward()]);
+    expect((await settings.json()).paths.pinnedProjectPaths).toContain(pin);
+  });
+}, 60_000);

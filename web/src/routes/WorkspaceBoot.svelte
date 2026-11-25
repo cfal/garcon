@@ -272,9 +272,12 @@
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).
 	let fileRecoveryInitialized = false;
+	let missedSettingsUpdates = false;
 	$effect(() => {
-		if (!visible) untrack(() => ws.pause('workspace-inactive'));
-		else if (auth.isAuthenticated) {
+		if (!visible) {
+			missedSettingsUpdates = true;
+			untrack(() => ws.pause('workspace-inactive'));
+		} else if (auth.isAuthenticated) {
 			const token = auth.token;
 			const authDisabled = auth.authDisabled;
 			if (!fileRecoveryInitialized) {
@@ -351,7 +354,6 @@
 	});
 	onMount(() => {
 		browserNotifications.start();
-		let missedSettingsUpdates = false;
 		return ws.onConnectionChange((connected) => {
 			if (!connected) {
 				missedSettingsUpdates = true;
