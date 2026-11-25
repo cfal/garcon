@@ -4,22 +4,17 @@
 
 import type { ToolPayload, ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import type { ToolUseChatMessage } from '$shared/chat-types';
-import { extractContentString } from '$lib/chat/tools/tool-display-presenters.js';
+import { reportedResultProps } from '$lib/chat/tools/tool-display-presenters.js';
 import * as m from '$lib/paraglide/messages.js';
 
-const FAILED_RESULT_RULE: ToolResultDisplayRule = {
+const TEXT_RESULT_RULE: ToolResultDisplayRule = {
 	mode: 'collapsible',
-	title: () => m.chat_message_error(),
 	defaultOpen: false,
 	contentKind: 'text',
-	getContentProps: (result) => {
-		const content = result.content as { items?: unknown } | undefined;
-		const text = Array.isArray(content?.items)
-			? content.items.flatMap((item) => item?.type === 'text' && typeof item.text === 'string' ? [item.text] : []).join('\n')
-			: '';
-		return { content: text || extractContentString(result.content), format: 'plain' };
-	},
+	getContentProps: reportedResultProps,
 };
+
+const FAILED_RESULT_RULE: ToolResultDisplayRule = { ...TEXT_RESULT_RULE, title: () => m.chat_message_error() };
 
 function hasEmptyRequiredInput(tool: ToolUseChatMessage | undefined): boolean {
 	switch (tool?.type) {
@@ -45,7 +40,21 @@ export function resolveToolResultDisplayRule(
 	toolResult: ToolPayload | null | undefined,
 	tool?: ToolUseChatMessage,
 ): ToolResultDisplayRule | undefined {
-	if (toolResult?.isError === true && hasEmptyRequiredInput(tool)) return FAILED_RESULT_RULE;
+	if (!toolResult) return rule.result;
+	const isAgentWork = tool?.type === 'background-task-tool-use' || tool?.type === 'agent-message-tool-use';
+	const isPlan = tool?.type === 'update-plan-tool-use';
+	if (!isAgentWork && !isPlan) {
+		return toolResult.isError === true && hasEmptyRequiredInput(tool) ? FAILED_RESULT_RULE : rule.result;
+	}
+	if (toolResult.isError === true) {
+		const status = (toolResult.content as { status?: unknown } | undefined)?.status;
+		return typeof status === 'string' && status
+			? { ...FAILED_RESULT_RULE, title: `${m.chat_message_error()}: ${status}` }
+			: FAILED_RESULT_RULE;
+	}
+	const hasContent = Object.keys(toolResult.content ?? {}).length > 0;
+	if (isAgentWork && !hasContent) return undefined;
+	if (isPlan && hasContent) return TEXT_RESULT_RULE;
 	return rule.result;
 }
 

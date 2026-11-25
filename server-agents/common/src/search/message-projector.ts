@@ -8,6 +8,7 @@ const MAX_BODY_CHARS = 64_000;
 const MAX_TOOL_INPUT_CHARS = 16_000;
 const MAX_TOOL_RESULT_HEAD_CHARS = 2_000;
 const MAX_TOOL_RESULT_TAIL_CHARS = 512;
+const MAX_TOOL_RESULT_CHARS = MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS;
 const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
 const MAX_RECURSIVE_NODES = 512;
@@ -19,8 +20,22 @@ interface ExtractionBudget {
   truncated: boolean;
 }
 
+interface PreferredFields { readonly [key: string]: PreferredFields | null }
+const TOOL_RESULT_FIELDS: PreferredFields = { raw: null, rawOutput: { output: null } };
+
 function assertNever(value: never): never {
   throw new Error(`Unhandled transcript search message type: ${String(value)}`);
+}
+
+function collapseSearchWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function searchablePrefix(text: string, budget: ExtractionBudget): string {
+  // Only searchable text spends the preferred field's budget; never scan beyond the prefix.
+  const prefix = text.slice(0, budget.remaining);
+  budget.truncated ||= prefix.length < text.length;
+  return collapseSearchWhitespace(prefix);
 }
 
 function appendText(parts: string[], value: unknown, budget: ExtractionBudget): void {
@@ -60,6 +75,7 @@ function boundedUnknownText(
     truncated: false,
   },
   depth = 0,
+  preferred?: PreferredFields | null,
 ): string {
   if (budget.remaining <= 0) return '';
   if (budget.remainingNodes <= 0) {
@@ -85,7 +101,7 @@ function boundedUnknownText(
   if (budget.seen.has(value)) return '';
   budget.seen.add(value);
   const parts: string[] = [];
-  const appendChild = (key: string | null, childValue: unknown): void => {
+  const appendChild = (key: string | null, childValue: unknown, childFields?: PreferredFields | null): void => {
     if (budget.remaining <= 0) return;
     if (parts.length > 0) {
       parts.push(' ');
@@ -101,7 +117,7 @@ function boundedUnknownText(
         budget.remaining -= 1;
       }
     }
-    const child = boundedUnknownText(childValue, budget, depth + 1);
+    const child = boundedUnknownText(childValue, budget, depth + 1, childFields);
     if (child) parts.push(child);
   };
   if (Array.isArray(value)) {
@@ -111,9 +127,21 @@ function boundedUnknownText(
     }
     if (index < value.length) budget.truncated = true;
   } else {
-    for (const key in value as Record<string, unknown>) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-      appendChild(key, (value as Record<string, unknown>)[key]);
+    const record = value as Record<string, unknown>;
+    if (preferred) {
+      for (const [key, fields] of Object.entries(preferred)) {
+        if (!Object.hasOwn(record, key)) continue;
+        let child = record[key];
+        if (typeof child === 'string') {
+          child = searchablePrefix(child, budget);
+          if (!child) continue;
+        }
+        appendChild(key, child, fields);
+      }
+    }
+    for (const key in record) {
+      if ((preferred && Object.hasOwn(preferred, key)) || !Object.hasOwn(record, key)) continue;
+      appendChild(key, record[key]);
       if (budget.remaining <= 0 || budget.remainingNodes <= 0) {
         budget.truncated = true;
         break;
@@ -138,15 +166,15 @@ function boundedUnknownForJoin(value: unknown, outerBudget: ExtractionBudget): s
 }
 
 function boundedToolResult(value: unknown, budget: ExtractionBudget): string {
-  const limit = MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS;
   if (typeof value !== 'string') {
-    const nestedBudget = { ...budget, remaining: limit };
-    const text = boundedUnknownText(value, nestedBudget);
+    const nestedBudget = { ...budget, remaining: MAX_TOOL_RESULT_CHARS };
+    // Indexes the user-visible diagnostic before supplementary tool payloads.
+    const text = boundedUnknownText(value, nestedBudget, 0, TOOL_RESULT_FIELDS);
     budget.remainingNodes = nestedBudget.remainingNodes;
     budget.truncated ||= nestedBudget.truncated;
     return text;
   }
-  if (value.length <= limit) return value;
+  if (value.length <= MAX_TOOL_RESULT_CHARS) return value;
   budget.truncated = true;
   return `${value.slice(0, MAX_TOOL_RESULT_HEAD_CHARS)} ${value.slice(-MAX_TOOL_RESULT_TAIL_CHARS)}`;
 }
@@ -225,6 +253,10 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     }
     case 'task-tool-use':
       return joinTool(message.subagentType, message.description, message.prompt, message.model);
+    case 'background-task-tool-use':
+      return joinTool(message.action, message.taskId, message.input);
+    case 'agent-message-tool-use':
+      return joinTool(message.recipient, message.message);
     case 'codex-subagent-tool-use':
       return joinTool(message.action, boundedUnknownForJoin(message.details, budget));
     case 'write-stdin-tool-use':
@@ -294,21 +326,24 @@ function roleForMessage(message: ChatMessage): ChatSearchSnippetRole {
   return 'system';
 }
 
+function searchBodyLimit(type: ChatMessage['type']): number {
+  if (type === 'tool-result') return MAX_TOOL_RESULT_CHARS;
+  if (type.endsWith('-tool-use') || type === 'permission-request') return MAX_TOOL_INPUT_CHARS;
+  return MAX_BODY_CHARS;
+}
+
 function projectOne(message: ChatMessage): {
   row: SearchMessageRowInput | null;
   truncated: boolean;
 } {
   const budget: ExtractionBudget = {
-    remaining: message.type === 'tool-result' ? MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS
-      : message.type.endsWith('-tool-use') || message.type === 'permission-request'
-        ? MAX_TOOL_INPUT_CHARS
-        : MAX_BODY_CHARS,
+    remaining: searchBodyLimit(message.type),
     remainingNodes: MAX_RECURSIVE_NODES,
     seen: new Set(),
     truncated: false,
   };
   const raw = messageText(message, budget);
-  const body = raw.replace(/\s+/g, ' ').trim();
+  const body = collapseSearchWhitespace(raw);
   const timestamp = typeof message.timestamp === 'string'
     && Buffer.byteLength(message.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES
     ? message.timestamp

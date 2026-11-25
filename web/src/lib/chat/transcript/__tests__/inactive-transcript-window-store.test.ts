@@ -1,6 +1,6 @@
 import { seedTranscript } from '$lib/chat/transcript/__tests__/transcript-fixture.js';
 import { describe, expect, it, vi } from 'vitest';
-import { AssistantMessage } from '$shared/chat-types';
+import { AssistantMessage, CodexSubagentToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte.js';
@@ -124,6 +124,46 @@ describe('InactiveTranscriptWindowStore', () => {
 			overlayMutation: { feedStructureChanged: false },
 		}, { feedStructureChanged: false });
 		expect(store.size).toBe(0);
+	});
+
+	it('does not reread parked transcript rows for successive new subagent calls', () => {
+		const store = new InactiveTranscriptWindowStore();
+		const cache = new ChatTranscriptCache({ limit: 2, persistenceDelayMs: 60_000 });
+		const window = new ActiveTranscriptState(cache, null, { combineMessages: true });
+		const time = '2026-08-30T00:00:00.000Z';
+		const firstResult = new ToolResultMessage(time, 'retained', { content: 'First result' }, false);
+		const latestResult = new ToolResultMessage(time, 'retained', { content: 'Latest result' }, false);
+		const assistant = new AssistantMessage(time, 'Synthetic output');
+		const readRetainedMessage = vi.fn(() => assistant);
+		const messages = [
+			{ ordinal: 1, message: firstResult },
+			{ ordinal: 2, message: latestResult },
+			...Array.from({ length: 998 }, (_, i) => ({
+				ordinal: i + 3,
+				get message() { return readRetainedMessage(); },
+			})),
+		];
+		seedTranscript(window, 'chat-1', 'view-1', messages, {
+			lastOrdinal: messages.length, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		park(store, 'left', 'chat-1', window);
+		readRetainedMessage.mockClear();
+		const calls = ['new-one', 'retained', 'new-two'].map(id =>
+			new CodexSubagentToolUseMessage(time, id, 'list_agents', {}));
+		for (const [index, message] of calls.entries()) {
+			const ordinal = messages.length + index + 1;
+			const append = { firstOrdinal: ordinal, lastOrdinal: ordinal, messages: [{ ordinal, message }] };
+			const outcome = cache.applyMessages('chat-1', 'view-1', append);
+			if (outcome.status !== 'applied') throw new Error('Expected a committed append');
+			store.applySharedCommit({
+				...append, chatId: 'chat-1', transcriptViewId: 'view-1', resendCandidates: [],
+				noticeRevision: 0, outcome, overlayMutation: { feedStructureChanged: false },
+			}, { feedStructureChanged: false });
+		}
+		expect(readRetainedMessage.mock.calls.length).toBe(0);
+		expect(store.take('left', 'chat-1')?.transcript).toBe(window);
+		expect(window.rowIndex.subagentMessages).toEqual([calls[0], latestResult, calls[1], calls[2]]);
+		cache.flush();
 	});
 
 	it('recalculates retained bytes when a commit restores a different cache window', () => {

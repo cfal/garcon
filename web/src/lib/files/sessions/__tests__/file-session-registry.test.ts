@@ -2266,6 +2266,55 @@ describe('FileSessionRegistry', () => {
 });
 
 describe('best-effort file recovery', () => {
+	it.each(['same', 'different', 'replacement'] as const)(
+		'cleans up only the peer checkpoint represented by the successful save (%s)',
+		async (scenario) => {
+			const repository = createMemoryFileDraftRepository();
+			const current = createHarness({ draftRepository: repository });
+			const peer = createHarness({ draftRepository: repository });
+			const opening = await current.registry.open(request('file.txt'));
+			const peerOpening = await peer.registry.open(request('file.txt'));
+			if (!opening || !peerOpening) throw new Error('Expected file sessions');
+			await vi.waitFor(() => expect(opening.loading || peerOpening.loading).toBe(false));
+
+			peerOpening.content = scenario === 'different' ? 'different edit' : 'agreed edit';
+			await peer.registry.flushRecovery();
+			await peer.registry.destroyAll();
+			opening.content = 'agreed edit';
+			const reply = deferred<Awaited<ReturnType<typeof current.saveText>>>();
+			current.saveText.mockReturnValueOnce(reply.promise);
+			const saving = current.registry.save(opening.id);
+			await vi.waitFor(() => expect(current.saveText).toHaveBeenCalledOnce());
+			if (scenario === 'replacement') {
+				const [checkpoint] = await repository.getDrafts('test-user', 'test-deployment');
+				await repository.putDraft({
+					...storedDraft('agreed edit'),
+					savedAt: checkpoint.savedAt,
+					checkpointId: 'replacement',
+				});
+			}
+			reply.resolve({
+				success: true,
+				message: 'saved',
+				path: '/workspace/file.txt',
+				revision: 'v1:saved',
+			});
+			await expect(saving).resolves.toBe(true);
+			await current.registry.flushRecovery();
+
+			const fresh = createHarness({ draftRepository: repository });
+			await fresh.registry.ready();
+			expect(fresh.registry.recoveredDrafts).toHaveLength(scenario === 'same' ? 0 : 1);
+			expect(await recoveredContent(repository)).toBe(
+				scenario === 'same' ? undefined : scenario === 'different' ? 'different edit' : 'agreed edit',
+			);
+			if (scenario === 'replacement')
+				expect(fresh.registry.recoveredDrafts[0]?.checkpointId).toBe('replacement');
+			await fresh.registry.destroyAll();
+			await current.registry.destroyAll();
+		},
+	);
+
 	it.each(['cancel', 'resume'] as const)(
 		'focuses an existing failed view before the recovery prompt and disk read (%s)',
 		async (choice) => {
@@ -2359,7 +2408,7 @@ describe('best-effort file recovery', () => {
 		},
 	);
 
-	it('deletes a stale backup discovered after a clean buffer has loaded', async () => {
+	it('retains different recovery bytes discovered after a clean buffer has loaded', async () => {
 		const repository = createMemoryFileDraftRepository();
 		await repository.putDraft(storedDraft());
 		vi.spyOn(repository, 'getDrafts').mockRejectedValueOnce(new Error('Storage unavailable'));
@@ -2369,7 +2418,7 @@ describe('best-effort file recovery', () => {
 		await harness.registry.retryRecoveryDiscovery();
 		await harness.registry.flushRecovery();
 		expect(harness.registry.recoveredDrafts).toEqual([]);
-		expect(await repository.getDrafts('test-user', 'test-deployment')).toEqual([]);
+		expect(await recoveredContent(repository)).toBe('recovered edit');
 		await harness.registry.destroyAll();
 	});
 

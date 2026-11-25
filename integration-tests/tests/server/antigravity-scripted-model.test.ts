@@ -438,6 +438,43 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
+  test('publishes task requests and agent messages with their empty or failed results', async () => {
+    const { model } = requireEnvironment();
+    model.scriptTurn([geminiFunctionCall('list-call', 'manage_task', { Action: 'list' })]);
+    model.scriptTurn([geminiFunctionCall('status-call', 'manage_task', { Action: 'status', TaskId: 'missing-job' })]);
+    model.scriptTurn([geminiFunctionCall('send-call', 'send_message', { Recipient: 'missing-agent', Message: 'Check the result.' })]);
+    model.scriptTurn([geminiText('Finished checking tasks.')]);
+    await withIntegrationFixture('antigravity-background-tasks', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedAntigravityStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'Check background tasks',
+      }));
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+        afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
+      });
+      expect(terminal).toMatchObject({ type: 'agent-run-finished', outcome: 'finished' });
+      const { messages } = await fixture.client.getMessages(chatId);
+      const tools = messages.map(entry => entry.message).filter(message => 'toolId' in message);
+      expect(tools).toMatchObject([
+        { toolId: 'list-call', type: 'background-task-tool-use', action: 'list' },
+        { toolId: 'list-call', type: 'tool-result', content: {}, isError: false },
+        { toolId: 'status-call', type: 'background-task-tool-use', action: 'status', taskId: 'missing-job' },
+        { toolId: 'status-call', type: 'tool-result', content: { status: 'failed' }, isError: true },
+        { toolId: 'send-call', type: 'agent-message-tool-use', recipient: 'missing-agent', message: 'Check the result.' },
+        { toolId: 'send-call', type: 'tool-result', isError: true },
+      ]);
+      const events = fixture.client.eventsSince(cursor);
+      const end = events.indexOf(terminal);
+      expect(end).toBeGreaterThanOrEqual(0);
+      const live = events.slice(0, end).flatMap(event => event.type === 'chat-messages' && event.chatId === chatId
+        ? event.messages.map(entry => entry.message).filter(message => 'toolId' in message) : []);
+      expect(live).toEqual(tools);
+      expect(messagesOfType(messages, 'tool-result')[0]?.content).toEqual({});
+      model.assertSettled();
+    }, withScriptedAntigravity());
+  }, TURN_TIMEOUT_MS);
+
   test('reports a nonzero command as a tool error, not a failed turn', async () => {
     const { model } = requireEnvironment();
     const output = 'synthetic-command-output';
@@ -554,6 +591,9 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       expect(messagesOfType(messages, 'edit-tool-use')).toEqual([
         expect.objectContaining({ toolId: 'scripted-edit', oldString: 'alpha', newString: 'beta' }),
       ]);
+      const editResult = messagesOfType(messages, 'tool-result').find(row => row.toolId === 'scripted-edit');
+      expect(editResult).toMatchObject({ isError: false });
+      expect(editResult?.content).not.toHaveProperty('items');
       expect(messagesOfType(messages, 'unknown-tool-use')).toEqual([]);
       expect(messagesOfType(messages, 'permission-resolved')).toEqual([]);
       testEnvironment.model.assertSettled();

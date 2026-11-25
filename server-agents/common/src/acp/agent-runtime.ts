@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {
   ErrorMessage,
+  isToolUseMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
@@ -50,7 +51,7 @@ import {
   type AcpTurnContext,
   type PendingPermissionRequest,
 } from './runtime-session.js';
-import { asObject, asString, type AcpBlockingRequestToolUse, type AcpEventConverter, type AcpSessionUpdateContext } from './event-converter.js';
+import { asObject, asString, type AcpBlockingRequestToolUse, type AcpEventConverter, type AcpRuntimeBoundary, type AcpSessionUpdateContext } from './event-converter.js';
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 import { waitUnlessAborted } from '../shared/shared-probe.js';
 import {
@@ -363,6 +364,7 @@ export class AcpAgentRuntime {
       pending.requestId,
       pending.responseForDecision(decision),
     );
+    this.#flushBeforeRuntimeRow(pending.turn, { kind: 'permission-settlement', toolCallId: pending.toolCallId });
     this.#pendingPermissions.delete(pending);
     pending.turn.pendingPermissions.delete(pending);
     this.#announceSteerable(pending.turn);
@@ -613,7 +615,10 @@ export class AcpAgentRuntime {
 
   #recordPromptBoundary(turn: AcpTurnContext, failure: string | null, admission?: AbortSignal): void {
     if (!this.#canRouteSource(turn)) return;
-    const answers = this.#emitFlushedMessages(turn).filter(message => message.type === 'assistant-message');
+    const flushed = this.#emitFlushedMessages(turn);
+    // Earlier prose released by a deferred tool is not the prompt's final answer.
+    const lastTool = flushed.findLastIndex(message => isToolUseMessage(message) || message.type === 'tool-result');
+    const answers = flushed.slice(lastTool + 1).filter(message => message.type === 'assistant-message');
     turn.finalResponseText = answers.length ? answers.map(message => message.content).join('\n\n') : null;
     if (failure && !turn.aborted && !admission?.aborted) {
       this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), failure)]);
@@ -659,6 +664,7 @@ export class AcpAgentRuntime {
     turn.detachSourceListeners.push(session.client.onStderr((line) => {
       if (!this.#canRouteSource(turn)) return;
       if (!line.trim()) return;
+      this.#flushBeforeRuntimeRow(turn, { kind: 'stderr' });
       this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), line)]);
     }));
   }
@@ -763,6 +769,7 @@ export class AcpAgentRuntime {
   ): void {
     const pending: PendingPermissionRequest = {
       permissionOccurrenceId,
+      toolCallId: request.tool.toolId,
       turn,
       requestId,
       responseForDecision: request.responseForDecision,
@@ -770,6 +777,7 @@ export class AcpAgentRuntime {
     };
     turn.pendingPermissions.add(pending);
     this.#pendingPermissions.add(pending);
+    this.#flushBeforeRuntimeRow(turn, { kind: 'permission-request', toolCallId: pending.toolCallId });
     this.#publishTurnEvent(turn, {
       type: 'permission',
       runId: turn.operation.runId,
@@ -790,6 +798,7 @@ export class AcpAgentRuntime {
       try {
         turn.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
       } catch {}
+      this.#flushBeforeRuntimeRow(turn, { kind: 'permission-settlement', toolCallId: pending.toolCallId });
       this.#publishTurnEvent(turn, {
         type: 'permission',
         runId: turn.operation.runId,
@@ -827,11 +836,14 @@ export class AcpAgentRuntime {
     turn: AcpTurnContext,
     messages: ChatMessage[],
   ): void {
-    if (messages.length === 0 || turn.sourceRetired) return;
-    this.#publishTurnEvent(turn, {
-      type: 'rows',
-      rows: runtimeRows(messages),
-    });
+    // Each row travels on its own: one flush can contain more than a remote
+    // frame even when every row fits. The relay bounds an individual row.
+    for (const message of messages) this.#publishTurnEvent(turn, { type: 'rows', rows: runtimeRows([message]) });
+  }
+
+  #flushBeforeRuntimeRow(turn: AcpTurnContext, boundary: AcpRuntimeBoundary): void {
+    if (!this.#canRouteSource(turn)) return;
+    this.#publishMessages(turn, this.#converter.flushPending?.(this.#sessionUpdateContext(turn), boundary) ?? []);
   }
 
   #publishTurnEvent(turn: AcpTurnContext, event: AgentRuntimeEvent): void {

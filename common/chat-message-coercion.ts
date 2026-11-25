@@ -4,33 +4,8 @@ import type {
   ChatImage,
   ChatMessageMetadata,
   CodexSubagentInputItem,
-  CursorPlanPhase,
-  CursorPlanTodo,
-  CursorPlanTodoStatus,
-  TodoItem,
-  TodoStatus,
 } from './chat-types.js';
 import { parseAsyncQuestionReply } from './async-user-questions.js';
-
-export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const items: TodoItem[] = [];
-  for (const entry of raw) {
-    if (entry == null || typeof entry !== 'object') continue;
-    const obj = entry as Record<string, unknown>;
-    const content = obj.content ?? obj.text ?? obj.step;
-    if (typeof content !== 'string') continue;
-    const rawStatus = obj.status;
-    let status: TodoStatus = 'pending';
-    if (obj.completed === true || rawStatus === 'completed' || rawStatus === 'done') {
-      status = 'completed';
-    } else if (rawStatus === 'in_progress' || rawStatus === 'in-progress') {
-      status = 'in_progress';
-    }
-    items.push({ content, status });
-  }
-  return items.length > 0 ? items : undefined;
-}
 
 export function asCodexSubagentInputItems(v: unknown): CodexSubagentInputItem[] | undefined {
   if (!Array.isArray(v)) return undefined;
@@ -164,46 +139,6 @@ export function asAskUserQuestions(value: unknown): AskUserQuestionPrompt[] {
     questions.push(question);
   }
   return questions;
-}
-
-function asCursorPlanTodoStatus(value: unknown): CursorPlanTodoStatus {
-  return value === 'completed'
-    || value === 'in_progress'
-    || value === 'cancelled'
-    ? value
-    : 'pending';
-}
-
-export function asCursorPlanTodos(value: unknown): CursorPlanTodo[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const todos: CursorPlanTodo[] = [];
-  for (const entry of value) {
-    const raw = asRecord(entry);
-    if (typeof raw.content !== 'string') continue;
-    const todo: CursorPlanTodo = {
-      content: raw.content,
-      status: asCursorPlanTodoStatus(raw.status),
-    };
-    if (typeof raw.id === 'string') todo.id = raw.id;
-    todos.push(todo);
-  }
-  if (todos.length > 0 || value.length === 0) return todos;
-  return undefined;
-}
-
-export function asCursorPlanPhases(value: unknown): CursorPlanPhase[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const phases: CursorPlanPhase[] = [];
-  for (const entry of value) {
-    const raw = asRecord(entry);
-    if (typeof raw.name !== 'string') continue;
-    phases.push({
-      name: raw.name,
-      todos: asCursorPlanTodos(raw.todos) ?? [],
-    });
-  }
-  if (phases.length > 0 || value.length === 0) return phases;
-  return undefined;
 }
 
 export function asOptionalChanges(value: unknown): Array<{ path?: string; kind?: string }> | undefined {
