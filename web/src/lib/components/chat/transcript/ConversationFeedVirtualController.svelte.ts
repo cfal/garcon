@@ -600,11 +600,12 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			if (!key) return 'target-missing';
 			const releaseTarget = this.options.retention.acquire(key, 'target');
 			try {
-				const align = options.viewportOffset === undefined ? (options.align ?? 'center') : 'start';
-				if (options.viewportOffset !== undefined && target.kind !== 'dom-anchor') {
+				const { viewportOffset } = options;
+				const align = viewportOffset === undefined ? (options.align ?? 'center') : 'start';
+				if (viewportOffset !== undefined && target.kind !== 'dom-anchor') {
 					// The saved clip can lie beyond the row's estimated height until it measures.
-					this.#readingRestore = { kind: 'item', token, key, viewportOffset: options.viewportOffset };
-					this.#virt.scrollToAnchor(key, options.viewportOffset);
+					this.#readingRestore = { kind: 'item', token, key, viewportOffset };
+					this.#virt.scrollToAnchor(key, viewportOffset);
 				} else {
 					this.#virt.scrollToIndex(resolved.index, { align });
 				}
@@ -613,7 +614,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					rowId: resolved.innerRowId,
 					viewport: () => this.options.viewport,
 					align,
-					viewportOffset: options.viewportOffset,
+					viewportOffset,
 					isCurrent: () => token === this.#targetToken,
 					isReady: () => this.isReady(),
 					scrollBy: (delta) => {
