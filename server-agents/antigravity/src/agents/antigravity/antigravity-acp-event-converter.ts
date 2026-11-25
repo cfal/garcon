@@ -15,7 +15,7 @@ import {
   type AcpEventConverter,
   type AcpSessionUpdateContext,
 } from '@garcon/server-agent-common/acp/event-converter';
-import { ACP_NEW_OUTPUT_UPDATES, AcpInBandFailure, acpOutputUpdateType } from '@garcon/server-agent-common/acp/in-band-failure';
+import { AcpInBandFailure, acpOutputUpdateType } from '@garcon/server-agent-common/acp/in-band-failure';
 import {
   antigravityToolCall,
   antigravityToolResultText,
@@ -25,6 +25,12 @@ import {
 
 const WARNING_MARKER = '\n⚠ ';
 const EXECUTOR_ERROR = 'agent executor error: ';
+
+interface TrackedCall extends AntigravityToolCall {
+  readonly result?: ToolResultMessage['content'];
+  readonly exitCode?: number;
+}
+
 interface SessionState {
   assistantText: string;
   thinkingText: string;
@@ -34,9 +40,10 @@ interface SessionState {
   readonly emittedToolIds: Set<string>;
   readonly completedToolIds: Set<string>;
   // ACP can split identity, arguments and MCP metadata across updates and permission requests.
-  readonly calls: Map<string, AntigravityToolCall>;
-  // Calls whose row is still waiting for arguments; the turn's end emits them.
-  readonly deferredCalls: Map<string, AntigravityToolCall>;
+  readonly calls: Map<string, TrackedCall>;
+  // Permission-only traffic must not evict an active tool's identity or result.
+  readonly permissions: Map<string, TrackedCall>;
+  deferredId: string | null;
 }
 
 // Upstream model failures (bad key, quota, HTTP errors) do not fail the ACP
@@ -55,17 +62,44 @@ export function splitExecutorError(text: string): { readonly text: string; reado
   };
 }
 
-function toolResultText(update: Record<string, unknown>): string {
+function reportedResult(update: Record<string, unknown>): ToolResultMessage['content'] | undefined {
   const rawOutput = asObject(update.rawOutput);
-  const output = asString(rawOutput.output);
-  if (output?.trim()) return output;
-  const parts: string[] = [];
-  for (const entry of Array.isArray(update.content) ? update.content : []) {
-    const content = asObject(entry);
-    const text = asString(asObject(content.content).text);
-    if (content.type === 'content' && text) parts.push(text);
+  const output = asString(update.rawOutput) ?? asString(rawOutput.output);
+  if (output?.trim()) return { raw: output };
+  const blocks = Array.isArray(update.content) ? update.content.map(asObject) : [];
+  if (blocks.some(block => block.type !== 'content' || asObject(block.content).type !== 'text')) return { items: update.content };
+  const text = blocks.map(block => asString(asObject(block.content).text) ?? '').join('\n');
+  if (text.trim()) return { raw: text };
+  // Command transport fields alone are not a result body.
+  if (Object.keys(rawOutput).some(key => key !== 'exit_code' && (key !== 'output' || typeof rawOutput.output !== 'string')) ||
+      Array.isArray(update.rawOutput) || typeof update.rawOutput === 'boolean' || typeof update.rawOutput === 'number') {
+    return { rawOutput: update.rawOutput };
   }
-  return parts.join('\n');
+  if (update.content !== undefined || output !== undefined || (update.rawOutput !== undefined && rawOutput.exit_code === undefined)) return {};
+  return undefined;
+}
+
+function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
+  const code = asObject(update?.rawOutput).exit_code;
+  const input = !previous ? call.input : Object.keys(call.input).length ? { ...previous.input, ...call.input } : previous.input;
+  return {
+    ...call,
+    name: call.name || previous?.name || null,
+    kind: call.kind || previous?.kind || null,
+    isMcp: call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool)),
+    planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
+    input,
+    result: (update && reportedResult(update)) ?? previous?.result,
+    exitCode: typeof code === 'number' ? code : previous?.exitCode,
+  };
+}
+
+function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean {
+  if (!Object.keys(call.input).length) return true;
+  if (row.type === 'mcp-tool-use') return false;
+  if (!call.name) return !call.isMcp;
+  return row.type === 'external-tool-use' && !call.isMcp &&
+    (call.name === 'manage_task' || call.name === 'send_message' || call.name === 'update_steps');
 }
 
 export class AntigravityAcpEventConverter implements AcpEventConverter {
@@ -85,7 +119,11 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const call = antigravityToolCall(toolCall);
     if (!call) return null;
     const session = this.#sessionFor(context.sessionId);
-    return convertAntigravityToolUse(context.timestamp, this.#resolvedCall(session, call));
+    const calls = session.calls.has(call.toolCallId) ? session.calls : session.permissions;
+    const resolved = mergeCall(calls.get(call.toolCallId), call);
+    calls.set(call.toolCallId, resolved);
+    evictOldestToolEntry(calls);
+    return convertAntigravityToolUse(context.timestamp, resolved);
   }
 
   fromSessionUpdate(
@@ -96,12 +134,9 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessionFor(context.sessionId);
     const updateType = asString(update.sessionUpdate);
     const outputType = acpOutputUpdateType(update, (id) => session.emittedToolIds.has(id)
-      || session.deferredCalls.has(id) || session.completedToolIds.has(id) || session.calls.has(id));
+      || session.calls.has(id) || session.completedToolIds.has(id) || session.permissions.has(id));
     session.assistantText += session.failure.continueOn(outputType);
-    // New output publishes waiting rows first, so nothing moves ahead of a call
-    // that started earlier.
-    const waiting = this.#emitDeferred(session, update, outputType, context.timestamp);
-    return [...waiting, ...this.#convertUpdate(session, update, updateType, context)];
+    return this.#convertUpdate(session, update, updateType, context);
   }
 
   #convertUpdate(
@@ -121,7 +156,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       case 'agent_message':
       case 'agent_message_chunk': {
         const answerStarted = session.assistantText.trim() !== '';
-        const flushed = !answerStarted && session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
+        const flushed = !session.deferredId && !answerStarted && session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
         session.assistantText += session.failure.offer(acpContentText(update.content));
         return flushed;
       }
@@ -142,10 +177,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   endTurn(sessionId: string, context: AcpSessionUpdateContext): ChatMessage[] {
     const session = this.#sessions.get(sessionId);
     if (!session) return [];
-    const messages = this.#flush(session, context.timestamp);
-    // A stopped turn may never send the frame a waiting row needed; the call
-    // still happened, so its row is published with what is known.
-    messages.push(...this.#emitDeferred(session, null, undefined, context.timestamp));
+    const messages = [...this.#emitDeferred(session, context.timestamp), ...this.#flush(session, context.timestamp)];
     const late = session.failure.take();
     if (late) messages.push(new ErrorMessage(context.timestamp, late));
     return messages;
@@ -159,96 +191,66 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     return this.#sessions.get(sessionId)?.failure.take() ?? null;
   }
 
-  // A call's row waits for its arguments when the first frame carries none, so a
-  // later frame can still give it its shared tool type; a terminal frame emits
-  // it regardless.
-  // Records the frame, then fills the name and arguments it omits from earlier
-  // frames of the same call.
-  #resolvedCall(session: SessionState, call: AntigravityToolCall): AntigravityToolCall {
-    const previous = session.calls.get(call.toolCallId);
-    const resolved: AntigravityToolCall = {
-      ...call,
-      name: call.name || previous?.name || null,
-      kind: call.kind ?? previous?.kind ?? null,
-      planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
-      input: Object.keys(call.input).length > 0 ? call.input : previous?.input ?? {},
-    };
-    session.calls.set(call.toolCallId, resolved);
-    evictOldestToolEntry(session.calls);
-    return resolved;
-  }
-
-  #toolCall(
-    session: SessionState,
-    update: Record<string, unknown>,
-    timestamp: string,
-    terminal: boolean,
-  ): ChatMessage[] {
-    const parsed = antigravityToolCall(update);
-    if (!parsed) return [];
-    const call = this.#resolvedCall(session, parsed);
-    // A progress frame for a published call publishes nothing, so streamed text
-    // around it stays one message. Text before any other frame is flushed first,
-    // so it stays ahead of the tool row, a waiting row, and the call's result.
-    const emitted = session.emittedToolIds.has(call.toolCallId);
-    if (emitted && !terminal) return [];
-    const messages = this.#flush(session, timestamp);
-    if (emitted) return messages;
-    if (!terminal && Object.keys(call.input).length === 0) {
-      session.deferredCalls.set(call.toolCallId, call);
-      return messages;
-    }
-    session.deferredCalls.delete(call.toolCallId);
-    this.#remember(session.emittedToolIds, call.toolCallId);
-    messages.push(convertAntigravityToolUse(timestamp, call));
-    return messages;
-  }
-
   #toolCallUpdate(session: SessionState, update: Record<string, unknown>, timestamp: string): ChatMessage[] {
+    const parsed = antigravityToolCall(update);
+    if (!parsed || session.completedToolIds.has(parsed.toolCallId)) return [];
+    const { toolCallId } = parsed;
     const status = asString(update.status);
-    if (!status || !ACP_TERMINAL_TOOL_STATUSES.has(status)) return this.#toolCall(session, update, timestamp, false);
-    const toolCallId = asString(update.toolCallId);
-    if (!toolCallId || session.completedToolIds.has(toolCallId)) return [];
+    const terminal = ACP_TERMINAL_TOOL_STATUSES.has(status ?? '');
+    const call = mergeCall(session.calls.get(toolCallId) ?? session.permissions.get(toolCallId), parsed, update);
+    session.permissions.delete(toolCallId);
+    const emitted = session.emittedToolIds.has(toolCallId);
+    if (!terminal) {
+      session.calls.set(toolCallId, call);
+      evictOldestToolEntry(session.calls);
+    }
+    if (emitted && !terminal) return [];
+
+    // Buffered prose after a deferred call can wait for its identity; another
+    // tool row or result is a publication boundary and cannot overtake it.
+    const wasDeferred = session.deferredId === toolCallId;
+    const messages = wasDeferred ? [] : [...this.#emitDeferred(session, timestamp), ...this.#flush(session, timestamp)];
+    if (!emitted) {
+      const row = convertAntigravityToolUse(timestamp, call);
+      if (!terminal && needsMoreEvidence(call, row)) {
+        session.deferredId = toolCallId;
+        return messages;
+      }
+      session.deferredId = null;
+      this.#remember(session.emittedToolIds, toolCallId);
+      messages.push(row);
+    }
+    if (!terminal) return messages;
+    if (wasDeferred) messages.push(...this.#flush(session, timestamp));
     this.#remember(session.completedToolIds, toolCallId);
-    // A terminal update can be the first frame for a call, so its tool row comes first.
-    const messages = this.#toolCall(session, update, timestamp, true);
-    const name = session.calls.get(toolCallId)?.name ?? '';
     session.calls.delete(toolCallId);
-    const text = antigravityToolResultText(name, toolResultText(update));
     // agy completes the tool invocation even when the command exits unsuccessfully.
-    const exitCode = name === 'run_command' ? asObject(update.rawOutput).exit_code : undefined;
+    const name = call.isMcp ? null : call.name;
+    const exitCode = name === 'run_command' ? call.exitCode : undefined;
     const commandFailed = typeof exitCode === 'number' && exitCode !== 0;
     const failed = status !== 'completed' || commandFailed;
-    const content: ToolResultMessage['content'] = {};
-    if (text.trim()) content.raw = text;
-    else if (commandFailed) content.exitCode = exitCode;
-    else if (failed) content.status = status;
+    const content = { ...call.result };
+    if (typeof content.raw === 'string') {
+      const text = antigravityToolResultText(name ?? '', content.raw);
+      if (text.trim()) content.raw = text;
+      else delete content.raw;
+    }
+    if (!Object.keys(content).length && failed) {
+      if (commandFailed) content.exitCode = exitCode;
+      else content.status = status;
+    }
     messages.push(new ToolResultMessage(timestamp, toolCallId, content, failed));
     return messages;
   }
 
-  // Publishes rows still waiting for arguments: all of them at the turn's end
-  // (`update` null), otherwise when output other than the waiting call's own
-  // frames arrives.
-  #emitDeferred(
-    session: SessionState,
-    update: Record<string, unknown> | null,
-    updateType: string | undefined,
-    timestamp: string,
-  ): ChatMessage[] {
-    if (session.deferredCalls.size === 0) return [];
-    if (update) {
-      const ownFrame = (updateType === 'tool_call' || updateType === 'tool_call_update')
-        && session.deferredCalls.has(asString(update.toolCallId) ?? '');
-      if (ownFrame || !ACP_NEW_OUTPUT_UPDATES.has(updateType ?? '')) return [];
-    }
-    const rows: ChatMessage[] = [];
-    for (const call of session.deferredCalls.values()) {
-      this.#remember(session.emittedToolIds, call.toolCallId);
-      rows.push(convertAntigravityToolUse(timestamp, session.calls.get(call.toolCallId) ?? call));
-    }
-    session.deferredCalls.clear();
-    return rows;
+  #emitDeferred(session: SessionState, timestamp: string): ChatMessage[] {
+    const id = session.deferredId;
+    if (!id) return [];
+    session.deferredId = null;
+    const call = session.calls.get(id);
+    if (!call) return [];
+    this.#remember(session.emittedToolIds, id);
+    return [convertAntigravityToolUse(timestamp, call)];
   }
 
   #remember(ids: Set<string>, toolCallId: string): void {
@@ -277,7 +279,8 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       emittedToolIds: new Set(),
       completedToolIds: new Set(),
       calls: new Map(),
-      deferredCalls: new Map(),
+      permissions: new Map(),
+      deferredId: null,
     };
     this.#sessions.set(sessionId, created);
     return created;

@@ -447,11 +447,13 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       const turn = await fixture.client.startChat(scriptedAntigravityStartRequest({
         chatId, projectPath: fixture.executionDirs.project, command: 'Check background tasks',
       }));
-      expect(await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, {
         afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
-      })).toMatchObject({ type: 'agent-run-finished', outcome: 'finished' });
+      });
+      expect(terminal).toMatchObject({ type: 'agent-run-finished', outcome: 'finished' });
       const { messages } = await fixture.client.getMessages(chatId);
-      expect(messages.map(entry => entry.message).filter(message => 'toolId' in message)).toMatchObject([
+      const tools = messages.map(entry => entry.message).filter(message => 'toolId' in message);
+      expect(tools).toMatchObject([
         { toolId: 'list-call', type: 'background-task-tool-use', action: 'list' },
         { toolId: 'list-call', type: 'tool-result', content: {}, isError: false },
         { toolId: 'status-call', type: 'background-task-tool-use', action: 'status', taskId: 'missing-job' },
@@ -459,6 +461,12 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
         { toolId: 'send-call', type: 'agent-message-tool-use', recipient: 'missing-agent', message: 'Check the result.' },
         { toolId: 'send-call', type: 'tool-result', isError: true },
       ]);
+      const events = fixture.client.eventsSince(cursor);
+      const end = events.indexOf(terminal);
+      expect(end).toBeGreaterThanOrEqual(0);
+      const live = events.slice(0, end).flatMap(event => event.type === 'chat-messages' && event.chatId === chatId
+        ? event.messages.map(entry => entry.message).filter(message => 'toolId' in message) : []);
+      expect(live).toEqual(tools);
       expect(messagesOfType(messages, 'tool-result')[0]?.content).toEqual({});
       model.assertSettled();
     }, withScriptedAntigravity());

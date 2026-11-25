@@ -32,7 +32,8 @@ describe('AntigravityAcpEventConverter', () => {
       status: 'failed', rawOutput: { output: 'Recipient unavailable' } }), context))
       .toMatchObject([{ type: 'tool-result', toolId: 'send', isError: true, content: { raw: 'Recipient unavailable' } }]);
     const input = { Message: 'Missing destination' };
-    expect(converter.fromSessionUpdate(toolCall('bad', 'send_message', 'other', input), context))
+    expect(converter.fromSessionUpdate(toolCall('bad', 'send_message', 'other', input), context)).toEqual([]);
+    expect(converter.endTurn(SESSION, context))
       .toMatchObject([{ type: 'external-tool-use', input }]);
   });
 
@@ -57,7 +58,8 @@ describe('AntigravityAcpEventConverter', () => {
   it('does not coerce unsupported plan steps or mistake an MCP title for a native checklist', () => {
     const converter = new AntigravityAcpEventConverter();
     const input = { steps: [{ title: 'Check', status: 'future' }] };
-    expect(converter.fromSessionUpdate(toolCall('bad', 'update_steps', 'other', input), context))
+    converter.fromSessionUpdate(toolCall('bad', 'update_steps', 'other', input), context);
+    expect(converter.endTurn(SESSION, context))
       .toMatchObject([{ type: 'external-tool-use', input }]);
     expect(converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call', toolCallId: 'mcp',
       title: 'Run update_steps', _meta: { is_mcp_tool_call: true }, rawInput: { steps: [] } }), context))
@@ -78,7 +80,8 @@ describe('AntigravityAcpEventConverter', () => {
   it.each([{ Action: 'kill' }, { Action: 'send_input', TaskId: 'job' }, { Action: 'stop', TaskId: 'job' }, { Action: 'future' }])(
     'keeps unsupported task input %j intact', (input) => {
       const converter = new AntigravityAcpEventConverter();
-      expect(converter.fromSessionUpdate(toolCall('call', 'manage_task', 'other', input), context))
+      converter.fromSessionUpdate(toolCall('call', 'manage_task', 'other', input), context);
+      expect(converter.endTurn(SESSION, context))
         .toMatchObject([{ type: 'external-tool-use', input }]);
     },
   );
@@ -205,7 +208,8 @@ describe('AntigravityAcpEventConverter', () => {
     const rows = converter.fromSessionUpdate(update({
       sessionUpdate: 'tool_call', toolCallId: 'anon', status: 'in_progress', kind: 'other', rawInput: { value: 1 },
     }), context);
-    expect(plain(rows)).toEqual([{ type: 'unknown-tool-use', toolId: 'anon', rawName: 'other', input: { value: 1 } }]);
+    expect(rows).toEqual([]);
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'unknown-tool-use', toolId: 'anon', rawName: 'other', input: { value: 1 } }]);
   });
 
   it.each([

@@ -27,6 +27,7 @@ export interface AntigravityToolCall {
   // Null when the frame names no tool; `kind` then only describes the category.
   readonly name: string | null;
   readonly planTitle: 'matched' | 'excluded' | null;
+  readonly isMcp: boolean;
   readonly kind: string | null;
   readonly input: Record<string, unknown>;
 }
@@ -68,12 +69,14 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
   const toolCallId = asString(raw.toolCallId);
   if (!toolCallId) return null;
   let planTitle: AntigravityToolCall['planTitle'] = null;
-  if (asObject(raw._meta).is_mcp_tool_call || (raw.kind && raw.kind !== 'other')) planTitle = 'excluded';
+  const isMcp = asObject(raw._meta).is_mcp_tool_call === true;
+  if (isMcp || (raw.kind && raw.kind !== 'other')) planTitle = 'excluded';
   else if (raw.title === 'Run update_steps') planTitle = 'matched';
   return {
     toolCallId,
     name: asString(raw.name) ?? null,
     planTitle,
+    isMcp,
     kind: asString(raw.kind) ?? null,
     input: asObject(raw.rawInput ?? raw.args),
   };
@@ -84,8 +87,13 @@ export function convertAntigravityToolUse(
   call: AntigravityToolCall,
 ): ToolUseChatMessage {
   const { toolCallId: id, input } = call;
+  const mcpServer = asString(input.server);
+  const mcpTool = asString(input.tool);
+  if (mcpServer && mcpTool) {
+    return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, asObject(input.arguments ?? input.args));
+  }
   const name = call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
-  switch (name) {
+  switch (call.isMcp && name !== 'call_mcp_tool' ? null : name) {
     case 'run_command': {
       const command = stringField(input, 'CommandLine', 'command_line', 'commandLine', 'command');
       if (command === undefined) break;
@@ -198,11 +206,6 @@ export function convertAntigravityToolUse(
       if (server && tool) return new McpToolUseMessage(timestamp, id, server, tool, asObject(field(input, 'Arguments', 'arguments')));
       break;
     }
-  }
-  const mcpServer = asString(input.server);
-  const mcpTool = asString(input.tool);
-  if (mcpServer && mcpTool) {
-    return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, asObject(input.arguments ?? input.args));
   }
   // Every named tool comes from agy's own registry, so tools without a shared
   // counterpart render as named provider tools; only an unnamed call is unknown.
