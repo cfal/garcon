@@ -2,7 +2,10 @@
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+	import {
+		dropTargetForElements,
+		monitorForElements,
+	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getAppShell, getWorkspaceWindowDnd } from '$lib/context';
@@ -292,6 +295,17 @@
 		return cleanup;
 	});
 	$effect(() => {
+		const element = viewportRef;
+		if (!element) return;
+		return dropTargetForElements({
+			element,
+			canDrop: ({ source }) =>
+				reorderEnabled &&
+				isSidebarChatDragData(source.data) &&
+				source.data.instanceId === instanceId,
+		});
+	});
+	$effect(() => {
 		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter))
 			pendingRecenter = null;
 	});
@@ -458,14 +472,19 @@
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
 		if (reorderEnabled && reorder.activeChatId === sourceData.chatId) {
-			const isInsideViewport = inputIsInsideViewport(input);
-			const currentInstruction = isInsideViewport
-				? resolveSidebarDropInstruction(sourceData, dropTargets)
-				: null;
-			const context = pointDropContext(sourceData, input.clientX, input.clientY);
-			const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
-			// Uses the last valid row target when virtualization removes the current target at drop time.
-			const instruction = currentInstruction ?? fallbackInstruction;
+			// Cancellation clears the accepted targets. Only a real viewport drop may use the row fallback.
+			const accepted = dropTargets.some(
+				({ element, isActiveDueToStickiness }) =>
+					element === viewportRef && !isActiveDueToStickiness,
+			);
+			const instruction =
+				accepted && inputIsInsideViewport(input)
+					? (resolveSidebarDropInstruction(sourceData, dropTargets) ??
+						fallbackInstructionForPointContext(
+							sourceData,
+							pointDropContext(sourceData, input.clientX, input.clientY),
+						))
+					: null;
 
 			if (instruction) {
 				applySidebarDropInstruction(instruction);

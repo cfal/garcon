@@ -133,10 +133,10 @@ async function sortFromChatMenu(
   return parsed;
 }
 
-async function dragRelative(
+async function previewRelativeDrag(
   page: Page,
   input: { sourceId: string; targetId: string; edge: 'top' | 'bottom' },
-): Promise<ReorderChatResponse> {
+): Promise<void> {
   const source = page.locator(`[data-sidebar-virtual-row="${input.sourceId}"]`);
   const target = page.locator(`[data-sidebar-virtual-row="${input.targetId}"]`);
   // Menu dismissal can leave the body pointer-locked after the rows update.
@@ -152,6 +152,13 @@ async function dragRelative(
   );
   await page.locator(`[data-sidebar-virtual-row="${input.sourceId}"].opacity-45`).waitFor();
   await page.locator('[data-sidebar-branch-drop-indicator]').waitFor();
+}
+
+async function dragRelative(
+  page: Page,
+  input: { sourceId: string; targetId: string; edge: 'top' | 'bottom' },
+): Promise<ReorderChatResponse> {
+  await previewRelativeDrag(page, input);
   const [response] = await Promise.all([
     page.waitForResponse((response) => isReorderRequest(response.request()), { timeout: 10_000 }),
     page.mouse.up(),
@@ -358,6 +365,29 @@ async function withSidebarChromiumFixture<T>(
 }
 
 describe('Chromium sidebar chat reorder', () => {
+  test('Escape cancels a previewed sidebar reorder without persisting it', async () => {
+    await withSidebarChromiumFixture('sidebar-escape-cancel', async (fixture) => {
+      const { page, integration } = fixture;
+      await page.addInitScript(seedLocalSettings, { sidebarSortMode: 'manual', sidebarNestDelegatedChats: false });
+      await createChats(integration, 4);
+      const original = await normalOrder(integration);
+      expect(original).toHaveLength(4);
+      await page.goto(`${integration.garcon.baseUrl}/chat/${original[0]}`);
+      await waitForSidebarOrder(page, original);
+      const move = { sourceId: original[0]!, targetId: original[2]!, edge: 'bottom' as const };
+      await previewRelativeDrag(page, move);
+      await page.keyboard.press('Escape');
+      await page.mouse.up();
+      await page.locator('[data-sidebar-branch-drop-indicator]').waitFor({ state: 'detached' });
+      await waitForSidebarOrder(page, original);
+      expect(capturedReorderRequests(fixture)).toEqual([]);
+      expect(await normalOrder(integration)).toEqual(original);
+      await expectRelativeDrag(fixture, original, [], {
+        sourceId: move.sourceId, targetId: move.targetId, position: 'after',
+      });
+    });
+  }, 120_000);
+
   test('keeps native dragging alive across filtered context rows', async () => {
     await withSidebarChromiumFixture('sidebar-filtered-context-reorder', async (fixture) => {
       const { page, integration } = fixture;
