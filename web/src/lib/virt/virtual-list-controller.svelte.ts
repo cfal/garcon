@@ -10,6 +10,7 @@ import type {
 	VirtualItemsMutation,
 	VirtualKeyScrollResult,
 	VirtualListSnapshot,
+	VirtualMeasurementAnchor,
 	VirtualMutationResult,
 	VirtualResumeResult,
 	VirtualResumeTarget,
@@ -21,7 +22,7 @@ import type {
 
 export interface VirtualListControllerOptions {
 	get overscan(): number;
-	get measurementAnchor(): 'geometric' | 'end';
+	get measurementAnchor(): VirtualMeasurementAnchor;
 	readonly initialViewportSize: number;
 	readonly environment?: VirtualListEnvironment;
 	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;

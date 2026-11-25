@@ -544,6 +544,7 @@ export class ConversationScrollController {
 	async jumpToMessageRow(
 		target: UserMessageNavigatorTarget,
 		options: { viewportOffset?: number; presentation?: 'group-summary' } = {},
+		signal?: AbortSignal,
 	): Promise<UserMessageNavigatorSelectionResult> {
 		if (
 			this.deps.getChatId() !== target.chatId ||
@@ -559,7 +560,7 @@ export class ConversationScrollController {
 			const result = await jumpToLoadedTranscriptRow(
 				target,
 				options,
-				() => this.#isCurrentViewportOperation(target.chatId, operationEpoch),
+				() => !signal?.aborted && this.#isCurrentViewportOperation(target.chatId, operationEpoch),
 				{
 					wasPinned: this.isPinnedToBottom,
 					viewId: () => this.deps.chatState.transcriptViewId,

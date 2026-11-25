@@ -116,7 +116,7 @@
 				transcriptEndIndex: items.length,
 			};
 		}
-		const items: ConversationVirtualFeedItem[] = keys.map((key, index) => ({
+		const items: TranscriptVirtualFeedItem[] = keys.map((key, index) => ({
 			kind: 'transcript',
 			key,
 			item: {
@@ -131,7 +131,7 @@
 		return {
 			items,
 			indexByKey: new Map(keys.map((key, index) => [key, index])),
-			indexByRowId: new Map(),
+			indexByRowId: new Map(items.map((item, index) => [item.item.id, index])),
 			rowIdByToolAnchorId: new Map(),
 			transcriptStartIndex: 0,
 			transcriptEndIndex: items.length,
@@ -381,6 +381,8 @@
 							onblur={() => { releaseGroupFocus?.(); releaseGroupFocus = null; }}
 						>Tool group</button>
 					{/if}
+				{:else}
+					<div data-chat-row-id={`row-${virtualItem.index}`}></div>
 				{/if}
 			</div>
 		{/each}

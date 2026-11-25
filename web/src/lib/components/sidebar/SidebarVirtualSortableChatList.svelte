@@ -2,7 +2,10 @@
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { monitorForElements } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
+	import {
+		dropTargetForElements,
+		monitorForElements,
+	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
 	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import { getAppShell, getWorkspaceWindowDnd } from '$lib/context';
@@ -55,6 +58,7 @@
 	interface SidebarVirtualSortableChatListProps {
 		rows: SidebarVirtualRow[];
 		viewportRef: HTMLElement | null;
+		viewportHeight: number;
 		selectedChatId: string | null;
 		currentTime: Date;
 		isMobile: boolean;
@@ -89,6 +93,7 @@
 	let {
 		rows,
 		viewportRef,
+		viewportHeight,
 		selectedChatId,
 		currentTime,
 		isMobile,
@@ -290,36 +295,39 @@
 		return cleanup;
 	});
 	$effect(() => {
+		const element = viewportRef;
+		if (!element) return;
+		return dropTargetForElements({
+			element,
+			canDrop: ({ source }) =>
+				reorderEnabled &&
+				isSidebarChatDragData(source.data) &&
+				source.data.instanceId === instanceId,
+		});
+	});
+	$effect(() => {
 		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter))
 			pendingRecenter = null;
 	});
+	// The list, including bottom padding, is the viewport's only in-flow content.
+	const autoScrollViewport = $derived(
+		viewportHeight > 0 && totalHeight > viewportHeight && rows.length > 0 ? viewportRef : null,
+	);
 	$effect(() => {
-		if (!viewportRef) return;
-		const rowCount = rows.length;
+		const element = autoScrollViewport;
+		if (!element) return;
 		let disposed = false;
 		let cleanup: (() => void) | undefined;
-		const frame = requestAnimationFrame(() => {
-			if (!viewportRef || rowCount === 0 || viewportRef.scrollHeight <= viewportRef.clientHeight)
-				return;
-			void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
-				if (
-					disposed ||
-					!viewportRef ||
-					rowCount === 0 ||
-					viewportRef.scrollHeight <= viewportRef.clientHeight
-				) {
-					return;
-				}
-				cleanup = module.autoScrollForElements({
-					element: viewportRef,
-					canScroll: ({ source }) => reorderEnabled && isSidebarChatDragData(source.data),
-					getAllowedAxis: () => 'vertical',
-				});
+		void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
+			if (disposed) return;
+			cleanup = module.autoScrollForElements({
+				element,
+				canScroll: ({ source }) => reorderEnabled && isSidebarChatDragData(source.data),
+				getAllowedAxis: () => 'vertical',
 			});
 		});
 		return () => {
 			disposed = true;
-			cancelAnimationFrame(frame);
 			cleanup?.();
 		};
 	});
@@ -456,6 +464,23 @@
 		applySidebarDropInstruction(instruction);
 	}
 
+	function acceptedDropInstruction(
+		source: SidebarChatDragData,
+		dropTargets: DropTargetRecord[],
+		input: Input,
+	): SidebarDropInstruction | null {
+		// Cancellation clears the accepted targets, even when the pointer is still over a row.
+		const accepted = dropTargets.some(
+			({ element, isActiveDueToStickiness }) => element === viewportRef && !isActiveDueToStickiness,
+		);
+		if (!accepted || !inputIsInsideViewport(input)) return null;
+
+		const instruction = resolveSidebarDropInstruction(source, dropTargets);
+		if (instruction) return instruction;
+		const context = pointDropContext(source, input.clientX, input.clientY);
+		return fallbackInstructionForPointContext(source, context);
+	}
+
 	function finishSidebarDrop(
 		sourceData: unknown,
 		dropTargets: DropTargetRecord[],
@@ -464,15 +489,7 @@
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
 		if (reorderEnabled && reorder.activeChatId === sourceData.chatId) {
-			const isInsideViewport = inputIsInsideViewport(input);
-			const currentInstruction = isInsideViewport
-				? resolveSidebarDropInstruction(sourceData, dropTargets)
-				: null;
-			const context = pointDropContext(sourceData, input.clientX, input.clientY);
-			const fallbackInstruction = fallbackInstructionForPointContext(sourceData, context);
-			// Uses the last valid row target when virtualization removes the current target at drop time.
-			const instruction = currentInstruction ?? fallbackInstruction;
-
+			const instruction = acceptedDropInstruction(sourceData, dropTargets, input);
 			if (instruction) {
 				applySidebarDropInstruction(instruction);
 				persistReorderRequest(reorder.finish(sourceData.list));

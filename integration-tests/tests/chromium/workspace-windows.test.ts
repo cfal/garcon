@@ -5,6 +5,7 @@ import { chromium, type Locator, type Page } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import type { PersistedWorkspaceLayoutV2 } from '../../../common/workspace-layout.js';
 import { seedLocalSettings } from '../../support/local-settings-seed.js';
+import { seedCombinedAnchorHistory } from '../../support/combined-anchor-history.js';
 import {
   closeChromiumBrowser,
   withChromiumFixture,
@@ -91,6 +92,63 @@ async function createChat(fixture: ChromiumFixture, content: string): Promise<st
   });
   await fixture.integration.client.waitForTurnTerminal(chatId, started.turnId);
   return chatId;
+}
+
+function scrollableTurn(label: string, index: number, words = 60): string {
+  return `${label}-turn-${index} ${Array.from(
+    { length: words }, (_, wordIndex) => `${label}-wrapping-word-${wordIndex + 1}`,
+  ).join(' ')}`;
+}
+
+async function createScrollableChat(fixture: ChromiumFixture, label: string, words?: number): Promise<string> {
+  const chatId = await createChat(fixture, scrollableTurn(label, 0, words));
+  for (let index = 1; index < 8; index++) {
+    const turn = await fixture.integration.client.runDirectChat({
+      chatId, content: scrollableTurn(label, index, words), agent: fixture.integration.directAgents.openAi,
+    });
+    await fixture.integration.client.waitForTurnTerminal(chatId, turn.turnId);
+  }
+  return chatId;
+}
+
+async function prepareReaderSplit(fixture: ChromiumFixture, chatId: string) {
+  const { page } = fixture;
+  await openChat(fixture, chatId);
+  const source = await page.locator('[data-workspace-window-current="true"]')
+    .getAttribute('data-workspace-window-id');
+  if (!source) throw new Error('Missing source Chat window');
+  // A second tab keeps the source pane open when its Chat moves below it.
+  await openWindowTab(page, source, 'Open Chat Map');
+  await page.locator(`[id="${source}-tab-chat-view:${source}"]`).click();
+  const sourceFeed = `[data-conversation-panel="chat-view:${source}"] [data-chat-scroll-viewport]`;
+  return { source, sourceFeed, feed: page.locator(sourceFeed) };
+}
+
+async function firstReaderPositionAfterSplit(
+  page: Page,
+  source: string,
+  chatId: string,
+  target: { attribute: 'data-chat-row-id' | 'data-chat-anchor-id'; id: string },
+) {
+  const movedPanel = `[data-conversation-panel-chat-id="${chatId}"]:not([data-conversation-panel="chat-view:${source}"])`;
+  const [first] = await Promise.all([
+    // Polls for a hittable target, not the expected offset or disclosure state.
+    page.waitForFunction(({ movedPanel, target }) => {
+      const feed = document.querySelector(`${movedPanel} [data-chat-scroll-viewport]`);
+      const node = feed?.querySelector(`[${target.attribute}="${CSS.escape(target.id)}"]`);
+      if (!feed || !node) return null;
+      const view = feed.getBoundingClientRect();
+      const rect = node.getBoundingClientRect();
+      const top = Math.max(view.top, rect.top);
+      const bottom = Math.min(view.bottom, rect.bottom);
+      if (bottom <= top) return null;
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, (top + bottom) / 2);
+      if (!node.contains(hit)) return null;
+      return { offset: rect.top - view.top, expanded: node.getAttribute('aria-expanded') };
+    }, { movedPanel, target }),
+    page.locator(`[data-workspace-window-menu="${source}"] [data-workspace-window-tab-action="move-new-bottom"]`).click(),
+  ]);
+  return (await first.jsonValue())!;
 }
 
 async function openChat(fixture: ChromiumFixture, chatId: string): Promise<void> {
@@ -1837,6 +1895,7 @@ describe('Chromium workspace windows', () => {
               offset: row.getBoundingClientRect().top - element.getBoundingClientRect().top,
             };
           });
+          expect(reading.offset).toBeLessThan(-3);
 
           if (hiddenSource) {
             await openWindowTab(page, source, 'Open Chat Map');
@@ -2840,31 +2899,98 @@ describe('Chromium workspace windows', () => {
     );
   });
 
+  test.each([
+    { firstRow: false, clip: 8, retain: false },
+    { firstRow: false, clip: 300, retain: true },
+    { firstRow: true, clip: 8, retain: false },
+    { firstRow: true, clip: 8, retain: true },
+  ])('restores a partially visible row when moving Chat to a pane below: %j', async ({ firstRow, clip, retain }) => {
+    await withChromiumFixture(`workspace-reader-split-${firstRow}-${clip}-${retain}`, async (fixture, markPhase) => {
+      const { page } = fixture;
+      await fixture.context.addInitScript(seedLocalSettings, { combineToolUseMessages: retain });
+      const words = clip === 8 ? 60 : 280;
+      const chatId = await createScrollableChat(fixture, 'reader', words);
+      const { source, sourceFeed, feed } = await prepareReaderSplit(fixture, chatId);
+      await feed.getByText(`echo:${scrollableTurn('reader', 7, words)}`, { exact: true }).waitFor();
+
+      markPhase('detaching the reader on a clipped row');
+      await feed.evaluate((element, firstRow) => {
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        element.scrollTop = firstRow ? 0 : (element.scrollHeight - element.clientHeight) / 2;
+      }, firstRow);
+      const clipped = await page.waitForFunction(({ selector, clip, firstRow }) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (element?.dataset.chatPinnedToBottom !== 'false') return null;
+        const view = element.getBoundingClientRect();
+        const row = [...element.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(item => {
+          const rect = item.getBoundingClientRect();
+          return (!firstRow || item.dataset.chatRowId?.endsWith(':1')) &&
+            rect.bottom > view.top && rect.top < view.bottom && rect.height > clip + 1;
+        });
+        if (!row) return null;
+        element.scrollTop += row.getBoundingClientRect().top - view.top + clip;
+        return row.dataset.chatRowId!;
+      }, { selector: sourceFeed, clip, firstRow });
+      const rowId = (await clipped.jsonValue())!;
+      await page.locator(`[data-workspace-window-menu-trigger="${source}"]`).click();
+      const savedOffset = await feed.locator(`[data-chat-row-id="${rowId}"]`).evaluate(row =>
+        row.getBoundingClientRect().top - row.closest('[data-chat-scroll-viewport]')!.getBoundingClientRect().top,
+      );
+      expect(Math.abs(savedOffset + clip)).toBeLessThanOrEqual(1);
+
+      markPhase('checking the first readable position in the new pane');
+      const { offset } = await firstReaderPositionAfterSplit(page, source, chatId, {
+        attribute: 'data-chat-row-id', id: rowId,
+      });
+      expect(Math.abs(offset - savedOffset), `first: ${offset}px, saved: ${savedOffset}px`).toBeLessThanOrEqual(1);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
+  test('restores a clipped tool summary without expanding it when moving Chat to a pane below', async () => {
+    await withChromiumFixture('workspace-reader-split-summary', async (fixture, markPhase) => {
+      const { page, context, integration } = fixture;
+      await context.addInitScript(seedLocalSettings, { combineToolUseMessages: true });
+      const { chatId } = await seedCombinedAnchorHistory(integration, { trailingAnchors: 35 });
+      const { source, feed } = await prepareReaderSplit(fixture, chatId);
+      await feed.getByText('Synthetic later anchor 34', { exact: true }).waitFor();
+      markPhase('detaching the reader on the collapsed tool summary');
+      await feed.evaluate(element => {
+        element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
+        element.scrollTop = 0;
+      });
+      await browserExpect(feed).toHaveAttribute('data-chat-pinned-to-bottom', 'false');
+      const summary = feed.locator('[data-chat-tool-group]');
+      await browserExpect(summary).toHaveAttribute('aria-expanded', 'false');
+      const anchorId = await summary.evaluate(button => {
+        const viewport = button.closest<HTMLElement>('[data-chat-scroll-viewport]')!;
+        viewport.scrollTop += button.getBoundingClientRect().top - viewport.getBoundingClientRect().top + 8;
+        return button.getAttribute('data-chat-anchor-id');
+      });
+      if (!anchorId) throw new Error('Missing tool summary anchor');
+      await page.locator(`[data-workspace-window-menu-trigger="${source}"]`).click();
+      const savedOffset = await summary.evaluate(button =>
+        button.getBoundingClientRect().top - button.closest('[data-chat-scroll-viewport]')!.getBoundingClientRect().top,
+      );
+      expect(Math.abs(savedOffset + 8)).toBeLessThanOrEqual(1);
+
+      markPhase('checking the same disclosure on its first readable layout');
+      const first = await firstReaderPositionAfterSplit(page, source, chatId, {
+        attribute: 'data-chat-anchor-id', id: anchorId,
+      });
+      expect(first.expanded).toBe('false');
+      expect(Math.abs(first.offset - savedOffset)).toBeLessThanOrEqual(1);
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('keeps two bottom-pinned Chats at the end while the composer changes windows', async () => {
     await withChromiumFixture(
       'workspace-window-two-chat-bottom-handoff',
       async (fixture, markPhase) => {
-        const turnContent = (chatLabel: string, index: number) =>
-          `${chatLabel}-turn-${index} ${Array.from(
-            { length: 60 },
-            (_, wordIndex) => `${chatLabel}-wrapping-word-${wordIndex + 1}`,
-          ).join(' ')}`;
-        const createScrollableChat = async (chatLabel: string): Promise<string> => {
-          const chatId = await createChat(fixture, turnContent(chatLabel, 0));
-          for (let index = 1; index < 8; index += 1) {
-            const accepted = await fixture.integration.client.runDirectChat({
-              chatId,
-              content: turnContent(chatLabel, index),
-              agent: fixture.integration.directAgents.openAi,
-            });
-            await fixture.integration.client.waitForTurnTerminal(chatId, accepted.turnId);
-          }
-          return chatId;
-        };
-
         markPhase('creating two scrollable Chat panels');
-        const firstChatId = await createScrollableChat('first-window');
-        const secondChatId = await createScrollableChat('second-window');
+        const firstChatId = await createScrollableChat(fixture, 'first-window');
+        const secondChatId = await createScrollableChat(fixture, 'second-window');
         await openChat(fixture, firstChatId);
         await fixture.page
           .locator(`[data-sidebar-virtual-row="${secondChatId}"]`)
@@ -2882,7 +3008,7 @@ describe('Chromium workspace windows', () => {
           expectedLabel: 'Add as tab',
         });
         await conversationPanel(fixture.page, secondWindowId)
-          .getByText(`echo:${turnContent('second-window', 7)}`, { exact: true })
+          .getByText(`echo:${scrollableTurn('second-window', 7)}`, { exact: true })
           .waitFor();
 
         const surfaceIds = [`chat-view:${firstWindowId}`, `chat-view:${secondWindowId}`];

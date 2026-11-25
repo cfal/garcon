@@ -32,6 +32,8 @@
 		displayOptions?: Partial<SidebarDisplayOptions>;
 		rowHeight?: number;
 		viewportAttached?: boolean;
+		viewportOverride?: HTMLElement;
+		viewportHeight?: number;
 		onRegisterRecenter?: (callback: () => void) => void;
 		onRegisterReorder?: (reorder: SidebarOrderController) => void;
 		onPersistReorder?: (request: SidebarChatReorderRequest) => void;
@@ -51,6 +53,8 @@
 		displayOptions: displayOptionsInput = {},
 		rowHeight,
 		viewportAttached = true,
+		viewportOverride,
+		viewportHeight = 640,
 		onRegisterRecenter,
 		onRegisterReorder,
 		onPersistReorder = () => {},
@@ -128,11 +132,12 @@
 <div
 	bind:this={viewportRef}
 	data-testid="virtual-sidebar-viewport"
-	style="height:640px; overflow-y:auto;"
+	style="height:{viewportHeight}px; overflow-y:auto;"
 >
 	<SidebarVirtualSortableChatList
 		{rows}
-		viewportRef={viewportAttached ? viewportRef : null}
+		viewportRef={viewportAttached ? viewportOverride ?? viewportRef : null}
+		{viewportHeight}
 		{selectedChatId}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{isMobile}

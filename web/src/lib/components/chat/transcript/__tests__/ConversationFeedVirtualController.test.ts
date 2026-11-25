@@ -81,6 +81,46 @@ function snapshot(keys: readonly string[], sizes: readonly number[]): VirtualLis
 	};
 }
 
+function rowWrapper(view: HTMLElement, index: number): HTMLElement {
+	return view.querySelector<HTMLElement>(`[data-chat-virtual-item][data-index="${index}"]`)!;
+}
+
+function setRowHeight(view: HTMLElement, index: number, height: number): void {
+	Object.defineProperty(rowWrapper(view, index), 'offsetHeight', { configurable: true, value: height });
+}
+
+function observeReadingTarget(exposure: ControllerExposure, index: number) {
+	const view = exposure.viewport()!;
+	const wrapper = rowWrapper(view, index);
+	const node = wrapper.querySelector<HTMLElement>('[data-chat-row-id],[data-chat-anchor-id]')!;
+	let inset = 0;
+	const wrapperRect = () => {
+		const item = exposure.controller.snapshot.positions.itemAt(index)!;
+		return new DOMRect(0, item.start - view.scrollTop, view.clientWidth, item.size);
+	};
+	wrapper.getBoundingClientRect = wrapperRect;
+	node.getBoundingClientRect = () => {
+		const { top, width, height } = wrapperRect();
+		return new DOMRect(0, top + inset, width, height - inset);
+	};
+	const writes: number[] = [];
+	const firstWrite = Promise.withResolvers<void>();
+	let top = view.scrollTop;
+	Object.defineProperty(view, 'scrollTop', {
+		configurable: true,
+		get: () => top,
+		set(value: number) {
+			top = value;
+			writes.push(value);
+			firstWrite.resolve();
+		},
+	});
+	return {
+		view, node, writes, firstWrite: firstWrite.promise,
+		setInset(value: number) { inset = value; },
+	};
+}
+
 describe('ConversationFeed virtual policy', () => {
 	it('uses existing estimates for passive detached fill without requiring offscreen mounts', () => {
 		const measurements = new Map([['visible', 20]]);
@@ -234,6 +274,246 @@ describe('ConversationFeedVirtualController', () => {
 	afterEach(() => {
 		cleanup();
 		restoreResizeObserver();
+	});
+
+	it.each([
+		{ kind: 'row', index: 3, ordinal: 4, target: { kind: 'row', id: 'row-3' } },
+		{ kind: 'group-summary', index: 0, ordinal: 1, target: { kind: 'presentation-row', id: 'b' } },
+	] as const)('seeks directly to the captured fractional $kind offset', async ({ kind, index, ordinal, target }) => {
+		const { exposure } = await renderController({
+			initialPinned: false, groupFocusMode: kind === 'group-summary', groupTailCount: 12,
+		});
+		const { view, node, writes } = observeReadingTarget(exposure, index);
+		const start = exposure.controller.snapshot.positions.itemAt(index)!.start;
+		view.scrollTop = start + 8.25;
+		const saved = exposure.controller.captureRestoreTarget('view', false);
+		expect(saved).toEqual({ kind, ordinal, transcriptViewId: 'view', viewportOffset: -8.25 });
+		if (!saved || saved.kind === 'end') throw Error('Expected a detached reader');
+		view.scrollTop = 0;
+		writes.length = 0;
+		expect(await exposure.controller.scrollToTarget(target, { viewportOffset: saved.viewportOffset })).toBe('completed');
+		expect(writes).toEqual([start + 8.25]);
+		expect(node.getBoundingClientRect().top).toBe(-8.25);
+	});
+
+	it('seeks to the saved offset after a width change and still corrects a late inner-row inset', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		await exposure.hide();
+		await exposure.showAtLayout(240, 80);
+		await settleController();
+		const { node, writes, firstWrite, setInset } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		expect(start).toBe(240);
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: 6.5 });
+		await firstWrite;
+		setInset(13);
+		await nextFrame();
+		await nextFrame();
+		expect(writes).toEqual([start - 6.5]);
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(writes).toEqual([start - 6.5, start - 6.5 + 13]);
+		expect(node.getBoundingClientRect().top).toBe(6.5);
+	});
+
+	it.each([
+		{ growingRow: 3, viewportOffset: -60.25 },
+		{ growingRow: 2, viewportOffset: 10 },
+	])('preserves offset $viewportOffset while row $growingRow first measures', async ({ growingRow, viewportOffset }) => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, firstWrite } = observeReadingTarget(exposure, 3);
+		setRowHeight(view, growingRow, 120);
+		expect(exposure.controller.snapshot.positions.itemAt(growingRow)?.size).toBe(40);
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset });
+		await firstWrite;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await nextFrame();
+		const measured = exposure.controller.snapshot.positions.itemAt(growingRow)?.size;
+		const offsetBeforeSettlement = node.getBoundingClientRect().top;
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(measured).toBe(120);
+		expect(offsetBeforeSettlement).toBe(viewportOffset);
+	});
+
+	it('seeks to the wrapper start before measuring an inner DOM anchor offset', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { node, writes, setInset } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		setInset(13);
+		expect(await exposure.controller.scrollToTarget(
+			{ kind: 'dom-anchor', id: 'row-3' }, { viewportOffset: 6.5 },
+		)).toBe('completed');
+		expect(writes).toEqual([start, start + 13 - 6.5]);
+		expect(node.getBoundingClientRect().top).toBe(6.5);
+	});
+
+	it('hands a released bottom clamp to the ready inner node without stacking two corrections', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, writes, firstWrite, setInset } = observeReadingTarget(exposure, 10);
+		setRowHeight(view, 10, 240);
+		setInset(13);
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-10' }, { viewportOffset: -60 });
+		await firstWrite;
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(node.getBoundingClientRect().top).toBe(-60);
+		expect(writes).toEqual([280, 473]);
+	});
+
+	it('keeps the keyed row pinned through its first ready remeasurement', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, writes } = observeReadingTarget(exposure, 3);
+		setRowHeight(view, 3, 120);
+		expect(await exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -60.25 })).toBe('completed');
+		expect(exposure.controller.snapshot.positions.itemAt(3)?.size).toBe(120);
+		expect(writes).toEqual([180.25]);
+	});
+
+	it.each([[0, 14.5], [11, -12.25]])('clamps the first restore write at row %i', async (index, viewportOffset) => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, writes } = observeReadingTarget(exposure, index);
+		const edge = index === 0 ? 0 : view.scrollHeight - view.clientHeight;
+		expect(await exposure.controller.scrollToTarget({ kind: 'row', id: `row-${index}` }, { viewportOffset })).toBe('completed');
+		expect(writes).toEqual([edge]);
+	});
+
+	it('does not scroll away from the top while the saved offset remains out of reach', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, firstWrite, writes } = observeReadingTarget(exposure, 1);
+		setRowHeight(view, 0, 55);
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-1' }, { viewportOffset: 60 });
+		await firstWrite;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await nextFrame();
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(node.getBoundingClientRect().top).toBe(55);
+		expect(writes).toEqual([0]);
+	});
+
+	it('does not write for a missing reader or a superseded seek', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { writes } = observeReadingTarget(exposure, 3);
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -8 });
+		const missing = exposure.controller.scrollToTarget({ kind: 'row', id: 'missing' }, { viewportOffset: 5 });
+		expect(await seek).toBe('cancelled');
+		expect(await missing).toBe('target-missing');
+		expect(writes).toEqual([]);
+	});
+
+	it('hands measurement ownership to a second restore after the first has written', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const runtime = await import('../conversation-feed-virtual-runtime.js');
+		const settleTarget = runtime.settleConversationTarget;
+		const finishFirst = Promise.withResolvers<void>();
+		using settle = vi.spyOn(runtime, 'settleConversationTarget');
+		// Delays the first request's cleanup until the second owns the viewport.
+		settle.mockImplementationOnce(async input => {
+			const result = await settleTarget(input);
+			await finishFirst.promise;
+			return result;
+		});
+		const first = observeReadingTarget(exposure, 3);
+		first.node.dataset.chatLayoutPending = 'true';
+		const previous = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -8 });
+		await first.firstWrite;
+
+		const second = observeReadingTarget(exposure, 5);
+		second.node.dataset.chatLayoutPending = 'true';
+		const current = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-5' }, { viewportOffset: 10 });
+		await second.firstWrite;
+		finishFirst.resolve();
+		expect(await previous).toBe('cancelled');
+		setRowHeight(second.view, 4, 80);
+		ResizeObserverHarness.emit(second.view, second.view.clientWidth, second.view.clientHeight);
+		await nextFrame();
+		const offsetBeforeSettlement = second.node.getBoundingClientRect().top;
+		delete second.node.dataset.chatLayoutPending;
+		expect(await current).toBe('completed');
+		expect(offsetBeforeSettlement).toBe(10);
+		expect(first.writes).toEqual([128]);
+		expect(second.writes).toEqual([190, 230]);
+	});
+
+	it('centers ordinary navigation but preserves an explicit zero reader offset', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const view = exposure.viewport()!;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await settleController();
+		const { node, writes } = observeReadingTarget(exposure, 3);
+		const target = { kind: 'row', id: 'row-3' } as const;
+		expect(await exposure.controller.scrollToTarget(target)).toBe('completed');
+		const centered = node.getBoundingClientRect();
+		expect(centered.top + centered.height / 2).toBe(view.clientHeight / 2);
+		expect(writes).toHaveLength(1);
+		writes.length = 0;
+		expect(await exposure.controller.scrollToTarget(target, { viewportOffset: 0 })).toBe('completed');
+		expect(writes).toEqual([exposure.controller.snapshot.positions.itemAt(3)!.start]);
+	});
+
+	it.each(['row', 'dom-anchor'] as const)('keeps geometric measurement during aligned %s navigation', async kind => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const view = exposure.viewport()!;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await settleController();
+		const { node, firstWrite, writes } = observeReadingTarget(exposure, 11);
+		const maximum = view.scrollHeight - view.clientHeight;
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget(
+			{ kind, id: 'row-11' }, kind === 'dom-anchor' ? { viewportOffset: 6.5 } : {},
+		);
+		await firstWrite;
+		ResizeObserverHarness.emit(rowWrapper(view, 9), view.clientWidth, 80);
+		await nextFrame();
+		const writesBeforeSettlement = [...writes];
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(exposure.controller.snapshot.positions.itemAt(9)?.size).toBe(80);
+		expect(writesBeforeSettlement).toEqual([maximum]);
+	});
+
+	it('leaves the reader in control when they scroll after the first restore write', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, writes, firstWrite } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: -8.25 });
+		await firstWrite;
+		expect(exposure.controller.cancelForUserIntent('later')).toBe('cancelled');
+		view.scrollTop = 200;
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('cancelled');
+		expect(writes).toEqual([start + 8.25, 200]);
+	});
+
+	it.each(['completed', 'cancelled'] as const)('releases the measurement anchor on a %s restore', async result => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const view = exposure.viewport()!;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await settleController();
+		const { firstWrite, writes, node } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		const preceding = rowWrapper(view, 2);
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: 10 });
+		if (result === 'cancelled') {
+			node.dataset.chatLayoutPending = 'true';
+			await firstWrite;
+			exposure.controller.cancelForUserIntent(null);
+		} else {
+			await seek;
+		}
+		// The preceding row now straddles the viewport top; its own growth must not scroll it.
+		ResizeObserverHarness.emit(preceding, view.clientWidth, 80);
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe(result);
+		await settleController();
+		expect(exposure.controller.snapshot.positions.itemAt(2)?.size).toBe(80);
+		expect(writes).toEqual([start - 10]);
 	});
 
 	it('restores summary focus after an intervening same-surface publication', async () => {

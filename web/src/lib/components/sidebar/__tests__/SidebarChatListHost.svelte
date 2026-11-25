@@ -151,6 +151,7 @@
 >
 	<SidebarChatList
 		{viewportRef}
+		viewportHeight={640}
 		projection={reorder.projection}
 		{selectedChatId}
 		isLoading={false}
