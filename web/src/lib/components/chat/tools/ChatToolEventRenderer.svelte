@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
-	import type { ToolUseChatMessage, TodoItem } from '$shared/chat-types';
+	import type { ToolUseChatMessage, PlanStep } from '$shared/chat-types';
 	import {
 		TOOL_DISPLAY_REGISTRY,
 		getToolDisplayLabel,
@@ -283,7 +283,7 @@
 							{successMessage}
 						</div>
 					{:else if displayConfig.contentKind === 'todoList'}
-						<ChatToolTodoListView todos={contentProps.todos as TodoItem[] | undefined} />
+						<ChatToolTodoListView todos={contentProps.todos as PlanStep[] | undefined} />
 					{:else if displayConfig.contentKind === 'task'}
 						<ChatToolPlainTextView
 							content={(contentProps.content as string) || ''}

@@ -3,10 +3,12 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import type { ConversationDisclosureStatePort } from '../../transcript/ConversationFeedItemState.svelte.js';
 import {
+	AgentMessageToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
 	BashToolUseMessage,
+	BackgroundTaskToolUseMessage,
 	ClaudeMonitorToolUseMessage,
 	ClaudeToolSearchToolUseMessage,
 	CodexSubagentToolUseMessage,
@@ -19,6 +21,7 @@ import {
 	PiToolSearchToolUseMessage,
 	ReadToolUseMessage,
 	UnknownToolUseMessage,
+	UpdatePlanToolUseMessage,
 	WebFetchToolUseMessage,
 	WebSearchToolUseMessage,
 	WriteStdinToolUseMessage,
@@ -31,6 +34,84 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('shows a stop request and target without a blank disclosure for an empty success', () => {
+		const toolMessage = new BackgroundTaskToolUseMessage('', 'stop', 'stop', 'job-1');
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
+		expect(screen.getByText('Request stop')).toBeTruthy();
+		expect(screen.getByText('job-1')).toBeTruthy();
+		const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'result', toolResult: { content: {}, isError: false } });
+		expect(container.textContent?.trim()).toBe('');
+		expect(container.querySelector('button')).toBeNull();
+	});
+	it('renders the destination and literal body of an agent message', () => {
+		const toolMessage = new AgentMessageToolUseMessage('', 'send', 'agent-2', '<b>unformatted</b>');
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+		expect(screen.getByText('Message to agent-2')).toBeTruthy();
+		expect(screen.getByText('<b>unformatted</b>')).toBeTruthy();
+	});
+
+	it.each(['', '\n', '  '])('makes literal task input %j visible', (input) => {
+		const toolMessage = new BackgroundTaskToolUseMessage('', 'stdin', 'send_input', 'job', input);
+		const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
+		expect(container.textContent).toContain(`Input: ${JSON.stringify(input)}`);
+	});
+
+	it('shows the supplied plan result instead of replacing it with an acknowledgment', () => {
+		render(ChatToolEventRenderer, { toolMessage: new UpdatePlanToolUseMessage('', 'plan', []), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { raw: 'Only one change was accepted' }, isError: false } });
+		expect(screen.getByText('Only one change was accepted')).toBeTruthy();
+	});
+
+	it('prefers the primary failure diagnostic over supplementary progress blocks', () => {
+		render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hello'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { raw: 'Operation refused', items: [{ type: 'text', text: 'In progress' }] }, isError: true } });
+		expect(screen.getByText('Operation refused')).toBeTruthy();
+	});
+
+	it('shows the reported cancellation alongside retained progress', () => {
+		render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hello'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { status: 'cancelled', raw: 'Sending' }, isError: true } });
+		expect(screen.getByText(/Error: cancelled/)).toBeTruthy();
+		expect(screen.getByText('Sending')).toBeTruthy();
+	});
+
+	it('shows the structured plan result even when the provider also reports text', () => {
+		render(ChatToolEventRenderer, { toolMessage: new UpdatePlanToolUseMessage('', 'plan', []), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { raw: 'Plan submitted', rawOutput: { updated: 1, ignored: 2 } }, isError: false } });
+		expect(screen.getByText(/Plan submitted.*"ignored": 2/s)).toBeTruthy();
+	});
+
+	it('shows a structured failure instead of supplementary progress', () => {
+		render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hello'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { rawOutput: { reason: 'Operation refused' }, items: [{ type: 'text', text: 'Sending' }] }, isError: true } });
+		expect(screen.getByText(/Operation refused/)).toBeTruthy();
+		expect(screen.queryByText(/Sending/)).toBeNull();
+	});
+
+	it('renders nested output as literal text once, with its metadata', () => {
+		const output = '  First line\nSecond line\n';
+		const { container } = render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hi'),
+			mode: 'result', autoExpandTools: true, toolResult: { content: { rawOutput: { output, attempt: 2 } }, isError: false } });
+		expect(container.textContent).toContain(output);
+		expect(container.textContent).toContain('"attempt": 2');
+		expect(container.textContent?.split('First line')).toHaveLength(2);
+	});
+
+	it('shows the diagnostic without a blank output prefix', () => {
+		const output = ' \t\n'.repeat(1000);
+		render(ChatToolEventRenderer, { toolMessage: new BackgroundTaskToolUseMessage('', 'task', 'list'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { status: 'failed', rawOutput: { output, error: 'Operation refused' } }, isError: true } });
+		expect(screen.getByText(/"error": "Operation refused"/).textContent).toBe('{\n  "error": "Operation refused"\n}');
+	});
+
+	it('renders distinct outcomes for plan steps with the same title', () => {
+		const toolMessage = new UpdatePlanToolUseMessage('', 'plan', [
+			{ content: 'Check', status: 'failed' }, { content: 'Check', status: 'skipped' },
+		]);
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+		expect(screen.getByText('Failed: Check')).toBeTruthy();
+		expect(screen.getByText('Skipped: Check')).toBeTruthy();
+	});
 	it('scopes plain tool results independently of commands', () => {
 		const toolMessage = new WebSearchToolUseMessage('', 'plain-output', 'Synthetic search');
 		render(ChatToolEventRenderer, {
@@ -70,6 +151,9 @@ describe('ChatToolEventRenderer', () => {
 		new BashToolUseMessage('', 'invalid-bash', ''),
 		new ClaudeToolSearchToolUseMessage('', 'invalid-search', ''),
 		new ClaudeMonitorToolUseMessage('', 'invalid-monitor', ''),
+		new UpdatePlanToolUseMessage('', 'invalid-plan', [{ content: 'Check', status: 'pending' }]),
+		new BackgroundTaskToolUseMessage('', 'missing-task', 'status', 'job-1'),
+		new AgentMessageToolUseMessage('', 'failed-send', 'agent-2', 'Hello'),
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
 		new EditToolUseMessage('', 'invalid-edit', ''),

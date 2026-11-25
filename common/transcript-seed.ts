@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ChatMessage, TodoItem, ToolUseChatMessage } from './chat-types.js';
+import type { ChatMessage, PlanStep, TodoItem, ToolUseChatMessage } from './chat-types.js';
 import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
   projectionPriorityLevel,
@@ -663,6 +663,13 @@ export interface ProjectedToolUseSummary {
 }
 
 export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToolUseSummary {
+  if (message.type === 'update-plan-tool-use') return summarizePlan(message.todos);
+  if (message.type === 'background-task-tool-use' && message.input !== undefined) {
+    // Collapsing whitespace here would change the literal input sent to the task.
+    const raw = `${message.action} ${message.taskId ?? ''} Input: ${JSON.stringify(message.input.slice(0, TOOL_SUMMARY_MAX_CHARS))}`;
+    const text = truncate(raw, TOOL_SUMMARY_MAX_CHARS);
+    return { text, abridged: text !== raw };
+  }
   const raw = extractToolDetail(message);
   const collapsed = boundedCollapse(raw);
   const text = truncate(collapsed, TOOL_SUMMARY_MAX_CHARS);
@@ -727,7 +734,8 @@ function extractToolDetail(message: ToolUseChatMessage): string {
     case 'web-fetch-tool-use': return message.url;
     case 'task-tool-use': return message.description || message.prompt || message.subagentType || '';
     case 'codex-subagent-tool-use': return message.action;
-    case 'update-plan-tool-use':
+    case 'background-task-tool-use': return [message.action, message.taskId].filter(Boolean).join(' ');
+    case 'agent-message-tool-use': return `To ${message.recipient}: ${message.message}`;
     case 'todo-write-tool-use': return summarizeTodos(message.todos);
     case 'ask-user-question-tool-use':
       return message.title || message.questions.map((prompt) => prompt.prompt).join('; ');
@@ -737,6 +745,30 @@ function extractToolDetail(message: ToolUseChatMessage): string {
     case 'unknown-tool-use': return message.rawName;
     default: return '';
   }
+}
+
+function summarizePlan(steps: readonly PlanStep[] | undefined): ProjectedToolUseSummary {
+  if (!steps) return { text: '', abridged: false };
+  if (!steps.length) return { text: 'Empty plan snapshot', abridged: false };
+  const parts: string[] = [];
+  let abridged = false;
+  const addStep = (label: string, step: PlanStep | undefined) => {
+    if (!step) return;
+    parts.push(`${label}: ${boundedCollapse(step.content)}`);
+    abridged ||= step.content.length > PROJECTED_BODY_MAX_CHARS;
+  };
+  addStep('failed', steps.find(step => step.status === 'failed'));
+  addStep('skipped', steps.find(step => step.status === 'skipped'));
+  const current = steps.find(step => step.status === 'in_progress');
+  if (current) addStep('current', current);
+  else addStep('next', steps.find(step => step.status === 'pending'));
+  if (!parts.length) return { text: `${steps.length} item(s), all completed`, abridged: false };
+  const summary = parts.join('; ');
+  if (summary.length <= TOOL_SUMMARY_MAX_CHARS) return { text: summary, abridged };
+  // Reserves room for each represented status even when the first title is long.
+  const budget = Math.floor((TOOL_SUMMARY_MAX_CHARS - 2 * (parts.length - 1)) / parts.length);
+  const text = parts.map(part => part.length > budget ? truncate(part, budget - 3) : part).join('; ');
+  return { text, abridged: true };
 }
 
 function summarizeTodos(todos: readonly TodoItem[] | undefined): string {
