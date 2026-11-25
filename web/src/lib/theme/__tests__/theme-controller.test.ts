@@ -210,10 +210,10 @@ describe('ThemeController', () => {
 		});
 		document.head.append(manifest);
 		// Happy DOM rejects external sheets automatically; the test drives their load events.
-		const append = vi.spyOn(document.head, 'append').mockImplementation(() => {});
-		onTestFinished(() => append.mockRestore());
+		const insert = vi.spyOn(manifest, 'after').mockImplementation(() => {});
+		onTestFinished(() => insert.mockRestore());
 		function lastStylesheet() {
-			const link = append.mock.lastCall?.[0];
+			const link = insert.mock.lastCall?.[0];
 			if (!(link instanceof HTMLLinkElement)) throw new Error('Expected a stylesheet link');
 			return link;
 		}
@@ -234,8 +234,7 @@ describe('ThemeController', () => {
 		neko.dispatchEvent(new Event('error'));
 		await waitFor(() => expect(rendered.reportError).toHaveBeenCalledOnce());
 		expect(document.documentElement.dataset.theme).toBe('phosphor-light');
-		flushSync(() => rendered.component.setPreference({ mode: 'fixed', themeId: 'phosphor-light' }));
-		flushSync(() => rendered.component.setPreference({ mode: 'fixed', themeId: 'neko-light' }));
+		flushSync(() => window.dispatchEvent(new Event('online')));
 		const retry = lastStylesheet();
 		expect(retry).not.toBe(neko);
 		retry.dispatchEvent(new Event('load'));

@@ -46,6 +46,7 @@ export class ThemeController {
 		getThemeProfile(resolveThemeId(this.deps.getPreference(), this.#systemColorScheme)),
 	);
 	#appliedProfile = $state.raw<ThemeProfile>();
+	#stylesheetRetry = $state(0);
 	#reportedMissingTerminalThemeIds = new Set<ThemeId>();
 
 	constructor(private readonly deps: ThemeControllerDeps) {
@@ -89,18 +90,21 @@ export class ThemeController {
 
 		$effect(() => {
 			const profile = this.#profile;
+			void this.#stylesheetRetry;
 			const loading = loadThemeStyles(profile.id);
 			if (!loading) {
 				untrack(() => this.#applyProfile(profile));
 				return;
 			}
 			let current = true;
+			const retry = () => this.#stylesheetRetry++;
 			void loading.then(
 				() => {
 					if (current) this.#applyProfile(profile);
 				},
 				(error: unknown) => {
 					if (!current) return;
+					window.addEventListener('online', retry, { once: true });
 					this.deps.reportError(String(error));
 					if (!this.#appliedProfile) {
 						this.#applyProfile(
@@ -111,6 +115,7 @@ export class ThemeController {
 			);
 			return () => {
 				current = false;
+				window.removeEventListener('online', retry);
 			};
 		});
 	}

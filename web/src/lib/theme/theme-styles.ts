@@ -42,6 +42,7 @@ export function loadThemeStyles(id: ThemeId): Promise<void> | undefined {
 		pendingStylesheets.delete(id);
 	});
 	pendingStylesheets.set(id, loading);
-	document.head.append(link);
+	if (bootstrap) bootstrap.after(link);
+	else document.head.prepend(link);
 	return loading;
 }
