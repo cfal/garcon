@@ -150,7 +150,9 @@ export class FileDraftCoordinator {
 	async observeBeforeSave(document: FileDocumentState): Promise<FileDraftVersion | undefined> {
 		if (!this.options.repository.durable) return undefined;
 		try {
-			return (await this.options.repository.getDraftSummary(this.#draftKey(document))) ?? undefined;
+			return (
+				(await this.options.repository.snapshotDraftVersion(this.#draftKey(document))) ?? undefined
+			);
 		} catch {
 			return undefined;
 		}

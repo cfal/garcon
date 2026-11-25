@@ -2266,6 +2266,32 @@ describe('FileSessionRegistry', () => {
 });
 
 describe('best-effort file recovery', () => {
+	it('saves without waiting for a stalled recovery snapshot', async () => {
+		const repository = createMemoryFileDraftRepository();
+		const harness = createHarness({ draftRepository: repository });
+		const session = await harness.registry.open(request('file.txt'));
+		if (!session) throw new Error('Expected file session');
+		await vi.waitFor(() => expect(session.loading).toBe(false));
+		const draft = storedDraft('agreed edit');
+		await repository.putDraft(draft);
+		const version = await repository.snapshotDraftVersion(draft.documentId);
+		const pending = Promise.withResolvers<typeof version>();
+		vi.spyOn(repository, 'snapshotDraftVersion').mockReturnValueOnce(pending.promise);
+
+		try {
+			session.content = draft.content;
+			const saving = harness.registry.save(session.id);
+			await vi.waitFor(() => expect(harness.saveText).toHaveBeenCalledOnce());
+			await expect(saving).resolves.toBe(true);
+			pending.resolve(version);
+			await harness.registry.flushRecovery();
+			expect(await recoveredContent(repository)).toBe(draft.content);
+		} finally {
+			pending.resolve(version);
+			await harness.registry.destroyAll();
+		}
+	});
+
 	it.each(['same', 'different', 'replacement'] as const)(
 		'cleans up only the peer checkpoint represented by the successful save (%s)',
 		async (scenario) => {
