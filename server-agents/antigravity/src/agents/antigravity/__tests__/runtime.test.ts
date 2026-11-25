@@ -654,6 +654,24 @@ describe('Antigravity ACP runtime', () => {
     }]);
   });
 
+  it('publishes prose between pending tools without including it in the final response', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, id) => {
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'send', name: 'send_message', rawInput: { Recipient: 'peer' } });
+      fake.update(id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Intermediate prose' } });
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'task', name: 'manage_task', rawInput: { Action: 'kill' } });
+      fake.update(id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Final answer' } });
+      fake.endPrompt();
+    });
+    try {
+      await runtime.startSession(request());
+      await waitFor(() => runEnded(events).length === 1);
+      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      expect(rows.filter(row => row.type === 'assistant-message').map(row => row.content)).toEqual(['Intermediate prose', 'Final answer']);
+      expect(runEnded(events)[0]).toMatchObject({ finalResponse: { type: 'text', text: 'Final answer' } });
+    } finally { runtime.shutdown(); }
+  });
+
   it('sends an image-only message without an empty text part', async () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake) => fake.endPrompt());

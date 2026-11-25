@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {
   ErrorMessage,
+  isToolUseMessage,
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
@@ -611,8 +612,11 @@ export class AcpAgentRuntime {
       if (!turn.aborted) failureMessage = humanizeError(error);
     } finally {
       releasePending();
-      const finalMessages = executionStarted ? this.#emitFlushedMessages(turn)
-        .filter((message) => message.type === 'assistant-message') : [];
+      const flushed = executionStarted ? this.#emitFlushedMessages(turn) : [];
+      // A deferred tool can publish earlier prose at turn end. Only the trailing
+      // answer belongs in notifications and the command result.
+      const lastTool = flushed.findLastIndex(message => isToolUseMessage(message) || message.type === 'tool-result');
+      const finalMessages = flushed.slice(lastTool + 1).filter(message => message.type === 'assistant-message');
       if (turn.aborted) {
         session.state = 'aborted';
       } else if (admissionClosed) {
