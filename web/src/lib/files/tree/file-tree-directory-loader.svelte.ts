@@ -433,12 +433,11 @@ export class FileTreeDirectoryLoader {
 			this.childErrors = errors;
 		}
 		this.expandedDirs = expanded;
-		const entries = collapsing ? undefined : this.childrenCache.get(path);
+		const entries = this.childrenCache.get(path);
 		if (entries) {
-			const cache = new Map(this.childrenCache);
-			cache.delete(path);
-			cache.set(path, entries);
-			this.childrenCache = cache;
+			// Insertion order tracks eviction priority; the listing itself has not changed.
+			this.childrenCache.delete(path);
+			this.childrenCache.set(path, entries);
 		}
 		this.reconcileDirectoryDemand();
 	}
