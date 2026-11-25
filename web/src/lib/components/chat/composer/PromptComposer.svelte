@@ -239,9 +239,9 @@
 		}),
 	);
 	const showProjectNotice = $derived(availabilityNotice?.kind === 'project-unavailable');
-	const fileMenuVisible = $derived(conversationInput && filesAvailable && ui.showFileMenu && !showProjectNotice);
+	const fileMenuVisible = $derived(isVisible && conversationInput && filesAvailable && ui.showFileMenu && !showProjectNotice);
 	const slashMenuVisible = $derived(
-		Boolean(executionAgent) && ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
+		isVisible && Boolean(executionAgent) && ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
 	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
