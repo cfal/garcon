@@ -312,7 +312,9 @@ export class AcpAgentRuntime {
       if (rejection) return rejection;
       await request.prepareDelivery();
       // Checked and sent without an await between them, so the prompt cannot miss the turn's end.
-      return this.#steerRejection(turn) ?? turn.prompts.steer((onSent, onReply) => turn.session.client.promptSession({
+      const changed = this.#steerRejection(turn);
+      if (changed) return changed;
+      return turn.prompts.steer((onSent, onReply) => turn.session.client.promptSession({
         sessionId: turn.session.id,
         prompt: [{ type: 'text', text: request.input }],
       }, { onSent, onReply, outputDuringWrite: 'stream' }), this.#steerDecisionTimeoutMs);
@@ -320,7 +322,7 @@ export class AcpAgentRuntime {
   }
 
   #steerRejection(turn: AcpTurnContext): AgentSteerResult | null {
-    if (!this.#converter.steering) {
+    if (!this.#policy.steering) {
       return rejectedSteer('turn-not-steerable', `${this.#policy.agentId} does not take steering input`);
     }
     const session = turn.session;
@@ -523,10 +525,7 @@ export class AcpAgentRuntime {
       if (turn.aborted) return;
       assertAcpExecutionOpen(request);
       if (session.retired) throw new Error(`${this.#policy.agentId} ACP process exited before the prompt was sent`);
-      await turn.prompts.run(onReply => session.client.promptSession({
-        sessionId: session.id,
-        prompt,
-      }, { onReply, onSent: () => {
+      const onSent = () => {
         releasePending();
         if (!this.#activateTurnSource(turn, request.projectPath)) return;
         executionStarted = true;
@@ -534,7 +533,8 @@ export class AcpAgentRuntime {
         if (turn.aborted) this.abort(session.id);
         onExecutionStarted?.();
         this.#announceSteerable(turn);
-      } }));
+      };
+      await turn.prompts.run(onReply => session.client.promptSession({ sessionId: session.id, prompt }, { onSent, onReply }));
       success = !turn.aborted;
     } catch (error) {
       admissionClosed = request.executionAdmission?.signal.aborted === true;
@@ -604,21 +604,23 @@ export class AcpAgentRuntime {
       settled: Promise.withResolvers<void>(),
       cancelTimer: null,
       prompts: new AcpTurnPrompts({
-        steering: this.#converter.steering,
+        steering: this.#policy.steering,
         takeFailure: () => this.#canRouteSource(turn) ? this.#converter.takeTurnFailure?.(session.id) ?? null : null,
-        onBoundary: failure => {
-          if (!this.#canRouteSource(turn)) return;
-          const answer = this.#emitFlushedMessages(turn).filter(message => message.type === 'assistant-message');
-          turn.finalResponseText = answer.length ? answer.map(message => message.content).join('\n\n') : null;
-          if (failure && !turn.aborted && !request.executionAdmission?.signal.aborted) {
-            this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), failure)]);
-            turn.reportedFailure = true;
-          }
-        },
+        onBoundary: failure => this.#recordPromptBoundary(turn, failure, request.executionAdmission?.signal),
         onSteerable: () => this.#announceSteerable(turn),
       }),
     };
     return turn;
+  }
+
+  #recordPromptBoundary(turn: AcpTurnContext, failure: string | null, admission?: AbortSignal): void {
+    if (!this.#canRouteSource(turn)) return;
+    const answers = this.#emitFlushedMessages(turn).filter(message => message.type === 'assistant-message');
+    turn.finalResponseText = answers.length ? answers.map(message => message.content).join('\n\n') : null;
+    if (failure && !turn.aborted && !admission?.aborted) {
+      this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), failure)]);
+      turn.reportedFailure = true;
+    }
   }
 
   #activateTurnSource(turn: AcpTurnContext, projectPath: string): boolean {

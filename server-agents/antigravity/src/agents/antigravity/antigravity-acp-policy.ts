@@ -142,6 +142,12 @@ export function createAntigravityAcpPolicy(config: AntigravityConfig): AcpAgentP
     command: config.binary,
     args: ['acp'],
     abortStrategy: 'cancel',
+    steering: {
+      // agy 1.5.13 sends the same bare end_turn for supersession and a natural completion without usage.
+      // Garcon favors immediate steering acknowledgment here; that ambiguous completion can be a false positive.
+      likelySuperseded: result => result?.stopReason === 'end_turn' && result.usage == null,
+      refused: error => error.code === -32603 && error.message.includes('answer it or send session/cancel, then send this prompt again'),
+    },
     authenticateMethodId: config.authMethod,
     clientCapabilities: {},
     configureSession: configureAntigravitySession,

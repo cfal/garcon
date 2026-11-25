@@ -300,6 +300,10 @@ function runEnded(events: readonly AgentRuntimeEvent[]) {
   return events.filter((event) => event.type === 'run-ended');
 }
 
+function publishedMessages(events: readonly AgentRuntimeEvent[]) {
+  return events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+}
+
 function steerRequest(runtime: AcpAgentRuntime, agentSessionId: string): RuntimeSteerRequest {
   return {
     chatId: 'chat-1',
@@ -468,7 +472,7 @@ describe('Antigravity ACP runtime', () => {
         expect(released.mock.calls).toEqual([[agentSessionId]]);
         expect(runEnded(events)[0]).toMatchObject({ error: { code: 'PROVIDER_FAILURE',
           message: failure === 'EOF' ? 'ACP transport stdout closed' : 'Synthetic stdout failure' } });
-        expect(events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message.type) : [])).toEqual(['error']);
+        expect(publishedMessages(events).map(message => message.type)).toEqual(['error']);
       }
       agent.onPrompt(fake => fake.endPrompt());
       const resume = (command: string) => runtime.runTurn({ ...request({ command }), agentSessionId });
@@ -791,7 +795,7 @@ describe('Antigravity ACP runtime', () => {
     await runtime.startSession(request({ permissionMode: 'bypassPermissions' }));
     await waitFor(() => runEnded(events).length === 1);
 
-    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    const rows = publishedMessages(events);
     expect(rows.find((message) => message.type === 'bash-tool-use')).toMatchObject({ command: 'echo synthetic' });
     runtime.shutdown();
   });
@@ -809,7 +813,7 @@ describe('Antigravity ACP runtime', () => {
     });
     await Bun.sleep(10);
 
-    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    const rows = publishedMessages(events);
     expect(rows.filter((message) => message.type === 'error')).toEqual([]);
     runtime.shutdown();
   });
@@ -1432,7 +1436,7 @@ describe('Antigravity ACP runtime', () => {
 
     runtime.abort(started.agentSessionId);
     await waitFor(() => !runtime.isRunning(started.agentSessionId));
-    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    const rows = publishedMessages(events);
     expect(rows).toEqual([
       expect.objectContaining({ type: 'thinking', content: 'Checking.' }),
       expect.objectContaining({ type: 'assistant-message', content: 'Partial reply.' }),
@@ -1516,7 +1520,7 @@ describe('Antigravity ACP runtime', () => {
 
     await runtime.startSession(request());
     await waitFor(() => runEnded(events).length === 1);
-    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    const rows = publishedMessages(events);
     expect(rows).toEqual([expect.objectContaining({ type: 'error', content: 'Synthetic prompt failure' })]);
   });
 
@@ -1532,7 +1536,7 @@ describe('Antigravity ACP runtime', () => {
 
     runtime.abort(started.agentSessionId);
     await waitFor(() => !runtime.isRunning(started.agentSessionId));
-    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message.type) : []);
+    const rows = publishedMessages(events).map(message => message.type);
     expect(rows).toEqual(['assistant-message']);
   });
 
@@ -1616,7 +1620,7 @@ describe('Antigravity ACP runtime', () => {
     expect(runEnded(events)).toEqual([{
       type: 'run-ended', runId: 'run-1', outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message },
     }]);
-    const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
+    const rows = publishedMessages(events);
     expect(rows.map((row) => row.type)).toEqual(['error']);
   });
 
@@ -1631,7 +1635,7 @@ describe('Antigravity ACP runtime', () => {
       });
       await waitFor(() => runEnded(events).length === 1);
       expect(runEnded(events)[0]?.outcome).toBe('failed');
-      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      const rows = publishedMessages(events);
       expect(rows.filter(row => row.type === 'error').map(row => row.content)).toEqual([expect.stringContaining('model failed')]);
       expect(rows.filter(row => row.type === 'assistant-message').map(row => row.content)).toEqual(['Late output.']);
     } finally { runtime.shutdown(); }
@@ -1667,7 +1671,7 @@ describe('Antigravity ACP runtime', () => {
       await waitFor(() => runEnded(events).length > 0);
 
       expect(steered).toEqual({ kind: 'accepted' });
-      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      const rows = publishedMessages(events);
       expect(rows).toEqual([
         expect.objectContaining({ type: 'thinking', content: 'Including the steer.' }),
         expect.objectContaining({ type: 'assistant-message', content: 'Did both.' }),
@@ -1712,7 +1716,7 @@ describe('Antigravity ACP runtime', () => {
       expect(endedBeforeDelivery).toBe(0);
       expect(steered).toEqual({ kind: 'accepted' });
       expect(agent.requests('session/prompt')).toHaveLength(2);
-      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      const rows = publishedMessages(events);
       expect(rows.map(row => [row.type, 'content' in row && row.content])).toEqual([
         ['assistant-message', 'First answer.'], ['assistant-message', 'Second answer.'],
       ]);
@@ -1820,9 +1824,8 @@ describe('Antigravity ACP runtime', () => {
       expect(runtime.captureSteerTarget(agentSessionId)).toBeNull();
       gate.resolve();
       await waitFor(() => !runtime.isRunning(agentSessionId));
-      expect(runEnded(events).map(event => event.outcome)).toEqual(
-        outcome === 'stopped' ? [] : [outcome === 'completed' ? 'finished' : 'failed'],
-      );
+      if (outcome === 'stopped') expect(runEnded(events)).toEqual([]);
+      else expect(runEnded(events).map(event => event.outcome)).toEqual([outcome === 'completed' ? 'finished' : 'failed']);
     } finally { runtime.shutdown(); }
   });
 
@@ -1874,129 +1877,118 @@ describe('Antigravity ACP wire ordering', () => {
   const natural = { result: { stopReason: 'end_turn', usage: { totalTokens: 8 } } };
   const rpcError = (message: string) => ({ error: { code: -32603, message } });
 
-  async function open() {
+  async function openWireTurn() {
     const { agent, runtime, events, request } = harness();
     agent.manualReplies = true;
     const { agentSessionId } = await runtime.startSession(request());
     return {
-      agent, runtime, events,
+      agent, events,
+      [Symbol.dispose]: () => runtime.shutdown(),
       steer: () => runtime.steer(steerRequest(runtime, agentSessionId)),
       stop: () => runtime.abort(agentSessionId),
       update: (text: string, sessionUpdate = 'agent_message_chunk') => agent.update(agentSessionId, { sessionUpdate, content: { type: 'text', text } }),
-      rows: () => events.flatMap(event => event.type === 'rows' ? event.rows.map(({ message }) => [message.type, 'content' in message && message.content]) : []),
-      requestCount: (count: number) => waitFor(() => agent.requests('session/prompt').length === count),
-      drained: () => waitFor(() => !runtime.isRunning(agentSessionId)),
+      rows: () => publishedMessages(events).map(message => [message.type, 'content' in message && message.content]),
+      waitForPrompts: (count: number) => waitFor(() => agent.requests('session/prompt').length === count),
+      waitForDrain: () => waitFor(() => !runtime.isRunning(agentSessionId)),
     };
   }
 
   it('keeps received answer frames when a concurrent steer write fails', async () => {
-    const t = await open();
-    try {
-      const flush = Promise.withResolvers<number>();
-      t.agent.promptFlush = flush.promise;
-      const steering = t.steer();
-      await t.requestCount(2);
-      t.agent.batchOutput(() => {
-        t.update('First.');
-        t.agent.replyToPrompt(0, natural);
-      });
-      await waitFor(() => t.rows().length === 1);
-      flush.reject(new Error('write failed'));
-      expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
-      await t.drained();
-      expect(t.rows()).toEqual([['assistant-message', 'First.'], ['error', 'write failed']]);
-    } finally { t.runtime.shutdown(); }
+    using turn = await openWireTurn();
+    const flush = Promise.withResolvers<number>();
+    turn.agent.promptFlush = flush.promise;
+    const steering = turn.steer();
+    await turn.waitForPrompts(2);
+    turn.agent.batchOutput(() => {
+      turn.update('First.');
+      turn.agent.replyToPrompt(0, natural);
+    });
+    await waitFor(() => turn.rows().length === 1);
+    flush.reject(new Error('write failed'));
+    expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+    await turn.waitForDrain();
+    expect(turn.rows()).toEqual([['assistant-message', 'First.'], ['error', 'write failed']]);
   });
 
   it('a refused steer cannot supersede its predecessor in the same pipe read', async () => {
-    const t = await open();
-    try {
-      const refused = t.steer();
-      const queued = t.steer();
-      await t.requestCount(2);
-      t.agent.batchOutput(() => {
-        t.agent.replyToPrompt(1, rpcError(AGY_STEER_REFUSAL));
-        t.update('First.');
-        t.agent.replyToPrompt(0, bare);
-      });
-      expect(await refused).toMatchObject({ kind: 'rejected', reason: 'provider-rejected' });
-      expect(await queued).toEqual({ kind: 'accepted' });
-      t.agent.batchOutput(() => {
-        t.update('Second.');
-        t.agent.replyToPrompt(2, natural);
-        t.update('Late thought.', 'agent_thought_chunk');
-      });
-      await t.drained();
-      expect(t.rows()).toEqual([['assistant-message', 'First.'], ['assistant-message', 'Second.'], ['thinking', 'Late thought.']]);
-      expect(runEnded(t.events)[0]?.finalResponse).toEqual({ type: 'text', text: 'Second.' });
-    } finally { t.runtime.shutdown(); }
+    using turn = await openWireTurn();
+    const refused = turn.steer();
+    const queued = turn.steer();
+    await turn.waitForPrompts(2);
+    turn.agent.batchOutput(() => {
+      turn.agent.replyToPrompt(1, rpcError(AGY_STEER_REFUSAL));
+      turn.update('First.');
+      turn.agent.replyToPrompt(0, bare);
+    });
+    expect(await refused).toMatchObject({ kind: 'rejected', reason: 'provider-rejected' });
+    expect(await queued).toEqual({ kind: 'accepted' });
+    turn.agent.batchOutput(() => {
+      turn.update('Second.');
+      turn.agent.replyToPrompt(2, natural);
+      turn.update('Late thought.', 'agent_thought_chunk');
+    });
+    await turn.waitForDrain();
+    expect(turn.rows()).toEqual([['assistant-message', 'First.'], ['assistant-message', 'Second.'], ['thinking', 'Late thought.']]);
+    expect(runEnded(turn.events)[0]?.finalResponse).toEqual({ type: 'text', text: 'Second.' });
   });
 
   it.each(['original', 'steer'])('keeps the %s RPC failure in transcript order without advertising a safe retry', async (which) => {
-    const t = await open();
-    try {
-      const steering = t.steer();
-      await t.requestCount(2);
-      t.agent.batchOutput(() => {
-        t.update('First.');
-        t.agent.replyToPrompt(0, which === 'original' ? rpcError('Failed.') : natural);
-        t.update('Second.');
-        t.agent.replyToPrompt(1, which === 'steer' ? rpcError('Failed.') : bare);
-      });
-      expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
-      await t.drained();
-      const first = ['assistant-message', 'First.'];
-      const second = ['assistant-message', 'Second.'];
-      const error = ['error', 'Failed.'];
-      expect(t.rows()).toEqual(which === 'original' ? [first, error, second] : [first, second, error]);
-      expect(runEnded(t.events)[0]?.outcome).toBe('failed');
-    } finally { t.runtime.shutdown(); }
+    using turn = await openWireTurn();
+    const steering = turn.steer();
+    await turn.waitForPrompts(2);
+    turn.agent.batchOutput(() => {
+      turn.update('First.');
+      turn.agent.replyToPrompt(0, which === 'original' ? rpcError('Failed.') : natural);
+      turn.update('Second.');
+      turn.agent.replyToPrompt(1, which === 'steer' ? rpcError('Failed.') : bare);
+    });
+    expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+    await turn.waitForDrain();
+    const first = ['assistant-message', 'First.'];
+    const second = ['assistant-message', 'Second.'];
+    const error = ['error', 'Failed.'];
+    expect(turn.rows()).toEqual(which === 'original' ? [first, error, second] : [first, second, error]);
+    expect(runEnded(turn.events)[0]?.outcome).toBe('failed');
   });
 
   it('does not acknowledge the steer from a bare reply after an overlapping executor failure', async () => {
-    const t = await open();
-    try {
-      const steering = t.steer();
-      await t.requestCount(2);
-      t.agent.batchOutput(() => {
-        t.update('\n⚠ agent executor error: model failed');
-        t.agent.replyToPrompt(0, natural);
-        t.agent.replyToPrompt(1, bare);
-      });
-      expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
-      await t.drained();
-      expect(t.rows()).toEqual([['error', expect.stringContaining('model failed')]]);
-    } finally { t.runtime.shutdown(); }
+    using turn = await openWireTurn();
+    const steering = turn.steer();
+    await turn.waitForPrompts(2);
+    turn.agent.batchOutput(() => {
+      turn.update('\n⚠ agent executor error: model failed');
+      turn.agent.replyToPrompt(0, natural);
+      turn.agent.replyToPrompt(1, bare);
+    });
+    expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+    await turn.waitForDrain();
+    expect(turn.rows()).toEqual([['error', expect.stringContaining('model failed')]]);
   });
 
   it('does not reopen steering when both replies have drained in reverse order', async () => {
-    const t = await open();
-    try {
-      const steering = t.steer();
-      await t.requestCount(2);
-      t.agent.batchOutput(() => {
-        t.agent.replyToPrompt(1, natural);
-        t.agent.replyToPrompt(0, bare);
-      });
-      expect(await steering).toEqual({ kind: 'accepted' });
-      await t.drained();
-      expect(t.events.filter(e => e.type === 'steerable')).toHaveLength(1);
-    } finally { t.runtime.shutdown(); }
+    using turn = await openWireTurn();
+    const steering = turn.steer();
+    await turn.waitForPrompts(2);
+    turn.agent.batchOutput(() => {
+      turn.agent.replyToPrompt(1, natural);
+      turn.agent.replyToPrompt(0, bare);
+    });
+    expect(await steering).toEqual({ kind: 'accepted' });
+    await turn.waitForDrain();
+    expect(turn.events.filter(e => e.type === 'steerable')).toHaveLength(1);
   });
 
   it('drops a cancellation error delivered after the stop reply in the same read', async () => {
-    const t = await open();
-    try {
-      t.agent.cancelReply = 'ignored';
-      t.stop();
-      t.agent.batchOutput(() => {
-        t.agent.replyToPrompt(0, { result: { stopReason: 'cancelled' } });
-        t.update('\n⚠ agent executor error: context canceled');
-      });
-      await t.drained();
-      expect(t.rows()).toEqual([]);
-      expect(runEnded(t.events)).toEqual([]);
-    } finally { t.runtime.shutdown(); }
+    using turn = await openWireTurn();
+    turn.agent.cancelReply = 'ignored';
+    turn.stop();
+    turn.agent.batchOutput(() => {
+      turn.agent.replyToPrompt(0, { result: { stopReason: 'cancelled' } });
+      turn.update('\n⚠ agent executor error: context canceled');
+    });
+    await turn.waitForDrain();
+    expect(turn.rows()).toEqual([]);
+    expect(runEnded(turn.events)).toEqual([]);
   });
 });
 

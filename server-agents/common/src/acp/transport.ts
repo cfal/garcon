@@ -27,8 +27,7 @@ export interface AcpProcess {
 }
 
 type PendingRequest = {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
+  settle: (reply: AcpReply<unknown>) => void;
   timer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -121,20 +120,21 @@ export class AcpTransport extends EventEmitter {
     return new Promise<T>((resolve, reject) => {
       const timer = timeoutMs > 0
         ? setTimeout(() => {
-          this.#rejectPending(id, new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`));
+          this.#settlePending(id, { error: new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`) });
         }, timeoutMs)
         : null;
       timer?.unref?.();
       this.#pending.set(id, {
-        resolve(value) {
+        settle(raw) {
+          const reply = raw as AcpReply<T>;
           try {
-            onReply?.({ result: value as T });
-            resolve(value as T);
-          } catch (error) { reject(error); }
-        },
-        reject(error) {
-          try { onReply?.({ error }); } catch (callbackError) { reject(callbackError); return; }
-          reject(error);
+            onReply?.({ ...reply });
+          } catch (error) {
+            reject(error);
+            return;
+          }
+          if ('error' in reply) reject(reply.error);
+          else resolve(reply.result);
         },
         timer,
       });
@@ -146,7 +146,7 @@ export class AcpTransport extends EventEmitter {
           ...(params === undefined ? {} : { params }),
         }, onSent && (() => { if (this.#pending.has(id)) onSent(); }), outputDuringWrite);
       } catch (error) {
-        this.#rejectPending(id, error instanceof Error ? error : new Error(String(error)));
+        this.#settlePending(id, { error: error instanceof Error ? error : new Error(String(error)) });
       }
     });
   }
@@ -324,16 +324,13 @@ export class AcpTransport extends EventEmitter {
     }
 
     if (isJsonRpcId(message.id) && 'error' in message && message.error) {
-      this.#rejectPending(message.id, new AcpRpcError(
-        message.error.message,
-        message.error.code,
-        message.error.data,
-      ));
+      const { message: detail, code, data } = message.error;
+      this.#settlePending(message.id, { error: new AcpRpcError(detail, code, data) });
       return;
     }
 
     if (isJsonRpcId(message.id) && 'result' in message) {
-      this.#resolvePending(message.id, message.result);
+      this.#settlePending(message.id, { result: message.result });
       return;
     }
 
@@ -357,26 +354,17 @@ export class AcpTransport extends EventEmitter {
     this.emit('exit', exitCode);
   }
 
-  #takePending(id: AcpJsonRpcId): PendingRequest | null {
+  #settlePending(id: AcpJsonRpcId, reply: AcpReply<unknown>): void {
     const pending = this.#pending.get(id);
-    if (!pending) return null;
+    if (!pending) return;
     this.#pending.delete(id);
     if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = null;
-    return pending;
-  }
-
-  #resolvePending(id: AcpJsonRpcId, value: unknown): void {
-    this.#takePending(id)?.resolve(value);
-  }
-
-  #rejectPending(id: AcpJsonRpcId, error: Error): void {
-    this.#takePending(id)?.reject(error);
+    pending.settle(reply);
   }
 
   #rejectAllPending(error: Error): void {
     for (const id of [...this.#pending.keys()]) {
-      this.#rejectPending(id, error);
+      this.#settlePending(id, { error });
     }
   }
 }

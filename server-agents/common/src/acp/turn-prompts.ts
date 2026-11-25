@@ -1,13 +1,13 @@
 import type { AgentSteerResult } from '@garcon/server-agent-interface';
 import { AcpRpcError } from './errors.js';
-import type { AcpSteeringProtocol } from './event-converter.js';
+import type { AcpSteeringProtocol } from './policy.js';
 import type { AcpSessionPromptResult } from './protocol.js';
 import { humanizeError } from './runtime-helpers.js';
 import type { AcpReply } from './transport.js';
 
-type Prompt = Promise<AcpSessionPromptResult>;
-type OnReply = (reply: AcpReply<AcpSessionPromptResult>) => void;
-type Send = (onReply: OnReply) => Prompt;
+type PromptReply = AcpReply<AcpSessionPromptResult>;
+type OnReply = (reply: PromptReply) => void;
+type Send = (onReply: OnReply) => Promise<AcpSessionPromptResult>;
 type Decide = (result: AgentSteerResult) => void;
 
 interface TurnPromptEvents {
@@ -58,7 +58,7 @@ export class AcpTurnPrompts {
     }
   }
 
-  steer(send: (onSent: () => void, onReply: OnReply) => Prompt, timeoutMs: number): Promise<AgentSteerResult> {
+  steer(send: (onSent: () => void, onReply: OnReply) => Promise<AcpSessionPromptResult>, timeoutMs: number): Promise<AgentSteerResult> {
     const previous = this.#open.values().next().value;
     const decision = Promise.withResolvers<AgentSteerResult>();
     let written = false;
@@ -81,44 +81,50 @@ export class AcpTurnPrompts {
     return decision.promise.finally(() => clearTimeout(timer));
   }
 
-  #track(send: Send, decide?: Decide, admission: Overlap | null = null): void {
+  #track(send: Send, decide?: Decide, overlapAtSend: Overlap | null = null): void {
     const id = Symbol();
     this.#open.add(id);
     const onReply: OnReply = reply => {
       if (!this.#open.delete(id)) return;
       const overlap = this.#overlap;
-      let refused = false;
+      let outcome: AgentSteerResult;
       try {
-        if ('error' in reply && admission && !admission.acknowledged
-          && reply.error instanceof AcpRpcError && this.events.steering?.refused(reply.error)) {
-          refused = true;
-          decide?.({ kind: 'rejected', reason: 'provider-rejected', message: reply.error.message });
-        } else {
-          const candidate = this.events.takeFailure();
-          const error = 'error' in reply ? humanizeError(reply.error) : candidate;
-          const previous = overlap?.previous === id;
-          if (previous && !error && 'result' in reply && this.events.steering?.likelySuperseded(reply.result)) {
-            overlap.acknowledged = true;
-            overlap.acceptWhenWritten();
-          } else if (!previous || this.#open.size || error) {
-            // A displaced predecessor's late reply must not replace its successor's final response.
-            this.events.onBoundary(this.#failure ? null : error);
-          }
-          if (error) this.#failure ??= new Error(error);
-          decide?.(!this.#failure && 'result' in reply && reply.result?.stopReason && reply.result.stopReason !== 'cancelled'
-            ? { kind: 'accepted' } : unconfirmed(error ?? 'The prompt ended without confirming the steering input'));
-        }
+        const successor = overlap?.previous === id ? overlap : null;
+        outcome = this.#settleReply(reply, overlapAtSend, successor);
       } catch (error) {
         const message = humanizeError(error);
         this.#failure ??= new Error(message);
-        decide?.(unconfirmed(message));
+        outcome = unconfirmed(message);
       }
-      if (!refused && overlap && this.#open.has(overlap.previous)) overlap.awaitingLateReply = true;
+      decide?.(outcome);
+      if (outcome.kind !== 'rejected' && overlap && this.#open.has(overlap.previous)) overlap.awaitingLateReply = true;
       else this.#overlap = null;
       this.#closeIfDrained();
       if (this.#open.size && overlap?.awaitingLateReply && !this.#overlap) this.events.onSteerable();
     };
     void send(onReply).catch((error: Error) => onReply({ error }));
+  }
+
+  #settleReply(reply: PromptReply, overlapAtSend: Overlap | null, successor: Overlap | null): AgentSteerResult {
+    if ('error' in reply && overlapAtSend && !overlapAtSend.acknowledged
+      && reply.error instanceof AcpRpcError && this.events.steering?.refused(reply.error)) {
+      return { kind: 'rejected', reason: 'provider-rejected', message: reply.error.message };
+    }
+
+    const candidate = this.events.takeFailure();
+    const error = 'error' in reply ? humanizeError(reply.error) : candidate;
+    if (successor && !error && 'result' in reply && this.events.steering?.likelySuperseded(reply.result)) {
+      successor.acknowledged = true;
+      successor.acceptWhenWritten();
+    } else if (!successor || this.#open.size > 0 || error) {
+      // A displaced predecessor's late reply must not replace its successor's final response.
+      this.events.onBoundary(this.#failure ? null : error);
+    }
+    if (error) this.#failure ??= new Error(error);
+    if (!this.#failure && 'result' in reply && reply.result?.stopReason && reply.result.stopReason !== 'cancelled') {
+      return { kind: 'accepted' };
+    }
+    return unconfirmed(error ?? 'The prompt ended without confirming the steering input');
   }
 
   #closeIfDrained(): void {

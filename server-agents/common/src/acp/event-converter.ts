@@ -1,8 +1,7 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ToolUseChatMessage } from '@garcon/common/chat-types';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
-import type { AcpSessionPromptResult, AcpSessionUpdateNotification } from './protocol.js';
-import type { AcpRpcError } from './errors.js';
+import type { AcpSessionUpdateNotification } from './protocol.js';
 
 export interface AcpSessionUpdateContext {
   chatId: string;
@@ -37,16 +36,10 @@ export interface AcpEventConverter {
     context: AcpSessionUpdateContext,
   ): AcpBlockingRequestToolUse | null;
   endTurn?(sessionId: string, context: AcpSessionUpdateContext): ChatMessage[];
-  readonly steering?: AcpSteeringProtocol;
   // Returns and clears a failure the agent reported in-band before ending the turn normally.
   takeTurnFailure?(sessionId: string): string | null;
   // Drops per-session state once the runtime retires the session.
   releaseSession?(sessionId: string): void;
-}
-
-export interface AcpSteeringProtocol {
-  likelySuperseded(result: AcpSessionPromptResult): boolean;
-  refused(error: AcpRpcError): boolean;
 }
 
 // Tool call statuses that settle a call; every one but `completed` is an error.
