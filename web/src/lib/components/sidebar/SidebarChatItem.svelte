@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
@@ -168,25 +167,16 @@
 	let rightClickPos = $state<{ x: number; y: number } | null>(null);
 	let isAtCursor = $derived(rightClickPos !== null);
 
-	let menuMounted = $state(false);
+	let retainMenuContent = $state(false);
 	let menuTrigger = $state<HTMLButtonElement | null>(null);
+	let menuFocusReturnTarget: HTMLButtonElement | null = null;
 	const menuTriggerClass = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground';
 
-	function prepareMenu(): void {
-		if (!isMobile && !isMultiSelectMode) menuMounted = true;
-	}
-
-	function openDesktopMenu(): void {
-		menuMounted = true;
-		menuOpen = true;
-	}
-
-	async function prepareFocusedMenu(event: FocusEvent & { currentTarget: HTMLButtonElement }): Promise<void> {
-		if (!event.currentTarget.matches(':focus-visible')) return;
-		prepareMenu();
-		await tick();
-		if (document.activeElement === document.body) menuTrigger?.focus({ preventScroll: true });
-	}
+	// Keeps the desktop portal owner until Bits completes its exit.
+	$effect.pre(() => {
+		if (isMobile || isMultiSelectMode) retainMenuContent = false;
+		else if (menuOpen) retainMenuContent = true;
+	});
 
 	// Positions the dropdown anchor at the cursor for desktop right-click.
 	function handleRightClick(e: MouseEvent) {
@@ -194,7 +184,7 @@
 		e.preventDefault();
 		if (!itemEl) return;
 		const rect = itemEl.getBoundingClientRect();
-		menuMounted = true;
+		menuFocusReturnTarget = null;
 		rightClickPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
 		menuOpen = true;
 	}
@@ -206,6 +196,7 @@
 		const target = e.currentTarget as HTMLElement;
 		const itemRect = itemEl.getBoundingClientRect();
 		const btnRect = target.getBoundingClientRect();
+		menuFocusReturnTarget = null;
 		rightClickPos = {
 			x: btnRect.left - itemRect.left,
 			y: btnRect.bottom - itemRect.top,
@@ -408,9 +399,6 @@
 				draggable={canNativeDrag ? true : undefined}
 				ondragstart={canNativeDrag ? handleDragStart : undefined}
 				ondragend={canNativeDrag ? handleDragEnd : undefined}
-				onpointerenter={prepareMenu}
-				onpointerdown={prepareMenu}
-				onfocus={prepareMenu}
 				oncontextmenu={handleRightClick}
 				class={cn(
 					'w-full h-full justify-start pr-2 font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
@@ -449,27 +437,32 @@
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>
-			{#if isMobile || menuMounted}
-				<DropdownMenu
-					bind:open={menuOpen}
-					onOpenChange={(open) => {
-						if (!open) rightClickPos = null;
-					}}
+			<DropdownMenu
+				bind:open={menuOpen}
+				onOpenChange={(open) => {
+					if (open) menuFocusReturnTarget = !isMobile && !isAtCursor ? menuTrigger : null;
+					else rightClickPos = null;
+				}}
+				onOpenChangeComplete={(open) => {
+					if (!open && !menuOpen) retainMenuContent = false;
+				}}
+			>
+				<DropdownMenuTrigger
+					bind:ref={menuTrigger}
+					data-sidebar-touch-drag-ignore
+					class={isAtCursor ? 'block w-px h-px opacity-0 pointer-events-none' : menuTriggerClass}
+					aria-label={m.sidebar_chat_more_actions()}
+					tabindex={isAtCursor ? -1 : 0}
 				>
-					<DropdownMenuTrigger
-						bind:ref={menuTrigger}
-						data-sidebar-touch-drag-ignore
-						class={isAtCursor
-							? 'block w-px h-px opacity-0 pointer-events-none'
-							: menuTriggerClass}
-						aria-label={m.sidebar_chat_more_actions()}
-						tabindex={isAtCursor ? -1 : 0}
+					{#if !isAtCursor}
+						<EllipsisVertical class="h-3.5 w-3.5" />
+					{/if}
+				</DropdownMenuTrigger>
+				{#if isMobile || menuOpen || retainMenuContent}
+					<DropdownMenuContent
+						align={isAtCursor ? 'start' : 'end'}
+						getFocusReturnTarget={() => menuFocusReturnTarget}
 					>
-						{#if !isAtCursor}
-							<EllipsisVertical class="h-3.5 w-3.5" />
-						{/if}
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
 						<SidebarChatMenu
 							delegatedChatsCollapsed={branch?.isCollapsed}
 							{onToggleDelegatedChats}
@@ -499,26 +492,8 @@
 							onDelete={requestDelete}
 						/>
 					</DropdownMenuContent>
-				</DropdownMenu>
-			{:else}
-				<button
-					type="button"
-					data-sidebar-touch-drag-ignore
-					class={menuTriggerClass}
-					aria-label={m.sidebar_chat_more_actions()}
-					aria-haspopup="menu"
-					aria-expanded="false"
-					onfocus={prepareFocusedMenu}
-					onclick={openDesktopMenu}
-					onkeydown={(event) => {
-						if (event.key !== 'ArrowDown') return;
-						event.preventDefault();
-						openDesktopMenu();
-					}}
-				>
-					<EllipsisVertical class="h-3.5 w-3.5" />
-				</button>
-			{/if}
+				{/if}
+			</DropdownMenu>
 		</div>
 	{/if}
 </div>

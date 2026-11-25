@@ -76,19 +76,66 @@ async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promis
   });
 }
 
-test('the first direct pointer click opens an unprepared row menu', async () => {
+test('the first direct row-menu press opens before release and selects on drag-release', async () => {
   await withChromiumFixture('sidebar-first-pointer-menu', async ({ page, integration }) => {
     const chatId = integration.newChatId();
     const turn = await integration.client.startDirectChat({ chatId, content: 'Synthetic row',
       projectPath: integration.executionDirs.project, agent: integration.directAgents.openAi });
     await integration.client.waitForTurnTerminal(chatId, turn.turnId);
     await page.goto(integration.garcon.baseUrl);
-    const trigger = page.locator(`[data-sidebar-virtual-row="${chatId}"] button[aria-haspopup="menu"]`);
-    await trigger.hover();
+    const trigger = page.locator(`[data-sidebar-virtual-row="${chatId}"]`).getByRole('button', { name: 'Chat actions' });
+    const menu = page.getByRole('menu');
+    await browserExpect(trigger).toBeVisible();
+    await browserExpect(menu).toHaveCount(0);
+    const bounds = (await trigger.boundingBox())!;
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     await page.mouse.down();
-    await page.evaluate(() => new Promise(requestAnimationFrame));
-    await page.mouse.up();
+    try {
+      const rename = menu.getByRole('menuitem', { name: 'Rename', exact: true });
+      await browserExpect(rename).toBeVisible();
+      await rename.hover();
+    } finally {
+      await page.mouse.up();
+    }
+    await browserExpect(page.getByRole('dialog', { name: 'Rename chat' })).toBeVisible();
+  });
+});
+
+test('row-menu Escape returns focus to the same trigger after hovering from the composer', async () => {
+  await withChromiumFixture('sidebar-row-menu-focus', async ({ page, integration }) => {
+    const chatId = integration.newChatId();
+    const turn = await integration.client.startDirectChat({ chatId, content: 'Synthetic row',
+      projectPath: integration.executionDirs.project, agent: integration.directAgents.openAi });
+    await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+    const row = page.locator(`[data-sidebar-virtual-row="${chatId}"]`);
+    const body = row.locator('[data-slot="sidebar-chat-summary"]');
+    const trigger = row.getByRole('button', { name: 'Chat actions' });
+    const originalTrigger = await trigger.elementHandle();
+    const menu = page.getByRole('menu');
+    const composer = page.locator('[data-composer] textarea');
+    await composer.focus();
+    await browserExpect(composer).toBeFocused();
+    await body.hover();
+    await browserExpect(menu).toHaveCount(0);
+    await trigger.click();
     await browserExpect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await browserExpect(menu.locator('[role="menuitem"]:focus')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await browserExpect(menu).toBeHidden();
+    await browserExpect(trigger).toBeFocused();
+    expect(await originalTrigger.evaluate(element => element.isConnected && element === document.activeElement)).toBe(true);
+
+    await page.keyboard.press('ArrowDown');
+    await browserExpect(menu.getByRole('menuitem').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await browserExpect(menu).toBeHidden();
+
+    await body.click({ button: 'right' });
+    await menu.getByRole('menuitem', { name: 'Select', exact: true }).click();
+    await browserExpect(row.getByRole('checkbox')).toBeVisible();
+    await browserExpect(trigger).toHaveCount(0);
   });
 });
 
