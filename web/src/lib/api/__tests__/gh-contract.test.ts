@@ -44,6 +44,16 @@ describe('gh API contract', () => {
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/gh/status?executorId=remote-executor');
 	});
 
+	it.each([
+		{ executorId: 'local', instanceId: 'local-instance' },
+		{ executorId: 'remote-executor', instanceId: '' },
+	])('rejects a status response without the requested executor and a serving instance', async (scope) => {
+		fetchMock.mockResolvedValueOnce(Response.json(scope));
+		await expect(getGhStatus('remote-executor')).rejects.toMatchObject({
+			errorCode: 'GIT_INVALID_RESULT',
+		});
+	});
+
 	it(
 		'keeps the pull request detail alive for the full paginated GitHub read budget',
 		async () => {
@@ -65,7 +75,7 @@ describe('gh API contract', () => {
 				),
 			);
 
-			await getPullRequest(target, 42);
+			await getPullRequest(target, 42, { timeoutMs: undefined });
 
 			expect(timeout).toHaveBeenCalledWith(GH_DETAIL_TIMEOUT_MS);
 			expect(fetchMock.mock.calls[0][1].signal).toBe(deadline.signal);

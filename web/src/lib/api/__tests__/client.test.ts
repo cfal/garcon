@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+	apiFetch,
 	apiGet,
 	apiPost,
 	apiPut,
@@ -76,6 +77,18 @@ describe('API client helpers', () => {
 		expect(url).toBe('/api/test');
 		expect(opts.headers.get('Authorization')).toBe('Bearer test-token');
 		expect(opts.headers.has('Content-Type')).toBe(false);
+	});
+
+	it('lets fetch supply the multipart boundary for FormData', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({ uploaded: true }));
+		const body = new FormData();
+		body.append('file', 'data');
+
+		await apiFetch('/api/upload', { method: 'POST', body });
+
+		const [, options] = fetchMock.mock.calls[0];
+		expect(options.body).toBe(body);
+		expect(options.headers.has('Content-Type')).toBe(false);
 	});
 
 	describe.each([

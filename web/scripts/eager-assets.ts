@@ -57,7 +57,7 @@ export function assertLazyRendererAssets(assets: readonly { file: string; names:
 }
 
 export function assertEagerAssetBudget(javascriptBytes: number, cssBytes: number): void {
-	if (javascriptBytes > 3_400_000 || cssBytes > 460_000) {
+	if (javascriptBytes > 730_000 || cssBytes > 290_000) {
 		throw new Error(`Eager asset budget exceeded: ${javascriptBytes} JS bytes, ${cssBytes} CSS bytes`);
 	}
 }

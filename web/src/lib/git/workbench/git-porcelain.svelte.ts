@@ -26,6 +26,8 @@ import type { GitWorkbenchMutationRunner } from '$lib/git/workbench/git-workbenc
 
 export type GitInspectorView = 'none' | 'conflicts' | 'stash' | 'history' | 'graph';
 
+const BLAME_PREVIEW_LINES = 12;
+
 export interface GitPorcelainDeps {
 	selectedFile: () => string | null;
 	refreshAfterMutation: (project: GitProjectTarget) => Promise<void>;
@@ -88,6 +90,8 @@ export class GitPorcelainState {
 		await this.withLoading(
 			'Failed to load conflicts',
 			async (context) => {
+				this.conflicts = [];
+				this.conflictDetails = null;
 				const result = await getGitConflicts(project, { signal: context.signal });
 				if (!this.isActiveLoad(context)) return;
 				const conflicts = result.conflicts;
@@ -99,11 +103,7 @@ export class GitPorcelainState {
 				}
 				if (!this.isActiveLoad(context)) return;
 				this.conflicts = conflicts;
-				if (conflicts.length > 0) {
-					this.conflictDetails = details;
-				} else {
-					this.conflictDetails = null;
-				}
+				this.conflictDetails = details;
 			},
 			parent,
 		);
@@ -111,6 +111,7 @@ export class GitPorcelainState {
 
 	async selectConflict(project: GitProjectTarget, filePath: string): Promise<void> {
 		await this.withLoading('Failed to load conflict details', async (context) => {
+			this.conflictDetails = null;
 			const details = await getGitConflictDetails(project, filePath, { signal: context.signal });
 			if (this.isActiveLoad(context)) this.conflictDetails = details;
 		});
@@ -121,7 +122,7 @@ export class GitPorcelainState {
 		filePath: string,
 		side: 'ours' | 'theirs',
 	): Promise<void> {
-		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
+		if (!this.canMutateConflict(project, filePath)) return;
 		await this.withLoading('Failed to accept conflict side', async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await gitAcceptConflictSide(project, filePath, side);
@@ -135,7 +136,7 @@ export class GitPorcelainState {
 	}
 
 	async markConflictResolved(project: GitProjectTarget, filePath: string): Promise<void> {
-		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
+		if (!this.canMutateConflict(project, filePath)) return;
 		await this.withLoading('Failed to mark conflict resolved', async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await gitMarkConflictResolved(project, filePath);
@@ -146,6 +147,15 @@ export class GitPorcelainState {
 				}
 			});
 		});
+	}
+
+	private canMutateConflict(project: GitProjectTarget, path: string): boolean {
+		return (
+			!this.isLoading &&
+			this.conflictDetails?.path === path &&
+			this.deps.isCurrentTarget(project) &&
+			this.deps.ensureFreshForGitMutation()
+		);
 	}
 
 	async loadStashes(project: GitProjectTarget, parent?: PorcelainLoadContext): Promise<void> {
@@ -256,12 +266,12 @@ export class GitPorcelainState {
 			}
 			const [history, blame] = await Promise.all([
 				getGitFileHistory(project, filePath, 8, { signal }),
-				getGitBlame(project, filePath, 'HEAD', 12, { signal }),
+				getGitBlame(project, filePath, 'HEAD', BLAME_PREVIEW_LINES + 1, { signal }),
 			]);
 			if (!this.isActiveLoad(context) || this.deps.selectedFile() !== filePath) return;
 			this.fileHistory = history.commits;
-			this.blameLines = blame.lines;
-			this.blameTruncated = blame.truncated;
+			this.blameLines = blame.lines.slice(0, BLAME_PREVIEW_LINES);
+			this.blameTruncated = blame.truncated || blame.lines.length > BLAME_PREVIEW_LINES;
 		});
 	}
 

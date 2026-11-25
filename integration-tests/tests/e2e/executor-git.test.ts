@@ -139,6 +139,44 @@ test('hidden Workbench return reloads retained files after an editor save', asyn
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
 
+test('Git reloads the inspector without discarding an open review comment on executor reconnect', async () => {
+  await withE2eFixture('executor-git-inspector-with-draft', async fixture => {
+    const { client, executionDirs, directAgents } = fixture.integration;
+    const project = executionDirs.project;
+    await initializeFixtureRepository(project);
+    await writeFile(join(project, 'example.txt'), 'Original stash content\n');
+    await runFixtureGit(project, 'stash', 'push', '-m', 'Original synthetic stash');
+    await writeFile(join(project, 'example.txt'), 'Pending review content\n');
+    const chatId = fixture.integration.newChatId();
+    const accepted = await client.startDirectChat({
+      chatId, projectPath: project, content: 'Synthetic review chat', agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, accepted.turnId);
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1_600, 900);
+    await app.openChat(chatId);
+    await openGit(fixture);
+    await showGitDiff(fixture);
+    await waitForDiff(fixture, 'Pending review content');
+    await fixture.page.$eval(`${GIT_PANEL} [data-git-virtual-diff-root] button[aria-label="Add to chat"]`,
+      button => (button as HTMLButtonElement).click());
+    const comment = `${GIT_PANEL} [data-git-comment-composer] textarea`;
+    await app.fill(comment, 'Retained synthetic comment');
+    await app.clickButton('Stash');
+    await waitForStashes(fixture, ['Original synthetic stash']);
+    const cursor = client.events().length;
+    await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+    await waitForGitExecutorOutage(fixture);
+    await runFixtureGit(project, 'stash', 'drop');
+    await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+    await waitForExecutorReconnect(fixture.integration, cursor);
+    await app.waitForText('No stashes');
+    expect(await fixture.page.$eval(comment, element => (element as HTMLTextAreaElement).value))
+      .toBe('Retained synthetic comment');
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);
+
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`Git destructive confirmations retire with the executor session (${executionBackend})`, async () => {
     await withE2eFixture(`executor-git-confirmations-${executionBackend}`, async fixture => {
