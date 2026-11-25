@@ -31,6 +31,48 @@ function harness(durable = true) {
 }
 
 describe('FileDraftCoordinator', () => {
+	it('clears a failed first backup after reverting an unsaved edit', async () => {
+		const { repository, coordinator } = harness();
+		const value = document();
+		vi.spyOn(repository, 'putDraft').mockRejectedValueOnce(new Error('Storage busy'));
+		await coordinator.settle(value);
+		expect(value.recoveryError).toBe('Storage busy');
+		value.content = value.baseline;
+		await coordinator.flush();
+		expect(value.recoveryError).toBeNull();
+		coordinator.destroy();
+	});
+
+	it.each([false, true])(
+		'retries confirmed-byte cleanup against the live peer draft (replaced: %s)',
+		async (replaced) => {
+			const { repository, coordinator } = harness();
+			const value = document();
+			const peer = new FileDraftCoordinator({
+				repository,
+				deploymentId: 'deployment',
+				userNamespace: 'user',
+			});
+			await peer.settle(value);
+			const [summary] = await repository.getDrafts('user', 'deployment');
+			const stored = (await repository.getDraft(summary.documentId))!;
+			value.baseline = value.content;
+			value.dirty = false;
+			coordinator.confirmSave(value, stored.content);
+			vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new Error('Storage busy'));
+			await coordinator.settle(value);
+			expect(value.recoveryError).toBe('Storage busy');
+			if (replaced) await repository.putDraft({ ...stored, content: 'new peer edit' });
+			await coordinator.flush();
+			expect(value.recoveryError).toBeNull();
+			expect((await repository.getDraft(summary.documentId))?.content).toBe(
+				replaced ? 'new peer edit' : undefined,
+			);
+			coordinator.destroy();
+			peer.destroy();
+		},
+	);
+
 	it('skips clean checkpoints without a draft, but deletes confirmed writes before close', async () => {
 		const { repository, coordinator } = harness();
 		const remove = vi.spyOn(repository, 'deleteDraft');
