@@ -10,6 +10,7 @@ import { SnippetStore } from '../store.ts';
 import { PreambleStore } from '../../preambles/store.ts';
 import { SnippetShortNameCoordinator } from '../short-name-coordinator.ts';
 import { PreambleService } from '../../preambles/service.ts';
+import { SNIPPET_ARGUMENTS_MAX_LENGTH } from '../../../../common/snippets.ts';
 
 const createdDirs = [];
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
@@ -436,6 +437,21 @@ describe('snippet service', () => {
     ).rejects.toMatchObject({
       code: 'SNIPPET_EXPANSION_TOO_LONG',
       status: 422,
+    });
+    await expect(
+      service.expand({
+        shortName: 'large',
+        arguments: { type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'SNIPPET_VALIDATION_FAILED',
+      message: 'Snippet is invalid',
+      status: 400,
     });
   });
 

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import {
+  SNIPPET_VALIDATION_ERROR_MESSAGE,
   normalizeExpandSnippetRequest,
   normalizeSnippetDefinitionInput,
   type CreateSnippetRequest,
@@ -271,7 +272,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
   }
 
   #validationError(): SnippetDomainError {
-    return new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Snippet is invalid', 400);
+    return new SnippetDomainError('SNIPPET_VALIDATION_FAILED', SNIPPET_VALIDATION_ERROR_MESSAGE, 400);
   }
 
   #emitInvalidated(reason: SnippetsInvalidationReason): void {
