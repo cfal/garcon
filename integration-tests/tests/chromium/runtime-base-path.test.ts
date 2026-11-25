@@ -46,6 +46,8 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
       const markupChunk = Object.values(manifest).find(entry => entry.name === 'vendor-cm-lang-markup');
       expect(markupChunk).toBeDefined();
       const workspaceChunk = manifest['src/routes/WorkspaceBoot.svelte'].file;
+      const fuseChunk = Object.values(manifest).find(entry => entry.name === 'vendor-fuse');
+      expect(fuseChunk).toBeDefined();
       const origin = new URL(baseUrl).origin;
       const requested = new Set<string>();
       const sockets: string[] = [];
@@ -69,11 +71,13 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
       await page.goto(origin + share.shareUrl);
       await browserExpect(page.getByText('echo:Synthetic mounted browser turn', { exact: true })).toBeVisible();
       expect(requested.has(`${basePath}/${workspaceChunk}`)).toBe(false);
+      expect(requested.has(`${basePath}/${fuseChunk!.file}`)).toBe(false);
       expect(sockets).toEqual([]);
       await page.locator(`a[href="${basePath}/"]`).first().click();
       await browserExpect(page).toHaveURL(`${baseUrl}/`);
       await browserExpect.poll(() => sockets).toContain(`${basePath}/ws`);
       expect(requested.has(`${basePath}/${workspaceChunk}`)).toBe(true);
+      expect(requested.has(`${basePath}/${fuseChunk!.file}`)).toBe(true);
       await page.goto(`${baseUrl}/chat/${chatId}`);
       await browserExpect(page.locator('[data-file-tree-entry-text]').filter({ hasText: 'mounted.html' })).toBeVisible();
       await page.getByRole('tab', { name: 'Files', exact: true }).click();
