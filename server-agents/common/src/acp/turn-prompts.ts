@@ -18,8 +18,8 @@ interface TurnPromptEvents {
 }
 
 interface Overlap {
-  previous: symbol;
-  acceptWhenWritten(): void;
+  readonly predecessor: symbol;
+  acknowledge(): void;
   acknowledged: boolean;
   awaitingLateReply: boolean;
 }
@@ -59,12 +59,15 @@ export class AcpTurnPrompts {
   }
 
   steer(send: (onSent: () => void, onReply: OnReply) => Promise<AcpSessionPromptResult>, timeoutMs: number): Promise<AgentSteerResult> {
-    const previous = this.#open.values().next().value;
+    const predecessor = this.#open.values().next().value;
     const decision = Promise.withResolvers<AgentSteerResult>();
     let written = false;
-    const overlap: Overlap | null = previous ? {
-      previous, acknowledged: false, awaitingLateReply: false,
-      acceptWhenWritten: () => { if (written) decision.resolve({ kind: 'accepted' }); },
+    const overlap: Overlap | null = predecessor ? {
+      predecessor, acknowledged: false, awaitingLateReply: false,
+      acknowledge() {
+        this.acknowledged = true;
+        if (written) decision.resolve({ kind: 'accepted' });
+      },
     } : null;
     this.#overlap = overlap;
     // A reserved steer written after a clean drain starts a new native prompt of the same run.
@@ -89,7 +92,7 @@ export class AcpTurnPrompts {
       const overlap = this.#overlap;
       let outcome: AgentSteerResult;
       try {
-        const successor = overlap?.previous === id ? overlap : null;
+        const successor = overlap?.predecessor === id ? overlap : null;
         outcome = this.#settleReply(reply, overlapAtSend, successor);
       } catch (error) {
         const message = humanizeError(error);
@@ -97,8 +100,11 @@ export class AcpTurnPrompts {
         outcome = unconfirmed(message);
       }
       decide?.(outcome);
-      if (outcome.kind !== 'rejected' && overlap && this.#open.has(overlap.previous)) overlap.awaitingLateReply = true;
-      else this.#overlap = null;
+      if (outcome.kind !== 'rejected' && overlap && this.#open.has(overlap.predecessor)) {
+        overlap.awaitingLateReply = true;
+      } else {
+        this.#overlap = null;
+      }
       this.#closeIfDrained();
       if (this.#open.size && overlap?.awaitingLateReply && !this.#overlap) this.events.onSteerable();
     };
@@ -114,8 +120,7 @@ export class AcpTurnPrompts {
     const candidate = this.events.takeFailure();
     const error = 'error' in reply ? humanizeError(reply.error) : candidate;
     if (successor && !error && 'result' in reply && this.events.steering?.likelySuperseded(reply.result)) {
-      successor.acknowledged = true;
-      successor.acceptWhenWritten();
+      successor.acknowledge();
     } else if (!successor || this.#open.size > 0 || error) {
       // A displaced predecessor's late reply must not replace its successor's final response.
       this.events.onBoundary(this.#failure ? null : error);

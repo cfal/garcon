@@ -538,14 +538,12 @@ export class AcpAgentRuntime {
       success = !turn.aborted;
     } catch (error) {
       admissionClosed = request.executionAdmission?.signal.aborted === true;
-      // The transport failure is reported; an in-band failure the agent sent
-      // first must not add a second error row at the final flush.
-      if (this.#canRouteSource(turn)) this.#converter.takeTurnFailure?.(session.id);
       if (!turn.aborted) failureMessage = humanizeError(error);
     } finally {
       releasePending();
       if (executionStarted) {
-        if (turn.aborted && this.#canRouteSource(turn)) this.#converter.takeTurnFailure?.(session.id);
+        // A late in-band error must not add a row after a Stop or duplicate a reported failure.
+        if (!success && this.#canRouteSource(turn)) this.#converter.takeTurnFailure?.(session.id);
         this.#emitFlushedMessages(turn);
       }
       if (turn.aborted) {

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatExecutionControlUpdatedMessage } from '../../../common/ws-events.js';
-import { assistantContents, messagesOfType, userContents } from '../../support/chat-assertions.js';
+import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { withTimeout } from '../../support/deferred.js';
 import { geminiFunctionCall, geminiText } from '../../support/fake-gemini-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -126,16 +126,17 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity steering', () => {
         afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
       const transcript = (await client.getMessages(chatId)).messages;
-      const answers = assistantContents(transcript);
       if (outcome === 'original error' || outcome === 'steer error') {
         expect(terminal.type).toBe('agent-run-failed');
-        expect(messagesOfType(transcript, 'error').map(row => row.content)).toEqual([expect.stringContaining(fault.message)]);
-        expect(answers).toEqual([outcome === 'original error' ? reply : 'Original answer.']);
-        const output = transcript.map(row => row.message.type).filter(type => type === 'assistant-message' || type === 'error');
+        const output = transcript.flatMap(({ message }) => message.type === 'assistant-message' || message.type === 'error'
+          ? [[message.type, message.content]] : []);
+        const errorRow = ['error', expect.stringContaining(fault.message)];
         expect(output).toEqual(outcome === 'original error'
-          ? ['error', 'assistant-message'] : ['assistant-message', 'error']);
+          ? [errorRow, ['assistant-message', reply]]
+          : [['assistant-message', 'Original answer.'], errorRow]);
       } else {
         expectFinished(terminal.type);
+        const answers = assistantContents(transcript);
         if (outcome === 'original success') expect(answers).toEqual(['Original answer.', reply]);
         else expect(answers.join('')).toBe('Original answer.' + reply);
       }
