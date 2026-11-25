@@ -42,6 +42,7 @@
 	let isOpen = $state(false);
 	let query = $state('');
 	let highlighted = $state.raw<WorkbenchCommand | null>(null);
+	let retainedOrder = $state.raw<readonly WorkbenchCommand[] | null>(null);
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let optionList = $state<HTMLDivElement>();
 	let Fuse = $state.raw<typeof import('fuse.js').default>();
@@ -98,9 +99,9 @@
 			)
 			.slice(0, searchResultLimit);
 	});
-	// Loading the fuzzy index must not replace a command the user already chose.
-	let filteredCommands = $derived(highlighted && !matches.includes(highlighted)
-		? [highlighted, ...matches.slice(0, searchResultLimit - 1)]
+	// Appends new matches without moving the options already being navigated.
+	let filteredCommands = $derived(retainedOrder
+		? [...new Set([...retainedOrder, ...matches])].slice(0, searchResultLimit)
 		: matches);
 	let selectedIndex = $derived(highlighted ? filteredCommands.indexOf(highlighted) : 0);
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
@@ -116,12 +117,14 @@
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
 		highlighted = null;
+		retainedOrder = null;
 	}
 
 	function open() {
 		if (!Fuse) {
 			void loadFuse().then(
 				({ default: SearchIndex }) => {
+					if (!Fuse && highlighted && query.trim()) retainedOrder = matches;
 					Fuse = SearchIndex;
 				},
 				(error: unknown) => console.warn('Fuzzy command search failed to load:', error),
@@ -142,6 +145,7 @@
 			isOpen = false;
 			commands = [];
 			highlighted = null;
+			retainedOrder = null;
 			query = '';
 		});
 		if (document.activeElement === document.body) opener?.focus({ preventScroll: true });

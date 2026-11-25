@@ -153,9 +153,21 @@ it('retains a keyboard highlight when fuzzy matching replaces the initial result
 		await fireEvent.input(input, { target: { value: 'open' } });
 		await fireEvent.keyDown(input, { key: 'ArrowDown' });
 		expect(screen.getByRole('option', { selected: true }).textContent).toContain('Document');
+		const initialOptions = screen.getAllByRole('option');
 		gate.resolve();
 		await screen.findByRole('option', { name: /Opeen/ });
-		expect(input.getAttribute('aria-activedescendant')).toBe(screen.getByRole('option', { selected: true }).id);
+		const highlighted = screen.getByRole('option', { selected: true });
+		expect(input.getAttribute('aria-activedescendant')).toBe(highlighted.id);
+		const rows = screen.getAllByRole('option');
+		expect(rows.slice(0, initialOptions.length)).toEqual(initialOptions);
+		const neighbor = screen.getByRole('option', { name: /Opeen/ });
+		highlighted.focus();
+		await fireEvent.pointerDown(neighbor);
+		await fireEvent.focus(neighbor);
+		expect(screen.getAllByRole('option')).toEqual(rows);
+		await fireEvent.pointerUp(neighbor);
+		await fireEvent.focus(highlighted);
+		input.focus();
 		await fireEvent.keyDown(input, { key: 'Enter' });
 		expect(invoke).toHaveBeenCalledWith(candidates[1], expect.anything());
 	} finally {
