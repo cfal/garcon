@@ -435,10 +435,11 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);
 
-  test('publishes background task requests and pairs even empty or failed replies by call ID', async () => {
+  test('publishes task requests and agent messages with their empty or failed results', async () => {
     const { model } = requireEnvironment();
     model.scriptTurn([geminiFunctionCall('list-call', 'manage_task', { Action: 'list' })]);
     model.scriptTurn([geminiFunctionCall('status-call', 'manage_task', { Action: 'status', TaskId: 'missing-job' })]);
+    model.scriptTurn([geminiFunctionCall('send-call', 'send_message', { Recipient: 'missing-agent', Message: 'Check the result.' })]);
     model.scriptTurn([geminiText('Finished checking tasks.')]);
     await withIntegrationFixture('antigravity-background-tasks', async (fixture) => {
       const chatId = fixture.newChatId();
@@ -455,6 +456,8 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
         { toolId: 'list-call', type: 'tool-result', content: {}, isError: false },
         { toolId: 'status-call', type: 'background-task-tool-use', action: 'status', taskId: 'missing-job' },
         { toolId: 'status-call', type: 'tool-result', content: { status: 'failed' }, isError: true },
+        { toolId: 'send-call', type: 'agent-message-tool-use', recipient: 'missing-agent', message: 'Check the result.' },
+        { toolId: 'send-call', type: 'tool-result', isError: true },
       ]);
       expect(messagesOfType(messages, 'tool-result')[0]?.content).toEqual({});
       model.assertSettled();

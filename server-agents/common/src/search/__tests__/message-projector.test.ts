@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { AgentMessageToolUseMessage, BackgroundTaskToolUseMessage } from '@garcon/common/chat-types';
 import { ClaudeMonitorToolUseMessage, ClaudeToolSearchToolUseMessage, CommandOutputMessage, CommandResultMessage, PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '../message-projector.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
@@ -10,6 +11,13 @@ const complete: CommandOutcome = {
 };
 
 describe('transcript search message projector', () => {
+  test('indexes task input and agent messages as tool calls', () => {
+    expect(projectSearchMessage(new BackgroundTaskToolUseMessage('', 'call', 'send_input', 'task', 'go')))
+      .toMatchObject({ role: 'tool', body: 'send_input task go' });
+    expect(projectSearchMessage(new AgentMessageToolUseMessage('', 'send', 'reviewer', 'Check')))
+      .toMatchObject({ role: 'tool', body: 'reviewer Check' });
+  });
+
   test('omits only clean command completion without filtering authored content', () => {
     expect(projectSearchMessage(new CommandResultMessage('', 'command', complete))).toBeNull();
     expect(projectSearchMessage(new UserMessage('', 'Completed'))).toMatchObject({ body: 'Completed' });
