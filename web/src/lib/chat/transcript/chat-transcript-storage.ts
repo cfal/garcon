@@ -67,10 +67,12 @@ function emptyIndex(): ChatSnapshotIndex {
 }
 
 function discardSnapshotIndex(keepKey?: string): void {
-	for (let i = localStorage.length - 1; i >= 0; i--) {
+	const obsolete: string[] = [];
+	for (let i = 0; i < localStorage.length; i++) {
 		const key = localStorage.key(i);
-		if (key?.startsWith(SNAPSHOT_PREFIX) && key !== keepKey && key !== INDEX_KEY) localStorage.removeItem(key);
+		if (key?.startsWith(SNAPSHOT_PREFIX) && key !== keepKey && key !== INDEX_KEY) obsolete.push(key);
 	}
+	for (const key of obsolete) localStorage.removeItem(key);
 	localStorage.removeItem(INDEX_KEY);
 }
 

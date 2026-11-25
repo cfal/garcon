@@ -62,12 +62,17 @@ describe('LocalChatTranscriptStorage', () => {
 	});
 
 	it.each(['read', 'write'])('discards obsolete snapshot bodies on the first %s without touching preferences', (first) => {
-		persist(storage, 'old', [entry(1, 'old')]);
+		const oldKeys = Array.from({ length: 25 }, (_, i) => snapshotKey(`old-${i}`));
+		for (const key of oldKeys) localStorage.setItem(key, 'obsolete');
 		localStorage.setItem(INDEX_KEY, JSON.stringify({ version: 6, entries: [{ chatId: 'old' }] }));
 		localStorage.setItem('pref_local_settings', '{}');
-		if (first === 'read') expect(storage.restore('old')).toBeNull();
+		const keyAt = localStorage.key.bind(localStorage);
+		// Storage enumeration may reorder the remaining keys after each removal.
+		vi.spyOn(localStorage, 'key').mockImplementation(i =>
+			keyAt(localStorage.length % 2 === 0 ? i : localStorage.length - 1 - i));
+		if (first === 'read') expect(storage.listCursors()).toEqual([]);
 		persist(storage, 'new', [entry(1, 'new')]);
-		expect(localStorage.getItem(snapshotKey('old'))).toBeNull();
+		expect(oldKeys.filter(key => localStorage.getItem(key) !== null)).toEqual([]);
 		expect(localStorage.getItem('pref_local_settings')).toBe('{}');
 		expect(storage.restore('new')?.stale).toBe(false);
 		expect(storage.listCursors().map(c => c.chatId)).toEqual(['new']);
