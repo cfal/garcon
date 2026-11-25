@@ -371,6 +371,42 @@ describe('ModelCatalogStore', () => {
 		});
 	});
 
+	it('ignores the retired catalog and validates against the server', async () => {
+		const retiredKey = 'pref_model_catalog_v3';
+		localStorage.setItem(
+			retiredKey,
+			JSON.stringify({
+				agentModels: { sample: [{ value: 'old-model', label: 'Old Model' }] },
+				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'old-model' }) },
+				apiProviderCatalog: [],
+				lastFetchedAt: 0,
+			}),
+		);
+		vi.mocked(clientApi.apiFetch).mockResolvedValueOnce(
+			mockResponse(
+				catalogBody([
+					agentEntry('sample', {
+						defaultModel: 'new-model',
+						models: [{ value: 'new-model', label: 'New Model' }],
+					}),
+				]),
+				200,
+				{ etag: 'W/"catalog:new"' },
+			),
+		);
+		using read = vi.spyOn(localStorage, 'getItem');
+
+		const store = createModelCatalogStore();
+		expect(store.getDefaultModel('sample')).toBe('');
+		await store.refreshIfStale();
+
+		expect(read).not.toHaveBeenCalledWith(retiredKey);
+		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models', { cache: 'no-store' });
+		expect(store.getDefaultModel('sample')).toBe('new-model');
+		expect(store.etag).toBe('W/"catalog:new"');
+		expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').etag).toBe('W/"catalog:new"');
+	});
+
 	it('revalidates an ETag without replacing the hydrated catalog', async () => {
 		localStorage.setItem(
 			STORAGE_KEY,
