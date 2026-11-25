@@ -1,6 +1,3 @@
-import { untrack } from 'svelte';
-import { runCatalogLoad } from '$lib/api/catalog-refresh.js';
-import { ApiError } from '$lib/api/client.js';
 import {
 	createPreamble,
 	getPreambles,
@@ -8,6 +5,10 @@ import {
 	reorderPreambles,
 	updatePreamble,
 } from '$lib/api/preambles.js';
+import {
+	VersionedCatalogStore,
+	type VersionedCatalogStatus,
+} from '$lib/stores/versioned-catalog-store.svelte.js';
 import {
 	PREAMBLE_ERROR_CODES,
 	type Preamble,
@@ -56,7 +57,7 @@ function preamblesDiffer(left: readonly Preamble[], right: readonly Preamble[]):
 	});
 }
 
-export type PreamblesStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type PreamblesStatus = VersionedCatalogStatus;
 
 export interface PreamblesStoreDeps {
 	get?: typeof getPreambles;
@@ -67,309 +68,118 @@ export interface PreamblesStoreDeps {
 }
 
 export class PreamblesStore {
-	status = $state<PreamblesStatus>('idle');
-	snapshot = $state<PreamblesSnapshot | null>(null);
-	error = $state<string | null>(null);
-	isRefreshing = $state(false);
-	invalidationVersion = $state(0);
-	#refreshLoopActive = $state(false);
-	#seq = 0;
-	#appliedSeq = 0;
-	#lastMutationAckSeq = 0;
-	#resetSeq = 0;
-	#lastReadFailureSeq = 0;
-	#lastError: unknown = null;
-	#loadPromise: Promise<PreamblesSnapshot> | null = null;
-	#refreshLoopPromise: Promise<void> | null = null;
-	#refreshRequested = false;
-	#localRevision = 0;
-	#confirmedSnapshot: PreamblesSnapshot | null = null;
+	readonly #catalog: VersionedCatalogStore<PreamblesSnapshot>;
 
-	constructor(private readonly deps: PreamblesStoreDeps = {}) {}
+	constructor(private readonly deps: PreamblesStoreDeps = {}) {
+		this.#catalog = new VersionedCatalogStore<PreamblesSnapshot>({
+			load: () => (this.deps.get ?? getPreambles)(),
+			loadErrorMessage: 'Failed to load preambles',
+			revisionConflictCode: PREAMBLE_ERROR_CODES.revisionConflict,
+			entriesDiffer: (left, right) => preamblesDiffer(left.preambles, right.preambles),
+		});
+	}
+
+	get status(): PreamblesStatus {
+		return this.#catalog.status;
+	}
+
+	get snapshot(): PreamblesSnapshot | null {
+		return this.#catalog.snapshot;
+	}
+
+	get error(): string | null {
+		return this.#catalog.error;
+	}
+
+	get isRefreshing(): boolean {
+		return this.#catalog.isRefreshing;
+	}
+
+	get invalidationVersion(): number {
+		return this.#catalog.invalidationVersion;
+	}
 
 	get hasLoaded(): boolean {
-		return this.snapshot !== null;
+		return this.#catalog.hasLoaded;
 	}
 
 	get hasFreshSnapshot(): boolean {
-		return (
-			this.snapshot !== null &&
-			!this.isRefreshing &&
-			!this.#refreshLoopActive &&
-			this.error === null
-		);
+		return this.#catalog.hasFreshSnapshot;
 	}
 
 	get preambles() {
-		return this.snapshot?.preambles ?? [];
+		return this.#catalog.snapshot?.preambles ?? [];
 	}
 
-	async ensureLoaded(): Promise<PreamblesSnapshot> {
-		while (!this.snapshot) {
-			if (this.#refreshLoopPromise) {
-				await this.#refreshLoopPromise;
-				if (this.snapshot) return this.snapshot;
-				if (this.#lastError !== null) throw this.#lastError;
-			}
-			const resetSeq = this.#resetSeq;
-			try {
-				await this.refresh();
-			} catch (error) {
-				if (resetSeq !== this.#resetSeq) continue;
-				throw error;
-			}
-		}
-		return this.snapshot;
+	ensureLoaded(): Promise<PreamblesSnapshot> {
+		return this.#catalog.ensureLoaded();
 	}
 
-	async refresh(): Promise<PreamblesSnapshot> {
-		if (this.#loadPromise) return this.#loadPromise;
-		const requestSeq = ++this.#seq;
-		if (this.snapshot) this.isRefreshing = true;
-		else {
-			this.status = 'loading';
-			this.error = null;
-		}
-		this.#lastError = null;
-		const get = this.deps.get ?? getPreambles;
-		let needsReconcileAfterFailure = false;
-		this.#loadPromise = get()
-			.then((next) => {
-				// Ignore reads started before a reconnect or reset so the queued GET establishes state.
-				if (requestSeq < this.#resetSeq) {
-					return this.snapshot ?? next;
-				}
-				const confirmed = this.#confirmedSnapshot;
-				// Ignore reads overtaken by a concurrent mutation unless the read observed a newer revision.
-				if (requestSeq < this.#appliedSeq) {
-					if (confirmed && next.revision <= confirmed.revision) {
-						return this.snapshot ?? confirmed;
-					}
-					return this.#installSnapshot(next, requestSeq);
-				}
-				// A lower revision or changed same-revision confirmed catalog from an authoritative GET
-				// indicates a reset or restore; advance the reset boundary so older in-flight mutations reconcile.
-				if (
-					confirmed &&
-					(next.revision < confirmed.revision ||
-						(next.revision === confirmed.revision &&
-							preamblesDiffer(confirmed.preambles, next.preambles)))
-				) {
-					this.#resetSeq = ++this.#seq;
-					return this.#installSnapshot(next, this.#resetSeq);
-				}
-				return this.#installSnapshot(next, requestSeq);
-			})
-			.catch((error) => {
-				if (requestSeq >= this.#resetSeq) {
-					this.#lastReadFailureSeq = ++this.#seq;
-					this.#lastError = error;
-					this.error = error instanceof Error ? error.message : 'Failed to load preambles';
-					if (!this.snapshot) this.status = 'error';
-					if (requestSeq < Math.max(this.#appliedSeq, this.#lastMutationAckSeq)) {
-						if (this.#refreshLoopPromise) this.#refreshRequested = true;
-						else needsReconcileAfterFailure = true;
-					}
-				}
-				throw error;
-			})
-			.finally(() => {
-				this.isRefreshing = false;
-				this.#loadPromise = null;
-				if (needsReconcileAfterFailure && !this.#refreshLoopPromise) {
-					void this.refreshIfLoaded();
-				}
-			});
-		return this.#loadPromise;
+	refresh(): Promise<PreamblesSnapshot> {
+		return this.#catalog.refresh();
 	}
 
 	loadInBackground(): Promise<void> {
-		return runCatalogLoad(() => this.ensureLoaded());
+		return this.#catalog.loadInBackground();
 	}
 
 	refreshInBackground(): Promise<void> {
-		return runCatalogLoad(() => this.refresh());
+		return this.#catalog.refreshInBackground();
 	}
 
-	// Marks a reconnect boundary so in-flight reads and mutations reconcile via a fresh GET.
 	reconcileAfterReconnect(): Promise<void> {
-		this.#resetSeq = ++this.#seq;
-		return this.refreshIfLoaded();
+		return this.#catalog.reconcileAfterReconnect();
 	}
 
-	async refreshIfLoaded(): Promise<void> {
-		this.invalidationVersion += 1;
-		if (!this.snapshot && this.status === 'idle') return;
-		this.#refreshRequested = true;
-		if (this.#refreshLoopPromise) return this.#refreshLoopPromise;
-		this.#refreshLoopActive = true;
-		let loopFinished = false;
-		const loop = untrack(async () => {
-			try {
-				do {
-					this.#refreshRequested = false;
-					const joinedExistingLoad = this.#loadPromise !== null;
-					try {
-						await this.refresh();
-					} catch {
-						if (!joinedExistingLoad && !this.#refreshRequested) return;
-					}
-					if (joinedExistingLoad) this.#refreshRequested = true;
-				} while (this.#refreshRequested);
-			} finally {
-				loopFinished = true;
-				this.#refreshLoopPromise = null;
-				this.#refreshLoopActive = false;
-			}
-		});
-		if (!loopFinished) this.#refreshLoopPromise = loop;
-		return loop;
+	refreshIfLoaded(): Promise<void> {
+		return this.#catalog.refreshIfLoaded();
 	}
 
-	async create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
-		const current = this.snapshot ?? (await this.ensureLoaded());
-		const dispatchSeq = ++this.#seq;
-		try {
-			const create = this.deps.create ?? createPreamble;
-			const result = await create({
-				expectedRevision: current.revision,
-				preamble: definition,
-			});
-			return await this.#applyMutationSnapshot(result.snapshot, dispatchSeq);
-		} catch (error) {
-			await this.#refreshAfterConflict(error);
-			throw error;
-		}
+	create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
+		const create = this.deps.create ?? createPreamble;
+		return this.#catalog.mutate((current) =>
+			create({ expectedRevision: current.revision, preamble: definition }),
+		);
 	}
 
-	async update(
+	update(
 		id: string,
 		definition: PreambleDefinitionInput,
 		expectedRevision: number,
 	): Promise<PreamblesSnapshot> {
-		if (!this.snapshot) await this.ensureLoaded();
-		const dispatchSeq = ++this.#seq;
-		try {
-			const update = this.deps.update ?? updatePreamble;
-			const result = await update({
-				expectedRevision,
-				id,
-				preamble: definition,
-			});
-			return await this.#applyMutationSnapshot(result.snapshot, dispatchSeq);
-		} catch (error) {
-			await this.#refreshAfterConflict(error);
-			throw error;
-		}
+		const update = this.deps.update ?? updatePreamble;
+		return this.#catalog.mutate(() =>
+			update({ expectedRevision, id, preamble: definition }),
+		);
 	}
 
-	async remove(id: string): Promise<PreamblesSnapshot> {
-		const current = this.snapshot ?? (await this.ensureLoaded());
-		const dispatchSeq = ++this.#seq;
-		try {
-			const remove = this.deps.remove ?? removePreamble;
-			const result = await remove({
-				expectedRevision: current.revision,
-				id,
-			});
-			return await this.#applyMutationSnapshot(result.snapshot, dispatchSeq);
-		} catch (error) {
-			await this.#refreshAfterConflict(error);
-			throw error;
-		}
+	remove(id: string): Promise<PreamblesSnapshot> {
+		const remove = this.deps.remove ?? removePreamble;
+		return this.#catalog.mutate((current) =>
+			remove({ expectedRevision: current.revision, id }),
+		);
 	}
 
 	async move(id: string, direction: 'up' | 'down'): Promise<void> {
-		const current = this.snapshot ?? (await this.ensureLoaded());
+		const current = this.#catalog.snapshot ?? (await this.#catalog.ensureLoaded());
 		const index = current.preambles.findIndex((preamble) => preamble.id === id);
 		const target = direction === 'up' ? index - 1 : index + 1;
 		if (index < 0 || target < 0 || target >= current.preambles.length) return;
 		const preambles = [...current.preambles];
 		[preambles[index], preambles[target]] = [preambles[target], preambles[index]];
-		const optimisticMarker = this.#localRevision + 1;
-		this.#localRevision = optimisticMarker;
-		this.snapshot = { ...current, preambles };
-		const dispatchSeq = ++this.#seq;
-		try {
-			const reorder = this.deps.reorder ?? reorderPreambles;
-			const result = await reorder({
-				expectedRevision: current.revision,
-				orderedPreambleIds: preambles.map((preamble) => preamble.id),
-			});
-			if (dispatchSeq < this.#resetSeq && this.#localRevision === optimisticMarker) {
-				this.snapshot = current;
-			}
-			await this.#applyMutationSnapshot(result.snapshot, dispatchSeq);
-		} catch (error) {
-			if (this.#localRevision === optimisticMarker) this.snapshot = current;
-			await this.#refreshAfterConflict(error);
-			throw error;
-		}
+		const reorder = this.deps.reorder ?? reorderPreambles;
+		await this.#catalog.mutate(
+			(base) =>
+				reorder({
+					expectedRevision: base.revision,
+					orderedPreambleIds: preambles.map((preamble) => preamble.id),
+				}),
+			{ preview: { ...current, preambles } },
+		);
 	}
 
 	applySnapshot(next: PreamblesSnapshot): PreamblesSnapshot {
-		if (this.snapshot && next.revision < this.snapshot.revision) return this.snapshot;
-		return this.#installSnapshot(next, ++this.#seq);
-	}
-
-	#installSnapshot(
-		next: PreamblesSnapshot,
-		seq: number,
-		clearError = true,
-	): PreamblesSnapshot {
-		this.snapshot = next;
-		this.#confirmedSnapshot = next;
-		this.status = 'ready';
-		if (clearError) {
-			this.error = null;
-			this.#lastError = null;
-		}
-		this.#appliedSeq = Math.max(this.#appliedSeq, seq);
-		this.#localRevision += 1;
-		return next;
-	}
-
-	// Withholds mutation results across reconnect or reset boundaries; after a same-connection
-	// read failure, retains the acknowledged mutation snapshot without clearing the error before reconciling.
-	async #applyMutationSnapshot(
-		next: PreamblesSnapshot,
-		dispatchSeq: number,
-	): Promise<PreamblesSnapshot> {
-		this.#lastMutationAckSeq = ++this.#seq;
-		if (dispatchSeq < this.#resetSeq) {
-			await this.refreshIfLoaded();
-			return this.snapshot ?? next;
-		}
-		const confirmed = this.#confirmedSnapshot;
-		if (dispatchSeq < this.#lastReadFailureSeq) {
-			if (!confirmed || next.revision > confirmed.revision) {
-				this.#installSnapshot(next, ++this.#seq, false);
-			}
-			await this.refreshIfLoaded();
-			return this.snapshot ?? next;
-		}
-		if (confirmed) {
-			if (next.revision < confirmed.revision) {
-				return this.snapshot ?? confirmed;
-			}
-			if (
-				next.revision === confirmed.revision &&
-				preamblesDiffer(confirmed.preambles, next.preambles)
-			) {
-				await this.refreshIfLoaded();
-				return this.snapshot ?? confirmed;
-			}
-		}
-		return this.#installSnapshot(next, ++this.#seq);
-	}
-
-	async #refreshAfterConflict(error: unknown): Promise<void> {
-		if (
-			!(error instanceof ApiError) ||
-			error.errorCode !== PREAMBLE_ERROR_CODES.revisionConflict
-		)
-			return;
-		await this.refreshIfLoaded();
+		return this.#catalog.applySnapshot(next);
 	}
 }
 

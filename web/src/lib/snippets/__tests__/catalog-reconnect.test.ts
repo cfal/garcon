@@ -96,13 +96,8 @@ describe('bindCatalogReconnect', () => {
 		vi.spyOn(Date, 'now').mockReturnValue(frozenNow);
 
 		const ws = new WsConnection();
-		let resolveRemove!: (value: { success: true; snapshot: SnippetsSnapshot }) => void;
-		const remove = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: SnippetsSnapshot }>((resolve) => {
-					resolveRemove = resolve;
-				}),
-		);
+		const removal = Promise.withResolvers<{ success: true; snapshot: SnippetsSnapshot }>();
+		const remove = vi.fn(() => removal.promise);
 		const getSnippets = vi
 			.fn<() => Promise<SnippetsSnapshot>>()
 			.mockResolvedValueOnce(snippetsSnapshot(3, ['a', 'b']))
@@ -135,7 +130,7 @@ describe('bindCatalogReconnect', () => {
 			expect(getSnippets).toHaveBeenCalledTimes(1);
 			expect(getPreambles).toHaveBeenCalledTimes(1);
 
-			resolveRemove({ success: true, snapshot: snippetsSnapshot(4, ['a']) });
+			removal.resolve({ success: true, snapshot: snippetsSnapshot(4, ['a']) });
 			expect(await removing).toEqual(snippetsSnapshot(4, ['a']));
 			expect(getSnippets).toHaveBeenCalledTimes(1);
 			expect(snippets.snapshot).toEqual(snippetsSnapshot(4, ['a']));
