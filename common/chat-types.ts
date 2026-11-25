@@ -299,6 +299,11 @@ export class AgentMessageToolUseMessage {
     public recipient: string,
     public message: string,
   ) {}
+
+  static fromFields(timestamp: string, toolId: string, recipient: unknown, message: unknown) {
+    if (typeof recipient !== 'string' || !recipient || typeof message !== 'string') return null;
+    return new AgentMessageToolUseMessage(timestamp, toolId, recipient, message);
+  }
 }
 
 export class TaskToolUseMessage {
@@ -1003,10 +1008,8 @@ const TOOL_USE_MESSAGE_PARSERS = {
   'background-task-tool-use': (data) =>
     BackgroundTaskToolUseMessage.fromFields(str(data.timestamp), str(data.toolId), data.action, data.taskId, data.input),
 
-  'agent-message-tool-use': (data) => {
-    if (typeof data.recipient !== 'string' || !data.recipient || typeof data.message !== 'string') return null;
-    return new AgentMessageToolUseMessage(str(data.timestamp), str(data.toolId), data.recipient, data.message);
-  },
+  'agent-message-tool-use': (data) =>
+    AgentMessageToolUseMessage.fromFields(str(data.timestamp), str(data.toolId), data.recipient, data.message),
 
   'task-tool-use': (data) =>
     new TaskToolUseMessage(

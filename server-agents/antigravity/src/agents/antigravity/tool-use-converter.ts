@@ -189,9 +189,9 @@ export function convertAntigravityToolUse(
       break;
     }
     case 'send_message': {
-      const recipient = stringField(input, 'Recipient', 'recipient');
-      const message = stringField(input, 'Message', 'message');
-      if (recipient && message !== undefined) return new AgentMessageToolUseMessage(timestamp, id, recipient, message);
+      const row = AgentMessageToolUseMessage.fromFields(timestamp, id,
+        field(input, 'Recipient', 'recipient'), field(input, 'Message', 'message'));
+      if (row) return row;
       break;
     }
     case 'invoke_subagent': {

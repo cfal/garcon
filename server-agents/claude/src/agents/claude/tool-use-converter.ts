@@ -206,9 +206,9 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
       return new TodoReadToolUseMessage(ts, toolId);
 
     case 'taskstop': {
-      const taskId = asString(input.task_id ?? input.shell_id);
-      if (!taskId) break;
-      return new BackgroundTaskToolUseMessage(ts, toolId, 'stop', taskId);
+      const row = BackgroundTaskToolUseMessage.fromFields(ts, toolId, 'stop', input.task_id ?? input.shell_id);
+      if (row) return row;
+      break;
     }
 
     case 'agent':
