@@ -1,11 +1,13 @@
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import { effectiveExecutorId } from '$shared/executors';
 import * as m from '$lib/paraglide/messages.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	fileDraftKey,
 	type FileDraftRepository,
 	type FileDraft,
 	type FileDraftSummary,
+	type FileDraftVersion,
 } from './file-draft-repository.js';
 
 const FILE_DRAFT_IDLE_DELAY_MS = 750;
@@ -30,14 +32,18 @@ interface QueuedCheckpoint {
 	completion: Promise<void>;
 }
 
+interface CleanCheckpoint {
+	cleanContent: string;
+	observed?: FileDraftVersion;
+}
+
 export class FileDraftCoordinator {
 	available = $state.raw<readonly FileDraftSummary[]>([]);
 	error = $state<string | null>(null);
 	readonly #pending = new Map<string, PendingCheckpoint>();
 	readonly #writes = new Map<string, Promise<void>>();
 	readonly #queuedCheckpoints = new Map<string, QueuedCheckpoint>();
-	readonly #persistedDrafts = new Set<string>();
-	#discovered = false;
+	readonly #ownedCheckpoints = new Map<string, FileDraftVersion>();
 	#discoveryGeneration = 0;
 	#destroyed = false;
 
@@ -51,8 +57,6 @@ export class FileDraftCoordinator {
 				this.options.deploymentId,
 			);
 			if (this.#destroyed || generation !== this.#discoveryGeneration) return;
-			for (const draft of available) this.#persistedDrafts.add(draft.documentId);
-			this.#discovered = true;
 			this.available = available;
 			this.error = null;
 		} catch (error) {
@@ -115,13 +119,17 @@ export class FileDraftCoordinator {
 		}
 	}
 
+	adoptCheckpoint(draft: FileDraft): void {
+		void this.#enqueue(draft.documentId, async () => this.#rememberCheckpoint(draft));
+	}
+
 	discard(draft: FileDraftSummary): void {
 		this.#queuedCheckpoints.delete(draft.documentId);
 		this.opened(draft.canonicalFileRootPath, draft.normalizedRelativePath, draft.executorId);
 		void this.#enqueue(draft.documentId, async () => {
 			try {
 				await this.options.repository.deleteDraft(draft.documentId);
-				this.#persistedDrafts.delete(draft.documentId);
+				this.#ownedCheckpoints.delete(draft.documentId);
 				this.error = null;
 			} catch (error) {
 				this.error = errorMessage(error);
@@ -139,8 +147,17 @@ export class FileDraftCoordinator {
 		);
 	}
 
-	settle(document: FileDocumentState): Promise<void> {
-		return this.#checkpoint(this.#entry(document));
+	async observeBeforeSave(document: FileDocumentState): Promise<FileDraftVersion | undefined> {
+		if (!this.options.repository.durable) return undefined;
+		try {
+			return (await this.options.repository.getDraftSummary(this.#draftKey(document))) ?? undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	settle(document: FileDocumentState, observed?: FileDraftVersion): Promise<void> {
+		return this.#checkpoint(this.#entry(document), observed);
 	}
 
 	closeDocument(document: FileDocumentState): void {
@@ -161,8 +178,7 @@ export class FileDraftCoordinator {
 				this.options.userNamespace,
 				this.options.deploymentId,
 			);
-			this.#persistedDrafts.clear();
-			this.#discovered = true;
+			this.#ownedCheckpoints.clear();
 			this.available = [];
 			this.error = null;
 			return true;
@@ -190,18 +206,26 @@ export class FileDraftCoordinator {
 		return pending;
 	}
 
-	#checkpoint(pending: PendingCheckpoint): Promise<void> {
-		this.#clearTimers(pending);
-		const document = pending.document;
-		if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
-			return Promise.resolve();
-		const documentId = fileDraftKey(
+	#draftKey(document: FileDocumentState): string {
+		return fileDraftKey(
 			this.options.userNamespace,
 			this.options.deploymentId,
 			document.canonicalFileRootPath,
 			document.relativePath,
 			document.executorId,
 		);
+	}
+
+	#rememberCheckpoint({ documentId, savedAt, checkpointId }: FileDraft): void {
+		this.#ownedCheckpoints.set(documentId, { savedAt, checkpointId });
+	}
+
+	#checkpoint(pending: PendingCheckpoint, observed?: FileDraftVersion): Promise<void> {
+		this.#clearTimers(pending);
+		const document = pending.document;
+		if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
+			return Promise.resolve();
+		const documentId = this.#draftKey(document);
 		const record: FileDraft | null = document.dirty
 			? {
 					schemaVersion: 1,
@@ -213,13 +237,17 @@ export class FileDraftCoordinator {
 					normalizedRelativePath: document.relativePath,
 					content: document.currentContent(),
 					savedAt: Date.now(),
+					checkpointId: createRandomId(),
 				}
 			: null;
 		if (!record) {
 			this.#queuedCheckpoints.delete(documentId);
-			if (!this.#writes.has(documentId) && !this.#needsCleanup(documentId, document))
+			if (!observed && !this.#writes.has(documentId) && !this.#ownedCheckpoints.has(documentId))
 				return Promise.resolve();
-			return this.#enqueue(documentId, () => this.#writeCheckpoint(documentId, document, null));
+			const checkpoint = { cleanContent: document.baseline, observed };
+			return this.#enqueue(documentId, () =>
+				this.#writeCheckpoint(documentId, document, checkpoint),
+			);
 		}
 		const queued = this.#queuedCheckpoints.get(documentId);
 		if (queued?.document === document) {
@@ -239,18 +267,27 @@ export class FileDraftCoordinator {
 	async #writeCheckpoint(
 		documentId: string,
 		document: FileDocumentState,
-		record: FileDraft | null,
+		record: FileDraft | CleanCheckpoint,
 	): Promise<void> {
 		try {
-			if (record && !this.options.repository.durable)
-				throw new Error(m.file_recovery_storage_unavailable());
-			if (record) {
-				await this.options.repository.putDraft(record);
-				this.#persistedDrafts.add(documentId);
-			} else if (this.#needsCleanup(documentId, document)) {
-				await this.options.repository.deleteDraft(documentId);
-				this.#persistedDrafts.delete(documentId);
+			if ('cleanContent' in record) {
+				const owned = this.#ownedCheckpoints.get(documentId);
+				if (!owned && !record.observed) return;
+				await this.options.repository.deleteDraft(documentId, (current) => {
+					const matchesContent = current.content === record.cleanContent;
+					return (
+						(matchesVersion(current, owned) &&
+							(current.checkpointId !== undefined || matchesContent)) ||
+						(matchesContent && matchesVersion(current, record.observed))
+					);
+				});
+				this.#ownedCheckpoints.delete(documentId);
 				this.available = this.available.filter((entry) => entry.documentId !== documentId);
+			} else {
+				if (!this.options.repository.durable)
+					throw new Error(m.file_recovery_storage_unavailable());
+				await this.options.repository.putDraft(record);
+				this.#rememberCheckpoint(record);
 			}
 			document.recoveryError = null;
 		} catch (error) {
@@ -258,12 +295,6 @@ export class FileDraftCoordinator {
 			document.recoveryError = cause.message;
 			this.options.onError?.(document, cause);
 		}
-	}
-
-	#needsCleanup(documentId: string, document: FileDocumentState): boolean {
-		return (
-			!this.#discovered || this.#persistedDrafts.has(documentId) || document.recoveryError !== null
-		);
 	}
 
 	#enqueue(documentId: string, operation: () => Promise<void>): Promise<void> {
@@ -283,6 +314,14 @@ export class FileDraftCoordinator {
 		pending.idleTimer = null;
 		pending.maxTimer = null;
 	}
+}
+
+function matchesVersion(current: FileDraftVersion, expected: FileDraftVersion | undefined): boolean {
+	return (
+		expected !== undefined &&
+		current.savedAt === expected.savedAt &&
+		current.checkpointId === expected.checkpointId
+	);
 }
 
 function errorMessage(error: unknown): string {

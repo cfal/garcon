@@ -9,6 +9,7 @@ export type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
 export interface PendingPermissionRequest {
   readonly permissionOccurrenceId: string;
+  readonly toolCallId: string;
   readonly turn: AcpTurnContext;
   readonly requestId: AcpJsonRpcId;
   readonly responseForDecision: (decision: PermissionDecisionPayload) => Record<string, unknown>;

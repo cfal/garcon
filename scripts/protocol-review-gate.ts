@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 const protocolFile = 'server/remote/transport/rpc-protocol.ts';
 export const sharedWireFiles = new Set([
   'common/agent-execution.ts', 'common/agent-integration.ts', 'common/agents.ts',
-  'common/chat-types.ts', 'common/chat-message-coercion.ts', 'common/executors.ts',
+  'common/chat-types.ts', 'common/chat-message-coercion.ts', 'common/chat-plan.ts', 'common/executors.ts',
   'common/agent-settings.ts', 'common/attachments.ts', 'common/chat-modes.ts',
   'common/http-error.ts', 'common/transcript-seed.ts', 'common/server-runtime.ts',
   'common/api-providers.ts', 'common/git.ts', 'common/gh.ts', 'common/git-execution.ts',
