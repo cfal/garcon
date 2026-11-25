@@ -183,8 +183,8 @@ const EDITOR_COMMANDS: Record<
 export class CodeEditorController {
 	readonly vim = new FileVimMode({
 		getView: () => this.#view,
-		undo: () => this.#runtime.undo(this.session.id),
-		redo: () => this.#runtime.redo(this.session.id),
+		undo: () => this.run('undo'),
+		redo: () => this.run('redo'),
 		save: () => this.onSave?.(),
 	});
 	#view: EditorView | null = null;
@@ -511,9 +511,7 @@ export class CodeEditorController {
 						const command = historyCommandForInputType(event.inputType);
 						if (!command) return false;
 						event.preventDefault();
-						return command === 'undo'
-							? this.#runtime.undo(this.session.id)
-							: this.#runtime.redo(this.session.id);
+						return this.run(command);
 					},
 				}),
 				EditorView.updateListener.of((update) => {
@@ -528,16 +526,16 @@ export class CodeEditorController {
 				search({ top: true, createPanel: createFileSearchPanel }),
 				Prec.high(
 					keymap.of([
-						{ key: 'Mod-z', run: () => this.#runtime.undo(this.session.id), preventDefault: true },
+						{ key: 'Mod-z', run: () => this.run('undo'), preventDefault: true },
 						{
 							key: 'Mod-y',
 							mac: 'Mod-Shift-z',
-							run: () => this.#runtime.redo(this.session.id),
+							run: () => this.run('redo'),
 							preventDefault: true,
 						},
 						{
 							linux: 'Ctrl-Shift-z',
-							run: () => this.#runtime.redo(this.session.id),
+							run: () => this.run('redo'),
 							preventDefault: true,
 						},
 					]),

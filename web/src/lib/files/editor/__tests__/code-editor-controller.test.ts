@@ -75,6 +75,29 @@ function createController() {
 }
 
 describe('CodeEditorController', () => {
+	it.each(['historyUndo', 'historyRedo'] as const)(
+		'blocks native %s immediately when a document starts refreshing',
+		(inputType) => {
+			const { session, controller } = createController();
+			const host = parent();
+			controller.attach(host);
+			const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+			const original = controller.currentContent();
+			view.dispatch({ changes: { from: 0, insert: 'edited ' } });
+			if (inputType === 'historyRedo') expect(controller.run('undo')).toBe(true);
+			const before = controller.currentContent();
+			const applyHistory = () => view.contentDOM.dispatchEvent(
+				new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true }),
+			);
+			session.refreshing = true;
+			applyHistory();
+			expect(controller.currentContent()).toBe(before);
+			session.refreshing = false;
+			applyHistory();
+			expect(controller.currentContent()).toBe(inputType === 'historyUndo' ? original : 'edited ' + original);
+		},
+	);
+
 	it('clamps retained selection when rebuilding after a canonical shrink', () => {
 		const { session, controller } = createController();
 		controller.dispose();
