@@ -6,6 +6,8 @@ import { decodeLedgerRow, encodeLedgerDraft } from '../../../ledger/codec.js';
 test.each([
   { reason: 'Operation refused' },
   { details: 'metadata '.repeat(500), output: 'Operation refused' },
+  { error: 'Operation refused', output: ' \t\n'.repeat(1000) },
+  { error: 'Operation refused', output: 'Working' + ' '.repeat(3000) },
 ])('indexes the structured diagnostic before supplementary data after ledger serialization', rawOutput => {
   const at = '2026-01-01T00:00:00Z';
   const message = new ToolResultMessage(at, 'task', { rawOutput,

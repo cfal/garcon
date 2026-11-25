@@ -118,7 +118,16 @@ function boundedUnknownText(
     const record = value as Record<string, unknown>;
     if (preferred) {
       for (const key of Object.keys(preferred)) {
-        if (Object.hasOwn(record, key)) appendChild(key, record[key], preferred[key]);
+        if (!Object.hasOwn(record, key)) continue;
+        let child = record[key];
+        if (typeof child === 'string') {
+          // Only searchable text spends the budget; never scan beyond the bounded prefix.
+          const prefix = child.slice(0, budget.remaining);
+          budget.truncated ||= prefix.length < child.length;
+          child = prefix.replace(/\s+/g, ' ').trim();
+          if (!child) continue;
+        }
+        appendChild(key, child, preferred[key]);
       }
     }
     for (const key in record) {
