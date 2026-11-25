@@ -47,6 +47,7 @@ export interface GitVirtualReviewMeasurements {
 export interface GitVirtualReviewRowSource {
 	readonly rowCount: number;
 	readonly measurementRevision: string;
+	readonly syntaxRevision?: object;
 	rowAt(index: number): GitVirtualReviewRow | null;
 	rowKey(index: number): string | number;
 	estimateRowHeight(index: number, lineHeight: number): number;
@@ -87,7 +88,7 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 	private readonly fileStarts = new Map<string, number>();
 	private readonly fileKeyBases = new Map<string, number>();
 	private readonly fileStates = new Map<string, 'pending' | 'resolved' | 'terminal'>();
-	private readonly interactions = new Map<string, ReturnType<typeof interactionForFile>>();
+	private lastInteraction?: { file: GitReviewFileSummary; value: FileInteraction };
 
 	constructor(private readonly options: BuildVirtualRowsOptions) {
 		const summaryByPath = new Map(options.summary.files.map((file) => [file.path, file]));
@@ -181,10 +182,14 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 			: String(this.structuralRevision);
 	}
 
+	get syntaxRevision(): object | undefined {
+		return this.options.syntaxResults;
+	}
+
 	private interactionForFile(file: GitReviewFileSummary) {
-		const previous = this.interactions.get(file.path);
+		const previous = this.lastInteraction?.file === file ? this.lastInteraction.value : undefined;
 		const next = interactionForFile(this.options, file, previous);
-		if (next !== previous) this.interactions.set(file.path, next);
+		if (next !== previous) this.lastInteraction = { file, value: next };
 		return next;
 	}
 

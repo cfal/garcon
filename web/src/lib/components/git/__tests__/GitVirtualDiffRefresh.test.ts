@@ -11,6 +11,9 @@ import type {
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import { arrayGitVirtualReviewRowSource } from '$lib/git/review/__tests__/array-git-virtual-review-row-source.js';
 import { measureVirtualRow } from '../git-virtual-row-measurement.js';
+import { buildGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { GitDiffSyntaxController } from '$lib/git/review/git-diff-syntax-controller.svelte.js';
+import { indexedBody, reviewRowOptions } from '$lib/git/review/__tests__/git-review-row-fixtures.js';
 import {
 	FakeVirtualListController,
 	publishVirtualDiffRange,
@@ -579,80 +582,41 @@ describe('Git virtual diff refresh', () => {
 		expect(virtualDiffControllerCalls.options[0]?.measureElement).toBe(measureVirtualRow);
 	});
 
-	it('restores scroll after presentation-only rows update the rendered DOM', async () => {
-		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
-		const props = makeSurfaceProps(rows);
-		const { container, rerender } = render(GitVirtualDiffSurface, { props });
+	it.each([false, true])('keeps indexed diff scroll stable during highlighting (newer user scroll: %s)', async (userScroll) => {
+		const file = makeHeaderRow(0).file;
+		const body = indexedBody(file.path, 1);
+		const syntax = new GitDiffSyntaxController();
+		const source = buildGitVirtualReviewRowSource({
+			...reviewRowOptions([file], { [file.path]: body }),
+			get syntaxResults() { return syntax.results; },
+		});
+		const { container } = render(GitVirtualDiffSurface, { props: makeSurfaceProps([], { source }) });
 		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
 		viewport.scrollTop = 60;
 		let shifted = false;
 		const observer = new MutationObserver(() => {
 			if (shifted || !container.querySelector('.cm-code-keyword')) return;
 			shifted = true;
-			viewport.scrollTop = 34;
+			if (userScroll) viewport.dispatchEvent(new WheelEvent('wheel'));
+			viewport.scrollTop = userScroll ? 90 : 34;
 		});
 		observer.observe(viewport, { childList: true, subtree: true });
-
-		const highlightedRows = rows.map((row) =>
-			row.kind === 'unified-row'
-				? {
-						...row,
-						view: {
-							...row.view,
-							segments: [
-								{ text: 'added ', className: null },
-								{ text: 'line', className: 'cm-code-keyword' },
-							],
-						},
-					}
-				: row,
-		);
-
-		await rerender({
-			...props,
-			source: arrayGitVirtualReviewRowSource(highlightedRows, fileIndexes(highlightedRows)),
-		});
-
-		await waitFor(() => expect(shifted).toBe(true));
-		await waitFor(() => expect(viewport.scrollTop).toBe(60));
-		observer.disconnect();
-	});
-
-	it('does not restore presentation scroll over a newer user scroll', async () => {
-		const rows = [makeHeaderRow(0), makeUnifiedRow(0), makeHeaderRow(1)];
-		const props = makeSurfaceProps(rows);
-		const { container, rerender } = render(GitVirtualDiffSurface, { props });
-		const viewport = container.querySelector<HTMLElement>('[data-git-virtual-diff-root]')!;
-		viewport.scrollTop = 60;
-		let userScrolled = false;
-		const observer = new MutationObserver(() => {
-			if (userScrolled || !container.querySelector('.cm-code-keyword')) return;
-			userScrolled = true;
-			viewport.dispatchEvent(new WheelEvent('wheel'));
-			viewport.scrollTop = 90;
-		});
-		observer.observe(viewport, { childList: true, subtree: true });
-
-		const highlightedRows = rows.map((row) =>
-			row.kind === 'unified-row'
-				? {
-						...row,
-						view: {
-							...row.view,
-							segments: [{ text: 'added line', className: 'cm-code-keyword' }],
-						},
-					}
-				: row,
-		);
-
-		await rerender({
-			...props,
-			source: arrayGitVirtualReviewRowSource(highlightedRows, fileIndexes(highlightedRows)),
-		});
-
-		await waitFor(() => expect(userScrolled).toBe(true));
-		await waitFor(() => expect(viewport.scrollTop).toBe(90));
-		observer.disconnect();
+		try {
+			syntax.results = {
+				[file.path]: {
+					cacheKey: 'syntax', filePath: file.path, bodyFingerprint: body.bodyFingerprint,
+					before: null, characterCount: 6, segmentCount: 1,
+					after: {
+						path: file.path, languageKey: 'typescript', characterCount: 6, segmentCount: 1,
+						lines: new Map([[0, [{ text: 'line 0', className: 'cm-code-keyword' }]]]),
+					},
+				},
+			};
+			await waitFor(() => expect(shifted).toBe(true));
+			await waitFor(() => expect(viewport.scrollTop).toBe(userScroll ? 90 : 60));
+		} finally {
+			observer.disconnect();
+		}
 	});
 
 	it('lets a layout reset win over presentation scroll restoration', async () => {

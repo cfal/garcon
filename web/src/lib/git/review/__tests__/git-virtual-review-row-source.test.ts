@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git.js';
-import type { BuildVirtualRowsOptions } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { indexedBody, reviewRowOptions as options, reviewFileSummary as summary } from './git-review-row-fixtures.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import {
 	buildGitVirtualReviewRowSource,
@@ -8,74 +8,6 @@ import {
 	type GitVirtualReviewRowSource,
 } from '$lib/git/review/git-virtual-review-row-source.js';
 import type { GitDiffFileSyntaxResult } from '$lib/git/review/git-diff-syntax.js';
-
-function summary(path: string, renderedRows: number): GitReviewFileSummary {
-	return {
-		path,
-		indexStatus: 'M',
-		workTreeStatus: 'M',
-		category: 'normal',
-		additions: renderedRows,
-		deletions: 0,
-		estimatedRows: renderedRows,
-		bodyState: 'unloaded',
-		bodyFingerprint: `fingerprint:${path}`,
-		isGenerated: false,
-		isBinary: false,
-		isTooLarge: false,
-	};
-}
-
-function indexedBody(path: string, lineCount: number): GitReviewFileBody {
-	const lines = Array.from({ length: lineCount }, (_, index) => `+line ${index}`).join('\n');
-	const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1,${lineCount} @@\n${lines}\n`;
-	const patchIndex = createGitPatchIndex(patch, lineCount + 1);
-	return {
-		path,
-		bodyFingerprint: `fingerprint:${path}`,
-		bodyState: 'loaded',
-		category: 'normal',
-		isBinary: false,
-		isTooLarge: false,
-		renderedRowCount: lineCount + 1,
-		patchBytes: patch.length,
-		patch,
-		patchIndex,
-	};
-}
-
-function options(
-	files: GitReviewFileSummary[],
-	bodies: Record<string, GitReviewFileBody>,
-): BuildVirtualRowsOptions {
-	return {
-		summary: {
-			document: { executorId: 'local', instanceId: 'test-instance', documentId: 'document' },
-			documentId: 'document',
-			project: '/project',
-			context: 3,
-			files,
-			limits: {
-				maxSummaryFiles: 10_000,
-				maxBodyBatchFiles: 24,
-				maxLoadedRows: 100_000,
-				maxLoadedPatchBytes: 10_000_000,
-				maxFileRows: 50_000,
-				maxFilePatchBytes: 5_000_000,
-				maxLineBytes: 20_000,
-				maxContextLines: 50,
-				bodyConcurrency: 4,
-			},
-		},
-		visibleFilePaths: files.map((file) => file.path),
-		fileBodies: bodies,
-		loadingBodies: new Set<string>(),
-		focusedFilePath: null,
-		diffMode: 'unified' as const,
-		contextLines: 3,
-		interaction: { kind: 'read-only' as const },
-	};
-}
 
 function expectEveryRowPresent(source: GitVirtualReviewRowSource): void {
 	for (let index = 0; index < source.rowCount; index += 1) {

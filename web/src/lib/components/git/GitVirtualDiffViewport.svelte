@@ -69,6 +69,7 @@
 	let configuredOverscan = Number.NaN;
 	let presentedSource: GitVirtualReviewRowSource | null = null;
 	let presentedMeasurementRevision = '';
+	let presentedSyntaxRevision: object | undefined;
 	let scrollIntentRevision = 0;
 	let demandEffectRuns = 0;
 	let demandPublications = 0;
@@ -188,6 +189,7 @@
 	$effect.pre(() => {
 		const nextSource = source;
 		const nextMeasurementRevision = nextSource.measurementRevision;
+		const nextSyntaxRevision = nextSource.syntaxRevision;
 		const nextLayoutIdentity = layoutIdentity;
 		const rowOverscan = overscan;
 		const lineHeight = rowLineHeight;
@@ -197,7 +199,7 @@
 			const presentationOnly =
 				!layoutChanged &&
 				presentedSource !== null &&
-				presentedSource !== nextSource &&
+				(presentedSource !== nextSource || presentedSyntaxRevision !== nextSyntaxRevision) &&
 				presentedMeasurementRevision === nextMeasurementRevision &&
 				measurementKey === configuredMeasurementKey;
 			const restoreOffset = presentationOnly ? virtual.viewportPosition?.logicalOffset : undefined;
@@ -239,6 +241,7 @@
 			configuredOverscan = rowOverscan;
 			presentedSource = nextSource;
 			presentedMeasurementRevision = nextMeasurementRevision;
+			presentedSyntaxRevision = nextSyntaxRevision;
 		});
 	});
 
