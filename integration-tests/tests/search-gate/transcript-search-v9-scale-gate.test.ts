@@ -4,12 +4,11 @@ import { rm, stat, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import type {
-  ChatSearchIndexStatus,
-  ChatSearchPage,
   ChatSearchRequest,
   ChatSearchResponse,
-  ChatSearchResult,
 } from '../../../common/chat-search.js';
+import type { ChatSessionRecord } from '../../../web/src/lib/chat/sessions/chat-session-types.js';
+import type { createSidebarSearchStore } from '../../../web/src/lib/sidebar/search/sidebar-search-store.svelte.js';
 import {
   SEARCH_CORPUS_TIER_ISOLATION,
   SEARCH_CORPUS_TIER_M,
@@ -47,29 +46,7 @@ const CLIENT_PREFIX_BUDGET_MS = 4_500;
 
 type ServiceSearchRequest = Parameters<TranscriptSearchService['search']>[0];
 
-interface SidebarSearchStoreHarness {
-  transcriptSearchQuery: string;
-  transcriptSearchResults: ChatSearchResult[];
-  transcriptSearchIndex: ChatSearchIndexStatus | null;
-  transcriptSearchPage: ChatSearchPage | null;
-  readonly transcriptSearchRevalidating: boolean;
-  readonly transcriptSearchRevalidationError: string | null;
-  updateDraftQuery(query: string): void;
-  retryTranscriptSearchRevalidation(): Promise<void>;
-  destroy(): void;
-}
-
-type SidebarSearchStoreFactory = (deps: {
-  readonly getChats: () => Record<string, unknown>[];
-  readonly getSelectedChatId: () => string | null;
-  readonly getTranscriptSearchEnabled: () => boolean;
-  readonly getSearchResultSort: () => 'relevance';
-  readonly notifyError: (message: string) => void;
-  readonly searchChatTranscripts: (
-    request: ChatSearchRequest,
-    options?: { signal?: AbortSignal },
-  ) => Promise<ChatSearchResponse>;
-}) => SidebarSearchStoreHarness;
+type SidebarSearchStoreFactory = typeof createSidebarSearchStore;
 
 async function loadSidebarSearchStore(): Promise<{
   readonly create: SidebarSearchStoreFactory;
@@ -129,14 +106,12 @@ function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function sidebarChat(chatId: string): Record<string, unknown> {
+function sidebarChat(chatId: string): ChatSessionRecord {
   return {
     id: chatId,
     parentChatId: null,
     lineage: null,
     projectPath: '/workspace/search-gate',
-    effectiveProjectKey: '/workspace/search-gate',
-    projectIdentityState: 'available',
     orderGroup: 'normal',
     title: chatId,
     agentId: 'claude',
@@ -151,6 +126,7 @@ function sidebarChat(chatId: string): Record<string, unknown> {
     isArchived: false,
     isProcessing: false,
     processingPhase: null,
+    activityStatus: null,
     canReloadFromNativeHistory: false,
     isUnread: false,
     status: 'running',
@@ -531,7 +507,7 @@ test('[TLV5-SEARCH.10-GATE-05] compact prefix retains near-cap client headroom',
   });
   const service = searchService(fixture.workspaceDirectory);
   let storeLoader: Awaited<ReturnType<typeof loadSidebarSearchStore>> | null = null;
-  let store: SidebarSearchStoreHarness | null = null;
+  let store: ReturnType<SidebarSearchStoreFactory> | null = null;
   try {
     await service.enable(new AbortController().signal);
     const initial = await service.search(prefixRequest(fixture));
@@ -597,24 +573,25 @@ test('[TLV5-SEARCH.10-GATE-05] compact prefix retains near-cap client headroom',
       searchChatTranscripts,
     });
     store.updateDraftQuery(fixture.markerTerm);
-    store.transcriptSearchQuery = fixture.markerTerm;
-    store.transcriptSearchResults = initial.results.map((result) => ({
+    const { transcript } = store;
+    transcript.transcriptSearchQuery = fixture.markerTerm;
+    transcript.transcriptSearchResults = initial.results.map((result) => ({
       ...result,
       snippets: [],
     }));
-    store.transcriptSearchPage = initial.page;
-    store.transcriptSearchIndex = initial.index;
+    transcript.transcriptSearchPage = initial.page;
+    transcript.transcriptSearchIndex = initial.index;
 
     const browserStarted = performance.now();
-    await store.retryTranscriptSearchRevalidation();
+    await transcript.retryTranscriptSearchRevalidation();
     const browserElapsedMs = performance.now() - browserStarted;
 
     expect(requestCount).toBe(1);
-    expect(store.transcriptSearchRevalidating).toBe(false);
-    expect(store.transcriptSearchRevalidationError).toBeNull();
-    expect(store.transcriptSearchResults).toHaveLength(500);
-    expect(store.transcriptSearchResults.every((result) => result.snippets.length === 1)).toBe(true);
-    expect(store.transcriptSearchResults[0]?.snippets[0]?.text).toContain(fixture.markerTerm);
+    expect(transcript.transcriptSearchRevalidating).toBe(false);
+    expect(transcript.transcriptSearchRevalidationError).toBeNull();
+    expect(transcript.transcriptSearchResults).toHaveLength(500);
+    expect(transcript.transcriptSearchResults.every((result) => result.snippets.length === 1)).toBe(true);
+    expect(transcript.transcriptSearchResults[0]?.snippets[0]?.text).toContain(fixture.markerTerm);
     expect(browserElapsedMs).toBeLessThan(CLIENT_PREFIX_BUDGET_MS);
     const stats = service.queryStats();
     expect(stats.served).toBe(5);
