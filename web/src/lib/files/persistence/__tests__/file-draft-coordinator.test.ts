@@ -169,6 +169,7 @@ describe('FileDraftCoordinator', () => {
 				gate.resolve();
 				await saving;
 				await coordinator.flush();
+				if (scenario === 'refresh and edit') expect(value.recoveryError).toBe('Quota exceeded');
 				expect((await repository.getDraft(draft.documentId))?.content).toBe(
 					scenario === 'close' ? undefined : saved,
 				);
