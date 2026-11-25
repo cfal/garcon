@@ -37,7 +37,10 @@ test('collects only static imports and their CSS, including cycles and shared ou
 
 test('guards optional language metadata, editor runtimes, and feature engines', () => {
   for (const name of ['vendor-cm-lang-web', 'vendor-cm-lang-markup', 'vendor-cm-lang-template', 'vendor-cm-lang-programming', 'vendor-cm-legacy-modes', 'vendor-cm-lang-metadata', 'vendor-codemirror-core', 'vendor-codemirror', 'vendor-canvas', 'vendor-xterm', 'vendor-fuse']) {
-    expect(() => assertLazyRendererAssets([{ file: 'chunk.js', names: [name] }])).toThrow();
+    const chunk = [{ file: 'chunk.js', names: [name] }];
+    expect(() => assertLazyRendererAssets(chunk)).toThrow();
+    if (name === 'vendor-fuse') expect(() => assertLazyRendererAssets(chunk, 'workspace')).not.toThrow();
+    else expect(() => assertLazyRendererAssets(chunk, 'workspace')).toThrow();
   }
   expect(() => assertLazyRendererAssets([{ file: 'chunk.js', names: ['vite-runtime', 'vendor-svelte'] }])).not.toThrow();
 });

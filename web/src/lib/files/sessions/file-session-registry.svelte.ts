@@ -22,6 +22,7 @@ import {
 	createFileDraftRepository,
 	type FileDraftRepository,
 	type FileDraftSummary,
+	type FileDraftVersion,
 } from '$lib/files/persistence/file-draft-repository.js';
 import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.svelte.js';
 import {
@@ -52,7 +53,11 @@ import {
 import { FileIdentityTeardownQueue } from '$lib/files/sessions/file-identity-teardown-queue.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { DesktopPlacement, PresentationHostId } from '$lib/workspace/surface-types.js';
-import type { CanonicalFileIdentity, FileIdentityResponse } from '$shared/file-contracts';
+import type {
+	CanonicalFileIdentity,
+	FileIdentityResponse,
+	FileRevision,
+} from '$shared/file-contracts';
 
 import {
 	FileDialogCoordinator,
@@ -329,7 +334,7 @@ export class FileSessionRegistry {
 			if (session.isExternallyStale)
 				return await this.#resolveConflictAndSubmit(session, controller);
 			try {
-				await this.#saves.submit(session.document, content, controller, revision);
+				await this.#submitSave(session.document, content, controller, revision);
 				return true;
 			} catch (error) {
 				if (!isFileRevisionConflict(error)) throw error;
@@ -357,6 +362,23 @@ export class FileSessionRegistry {
 		document.saveController = null;
 		document.saving = false;
 		void this.#drafts?.settle(document);
+	}
+
+	async #submitSave(
+		document: FileDocumentState,
+		content: string,
+		controller: AbortController,
+		revision: FileRevision,
+	): Promise<void> {
+		const drafts = this.#drafts;
+		let observed: FileDraftVersion | undefined;
+		// A late storage observation does not delay or authorize cleanup after Save.
+		void drafts?.observeBeforeSave(document).then((version) => {
+			observed = version;
+		});
+		await this.#saves.submit(document, content, controller, revision);
+		if (observed && !document.dirty && drafts === this.#drafts)
+			void drafts?.settle(document, observed);
 	}
 
 	async refresh(sessionId: string): Promise<void> {
@@ -619,7 +641,7 @@ export class FileSessionRegistry {
 		if (!this.#conflicts.apply(session, decision)) return;
 		const controller = this.#beginSave(session.document);
 		try {
-			await this.#saves.submit(
+			await this.#submitSave(
 				session.document,
 				decision.resolvedContent,
 				controller,
@@ -667,6 +689,7 @@ export class FileSessionRegistry {
 				if (!body || this.#destroyed || this.#drafts !== drafts) return false;
 				if (document.loadedRevision || document.dirty || document.pendingRecoveryContent !== null)
 					return true;
+				drafts.adoptCheckpoint(body);
 				document.pendingRecoveryContent = body.content;
 			} else drafts.discard(draft);
 			return true;
@@ -753,7 +776,7 @@ export class FileSessionRegistry {
 		const decision = await this.#conflicts.confirm(session, disk, true);
 		if (decision.choice !== 'save-checked' || !session.document.executorAvailable) return false;
 		if (!this.#conflicts.apply(session, decision)) return false;
-		await this.#saves.submit(
+		await this.#submitSave(
 			session.document,
 			decision.resolvedContent,
 			controller,

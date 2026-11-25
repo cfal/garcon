@@ -269,6 +269,75 @@ describe('File draft storage', () => {
       });
     }), 30_000);
 
+  test('checks the current draft and deletes both records in one transaction', () =>
+    withRepositoryPage(async (page, source) => {
+      const result = await page.evaluate(async (source) => {
+        const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+        const { createFileDraftRepository, fileDraftKey } = (await import(
+          url
+        )) as typeof import('../../../web/src/lib/files/persistence/file-draft-repository.js');
+        URL.revokeObjectURL(url);
+        const repository = createFileDraftRepository();
+        const peer = createFileDraftRepository();
+        const documentId = fileDraftKey('user', 'deployment', '/project', 'a.txt');
+        const original = {
+          schemaVersion: 1 as const,
+          userNamespace: 'user',
+          deploymentId: 'deployment',
+          documentId,
+          canonicalFileRootPath: '/project',
+          normalizedRelativePath: 'a.txt',
+          content: 'saved text',
+          savedAt: 1,
+          checkpointId: 'original',
+        };
+        const replacement = { ...original, checkpointId: 'replacement' };
+        const newer = { ...original, checkpointId: 'newer' };
+        try {
+          await peer.putDraft(original);
+          const unopened = await repository.snapshotDraftVersion(documentId);
+          await repository.getDrafts('user', 'deployment');
+          const observation = repository.snapshotDraftVersion(documentId);
+          await peer.putDraft(replacement);
+          const observed = await observation;
+          await repository.deleteDraft(documentId, current =>
+            current.checkpointId === observed?.checkpointId && current.content === original.content,
+          );
+          const preserved = await repository.snapshotDraftVersion(documentId);
+
+          let writing: Promise<void> | undefined;
+          await repository.deleteDraft(documentId, current => {
+            writing = peer.putDraft(newer);
+            return current.checkpointId === preserved?.checkpointId;
+          });
+          await writing;
+          const retained = await repository.getDraft(documentId);
+          await repository.deleteDraft(documentId, current =>
+            current.checkpointId === newer.checkpointId && current.content === newer.content,
+          );
+          return {
+            unopened,
+            observed: observed?.checkpointId,
+            preserved: preserved?.checkpointId,
+            retained: retained?.checkpointId,
+            body: await repository.getDraft(documentId),
+            summary: await repository.snapshotDraftVersion(documentId),
+          };
+        } finally {
+          repository.close();
+          peer.close();
+        }
+      }, source);
+      expect(result).toEqual({
+        unopened: null,
+        observed: 'original',
+        preserved: 'replacement',
+        retained: 'newer',
+        body: null,
+        summary: null,
+      });
+    }));
+
   test('upgrades populated recents and evicts only within the writing user and deployment', () =>
     withRepositoryPage(async (page, source) => {
       const result = await page.evaluate(async source => {

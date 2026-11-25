@@ -25,7 +25,10 @@ export interface FileDraft {
 	normalizedRelativePath: string;
 	content: string;
 	savedAt: number;
+	checkpointId?: string;
 }
+
+export type FileDraftVersion = Pick<FileDraft, 'savedAt' | 'checkpointId'>;
 
 export interface FileDraftSummary extends Omit<FileDraft, 'content'> {
 	contentBytes: number;
@@ -65,8 +68,10 @@ export interface FileNavigationHistoryV1 {
 export interface FileDraftRepository {
 	readonly durable: boolean;
 	putDraft(record: FileDraft): Promise<void>;
-	deleteDraft(documentId: string): Promise<void>;
+	deleteDraft(documentId: string, canDelete?: (current: FileDraft) => boolean): Promise<void>;
 	getDrafts(userNamespace: string, deploymentId: string): Promise<FileDraftSummary[]>;
+	// Starts the read synchronously on the open connection, without opening storage.
+	snapshotDraftVersion(documentId: string): Promise<FileDraftVersion | null>;
 	getDraft(documentId: string): Promise<FileDraft | null>;
 	clearDrafts(userNamespace: string, deploymentId: string): Promise<void>;
 	putRecent(record: FileRecentLocationV1): Promise<void>;
@@ -84,14 +89,24 @@ export function createFileDraftRepository(
 ): FileDraftRepository {
 	if (!indexedDb) return createMemoryFileDraftRepository(false);
 	let databasePromise: Promise<IDBDatabase> | null = null;
+	let readyDatabase: IDBDatabase | null = null;
 	const open = () => {
 		if (!databasePromise) {
 			const opening = openDatabase(indexedDb, () => {
-				if (databasePromise === opening) databasePromise = null;
-			}).catch((error) => {
-				if (databasePromise === opening) databasePromise = null;
-				throw error;
-			});
+				if (databasePromise === opening) {
+					databasePromise = null;
+					readyDatabase = null;
+				}
+			}).then(
+				(database) => {
+					if (databasePromise === opening) readyDatabase = database;
+					return database;
+				},
+				(error) => {
+					if (databasePromise === opening) databasePromise = null;
+					throw error;
+				},
+			);
 			databasePromise = opening;
 		}
 		return databasePromise;
@@ -121,14 +136,19 @@ export function createFileDraftRepository(
 				},
 			);
 		},
-		async deleteDraft(documentId) {
+		async deleteDraft(documentId, canDelete) {
 			await runTransaction(
 				await open(),
 				[FILE_DRAFT_SUMMARY_STORE_NAME, FILE_DRAFT_STORE_NAME],
 				'readwrite',
 				async (summaries, transaction) => {
+					const bodies = transaction.objectStore(FILE_DRAFT_STORE_NAME);
+					if (canDelete) {
+						const current = await indexedDbRequest<FileDraft | undefined>(bodies.get(documentId));
+						if (!current || !canDelete(current)) return;
+					}
 					await indexedDbRequest(summaries.delete(documentId));
-					await indexedDbRequest(transaction.objectStore(FILE_DRAFT_STORE_NAME).delete(documentId));
+					await indexedDbRequest(bodies.delete(documentId));
 				},
 			);
 		},
@@ -139,6 +159,16 @@ export function createFileDraftRepository(
 				),
 				userNamespace,
 				deploymentId,
+			);
+		},
+		async snapshotDraftVersion(documentId) {
+			if (!readyDatabase) return null;
+			return runTransaction(
+				readyDatabase,
+				FILE_DRAFT_SUMMARY_STORE_NAME,
+				'readonly',
+				async (store) =>
+					(await indexedDbRequest<FileDraftSummary | undefined>(store.get(documentId))) ?? null,
 			);
 		},
 		async getDraft(documentId) {
@@ -212,6 +242,7 @@ export function createFileDraftRepository(
 				() => undefined,
 			);
 			databasePromise = null;
+			readyDatabase = null;
 		},
 	};
 }
@@ -230,13 +261,21 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 				drafts.delete(id);
 			drafts.set(record.documentId, structuredClone(record));
 		},
-		async deleteDraft(documentId) {
+		async deleteDraft(documentId, canDelete) {
+			if (canDelete) {
+				const current = drafts.get(documentId);
+				if (!current || !canDelete(current)) return;
+			}
 			drafts.delete(documentId);
 		},
 		async getDrafts(userNamespace, deploymentId) {
 			return structuredClone(
 				latestDrafts([...drafts.values()].map(summarizeFileDraft), userNamespace, deploymentId),
 			);
+		},
+		async snapshotDraftVersion(documentId) {
+			const draft = drafts.get(documentId);
+			return draft ? { savedAt: draft.savedAt, checkpointId: draft.checkpointId } : null;
 		},
 		async getDraft(documentId) {
 			return structuredClone(drafts.get(documentId) ?? null);

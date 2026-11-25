@@ -159,7 +159,17 @@ if (import.meta.main) {
     return entry.file;
   });
   const offline = collectEagerAssets([...preloads, ...routeFiles], [], manifest);
-  const eager = [...offline.files, ...offline.cssFiles].sort();
+  const workspaceEntry = manifest['src/routes/WorkspaceBoot.svelte'];
+  const settingsEntry = manifest['src/lib/components/settings/Settings.svelte'];
+  if (!workspaceEntry || !settingsEntry) throw new Error('Missing offline Settings entry points');
+  const workspace = collectEagerAssets([workspaceEntry.file], [], manifest);
+  const settings = collectEagerAssets([settingsEntry.file], [], manifest);
+  // Settings opens from an already loaded workspace. Only its additional assets need precaching.
+  const eager = [...new Set([
+    ...offline.files, ...offline.cssFiles,
+    ...[...settings.files].filter(file => !workspace.files.has(file)),
+    ...[...settings.cssFiles].filter(file => !workspace.cssFiles.has(file)),
+  ])].sort();
 
   const themeStylesheets: Record<string, string> = {};
   for (const { id } of THEME_PROFILES) {

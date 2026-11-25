@@ -98,6 +98,31 @@ describe('FileDraftCoordinator', () => {
 		coordinator.destroy();
 	});
 
+	it('retains a different peer checkpoint when the owner of an older checkpoint closes clean', async () => {
+		const { repository, coordinator } = harness();
+		try {
+			const value = document();
+			await coordinator.settle(value);
+			const [summary] = await repository.getDrafts('user', 'deployment');
+			const original = (await repository.getDraft(summary.documentId))!;
+			await repository.putDraft({
+				...original,
+				checkpointId: 'peer',
+				content: 'different peer edit',
+			});
+
+			value.content = value.baseline;
+			coordinator.closeDocument(value);
+			await coordinator.flush();
+			expect(await repository.getDraft(summary.documentId)).toMatchObject({
+				checkpointId: 'peer',
+				content: 'different peer edit',
+			});
+		} finally {
+			coordinator.destroy();
+		}
+	});
+
 	it.each([false, true])(
 		'orders explicit discard after queued checkpoints (reopen: %s)',
 		async (reopen) => {
