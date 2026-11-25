@@ -43,12 +43,18 @@ test('Settings exposes a working recovery action after its module fails to load'
   await withChromiumFixture('settings-load-recovery', async ({ page, integration, withExpectedConsoleErrors }) => {
     const baseUrl = integration.garcon.baseUrl;
     const chunk = await settingsChunk(baseUrl);
-    await page.route(chunk, route => route.abort('failed'), { times: 1 });
+    let failedRequests = 0;
+    await page.route(chunk, route => {
+      failedRequests++;
+      return route.abort('failed');
+    });
     await page.goto(baseUrl);
     await withExpectedConsoleErrors(['Failed to load resource: net::ERR_FAILED'], async () => {
       await openSettings(page);
       const reload = page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Reload application' });
       await browserExpect(reload).toBeVisible();
+      expect(failedRequests).toBeGreaterThan(0);
+      await page.unroute(chunk);
       await Promise.all([page.waitForEvent('domcontentloaded'), reload.click()]);
     });
     const loaded = page.waitForResponse(chunk);
