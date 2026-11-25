@@ -15,15 +15,15 @@ async function authenticationSettings(page: Page) {
 async function privateDatabaseRows(page: Page, seed: boolean): Promise<number[]> {
   return page.evaluate(async (seed) => {
     const counts: number[] = [];
-    for (const { name, version, stores } of [
+    for (const { name, stores } of [
       {
-        name: 'garcon-file-drafts-v1', version: 3,
+        name: 'garcon-file-drafts-v1',
         stores: { drafts: 'documentId', 'draft-summaries': 'documentId', recents: 'key', navigation: 'key' },
       },
-      { name: 'garcon-local-media', version: 1, stores: { 'completion-sounds': null } },
+      { name: 'garcon-local-media', stores: { 'completion-sounds': null } },
     ]) {
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open(name, version);
+        const request = indexedDB.open(name);
         request.onupgradeneeded = () => {
           for (const [store, keyPath] of Object.entries(stores)) {
             if (!request.result.objectStoreNames.contains(store)) {
