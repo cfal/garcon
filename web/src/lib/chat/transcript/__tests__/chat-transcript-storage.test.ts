@@ -61,6 +61,18 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(snapshot()).toEqual(before);
 	});
 
+	it.each(['read', 'write'])('discards obsolete snapshot bodies on the first %s without touching preferences', (first) => {
+		persist(storage, 'old', [entry(1, 'old')]);
+		localStorage.setItem(INDEX_KEY, JSON.stringify({ version: 6, entries: [{ chatId: 'old' }] }));
+		localStorage.setItem('pref_local_settings', '{}');
+		if (first === 'read') expect(storage.restore('old')).toBeNull();
+		persist(storage, 'new', [entry(1, 'new')]);
+		expect(localStorage.getItem(snapshotKey('old'))).toBeNull();
+		expect(localStorage.getItem('pref_local_settings')).toBe('{}');
+		expect(storage.restore('new')?.stale).toBe(false);
+		expect(storage.listCursors().map(c => c.chatId)).toEqual(['new']);
+	});
+
 	it('persists and restores entries with generation cursor metadata', () => {
 		storage.persist('chat-1', [entry(1, 'hello')], cursor(1));
 

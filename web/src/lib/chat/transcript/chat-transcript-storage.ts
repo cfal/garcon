@@ -66,12 +66,23 @@ function emptyIndex(): ChatSnapshotIndex {
 	return { version: INDEX_VERSION, entries: [] };
 }
 
-function readIndex(): ChatSnapshotIndex {
+function discardSnapshotIndex(keepKey?: string): void {
+	for (let i = localStorage.length - 1; i >= 0; i--) {
+		const key = localStorage.key(i);
+		if (key?.startsWith(SNAPSHOT_PREFIX) && key !== keepKey && key !== INDEX_KEY) localStorage.removeItem(key);
+	}
+	localStorage.removeItem(INDEX_KEY);
+}
+
+function readIndex(justWrittenKey?: string): ChatSnapshotIndex {
 	try {
 		const raw = localStorage.getItem(INDEX_KEY);
 		if (!raw) return emptyIndex();
 		const parsed = JSON.parse(raw) as ChatSnapshotIndex;
-		if (parsed.version !== INDEX_VERSION || !Array.isArray(parsed.entries)) return emptyIndex();
+		if (parsed.version !== INDEX_VERSION || !Array.isArray(parsed.entries)) {
+			discardSnapshotIndex(justWrittenKey);
+			return emptyIndex();
+		}
 		return {
 			version: INDEX_VERSION,
 			entries: parsed.entries.filter(entry =>
@@ -155,6 +166,7 @@ export class LocalChatTranscriptStorage {
 	): RestoredChatTranscript | null {
 		if (!chatId || !canPersistBrowserData()) return null;
 		try {
+			const index = readIndex();
 			const raw = localStorage.getItem(snapshotKey(chatId));
 			if (!raw || raw.length > MAX_SNAPSHOT_CHARACTERS) {
 				this.remove(chatId);
@@ -188,7 +200,6 @@ export class LocalChatTranscriptStorage {
 			const nextBeforeOrdinal = restoredEntries.length < entries.length
 				? restoredEntries[0]?.ordinal ?? null
 				: parsed.nextBeforeOrdinal;
-			const index = readIndex();
 			const entry = index.entries.find((candidate) => candidate.chatId === chatId);
 			const stale = entry?.transcriptViewId !== parsed.transcriptViewId
 				|| entry.lastOrdinal !== parsed.lastOrdinal || entry.stale;
@@ -249,7 +260,7 @@ export class LocalChatTranscriptStorage {
 				return;
 			}
 			setLocalStorageWithCacheRecovery(localStorage, snapshotKey(chatId), serialized);
-			const index = readIndex();
+			const index = readIndex(snapshotKey(chatId));
 			writeIndex(
 				pruneIndex(
 					upsertEntry(index, {
@@ -333,11 +344,7 @@ export class LocalChatTranscriptStorage {
 	clearAll(): void {
 		if (!canPersistBrowserData()) return;
 		try {
-			for (let i = localStorage.length - 1; i >= 0; i--) {
-				const key = localStorage.key(i);
-				if (key?.startsWith(SNAPSHOT_PREFIX)) localStorage.removeItem(key);
-			}
-			localStorage.removeItem(INDEX_KEY);
+			discardSnapshotIndex();
 		} catch {
 			// Ignores clear failures.
 		}
