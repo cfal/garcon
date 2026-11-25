@@ -1,8 +1,9 @@
+import { errorMessage } from '$lib/utils/error-message.js';
+import { getGitReviewDocumentFileBodies } from '$lib/api/git.js';
 import type { GitProjectTarget } from '$lib/api/git-client.js';
 import { sameGitProject } from '$lib/git/targets/git-target.js';
 import {
 	getGitComparisonFreshness,
-	getGitComparisonFileBodies,
 	getGitComparisonSnapshot,
 	type GitComparisonMode,
 	type GitComparisonSnapshotReady,
@@ -252,16 +253,10 @@ export class GitComparisonController {
 					...(result.mergeBaseHash ? { mergeBaseHash: result.mergeBaseHash } : {}),
 				},
 				loadBodies: (_snapshot, files, purpose, signal, publish) =>
-					getGitComparisonFileBodies(
-						project,
-						result.document,
-						result.effectiveFromHash,
-						result.to.kind === 'revision'
-							? { kind: 'revision', hash: result.to.hash }
-							: { kind: 'working-tree', fingerprint: result.to.fingerprint },
-						files,
-						{ context: requestContextLines, purpose, signal, onIndexedBodies: publish },
-					),
+					getGitReviewDocumentFileBodies(project, result.document, files, purpose, {
+						signal,
+						onIndexedBodies: publish,
+					}),
 				onError: (detail) => {
 					this.bodyError = m.git_compare_load_rows_failed({ detail });
 				},
@@ -285,7 +280,7 @@ export class GitComparisonController {
 			if (isAbortError(error) || !this.isCurrent(generation, project, controller.signal)) {
 				return false;
 			}
-			this.error = error instanceof Error ? error.message : String(error);
+			this.error = errorMessage(error);
 			this.errorStatus = null;
 			this.errorEndpoint = null;
 			return false;

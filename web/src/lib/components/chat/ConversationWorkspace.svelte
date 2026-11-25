@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/error-message.js';
 	// Owns the singleton conversation runtime, composer, and dialogs while
 	// rendered panels own transcript presentation and scrolling.
 
 	import { onDestroy, onMount, untrack } from 'svelte';
-	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
+	import type { ComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
 	import PromptComposer from './composer/PromptComposer.svelte';
 	import QueuedInputEditorDialog from './queue/QueuedInputEditorDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
@@ -23,7 +24,7 @@
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
-	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import {
 		reloadChatFromNative,
 		type ChatReloadOptions,
@@ -90,8 +91,9 @@
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
 		onComposerHeightChange?: (height: number) => void;
-		onComposerNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
+		availabilityNotice?: ComposerAvailabilityNotice | null;
 		onChooseProjectFolder?: (chatId: string) => void;
+		agentState: AgentState;
 		subagentToolbar: SubagentToolbarState;
 		transcriptCache?: ChatTranscriptCache;
 		reserveMobileToolbar?: boolean;
@@ -108,14 +110,16 @@
 		onRegisterPrepareHide,
 		onRegisterPanelActions,
 		onComposerHeightChange,
-		onComposerNoticeChange,
+		availabilityNotice,
 		onChooseProjectFolder,
+		agentState: providedAgentState,
 		subagentToolbar,
 		transcriptCache: providedTranscriptCache,
 		reserveMobileToolbar = false,
 		isVisible = true,
 		isPresented: isPresentedOverride,
 	}: ConversationWorkspaceProps = $props();
+	const agentState = untrack(() => providedAgentState);
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 
 	function getInitialTranscriptCache(): ChatTranscriptCache {
@@ -149,7 +153,6 @@
 			return sessions.selectedChatId;
 		},
 	});
-	const agentState = new AgentState();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
 	const lifecycle = new CurrentConversationLifecycle({
 		lifecycles: conversationLifecycles,
@@ -325,7 +328,7 @@
 				void workspace
 					.openForkedChat(chatId, sourceChatId, localSettings.forkOpenPlacement)
 					.catch((error) => {
-						notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+						notifications.error(errorMessage(error, m.workspace_open_failed()));
 					});
 			},
 		},
@@ -568,7 +571,7 @@
 		}
 		if (!opening) return;
 		void opening.catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+			notifications.error(errorMessage(error, m.workspace_open_failed()));
 		});
 	}
 
@@ -608,8 +611,7 @@
 			{composerEditorOpenRequestId}
 			onsubmit={onSubmit}
 			{onSteerPreferredSubmit}
-			{onChooseProjectFolder}
-			onAvailabilityNoticeChange={onComposerNoticeChange}
+			{availabilityNotice}
 			onModelChange={(next) => controller.handleModelSelectionChange(next)}
 			onExecutorChange={(executorId) =>
 				controller.handleModelSelectionChange({

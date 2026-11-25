@@ -1,3 +1,5 @@
+import * as m from '$lib/paraglide/messages.js';
+import { errorMessage } from '$lib/utils/error-message.js';
 import type { GitProjectTarget } from '$lib/api/git-client.js';
 import {
 	getGitBlame,
@@ -25,6 +27,8 @@ import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { GitWorkbenchMutationRunner } from '$lib/git/workbench/git-workbench-types.js';
 
 export type GitInspectorView = 'none' | 'conflicts' | 'stash' | 'history' | 'graph';
+
+const BLAME_PREVIEW_LINES = 12;
 
 export interface GitPorcelainDeps {
 	selectedFile: () => string | null;
@@ -86,8 +90,10 @@ export class GitPorcelainState {
 
 	async loadConflicts(project: GitProjectTarget, parent?: PorcelainLoadContext): Promise<void> {
 		await this.withLoading(
-			'Failed to load conflicts',
+			m.git_porcelain_load_conflicts_failed,
 			async (context) => {
+				this.conflicts = [];
+				this.conflictDetails = null;
 				const result = await getGitConflicts(project, { signal: context.signal });
 				if (!this.isActiveLoad(context)) return;
 				const conflicts = result.conflicts;
@@ -110,7 +116,8 @@ export class GitPorcelainState {
 	}
 
 	async selectConflict(project: GitProjectTarget, filePath: string): Promise<void> {
-		await this.withLoading('Failed to load conflict details', async (context) => {
+		await this.withLoading(m.git_porcelain_load_conflict_details_failed, async (context) => {
+			this.conflictDetails = null;
 			const details = await getGitConflictDetails(project, filePath, { signal: context.signal });
 			if (this.isActiveLoad(context)) this.conflictDetails = details;
 		});
@@ -121,8 +128,8 @@ export class GitPorcelainState {
 		filePath: string,
 		side: 'ours' | 'theirs',
 	): Promise<void> {
-		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
-		await this.withLoading('Failed to accept conflict side', async (context) => {
+		if (!this.canMutateConflict(project, filePath)) return;
+		await this.withLoading(m.git_porcelain_accept_conflict_side_failed, async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await gitAcceptConflictSide(project, filePath, side);
 				if (result.success && this.isActiveLoad(context) && this.deps.isCurrentTarget(project)) {
@@ -135,8 +142,8 @@ export class GitPorcelainState {
 	}
 
 	async markConflictResolved(project: GitProjectTarget, filePath: string): Promise<void> {
-		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
-		await this.withLoading('Failed to mark conflict resolved', async (context) => {
+		if (!this.canMutateConflict(project, filePath)) return;
+		await this.withLoading(m.git_porcelain_mark_conflict_resolved_failed, async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await gitMarkConflictResolved(project, filePath);
 				if (result.success && this.isActiveLoad(context) && this.deps.isCurrentTarget(project)) {
@@ -148,9 +155,14 @@ export class GitPorcelainState {
 		});
 	}
 
+	private canMutateConflict(project: GitProjectTarget, path: string): boolean {
+		return !this.isLoading && this.conflictDetails?.path === path &&
+			this.deps.isCurrentTarget(project) && this.deps.ensureFreshForGitMutation();
+	}
+
 	async loadStashes(project: GitProjectTarget, parent?: PorcelainLoadContext): Promise<void> {
 		await this.withLoading(
-			'Failed to load stashes',
+			m.git_porcelain_load_stashes_failed,
 			async (context) => {
 				const result = await getGitStashes(project, { signal: context.signal });
 				if (!this.isActiveLoad(context)) return;
@@ -162,7 +174,7 @@ export class GitPorcelainState {
 
 	async createStash(project: GitProjectTarget): Promise<void> {
 		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
-		await this.withLoading('Failed to create stash', async (context) => {
+		await this.withLoading(m.git_porcelain_create_stash_failed, async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await gitCreateStash(project, this.stashMessage, this.stashIncludeUntracked);
 				if (result.success && this.isActiveLoad(context) && this.deps.isCurrentTarget(project)) {
@@ -178,7 +190,7 @@ export class GitPorcelainState {
 	async applyStash(project: GitProjectTarget, stash: GitStashTarget): Promise<void> {
 		const target = { ref: stash.ref, hash: stash.hash };
 		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
-		await this.withLoading('Failed to apply stash', async (context) => {
+		await this.withLoading(m.git_porcelain_apply_stash_failed, async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await this.submitStashAction(project, context, () =>
 					gitApplyStash(project, target),
@@ -193,7 +205,7 @@ export class GitPorcelainState {
 	async popStash(project: GitProjectTarget, stash: GitStashTarget): Promise<void> {
 		const target = { ref: stash.ref, hash: stash.hash };
 		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
-		await this.withLoading('Failed to pop stash', async (context) => {
+		await this.withLoading(m.git_porcelain_pop_stash_failed, async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await this.submitStashAction(project, context, () =>
 					gitPopStash(project, target),
@@ -210,7 +222,7 @@ export class GitPorcelainState {
 	async dropStash(project: GitProjectTarget, stash: GitStashTarget): Promise<void> {
 		const target = { ref: stash.ref, hash: stash.hash };
 		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
-		await this.withLoading('Failed to drop stash', async (context) => {
+		await this.withLoading(m.git_porcelain_drop_stash_failed, async (context) => {
 			await this.deps.runGitMutation(project, async () => {
 				const result = await this.submitStashAction(project, context, () =>
 					gitDropStash(project, target),
@@ -246,7 +258,7 @@ export class GitPorcelainState {
 
 	private async loadHistory(project: GitProjectTarget): Promise<void> {
 		const filePath = this.deps.selectedFile();
-		await this.withLoading('Failed to load file history', async (context) => {
+		await this.withLoading(m.git_porcelain_load_file_history_failed, async (context) => {
 			const { signal } = context;
 			if (!filePath) {
 				this.fileHistory = [];
@@ -256,17 +268,17 @@ export class GitPorcelainState {
 			}
 			const [history, blame] = await Promise.all([
 				getGitFileHistory(project, filePath, 8, { signal }),
-				getGitBlame(project, filePath, 'HEAD', 12, { signal }),
+				getGitBlame(project, filePath, 'HEAD', BLAME_PREVIEW_LINES + 1, { signal }),
 			]);
 			if (!this.isActiveLoad(context) || this.deps.selectedFile() !== filePath) return;
 			this.fileHistory = history.commits;
-			this.blameLines = blame.lines;
-			this.blameTruncated = blame.truncated;
+			this.blameLines = blame.lines.slice(0, BLAME_PREVIEW_LINES);
+			this.blameTruncated = blame.truncated || blame.lines.length > BLAME_PREVIEW_LINES;
 		});
 	}
 
 	private async loadGraph(project: GitProjectTarget): Promise<void> {
-		await this.withLoading('Failed to load commit graph', async (context) => {
+		await this.withLoading(m.git_porcelain_load_commit_graph_failed, async (context) => {
 			const result = await getGitGraph(project, 30, { signal: context.signal });
 			if (this.isActiveLoad(context)) this.graphCommits = result.commits;
 		});
@@ -301,7 +313,7 @@ export class GitPorcelainState {
 	}
 
 	private async withLoading(
-		label: string,
+		describeError: (inputs: { detail: string }) => string,
 		action: (context: PorcelainLoadContext) => Promise<void>,
 		parent?: PorcelainLoadContext,
 	): Promise<void> {
@@ -314,7 +326,7 @@ export class GitPorcelainState {
 			if (isAbortError(error)) return;
 			if (this.isActiveLoad(context)) {
 				this.deps.surfaceError(
-					`${label}: ${error instanceof Error ? error.message : String(error)}`,
+					describeError({ detail: errorMessage(error) }),
 				);
 			}
 		} finally {

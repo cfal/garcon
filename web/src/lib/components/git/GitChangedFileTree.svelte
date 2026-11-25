@@ -12,7 +12,7 @@
 		type GitChangedFileTreeRow,
 	} from '$lib/git/review/git-changed-file-tree.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { indexesInRange, currentAnchor } from './git-virtual-list.js';
+	import { indexesInRange, currentMutationAnchor } from '$lib/virt/virtual-list-types.js';
 	import { statusToIndexStatus } from '$lib/git/review/git-commit-file-status.js';
 	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 	import { virtualItems as selectVirtualItems } from '$lib/virt/virtual-list-types.js';
@@ -86,7 +86,7 @@
 				kind: 'update',
 				keys: nextRows.map((row) => row.key),
 				estimates: nextRows.map(() => rowHeight),
-				anchor: currentAnchor(virtual),
+				anchor: currentMutationAnchor(virtual.snapshot.positions, virtual.viewportPosition),
 			});
 		});
 	});

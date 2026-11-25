@@ -7,10 +7,6 @@
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import ComposerAttachmentList from './ComposerAttachmentList.svelte';
 	import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
-	import {
-		resolveComposerAvailabilityNotice,
-		type ComposerAvailabilityNoticePresentation,
-	} from '$lib/chat/composer/composer-availability.js';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import {
@@ -99,8 +95,7 @@
 		isVisible = true,
 		isPresented: isPresentedOverride,
 		composerEditorOpenRequestId = 0,
-		onChooseProjectFolder,
-		onAvailabilityNoticeChange,
+		availabilityNotice = null,
 	}: PromptComposerProps = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 	const composerState = getComposerState();
@@ -228,61 +223,12 @@
 	const selectedProjectTarget = $derived(projectState.target);
 	const snippetInteractionKey = $derived(projectState.snippetInteractionKey);
 	const selectedProjectResolution = $derived(projectState.snapshot);
-	const availabilityNotice = $derived(
-		resolveComposerAvailabilityNotice({
-			executorId: agentState.executorId,
-			executors,
-			projectTarget: selectedProjectTarget,
-			projectResolution: selectedProjectResolution,
-			catalog: modelCatalog,
-			providerAvailable,
-		}),
-	);
 	const showProjectNotice = $derived(availabilityNotice?.kind === 'project-unavailable');
-	const fileMenuVisible = $derived(conversationInput && filesAvailable && ui.showFileMenu && !showProjectNotice);
+	const fileMenuVisible = $derived(isVisible && conversationInput && filesAvailable && ui.showFileMenu && !showProjectNotice);
 	const slashMenuVisible = $derived(
-		Boolean(executionAgent) && ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
+		isVisible && Boolean(executionAgent) && ui.showSlashMenu && (!conversationInput || executors.isReady(agentState.executorId)) && !showProjectNotice,
 	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
-	const canChooseProjectFolder = $derived(
-		Boolean(
-			onChooseProjectFolder &&
-			sessions.selectedChat &&
-			(sessions.selectedChat.status === 'draft' ||
-				modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId)),
-		),
-	);
-	const noticePresentation = $derived.by<ComposerAvailabilityNoticePresentation | null>(() => {
-		const chatId = sessions.selectedChatId;
-		const notice = availabilityNotice;
-		if (!isVisible || !chatId || !notice) return null;
-		const catalog = modelCatalog;
-		const projectPath = selectedProjectTarget?.projectPath;
-		return {
-			chatId,
-			notice,
-			onRetryProject: () => {
-				if (
-					sessions.selectedChatId !== chatId ||
-					modelCatalog !== catalog ||
-					selectedProjectTarget?.projectPath !== projectPath
-				)
-					return;
-				projectState.retry();
-			},
-			onChooseProjectFolder: canChooseProjectFolder
-				? () => onChooseProjectFolder?.(chatId)
-				: undefined,
-			onRetryCatalog: () => void catalog.forceRefresh(),
-		};
-	});
-	// The owning panel renders notices above its status cap, outside the measured composer.
-	$effect(() => {
-		const presentation = noticePresentation;
-		untrack(() => onAvailabilityNoticeChange?.(presentation));
-	});
-	onDestroy(() => onAvailabilityNoticeChange?.(null));
-
 	onMount(() => {
 		tick().then(() => focusDelivery.requestCurrentChat());
 	});

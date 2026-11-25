@@ -13,7 +13,6 @@ import * as commandsApi from '$lib/api/commands.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
-import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 function conversationalCatalog(): ModelCatalogStore {
 	const catalog = new ModelCatalogStore();
@@ -415,13 +414,11 @@ describe('PromptComposer focus', () => {
 			remote.lastValidatedAt = Date.now();
 		});
 		const onsubmit = vi.fn();
-		const onAvailabilityNoticeChange = vi.fn();
-		const { container } = render(PromptComposerTestHost, {
+		const { container, component } = render(PromptComposerTestHost, {
 			selectedExecutorId: remoteExecutor.id,
 			executors: [localExecutor, remoteExecutor],
 			catalog,
 			onsubmit,
-			onAvailabilityNoticeChange,
 		});
 		const textarea = screen.getByRole('textbox');
 		const surface = container.querySelector<HTMLElement>('[data-composer]')!;
@@ -435,7 +432,7 @@ describe('PromptComposer focus', () => {
 		expect(container.querySelector('[data-composer-shell]')?.contains(notice)).toBe(false);
 		expect(surface.querySelector('[role="status"]')).toBeNull();
 		expect(surface.className).toBe(surfaceMarkup);
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+		expect(component.getComposerNotice()).toEqual(
 			expect.objectContaining({
 				notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
 				onRetryCatalog: expect.any(Function),
@@ -452,7 +449,7 @@ describe('PromptComposer focus', () => {
 			false,
 		);
 		expect(container.querySelector('[data-composer-availability-notice]')).toBeNull();
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
+		expect(component.getComposerNotice()).toBeNull();
 		expect(screen.getByRole('textbox')).toBe(textarea);
 		expect(surface.className).toBe(surfaceMarkup);
 	});
@@ -2539,24 +2536,21 @@ describe('PromptComposer focus', () => {
 		},
 	);
 
-	it('publishes chat-scoped recovery actions and clears the notice when hidden or destroyed', async () => {
+	it('derives chat-scoped recovery actions and clears the notice when hidden or destroyed', async () => {
 		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
 			target,
 			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
 		}));
-		const onAvailabilityNoticeChange =
-			vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
 		const onChooseProjectFolder = vi.fn();
 		const props = {
 			selectedChatId: 'notice-chat-one',
 			fetchProjectResolution,
-			onAvailabilityNoticeChange,
 			onChooseProjectFolder,
 		};
 		const rendered = render(PromptComposerTestHost, props);
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '/' } });
 		await screen.findByText('Project folder unavailable');
-		const firstNotice = onAvailabilityNoticeChange.mock.lastCall![0]!;
+		const firstNotice = rendered.component.getComposerNotice()!;
 		expect(firstNotice.chatId).toBe('notice-chat-one');
 
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two' });
@@ -2568,16 +2562,18 @@ describe('PromptComposer focus', () => {
 
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '/' } });
 		await waitFor(() =>
-			expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+			expect(rendered.component.getComposerNotice()).toEqual(
 				expect.objectContaining({ chatId: 'notice-chat-two' }),
 			),
 		);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: false });
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
+		expect(rendered.component.getComposerNotice()).toBeNull();
+		const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+		expect(rendered.component.getFocusServices().transientLayers.handleEscape(escape)).toBe(false);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: true });
 		await screen.findByText('Project folder unavailable');
 		rendered.unmount();
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
+		expect(screen.queryByText('Project folder unavailable')).toBeNull();
 	});
 
 	it('reports a missing project path instead of swallowing a snippet command', async () => {

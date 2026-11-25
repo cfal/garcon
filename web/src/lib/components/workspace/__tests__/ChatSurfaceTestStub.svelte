@@ -5,11 +5,13 @@
 	import type { UserMessageNavigatorRegistration } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import type { ConversationPanelActions } from '$lib/components/chat/conversation-panel-actions.js';
+	import type { ComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
 
 	let {
 		subagentToolbar,
 		isVisible,
 		isInteractive,
+		availabilityNotice,
 		onRegisterUserMessageNavigator,
 		onRegisterAppendToDraft,
 		onRegisterPanelActions,
@@ -17,6 +19,7 @@
 		subagentToolbar: SubagentToolbarState;
 		isVisible: boolean;
 		isInteractive: boolean;
+		availabilityNotice?: ComposerAvailabilityNotice | null;
 		onRegisterUserMessageNavigator?: (command: UserMessageNavigatorRegistration) => void;
 		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
@@ -112,6 +115,7 @@
 	data-testid="chat-surface-stub"
 	data-navigator-open-count={navigatorOpenCount}
 	data-visible={isVisible}
+	data-availability-notice={availabilityNotice?.kind}
 		data-interactive={isInteractive}
 		data-panel-action={panelAction}
 >

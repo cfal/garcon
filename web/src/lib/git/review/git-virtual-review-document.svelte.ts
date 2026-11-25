@@ -1,5 +1,6 @@
+import { errorMessage } from '$lib/utils/error-message.js';
 import {
-	getGitReviewFileBodies,
+	getGitReviewDocumentFileBodies,
 	type GitDiffTab,
 	type GitReviewDocumentSummary,
 	type GitReviewBodyPurpose,
@@ -279,18 +280,17 @@ export class GitVirtualReviewDocumentController {
 				cacheScope: () => cacheScope,
 				isCurrent: () => this.isCurrentGuard(guard),
 				load: (paths, purpose, signal, publish) =>
-					getGitReviewFileBodies(
+					getGitReviewDocumentFileBodies(
 						{ executorId: summary.document.executorId, projectPath },
 						summary.document,
 						paths,
-						guard.tab,
-						guard.contextLines,
-						{ purpose, signal, onIndexedBodies: publish },
+						purpose,
+						{ signal, onIndexedBodies: publish },
 					),
 				onError: (error) =>
 					this.deps.surfaceError(
 						m.git_virtual_load_diff_failed_with_detail({
-							detail: error instanceof Error ? error.message : String(error),
+							detail: errorMessage(error),
 						}),
 					),
 				onStale: (result) => this.deps.markExternallyStale(result.status),

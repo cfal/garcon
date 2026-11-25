@@ -9,6 +9,7 @@ import {
 vi.mock('$lib/api/git.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api/git.js')>()),
 	getGitConflictDetails: vi.fn(),
+	getGitConflicts: vi.fn(),
 	getGitStashes: vi.fn(),
 	gitCreateStash: vi.fn(),
 	gitApplyStash: vi.fn(),
@@ -144,6 +145,22 @@ describe('GitPorcelainState stash actions', () => {
 describe('GitPorcelainState conflict details', () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+	});
+
+	it('cannot act on a previous conflict preview during or after a failed reload', async () => {
+		const project = { executorId: 'remote', projectPath: '/project' };
+		const runGitMutation = vi.fn(async () => {
+			throw new Error('A stale preview must not dispatch a mutation');
+		});
+		const porcelain = createState({ runGitMutation });
+		porcelain.conflictDetails = makeConflictDetails('file.ts');
+		vi.mocked(gitApi.getGitConflicts).mockRejectedValueOnce(new Error('Unavailable'));
+		const reload = porcelain.loadConflicts(project);
+		expect(porcelain.conflictDetails).toBeNull();
+		await porcelain.acceptConflictSide(project, 'file.ts', 'ours');
+		await reload;
+		await porcelain.markConflictResolved(project, 'file.ts');
+		expect(runGitMutation).not.toHaveBeenCalled();
 	});
 
 	it('ignores a direct stash load after reset', async () => {

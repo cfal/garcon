@@ -160,11 +160,11 @@ export class ModelSelectorState {
 	get executorLabel(): string | null {
 		const executors = this.#options.executors;
 		if (this.committedExecutorId !== 'local' && !executors?.hasSnapshot) return null;
-		return executors?.label(this.committedExecutorId) ?? 'Local';
+		return executors?.label(this.committedExecutorId) ?? m.executors_local();
 	}
 
 	get draftExecutorLabel(): string {
-		return this.#options.executors?.label(this.executorId) ?? 'Local';
+		return this.#options.executors?.label(this.executorId) ?? m.executors_local();
 	}
 	get committedCatalog(): ModelCatalogStore {
 		return effectiveExecutorId(this.value.executorId) === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forExecutor(this.value.executorId);
