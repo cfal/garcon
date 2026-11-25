@@ -1,15 +1,24 @@
 import type { Page } from 'puppeteer-core';
 import { clickInlineComposerButton } from './composer-actions.js';
+import { performLightpandaAction } from './lightpanda-action.js';
 
 export async function openModelSelector(page: Page, scope = '[role="dialog"]'): Promise<void> {
-  const selector = `${scope} button[data-slot="model-selector-trigger"]:not(:disabled)`;
-  if (await clickInlineComposerButton(page, selector)) return;
+  const trigger = `${scope} button[data-slot="model-selector-trigger"]:not(:disabled)`;
 
-  const menu = `${scope} :is([data-composer-overflow="settings"], [data-slot="model-selector-overflow"]):not([hidden])`;
-  await page.$eval(menu, (button) => (button as HTMLButtonElement).click());
-  const model = '[role="menuitem"][data-composer-control="model"]';
-  await page.waitForSelector(model);
-  await page.$eval(model, (item) => (item as HTMLElement).click());
+  async function clickModelControl() {
+    // A lost inline reply must reach the expansion check, not dispatch another click.
+    if (await clickInlineComposerButton(page, trigger)) return;
+
+    const overflowTrigger = `${scope} :is([data-composer-overflow="settings"], [data-slot="model-selector-overflow"]):not([hidden])`;
+    const modelItem = '[role="menuitem"][data-composer-control="model"]';
+    await performLightpandaAction(
+      () => page.$eval(overflowTrigger, (button) => (button as HTMLButtonElement).click()),
+      () => page.waitForSelector(modelItem),
+    );
+    await page.$eval(modelItem, (item) => (item as HTMLElement).click());
+  }
+
+  await performLightpandaAction(clickModelControl, () => page.waitForSelector(`${trigger}[aria-expanded="true"]`));
 }
 
 export async function selectModelOption(page: Page, label: string): Promise<void> {

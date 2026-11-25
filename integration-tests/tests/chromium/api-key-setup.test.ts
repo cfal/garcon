@@ -15,6 +15,7 @@ test('key setup reviews a draft without automatic credential requests on desktop
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
     await settings.getByRole('tab', { name: 'Providers', exact: true }).click();
+    const keyStatus = settings.locator('form:has(#provider-quick-key)').getByRole('status');
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
     const cdp = await context.newCDPSession(page);
@@ -25,7 +26,7 @@ test('key setup reviews a draft without automatic credential requests on desktop
       await key.fill('sk-ambiguous_synthetic_key');
       await browserExpect(settings.getByRole('button', { name: 'Review provider' })).toBeDisabled();
       await key.fill('sk-or-v1-synthetic_key');
-      await browserExpect(settings.getByRole('status')).toContainText('Detected OpenRouter');
+      await browserExpect(keyStatus).toContainText('Detected OpenRouter');
       await page.screenshot({ path: join(artifacts, `api-key-setup-${width}.png`) });
       await settings.getByRole('button', { name: 'Review provider' }).click();
       const editor = page.getByRole('dialog').filter({ has: page.locator('#api-provider-label') });
