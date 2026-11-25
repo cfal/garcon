@@ -54,6 +54,7 @@ export type WsConnectionIssue =
 	| 'connect-timeout'
 	| 'connect-threw'
 	| 'missing-auth'
+	| 'workspace-inactive'
 	| 'manual-disconnect';
 
 export interface WsConnectionStatus {
@@ -165,7 +166,7 @@ export class WsConnection {
 	#stabilityTimeout: ReturnType<typeof setTimeout> | null = null;
 	#reconnectAttempts = 0;
 	#destroyed = false;
-	#authPaused = false;
+	#pauseReason: 'missing-auth' | 'workspace-inactive' | null = null;
 	#pendingResumeReason: 'visibility-visible' | 'browser-online' | null = null;
 	#recoveryTimeouts: number | null = null;
 	onAuthFailure: ((token: string | null, code: number) => void) | null = null;
@@ -216,7 +217,7 @@ export class WsConnection {
 				this.#resumeConnection('browser-online');
 			};
 			this.#offlineHandler = () => {
-				if (!this.#destroyed) {
+				if (!this.#destroyed && this.#pauseReason !== 'workspace-inactive') {
 					this.#forceReconnect('browser-offline', { reconnectNow: false });
 				}
 			};
@@ -229,7 +230,7 @@ export class WsConnection {
 
 	connect(token: string | null, authDisabled = false): void {
 		if (this.#destroyed || !isBrowserDataCurrent()) return;
-		this.#authPaused = false;
+		this.#pauseReason = null;
 		this.#authDisabled = authDisabled;
 
 		if (!token && !authDisabled) {
@@ -354,7 +355,7 @@ export class WsConnection {
 						event.code === AUTH_UNAVAILABLE_CLOSE_CODE ||
 						(event.code === 1006 && this.#ws !== websocket))
 				) {
-					this.pauseForAuth();
+					this.pause('missing-auth');
 					this.onAuthFailure(token, event.code);
 					return;
 				}
@@ -399,20 +400,20 @@ export class WsConnection {
 		}
 	}
 
-	pauseForAuth(): void {
-		this.#authPaused = true;
+	pause(reason: 'missing-auth' | 'workspace-inactive'): void {
+		this.#pauseReason = reason;
 		this.#closeExisting({ rejectPending: true });
-		this.#rejectAllWaiters('Authentication is unavailable');
-		this.#setConnectionStatus({ phase: 'idle', reason: 'missing-auth', nextRetryAt: null });
+		this.#rejectAllWaiters(reason === 'missing-auth' ? 'Authentication is unavailable' : 'Workspace is inactive');
+		this.#setConnectionStatus({ phase: 'idle', reason, nextRetryAt: null });
 	}
 
 	resumeForAuth(token: string | null, authDisabled = false): void {
-		if (this.#authPaused) this.connect(token, authDisabled);
+		if (this.#pauseReason === 'missing-auth') this.connect(token, authDisabled);
 	}
 
 	retryAfterAuthProbe(): void {
-		if (!this.#authPaused || this.#destroyed) return;
-		this.#authPaused = false;
+		if (this.#pauseReason !== 'missing-auth' || this.#destroyed) return;
+		this.#pauseReason = null;
 		if (this.#pendingResumeReason && document.visibilityState !== 'hidden') {
 			this.#connectNow(this.#pendingResumeReason);
 			return;
@@ -528,7 +529,7 @@ export class WsConnection {
 
 	/** Sends a JSON-serializable message. Returns true if sent. */
 	sendMessage(msg: unknown): boolean {
-		if (this.#authPaused || !isBrowserDataCurrent()) return false;
+		if (this.#pauseReason || !isBrowserDataCurrent()) return false;
 		const socket = this.#ws;
 		if (socket && socket.readyState === WebSocket.OPEN) {
 			socket.send(JSON.stringify(msg));
@@ -807,11 +808,11 @@ export class WsConnection {
 	}
 
 	#resumeConnection(reason: 'visibility-visible' | 'browser-online'): void {
-		if (this.#destroyed || document.visibilityState === 'hidden') return;
+		if (this.#destroyed || this.#pauseReason === 'workspace-inactive' || document.visibilityState === 'hidden') return;
 		// A foreground or network restoration starts a fresh retry budget.
 		this.#reconnectAttempts = 0;
 		this.#setConnectionStatus({ reconnectAttempt: 0 });
-		if (this.#authPaused) {
+		if (this.#pauseReason === 'missing-auth') {
 			this.#recoveryTimeouts ??= 0;
 			this.#pendingResumeReason = reason;
 			return;
@@ -842,7 +843,7 @@ export class WsConnection {
 	}
 
 	#connectNow(reason: WsConnectionIssue): void {
-		if (this.#destroyed || this.#authPaused) return;
+		if (this.#destroyed || this.#pauseReason) return;
 		if (
 			this.#activeSocket?.readyState === WebSocket.CONNECTING &&
 			this.#connectStartedAt !== null &&
@@ -865,7 +866,7 @@ export class WsConnection {
 		reason: WsConnectionIssue = 'socket-close',
 		episodeId = this.#currentEpisodeId,
 	): void {
-		if (this.#destroyed || this.#authPaused) return;
+		if (this.#destroyed || this.#pauseReason) return;
 		this.#clearReconnectTimeout();
 		if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
 			const currentPhase = this.connectionStatus.phase;

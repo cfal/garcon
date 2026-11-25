@@ -268,7 +268,8 @@
 	// internal $state fields (which would cause an infinite reconnect loop).
 	let fileRecoveryInitialized = false;
 	$effect(() => {
-		if (auth.isAuthenticated) {
+		if (!visible) untrack(() => ws.pause('workspace-inactive'));
+		else if (auth.isAuthenticated) {
 			const token = auth.token;
 			const authDisabled = auth.authDisabled;
 			if (!fileRecoveryInitialized) {
@@ -282,7 +283,7 @@
 				}
 			}
 			untrack(() => ws.connect(token, authDisabled));
-		} else untrack(() => ws.pauseForAuth());
+		} else untrack(() => ws.pause('missing-auth'));
 	});
 
 	let presentationOwnerKey: string | null = null;

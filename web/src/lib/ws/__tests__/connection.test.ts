@@ -1377,13 +1377,34 @@ describe('WsConnection', () => {
 		const connection = new WsConnection();
 		connection.connect('old-token');
 		try {
-			connection.pauseForAuth();
+			connection.pause('missing-auth');
 			window.dispatchEvent(new Event('online'));
 			connection.resumeForAuth('new-token');
 			expect(connection.connectionStatus.reason).toBe('browser-online');
 			const resumed = mockSockets.at(-1)!;
 			await vi.advanceTimersByTimeAsync(3_000);
 			expect(resumed.close).toHaveBeenCalledOnce();
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('keeps an inactive workspace disconnected across browser and late auth signals', async () => {
+		const connection = new WsConnection();
+		try {
+			connection.connect('token');
+			mockSockets[0].open();
+			connection.pause('workspace-inactive');
+			window.dispatchEvent(new Event('offline'));
+			window.dispatchEvent(new Event('online'));
+			document.dispatchEvent(new Event('visibilitychange'));
+			connection.retryAfterAuthProbe();
+			connection.resumeForAuth('token');
+			await vi.advanceTimersByTimeAsync(30_000);
+			expect(mockSockets).toHaveLength(1);
+			expect(connection.connectionStatus).toMatchObject({ phase: 'idle', reason: 'workspace-inactive' });
+			connection.connect('token');
+			expect(mockSockets).toHaveLength(2);
 		} finally {
 			connection.disconnect();
 		}
@@ -1397,7 +1418,7 @@ describe('WsConnection', () => {
 			const connection = new WsConnection();
 			connection.connect('token');
 			try {
-				connection.pauseForAuth();
+				connection.pause('missing-auth');
 				window.dispatchEvent(new Event('online'));
 				visibilityState = 'hidden';
 				document.dispatchEvent(new Event('visibilitychange'));
