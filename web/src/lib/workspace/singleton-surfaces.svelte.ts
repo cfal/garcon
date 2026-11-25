@@ -18,14 +18,13 @@ import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte.js';
 import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
 import { CanvasExitGuard } from '$lib/chat-canvas/canvas-exit-guard.js';
-import type { CanvasRecoveryPort } from '$lib/chat-canvas/canvas-recovery.js';
+import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
 import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 import { UsageController } from '$lib/usage/usage-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
-	canvasRecovery: CanvasRecoveryPort;
 	createCommit(): CommitController;
 	createPullRequests(): PullRequestsStore;
 	comparisonPreferences: GitComparisonPreferences;
@@ -76,10 +75,12 @@ export class SingletonSurfaceRegistry {
 	#filesProjectState: WorkspaceProjectState = { kind: 'absent' };
 	#visible: Partial<Record<PortableSingletonKind, boolean>> = {};
 	#hasVisibleProjectSurface = $state(false);
-	readonly #canvasExitGuard: CanvasExitGuard;
+	readonly #canvasExitGuard = new CanvasExitGuard(
+		browserCanvasRecovery,
+		() => this.chatCanvasIfPresent()?.session ?? null,
+	);
 
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
-		this.#canvasExitGuard = new CanvasExitGuard(deps.canvasRecovery, () => this.chatCanvasIfPresent()?.session ?? null);
 		this.#canvasExitGuard.activate();
 		this.#factories = {
 			tickets: () => this.deps.createTickets(),
@@ -89,7 +90,7 @@ export class SingletonSurfaceRegistry {
 			files: () => new FilesSurfaceController(this.deps.executors),
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
-			'chat-canvas': () => new CanvasController(deps.canvasRecovery),
+			'chat-canvas': () => new CanvasController(),
 			'chat-board': () => this.deps.createChatBoard(),
 			'pull-requests': () => this.deps.createPullRequests(),
 			usage: () => new UsageController(),

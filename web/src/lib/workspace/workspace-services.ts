@@ -111,7 +111,6 @@ export function resolveConfiguredFilePlacement(
 }
 
 export interface WorkspaceRootDependencies {
-	canvasRecovery: import('$lib/chat-canvas/canvas-recovery.js').CanvasRecoveryPort;
 	executors: import('$lib/executors/executors-store.svelte.js').ExecutorsStore;
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
@@ -345,7 +344,6 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			(executorId === 'local' ? deps.localProjectBasePath() : null),
 	};
 	const singletonSurfaces = new SingletonSurfaceRegistry({
-		canvasRecovery: deps.canvasRecovery,
 		projectSelection,
 		executors: deps.executors,
 		createTickets: () => new TicketsController({ invalidations: deps.ticketsInvalidations }),

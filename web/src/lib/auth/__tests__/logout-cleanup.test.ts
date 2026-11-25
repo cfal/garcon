@@ -32,7 +32,6 @@ it('clears Garcon credentials, drafts, snapshots and paths without clearing unre
 	for (const key of [
 		'garcon-ticket-draft-v1:test',
 		'chat-canvas-recovery-v1:test',
-		'chat-canvas-recovery-v1:viewer:user%3Asynthetic:test',
 		'terminal_client_id_v1',
 	])
 		sessionStorage.setItem(key, 'private');
