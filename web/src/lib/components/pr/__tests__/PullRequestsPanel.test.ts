@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { getLocalSettings } from '$lib/context';
-import { MinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
+import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { createGitPatchIndex, getGitSplitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { gitReviewWorker } from '$lib/git/review/git-review-worker-client.js';
@@ -30,7 +30,7 @@ afterEach(cleanup);
 vi.mock('$lib/context', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/context')>()),
 	getLocalSettings: vi.fn(),
-	getMinuteClock: () => new MinuteClockStore(),
+	getMinuteClock: () => ({ currentTime: new Date('2026-01-01T00:00:00Z') } satisfies Pick<MinuteClockStore, 'currentTime'>),
 }));
 
 const HEAD = 'a'.repeat(40);
