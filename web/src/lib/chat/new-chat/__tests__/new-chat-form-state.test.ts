@@ -2063,12 +2063,17 @@ describe('NewChatFormState prompt draft', () => {
 		const kept = image('kept.png');
 		closed.addImages([kept, image('removed.png')]);
 		closed.removeImage(1);
+		const oldUrl = closed.attachmentPreviewUrls.get(kept);
+		closed.revokeAllImageUrls();
 
 		const reopened = createFormState(['claude'], new NewChatPromptDraft(drafts));
 		reopened.reseed('');
 
 		expect(reopened.firstMessage).toBe('Unsent prompt');
 		expect(reopened.attachedImages).toEqual([kept]);
+		expect(reopened.attachmentPreviewUrls.get(kept)).toEqual(expect.any(String));
+		expect(reopened.attachmentPreviewUrls.get(kept)).not.toBe(oldUrl);
+		reopened.revokeAllImageUrls();
 	});
 
 	it('shows an explicit prefill instead of the retained draft', () => {

@@ -721,6 +721,7 @@ export class NewChatFormState {
 		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;
 		this.#images.images = [...(retained?.attachments ?? [])];
+		this.#images.syncUrls();
 		this.#contentRevision += 1;
 		this.error = null;
 		this.showBrowser = false;
