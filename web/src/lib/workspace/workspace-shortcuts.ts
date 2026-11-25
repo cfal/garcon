@@ -75,9 +75,8 @@ export class WorkspaceShortcutDispatcher {
 	readonly #localOwners = new Map<HTMLElement, Set<WorkspaceLocalShortcutOwner>>();
 	#toggleCommandMenu: (() => void) | null = null;
 	#userInteractionGeneration = 0;
-	#lastInteractedScrollRegion: HTMLElement | null = null;
-	#lastWheelTarget: EventTarget | null = null;
-	#lastWheelRegion: HTMLElement | null = null;
+	#lastInteractedScrollRegion?: WeakRef<HTMLElement>;
+	#lastWheelTarget?: WeakRef<Element>;
 	#lastWheelRegionRevision = -1;
 	#pendingPointerFocus: { region: HTMLElement } | null = null;
 
@@ -128,20 +127,20 @@ export class WorkspaceShortcutDispatcher {
 		if (interaction === 'wheel') {
 			const revision = workspaceScrollRegionRevision();
 			if (
-				target !== this.#lastWheelTarget ||
+				!(target instanceof Element) ||
+				target !== this.#lastWheelTarget?.deref() ||
 				revision !== this.#lastWheelRegionRevision ||
-				!this.#lastWheelRegion ||
-				(this.#lastWheelRegion && target instanceof Node && !this.#lastWheelRegion.contains(target))
+				!this.#lastInteractedScrollRegion?.deref()?.contains(target)
 			) {
-				this.#lastWheelTarget = target;
-				this.#lastWheelRegion = closestWorkspaceScrollRegion(target);
+				const region = closestWorkspaceScrollRegion(target);
+				this.#lastWheelTarget = target instanceof Element ? new WeakRef(target) : undefined;
+				this.#lastInteractedScrollRegion = region ? new WeakRef(region) : undefined;
 				this.#lastWheelRegionRevision = revision;
 			}
-			// Shortcut dispatch checks availability against the current presentation.
-			this.#lastInteractedScrollRegion = this.#lastWheelRegion;
 			this.#pendingPointerFocus = null;
 			return;
 		}
+		this.#lastWheelTarget = undefined;
 		const region = closestWorkspaceScrollRegion(target);
 		const availableRegion = region && this.#isScrollRegionAvailable(region) ? region : null;
 		if (interaction === 'focus') {
@@ -159,7 +158,7 @@ export class WorkspaceShortcutDispatcher {
 		if (interaction === 'pointer') {
 			this.#pendingPointerFocus = availableRegion ? { region: availableRegion } : null;
 		}
-		this.#lastInteractedScrollRegion = availableRegion;
+		this.#lastInteractedScrollRegion = availableRegion ? new WeakRef(availableRegion) : undefined;
 	}
 
 	matchesGlobalShortcut(id: GlobalShortcutId, event: KeyboardEvent): boolean {
@@ -169,7 +168,6 @@ export class WorkspaceShortcutDispatcher {
 
 	handle(event: KeyboardEvent): void {
 		if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.key === 'Process') return;
-		if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) return;
 		if (
 			event.key === 'Escape' &&
 			this.deps.transients.topVisibleKind() === 'file-dialog' &&
@@ -187,6 +185,7 @@ export class WorkspaceShortcutDispatcher {
 			return;
 		}
 		if (this.#isLocallyOwned(event)) return;
+		if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) return;
 		const owner = explicitOwner ?? this.deps.workspace.focusOwner;
 		const ownerDescriptor =
 			owner.kind === 'surface' || owner.kind === 'window-chrome'
@@ -337,7 +336,7 @@ export class WorkspaceShortcutDispatcher {
 				this.#ownersMatch(owner, this.#ownerForTarget(region)) &&
 				(!restrictToTopModal || this.deps.transients.ownsTopModalTarget(region)),
 		);
-		const lastRegion = this.#lastInteractedScrollRegion;
+		const lastRegion = this.#lastInteractedScrollRegion?.deref();
 		const region =
 			(lastRegion && regions.includes(lastRegion) ? lastRegion : null) ??
 			regions.find((candidate) => workspaceScrollRegionRole(candidate) === 'primary') ??
