@@ -21,6 +21,7 @@ interface RenderJob {
 export type RenderDiagram = (
 	source: string,
 	theme: RendererThemeId,
+	requireConsumer: () => void,
 ) => Promise<string>;
 
 export class MermaidRenderQueue {
@@ -87,7 +88,11 @@ export class MermaidRenderQueue {
 
 	async #run(job: RenderJob): Promise<void> {
 		try {
-			const svg = await this.renderDiagram(job.source, job.theme);
+			const svg = await this.renderDiagram(job.source, job.theme, () => {
+				if (job.consumers.size > 0) return;
+				this.#jobs.delete(job.key);
+				throw new DOMException('No remaining diagram consumers', 'AbortError');
+			});
 			if (svg.length > MERMAID_OUTPUT_LIMIT) throw new Error('Rendered diagram is too large');
 			if (job.consumers.size > 0) this.#cacheResult(job.key, svg);
 			for (const consumer of job.consumers) consumer.resolve(svg);

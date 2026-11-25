@@ -47,6 +47,27 @@ describe('mermaid-loader', () => {
 		expect(mermaid.initialize).toHaveBeenCalledTimes(2);
 	});
 
+	it('skips abandoned work when the renderer finishes loading', async () => {
+		const loading = Promise.withResolvers<void>();
+		vi.doMock('mermaid', async () => {
+			await loading.promise;
+			return { default: mermaid };
+		});
+		try {
+			const { renderMermaid } = await import('../mermaid-loader');
+			const abort = new AbortController();
+			const cancelled = expect(renderMermaid('abandoned', 'standard-light', abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+			abort.abort();
+			const visible = renderMermaid('visible', 'standard-dark');
+			loading.resolve();
+			await cancelled;
+			await visible;
+			expect(mermaid.render.mock.calls.map(([, source]) => source)).toEqual(['visible']);
+		} finally {
+			vi.doMock('mermaid', () => ({ default: mermaid }));
+		}
+	});
+
 	it('serializes initialize and render when renderer themes change', async () => {
 		let resolveFirst!: (value: { svg: string }) => void;
 		mermaid.render

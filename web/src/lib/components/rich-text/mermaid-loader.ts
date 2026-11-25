@@ -247,8 +247,9 @@ const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 let loadPromise: Promise<Mermaid> | null = null;
 let initializedTheme: MermaidThemeId | null = null;
 let renderCounter = 0;
-const renders = new MermaidRenderQueue(async (source, themeId) => {
+const renders = new MermaidRenderQueue(async (source, themeId, requireConsumer) => {
 	const mermaid = await loadMermaid();
+	requireConsumer();
 	if (initializedTheme !== themeId) {
 		mermaid.initialize(THEME_CONFIGS[themeId]);
 		initializedTheme = themeId;
