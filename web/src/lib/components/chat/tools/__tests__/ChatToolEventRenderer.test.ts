@@ -89,12 +89,19 @@ describe('ChatToolEventRenderer', () => {
 	});
 
 	it('renders nested output as literal text once, with its metadata', () => {
-		const output = 'First line\nSecond line';
+		const output = '  First line\nSecond line\n';
 		const { container } = render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hi'),
 			mode: 'result', autoExpandTools: true, toolResult: { content: { rawOutput: { output, attempt: 2 } }, isError: false } });
 		expect(container.textContent).toContain(output);
 		expect(container.textContent).toContain('"attempt": 2');
 		expect(container.textContent?.split('First line')).toHaveLength(2);
+	});
+
+	it('shows the diagnostic without a blank output prefix', () => {
+		const output = ' \t\n'.repeat(1000);
+		render(ChatToolEventRenderer, { toolMessage: new BackgroundTaskToolUseMessage('', 'task', 'list'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { status: 'failed', rawOutput: { output, error: 'Operation refused' } }, isError: true } });
+		expect(screen.getByText(/"error": "Operation refused"/).textContent).toBe('{\n  "error": "Operation refused"\n}');
 	});
 
 	it('renders distinct outcomes for plan steps with the same title', () => {

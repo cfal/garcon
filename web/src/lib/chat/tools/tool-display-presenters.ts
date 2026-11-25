@@ -77,7 +77,11 @@ export function reportedToolResultText(content: unknown): string {
 		if (rawOutput && typeof rawOutput === 'object' && 'output' in rawOutput && typeof rawOutput.output === 'string') {
 			const { output, ...metadata } = rawOutput;
 			const hasMetadata = Object.keys(metadata).length > 0;
-			if (!text || text === output) return [output, hasMetadata ? JSON.stringify(metadata, null, 2) : ''].filter(Boolean).join('\n\n');
+			if (!text || text === output) {
+				const details = hasMetadata ? JSON.stringify(metadata, null, 2) : '';
+				if (!/\S/.test(output)) return details;
+				return details ? output + '\n\n' + details : output;
+			}
 			if (!hasMetadata) return text;
 		}
 		if (!text) return JSON.stringify(rawOutput, null, 2);
