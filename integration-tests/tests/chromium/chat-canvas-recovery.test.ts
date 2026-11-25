@@ -22,6 +22,29 @@ async function saved(page: Page): Promise<void> {
 }
 
 describe('Chromium canvas recovery', () => {
+  test('keeps a closed canvas draft protected while the workspace requires sign-in', async () => {
+    await withChromiumFixture('canvas-reauth-recovery', async ({ page, integration, withExpectedConsoleErrors }) => {
+      const draft = await integration.client.post<ChatCanvas>(endpoint, {
+        id: 'offline', content: { title: 'Synthetic draft', nodes: [], connections: [] },
+      });
+      await page.goto(integration.garcon.baseUrl);
+      await page.locator('[data-workspace-window-current="true"] [data-workspace-window-titlebar]').waitFor();
+      await page.evaluate(({ key, draft }) => sessionStorage.setItem(key, JSON.stringify(draft)), {
+        key: canvasRecoveryKey(integration.garcon.authToken, draft.id), draft,
+      });
+      const wouldWarn = () => page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+      expect(await wouldWarn()).toBe(true);
+      await page.route('**/api/v1/auth/user', route => route.fulfill({
+        status: 401, json: { success: false, error: 'Session expired', errorCode: 'AUTH_SESSION_INVALID', retryable: false },
+      }));
+      await withExpectedConsoleErrors(['Failed to load resource: the server responded with a status of 401 (Unauthorized)'], async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('online')));
+        await page.locator('dialog').getByRole('button', { name: 'Sign in', exact: true }).waitFor();
+        expect(await wouldWarn()).toBe(true);
+      });
+    });
+  }, 60_000);
+
   test('frees a catalog slot and recovers a local draft when its server file is corrupt', async () => {
     await withChromiumFixture('canvas-corrupt-draft-recovery', async ({ page, integration, browserErrors, assertNoBrowserErrors }, markPhase) => {
       const original = await integration.client.post<ChatCanvas>(endpoint, {

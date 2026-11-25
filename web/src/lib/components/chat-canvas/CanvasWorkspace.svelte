@@ -6,6 +6,7 @@
 	import type { CanvasSession } from '$lib/chat-canvas/canvas-session.svelte';
 	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 	import { getMinuteClock, getWorkspaceShortcuts } from '$lib/context';
 	import { setCanvasView } from '$lib/context/canvas-context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -20,7 +21,7 @@
 	let {
 		session,
 		controller,
-		chats,
+		sessions,
 		visible,
 		presentation,
 		onopen,
@@ -28,7 +29,7 @@
 	}: {
 		session: CanvasSession;
 		controller: CanvasController;
-		chats: readonly ChatSessionRecord[];
+		sessions: Pick<ChatSessionsStore, 'byId' | 'orderedChats'>;
 		visible: boolean;
 		presentation: string;
 		onopen: (id: string) => void;
@@ -50,8 +51,11 @@
 	let previousChats: Record<string, ChatSessionRecord> = Object.create(null);
 	const chatsById = $derived.by(() => {
 		if (!visible) return {};
-		const ids = canvasChatIds;
-		const matching = chats.filter((chat) => ids.has(chat.id));
+		const byId = sessions.byId;
+		const matching: ChatSessionRecord[] = [];
+		for (const id of canvasChatIds) {
+			if (Object.hasOwn(byId, id)) matching.push(byId[id]!);
+		}
 		if (
 			Object.keys(previousChats).length === matching.length &&
 			matching.every((chat) => previousChats[chat.id] === chat)
@@ -290,7 +294,7 @@
 		{:else if dialog.kind === 'chats'}
 			<CanvasChatPicker
 				{visible}
-				{chats}
+				chats={sessions.orderedChats}
 				{boxes}
 				initialBox={dialog.boxId}
 				capacity={CANVAS_MAX_NODES - content.nodes.length}

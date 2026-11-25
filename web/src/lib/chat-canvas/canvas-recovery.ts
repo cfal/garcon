@@ -1,5 +1,4 @@
 import { parseChatCanvas, type ChatCanvas } from '$shared/chat-canvas';
-import { authTokenIdentity, canDispatchAuthenticated, getAuthToken } from '$lib/auth/session';
 import { canPersistBrowserData, isBrowserDataCurrent } from '$lib/utils/browser-data-lifetime';
 import { CANVAS_RECOVERY_STORAGE_PREFIX } from './canvas-recovery-storage.js';
 
@@ -18,16 +17,8 @@ function parseRecovery(raw: string, id: string): ChatCanvas {
 	return canvas;
 }
 
-function currentViewer(): string | null {
-	if (!canDispatchAuthenticated()) return null;
-	const token = getAuthToken();
-	if (token === null) return 'local';
-	const owner = authTokenIdentity(token)?.ownerKey;
-	return owner ? `user:${owner}` : null;
-}
-
 // Captures the viewer for the lifetime of the controller, including late saves.
-export function createBrowserCanvasRecovery(viewer = currentViewer): CanvasRecoveryPort {
+export function createBrowserCanvasRecovery(viewer: () => string | null): CanvasRecoveryPort {
 	const owner = viewer();
 	const scope = `${CANVAS_RECOVERY_STORAGE_PREFIX}viewer:${encodeURIComponent(owner ?? '')}:`;
 	const canRead = () => owner !== null && viewer() === owner && isBrowserDataCurrent();
@@ -81,21 +72,3 @@ export function createBrowserCanvasRecovery(viewer = currentViewer): CanvasRecov
 		},
 	};
 }
-
-let browserPartition: { viewer: string | null; port: CanvasRecoveryPort } | undefined;
-
-export function recoveryForCurrentViewer(): CanvasRecoveryPort {
-	const viewer = currentViewer();
-	if (!browserPartition || browserPartition.viewer !== viewer) {
-		browserPartition = { viewer, port: createBrowserCanvasRecovery() };
-	}
-	return browserPartition.port;
-}
-
-// The workspace exit guard can read recovery even before a Canvas controller exists.
-export const browserCanvasRecovery: CanvasRecoveryPort = {
-	list: () => recoveryForCurrentViewer().list(),
-	read: (id) => recoveryForCurrentViewer().read(id),
-	write: (canvas) => recoveryForCurrentViewer().write(canvas),
-	remove: (id) => recoveryForCurrentViewer().remove(id),
-};

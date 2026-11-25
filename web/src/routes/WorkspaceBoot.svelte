@@ -94,6 +94,7 @@
 		serializeTerminalLauncherDismissal,
 	} from '$lib/workspace/terminal-launcher-dismissal.js';
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
+	import { createBrowserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery.js';
 	import type { ThemeControllerDeps } from '$lib/theme/theme-controller.svelte.js';
 	import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 	import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
@@ -152,6 +153,10 @@
 	const ghCapability = createGhCapabilityStore(executors);
 	const pullRequestReviews = new PullRequestReviewsStore();
 	const workspaceServices = createWorkspaceServices({
+		canvasRecovery: createBrowserCanvasRecovery(() => {
+			const owner = auth.presentationOwner;
+			return owner?.mode === 'local' ? 'local' : owner ? `user:${owner.key}` : null;
+		}),
 		pullRequestReviews,
 		localProjectBasePath: () => remoteSettings.snapshot?.projectBasePath ?? null,
 		executors,

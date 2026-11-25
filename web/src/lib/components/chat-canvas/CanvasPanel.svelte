@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
-	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 	import type { PresentationHostId } from '$lib/workspace/surface-types';
 	import { getWorkspaceCoordinator } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
@@ -13,12 +13,12 @@
 
 	let {
 		controller,
-		chats,
+		sessions,
 		visible,
 		presentation,
 	}: {
 		controller: CanvasController;
-		chats: readonly ChatSessionRecord[];
+		sessions: Pick<ChatSessionsStore, 'byId' | 'orderedChats'>;
 		visible: boolean;
 		presentation: PresentationHostId;
 	} = $props();
@@ -185,7 +185,7 @@
 			{#key session.saved.id}<CanvasWorkspace
 					{session}
 					{controller}
-					{chats}
+					{sessions}
 					{visible}
 					{presentation}
 					onopen={(id) => void openChat(id)}

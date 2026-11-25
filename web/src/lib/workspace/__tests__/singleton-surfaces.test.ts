@@ -2,7 +2,6 @@ import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-single
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeResponse } from '$shared/file-contracts';
-import { browserCanvasRecovery } from '$lib/chat-canvas/canvas-recovery';
 import { canvas } from '$lib/chat-canvas/__tests__/canvas-fixtures';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
@@ -200,7 +199,7 @@ describe('SingletonSurfaceRegistry', () => {
 		expect(destroyedExit.defaultPrevented).toBe(false);
 	});
 	it('protects recovered drafts before opening Canvas', () => {
-		browserCanvasRecovery.write(canvas());
+		unusedSingletonFactories.canvasRecovery.write(canvas());
 		const { registry } = createRegistry();
 		expect(registry.chatCanvasIfPresent()).toBeNull();
 		const exit = new Event('beforeunload', { cancelable: true });
@@ -211,7 +210,7 @@ describe('SingletonSurfaceRegistry', () => {
 	it('keeps inactive Canvas drafts protected after closing the surface', () => {
 		const { registry } = createRegistry();
 		registry.chatCanvas();
-		browserCanvasRecovery.write(canvas());
+		unusedSingletonFactories.canvasRecovery.write(canvas());
 		registry.disposeSurface('chat-canvas');
 		expect(registry.chatCanvasIfPresent()).toBeNull();
 		const exit = new Event('beforeunload', { cancelable: true });

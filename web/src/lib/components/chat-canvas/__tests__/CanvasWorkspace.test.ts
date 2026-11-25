@@ -59,6 +59,14 @@ const chat: ChatSessionRecord = {
 	tags: [],
 };
 
+function canvasRoster(record: ChatSessionRecord) {
+	const byId = { [record.id]: record };
+	return {
+		get byId() { return byId; },
+		get orderedChats() { return [record]; },
+	};
+}
+
 describe('CanvasWorkspace visibility', () => {
 	it('skips hidden catalog projections and restores fresh metadata without losing edits or selection', async () => {
 		vi.useFakeTimers();
@@ -70,13 +78,15 @@ describe('CanvasWorkspace visibility', () => {
 			),
 		} satisfies CanvasSessionPort;
 		const session = new CanvasSession(original, api, recoveryMemory().port, vi.fn());
-		const controller = new CanvasController();
+		const controller = new CanvasController(recoveryMemory().port);
 		controller.view = 'list';
+		const sessions = canvasRoster(chat);
+		const ordered = vi.spyOn(sessions, 'orderedChats', 'get');
 		try {
 			const view = render(CanvasWorkspace, {
 				session,
 				controller,
-				chats: [chat],
+				sessions,
 				visible: true,
 				presentation: 'window-main',
 				onopen: vi.fn(),
@@ -90,12 +100,13 @@ describe('CanvasWorkspace visibility', () => {
 			expect(card.classList.contains('canvas-selected')).toBe(true);
 			await view.rerender({ visible: false });
 			expect(shortcuts.registerLocalShortcutOwner.mock.results[0].value).toHaveBeenCalledOnce();
-			const intermediate = [{ ...chat, title: 'Synthetic intermediate chat' }];
-			const latest = [{ ...chat, title: 'Synthetic latest chat', isArchived: true }];
-			const intermediateProjection = vi.spyOn(intermediate, 'filter');
-			const latestProjection = vi.spyOn(latest, 'filter');
-			await view.rerender({ chats: intermediate });
-			await view.rerender({ chats: latest });
+			expect(ordered).not.toHaveBeenCalled();
+			const intermediate = canvasRoster({ ...chat, title: 'Synthetic intermediate chat' });
+			const latest = canvasRoster({ ...chat, title: 'Synthetic latest chat', isArchived: true });
+			const intermediateProjection = vi.spyOn(intermediate, 'byId', 'get');
+			const latestProjection = vi.spyOn(latest, 'byId', 'get');
+			await view.rerender({ sessions: intermediate });
+			await view.rerender({ sessions: latest });
 			expect(intermediateProjection).not.toHaveBeenCalled();
 			expect(latestProjection).not.toHaveBeenCalled();
 			expect(screen.queryByText(chat.title!)).toBeNull();
@@ -160,13 +171,13 @@ describe('CanvasWorkspace retention', () => {
 				update: async (request) => canvas(request.content, request.expectedRevision + 1),
 			} satisfies CanvasSessionPort;
 			const session = new CanvasSession(original, api, recoveryMemory().port, vi.fn());
-			const controller = new CanvasController();
+			const controller = new CanvasController(recoveryMemory().port);
 			controller.view = mode;
 			try {
 				const view = render(CanvasWorkspace, {
 					session,
 					controller,
-					chats: [chat],
+					sessions: canvasRoster(chat),
 					visible: true,
 					presentation: 'desktop',
 					onopen: vi.fn(),
