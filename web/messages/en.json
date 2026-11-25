@@ -2339,6 +2339,8 @@
 	"scheduled_prompts_open_chat": "Open chat",
 	"scheduled_prompts_open_chat_named": "Open chat: {title}",
 	"scheduled_prompts_outcome_created_chat": "Started a new chat",
+	"chat_plan_step_failed": "Failed",
+	"chat_plan_step_skipped": "Skipped",
 	"scheduled_prompts_outcome_failed": "Failed",
 	"scheduled_prompts_outcome_missed": "Missed",
 	"scheduled_prompts_outcome_queued": "Queued behind a running turn",

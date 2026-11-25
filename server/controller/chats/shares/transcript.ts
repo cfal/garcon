@@ -12,7 +12,7 @@ import {
   UserMessage,
   parseChatMessage,
   type ChatMessage,
-  type TodoItem,
+  type PlanStep,
   type ToolUseChatMessage,
 } from '../../../../common/chat-types.ts';
 import type { CliPresentationStyle } from '../../../../common/cli-presentation.ts';
@@ -28,7 +28,7 @@ interface TranscriptEntry {
   content: string;
 }
 
-function summarizeTodos(todos: TodoItem[] | undefined): string {
+function summarizeTodos(todos: readonly PlanStep[] | undefined): string {
   if (!todos || todos.length === 0) return 'No tasks recorded.';
   return todos
     .map((item) => `- [${item.status}] ${item.content}`)
@@ -118,6 +118,11 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
       return { role: 'Plan Update', content: summarizeTodos(message.todos) };
     case 'todo-read-tool-use':
       return { role: 'Plan Read', content: 'Read the current task list.' };
+    case 'background-task-tool-use':
+      return { role: 'Tool Call', content: [`Background task: ${message.action}`, message.taskId,
+        message.input === undefined ? undefined : `Input: ${JSON.stringify(message.input)}`].filter(Boolean).join('\n') };
+    case 'agent-message-tool-use':
+      return { role: 'Tool Call', content: `Message to ${message.recipient}\n${message.message}` };
     case 'task-tool-use': {
       const lines = ['Run subtask'];
       if (message.subagentType) lines.push(`Agent: ${message.subagentType}`);
