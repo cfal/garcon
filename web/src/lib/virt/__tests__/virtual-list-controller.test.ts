@@ -411,6 +411,35 @@ describe('VirtualListController', () => {
 		);
 	});
 
+	it.each(['scroll', 'resize'])('keeps user movement during a resize when %s arrives first', first => {
+		const test = harness({ viewportSize: 100 });
+		const keys = ['a', 'b', 'c', 'd'];
+		const estimates = [100, 100, 100, 100];
+		test.controller.apply({ kind: 'update', keys, estimates, anchor: { kind: 'none' } });
+		test.setPhysicalScrollTop(250);
+		test.controller.setScrollActivity('coasting');
+		test.controller.apply({
+			kind: 'update', keys: ['prepended', ...keys], estimates: [30, ...estimates],
+			anchor: { kind: 'item', key: 'c' },
+		});
+
+		// The old 250px is unreachable, but 110px is user movement, not the new 200px edge.
+		test.setViewportSizeSilently(200);
+		expect(test.viewport.scrollHeight - test.viewport.clientHeight).toBe(200);
+		test.setPhysicalScrollTopSilently(110);
+		if (first === 'resize') test.emitViewportResize();
+		test.viewport.dispatchEvent(new Event('scroll'));
+		if (first === 'scroll') test.emitViewportResize();
+		expect(test.controller.viewportPosition?.logicalOffset).toBe(140);
+		expect(test.writes).toBe(0);
+
+		test.controller.setScrollActivity('idle');
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(140);
+		expect(test.writes).toBe(1);
+	});
+
 	it('records settled deviation and painted anchor coordinates', () => {
 		const test = harness({ viewportSize: 80 });
 		test.controller.apply({
@@ -1081,6 +1110,27 @@ describe('VirtualListController', () => {
 		test.mountItem('reader', 500);
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(601);
+	});
+
+	it('does not resume a newly attainable reader seek during native momentum', () => {
+		const test = readerHarness({ before: 400, reader: 40, tail: 40 }, { viewportOffset: -60 });
+		const reader = test.mountItem('reader', 40);
+		test.controller.scrollToAnchor('reader', -60);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(280);
+
+		test.controller.setScrollActivity('coasting');
+		test.environment.observer.emit(reader.element, 240);
+		test.environment.flushMicrotasks();
+		expect(test.controller.measuredSize('reader')).toBe(240);
+		expect(test.viewport.scrollTop).toBe(280);
+		expect(test.writes).toBe(1);
+
+		test.controller.setScrollActivity('idle');
+		test.mountItem('tail', 60);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(460);
+		expect(test.writes).toBe(2);
 	});
 
 	it.each(['row', 'viewport'])('commits the reader start and leading inset together after a %s resize', source => {
