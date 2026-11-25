@@ -763,12 +763,14 @@ describe('git API contract', () => {
 	});
 
 	it('passes cancellation to the review document body request', async () => {
-		fetchMock.mockResolvedValue(
-			jsonResponse({ status: 'document-expired', documentId: 'doc', message: 'Expired' }),
+		fetchMock.mockImplementation((_url: string, options: RequestInit) =>
+			new Promise<Response>((_, reject) => {
+				options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+			}),
 		);
 		const controller = new AbortController();
 
-		await getGitReviewDocumentFileBodies(
+		const request = getGitReviewDocumentFileBodies(
 			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ ...scope, documentId: 'doc' },
 			['renamed.ts'],
@@ -779,7 +781,9 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(opts.method).toBe('POST');
-		expect(opts.signal).toBeInstanceOf(AbortSignal);
+		controller.abort();
+		expect(opts.signal.aborted).toBe(true);
+		await expect(request).rejects.toBe(controller.signal.reason);
 		expect(JSON.parse(opts.body)).toEqual({
 			executorId: scope.executorId,
 			project: '/project',
