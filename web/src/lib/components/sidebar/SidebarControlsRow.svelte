@@ -86,13 +86,17 @@
 	let showMarkAllRead = $derived(visibleUnreadCount > 0);
 	let showQuickSearchSeparator = $derived(sidebarMenuSearches.length > 0);
 	let showDockDivider = $derived(!hasAdjacentSearchContext);
-	let primaryButtonRef = $state<HTMLButtonElement | null>(null);
 	let menuTrigger = $state<HTMLButtonElement | null>(null);
 	let menuOpen = $state(false);
 	let selectedTileAction = false;
 	function handleMenuCloseFocus(event: Event): void {
 		const focused = document.activeElement;
-		if (selectedTileAction && focused && focused !== document.body && !focused.closest('[role="menu"]')) {
+		if (
+			selectedTileAction &&
+			focused &&
+			focused !== document.body &&
+			!focused.closest('[role="menu"]')
+		) {
 			event.preventDefault();
 		}
 		selectedTileAction = false;
@@ -111,19 +115,6 @@
 				target.focus();
 		});
 	}
-	let primaryButtonWidth = $state(0);
-	let showPrimaryLabel = $derived(primaryButtonWidth === 0 || primaryButtonWidth >= 136);
-
-	$effect(() => {
-		if (!primaryButtonRef || typeof ResizeObserver === 'undefined') return;
-
-		const resizeObserver = new ResizeObserver((entries) => {
-			primaryButtonWidth = entries[0]?.contentRect.width ?? 0;
-		});
-
-		resizeObserver.observe(primaryButtonRef);
-		return () => resizeObserver.disconnect();
-	});
 </script>
 
 <div
@@ -133,16 +124,13 @@
 	<div class="flex items-center gap-1.5">
 		<button
 			type="button"
-			bind:this={primaryButtonRef}
 			onclick={onCreateChat}
-			class="flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-sidebar-border/70 bg-muted/50 px-3 text-sm font-medium text-foreground transition-colors hover:bg-background"
+			class="@container/sidebar-create flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-sidebar-border/70 bg-muted/50 px-3 text-sm font-medium text-foreground transition-colors hover:bg-background"
 			aria-label={buttonLabel}
 			title={buttonLabel}
 		>
 			<MessageSquarePlus class="h-4 w-4 shrink-0" />
-			{#if showPrimaryLabel}
-				<span class="truncate">{buttonLabel}</span>
-			{/if}
+			<span class="hidden truncate @min-[136px]/sidebar-create:inline">{buttonLabel}</span>
 		</button>
 
 		<Button
@@ -165,7 +153,11 @@
 			>
 				<EllipsisVertical class="h-3.5 w-3.5" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" inert={actionsHidden} onCloseAutoFocus={handleMenuCloseFocus}>
+			<DropdownMenuContent
+				align="end"
+				inert={actionsHidden}
+				onCloseAutoFocus={handleMenuCloseFocus}
+			>
 				{#if sidebarMenuSearches.length > 0}
 					{#each sidebarMenuSearches as search (search.id)}
 						<DropdownMenuItem onclick={() => onApplySidebarMenuSearch?.(search.query)}>

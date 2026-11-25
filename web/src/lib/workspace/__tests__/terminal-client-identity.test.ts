@@ -130,6 +130,15 @@ describe('TerminalClientIdentity', () => {
 		expect(identity.clientId).not.toBe('shared-client');
 	});
 
+	it('does not scan or subscribe to storage with a working BroadcastChannel', () => {
+		const subscribe = vi.spyOn(window, 'addEventListener');
+		const scan = vi.spyOn(Storage.prototype, 'key');
+		mockCreateRandomId.mockReturnValue(uuid(5));
+		create();
+		expect(subscribe.mock.calls.some(([name]) => name === 'storage')).toBe(false);
+		expect(scan).not.toHaveBeenCalled();
+	});
+
 	it('uses storage coordination when BroadcastChannel construction is rejected', () => {
 		vi.stubGlobal(
 			'BroadcastChannel',

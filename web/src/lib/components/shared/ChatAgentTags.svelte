@@ -1,10 +1,7 @@
 <script lang="ts">
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
-	import {
-		observeChatAgentTagsSize,
-		selectFittingTagPrefix,
-	} from './chat-agent-tags-layout.js';
+	import { observeChatAgentTagsSize, selectFittingTagPrefix } from './chat-agent-tags-layout.js';
 	import AgentPill from './AgentPill.svelte';
 	import ColoredTag from './ColoredTag.svelte';
 
@@ -29,12 +26,12 @@
 	}: Props = $props();
 
 	const OVERFLOW_CLASS = 'shrink-0 text-[10px] text-muted-foreground';
+	const TAG_GAP_PX = 4;
 	let root: HTMLDivElement | undefined = $state();
 	let measurementRail: HTMLDivElement | undefined = $state();
 	let measuredVisibleTagCount: number | null = $state(null);
-	let maximumVisibleTagCount = $derived(
-		Math.min(tags.length, Math.max(0, Math.floor(tagLimit))),
-	);
+	let maximumVisibleTagCount = $derived(Math.min(tags.length, Math.max(0, Math.floor(tagLimit))));
+	const shouldMeasure = $derived(wrap === 'two-lines' && maximumVisibleTagCount > 0);
 	let visibleTagCount = $derived(
 		wrap === 'two-lines'
 			? Math.min(measuredVisibleTagCount ?? maximumVisibleTagCount, maximumVisibleTagCount)
@@ -60,9 +57,8 @@
 			: undefined,
 	);
 
-	function recomputeVisibleTags(availableWidth: number): void {
-		const rail = measurementRail;
-		if (!root || !rail || availableWidth <= 0) return;
+	function measureVisibleTags(rail: HTMLElement, availableWidth: number, totalTagCount: number) {
+		if (availableWidth <= 0) return;
 		const agentWidth =
 			rail
 				.querySelector<HTMLElement>('[data-chat-agent-tags-agent-measure]')
@@ -80,40 +76,37 @@
 				overflowWidths.set(hiddenCount, element.getBoundingClientRect().width);
 			}
 		}
-		const computedGap = Number.parseFloat(getComputedStyle(root).columnGap);
-		measuredVisibleTagCount = selectFittingTagPrefix({
+		const count = selectFittingTagPrefix({
 			availableWidth,
 			agentWidth,
 			tagWidths,
-			totalTagCount: tags.length,
+			totalTagCount,
 			overflowWidths,
-			gap: Number.isFinite(computedGap) ? computedGap : 4,
+			gap: TAG_GAP_PX,
 			maxRows: 2,
 		});
+		return () => (measuredVisibleTagCount = count);
 	}
 
 	$effect(() => {
-		const actionRoot = root;
-		const rail = measurementRail;
-		const inputKey = measurementKey;
-		if (wrap !== 'two-lines') {
+		if (!shouldMeasure) {
 			measuredVisibleTagCount = null;
 			return;
 		}
+		const actionRoot = root;
+		const rail = measurementRail;
 		if (!actionRoot || !rail) return;
-		let disposed = false;
-		let availableWidth = actionRoot.getBoundingClientRect().width;
-		const recompute = () => recomputeVisibleTags(availableWidth);
-		queueMicrotask(() => {
-			if (!disposed && inputKey === measurementKey) recompute();
-		});
+		// Equal-width replacements still need a fresh measurement of their individual pills.
+		measurementKey;
+		const totalTagCount = tags.length;
+		let availableWidth = 0;
+		const measure = () => measureVisibleTags(rail, availableWidth, totalTagCount);
 		const stopRootObservation = observeChatAgentTagsSize(actionRoot, (entry) => {
 			availableWidth = entry.contentRect.width;
-			recompute();
+			return measure;
 		});
-		const stopRailObservation = observeChatAgentTagsSize(rail, recompute);
+		const stopRailObservation = observeChatAgentTagsSize(rail, () => measure);
 		return () => {
-			disposed = true;
 			stopRootObservation();
 			stopRailObservation();
 		};
@@ -133,11 +126,7 @@
 <div
 	bind:this={root}
 	data-slot="chat-agent-tags"
-	class={cn(
-		'flex items-center gap-1',
-		rootLayoutClass,
-		className,
-	)}
+	class={cn('flex items-center gap-1', rootLayoutClass, className)}
 >
 	<AgentPill
 		{agentId}
@@ -170,7 +159,7 @@
 	{/if}
 </div>
 
-{#if wrap === 'two-lines'}
+{#if shouldMeasure}
 	<div
 		bind:this={measurementRail}
 		aria-hidden="true"

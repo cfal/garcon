@@ -17,18 +17,23 @@
 		children: Snippet;
 	} = $props();
 
-	// Keeps the portal owner through dismissal so Bits can finish focus restoration.
-	let hasOpened = $state(false);
+	// Keeps the portal owner until Bits completes the exit.
+	let exitingOrOpen = $state(false);
 
-	function handleOpenChange(nextOpen: boolean): void {
-		if (nextOpen) hasOpened = true;
-		onOpenChange?.(nextOpen);
-	}
+	$effect.pre(() => {
+		if (open) exitingOrOpen = true;
+	});
 </script>
 
-<Root bind:open onOpenChange={handleOpenChange}>
+<Root
+	bind:open
+	{onOpenChange}
+	onOpenChangeComplete={(nextOpen) => {
+		if (!nextOpen && !open) exitingOrOpen = false;
+	}}
+>
 	{@render trigger()}
-	{#if hasOpened || open}
+	{#if exitingOrOpen || open}
 		{@render children()}
 	{/if}
 </Root>

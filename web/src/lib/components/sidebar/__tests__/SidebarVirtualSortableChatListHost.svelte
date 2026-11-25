@@ -149,14 +149,16 @@
 		{onSortChatOrder}
 		{onToggleProjectCollapsed}
 		newWindowEdges={workspaceSplitAdmissions()}
-		onChatSelect={() => {}}
-		onDeleteChat={() => {}}
-		onStartRenameChat={() => {}}
-		onTogglePinned={() => {}}
-		onToggleArchive={() => {}}
-		isArchiveMutationPending={(id) => pendingChatIds.includes(id)}
-		onShowDetails={() => {}}
-		onForkChat={() => {}}
-		onShareChat={() => {}}
+		actions={{
+			onChatSelect: () => {},
+			onDeleteChat: () => {},
+			onStartRenameChat: () => {},
+			onTogglePinned: () => {},
+			onToggleArchive: () => {},
+			isArchiveMutationPending: (id) => pendingChatIds.includes(id),
+			onShowDetails: () => {},
+			onForkChat: () => {},
+			onShareChat: () => {},
+		}}
 	/>
 </div>

@@ -70,6 +70,33 @@ afterEach(() => {
 });
 
 describe('WorkspaceWindowDndController', () => {
+	it('keeps the same tab target across repeated dragovers and reads direction once per drag', () => {
+		const dnd = new WorkspaceWindowDndController(
+			twoWindowLayout(),
+			resolveUnmeasuredWorkspaceSplit,
+		);
+		const tab = windowElement('window-main');
+		const getStyle = vi.spyOn(globalThis, 'getComputedStyle');
+		try {
+			dnd.beginSurfaceTabDrag('singleton:git', 'window-main', 1, dragEvent('dragstart', tab));
+			const dragOver = (x: number) =>
+				dnd.handleTabDragOver(
+					'window-main',
+					'chat-view:window-main',
+					dragEvent('dragover', tab, { clientX: x }),
+				);
+			dragOver(20);
+			const target = dnd.activeTarget;
+			expect(target).toMatchObject({ kind: 'tab', position: 'before' });
+			dragOver(30);
+			expect(dnd.activeTarget).toBe(target);
+			dragOver(80);
+			expect(dnd.activeTarget).toMatchObject({ kind: 'tab', position: 'after' });
+			expect(getStyle).toHaveBeenCalledTimes(1);
+		} finally {
+			getStyle.mockRestore();
+		}
+	});
 	it('routes sidebar drops to a registered content surface without replacing a workspace chat', () => {
 		const dnd = new WorkspaceWindowDndController(
 			twoWindowLayout(),

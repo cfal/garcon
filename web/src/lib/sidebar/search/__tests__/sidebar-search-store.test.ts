@@ -193,15 +193,17 @@ describe('SidebarSearchStore', () => {
 				});
 				store.activeQuery = 'needle';
 				store.openSearchDialog();
-				const pending = store.refreshTranscriptSearch('needle');
+				const pending = store.transcript.refreshTranscriptSearch('needle');
 
 				if (action === 'close') store.closeSearchDialog();
 				else store.confirmSearchDialog();
 				response.resolve(makeSearchResponse([makeSearchResult('c1')], makeSearchPage(1)));
 				await pending;
 
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
-				expect(store.transcriptSearchPage).toEqual(makeSearchPage(1));
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+					'c1',
+				]);
+				expect(store.transcript.transcriptSearchPage).toEqual(makeSearchPage(1));
 			},
 		);
 
@@ -301,18 +303,18 @@ describe('SidebarSearchStore', () => {
 		it('owns the reset sequence for search-result sort changes', () => {
 			const { store } = createStore([makeChat({ id: 'c1' })]);
 			store.highlightedResultIndex = 4;
-			store.transcriptSearchResultsResetVersion = 2;
-			store.transcriptSearchQuery = 'needle';
-			store.transcriptSearchResults = [makeSearchResult('c1')];
-			store.transcriptSearchPage = makeSearchPage(1);
+			store.transcript.transcriptSearchResultsResetVersion = 2;
+			store.transcript.transcriptSearchQuery = 'needle';
+			store.transcript.transcriptSearchResults = [makeSearchResult('c1')];
+			store.transcript.transcriptSearchPage = makeSearchPage(1);
 
 			store.resetTranscriptSearchForSortChange();
 
 			expect(store.highlightedResultIndex).toBe(0);
-			expect(store.transcriptSearchResultsResetVersion).toBe(3);
-			expect(store.transcriptSearchQuery).toBe('');
-			expect(store.transcriptSearchResults).toEqual([]);
-			expect(store.transcriptSearchPage).toBeNull();
+			expect(store.transcript.transcriptSearchResultsResetVersion).toBe(3);
+			expect(store.transcript.transcriptSearchQuery).toBe('');
+			expect(store.transcript.transcriptSearchResults).toEqual([]);
+			expect(store.transcript.transcriptSearchPage).toBeNull();
 		});
 
 		it('reports filtered state and all known tags', () => {
@@ -406,7 +408,7 @@ describe('SidebarSearchStore', () => {
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle tag:ops');
 
-			await store.refreshTranscriptSearch('needle tag:ops');
+			await store.transcript.refreshTranscriptSearch('needle tag:ops');
 
 			expect(searchChatTranscripts).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -417,9 +419,9 @@ describe('SidebarSearchStore', () => {
 				expect.any(Object),
 			);
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c1']);
-			expect(store.transcriptSearchResultsByChatId.get('c1')?.snippets[0]?.text).toContain(
-				'needle',
-			);
+			expect(
+				store.transcript.transcriptSearchResultsByChatId.get('c1')?.snippets[0]?.text,
+			).toContain('needle');
 		});
 
 		it('searches transcripts within is: filter candidates', async () => {
@@ -450,7 +452,7 @@ describe('SidebarSearchStore', () => {
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 
-			await store.refreshTranscriptSearch('needle is:!archived');
+			await store.transcript.refreshTranscriptSearch('needle is:!archived');
 
 			expect(searchChatTranscripts).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -468,11 +470,11 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 
-			await store.refreshTranscriptSearch('needle tag:ops');
+			await store.transcript.refreshTranscriptSearch('needle tag:ops');
 
 			expect(searchChatTranscripts).not.toHaveBeenCalled();
-			expect(store.transcriptSearchResults).toEqual([]);
-			expect(store.transcriptSearchIndex).toEqual({
+			expect(store.transcript.transcriptSearchResults).toEqual([]);
+			expect(store.transcript.transcriptSearchIndex).toEqual({
 				indexedChatCount: 0,
 				pendingChatCount: 0,
 				failedChatCount: 0,
@@ -490,7 +492,7 @@ describe('SidebarSearchStore', () => {
 				getTranscriptSearchEnabled: () => false,
 				searchChatTranscripts,
 			});
-			store.transcriptSearchResults = [
+			store.transcript.transcriptSearchResults = [
 				{
 					chatId: 'c1',
 					transcriptViewId: 'view-1',
@@ -500,11 +502,11 @@ describe('SidebarSearchStore', () => {
 				},
 			];
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			expect(searchChatTranscripts).not.toHaveBeenCalled();
-			expect(store.transcriptSearchResults).toEqual([]);
-			expect(store.transcriptSearchError).toBeNull();
+			expect(store.transcript.transcriptSearchResults).toEqual([]);
+			expect(store.transcript.transcriptSearchError).toBeNull();
 		});
 
 		it('silently clears a disabled race response without retrying', async () => {
@@ -523,10 +525,10 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
-			expect(store.transcriptSearchError).toBeNull();
+			expect(store.transcript.transcriptSearchError).toBeNull();
 			expect(logError).not.toHaveBeenCalled();
 		});
 
@@ -560,11 +562,11 @@ describe('SidebarSearchStore', () => {
 				waitForTranscriptIndexRetry,
 			});
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
 			expect(waitForTranscriptIndexRetry).toHaveBeenCalledWith(1_000, expect.any(AbortSignal));
-			expect(store.transcriptSearchError).toBeNull();
+			expect(store.transcript.transcriptSearchError).toBeNull();
 			expect(logError).not.toHaveBeenCalled();
 		});
 
@@ -604,11 +606,11 @@ describe('SidebarSearchStore', () => {
 				waitForTranscriptIndexRetry,
 			});
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
 			expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1);
-			expect(store.transcriptSearchError).toBeNull();
+			expect(store.transcript.transcriptSearchError).toBeNull();
 			expect(logError).not.toHaveBeenCalled();
 		});
 
@@ -623,10 +625,10 @@ describe('SidebarSearchStore', () => {
 				waitForTranscriptIndexRetry: async () => undefined,
 			});
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
-			expect(store.transcriptSearchError).not.toBeNull();
+			expect(store.transcript.transcriptSearchError).not.toBeNull();
 			expect(logError).toHaveBeenCalledTimes(1);
 		});
 
@@ -685,11 +687,11 @@ describe('SidebarSearchStore', () => {
 					waitForTranscriptIndexRetry,
 				});
 
-				await store.refreshTranscriptSearch('needle');
+				await store.transcript.refreshTranscriptSearch('needle');
 
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
 				expect(waitForTranscriptIndexRetry).not.toHaveBeenCalled();
-				expect(store.transcriptSearchIndexing).toBe(true);
+				expect(store.transcript.transcriptSearchIndexing).toBe(true);
 
 				store.applyTranscriptSearchStatus(
 					makeStatus({
@@ -703,9 +705,11 @@ describe('SidebarSearchStore', () => {
 				await vi.runAllTimersAsync();
 
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
-				expect(store.transcriptSearchIndex?.pendingChatCount).toBe(0);
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
-				expect(store.transcriptSearchIndexing).toBe(false);
+				expect(store.transcript.transcriptSearchIndex?.pendingChatCount).toBe(0);
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+					'c1',
+				]);
+				expect(store.transcript.transcriptSearchIndexing).toBe(false);
 				store.destroy();
 			} finally {
 				vi.useRealTimers();
@@ -739,14 +743,14 @@ describe('SidebarSearchStore', () => {
 				waitForTranscriptIndexRetry,
 			});
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 			store.applyTranscriptSearchStatus(makeStatus());
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
 			expect(waitForTranscriptIndexRetry).not.toHaveBeenCalled();
-			expect(store.transcriptSearchLoading).toBe(false);
-			expect(store.transcriptSearchIndexing).toBe(true);
-			expect(store.transcriptSearchStatus).toEqual(makeStatus());
+			expect(store.transcript.transcriptSearchLoading).toBe(false);
+			expect(store.transcript.transcriptSearchIndexing).toBe(true);
+			expect(store.transcript.transcriptSearchStatus).toEqual(makeStatus());
 			store.destroy();
 		});
 
@@ -777,7 +781,7 @@ describe('SidebarSearchStore', () => {
 				const { store } = createStore([makeChat({ id: 'c1' })], null, {
 					searchChatTranscripts,
 				});
-				await store.refreshTranscriptSearch('needle');
+				await store.transcript.refreshTranscriptSearch('needle');
 
 				for (const indexed of [1, 2, 3]) {
 					store.applyTranscriptSearchStatus(
@@ -817,13 +821,13 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 
-			await store.refreshTranscriptSearch('needle');
-			expect(store.transcriptSearchError).toBeTruthy();
-			expect(store.transcriptSearchError).not.toContain('raw backend failure');
+			await store.transcript.refreshTranscriptSearch('needle');
+			expect(store.transcript.transcriptSearchError).toBeTruthy();
+			expect(store.transcript.transcriptSearchError).not.toContain('raw backend failure');
 			expect(logError).toHaveBeenCalledTimes(1);
 
-			await store.refreshTranscriptSearch('other');
-			expect(store.transcriptSearchError).toBeNull();
+			await store.transcript.refreshTranscriptSearch('other');
+			expect(store.transcript.transcriptSearchError).toBeNull();
 			expect(logError).toHaveBeenCalledTimes(1);
 		});
 
@@ -838,8 +842,8 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 
-			const staleSearch = store.refreshTranscriptSearch('stale');
-			const currentSearch = store.refreshTranscriptSearch('current');
+			const staleSearch = store.transcript.refreshTranscriptSearch('stale');
+			const currentSearch = store.transcript.refreshTranscriptSearch('current');
 			const currentSignal = searchChatTranscripts.mock.calls[1]?.[1]?.signal;
 			staleResponse.resolve(makeSearchResponse([makeSearchResult('c1')], makeSearchPage(1)));
 			await staleSearch;
@@ -848,8 +852,10 @@ describe('SidebarSearchStore', () => {
 			currentResponse.resolve(makeSearchResponse([makeSearchResult('c2')], makeSearchPage(1)));
 			await currentSearch;
 
-			expect(store.transcriptSearchQuery).toBe('current');
-			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c2']);
+			expect(store.transcript.transcriptSearchQuery).toBe('current');
+			expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+				'c2',
+			]);
 		});
 
 		it('adds transcript-only matches after metadata matches for the same query', async () => {
@@ -895,7 +901,7 @@ describe('SidebarSearchStore', () => {
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			expect(store.dialogFilteredChats.map((chat) => chat.id)).toEqual(['c1']);
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c1', 'c2']);
@@ -938,7 +944,7 @@ describe('SidebarSearchStore', () => {
 				getChats: () => chats.chats,
 			});
 			store.updateDraftQuery('needle tag:ops');
-			await store.refreshTranscriptSearch('needle tag:ops');
+			await store.transcript.refreshTranscriptSearch('needle tag:ops');
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c1']);
 
 			chats.replace(0, makeChat({ id: 'c1', title: 'Hidden match', tags: ['dev'] }));
@@ -986,16 +992,16 @@ describe('SidebarSearchStore', () => {
 				.mockReturnValueOnce(deferred.promise);
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 			expect(searchChatTranscripts).toHaveBeenCalledWith(
 				expect.objectContaining({ chatIds: ['c1', 'c2'] }),
 				expect.any(Object),
 			);
-			expect([...store.transcriptSearchResultsByChatId.keys()]).toEqual(['c2']);
+			expect([...store.transcript.transcriptSearchResultsByChatId.keys()]).toEqual(['c2']);
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(['c2']);
 
 			store.updateDraftQuery('other');
-			const pending = store.refreshTranscriptSearch('other');
+			const pending = store.transcript.refreshTranscriptSearch('other');
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual([]);
 
 			deferred.resolve({
@@ -1025,12 +1031,12 @@ describe('SidebarSearchStore', () => {
 			const { store } = createStore([makeChat({ id: 'c1', title: 'Needle' })]);
 			store.updateDraftQuery('needle');
 			const display = store.dialogDisplayChats;
-			const results = store.transcriptSearchResultsByChatId;
+			const results = store.transcript.transcriptSearchResultsByChatId;
 
 			store.highlightedResultIndex = 1;
 
 			expect(store.dialogDisplayChats).toBe(display);
-			expect(store.transcriptSearchResultsByChatId).toBe(results);
+			expect(store.transcript.transcriptSearchResultsByChatId).toBe(results);
 		});
 
 		it('separates candidate membership from content revisions', () => {
@@ -1075,7 +1081,7 @@ describe('SidebarSearchStore', () => {
 					),
 			});
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			store.updateDraftQuery('other');
 
@@ -1099,12 +1105,12 @@ describe('SidebarSearchStore', () => {
 					),
 			});
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 			store.highlightedResultIndex = 30;
 			const displayedBeforeActivity = store.dialogDisplayChats.map((chat) => chat.id);
 
 			chats[40].lastActivityAt = '2026-09-05T00:00:00.000Z';
-			store.scheduleTranscriptSearchRevalidation();
+			store.transcript.scheduleTranscriptSearchRevalidation();
 
 			expect(store.dialogDisplayChats.map((chat) => chat.id)).toEqual(displayedBeforeActivity);
 			expect(store.dialogDisplayChats[store.highlightedResultIndex]?.id).toBe(
@@ -1124,7 +1130,7 @@ describe('SidebarSearchStore', () => {
 				getSearchResultSort: () => 'activity',
 			});
 
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			expect(searchChatTranscripts).toHaveBeenCalledWith(
 				{
@@ -1140,9 +1146,9 @@ describe('SidebarSearchStore', () => {
 				{ signal: expect.any(AbortSignal) },
 			);
 
-			await store.refreshTranscriptSearch('title:Needle');
+			await store.transcript.refreshTranscriptSearch('title:Needle');
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
-			expect(store.transcriptSearchPage).toBeNull();
+			expect(store.transcript.transcriptSearchPage).toBeNull();
 		});
 
 		it('uses the server cursor, single-flights demand, and deduplicates live overlap', async () => {
@@ -1159,10 +1165,10 @@ describe('SidebarSearchStore', () => {
 			const chats = [makeChat({ id: 'c1' }), makeChat({ id: 'c2' })];
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
-			const firstDemand = store.loadMoreTranscriptResults();
-			const repeatedDemand = store.loadMoreTranscriptResults();
+			const firstDemand = store.transcript.loadMoreTranscriptResults();
+			const repeatedDemand = store.transcript.loadMoreTranscriptResults();
 
 			expect(repeatedDemand).toBe(firstDemand);
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
@@ -1180,10 +1186,13 @@ describe('SidebarSearchStore', () => {
 			nextPage.resolve(nextPageResponse);
 			await firstDemand;
 
-			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1', 'c2']);
-			expect(store.transcriptSearchPage?.nextOffset).toBe(100);
-			expect(store.transcriptSearchIndexing).toBe(true);
-			expect(store.transcriptSearchLoadingMore).toBe(false);
+			expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+				'c1',
+				'c2',
+			]);
+			expect(store.transcript.transcriptSearchPage?.nextOffset).toBe(100);
+			expect(store.transcript.transcriptSearchIndexing).toBe(true);
+			expect(store.transcript.transcriptSearchLoadingMore).toBe(false);
 		});
 
 		it('invalidates an in-flight page immediately when the draft query changes', async () => {
@@ -1201,16 +1210,16 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 			store.highlightedResultIndex = 1;
-			const pending = store.loadMoreTranscriptResults();
+			const pending = store.transcript.loadMoreTranscriptResults();
 			const pageSignal = searchChatTranscripts.mock.calls[1]?.[1]?.signal;
 
 			store.updateDraftQuery('replacement');
 
 			expect(pageSignal?.aborted).toBe(true);
 			expect(store.highlightedResultIndex).toBe(0);
-			expect(store.transcriptSearchResults).toEqual([]);
+			expect(store.transcript.transcriptSearchResults).toEqual([]);
 			nextPage.resolve(
 				makeSearchResponse(
 					[makeSearchResult('c2')],
@@ -1218,7 +1227,7 @@ describe('SidebarSearchStore', () => {
 				),
 			);
 			await pending;
-			expect(store.transcriptSearchResults).toEqual([]);
+			expect(store.transcript.transcriptSearchResults).toEqual([]);
 		});
 
 		it('preserves a user highlight changed while a page is loading', async () => {
@@ -1235,9 +1244,9 @@ describe('SidebarSearchStore', () => {
 				.mockReturnValueOnce(nextPage.promise);
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 			store.highlightedResultIndex = 42;
-			const pending = store.loadMoreTranscriptResults();
+			const pending = store.transcript.loadMoreTranscriptResults();
 			store.highlightedResultIndex = 49;
 
 			nextPage.resolve(
@@ -1265,13 +1274,13 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
 			store.updateDraftQuery('replacement');
-			await store.loadMoreTranscriptResults();
+			await store.transcript.loadMoreTranscriptResults();
 
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
-			expect(store.canLoadMoreTranscriptResults).toBe(false);
+			expect(store.transcript.canLoadMoreTranscriptResults).toBe(false);
 		});
 
 		it('remounts identical live announcements for consecutive metadata overlaps', async () => {
@@ -1298,15 +1307,15 @@ describe('SidebarSearchStore', () => {
 				{ searchChatTranscripts },
 			);
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
-			await store.loadMoreTranscriptResults();
-			const firstAnnouncement = store.transcriptSearchAnnouncement;
-			expect(store.transcriptSearchAnnouncementVersion).toBe(1);
-			await store.loadMoreTranscriptResults();
+			await store.transcript.loadMoreTranscriptResults();
+			const firstAnnouncement = store.transcript.transcriptSearchAnnouncement;
+			expect(store.transcript.transcriptSearchAnnouncementVersion).toBe(1);
+			await store.transcript.loadMoreTranscriptResults();
 
-			expect(store.transcriptSearchAnnouncement).toBe(firstAnnouncement);
-			expect(store.transcriptSearchAnnouncementVersion).toBe(2);
+			expect(store.transcript.transcriptSearchAnnouncement).toBe(firstAnnouncement);
+			expect(store.transcript.transcriptSearchAnnouncementVersion).toBe(2);
 		});
 
 		it('preserves loaded rows after a page failure and retries the same offset', async () => {
@@ -1326,18 +1335,23 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
+			await store.transcript.refreshTranscriptSearch('needle');
 
-			await store.loadMoreTranscriptResults();
-			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
-			expect(store.transcriptSearchPageError).toBeTruthy();
-			expect(store.transcriptSearchPage?.nextOffset).toBe(50);
+			await store.transcript.loadMoreTranscriptResults();
+			expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+				'c1',
+			]);
+			expect(store.transcript.transcriptSearchPageError).toBeTruthy();
+			expect(store.transcript.transcriptSearchPage?.nextOffset).toBe(50);
 
-			await store.loadMoreTranscriptResults();
+			await store.transcript.loadMoreTranscriptResults();
 			expect(searchChatTranscripts.mock.calls[1]?.[0].offset).toBe(50);
 			expect(searchChatTranscripts.mock.calls[2]?.[0].offset).toBe(50);
-			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1', 'c2']);
-			expect(store.transcriptSearchPageError).toBeNull();
+			expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+				'c1',
+				'c2',
+			]);
+			expect(store.transcript.transcriptSearchPageError).toBeNull();
 		});
 
 		it('clears a page error when revalidation exhausts the result set', async () => {
@@ -1359,14 +1373,14 @@ describe('SidebarSearchStore', () => {
 				);
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
-			await store.loadMoreTranscriptResults();
-			expect(store.transcriptSearchPageError).toBeTruthy();
+			await store.transcript.refreshTranscriptSearch('needle');
+			await store.transcript.loadMoreTranscriptResults();
+			expect(store.transcript.transcriptSearchPageError).toBeTruthy();
 
-			await store.retryTranscriptSearchRevalidation();
+			await store.transcript.retryTranscriptSearchRevalidation();
 
-			expect(store.transcriptSearchPage?.hasMore).toBe(false);
-			expect(store.transcriptSearchPageError).toBeNull();
+			expect(store.transcript.transcriptSearchPage?.hasMore).toBe(false);
+			expect(store.transcript.transcriptSearchPageError).toBeNull();
 			store.destroy();
 		});
 
@@ -1389,13 +1403,13 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 			store.updateDraftQuery('needle');
-			await store.refreshTranscriptSearch('needle');
-			await store.loadMoreTranscriptResults();
+			await store.transcript.refreshTranscriptSearch('needle');
+			await store.transcript.loadMoreTranscriptResults();
 
-			expect(store.transcriptSearchLimitReached).toBe(true);
-			expect(store.canLoadMoreTranscriptResults).toBe(false);
-			expect(store.transcriptSearchResults).toHaveLength(2);
-			await store.loadMoreTranscriptResults();
+			expect(store.transcript.transcriptSearchLimitReached).toBe(true);
+			expect(store.transcript.canLoadMoreTranscriptResults).toBe(false);
+			expect(store.transcript.transcriptSearchResults).toHaveLength(2);
+			await store.transcript.loadMoreTranscriptResults();
 			expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
 		});
 
@@ -1419,15 +1433,17 @@ describe('SidebarSearchStore', () => {
 				});
 			const { store } = createStore(chats, null, { searchChatTranscripts });
 			store.updateDraftQuery('needle');
-			store.transcriptSearchQuery = 'needle';
-			store.transcriptSearchResults = chats.slice(0, 475).map((chat) => makeSearchResult(chat.id));
-			store.transcriptSearchPage = makeSearchPage(475, {
+			store.transcript.transcriptSearchQuery = 'needle';
+			store.transcript.transcriptSearchResults = chats
+				.slice(0, 475)
+				.map((chat) => makeSearchResult(chat.id));
+			store.transcript.transcriptSearchPage = makeSearchPage(475, {
 				offset: 450,
 				limit: 25,
 			});
 
-			await store.retryTranscriptSearchRevalidation();
-			await store.loadMoreTranscriptResults();
+			await store.transcript.retryTranscriptSearchRevalidation();
+			await store.transcript.loadMoreTranscriptResults();
 
 			const finalRequest = searchChatTranscripts.mock.calls.at(-1)?.[0];
 			expect(finalRequest).toMatchObject({
@@ -1436,9 +1452,9 @@ describe('SidebarSearchStore', () => {
 				limit: 25,
 				snippetLimit: 1,
 			});
-			expect(store.transcriptSearchResults).toHaveLength(500);
-			expect(store.transcriptSearchPage?.nextOffset).toBe(500);
-			expect(store.transcriptSearchLimitReached).toBe(true);
+			expect(store.transcript.transcriptSearchResults).toHaveLength(500);
+			expect(store.transcript.transcriptSearchPage?.nextOffset).toBe(500);
+			expect(store.transcript.transcriptSearchLimitReached).toBe(true);
 		});
 
 		it('loads the first 500 logical positions in six bounded requests', async () => {
@@ -1463,9 +1479,9 @@ describe('SidebarSearchStore', () => {
 			});
 			store.updateDraftQuery('needle');
 
-			await store.refreshTranscriptSearch('needle');
-			while (store.canLoadMoreTranscriptResults) {
-				await store.loadMoreTranscriptResults();
+			await store.transcript.refreshTranscriptSearch('needle');
+			while (store.transcript.canLoadMoreTranscriptResults) {
+				await store.transcript.loadMoreTranscriptResults();
 			}
 
 			expect(
@@ -1481,7 +1497,7 @@ describe('SidebarSearchStore', () => {
 				{ offset: 350, limit: 100 },
 				{ offset: 450, limit: 50 },
 			]);
-			expect(store.transcriptSearchLimitReached).toBe(true);
+			expect(store.transcript.transcriptSearchLimitReached).toBe(true);
 		});
 
 		it('drains a content invalidation received during the initial page', async () => {
@@ -1496,9 +1512,9 @@ describe('SidebarSearchStore', () => {
 					searchChatTranscripts,
 				});
 				store.updateDraftQuery('needle');
-				const pending = store.refreshTranscriptSearch('needle');
+				const pending = store.transcript.refreshTranscriptSearch('needle');
 
-				store.scheduleTranscriptSearchRevalidation();
+				store.transcript.scheduleTranscriptSearchRevalidation();
 				const partial = makeSearchResponse([makeSearchResult('c1')], makeSearchPage(1));
 				partial.index.indexedChatCount = 0;
 				partial.index.pendingChatCount = 1;
@@ -1526,7 +1542,7 @@ describe('SidebarSearchStore', () => {
 				});
 				store.applyTranscriptSearchStatus(makeStatus());
 				store.updateDraftQuery('needle');
-				const pending = store.refreshTranscriptSearch('needle');
+				const pending = store.transcript.refreshTranscriptSearch('needle');
 
 				store.applyTranscriptSearchStatus(
 					makeStatus({
@@ -1583,12 +1599,12 @@ describe('SidebarSearchStore', () => {
 						}),
 					);
 					store.updateDraftQuery('needle');
-					await store.refreshTranscriptSearch('needle');
+					await store.transcript.refreshTranscriptSearch('needle');
 
 					const pending =
 						operation === 'page append'
-							? store.loadMoreTranscriptResults()
-							: store.retryTranscriptSearchRevalidation();
+							? store.transcript.loadMoreTranscriptResults()
+							: store.transcript.retryTranscriptSearchRevalidation();
 					store.applyTranscriptSearchStatus(
 						makeStatus({
 							phase: 'ready',
@@ -1635,9 +1651,9 @@ describe('SidebarSearchStore', () => {
 					}),
 				);
 				store.updateDraftQuery('needle');
-				await store.refreshTranscriptSearch('needle');
+				await store.transcript.refreshTranscriptSearch('needle');
 
-				const pendingAppend = store.loadMoreTranscriptResults();
+				const pendingAppend = store.transcript.loadMoreTranscriptResults();
 				store.applyTranscriptSearchStatus(
 					makeStatus({
 						phase: 'ready',
@@ -1651,12 +1667,12 @@ describe('SidebarSearchStore', () => {
 					),
 				);
 				await pendingAppend;
-				expect(store.transcriptSearchIndexing).toBe(true);
+				expect(store.transcript.transcriptSearchIndexing).toBe(true);
 
 				await vi.advanceTimersByTimeAsync(500);
 
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(3);
-				expect(store.transcriptSearchIndexing).toBe(false);
+				expect(store.transcript.transcriptSearchIndexing).toBe(false);
 				store.destroy();
 			} finally {
 				vi.useRealTimers();
@@ -1674,16 +1690,16 @@ describe('SidebarSearchStore', () => {
 					searchChatTranscripts,
 				});
 				store.updateDraftQuery('needle');
-				store.transcriptSearchQuery = 'needle';
-				store.transcriptSearchResults = [makeSearchResult('c1')];
-				store.transcriptSearchPage = makeSearchPage(1);
+				store.transcript.transcriptSearchQuery = 'needle';
+				store.transcript.transcriptSearchResults = [makeSearchResult('c1')];
+				store.transcript.transcriptSearchPage = makeSearchPage(1);
 				store.applyTranscriptSearchStatus(
 					makeStatus({
 						phase: 'ready',
 						chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
 					}),
 				);
-				const pending = store.retryTranscriptSearchRevalidation();
+				const pending = store.transcript.retryTranscriptSearchRevalidation();
 
 				store.applyTranscriptSearchStatus(
 					makeStatus({
@@ -1725,14 +1741,14 @@ describe('SidebarSearchStore', () => {
 				const { store } = createStore(chats, null, { searchChatTranscripts });
 				store.applyTranscriptSearchStatus(makeStatus());
 				store.updateDraftQuery('needle');
-				await store.refreshTranscriptSearch('needle');
+				await store.transcript.refreshTranscriptSearch('needle');
 				store.applyTranscriptSearchStatus(
 					makeStatus({
 						phase: 'ready',
 						chats: { total: 1, indexed: 1, pending: 0, failed: 0, unindexed: 0 },
 					}),
 				);
-				const pendingAppend = store.loadMoreTranscriptResults();
+				const pendingAppend = store.transcript.loadMoreTranscriptResults();
 
 				await vi.advanceTimersByTimeAsync(500);
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
@@ -1772,11 +1788,11 @@ describe('SidebarSearchStore', () => {
 					searchChatTranscripts,
 					waitForTranscriptIndexRetry,
 				});
-				const pending = store.refreshTranscriptSearch('needle');
+				const pending = store.transcript.refreshTranscriptSearch('needle');
 				await vi.waitFor(() => expect(waitForTranscriptIndexRetry).toHaveBeenCalledTimes(1));
-				expect(store.transcriptSearchLoading).toBe(false);
+				expect(store.transcript.transcriptSearchLoading).toBe(false);
 
-				store.scheduleTranscriptSearchRevalidation();
+				store.transcript.scheduleTranscriptSearchRevalidation();
 				retry.resolve();
 				await pending;
 				await vi.advanceTimersByTimeAsync(500);
@@ -1798,18 +1814,21 @@ describe('SidebarSearchStore', () => {
 				const chats = ['c1', 'c2', 'c3'].map((id) => makeChat({ id }));
 				const { store } = createStore(chats, null, { searchChatTranscripts });
 				store.updateDraftQuery('needle');
-				store.transcriptSearchQuery = 'needle';
-				store.transcriptSearchResults = [makeSearchResult('c1'), makeSearchResult('c2')];
-				store.transcriptSearchPage = makeSearchPage(300, {
+				store.transcript.transcriptSearchQuery = 'needle';
+				store.transcript.transcriptSearchResults = [makeSearchResult('c1'), makeSearchResult('c2')];
+				store.transcript.transcriptSearchPage = makeSearchPage(300, {
 					offset: 200,
 					hasMore: true,
 					nextOffset: 250,
 				});
 
-				store.scheduleTranscriptSearchRevalidation();
+				store.transcript.scheduleTranscriptSearchRevalidation();
 				await vi.advanceTimersByTimeAsync(500);
-				expect(store.transcriptSearchRevalidating).toBe(true);
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1', 'c2']);
+				expect(store.transcript.transcriptSearchRevalidating).toBe(true);
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+					'c1',
+					'c2',
+				]);
 				expect(searchChatTranscripts.mock.calls[0]?.[0]).toMatchObject({
 					mode: 'prefix',
 					offset: 0,
@@ -1827,13 +1846,13 @@ describe('SidebarSearchStore', () => {
 				await vi.runAllTimersAsync();
 
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
 					'c2',
 					'c3',
 					'c1',
 				]);
-				expect(store.transcriptSearchRevalidating).toBe(false);
-				expect(store.transcriptSearchRevalidationVersion).toBe(1);
+				expect(store.transcript.transcriptSearchRevalidating).toBe(false);
+				expect(store.transcript.transcriptSearchRevalidationVersion).toBe(1);
 			} finally {
 				vi.useRealTimers();
 			}
@@ -1859,14 +1878,14 @@ describe('SidebarSearchStore', () => {
 					searchChatTranscripts,
 				});
 				store.updateDraftQuery('needle');
-				store.transcriptSearchQuery = 'needle';
-				store.transcriptSearchResults = [makeSearchResult('c1')];
-				store.transcriptSearchPage = makeSearchPage(600, {
+				store.transcript.transcriptSearchQuery = 'needle';
+				store.transcript.transcriptSearchResults = [makeSearchResult('c1')];
+				store.transcript.transcriptSearchPage = makeSearchPage(600, {
 					hasMore: true,
 					nextOffset: frontier,
 				});
 
-				await store.retryTranscriptSearchRevalidation();
+				await store.transcript.retryTranscriptSearchRevalidation();
 
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
 				expect(searchChatTranscripts).toHaveBeenCalledWith(
@@ -1919,9 +1938,9 @@ describe('SidebarSearchStore', () => {
 						searchChatTranscripts,
 					});
 					store.updateDraftQuery('needle');
-					store.transcriptSearchQuery = 'needle';
-					store.transcriptSearchResults = [makeSearchResult('c1')];
-					store.transcriptSearchPage = makeSearchPage(600, {
+					store.transcript.transcriptSearchQuery = 'needle';
+					store.transcript.transcriptSearchResults = [makeSearchResult('c1')];
+					store.transcript.transcriptSearchPage = makeSearchPage(600, {
 						limit: frontier,
 						hasMore: true,
 						nextOffset: frontier,
@@ -1929,7 +1948,7 @@ describe('SidebarSearchStore', () => {
 
 					for (let event = 0; event < 31; event += 1) {
 						invalidationVersion += 1;
-						store.scheduleTranscriptSearchRevalidation();
+						store.transcript.scheduleTranscriptSearchRevalidation();
 						await vi.advanceTimersByTimeAsync(100);
 					}
 					await vi.runAllTimersAsync();
@@ -1962,15 +1981,15 @@ describe('SidebarSearchStore', () => {
 				{ searchChatTranscripts },
 			);
 			store.updateDraftQuery('needle');
-			store.transcriptSearchQuery = 'needle';
-			store.transcriptSearchResults = [
+			store.transcript.transcriptSearchQuery = 'needle';
+			store.transcript.transcriptSearchResults = [
 				makeSearchResult('c1'),
 				makeSearchResult('c2'),
 				makeSearchResult('c3'),
 			];
-			store.transcriptSearchPage = makeSearchPage(3, { limit: 3 });
+			store.transcript.transcriptSearchPage = makeSearchPage(3, { limit: 3 });
 			store.highlightedResultIndex = 0;
-			const pending = store.retryTranscriptSearchRevalidation();
+			const pending = store.transcript.retryTranscriptSearchRevalidation();
 			store.highlightedResultIndex = 2;
 
 			refreshed.resolve(
@@ -2004,25 +2023,27 @@ describe('SidebarSearchStore', () => {
 					{ searchChatTranscripts },
 				);
 				store.updateDraftQuery('needle');
-				store.transcriptSearchQuery = 'needle';
-				store.transcriptSearchResults = [makeSearchResult('c1')];
-				store.transcriptSearchPage = makeSearchPage(100, {
+				store.transcript.transcriptSearchQuery = 'needle';
+				store.transcript.transcriptSearchResults = [makeSearchResult('c1')];
+				store.transcript.transcriptSearchPage = makeSearchPage(100, {
 					hasMore: true,
 					nextOffset: 50,
 				});
 
-				store.scheduleTranscriptSearchRevalidation();
+				store.transcript.scheduleTranscriptSearchRevalidation();
 				await vi.advanceTimersByTimeAsync(500);
 
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
-				expect(store.transcriptSearchPage?.nextOffset).toBe(50);
-				expect(store.transcriptSearchRevalidationError).toBeTruthy();
-				expect(store.canLoadMoreTranscriptResults).toBe(false);
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+					'c1',
+				]);
+				expect(store.transcript.transcriptSearchPage?.nextOffset).toBe(50);
+				expect(store.transcript.transcriptSearchRevalidationError).toBeTruthy();
+				expect(store.transcript.canLoadMoreTranscriptResults).toBe(false);
 				expect(logError).toHaveBeenCalledWith(
 					'Failed to update transcript search results:',
 					expect.any(Error),
 				);
-				store.scheduleTranscriptSearchRevalidation();
+				store.transcript.scheduleTranscriptSearchRevalidation();
 				store.applyTranscriptSearchStatus(
 					makeStatus({
 						phase: 'ready',
@@ -2032,11 +2053,13 @@ describe('SidebarSearchStore', () => {
 				await vi.advanceTimersByTimeAsync(5_000);
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(1);
 
-				await store.retryTranscriptSearchRevalidation();
+				await store.transcript.retryTranscriptSearchRevalidation();
 
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c2']);
-				expect(store.transcriptSearchRevalidationError).toBeNull();
-				expect(store.canLoadMoreTranscriptResults).toBe(true);
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+					'c2',
+				]);
+				expect(store.transcript.transcriptSearchRevalidationError).toBeNull();
+				expect(store.transcript.canLoadMoreTranscriptResults).toBe(true);
 				store.destroy();
 			} finally {
 				vi.useRealTimers();
@@ -2072,28 +2095,32 @@ describe('SidebarSearchStore', () => {
 					{ searchChatTranscripts },
 				);
 				store.updateDraftQuery('needle');
-				store.transcriptSearchQuery = 'needle';
-				store.transcriptSearchResults = [makeSearchResult('c1')];
-				store.transcriptSearchPage = makeSearchPage(100, {
+				store.transcript.transcriptSearchQuery = 'needle';
+				store.transcript.transcriptSearchResults = [makeSearchResult('c1')];
+				store.transcript.transcriptSearchPage = makeSearchPage(100, {
 					hasMore: true,
 					nextOffset: 50,
 				});
 
-				store.scheduleTranscriptSearchRevalidation();
+				store.transcript.scheduleTranscriptSearchRevalidation();
 				await vi.advanceTimersByTimeAsync(500);
-				expect(store.transcriptSearchRevalidating).toBe(true);
+				expect(store.transcript.transcriptSearchRevalidating).toBe(true);
 				await vi.advanceTimersByTimeAsync(5_000);
 
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
-				expect(store.transcriptSearchRevalidationError).toBeTruthy();
-				expect(store.canLoadMoreTranscriptResults).toBe(false);
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+					'c1',
+				]);
+				expect(store.transcript.transcriptSearchRevalidationError).toBeTruthy();
+				expect(store.transcript.canLoadMoreTranscriptResults).toBe(false);
 				expect(logError).not.toHaveBeenCalled();
 
-				await store.retryTranscriptSearchRevalidation();
+				await store.transcript.retryTranscriptSearchRevalidation();
 
-				expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c2']);
-				expect(store.transcriptSearchRevalidationError).toBeNull();
-				expect(store.canLoadMoreTranscriptResults).toBe(true);
+				expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+					'c2',
+				]);
+				expect(store.transcript.transcriptSearchRevalidationError).toBeNull();
+				expect(store.transcript.canLoadMoreTranscriptResults).toBe(true);
 				store.destroy();
 			} finally {
 				vi.useRealTimers();
@@ -2107,13 +2134,13 @@ describe('SidebarSearchStore', () => {
 				searchChatTranscripts,
 			});
 			store.updateDraftQuery('needle title:missing');
-			await store.refreshTranscriptSearch('needle title:missing');
+			await store.transcript.refreshTranscriptSearch('needle title:missing');
 
-			await store.retryTranscriptSearchRevalidation();
+			await store.transcript.retryTranscriptSearchRevalidation();
 
 			expect(searchChatTranscripts).not.toHaveBeenCalled();
-			expect(store.transcriptSearchPage).toEqual(makeSearchPage(0));
-			expect(store.transcriptSearchRevalidating).toBe(false);
+			expect(store.transcript.transcriptSearchPage).toEqual(makeSearchPage(0));
+			expect(store.transcript.transcriptSearchRevalidating).toBe(false);
 		});
 
 		it('ignores status churn and unrelated global progress after the query is fully indexed', async () => {
@@ -2131,7 +2158,7 @@ describe('SidebarSearchStore', () => {
 						chats: { total: 10, indexed: 10, pending: 0, failed: 0, unindexed: 0 },
 					}),
 				);
-				await store.refreshTranscriptSearch('needle');
+				await store.transcript.refreshTranscriptSearch('needle');
 
 				store.applyTranscriptSearchStatus(
 					makeStatus({
@@ -2190,9 +2217,9 @@ describe('SidebarSearchStore', () => {
 					searchChatTranscripts,
 				});
 				store.updateDraftQuery('needle');
-				await store.refreshTranscriptSearch('needle');
-				store.scheduleTranscriptSearchRevalidation();
-				const pendingPage = store.loadMoreTranscriptResults();
+				await store.transcript.refreshTranscriptSearch('needle');
+				store.transcript.scheduleTranscriptSearchRevalidation();
+				const pendingPage = store.transcript.loadMoreTranscriptResults();
 
 				await vi.advanceTimersByTimeAsync(500);
 				expect(searchChatTranscripts).toHaveBeenCalledTimes(2);
@@ -2229,17 +2256,19 @@ describe('SidebarSearchStore', () => {
 			const { store } = createStore([makeChat({ id: 'c1' }), makeChat({ id: 'c2' })], null, {
 				searchChatTranscripts,
 			});
-			await store.refreshTranscriptSearch('needle');
-			const pending = store.loadMoreTranscriptResults();
+			await store.transcript.refreshTranscriptSearch('needle');
+			const pending = store.transcript.loadMoreTranscriptResults();
 			store.closeSearchDialog();
-			expect(store.transcriptSearchLoadingMore).toBe(false);
-			expect(store.transcriptSearchPageError).toBeNull();
+			expect(store.transcript.transcriptSearchLoadingMore).toBe(false);
+			expect(store.transcript.transcriptSearchPageError).toBeNull();
 
 			page.resolve(
 				makeSearchResponse([makeSearchResult('c2')], makeSearchPage(100, { offset: 50 })),
 			);
 			await pending;
-			expect(store.transcriptSearchResults.map((result) => result.chatId)).toEqual(['c1']);
+			expect(store.transcript.transcriptSearchResults.map((result) => result.chatId)).toEqual([
+				'c1',
+			]);
 		});
 	});
 
@@ -2393,7 +2422,7 @@ describe('transcript result targets', () => {
 			getSearchResultSort: () => 'relevance',
 			notifyError: vi.fn(),
 		});
-		store.transcriptSearchResults = [
+		store.transcript.transcriptSearchResults = [
 			{
 				chatId: 'chat-1',
 				transcriptViewId: 'view-1',
@@ -2407,41 +2436,41 @@ describe('transcript result targets', () => {
 
 	it('captures the displayed snippet with its immutable view identity', () => {
 		const store = navigationStore();
-		const target = store.transcriptResultTarget('chat-1');
+		const target = store.transcript.transcriptResultTarget('chat-1');
 		expect(target).toEqual({ chatId: 'chat-1', transcriptViewId: 'view-1', ordinal: 4 });
-		store.transcriptSearchResults[0]!.transcriptViewId = 'view-2';
+		store.transcript.transcriptSearchResults[0]!.transcriptViewId = 'view-2';
 		expect(target?.transcriptViewId).toBe('view-1');
 	});
 
 	it('returns no target for a metadata-only match', () => {
 		const store = navigationStore();
-		expect(store.transcriptResultTarget('chat-2')).toBeNull();
-		store.transcriptSearchResults[0]!.snippets = [];
-		expect(store.transcriptResultTarget('chat-1')).toBeNull();
+		expect(store.transcript.transcriptResultTarget('chat-2')).toBeNull();
+		store.transcript.transcriptSearchResults[0]!.snippets = [];
+		expect(store.transcript.transcriptResultTarget('chat-1')).toBeNull();
 	});
 
 	it('discards a stale view and refreshes the current query', () => {
 		const store = navigationStore();
-		const refresh = vi.spyOn(store, 'refreshTranscriptSearch').mockResolvedValue();
-		store.transcriptSearchQuery = 'needle';
-		store.discardStaleTranscriptResult({
+		const refresh = vi.spyOn(store.transcript, 'refreshTranscriptSearch').mockResolvedValue();
+		store.transcript.transcriptSearchQuery = 'needle';
+		store.transcript.discardStaleTranscriptResult({
 			chatId: 'chat-1',
 			transcriptViewId: 'view-1',
 			ordinal: 4,
 		});
-		expect(store.transcriptSearchResults).toEqual([]);
+		expect(store.transcript.transcriptSearchResults).toEqual([]);
 		expect(refresh).toHaveBeenCalledWith('needle');
 	});
 
 	it('does not discard a replacement result because an older view failed', () => {
 		const store = navigationStore();
-		const refresh = vi.spyOn(store, 'refreshTranscriptSearch').mockResolvedValue();
-		store.discardStaleTranscriptResult({
+		const refresh = vi.spyOn(store.transcript, 'refreshTranscriptSearch').mockResolvedValue();
+		store.transcript.discardStaleTranscriptResult({
 			chatId: 'chat-1',
 			transcriptViewId: 'old-view',
 			ordinal: 4,
 		});
-		expect(store.transcriptSearchResults).toHaveLength(1);
+		expect(store.transcript.transcriptSearchResults).toHaveLength(1);
 		expect(refresh).not.toHaveBeenCalled();
 	});
 });

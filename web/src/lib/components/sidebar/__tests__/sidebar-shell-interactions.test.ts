@@ -77,7 +77,9 @@ describe('sidebar search dialog flow', () => {
 			createChat('busy', 'Working', { isProcessing: true, processingPhase: 'running' }),
 			createChat('idle', 'Idle'),
 			createChat('waiting', 'Waiting', {
-				isProcessing: true, processingPhase: 'running', activityStatus: 'pending-user-action',
+				isProcessing: true,
+				processingPhase: 'running',
+				activityStatus: 'pending-user-action',
 			}),
 		];
 		const sidebarSearch = createSidebarSearchStore({
@@ -88,13 +90,18 @@ describe('sidebar search dialog flow', () => {
 			notifyError: vi.fn(),
 		});
 		sidebarSearch.applyQuery('Idle');
-		const onTileWorkingChats = vi.fn<(ids: readonly string[]) => Promise<number>>()
+		const onTileWorkingChats = vi
+			.fn<(ids: readonly string[]) => Promise<number>>()
 			.mockResolvedValueOnce(1)
 			.mockResolvedValueOnce(2)
 			.mockRejectedValueOnce(new Error('Workspace busy'));
 		const notifications = { info: vi.fn(), error: vi.fn(), dismissKey: vi.fn() };
 		render(SidebarHost, {
-			chats, sidebarSearch, onTileWorkingChats, notifications, autoLoadSavedSearches: false,
+			chats,
+			sidebarSearch,
+			onTileWorkingChats,
+			notifications,
+			autoLoadSavedSearches: false,
 		});
 		expect(sidebarSearch.filteredChats.map((chat) => chat.id)).toEqual(['idle']);
 		async function tile(): Promise<void> {
@@ -105,7 +112,8 @@ describe('sidebar search dialog flow', () => {
 		await tile();
 		expect(onTileWorkingChats).toHaveBeenCalledWith(['waiting', 'busy']);
 		expect(notifications.info).toHaveBeenCalledWith(
-			'Tiled 1 of 2 working chats. The rest could not fit.', { key: 'tile-working-chats' },
+			'Tiled 1 of 2 working chats. The rest could not fit.',
+			{ key: 'tile-working-chats' },
 		);
 		await tile();
 		expect(notifications.dismissKey).toHaveBeenCalledWith('tile-working-chats');
@@ -216,16 +224,17 @@ describe('sidebar search dialog flow', () => {
 		});
 		sidebarSearch.searchDialogOpen = true;
 		sidebarSearch.draftQuery = 'needle';
-		sidebarSearch.transcriptSearchQuery = 'needle';
-		sidebarSearch.transcriptSearchPage = {
+		sidebarSearch.transcript.transcriptSearchQuery = 'needle';
+		sidebarSearch.transcript.transcriptSearchPage = {
 			offset: 400,
 			limit: 100,
 			total: 600,
 			hasMore: true,
 			nextOffset: 500,
 		};
-		sidebarSearch.refreshTranscriptSearch = refreshTranscriptSearch;
-		sidebarSearch.scheduleTranscriptSearchRevalidation = scheduleTranscriptSearchRevalidation;
+		sidebarSearch.transcript.refreshTranscriptSearch = refreshTranscriptSearch;
+		sidebarSearch.transcript.scheduleTranscriptSearchRevalidation =
+			scheduleTranscriptSearchRevalidation;
 		const view = render(SidebarHost, {
 			chats,
 			sidebarSearch,

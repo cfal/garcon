@@ -1,4 +1,5 @@
 import { tick, untrack } from 'svelte';
+import { sameVisibleTabs } from './workspace-window-tab-layout.js';
 import {
 	resolveWorkspaceWindowInlineAddActionCount,
 	type WorkspaceWindowTabMeasure,
@@ -22,11 +23,11 @@ export class WorkspaceWindowAddMenuState {
 	#pendingLayoutFocusRestore: HTMLElement | null = null;
 
 	constructor(private readonly options: WorkspaceWindowAddMenuOptions) {
+		let previousActionIds: readonly string[] = [];
+		let previouslyHadUnplacedTerminals = false;
 		$effect.pre(() => {
-			const focusedElement = this.#focusedControl();
 			const { actionIds, measure, controlWidthPx } = this.options;
-			// Saved terminals replace the inline terminal action with a menu trigger.
-			void this.options.hasUnplacedTerminalSessions;
+			const hasUnplacedTerminals = this.options.hasUnplacedTerminalSessions;
 			const currentInlineCount = Math.min(
 				actionIds.length,
 				Math.max(
@@ -40,6 +41,14 @@ export class WorkspaceWindowAddMenuState {
 				currentInlineCount,
 				controlWidthPx,
 			});
+			const layoutChanged =
+				nextInlineCount !== currentInlineCount ||
+				!sameVisibleTabs(previousActionIds, actionIds) ||
+				previouslyHadUnplacedTerminals !== hasUnplacedTerminals;
+			previousActionIds = actionIds;
+			previouslyHadUnplacedTerminals = hasUnplacedTerminals;
+			if (!layoutChanged) return;
+			const focusedElement = this.#focusedControl();
 			const focusedActionId = focusedElement ? this.#actionId(focusedElement) : undefined;
 			const focusedActionWasPromoted =
 				focusedElement !== null &&

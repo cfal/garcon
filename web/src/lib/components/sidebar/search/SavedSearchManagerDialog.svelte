@@ -154,7 +154,7 @@
 							</div>
 						</div>
 						<div
-							class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0"
+							class="flex items-center gap-0.5 shrink-0 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100"
 						>
 							<button
 								type="button"

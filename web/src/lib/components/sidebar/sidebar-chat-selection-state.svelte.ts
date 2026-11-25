@@ -2,9 +2,9 @@
 // selected and provides range-select, select-all, and bulk toggle.
 
 export class SidebarChatSelectionState {
-	selectedIds = $state<Set<string>>(new Set());
+	selectedIds = $state.raw<Set<string>>(new Set());
 	isActive = $state(false);
-	lastClickedId = $state<string | null>(null);
+	lastClickedId: string | null = null;
 
 	get count(): number {
 		return this.selectedIds.size;
