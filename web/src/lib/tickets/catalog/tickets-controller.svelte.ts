@@ -241,6 +241,14 @@ export class TicketsController implements PortableSingletonController {
 			...query
 		} = parseTicketListQuery(input);
 		if (stableJsonStringify(query) === stableJsonStringify(this.query)) return;
+		this.#resetQuery(query);
+	}
+
+	revealCreatedTicket(): void {
+		this.#resetQuery({ includeClosed: true });
+	}
+
+	#resetQuery(query: TicketListQuery): void {
 		this.query = query;
 		this.#anchors = {};
 		this.createdTicketId = null;

@@ -221,6 +221,22 @@ describe('Tickets controller', () => {
 		expect(controller.stale).toBe(false);
 	});
 
+	it('reveals the new ticket on the first page even when the filters already match', async () => {
+		const { controller } = harness(Array.from({ length: 550 }, (_, index) => ticket(index + 1)));
+		controller.setQuery({ includeClosed: true });
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		const newest = controller.collection!.windows.list!.items[0]!;
+		await controller.page('list', 'next');
+		expect(controller.collection?.windows.list?.pageIndex).toBe(1);
+		controller.createdTicketId = newest.id;
+		controller.revealCreatedTicket();
+		await controller.refresh();
+		expect(controller.collection?.windows.list?.pageIndex).toBe(0);
+		expect(controller.collection?.windows.list?.items[0]?.id).toBe(newest.id);
+		expect(controller.createdTicketId).toBeNull();
+	});
+
 	it('retains displayed results but never reuses their cursors for a new query at the same revision', async () => {
 		const { controller, api } = harness(
 			Array.from({ length: 550 }, (_, index) => ticket(index + 1)),
