@@ -48,7 +48,7 @@ export function computeMobileViewportMetrics(
 	const keyboardHeight = Math.max(
 		0,
 		Math.round(expectedVisualHeight - keyboardReferenceHeight),
-		Math.round((baselineAppHeight ?? appHeight) - keyboardReferenceHeight),
+		scale === 1 ? Math.round((baselineAppHeight ?? appHeight) - keyboardReferenceHeight) : 0,
 		scale === 1 ? Math.round(visualViewportOffsetTop) : 0,
 	);
 	const keyboardVisible = keyboardHeight >= keyboardVisibleThreshold;
