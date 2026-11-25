@@ -45,6 +45,7 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
       ));
       const markupChunk = Object.values(manifest).find(entry => entry.name === 'vendor-cm-lang-markup');
       expect(markupChunk).toBeDefined();
+      const workspaceChunk = manifest['src/routes/WorkspaceBoot.svelte'].file;
       const origin = new URL(baseUrl).origin;
       const requested = new Set<string>();
       const sockets: string[] = [];
@@ -64,9 +65,17 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
       const turn = await integration.client.startDirectChat({ chatId, content: 'Synthetic mounted browser turn',
         projectPath: integration.dirs.project, agent: integration.directAgents.openAi });
       await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+      const share = await integration.client.post<ShareChatResponse>('/api/v1/chats/share', { chatId });
+      await page.goto(origin + share.shareUrl);
+      await browserExpect(page.getByText('echo:Synthetic mounted browser turn', { exact: true })).toBeVisible();
+      expect(requested.has(`${basePath}/${workspaceChunk}`)).toBe(false);
+      expect(sockets).toEqual([]);
+      await page.locator(`a[href="${basePath}/"]`).first().click();
+      await browserExpect(page).toHaveURL(`${baseUrl}/`);
+      await browserExpect.poll(() => sockets).toContain(`${basePath}/ws`);
+      expect(requested.has(`${basePath}/${workspaceChunk}`)).toBe(true);
       await page.goto(`${baseUrl}/chat/${chatId}`);
       await browserExpect(page.locator('[data-file-tree-entry-text]').filter({ hasText: 'mounted.html' })).toBeVisible();
-      await browserExpect.poll(() => sockets).toContain(`${basePath}/ws`);
       await page.getByRole('tab', { name: 'Files', exact: true }).click();
       await page.locator('[data-file-tree-entry-text]').filter({ hasText: 'mounted.html' }).click();
       await browserExpect(page.locator('.cm-content .cm-line')).toHaveText('<section>Synthetic mounted editor</section>');
@@ -75,11 +84,6 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
       await page.reload();
       await browserExpect(page.locator('[data-file-tree-entry-text]').filter({ hasText: 'mounted.html' })).toBeVisible();
 
-      const share = await integration.client.post<ShareChatResponse>('/api/v1/chats/share', { chatId });
-      await page.goto(origin + share.shareUrl);
-      await browserExpect(page.getByText('echo:Synthetic mounted browser turn', { exact: true })).toBeVisible();
-      await page.locator(`a[href="${basePath}/"]`).first().click();
-      await browserExpect(page).toHaveURL(`${baseUrl}/`);
       assertNoBrowserErrors();
       expect([...requested].filter(path => !path.startsWith(`${basePath}/`))).toEqual([]);
 
