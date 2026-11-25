@@ -421,6 +421,7 @@ export class AcpAgentRuntime {
       pending.requestId,
       pending.responseForDecision(decision),
     );
+    this.#flushBeforeRuntimeRow(pending.turn, pending.toolCallId);
     this.#pendingPermissions.delete(pending);
     pending.turn.pendingPermissions.delete(pending);
     this.#announceSteerable(pending.turn);
@@ -825,6 +826,7 @@ export class AcpAgentRuntime {
   ): void {
     const pending: PendingPermissionRequest = {
       permissionOccurrenceId,
+      toolCallId: request.tool.toolId,
       turn,
       requestId,
       responseForDecision: request.responseForDecision,
@@ -832,6 +834,7 @@ export class AcpAgentRuntime {
     };
     turn.pendingPermissions.add(pending);
     this.#pendingPermissions.add(pending);
+    this.#flushBeforeRuntimeRow(turn, pending.toolCallId);
     this.#publishTurnEvent(turn, {
       type: 'permission',
       runId: turn.operation.runId,
@@ -852,6 +855,7 @@ export class AcpAgentRuntime {
       try {
         turn.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
       } catch {}
+      this.#flushBeforeRuntimeRow(turn, pending.toolCallId);
       this.#publishTurnEvent(turn, {
         type: 'permission',
         runId: turn.operation.runId,
@@ -894,13 +898,12 @@ export class AcpAgentRuntime {
     for (const message of messages) this.#publishTurnEvent(turn, { type: 'rows', rows: runtimeRows([message]) });
   }
 
-  #flushBeforeRuntimeRow(turn: AcpTurnContext): void {
+  #flushBeforeRuntimeRow(turn: AcpTurnContext, beforeToolCallId?: string): void {
     if (!this.#canRouteSource(turn)) return;
-    this.#publishMessages(turn, this.#converter.flushPending?.(this.#sessionUpdateContext(turn)) ?? []);
+    this.#publishMessages(turn, this.#converter.flushPending?.(this.#sessionUpdateContext(turn), beforeToolCallId) ?? []);
   }
 
   #publishTurnEvent(turn: AcpTurnContext, event: AgentRuntimeEvent): void {
-    if (event.type === 'permission') this.#flushBeforeRuntimeRow(turn);
     if (turn.sourceRetired) return;
     try {
       turn.operation.publish(event);

@@ -219,10 +219,15 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     this.#sessions.delete(sessionId);
   }
 
-  flushPending(context: AcpSessionUpdateContext): ChatMessage[] {
+  flushPending(context: AcpSessionUpdateContext, beforeToolCallId?: string): ChatMessage[] {
     const session = this.#sessions.get(context.sessionId);
     if (!session?.deferred.size) return [];
-    return [...this.#emitDeferred(session, context.timestamp), ...this.#flush(session, context.timestamp)];
+    const rows = this.#emitDeferred(session, context.timestamp, beforeToolCallId);
+    const target = beforeToolCallId && session.deferred.get(beforeToolCallId);
+    if (target) rows.push(...target.preceding.splice(0));
+    // An unrelated approval is a tool boundary; stderr can arrive mid-answer.
+    else if (beforeToolCallId !== undefined) rows.push(...this.#flush(session, context.timestamp));
+    return rows;
   }
 
   takeTurnFailure(sessionId: string): string | null {

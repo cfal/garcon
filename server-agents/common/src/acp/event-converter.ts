@@ -35,8 +35,8 @@ export interface AcpEventConverter {
     request: AcpCustomRequest,
     context: AcpSessionUpdateContext,
   ): AcpBlockingRequestToolUse | null;
-  // Publishes pending transcript rows before a runtime-owned row, without settling the turn.
-  flushPending?(context: AcpSessionUpdateContext): ChatMessage[];
+  // Publishes earlier pending rows without settling the turn or the call awaiting approval.
+  flushPending?(context: AcpSessionUpdateContext, beforeToolCallId?: string): ChatMessage[];
   endTurn?(sessionId: string, context: AcpSessionUpdateContext): ChatMessage[];
   // Returns and clears a failure the agent reported in-band before ending the turn normally.
   takeTurnFailure?(sessionId: string): string | null;

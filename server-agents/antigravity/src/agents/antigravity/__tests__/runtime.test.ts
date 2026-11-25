@@ -50,6 +50,7 @@ class FakeAntigravityAgent {
   // When set, sessions offer only these models, as another account would.
   resumeAvailableModels: unknown = MODELS.availableModels;
   #stdout!: ReadableStreamDefaultController<Uint8Array>;
+  #stderr!: ReadableStreamDefaultController<Uint8Array>;
   #openPrompt: { id: number | string; sessionId: string } | null = null;
   readonly #unansweredPermissions = new Set<string>();
   // When set, a prompt sent during a turn is refused, as agy refuses one while a permission is unanswered.
@@ -104,7 +105,7 @@ class FakeAntigravityAgent {
     return {
       stdin: { write: (data: string | Uint8Array) => this.#receive(String(data)), flush: () => this.promptFlush ?? 0 },
       stdout: new ReadableStream<Uint8Array>({ start: (controller) => { this.#stdout = controller; } }),
-      stderr: new ReadableStream<Uint8Array>(),
+      stderr: new ReadableStream<Uint8Array>({ start: controller => { this.#stderr = controller; } }),
       exited: exited.promise,
       kill: () => {
         this.processesKilled++;
@@ -127,6 +128,15 @@ class FakeAntigravityAgent {
   }
 
   requestPermission(sessionId: string, toolCallId: string, options = PERMISSION_OPTIONS, id = 'permission-1'): void {
+    this.requestToolPermission(sessionId, { toolCallId, name: 'run_command', kind: 'execute', status: 'pending',
+      rawInput: { CommandLine: 'echo synthetic' } }, options, id);
+  }
+
+  stderr(line: string): void {
+    this.#stderr.enqueue(new TextEncoder().encode(line + '\n'));
+  }
+
+  requestToolPermission(sessionId: string, toolCall: Record<string, unknown>, options = PERMISSION_OPTIONS, id = 'permission-1'): void {
     this.#unansweredPermissions.add(id);
     this.#send({
       jsonrpc: '2.0',
@@ -134,7 +144,7 @@ class FakeAntigravityAgent {
       method: 'session/request_permission',
       params: {
         sessionId,
-        toolCall: { toolCallId, name: 'run_command', kind: 'execute', status: 'pending', rawInput: { CommandLine: 'echo synthetic' } },
+        toolCall,
         options,
       },
     });
@@ -692,6 +702,7 @@ describe('Antigravity ACP runtime', () => {
     const { agent, runtime, events, request } = harness();
     agent.onPrompt((fake, id) => {
       fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'send', name: 'send_message', rawInput: { Recipient: 'peer' } });
+      fake.update(id, { sessionUpdate: 'agent_message_chunk', content: { text: 'Checking permissions' } });
       fake.requestPermission(id, 'cmd');
       fake.update(id, { sessionUpdate: 'tool_call_update', toolCallId: 'send', status: 'completed', rawInput: { Message: 'Hello' } });
       fake.endPrompt();
@@ -701,7 +712,74 @@ describe('Antigravity ACP runtime', () => {
       await waitFor(() => runEnded(events).length === 1);
       const order = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => String(row.message.type)) :
         event.type === 'permission' && event.lifecycle.kind === 'requested' ? ['permission'] : []);
-      expect(order).toEqual(mode === 'default' ? ['external-tool-use', 'permission', 'tool-result'] : ['agent-message-tool-use', 'tool-result']);
+      expect(order).toEqual(mode === 'default'
+        ? ['external-tool-use', 'assistant-message', 'permission', 'tool-result']
+        : ['agent-message-tool-use', 'assistant-message', 'tool-result']);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('keeps a streamed answer whole across stderr while a tool is pending', async () => {
+    const { agent, converter, runtime, events, request } = harness();
+    const updates = spyOn(converter, 'fromSessionUpdate');
+    agent.onPrompt((fake, id) => {
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'send', name: 'send_message' });
+      fake.update(id, { sessionUpdate: 'agent_message_chunk', content: { text: '**Report' } });
+    });
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      await waitFor(() => updates.mock.calls.length === 2);
+      agent.stderr('Diagnostic');
+      await waitFor(() => events.some(e => e.type === 'rows' && e.rows.some(r => r.message.type === 'error')));
+      agent.update(agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { text: ' complete**' } });
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length === 1);
+      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      expect(rows.map(row => row.type)).toEqual(['external-tool-use', 'error', 'assistant-message']);
+      expect(runEnded(events)[0]).toMatchObject({ finalResponse: { text: '**Report complete**' } });
+    } finally { runtime.shutdown(); }
+  });
+
+  it('leaves the requested call and newer calls open to later identity and arguments', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, id) => {
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'first' });
+      fake.update(id, { sessionUpdate: 'agent_message_chunk', content: { text: 'Before approval' } });
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'preview', title: 'Run update_steps', rawInput: { steps: [] } });
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'after', name: 'send_message', rawInput: { Recipient: 'peer' } });
+      fake.requestToolPermission(id, { toolCallId: 'preview' });
+    });
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      await waitFor(() => events.some(e => e.type === 'permission'));
+      const permission = events.find(e => e.type === 'permission');
+      if (!permission?.decision) throw new Error('Expected an interactive approval');
+      expect(permission.lifecycle).toMatchObject({ kind: 'requested', requestedTool: { type: 'unknown-tool-use' } });
+      const rows = () => events.flatMap(e => e.type === 'rows' ? e.rows.map(row => row.message) : []);
+      expect(rows()).toMatchObject([{ toolId: 'first' }, { type: 'assistant-message', content: 'Before approval' }]);
+      await permission.decision.respond({ allow: true });
+      agent.update(agentSessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'preview', _meta: { is_mcp_tool_call: true },
+        rawInput: { server: 'docs', tool: 'lookup' } });
+      agent.update(agentSessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'after', rawInput: { Message: 'Hello' }, status: 'completed' });
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length === 1);
+      expect(rows().slice(2)).toMatchObject([{ type: 'mcp-tool-use', server: 'docs' }, { type: 'agent-message-tool-use', message: 'Hello' }, { type: 'tool-result' }]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('publishes unrelated pending calls before the controller can record a successful permission response', async () => {
+    const { agent, converter, runtime, events, request } = harness();
+    const updates = spyOn(converter, 'fromSessionUpdate');
+    agent.onPrompt((fake, id) => {
+      fake.requestPermission(id, 'cmd');
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'later', name: 'send_message', rawInput: { Recipient: 'peer' } });
+    });
+    try {
+      await runtime.startSession(request());
+      await waitFor(() => updates.mock.calls.length === 1);
+      const permission = events.find(e => e.type === 'permission');
+      if (!permission?.decision) throw new Error('Expected an interactive approval');
+      await permission.decision.respond({ allow: true });
+      expect(events.flatMap(e => e.type === 'rows' ? e.rows.map(row => row.message) : [])).toMatchObject([{ toolId: 'later' }]);
     } finally { runtime.shutdown(); }
   });
 
