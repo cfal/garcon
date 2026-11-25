@@ -14,7 +14,6 @@
 		"dev": "vite dev",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --output-structure locale-modules",
 		"build": "vite build && bun ../scripts/runtime-shell.ts && bun scripts/report-eager-assets.ts --check",
-		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"precheck": "bun run i18n:compile",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc --project ./src/service-worker/tsconfig.json --noEmit",
