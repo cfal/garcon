@@ -835,23 +835,24 @@ describe('transcript search service v9', () => {
     try {
       await service.enable(new AbortController().signal);
       await build(service, 'chat-grace', 'view-grace', 20, 'gracemarker #731');
-      const request = searchRequest('chat-grace', 'view-grace', 20, 'gracemarker');
-      // Only the stalled reader's deadline is accelerated. Its peer runs on real time.
-      const schedule = globalThis.setTimeout;
-      const timer = spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
-        schedule(callback, delay === readerDeadlineMs ? 0 : delay, ...args));
-      try {
-        const failure = await service.search({ ...request, query: compileChatSearchQuery('"gracemarker" #731') })
-          .then(() => null, (error: unknown) => error);
+      const peerRequest = searchRequest('chat-grace', 'view-grace', 20, 'gracemarker');
+      const stalledRequest = { ...peerRequest, query: compileChatSearchQuery('"gracemarker" #731') };
+
+      {
+        // Only the stalled reader's deadline is accelerated. Its peer runs on real time.
+        const schedule = globalThis.setTimeout;
+        using deadline = spyOn(globalThis, 'setTimeout');
+        deadline.mockImplementation((callback, delay, ...args) =>
+          schedule(callback, delay === readerDeadlineMs ? 0 : delay, ...args));
+        const failure = await service.search(stalledRequest).then(() => null, (error: unknown) => error);
         expect(failure).toMatchObject({ message: 'SEARCH_TIMEOUT' });
-      } finally {
-        timer.mockRestore();
       }
+
       expect(service.queryStats().timedOut).toBe(1);
       expect(records.find((record) => record.message === 'Transcript search query timeout')?.fields)
         .toMatchObject({ clauseCount: 2, phraseClauseCount: 1, literalClauseCount: 1 });
       const [healthy] = await Promise.all([
-        service.search(request),
+        service.search(peerRequest),
         waitFor(() => service.status().phase === 'degraded'),
       ]);
       expect(healthy.results).toEqual([expect.objectContaining({ chatId: 'chat-grace' })]);
