@@ -430,6 +430,9 @@ describe('VirtualListController', () => {
 		if (first === 'resize') test.emitViewportResize();
 		test.viewport.dispatchEvent(new Event('scroll'));
 		if (first === 'scroll') test.emitViewportResize();
+		test.environment.flushMicrotasks();
+		test.environment.flushFrames();
+		test.environment.flushMicrotasks();
 		expect(test.controller.viewportPosition?.logicalOffset).toBe(140);
 		expect(test.writes).toBe(0);
 
@@ -1117,10 +1120,13 @@ describe('VirtualListController', () => {
 		const reader = test.mountItem('reader', 40);
 		test.controller.scrollToAnchor('reader', -60);
 		test.environment.flushMicrotasks();
+		test.environment.flushFrames();
 		expect(test.viewport.scrollTop).toBe(280);
 
 		test.controller.setScrollActivity('coasting');
 		test.environment.observer.emit(reader.element, 240);
+		test.environment.flushMicrotasks();
+		test.environment.flushFrames();
 		test.environment.flushMicrotasks();
 		expect(test.controller.measuredSize('reader')).toBe(240);
 		expect(test.viewport.scrollTop).toBe(280);
