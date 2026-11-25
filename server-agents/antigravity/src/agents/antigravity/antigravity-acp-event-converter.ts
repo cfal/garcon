@@ -86,21 +86,34 @@ function isStructuredOutput(raw: unknown): boolean {
     Object.entries(asObject(raw)).some(([key, value]) => key !== 'output' || typeof value !== 'string'));
 }
 
+function joinBlockText(blocks: readonly Record<string, unknown>[]): string {
+  return blocks.map(block => asString(asObject(block.content).text)).filter(Boolean).join('\n');
+}
+
 function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): ToolResultMessage['content'] {
   const name = call.isMcp ? null : call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
   const agentWork = isAgentWork(name);
   const raw = agentWork ? call.rawOutput : terminal.rawOutput;
-  const blocks = agentWork || Array.isArray(terminal.content) ? (call.content ?? []) : [];
   const output = agentWork ? rawOutputText(raw) : asString(asObject(raw).output) ?? '';
-  const blockText = blocks.length ? call.blockText : '';
+  const trimmedOutput = output.trim();
+  let blocks = agentWork || Array.isArray(terminal.content) ? (call.content ?? []) : [];
+  if (agentWork && trimmedOutput && blocks.length) {
+    // ACP can echo the raw output in one block alongside a distinct update or attachment.
+    blocks = blocks.filter(block => {
+      const part = block.type === 'content' ? asObject(block.content) : block;
+      return part.type !== 'text' || asString(part.text)?.trim() !== trimmedOutput;
+    });
+  }
+  const blockText = blocks === call.content ? call.blockText : joinBlockText(blocks);
+  const trimmedBlocks = blockText.trim();
   // A fresh diagnostic takes precedence over an independent progress field,
   // even if the final frame supplies only the status.
-  const text = output.trim() && !(agentWork && call.contentIsNewer && blockText.trim()) ? output : blockText;
-  const distinct = output.trim() !== '' && blockText.trim() !== '' && output !== blockText;
+  const distinct = trimmedOutput !== '' && trimmedBlocks !== '' && trimmedOutput !== trimmedBlocks;
+  const text = trimmedOutput && !(agentWork && call.contentIsNewer && distinct) ? output : blockText;
   const result: ToolResultMessage['content'] = {};
   if (agentWork && terminal.status !== 'completed') result.status = terminal.status;
   const structured = agentWork && isStructuredOutput(raw);
-  const structuredIsPrimary = structured && !output.trim() && !call.contentIsNewer;
+  const structuredIsPrimary = structured && !trimmedOutput && !call.contentIsNewer;
   if (agentWork && (structured || (distinct && text === blockText))) {
     result.rawOutput = raw;
   }
@@ -129,8 +142,7 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
   const content = Array.isArray(update?.content)
     ? update.content.map(asObject).filter(block => block.type !== 'diff') : previous?.content;
   const priorText = previous?.blockText ?? '';
-  const blockText = content === previous?.content ? priorText
-    : (content ?? []).map(block => asString(asObject(block.content).text)).filter(Boolean).join('\n');
+  const blockText = content === previous?.content ? priorText : joinBlockText(content ?? []);
   const rawText = rawOutputText(rawOutput);
   const rawTextChanged = rawText !== rawOutputText(previous?.rawOutput);
   const rawChanged = rawTextChanged || (rawOutput !== previous?.rawOutput &&

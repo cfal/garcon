@@ -69,16 +69,21 @@ test('keeps reported structured and progress output without manufacturing a succ
   expect(s.patch('cmd', { status: 'completed' })).toMatchObject([{ content: { exitCode: 1 }, isError: true }]);
 });
 
-test('stores large structured output once even when content echoes it alongside another block', () => {
+test.each(['raw first', 'blocks first'] as const)('stores an output echo only once alongside distinct text and attachments (%s)', order => {
   const s = session();
   const output = 'x'.repeat(8 * 1024 * 1024);
   const attachment = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  const update = { type: 'content', content: { type: 'text', text: 'Still checking' } };
+  const raw = { rawOutput: { output, count: 1 } };
+  const blocks = { content: [{ type: 'content', content: { type: 'text', text: output + '\n' } }, update, attachment] };
   s.start('list', { name: 'manage_task', rawInput: { Action: 'list' },
-    content: [{ type: 'content', content: { type: 'text', text: output } }, attachment] });
-  const result = s.patch('list', { status: 'completed', rawOutput: { output, count: 1 } })[0];
+    ...(order === 'raw first' ? raw : blocks) });
+  const result = s.patch('list', { status: 'completed', ...(order === 'raw first' ? blocks : raw) })[0];
   if (result?.type !== 'tool-result') throw new Error('Expected a tool result');
   expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(output.length + 1024);
-  expect(result.content).toEqual({ rawOutput: { output, count: 1 }, items: [attachment] });
+  expect(result.content).toEqual(order === 'raw first'
+    ? { ...raw, raw: 'Still checking', items: [attachment] }
+    : { ...raw, items: [update, attachment] });
 });
 
 test('merges rawOutput and content as independent ACP fields and treats null rawOutput as unchanged', () => {
