@@ -729,7 +729,7 @@ function extractToolDetail(message: ToolUseChatMessage): string {
     case 'codex-subagent-tool-use': return message.action;
     case 'background-task-tool-use': return [message.action, message.taskId, message.input].filter(Boolean).join(' ');
     case 'agent-message-tool-use': return `To ${message.recipient}: ${message.message}`;
-    case 'update-plan-tool-use':
+    case 'update-plan-tool-use': return summarizePlan(message.todos);
     case 'todo-write-tool-use': return summarizeTodos(message.todos);
     case 'ask-user-question-tool-use':
       return message.title || message.questions.map((prompt) => prompt.prompt).join('; ');
@@ -739,6 +739,18 @@ function extractToolDetail(message: ToolUseChatMessage): string {
     case 'unknown-tool-use': return message.rawName;
     default: return '';
   }
+}
+
+function summarizePlan(steps: readonly PlanStep[] | undefined): string {
+  const failed = steps?.find(step => step.status === 'failed');
+  const skipped = steps?.find(step => step.status === 'skipped');
+  if (!failed && !skipped) return summarizeTodos(steps);
+  const current = steps?.find(step => step.status === 'in_progress');
+  const next = current ?? steps?.find(step => step.status === 'pending');
+  return [
+    failed && `failed: ${failed.content}`, skipped && `skipped: ${skipped.content}`,
+    next && `${current ? 'current' : 'next'}: ${next.content}`,
+  ].filter(Boolean).join('; ');
 }
 
 function summarizeTodos(todos: readonly PlanStep[] | undefined): string {

@@ -26,7 +26,7 @@ export interface AntigravityToolCall {
   readonly toolCallId: string;
   // Null when the frame names no tool; `kind` then only describes the category.
   readonly name: string | null;
-  readonly titleName: string | null;
+  readonly planTitle: 'matched' | 'excluded' | null;
   readonly kind: string | null;
   readonly input: Record<string, unknown>;
 }
@@ -67,12 +67,13 @@ function antigravityPlanSteps(raw: unknown): PlanStep[] | undefined {
 export function antigravityToolCall(raw: Record<string, unknown>): AntigravityToolCall | null {
   const toolCallId = asString(raw.toolCallId);
   if (!toolCallId) return null;
+  let planTitle: AntigravityToolCall['planTitle'] = null;
+  if (asObject(raw._meta).is_mcp_tool_call || (raw.kind && raw.kind !== 'other')) planTitle = 'excluded';
+  else if (raw.title === 'Run update_steps') planTitle = 'matched';
   return {
     toolCallId,
     name: asString(raw.name) ?? null,
-    // Some agy builds identify the checklist only by this literal ACP title.
-    titleName: raw.title === 'Run update_steps' && (!raw.kind || raw.kind === 'other')
-      && !asObject(raw._meta).is_mcp_tool_call ? 'update_steps' : null,
+    planTitle,
     kind: asString(raw.kind) ?? null,
     input: asObject(raw.rawInput ?? raw.args),
   };
@@ -82,7 +83,8 @@ export function convertAntigravityToolUse(
   timestamp: string,
   call: AntigravityToolCall,
 ): ToolUseChatMessage {
-  const { toolCallId: id, name, input } = call;
+  const { toolCallId: id, input } = call;
+  const name = call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
   switch (name) {
     case 'run_command': {
       const command = stringField(input, 'CommandLine', 'command_line', 'commandLine', 'command');

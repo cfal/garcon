@@ -33,11 +33,8 @@ interface SessionState {
   // stopped turn's late terminal update can arrive after the next turn begins.
   readonly emittedToolIds: Set<string>;
   readonly completedToolIds: Set<string>;
-  // Tool names by call ID; terminal updates need the name to normalize output.
-  readonly toolNames: Map<string, string>;
-  // Arguments seen on any frame of a call, including its permission request,
-  // for a row that waited on a frame without them.
-  readonly toolInputs: Map<string, Record<string, unknown>>;
+  // ACP can split identity, arguments and MCP metadata across updates and permission requests.
+  readonly calls: Map<string, AntigravityToolCall>;
   // Calls whose row is still waiting for arguments; the turn's end emits them.
   readonly deferredCalls: Map<string, AntigravityToolCall>;
 }
@@ -99,7 +96,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessionFor(context.sessionId);
     const updateType = asString(update.sessionUpdate);
     const outputType = acpOutputUpdateType(update, (id) => session.emittedToolIds.has(id)
-      || session.deferredCalls.has(id) || session.completedToolIds.has(id) || session.toolNames.has(id));
+      || session.deferredCalls.has(id) || session.completedToolIds.has(id) || session.calls.has(id));
     session.assistantText += session.failure.continueOn(outputType);
     // New output publishes waiting rows first, so nothing moves ahead of a call
     // that started earlier.
@@ -168,13 +165,17 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   // Records the frame, then fills the name and arguments it omits from earlier
   // frames of the same call.
   #resolvedCall(session: SessionState, call: AntigravityToolCall): AntigravityToolCall {
-    const name = call.name ?? session.toolNames.get(call.toolCallId) ?? call.titleName;
-    this.#rememberCall(session, { ...call, name });
-    return {
+    const previous = session.calls.get(call.toolCallId);
+    const resolved: AntigravityToolCall = {
       ...call,
-      name,
-      input: Object.keys(call.input).length > 0 ? call.input : session.toolInputs.get(call.toolCallId) ?? {},
+      name: call.name || previous?.name || null,
+      kind: call.kind ?? previous?.kind ?? null,
+      planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
+      input: Object.keys(call.input).length > 0 ? call.input : previous?.input ?? {},
     };
+    session.calls.set(call.toolCallId, resolved);
+    evictOldestToolEntry(session.calls);
+    return resolved;
   }
 
   #toolCall(
@@ -211,9 +212,8 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     this.#remember(session.completedToolIds, toolCallId);
     // A terminal update can be the first frame for a call, so its tool row comes first.
     const messages = this.#toolCall(session, update, timestamp, true);
-    const name = asString(update.name) ?? session.toolNames.get(toolCallId) ?? '';
-    session.toolNames.delete(toolCallId);
-    session.toolInputs.delete(toolCallId);
+    const name = session.calls.get(toolCallId)?.name ?? '';
+    session.calls.delete(toolCallId);
     const text = antigravityToolResultText(name, toolResultText(update));
     // agy completes the tool invocation even when the command exits unsuccessfully.
     const exitCode = name === 'run_command' ? asObject(update.rawOutput).exit_code : undefined;
@@ -245,11 +245,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const rows: ChatMessage[] = [];
     for (const call of session.deferredCalls.values()) {
       this.#remember(session.emittedToolIds, call.toolCallId);
-      rows.push(convertAntigravityToolUse(timestamp, {
-        ...call,
-        name: session.toolNames.get(call.toolCallId) ?? call.name,
-        input: session.toolInputs.get(call.toolCallId) ?? call.input,
-      }));
+      rows.push(convertAntigravityToolUse(timestamp, session.calls.get(call.toolCallId) ?? call));
     }
     session.deferredCalls.clear();
     return rows;
@@ -258,18 +254,6 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   #remember(ids: Set<string>, toolCallId: string): void {
     ids.add(toolCallId);
     evictOldestToolEntry(ids);
-  }
-
-  // A later frame without a name or arguments must not replace what the call started with.
-  #rememberCall(session: SessionState, call: { readonly toolCallId: string; readonly name: string | null; readonly input: Record<string, unknown> }): void {
-    if (call.name) {
-      session.toolNames.set(call.toolCallId, call.name);
-      evictOldestToolEntry(session.toolNames);
-    }
-    if (Object.keys(call.input).length > 0) {
-      session.toolInputs.set(call.toolCallId, call.input);
-      evictOldestToolEntry(session.toolInputs);
-    }
   }
 
   #flush(session: SessionState, timestamp: string): ChatMessage[] {
@@ -292,8 +276,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       failure: new AcpInBandFailure(splitExecutorError),
       emittedToolIds: new Set(),
       completedToolIds: new Set(),
-      toolNames: new Map(),
-      toolInputs: new Map(),
+      calls: new Map(),
       deferredCalls: new Map(),
     };
     this.#sessions.set(sessionId, created);
