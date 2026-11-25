@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bindMobileViewport } from '../mobile-viewport-binding';
 
 function createViewport() {
-	return Object.assign(new EventTarget(), { height: 800, offsetTop: 0 }) satisfies Pick<
+	return Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 }) satisfies Pick<
 		VisualViewport,
-		'height' | 'offsetTop' | 'addEventListener' | 'removeEventListener'
+		'height' | 'offsetTop' | 'scale' | 'addEventListener' | 'removeEventListener'
 	>;
 }
 
@@ -107,6 +107,33 @@ describe('bindMobileViewport', () => {
 		expect(style.getPropertyValue('--app-height')).toBe('');
 		expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('');
 		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('');
+	});
+
+	it('ignores ordinary window shrink and zoom but detects a wide-device keyboard overlay', () => {
+		unbind = bindMobileViewport(onMetrics, 'overlay-only');
+		flushFrame();
+
+		vi.stubGlobal('innerHeight', 650);
+		viewport.height = 650;
+		window.dispatchEvent(new Event('resize'));
+		flushFrame();
+		expect(onMetrics).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardHeight: 0 }));
+		expect(style.getPropertyValue('--app-height')).toBe('');
+
+		viewport.scale = 1.5;
+		viewport.height = 430;
+		viewport.offsetTop = 100;
+		viewport.dispatchEvent(new Event('resize'));
+		flushFrame();
+		expect(onMetrics).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardHeight: 0 }));
+		expect(style.getPropertyValue('--app-height')).toBe('');
+
+		viewport.scale = 1;
+		viewport.dispatchEvent(new Event('resize'));
+		flushFrame();
+		expect(onMetrics).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardHeight: 220 }));
+		expect(style.getPropertyValue('--app-height')).toBe('430px');
+		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('315px');
 	});
 
 	it('refreshes on pageshow and visible-only visibility changes', () => {
