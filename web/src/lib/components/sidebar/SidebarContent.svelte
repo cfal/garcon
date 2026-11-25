@@ -83,6 +83,8 @@
 	}: SidebarContentProps = $props();
 
 	let viewportRef = $state<HTMLElement | null>(null);
+	let measuredViewport = $state<HTMLElement | null>(null);
+	let viewportHeight = $state(0);
 	let showBackToTop = $state(false);
 
 	$effect(() => {
@@ -94,15 +96,19 @@
 	$effect(() => {
 		const viewport = viewportRef;
 		if (!viewport) {
+			measuredViewport = null;
 			showBackToTop = false;
 			return;
 		}
 		const scrollViewport: HTMLElement = viewport;
 
 		function updateVisibility(): void {
+			if (viewportRef !== scrollViewport) return;
+			const height = scrollViewport.clientHeight;
+			viewportHeight = height;
 			const nextVisible = shouldShowSidebarBackToTop({
 				scrollTop: scrollViewport.scrollTop,
-				viewportHeight: scrollViewport.clientHeight,
+				viewportHeight: height,
 				currentlyVisible: showBackToTop,
 			});
 			if (nextVisible === showBackToTop) return;
@@ -117,6 +123,7 @@
 
 		// Keeps visibility state reads from re-subscribing the DOM lifecycle effect.
 		untrack(updateVisibility);
+		measuredViewport = scrollViewport;
 		scrollViewport.addEventListener('scroll', updateVisibility, { passive: true });
 		const resizeObserver =
 			typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateVisibility);
@@ -154,6 +161,7 @@
 >
 	<SidebarChatList
 		{viewportRef}
+		viewportHeight={measuredViewport === viewportRef ? viewportHeight : 0}
 		{projection}
 		{selectedChatId}
 		{isLoading}

@@ -55,6 +55,7 @@
 	interface SidebarVirtualSortableChatListProps {
 		rows: SidebarVirtualRow[];
 		viewportRef: HTMLElement | null;
+		viewportHeight: number;
 		selectedChatId: string | null;
 		currentTime: Date;
 		isMobile: boolean;
@@ -89,6 +90,7 @@
 	let {
 		rows,
 		viewportRef,
+		viewportHeight,
 		selectedChatId,
 		currentTime,
 		isMobile,
@@ -293,33 +295,25 @@
 		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter))
 			pendingRecenter = null;
 	});
+	// The list, including bottom padding, is the viewport's only in-flow content.
+	const autoScrollViewport = $derived(
+		viewportHeight > 0 && totalHeight > viewportHeight && rows.length > 0 ? viewportRef : null,
+	);
 	$effect(() => {
-		if (!viewportRef) return;
-		const rowCount = rows.length;
+		const element = autoScrollViewport;
+		if (!element) return;
 		let disposed = false;
 		let cleanup: (() => void) | undefined;
-		const frame = requestAnimationFrame(() => {
-			if (!viewportRef || rowCount === 0 || viewportRef.scrollHeight <= viewportRef.clientHeight)
-				return;
-			void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
-				if (
-					disposed ||
-					!viewportRef ||
-					rowCount === 0 ||
-					viewportRef.scrollHeight <= viewportRef.clientHeight
-				) {
-					return;
-				}
-				cleanup = module.autoScrollForElements({
-					element: viewportRef,
-					canScroll: ({ source }) => reorderEnabled && isSidebarChatDragData(source.data),
-					getAllowedAxis: () => 'vertical',
-				});
+		void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
+			if (disposed) return;
+			cleanup = module.autoScrollForElements({
+				element,
+				canScroll: ({ source }) => reorderEnabled && isSidebarChatDragData(source.data),
+				getAllowedAxis: () => 'vertical',
 			});
 		});
 		return () => {
 			disposed = true;
-			cancelAnimationFrame(frame);
 			cleanup?.();
 		};
 	});
