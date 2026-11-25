@@ -41,7 +41,7 @@
 
 	let isOpen = $state(false);
 	let query = $state('');
-	let selectedIndex = $state(0);
+	let highlightedId = $state<string | null>(null);
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let optionList = $state<HTMLDivElement>();
 	let Fuse = $state.raw<typeof import('fuse.js').default>();
@@ -98,6 +98,7 @@
 			)
 			.slice(0, searchResultLimit);
 	});
+	let selectedIndex = $derived(highlightedId === null ? 0 : filteredCommands.findIndex(item => item.id === highlightedId));
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
 
 	function isEnabled(command: WorkbenchCommand): boolean {
@@ -110,7 +111,7 @@
 
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
-		selectedIndex = 0;
+		highlightedId = null;
 	}
 
 	function open() {
@@ -118,7 +119,6 @@
 			void loadFuse().then(
 				({ default: SearchIndex }) => {
 					Fuse = SearchIndex;
-					if (query.trim()) selectedIndex = 0;
 				},
 				(error: unknown) => console.warn('Fuzzy command search failed to load:', error),
 			);
@@ -128,7 +128,7 @@
 			commands = captureCommands();
 			isOpen = true;
 			query = '';
-			selectedIndex = 0;
+			highlightedId = null;
 		});
 	}
 
@@ -175,10 +175,10 @@
 		}
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
+			highlightedId = filteredCommands[Math.min(selectedIndex + 1, filteredCommands.length - 1)]?.id ?? null;
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			selectedIndex = Math.max(selectedIndex - 1, 0);
+			highlightedId = filteredCommands[Math.max(selectedIndex - 1, 0)]?.id ?? null;
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			if (selectedCommand) selectItem(selectedCommand);
@@ -271,11 +271,11 @@
 								? 'bg-accent text-accent-foreground'
 								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
-							onfocus={() => (selectedIndex = i)}
+							onfocus={() => (highlightedId = item.id)}
 							onmouseenter={(event) => {
 								// A focused result owns native Enter and Space activation.
 								if (!event.currentTarget.parentElement?.contains(document.activeElement)) {
-									selectedIndex = i;
+									highlightedId = item.id;
 								}
 							}}
 						>
