@@ -171,9 +171,6 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 				preserveSelection: true,
 				preferSelectedFile: true,
 			});
-			if (reason === 'session' && current() && this.workbench.porcelain.inspectorView !== 'none') {
-				await this.workbench.porcelain.loadCurrentView(target);
-			}
 		}
 	}
 
