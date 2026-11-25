@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { AgentMessageToolUseMessage, BackgroundTaskToolUseMessage } from '@garcon/common/chat-types';
+import { AgentMessageToolUseMessage, BackgroundTaskToolUseMessage, ToolResultMessage } from '@garcon/common/chat-types';
 import { ClaudeMonitorToolUseMessage, ClaudeToolSearchToolUseMessage, CommandOutputMessage, CommandResultMessage, PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '../message-projector.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
@@ -11,6 +11,14 @@ const complete: CommandOutcome = {
 };
 
 describe('transcript search message projector', () => {
+  test('reserves result search space for the visible diagnostic regardless of field order', () => {
+    const progress = 'working '.repeat(500);
+    for (const extra of [{ rawOutput: { output: progress } }, { items: [{ type: 'text', text: progress }] }]) {
+      const row = projectSearchMessage(new ToolResultMessage('', 'task', { ...extra, raw: 'Operation refused' }, true));
+      expect(row?.body).toContain('Operation refused');
+      expect(row?.body).toContain('working');
+    }
+  });
   test('indexes task input and agent messages as tool calls', () => {
     expect(projectSearchMessage(new BackgroundTaskToolUseMessage('', 'call', 'send_input', 'task', 'go')))
       .toMatchObject({ role: 'tool', body: 'send_input task go' });

@@ -60,6 +60,7 @@ function boundedUnknownText(
     truncated: false,
   },
   depth = 0,
+  firstKey?: string,
 ): string {
   if (budget.remaining <= 0) return '';
   if (budget.remainingNodes <= 0) {
@@ -111,9 +112,11 @@ function boundedUnknownText(
     }
     if (index < value.length) budget.truncated = true;
   } else {
-    for (const key in value as Record<string, unknown>) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-      appendChild(key, (value as Record<string, unknown>)[key]);
+    const record = value as Record<string, unknown>;
+    if (firstKey && Object.prototype.hasOwnProperty.call(record, firstKey)) appendChild(firstKey, record[firstKey]);
+    for (const key in record) {
+      if (key === firstKey || !Object.prototype.hasOwnProperty.call(record, key)) continue;
+      appendChild(key, record[key]);
       if (budget.remaining <= 0 || budget.remainingNodes <= 0) {
         budget.truncated = true;
         break;
@@ -141,7 +144,8 @@ function boundedToolResult(value: unknown, budget: ExtractionBudget): string {
   const limit = MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS;
   if (typeof value !== 'string') {
     const nestedBudget = { ...budget, remaining: limit };
-    const text = boundedUnknownText(value, nestedBudget);
+    // Indexes the user-visible diagnostic before supplementary tool payloads.
+    const text = boundedUnknownText(value, nestedBudget, 0, 'raw');
     budget.remainingNodes = nestedBudget.remainingNodes;
     budget.truncated ||= nestedBudget.truncated;
     return text;
