@@ -11,6 +11,7 @@ import {
 	AssistantMessage,
 	BashToolUseMessage,
 	CodexSubagentToolUseMessage,
+	ToolResultMessage,
 	TranscriptNoticeMessage,
 	UserMessage,
 	type ChatMessage,
@@ -247,6 +248,23 @@ describe('ActiveTranscriptState', () => {
 		expect(index.questionAnswers).toBe(answers);
 		expect(index.subagentMessages).toBe(subagentMessages);
 		expect(index.lastOwnershipBoundary).toBe(1);
+		chat.transcriptCache.flush();
+	});
+
+	it('indexes an appended answer and pairs a new subagent call with its earlier retained result', () => {
+		const chat = new ActiveTranscriptState();
+		const result = new ToolResultMessage(TS, 'tool', {}, false);
+		const unrelated = new ToolResultMessage(TS, 'other', {}, false);
+		seedTranscript(chat, 'chat-1', 'generation-1', [entry(1, result), entry(2, unrelated)], {
+			lastOrdinal: 2, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const call = new CodexSubagentToolUseMessage(TS, 'tool', 'list_agents', {});
+		const answer = user('Synthetic answer', { questionReply: {
+			questionId: 'question', question: 'Synthetic question', answer: 'Synthetic answer',
+		} });
+		expect(applyMessages(chat, 'chat-1', 'generation-1', [entry(3, call), entry(4, answer)])).toBe('applied');
+		expect(chat.rowIndex.questionAnswers).toEqual([answer]);
+		expect(chat.rowIndex.subagentMessages).toEqual([result, call, answer]);
 		chat.transcriptCache.flush();
 	});
 
