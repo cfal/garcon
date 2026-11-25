@@ -81,9 +81,38 @@ test.each(['raw first', 'blocks first'] as const)('stores an output echo only on
   const result = s.patch('list', { status: 'completed', ...(order === 'raw first' ? blocks : raw) })[0];
   if (result?.type !== 'tool-result') throw new Error('Expected a tool result');
   expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(output.length + 1024);
-  expect(result.content).toEqual(order === 'raw first'
-    ? { ...raw, raw: 'Still checking', items: [attachment] }
-    : { ...raw, items: [update, attachment] });
+  expect(result.content).toEqual({ ...raw, items: [update, attachment] });
+});
+
+test('echoes confirm the primary output without turning repeated progress into a new diagnostic', () => {
+  const s = session();
+  const block = (text: string) => ({ type: 'content', content: { type: 'text', text } });
+  const progress = block('Sending '.repeat(500));
+  const error = 'Operation refused';
+  const list = { name: 'manage_task', rawInput: { Action: 'list' } };
+  for (const rawOutput of [error, { output: error }, { output: error, attempt: 2 }]) {
+    const id = JSON.stringify(rawOutput);
+    s.start(id, { ...list, content: [progress] });
+    s.patch(id, { rawOutput });
+    const [row] = s.patch(id, { content: [progress, block(error + '\n')], status: 'failed' });
+    const primary = typeof rawOutput === 'object' && 'attempt' in rawOutput ? { rawOutput } : { raw: error };
+    expect(row).toMatchObject({ content: { ...primary, items: [progress], status: 'failed' } });
+  }
+  s.start('confirmed', { ...list, rawOutput: 'Waiting', content: [block('Waiting')] });
+  expect(s.patch('confirmed', { status: 'failed', content: [block('Waiting'), block(error)] })[0])
+    .toMatchObject({ content: { raw: error, rawOutput: 'Waiting' } });
+});
+
+test('drops an exact whitespace-only echo without discarding the structured provider payload', () => {
+  const s = session();
+  const output = ' '.repeat(8 * 1024 * 1024);
+  const rawOutput = { output, count: 1 };
+  const block = (text: string) => ({ type: 'content', content: { type: 'text', text } });
+  s.start('list', { name: 'manage_task', rawInput: { Action: 'list' }, content: [block(output), block('Checking')] });
+  const [row] = s.patch('list', { status: 'completed', rawOutput });
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(Buffer.byteLength(JSON.stringify(row))).toBeLessThan(output.length + 1024);
+  expect(row.content).toEqual({ rawOutput, items: [block('Checking')] });
 });
 
 test('merges rawOutput and content as independent ACP fields and treats null rawOutput as unchanged', () => {

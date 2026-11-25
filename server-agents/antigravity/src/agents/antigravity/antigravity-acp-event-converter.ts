@@ -33,7 +33,6 @@ const EXECUTOR_ERROR = 'agent executor error: ';
 interface TrackedCall extends AntigravityToolCall {
   readonly rawOutput?: unknown;
   readonly content?: readonly Record<string, unknown>[];
-  readonly blockText: string;
   readonly contentIsNewer: boolean;
 }
 
@@ -90,21 +89,42 @@ function joinBlockText(blocks: readonly Record<string, unknown>[]): string {
   return blocks.map(block => asString(asObject(block.content).text)).filter(Boolean).join('\n');
 }
 
+function withoutOutputEchoes(blocks: readonly Record<string, unknown>[], output: string): readonly Record<string, unknown>[] {
+  if (!output || !blocks.length) return blocks;
+  const trimmed = output.trim();
+  return blocks.filter(block => {
+    const part = block.type === 'content' ? asObject(block.content) : block;
+    const text = part.type === 'text' ? asString(part.text) : undefined;
+    return text !== output && !(trimmed && text?.trim() === trimmed);
+  });
+}
+
+function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, content: TrackedCall['content']): boolean {
+  const output = rawOutputText(rawOutput);
+  const outputChanged = output !== rawOutputText(previous?.rawOutput);
+  if (content && content !== previous?.content) {
+    const oldBlocks = previous?.content ?? [];
+    const before = withoutOutputEchoes(oldBlocks, output);
+    const after = withoutOutputEchoes(content, output);
+    // A newly echoed output confirms it alongside the other text on the frame.
+    // Once confirmed, only a change to independent text can supersede it.
+    if (output.trim() && after.length < content.length && before.length === oldBlocks.length) return false;
+    if (joinBlockText(before) !== joinBlockText(after)) return !(outputChanged && output.trim());
+  }
+  const rawChanged = outputChanged || (rawOutput !== previous?.rawOutput &&
+    isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
+  return !rawChanged && !!previous?.contentIsNewer;
+}
+
 function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): ToolResultMessage['content'] {
   const name = call.isMcp ? null : call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
   const agentWork = isAgentWork(name);
   const raw = agentWork ? call.rawOutput : terminal.rawOutput;
   const output = agentWork ? rawOutputText(raw) : asString(asObject(raw).output) ?? '';
   const trimmedOutput = output.trim();
-  let blocks = agentWork || Array.isArray(terminal.content) ? (call.content ?? []) : [];
-  if (agentWork && trimmedOutput && blocks.length) {
-    // ACP can echo the raw output in one block alongside a distinct update or attachment.
-    blocks = blocks.filter(block => {
-      const part = block.type === 'content' ? asObject(block.content) : block;
-      return part.type !== 'text' || asString(part.text)?.trim() !== trimmedOutput;
-    });
-  }
-  const blockText = blocks === call.content ? call.blockText : joinBlockText(blocks);
+  const supplied = call.content ?? [];
+  const blocks = agentWork ? withoutOutputEchoes(supplied, output) : Array.isArray(terminal.content) ? supplied : [];
+  const blockText = joinBlockText(blocks);
   const trimmedBlocks = blockText.trim();
   // A fresh diagnostic takes precedence over an independent progress field,
   // even if the final frame supplies only the status.
@@ -141,12 +161,6 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
   const rawOutput = update?.rawOutput ?? previous?.rawOutput;
   const content = Array.isArray(update?.content)
     ? update.content.map(asObject).filter(block => block.type !== 'diff') : previous?.content;
-  const priorText = previous?.blockText ?? '';
-  const blockText = content === previous?.content ? priorText : joinBlockText(content ?? []);
-  const rawText = rawOutputText(rawOutput);
-  const rawTextChanged = rawText !== rawOutputText(previous?.rawOutput);
-  const rawChanged = rawTextChanged || (rawOutput !== previous?.rawOutput &&
-    isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
   return {
     ...call,
     name,
@@ -156,8 +170,7 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
     input,
     rawOutput,
     content,
-    blockText,
-    contentIsNewer: blockText !== priorText ? !(rawTextChanged && rawText.trim()) : !rawChanged && !!previous?.contentIsNewer,
+    contentIsNewer: prefersContent(previous, rawOutput, content),
   };
 }
 
