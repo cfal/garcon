@@ -218,6 +218,15 @@ describe('Git executor response boundaries', () => {
 		});
 	});
 
+	it.each(['', '  '])('does not treat a blank proxy error code as a confirmed rejection', async (errorCode) => {
+		fetchMock.mockResolvedValueOnce(response({
+			success: false, error: 'Bad Gateway', errorCode, retryable: false,
+		}, 502));
+		await expect(gitCommitIndex(target, 'synthetic commit')).rejects.toMatchObject({
+			errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN',
+		});
+	});
+
 	it('preserves a coded rejection at a proxy-like status', async () => {
 		fetchMock.mockResolvedValueOnce(response({
 			success: false, error: 'Busy', errorCode: 'EXECUTOR_BUSY', retryable: true,
