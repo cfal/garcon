@@ -9,6 +9,7 @@ import {
 	extractContentString,
 	fileTitlePresenter,
 	readRangePresenter,
+	reportedToolResultText,
 	webFetchSecondaryPresenter,
 } from '$lib/chat/tools/tool-display-presenters.js';
 
@@ -580,7 +581,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result.content), format: 'plain' }),
+			getContentProps: (result) => ({ content: reportedToolResultText(result.content), format: 'plain' }),
 		},
 	},
 
@@ -602,7 +603,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result.content), format: 'plain' }),
+			getContentProps: (result) => ({ content: reportedToolResultText(result.content), format: 'plain' }),
 		},
 	},
 

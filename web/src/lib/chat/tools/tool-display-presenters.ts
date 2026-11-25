@@ -69,6 +69,23 @@ export function extractContentString(content: unknown): string {
 	return JSON.stringify(rec, null, 2);
 }
 
+export function reportedToolResultText(content: unknown): string {
+	if (!content || typeof content !== 'object') return '';
+	const { raw, rawOutput, items } = content as Record<string, unknown>;
+	const text = typeof raw === 'string' ? raw : '';
+	if (rawOutput !== undefined) {
+		if (!text) return JSON.stringify(rawOutput, null, 2);
+		// A second plain output string is supplementary progress, not another result.
+		if (typeof rawOutput !== 'string' && !(rawOutput && typeof rawOutput === 'object' &&
+			Object.keys(rawOutput).length === 1 && 'output' in rawOutput && typeof rawOutput.output === 'string')) {
+			return text + '\n\n' + JSON.stringify(rawOutput, null, 2);
+		}
+	}
+	if (text) return text;
+	const parts = Array.isArray(items) ? items.flatMap(item => item?.type === 'text' && typeof item.text === 'string' ? [item.text] : []) : [];
+	return parts.join('\n') || extractContentString(content);
+}
+
 /** Derives a short file name from a tool input's filePath field. */
 export function fileTitlePresenter(input: ToolPayload): string {
 	const fp = input.filePath as string | undefined;

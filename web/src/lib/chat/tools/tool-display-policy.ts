@@ -4,21 +4,14 @@
 
 import type { ToolPayload, ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import type { ToolUseChatMessage } from '$shared/chat-types';
-import { extractContentString } from '$lib/chat/tools/tool-display-presenters.js';
+import { reportedToolResultText } from '$lib/chat/tools/tool-display-presenters.js';
 import * as m from '$lib/paraglide/messages.js';
 
 const TEXT_RESULT_RULE: ToolResultDisplayRule = {
 	mode: 'collapsible',
 	defaultOpen: false,
 	contentKind: 'text',
-	getContentProps: (result) => {
-		const content = result.content as { raw?: unknown; items?: unknown } | undefined;
-		if (typeof content?.raw === 'string' && content.raw.length > 0) return { content: content.raw, format: 'plain' };
-		const text = Array.isArray(content?.items)
-			? content.items.flatMap((item) => item?.type === 'text' && typeof item.text === 'string' ? [item.text] : []).join('\n')
-			: '';
-		return { content: text || extractContentString(result.content), format: 'plain' };
-	},
+	getContentProps: (result) => ({ content: reportedToolResultText(result.content), format: 'plain' }),
 };
 
 const FAILED_RESULT_RULE: ToolResultDisplayRule = { ...TEXT_RESULT_RULE, title: () => m.chat_message_error() };

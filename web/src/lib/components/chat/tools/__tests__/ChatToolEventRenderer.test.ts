@@ -68,6 +68,19 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('Operation refused')).toBeTruthy();
 	});
 
+	it('shows the structured plan result even when the provider also reports text', () => {
+		render(ChatToolEventRenderer, { toolMessage: new UpdatePlanToolUseMessage('', 'plan', []), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { raw: 'Plan submitted', rawOutput: { updated: 1, ignored: 2 } }, isError: false } });
+		expect(screen.getByText(/Plan submitted.*"ignored": 2/s)).toBeTruthy();
+	});
+
+	it('shows a structured failure instead of supplementary progress', () => {
+		render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hello'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { rawOutput: { reason: 'Operation refused' }, items: [{ type: 'text', text: 'Sending' }] }, isError: true } });
+		expect(screen.getByText(/Operation refused/)).toBeTruthy();
+		expect(screen.queryByText(/Sending/)).toBeNull();
+	});
+
 	it('renders distinct outcomes for plan steps with the same title', () => {
 		const toolMessage = new UpdatePlanToolUseMessage('', 'plan', [
 			{ content: 'Check', status: 'failed' }, { content: 'Check', status: 'skipped' },
