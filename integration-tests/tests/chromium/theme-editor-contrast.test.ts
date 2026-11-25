@@ -182,14 +182,21 @@ describe("CodeMirror theme contrast", () => {
     );
     if (!rootEntryKey) throw new Error("Missing root layout manifest entry");
 
-    const editorEntryKey =
-      "src/lib/files/editor/code-editor-controller.svelte.ts";
-    expect(manifest[rootEntryKey]?.dynamicImports).toContain(editorEntryKey);
-    const rootImports = collectStaticImports(manifest, rootEntryKey);
-    const eagerEditorChunks = [...rootImports].filter((key) => {
-      return manifest[key]?.name === "vendor-codemirror-editor";
-    });
-    expect(eagerEditorChunks).toEqual([]);
+    const workspace = "src/routes/WorkspaceBoot.svelte";
+    const editor = "src/lib/files/editor/code-editor-controller.svelte.ts";
+    const implementation = Object.keys(manifest).find(
+      (key) => manifest[key]?.name === "vendor-codemirror-editor",
+    );
+    if (!implementation) throw new Error("Missing CodeMirror implementation chunk");
+
+    for (const [entry, lazyEntry] of [[rootEntryKey, workspace], [workspace, editor]] as const) {
+      const eager = collectStaticImports(manifest, entry);
+      expect(eager).not.toContain(lazyEntry);
+      expect(eager).not.toContain(implementation);
+      expect([entry, ...eager].flatMap((key) => manifest[key]?.dynamicImports ?? []))
+        .toContain(lazyEntry);
+    }
+    expect(collectStaticImports(manifest, editor)).toContain(implementation);
   });
 
   const selectionTest = test.each(["drawn", "native"] as const);
