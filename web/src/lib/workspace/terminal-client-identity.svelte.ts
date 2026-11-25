@@ -33,7 +33,6 @@ export class TerminalClientIdentity {
 	readonly ready = new Promise<string | null>((resolve) => {
 		this.#resolveReady = resolve;
 	});
-	#pageHide = () => this.destroy();
 	#storage = (event: StorageEvent) => {
 		if (!event.key?.startsWith(TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX) || !event.newValue) return;
 		try {
@@ -54,12 +53,12 @@ export class TerminalClientIdentity {
 		}
 		window.addEventListener('storage', this.#storage);
 		if (this.#savedId || !this.#channel) this.#scanFallbackClaims();
-		window.addEventListener('pagehide', this.#pageHide, { once: true });
 		this.#beginClaim();
 	}
 
 	destroy(): void {
 		this.established = false;
+		this.clientId = null;
 		this.#resolveReady?.(null);
 		this.#resolveReady = null;
 		if (this.#claimTimer) clearTimeout(this.#claimTimer);
@@ -71,7 +70,6 @@ export class TerminalClientIdentity {
 			this.#removeFallbackClaim(key);
 		}
 		this.#fallbackCleanupTimers.clear();
-		window.removeEventListener('pagehide', this.#pageHide);
 		window.removeEventListener('storage', this.#storage);
 	}
 

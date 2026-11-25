@@ -113,7 +113,7 @@
 
 	const auth = getAuth();
 	const localSettings = getLocalSettings();
-	const terminalIdentity = new TerminalClientIdentity();
+	let terminalIdentity = $state.raw(new TerminalClientIdentity());
 	const fileImages = new FileImageCache({
 		budgetBytes: localSettings.imageCacheSizeMiB * 1024 * 1024,
 		owner: null,
@@ -167,7 +167,7 @@
 		modelCatalog,
 		navigation,
 		notifications,
-		terminalIdentity,
+		get terminalIdentity() { return terminalIdentity; },
 		ws,
 		chatBoardInvalidations,
 		ticketsInvalidations,
@@ -309,10 +309,11 @@
 	let terminalsInitialized = false;
 	$effect(() => {
 		const authenticated = auth.isAuthenticated;
+		const identity = terminalIdentity;
 		let current = true;
 		untrack(() => {
-			void terminalIdentity.ready.then(async (clientId) => {
-				if (!current || clientId === null || !terminalIdentity.established) return;
+			void identity.ready.then(async (clientId) => {
+				if (!current || clientId === null || !identity.established) return;
 				if (!authenticated) {
 					terminals.authChanged(false);
 					return;
@@ -428,11 +429,21 @@
 
 	function handlePageHide() {
 		readReceiptOutbox.flushNow();
+		terminals.authChanged(false);
+		terminalIdentity.destroy();
+	}
+
+	function handlePageShow(event: PageTransitionEvent) {
+		if (event.persisted) terminalIdentity = new TerminalClientIdentity();
 	}
 
 	onMount(() => {
 		window.addEventListener('pagehide', handlePageHide);
-		return () => window.removeEventListener('pagehide', handlePageHide);
+		window.addEventListener('pageshow', handlePageShow);
+		return () => {
+			window.removeEventListener('pagehide', handlePageHide);
+			window.removeEventListener('pageshow', handlePageShow);
+		};
 	});
 
 	// Preload remote settings after authentication so root-global values
