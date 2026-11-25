@@ -11,7 +11,7 @@
 
 <script lang="ts">
 	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
-	import { flushSync } from 'svelte';
+	import { flushSync, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
@@ -41,8 +41,7 @@
 
 	let isOpen = $state(false);
 	let query = $state('');
-	let highlighted = $state.raw<WorkbenchCommand | null>(null);
-	let retainedOrder = $state.raw<readonly WorkbenchCommand[] | null>(null);
+	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let optionList = $state<HTMLDivElement>();
 	let Fuse = $state.raw<typeof import('fuse.js').default>();
@@ -79,11 +78,13 @@
 			}),
 	);
 
-	let matches = $derived.by(() => {
+	let filteredCommands = $derived.by(() => {
 		const needle = query.trim().toLowerCase();
 		if (needle) {
-			if (fuse)
-				return fuse.search(query, { limit: searchResultLimit }).map((result) => result.item);
+			// A late import takes effect on the next edit, not under a pending click or Enter.
+			const index = untrack(() => fuse);
+			if (index)
+				return index.search(query, { limit: searchResultLimit }).map((result) => result.item);
 			return commands
 				.filter((command) =>
 					[command.label, command.description, categoryLabels[command.category]()].some((field) =>
@@ -99,11 +100,6 @@
 			)
 			.slice(0, searchResultLimit);
 	});
-	// Appends new matches without moving the options already being navigated.
-	let filteredCommands = $derived(retainedOrder
-		? [...new Set([...retainedOrder, ...matches])].slice(0, searchResultLimit)
-		: matches);
-	let selectedIndex = $derived(highlighted ? filteredCommands.indexOf(highlighted) : 0);
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
 
 	function isEnabled(command: WorkbenchCommand): boolean {
@@ -116,17 +112,13 @@
 
 	function handleQueryInput(e: Event) {
 		query = (e.target as HTMLInputElement).value;
-		highlighted = null;
-		retainedOrder = null;
+		selectedIndex = 0;
 	}
 
 	function open() {
 		if (!Fuse) {
 			void loadFuse().then(
-				({ default: SearchIndex }) => {
-					if (!Fuse && highlighted && query.trim()) retainedOrder = matches;
-					Fuse = SearchIndex;
-				},
+				({ default: SearchIndex }) => { Fuse = SearchIndex; },
 				(error: unknown) => console.warn('Fuzzy command search failed to load:', error),
 			);
 		}
@@ -135,7 +127,7 @@
 			commands = captureCommands();
 			isOpen = true;
 			query = '';
-			highlighted = null;
+			selectedIndex = 0;
 		});
 	}
 
@@ -144,8 +136,6 @@
 		flushSync(() => {
 			isOpen = false;
 			commands = [];
-			highlighted = null;
-			retainedOrder = null;
 			query = '';
 		});
 		if (document.activeElement === document.body) opener?.focus({ preventScroll: true });
@@ -184,10 +174,10 @@
 		}
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			highlighted = filteredCommands[Math.min(selectedIndex + 1, filteredCommands.length - 1)] ?? null;
+			if (selectedIndex + 1 < filteredCommands.length) selectedIndex++;
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			highlighted = filteredCommands[Math.max(selectedIndex - 1, 0)] ?? null;
+			if (selectedIndex > 0) selectedIndex--;
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			if (selectedCommand) selectItem(selectedCommand);
@@ -280,11 +270,11 @@
 								? 'bg-accent text-accent-foreground'
 								: 'text-foreground hover:bg-accent/50'}"
 							onclick={() => selectItem(item)}
-							onfocus={() => (highlighted = item)}
+							onfocus={() => (selectedIndex = i)}
 							onmouseenter={(event) => {
 								// A focused result owns native Enter and Space activation.
 								if (!event.currentTarget.parentElement?.contains(document.activeElement)) {
-									highlighted = item;
+									selectedIndex = i;
 								}
 							}}
 						>

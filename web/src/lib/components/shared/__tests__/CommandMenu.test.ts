@@ -137,7 +137,7 @@ function createCatalog(count: number): ChatSessionsStore {
 	return sessions;
 }
 
-it('retains a keyboard highlight when fuzzy matching replaces the initial results', async () => {
+it('keeps the current query stable and uses late fuzzy matching on the next edit', async () => {
 	const gate = Promise.withResolvers<void>();
 	mocks.fuseReady = gate.promise;
 	const candidates = ['Open', 'Document', 'Opeen'].map(label => ({
@@ -154,22 +154,20 @@ it('retains a keyboard highlight when fuzzy matching replaces the initial result
 		await fireEvent.keyDown(input, { key: 'ArrowDown' });
 		expect(screen.getByRole('option', { selected: true }).textContent).toContain('Document');
 		const initialOptions = screen.getAllByRole('option');
+		await fireEvent.pointerDown(initialOptions[0]);
 		gate.resolve();
-		await screen.findByRole('option', { name: /Opeen/ });
+		await vi.dynamicImportSettled();
 		const highlighted = screen.getByRole('option', { selected: true });
 		expect(input.getAttribute('aria-activedescendant')).toBe(highlighted.id);
-		const rows = screen.getAllByRole('option');
-		expect(rows.slice(0, initialOptions.length)).toEqual(initialOptions);
-		const neighbor = screen.getByRole('option', { name: /Opeen/ });
-		highlighted.focus();
-		await fireEvent.pointerDown(neighbor);
-		await fireEvent.focus(neighbor);
-		expect(screen.getAllByRole('option')).toEqual(rows);
-		await fireEvent.pointerUp(neighbor);
-		await fireEvent.focus(highlighted);
-		input.focus();
+		expect(highlighted).toBe(initialOptions[1]);
+		expect(screen.getAllByRole('option')).toEqual(initialOptions);
+		await fireEvent.pointerUp(initialOptions[0]);
+		await fireEvent.input(input, { target: { value: 'Open' } });
+		expect(screen.queryByRole('option', { name: /Document/ })).toBeNull();
+		expect(screen.getByRole('option', { name: /Opeen/ })).toBeTruthy();
+		await fireEvent.keyDown(input, { key: 'ArrowDown' });
 		await fireEvent.keyDown(input, { key: 'Enter' });
-		expect(invoke).toHaveBeenCalledWith(candidates[1], expect.anything());
+		expect(invoke).toHaveBeenCalledWith(candidates[2], expect.anything());
 	} finally {
 		gate.resolve();
 		mocks.fuseReady = undefined;
@@ -180,6 +178,7 @@ it('loads fuzzy matching after opening the palette', async () => {
 	const { component } = render(CommandMenu);
 	component.toggle();
 	const input = await screen.findByRole('combobox');
+	await vi.dynamicImportSettled();
 	await fireEvent.input(input, { target: { value: 'settngs' } });
 	expect(await screen.findByRole('option', { name: /settings/i })).toBeTruthy();
 });
