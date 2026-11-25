@@ -249,18 +249,19 @@
 		if (pendingRecenter && viewportRef && scrollChatIntoView(pendingRecenter))
 			pendingRecenter = null;
 	});
+	const desktopViewport = $derived(isMobile ? null : viewportRef);
 	// The list, including bottom padding, is the viewport's only in-flow content.
 	const autoScrollViewport = $derived(
-		viewportHeight > 0 && totalHeight > viewportHeight && rows.length > 0 ? viewportRef : null,
+		viewportHeight > 0 && totalHeight > viewportHeight && rows.length > 0 ? desktopViewport : null,
 	);
 	$effect(() => {
 		const element = autoScrollViewport;
-		if (isMobile || !element) return;
+		if (!element) return;
 		return bindSidebarAutoScroll(element, instanceId, () => reorderEnabled);
 	});
 	$effect(() => {
-		const viewport = viewportRef;
-		if (isMobile || !viewport) return;
+		const viewport = desktopViewport;
+		if (!viewport) return;
 		return bindSidebarDesktopReorder(viewport, {
 			instanceId,
 			canReorder: () => reorderEnabled,
