@@ -2568,6 +2568,8 @@ describe('PromptComposer focus', () => {
 		);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: false });
 		expect(rendered.component.getComposerNotice()).toBeNull();
+		const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+		expect(rendered.component.getFocusServices().transientLayers.handleEscape(escape)).toBe(false);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: true });
 		await screen.findByText('Project folder unavailable');
 		rendered.unmount();
