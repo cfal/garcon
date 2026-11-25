@@ -27,10 +27,19 @@ export interface AcpProcess {
 }
 
 type PendingRequest = {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
+  settle: (reply: AcpReply<unknown>) => void;
   timer: ReturnType<typeof setTimeout> | null;
 };
+
+export type AcpReply<T> = { result: T } | { error: Error };
+
+export interface AcpRequestOptions<T> {
+  onSent?: () => void;
+  // Runs at the wire boundary, before later frames in the same read can change session state.
+  onReply?: (reply: AcpReply<T>) => void;
+  outputDuringWrite?: 'hold' | 'stream';
+  timeoutMs?: number;
+}
 
 export interface AcpSpawnSpec {
   command: string;
@@ -70,6 +79,7 @@ export class AcpTransport extends EventEmitter {
   #nextId = 1;
   #pending = new Map<AcpJsonRpcId, PendingRequest>();
   #sendTimers = new Set<ReturnType<typeof setTimeout>>();
+  #outputHolds = 0;
   #heldOutput: Array<() => void> = [];
   #heldBytes = 0;
   #releaseExit: (() => void) | null = null;
@@ -104,27 +114,39 @@ export class AcpTransport extends EventEmitter {
   async request<T>(
     method: string,
     params?: unknown,
-    onSent?: () => void,
-    timeoutMs: number = this.#requestTimeoutMs,
+    { onSent, onReply, outputDuringWrite, timeoutMs = this.#requestTimeoutMs }: AcpRequestOptions<T> = {},
   ): Promise<T> {
     const id = this.#nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = timeoutMs > 0
         ? setTimeout(() => {
-          this.#rejectPending(id, new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`));
+          this.#settlePending(id, { error: new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`) });
         }, timeoutMs)
         : null;
       timer?.unref?.();
-      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+      this.#pending.set(id, {
+        settle(raw) {
+          const reply = raw as AcpReply<T>;
+          try {
+            onReply?.({ ...reply });
+          } catch (error) {
+            reject(error);
+            return;
+          }
+          if ('error' in reply) reject(reply.error);
+          else resolve(reply.result);
+        },
+        timer,
+      });
       try {
         this.#write({
           jsonrpc: '2.0',
           id,
           method,
           ...(params === undefined ? {} : { params }),
-        }, onSent && (() => { if (this.#pending.has(id)) onSent(); }));
+        }, onSent && (() => { if (this.#pending.has(id)) onSent(); }), outputDuringWrite);
       } catch (error) {
-        this.#rejectPending(id, error instanceof Error ? error : new Error(String(error)));
+        this.#settlePending(id, { error: error instanceof Error ? error : new Error(String(error)) });
       }
     });
   }
@@ -168,6 +190,9 @@ export class AcpTransport extends EventEmitter {
   }
 
   #disconnect(error: Error): void {
+    for (const timer of this.#sendTimers) clearTimeout(timer);
+    this.#sendTimers.clear();
+    this.#outputHolds = 0;
     this.#takeHeldOutput();
     this.#rejectAllPending(error);
     this.#process = null;
@@ -199,7 +224,7 @@ export class AcpTransport extends EventEmitter {
     return () => this.off('exit', cb);
   }
 
-  #write(payload: AcpJsonRpcMessage, onSent?: () => void): void {
+  #write(payload: AcpJsonRpcMessage, onSent?: () => void, outputDuringWrite: 'hold' | 'stream' = 'hold'): void {
     const process = this.#process;
     if (!process?.stdin) throw new Error('ACP transport stdin is unavailable');
     const onFailure = (error: Error) => {
@@ -224,12 +249,14 @@ export class AcpTransport extends EventEmitter {
     const timer = setTimeout(() => onFailure(new Error('ACP frame write timed out')), this.#requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS);
     timer.unref?.();
     this.#sendTimers.add(timer);
+    if (outputDuringWrite === 'hold') this.#outputHolds++;
     void flushed.then(() => {
       if (this.#process !== process) return;
       clearTimeout(timer);
       this.#sendTimers.delete(timer);
+      if (outputDuringWrite === 'hold') this.#outputHolds--;
       onSent();
-      if (this.#sendTimers.size) return;
+      if (this.#outputHolds) return;
       for (const deliver of this.#takeHeldOutput()) {
         if (this.#process !== process) break;
         deliver();
@@ -238,8 +265,6 @@ export class AcpTransport extends EventEmitter {
   }
 
   #takeHeldOutput(): Array<() => void> {
-    for (const timer of this.#sendTimers) clearTimeout(timer);
-    this.#sendTimers.clear();
     const output = this.#heldOutput;
     this.#heldOutput = [];
     this.#heldBytes = 0;
@@ -274,7 +299,7 @@ export class AcpTransport extends EventEmitter {
         const { done, value } = await read;
         if (this.#process !== process) break;
         // Drain both pipes; delay publication, not reads, until the prompt is acknowledged.
-        if (this.#sendTimers.size) {
+        if (this.#outputHolds) {
           this.#heldBytes += Math.max(value?.byteLength ?? 0, 64);
           if (this.#heldBytes > MAX_OUTPUT_DURING_SEND) throw new Error('ACP output exceeded the pending send buffer');
           this.#heldOutput.push(() => consume(value));
@@ -299,16 +324,13 @@ export class AcpTransport extends EventEmitter {
     }
 
     if (isJsonRpcId(message.id) && 'error' in message && message.error) {
-      this.#rejectPending(message.id, new AcpRpcError(
-        message.error.message,
-        message.error.code,
-        message.error.data,
-      ));
+      const { message: detail, code, data } = message.error;
+      this.#settlePending(message.id, { error: new AcpRpcError(detail, code, data) });
       return;
     }
 
     if (isJsonRpcId(message.id) && 'result' in message) {
-      this.#resolvePending(message.id, message.result);
+      this.#settlePending(message.id, { result: message.result });
       return;
     }
 
@@ -332,26 +354,17 @@ export class AcpTransport extends EventEmitter {
     this.emit('exit', exitCode);
   }
 
-  #takePending(id: AcpJsonRpcId): PendingRequest | null {
+  #settlePending(id: AcpJsonRpcId, reply: AcpReply<unknown>): void {
     const pending = this.#pending.get(id);
-    if (!pending) return null;
+    if (!pending) return;
     this.#pending.delete(id);
     if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = null;
-    return pending;
-  }
-
-  #resolvePending(id: AcpJsonRpcId, value: unknown): void {
-    this.#takePending(id)?.resolve(value);
-  }
-
-  #rejectPending(id: AcpJsonRpcId, error: Error): void {
-    this.#takePending(id)?.reject(error);
+    pending.settle(reply);
   }
 
   #rejectAllPending(error: Error): void {
     for (const id of [...this.#pending.keys()]) {
-      this.#rejectPending(id, error);
+      this.#settlePending(id, { error });
     }
   }
 }

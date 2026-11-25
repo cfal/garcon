@@ -1,9 +1,10 @@
-import { describe, expect, spyOn, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import * as filesystem from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ProtocolError } from 'puppeteer-core';
 import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
@@ -27,6 +28,7 @@ import {
   stopLightpandaChild,
   type LightpandaStopChild,
 } from '../../support/lightpanda-process.js';
+import { performLightpandaAction } from '../../support/lightpanda-action.js';
 import {
   assertSensitiveValuesNotPersisted,
   createIntegrationFixture,
@@ -808,6 +810,35 @@ describe('integration support contracts', () => {
     await stopLightpandaChild(child, () => '(test logs)', 1);
 
     expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
+  });
+
+  test('confirms a Lightpanda action with a lost reply without dispatching it twice', async () => {
+    const lostReply = new ProtocolError();
+    lostReply.originalMessage = 'Promise was collected';
+    const calls: string[] = [];
+    const act = async () => {
+      calls.push('act');
+      throw lostReply;
+    };
+    await performLightpandaAction(act, async () => calls.push('confirm'));
+    expect(calls).toEqual(['act', 'confirm']);
+
+    const missing = new Error('Expected menu did not open');
+    const error = await rejectionOf(performLightpandaAction(act, () => Promise.reject(missing)));
+    expect(error).toBe(missing);
+  });
+
+  test('propagates other Lightpanda action errors without confirming', async () => {
+    const originalMessage = 'Promise was collected';
+    const pageError = Object.assign(new Error(originalMessage), { originalMessage });
+    const nearMatch = new ProtocolError();
+    nearMatch.originalMessage = `${originalMessage}.`;
+    for (const failure of [pageError, nearMatch]) {
+      const confirm = mock(async () => {});
+      const error = await rejectionOf(performLightpandaAction(() => Promise.reject(failure), confirm));
+      expect(error).toBe(failure);
+      expect(confirm).not.toHaveBeenCalled();
+    }
   });
 
   test('serves models and deterministic streaming echoes', async () => {

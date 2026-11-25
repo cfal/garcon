@@ -32,10 +32,6 @@ export interface RecordedGeminiRequest {
   }>;
 }
 
-export type GeminiTurn =
-  | GeminiPart[]
-  | ((request: RecordedGeminiRequest) => GeminiPart[] | Promise<GeminiPart[]>);
-
 export interface GeminiFault {
   readonly kind: 'http-error';
   readonly status: number;
@@ -43,17 +39,20 @@ export interface GeminiFault {
   readonly reason: string;
 }
 
+type GeminiReply = GeminiPart[] | GeminiFault;
+export type GeminiTurn = GeminiReply | ((request: RecordedGeminiRequest) => GeminiReply | Promise<GeminiReply>);
+
 export interface GeminiStreamOptions {
   // Spaces the response's frames this far apart instead of sending them at
   // once. agy relays updates that arrive together as one batch, so only a paced
   // stream shows how it relays output a real model streams over time.
   readonly frameIntervalMs?: number;
+  readonly omitUsage?: boolean;
 }
 
-interface ScriptedGeminiStream {
-  readonly kind: 'stream';
+interface ScriptedGeminiTurn {
   readonly turn: GeminiTurn;
-  readonly frameIntervalMs: number;
+  readonly options: GeminiStreamOptions;
 }
 
 export interface HeldGeminiTurn {
@@ -110,14 +109,14 @@ function wirePart(part: GeminiPart): Record<string, unknown> {
   return { functionCall: { id: part.id, name: part.name, args: part.args } };
 }
 
-function sseResponse(parts: readonly GeminiPart[], frameIntervalMs = 0): Response {
+function sseResponse(parts: readonly GeminiPart[], { frameIntervalMs = 0, omitUsage }: GeminiStreamOptions = {}): Response {
   const usageMetadata = { promptTokenCount: 42, candidatesTokenCount: 7, totalTokenCount: 49 };
   const frames = parts.map((part, index) => ({
     candidates: [{
       content: { role: 'model', parts: [wirePart(part)] },
       ...(index === parts.length - 1 ? { finishReason: 'STOP' } : {}),
     }],
-    ...(index === parts.length - 1 ? { usageMetadata } : {}),
+    ...(index === parts.length - 1 && !omitUsage ? { usageMetadata } : {}),
   }));
   const encoder = new TextEncoder();
   let cancelled = false;
@@ -138,7 +137,7 @@ function sseResponse(parts: readonly GeminiPart[], frameIntervalMs = 0): Respons
 
 export class FakeGeminiModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: Array<ScriptedGeminiStream | GeminiFault> = [];
+  readonly #turns: ScriptedGeminiTurn[] = [];
   readonly #requests: RecordedGeminiRequest[] = [];
   readonly #violations: string[] = [];
   readonly #auxiliaryRequests: string[] = [];
@@ -164,7 +163,7 @@ export class FakeGeminiModel {
   }
 
   scriptTurn(turn: GeminiTurn, options: GeminiStreamOptions = {}): void {
-    this.#turns.push({ kind: 'stream', turn, frameIntervalMs: options.frameIntervalMs ?? 0 });
+    this.#turns.push({ turn, options });
   }
 
   // Holds the response before its first frame until the test releases it.
@@ -185,7 +184,7 @@ export class FakeGeminiModel {
   }
 
   scriptFault(fault: GeminiFault): void {
-    this.#turns.push(fault);
+    this.scriptTurn(fault);
   }
 
   requests(): readonly RecordedGeminiRequest[] {
@@ -258,16 +257,14 @@ export class FakeGeminiModel {
       );
       return Response.json({ error: { code: 500, message: 'no scripted turn', status: 'INTERNAL' } }, { status: 500 });
     }
-    if (turn.kind === 'stream') {
-      const parts = typeof turn.turn === 'function' ? await turn.turn(recorded) : turn.turn;
-      return sseResponse(parts, turn.frameIntervalMs);
-    }
+    const reply = typeof turn.turn === 'function' ? await turn.turn(recorded) : turn.turn;
+    if (Array.isArray(reply)) return sseResponse(reply, turn.options);
     return Response.json({
       error: {
-        code: turn.status,
-        message: turn.message,
-        status: turn.reason,
+        code: reply.status,
+        message: reply.message,
+        status: reply.reason,
       },
-    }, { status: turn.status });
+    }, { status: reply.status });
   }
 }
