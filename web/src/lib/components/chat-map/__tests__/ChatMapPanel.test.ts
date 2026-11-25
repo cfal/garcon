@@ -1,10 +1,16 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatLineage } from '$shared/chat-parentage';
 import { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte';
 import * as m from '$lib/paraglide/messages.js';
 import ChatMapPanel from '../ChatMapPanel.svelte';
+
+vi.mock('$lib/context', async (original) => ({
+	...(await original<typeof import('$lib/context')>()),
+	getMinuteClock: () => ({ currentTime: new Date() } satisfies Pick<MinuteClockStore, 'currentTime'>),
+}));
 
 afterEach(cleanup);
 

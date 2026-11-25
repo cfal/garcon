@@ -19,6 +19,7 @@
 		type ChatBoardColumn,
 		type ChatBoardMatchMode,
 	} from '$shared/chat-boards';
+	import { BoardReorderState } from './board-reorder-state.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface ColumnDraft {
@@ -56,8 +57,7 @@
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
 	let fieldErrors = $state<Record<string, string>>({});
-	let draggedColumnId = $state<string | null>(null);
-	let dragOverColumnId = $state<string | null>(null);
+	const reorder = new BoardReorderState(() => columns, () => submitting || outdated, (items) => { columns = items; });
 	let outdated = $derived(controller.catalog.revision !== baseRevision);
 	let columnLimitReached = $derived(columns.length >= CHAT_BOARD_COLUMN_MAX_COUNT);
 
@@ -107,76 +107,32 @@
 		columns = next;
 	}
 
-	function handleDragStart(event: DragEvent, columnId: string): void {
-		if (submitting || outdated) {
-			event.preventDefault();
-			return;
+	function parseTags(value: string) {
+		const raw = value.split(',').map((tag) => tag.trim()).filter(Boolean);
+		const normalized = raw.map(normalizeBoardTagInput);
+		const tags = [...new Set(normalized.filter((tag): tag is string => Boolean(tag)))]
+			.sort((left, right) => left.localeCompare(right));
+		return { tags, invalid: raw.length > 32 || normalized.some((tag) => !tag) };
+	}
+
+	const columnRules = $derived.by(() => {
+		const groups = new Map<string, string[]>();
+		const byId = new Map<string, { tags: string[]; invalid: boolean; matches?: string[] }>();
+		for (const column of columns) {
+			const rule = parseTags(column.tagsInput);
+			if (rule.tags.length === 0) {
+				byId.set(column.id, rule);
+				continue;
+			}
+			const key = `${column.match}\0${rule.tags.join('\0')}`;
+			const matches = groups.get(key) ?? [];
+			if (matches.length === 0) groups.set(key, matches);
+			matches.push(column.id);
+			byId.set(column.id, { ...rule, matches });
 		}
-		draggedColumnId = columnId;
-		event.dataTransfer?.setData('text/plain', columnId);
-		if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-	}
-
-	function handleDragOver(event: DragEvent, columnId: string): void {
-		if (!draggedColumnId || draggedColumnId === columnId || submitting || outdated) return;
-		event.preventDefault();
-		dragOverColumnId = columnId;
-		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-	}
-
-	function handleDrop(event: DragEvent, targetId: string): void {
-		event.preventDefault();
-		const sourceId = draggedColumnId;
-		draggedColumnId = null;
-		dragOverColumnId = null;
-		if (!sourceId || sourceId === targetId || submitting || outdated) return;
-		const sourceIndex = columns.findIndex((column) => column.id === sourceId);
-		const targetIndex = columns.findIndex((column) => column.id === targetId);
-		if (sourceIndex < 0 || targetIndex < 0) return;
-		const next = [...columns];
-		const [moved] = next.splice(sourceIndex, 1);
-		if (!moved) return;
-		next.splice(targetIndex, 0, moved);
-		columns = next;
-	}
-
-	function clearDrag(): void {
-		draggedColumnId = null;
-		dragOverColumnId = null;
-	}
-
-	function normalizedTags(value: string): string[] {
-		return [
-			...new Set(
-				value
-					.split(',')
-					.map((tag) => normalizeBoardTagInput(tag.trim()))
-					.filter((tag): tag is string => Boolean(tag)),
-			),
-		].sort((left, right) => left.localeCompare(right));
-	}
-
-	function rawTags(value: string): string[] {
-		return value
-			.split(',')
-			.map((tag) => tag.trim())
-			.filter(Boolean);
-	}
-
-	function identicalRuleFor(index: number): ColumnDraft | null {
-		const current = columns[index];
-		if (!current) return null;
-		const tags = normalizedTags(current.tagsInput).join('\u0000');
-		if (!tags) return null;
-		return (
-			columns.find(
-				(candidate, candidateIndex) =>
-					candidateIndex !== index &&
-					candidate.match === current.match &&
-					normalizedTags(candidate.tagsInput).join('\u0000') === tags,
-			) ?? null
-		);
-	}
+		return byId;
+	});
+	const columnsById = $derived(new Map(columns.map((column) => [column.id, column])));
 
 	function validate(): ChatBoard | null {
 		if (columns.length > CHAT_BOARD_COLUMN_MAX_COUNT) {
@@ -194,10 +150,9 @@
 			else if (seenNames.has(key))
 				errors[`name:${column.id}`] = m.chat_board_column_name_duplicate();
 			seenNames.add(key);
-			const raw = rawTags(column.tagsInput);
-			const tags = normalizedTags(column.tagsInput);
+			const { tags, invalid } = columnRules.get(column.id)!;
 			if (tags.length === 0) errors[`tags:${column.id}`] = m.chat_board_column_tags_required();
-			else if (raw.length > 32 || raw.some((tag) => !normalizeBoardTagInput(tag))) {
+			else if (invalid) {
 				errors[`tags:${column.id}`] = m.chat_board_column_tags_invalid();
 			}
 			return { id: column.id, name: columnName, match: column.match, tags };
@@ -286,16 +241,17 @@
 
 			<div class="mt-5 space-y-3">
 				{#each columns as column, index (column.id)}
+					{@const rule = columnRules.get(column.id)!}
+					{@const matches = rule.matches}
+					{@const duplicateId = matches?.[matches[0] === column.id ? 1 : 0]}
 					<fieldset
 						class="rounded-xl border bg-muted/25 p-3 transition-colors"
-						class:border-ring={dragOverColumnId === column.id}
-						class:border-border={dragOverColumnId !== column.id}
+						class:border-ring={reorder.overId === column.id}
+						class:border-border={reorder.overId !== column.id}
 						disabled={submitting || outdated}
-						ondragover={(event) => handleDragOver(event, column.id)}
-						ondragleave={() => {
-							if (dragOverColumnId === column.id) dragOverColumnId = null;
-						}}
-						ondrop={(event) => handleDrop(event, column.id)}
+						ondragover={(event) => reorder.over(event, column.id)}
+						ondragleave={() => reorder.leave(column.id)}
+						ondrop={(event) => reorder.drop(event, column.id)}
 						data-chat-board-column-editor={column.id}
 					>
 						<legend class="sr-only">{m.chat_board_column_name()}</legend>
@@ -308,8 +264,8 @@
 									name: column.name || m.chat_board_column_name(),
 								})}
 								disabled={submitting || outdated}
-								ondragstart={(event) => handleDragStart(event, column.id)}
-								ondragend={clearDrag}
+								ondragstart={(event) => reorder.start(event, column.id)}
+								ondragend={() => reorder.clear()}
 								data-chat-board-column-drag={column.id}
 							>
 								<GripVertical class="size-4" aria-hidden="true" />
@@ -387,15 +343,15 @@
 									>{fieldErrors[`tags:${column.id}`]}</span
 								>{/if}
 						</label>
-						{#if normalizedTags(column.tagsInput).length > 0}
+						{#if rule.tags.length > 0}
 							<p class="mt-2 text-xs text-muted-foreground">
-								{normalizedTags(column.tagsInput).join(' · ')}
+								{rule.tags.join(' · ')}
 							</p>
 						{/if}
-						{#if identicalRuleFor(index)}
+						{#if duplicateId}
 							<p class="mt-2 text-xs text-status-warning-muted-foreground">
 								{m.chat_board_column_rule_duplicate({
-									column: identicalRuleFor(index)?.name || m.chat_board_column_name(),
+									column: columnsById.get(duplicateId)?.name || m.chat_board_column_name(),
 								})}
 							</p>
 						{/if}

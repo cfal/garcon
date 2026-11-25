@@ -2,7 +2,13 @@ import type { TicketStatus, TicketSummary } from '$shared/tickets';
 
 type DragModule = typeof import('@atlaskit/pragmatic-drag-and-drop/element/adapter');
 let modulePromise: Promise<DragModule> | null = null;
-const load = () => (modulePromise ??= import('@atlaskit/pragmatic-drag-and-drop/element/adapter'));
+function load(): Promise<DragModule> {
+	modulePromise ??= import('@atlaskit/pragmatic-drag-and-drop/element/adapter').catch((error: unknown) => {
+		modulePromise = null;
+		throw error;
+	});
+	return modulePromise;
+}
 
 export function ticketDraggable(
 	node: HTMLElement,

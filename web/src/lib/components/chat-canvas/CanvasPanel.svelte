@@ -8,6 +8,7 @@
 	import CanvasWorkspace from './CanvasWorkspace.svelte';
 	import CanvasNameDialog from './CanvasNameDialog.svelte';
 	import CanvasConfirmDialog from './CanvasConfirmDialog.svelte';
+	import { canPollVisibility, startVisibilityPolling } from '$lib/components/shared/visibility-polling';
 	import './canvas.css';
 
 	let {
@@ -53,15 +54,15 @@
 	$effect(() => {
 		if (!visible) return;
 		const refresh = () => {
-			if (document.visibilityState === 'visible') void controller.refresh();
+			if (canPollVisibility()) void controller.refresh();
 		};
 		const flush = () => {
 			void controller.session?.flush();
 		};
-		const timer = setInterval(refresh, 15_000);
+		const stopPolling = startVisibilityPolling({ intervalMs: 15_000, poll: refresh });
 		window.addEventListener('focus', refresh);
 		return () => {
-			clearInterval(timer);
+			stopPolling();
 			window.removeEventListener('focus', refresh);
 			flush();
 		};

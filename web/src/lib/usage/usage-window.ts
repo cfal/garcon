@@ -1,6 +1,6 @@
 import { usageDayFormatter, type UsageReadRequest, type UsageWindowDays } from '$shared/usage';
 
-export function viewerTimeZone(): string {
+function viewerTimeZone(): string {
 	try {
 		return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 	} catch {
