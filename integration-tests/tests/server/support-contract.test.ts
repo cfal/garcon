@@ -829,9 +829,11 @@ describe('integration support contracts', () => {
   });
 
   test('propagates other Lightpanda action errors without confirming', async () => {
+    const originalMessage = 'Promise was collected';
+    const pageError = Object.assign(new Error(originalMessage), { originalMessage });
     const nearMatch = new ProtocolError();
-    nearMatch.originalMessage = 'Promise was collected.';
-    for (const failure of [new Error('Promise was collected'), nearMatch]) {
+    nearMatch.originalMessage = `${originalMessage}.`;
+    for (const failure of [pageError, nearMatch]) {
       const confirm = mock(async () => {});
       const error = await rejectionOf(performLightpandaAction(() => Promise.reject(failure), confirm));
       expect(error).toBe(failure);
