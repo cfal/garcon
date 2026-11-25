@@ -23,6 +23,70 @@ function plain(messages: readonly object[]) {
 }
 
 describe('AntigravityAcpEventConverter', () => {
+  it('publishes agent-to-agent messages as tool calls, not assistant replies', () => {
+    const converter = new AntigravityAcpEventConverter();
+    expect(converter.fromSessionUpdate(toolCall('send', 'send_message', 'other', {
+      Recipient: 'reviewer', Message: 'First line\nSecond line',
+    }), context)).toMatchObject([{ type: 'agent-message-tool-use', toolId: 'send', recipient: 'reviewer', message: 'First line\nSecond line' }]);
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'send',
+      status: 'failed', rawOutput: { output: 'Recipient unavailable' } }), context))
+      .toMatchObject([{ type: 'tool-result', toolId: 'send', isError: true, content: { raw: 'Recipient unavailable' } }]);
+    const input = { Message: 'Missing destination' };
+    expect(converter.fromSessionUpdate(toolCall('bad', 'send_message', 'other', input), context)).toEqual([]);
+    expect(converter.endTurn(SESSION, context))
+      .toMatchObject([{ type: 'external-tool-use', input }]);
+  });
+
+  it('converts a checklist snapshot even when the name and arguments arrive separately', () => {
+    const converter = new AntigravityAcpEventConverter();
+    expect(converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'plan', title: 'Run update_steps', kind: 'other',
+    }), context)).toEqual([]);
+    const statuses = ['pending', 'in_progress', 'done', 'skipped', 'failed'];
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'plan', status: 'completed',
+      rawInput: { steps: statuses.map(status => ({ title: 'Check', status })) },
+    }), context);
+    expect(plain(rows)).toEqual([
+      { type: 'update-plan-tool-use', toolId: 'plan', todos: statuses.map(status => ({
+        content: 'Check', status: status === 'done' ? 'completed' : status,
+      })) },
+      { type: 'tool-result', toolId: 'plan', content: {}, isError: false },
+    ]);
+  });
+
+  it('does not coerce unsupported plan steps or mistake an MCP title for a native checklist', () => {
+    const converter = new AntigravityAcpEventConverter();
+    const input = { steps: [{ title: 'Check', status: 'future' }] };
+    converter.fromSessionUpdate(toolCall('bad', 'update_steps', 'other', input), context);
+    expect(converter.endTurn(SESSION, context))
+      .toMatchObject([{ type: 'external-tool-use', input }]);
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call', toolCallId: 'mcp',
+      title: 'Run update_steps', _meta: { is_mcp_tool_call: true }, rawInput: { steps: [] } }), context)).toEqual([]);
+    expect(converter.endTurn(SESSION, context))
+      .toMatchObject([{ type: 'unknown-tool-use' }]);
+  });
+
+  it.each([
+    [{ Action: 'list' }, { action: 'list' }],
+    [{ Action: 'kill', TaskId: 'job-1' }, { action: 'stop', taskId: 'job-1' }],
+    [{ action: 'status', task_id: 'job-1' }, { action: 'status', taskId: 'job-1' }],
+    [{ Action: 'send_input', TaskId: 'job-1', Input: '\n' }, { action: 'send_input', taskId: 'job-1', input: '\n' }],
+  ])('normalizes background task input %j', (input, expected) => {
+    const converter = new AntigravityAcpEventConverter();
+    const rows = converter.fromSessionUpdate(toolCall('call', 'manage_task', 'other', input), context);
+    expect(rows).toMatchObject([{ type: 'background-task-tool-use', toolId: 'call', ...expected }]);
+  });
+
+  it.each([{ Action: 'kill' }, { Action: 'send_input', TaskId: 'job' }, { Action: 'stop', TaskId: 'job' }, { Action: 'future' }])(
+    'keeps unsupported task input %j intact', (input) => {
+      const converter = new AntigravityAcpEventConverter();
+      converter.fromSessionUpdate(toolCall('call', 'manage_task', 'other', input), context);
+      expect(converter.endTurn(SESSION, context))
+        .toMatchObject([{ type: 'external-tool-use', input }]);
+    },
+  );
+
   it('buffers text and thinking until a tool call or the end of the turn', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
@@ -145,7 +209,21 @@ describe('AntigravityAcpEventConverter', () => {
     const rows = converter.fromSessionUpdate(update({
       sessionUpdate: 'tool_call', toolCallId: 'anon', status: 'in_progress', kind: 'other', rawInput: { value: 1 },
     }), context);
-    expect(plain(rows)).toEqual([{ type: 'unknown-tool-use', toolId: 'anon', rawName: 'other', input: { value: 1 } }]);
+    expect(rows).toEqual([]);
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'unknown-tool-use', toolId: 'anon', rawName: 'other', input: { value: 1 } }]);
+  });
+
+  it.each([
+    [{ _meta: { is_mcp_tool_call: true } }, { title: 'Run update_steps' }],
+    [{ title: 'Run update_steps' }, { _meta: { is_mcp_tool_call: true } }],
+    [{ kind: 'execute' }, { title: 'Run update_steps' }],
+  ])('does not infer a native plan when another frame excludes it', (first, last) => {
+    const converter = new AntigravityAcpEventConverter();
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call', toolCallId: 'call', ...first }), context)).toEqual([]);
+    const rows = converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'call',
+      rawInput: { steps: [] }, status: 'completed', ...last }), context);
+    expect(rows.map(row => row.type)).toEqual(['unknown-tool-use', 'tool-result']);
+    if ('kind' in first) expect(rows[0]).toMatchObject({ rawName: 'execute' });
   });
 
   it('keeps the original tool name when a terminal update omits it', () => {
@@ -159,6 +237,16 @@ describe('AntigravityAcpEventConverter', () => {
     expect(plain(completed)).toEqual([
       { type: 'tool-result', toolId: 'tool-1', content: { raw: 'Command output:\nx\n' }, isError: false },
     ]);
+  });
+
+  it('does not lose a command exit failure when a progress frame has a blank name', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.fromSessionUpdate(toolCall('cmd', 'run_command', 'execute', { CommandLine: 'false' }), context);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'cmd', name: '' }), context);
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'cmd', status: 'completed', rawOutput: { exit_code: 1 },
+    }), context);
+    expect(rows).toMatchObject([{ type: 'tool-result', isError: true, content: { exitCode: 1 } }]);
   });
 
   it('reports failed tools as errors', () => {
@@ -471,6 +559,17 @@ describe('AntigravityAcpEventConverter', () => {
       sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: Error 429\n' },
     }), context);
     converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'failed' }), context);
+    expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: Error 429');
+  });
+
+  it('recognizes a late permission-call update by ID even without a tool name', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    converter.permissionToolUse({ toolCallId: 'plan', title: 'Run update_steps', rawInput: { steps: [] } }, context);
+    converter.fromSessionUpdate(update({
+      sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: Error 429\n' },
+    }), context);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'plan', status: 'failed' }), context);
     expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: Error 429');
   });
 

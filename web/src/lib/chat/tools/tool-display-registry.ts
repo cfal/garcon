@@ -3,18 +3,25 @@
 
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
-import type { ToolDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
+import type { ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import {
 	diffProps,
 	extractContentString,
 	fileTitlePresenter,
 	readRangePresenter,
+	reportedResultProps,
 	webFetchSecondaryPresenter,
 } from '$lib/chat/tools/tool-display-presenters.js';
 
 type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
 
 const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...' : s);
+
+const REPORTED_RESULT_RULE: ToolResultDisplayRule = {
+	mode: 'collapsible',
+	contentKind: 'text',
+	getContentProps: reportedResultProps,
+};
 
 function filesFoundTitle(count: number): string {
 	return count === 1 ? m.chat_tool_file_found() : m.chat_tool_files_found({ count });
@@ -49,6 +56,8 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'todo-write-tool-use': 'TodoWrite',
 	'todo-read-tool-use': 'TodoRead',
 	'task-tool-use': 'Task',
+	'background-task-tool-use': 'Background task',
+	'agent-message-tool-use': 'Agent message',
 	'codex-subagent-tool-use': 'Subagent',
 	'update-plan-tool-use': 'UpdatePlan',
 	'write-stdin-tool-use': 'WriteStdin',
@@ -565,6 +574,35 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				return { todos, isResult: true };
 			},
 		},
+	},
+
+	'agent-message-tool-use': {
+		input: {
+			mode: 'collapsible',
+			label: 'Agent message',
+			title: ({ recipient }) => `Message to ${recipient}`,
+			contentKind: 'text',
+			getContentProps: ({ message }) => ({ content: message, format: 'plain' }),
+		},
+		result: REPORTED_RESULT_RULE,
+	},
+
+	'background-task-tool-use': {
+		input: {
+			mode: 'inline',
+			getLabel: ({ action }) => {
+				switch (action) {
+					case 'list': return 'List background tasks';
+					case 'status': return 'Check task status';
+					case 'stop': return 'Request stop';
+					case 'send_input': return 'Send task input';
+					default: return 'Background task';
+				}
+			},
+			getValue: ({ taskId, input }) => [taskId, typeof input === 'string' ? `Input: ${JSON.stringify(input)}` : undefined].filter(Boolean).join('\n'),
+			wrapText: true,
+		},
+		result: REPORTED_RESULT_RULE,
 	},
 
 	'task-tool-use': {
