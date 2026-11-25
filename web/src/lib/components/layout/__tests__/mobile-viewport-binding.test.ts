@@ -158,6 +158,23 @@ describe('bindMobileViewport', () => {
 		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('255px');
 	});
 
+	it('does not treat a zoomed height below the app minimum as keyboard occlusion', () => {
+		vi.stubGlobal('innerHeight', 600);
+		viewport.height = 150;
+		viewport.scale = 4;
+		unbind = bindMobileViewport(onMetrics, 'overlay-only');
+		flushFrame();
+
+		expect(onMetrics).toHaveBeenLastCalledWith({
+			appHeight: 600,
+			viewportOffsetTop: 0,
+			viewportCenterY: 300,
+			keyboardHeight: 0,
+			keyboardVisible: false,
+		});
+		expect(style.getPropertyValue('--app-height')).toBe('');
+	});
+
 	it('refreshes on pageshow and visible-only visibility changes', () => {
 		unbind = bindMobileViewport(onMetrics);
 		flushFrame();
