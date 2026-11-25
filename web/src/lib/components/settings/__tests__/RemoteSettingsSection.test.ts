@@ -337,7 +337,7 @@ describe('remote settings sections', () => {
 		).toBeTruthy();
 	});
 
-	it('reports a failed Telegram toggle without allowing a second update while pending', async () => {
+	async function startTelegramToggle() {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeRemoteSettingsSnapshot({
 			ui: { notifications: { telegram: { enabled: false } } },
@@ -355,9 +355,25 @@ describe('remote settings sections', () => {
 		setTestRemoteSettingsStore(store);
 		const pending = Promise.withResolvers<Awaited<ReturnType<typeof updateRemoteSettings>>>();
 		vi.mocked(updateRemoteSettings).mockReturnValueOnce(pending.promise);
-		render(RemoteSettingsSectionTestHost);
+		const panel = render(RemoteSettingsSectionTestHost);
 		const toggle = screen.getByRole('switch', { name: 'Telegram notifications' });
 		await fireEvent.click(toggle);
+		return { panel, toggle, pending, store };
+	}
+
+	it('applies a successful Telegram toggle after its panel unmounts without a settings broadcast', async () => {
+		const { panel, pending, store } = await startTelegramToggle();
+		panel.unmount();
+		const settings = makeRemoteSettingsSnapshot({
+			version: 2, telegram: store.snapshot!.telegram,
+			ui: { notifications: { telegram: { enabled: true } } },
+		});
+		pending.resolve({ success: true, settings });
+		await waitFor(() => expect(store.snapshot?.ui.notifications?.telegram?.enabled).toBe(true));
+	});
+
+	it('reports a failed Telegram toggle without allowing a second update while pending', async () => {
+		const { pending, toggle } = await startTelegramToggle();
 		expect(toggle.hasAttribute('disabled')).toBe(true);
 		await fireEvent.click(toggle);
 		expect(updateRemoteSettings).toHaveBeenCalledOnce();

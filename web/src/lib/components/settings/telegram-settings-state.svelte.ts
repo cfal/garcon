@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import type { RemoteSettingsSnapshot } from '$shared/settings';
 import { ApiError } from '$lib/api/client.js';
 import {
 	beginTelegramRecipientLink,
@@ -87,25 +88,21 @@ export class TelegramSettingsState {
 
 	async persistEnabled(enabled: boolean): Promise<void> {
 		if (!this.ready) return;
-		await this.#run(
+		await this.#runMutation(
 			'enable',
 			'enabledResult',
 			() => updateRemoteSettings({ ui: { notifications: { telegram: { enabled } } } }),
-			(response) => {
-				this.remoteSettings.applySnapshot(response.settings);
-			},
 		);
 	}
 
 	async saveToken(): Promise<void> {
 		const token = this.token.trim();
 		if (!token || this.botAvailable) return;
-		await this.#run(
+		await this.#runMutation(
 			'saveToken',
 			'tokenResult',
 			() => saveTelegramBotToken(token),
-			(response) => {
-				this.remoteSettings.applySnapshot(response.settings);
+			() => {
 				this.token = '';
 				this.recipientResult = null;
 			},
@@ -129,8 +126,7 @@ export class TelegramSettingsState {
 
 	async clearToken(): Promise<void> {
 		if (!this.botAvailable) return;
-		await this.#run('clearToken', 'tokenResult', clearTelegramBotToken, (response) => {
-			this.remoteSettings.applySnapshot(response.settings);
+		await this.#runMutation('clearToken', 'tokenResult', clearTelegramBotToken, () => {
 			this.token = '';
 			this.recipientResult = null;
 			this.tokenResult = { ok: true, message: m.settings_telegram_token_cleared() };
@@ -139,15 +135,12 @@ export class TelegramSettingsState {
 
 	async createLink(): Promise<void> {
 		if (!this.botAvailable || this.recipientLinked || this.linkUrl) return;
-		await this.#run('createLink', 'recipientResult', beginTelegramRecipientLink, (response) => {
-			this.remoteSettings.applySnapshot(response.settings);
-		});
+		await this.#runMutation('createLink', 'recipientResult', beginTelegramRecipientLink);
 	}
 
 	async resolveLink(): Promise<void> {
 		if (!this.linkUrl) return;
-		await this.#run('resolveLink', 'recipientResult', resolveTelegramRecipientLink, (response) => {
-			this.remoteSettings.applySnapshot(response.settings);
+		await this.#runMutation('resolveLink', 'recipientResult', resolveTelegramRecipientLink, (response) => {
 			this.recipientResult = response.success
 				? { ok: true, message: m.settings_telegram_recipient_linked() }
 				: { ok: false, message: response.error ?? m.settings_telegram_link_not_found() };
@@ -156,8 +149,7 @@ export class TelegramSettingsState {
 
 	async clearRecipient(): Promise<void> {
 		if (!this.recipientLinked && !this.linkUrl) return;
-		await this.#run('clearRecipient', 'recipientResult', clearTelegramRecipient, (response) => {
-			this.remoteSettings.applySnapshot(response.settings);
+		await this.#runMutation('clearRecipient', 'recipientResult', clearTelegramRecipient, () => {
 			this.recipientResult = { ok: true, message: m.settings_telegram_recipient_cleared() };
 		});
 	}
@@ -171,18 +163,31 @@ export class TelegramSettingsState {
 		});
 	}
 
+	#runMutation<T extends { settings: RemoteSettingsSnapshot }>(
+		operation: Operation,
+		slot: ResultSlot,
+		request: () => Promise<T>,
+		publish?: (response: T) => void,
+	): Promise<void> {
+		return this.#run(operation, slot, async () => {
+			const response = await request();
+			this.remoteSettings.applySnapshot(response.settings);
+			return response;
+		}, publish);
+	}
+
 	async #run<T>(
 		operation: Operation,
 		slot: ResultSlot,
 		request: () => Promise<T>,
-		publish: (response: T) => void,
+		publish?: (response: T) => void,
 	): Promise<void> {
 		if (this.#disposed || this.operation) return;
 		this.operation = operation;
 		this[slot] = null;
 		try {
 			const response = await request();
-			if (!this.#disposed) publish(response);
+			if (!this.#disposed) publish?.(response);
 		} catch (error) {
 			if (!this.#disposed) this[slot] = { ok: false, message: telegramErrorMessage(error) };
 		} finally {
