@@ -7,6 +7,18 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser notification delivery', () => {
+	it('distinguishes releasing a local delivery from globally resolving a permission', async () => {
+		const close = vi.fn();
+		const getNotifications = vi.fn(async () => [{ close }]);
+		vi.stubGlobal('navigator', { serviceWorker: { getRegistration: async () => ({ getNotifications }) } });
+		const service = new BrowserNotificationService({ enabled: () => true, isFocused: () => false, openChat: vi.fn() });
+		service.closeOwned('peer-permission');
+		await Promise.resolve();
+		expect(getNotifications).not.toHaveBeenCalled();
+		service.close('peer-permission');
+		await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+		service.destroy();
+	});
 	it('retracts a resolved permission even when worker delivery finishes after close', async () => {
 		let release!: () => void;
 		const close = vi.fn();

@@ -332,7 +332,7 @@
 	});
 
 	const browserNotifications = new BrowserNotificationService({
-		enabled: () => localSettings.browserNotifications,
+		enabled: () => visible && ws.isConnected && localSettings.browserNotifications,
 		openChat: gotoChat,
 		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
 	});
@@ -351,8 +351,16 @@
 	});
 	onMount(() => {
 		browserNotifications.start();
+		let missedSettingsUpdates = false;
 		return ws.onConnectionChange((connected) => {
-			if (!connected) browserNotificationsRouter.clearPermissions();
+			if (!connected) {
+				missedSettingsUpdates = true;
+				browserNotificationsRouter.releasePermissions();
+			} else if (missedSettingsUpdates) {
+				missedSettingsUpdates = false;
+				void remoteSettings.refreshLatest().catch((error: unknown) =>
+					console.warn('Failed to refresh remote settings after reconnect:', error));
+			}
 		});
 	});
 	onMount(() =>

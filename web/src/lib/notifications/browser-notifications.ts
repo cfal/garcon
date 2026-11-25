@@ -20,6 +20,7 @@ export async function requestBrowserNotificationPermission(): Promise<BrowserNot
 export interface BrowserNotificationDeliveryPort {
 	show(title: string, chatId: string, tag: string): void;
 	close(tag: string): void;
+	closeOwned(tag: string): void;
 	destroy(): void;
 }
 
@@ -59,7 +60,7 @@ export class BrowserNotificationService implements BrowserNotificationDeliveryPo
 		if (this.#destroyed || this.#deliveries.has(tag)) return;
 		const delivery: NotificationDelivery = { cancelled: false, workerStarted: false };
 		this.#deliveries.set(tag, delivery);
-		while (this.#deliveries.size > 20) this.#closeOwned(this.#deliveries.keys().next().value!);
+		while (this.#deliveries.size > 20) this.closeOwned(this.#deliveries.keys().next().value!);
 		void this.#deliver(title, chatId, tag, delivery)
 			.catch(() => {
 				if (delivery.workerStarted) this.close(tag);
@@ -136,13 +137,13 @@ export class BrowserNotificationService implements BrowserNotificationDeliveryPo
 		return delivery;
 	}
 
-	#closeOwned(tag: string): void {
+	closeOwned(tag: string): void {
 		if (this.#cancel(tag)?.workerStarted) void this.#closeWorkerTag(tag).catch(() => {});
 	}
 
 	destroy(): void {
 		this.#destroyed = true;
 		this.#coordinator?.destroy();
-		for (const tag of this.#deliveries.keys()) this.#closeOwned(tag);
+		for (const tag of this.#deliveries.keys()) this.closeOwned(tag);
 	}
 }

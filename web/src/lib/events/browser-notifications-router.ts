@@ -19,7 +19,7 @@ export class BrowserNotificationsRouter {
 	>();
 	constructor(
 		private readonly ws: WsPushEvents,
-		private readonly delivery: Pick<BrowserNotificationDeliveryPort, 'show' | 'close'>,
+		private readonly delivery: Pick<BrowserNotificationDeliveryPort, 'show' | 'close' | 'closeOwned'>,
 		private readonly deps: {
 			enabled(): boolean;
 			isFocused(): boolean;
@@ -121,8 +121,9 @@ export class BrowserNotificationsRouter {
 		if (this.#permissions.delete(key)) this.delivery.close(key);
 	}
 
-	clearPermissions(): void {
-		for (const key of this.#permissions.keys()) this.#closePermission(key);
+	releasePermissions(): void {
+		for (const key of this.#permissions.keys()) this.delivery.closeOwned(key);
+		this.#permissions.clear();
 	}
 
 	#notify(key: string, chatId: string, title: string): void {
@@ -136,7 +137,7 @@ export class BrowserNotificationsRouter {
 	destroy(): void {
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
-		this.clearPermissions();
+		this.releasePermissions();
 		this.#seen.clear();
 	}
 }
