@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test';
 import { AntigravityAcpEventConverter } from '../antigravity-acp-event-converter.ts';
 
+const LIST_TASK = { name: 'manage_task', rawInput: { Action: 'list' } };
+
+function textBlock(text: string) {
+  return { type: 'content', content: { type: 'text', text } };
+}
+
 function session() {
   const converter = new AntigravityAcpEventConverter();
   const context = { chatId: 'chat', sessionId: 'session', timestamp: 'now' };
@@ -53,17 +59,16 @@ test('prefers explicit MCP metadata or envelopes over native names and provision
 
 test('keeps reported structured and progress output without manufacturing a successful result body', () => {
   const s = session();
-  const list = { name: 'manage_task', rawInput: { Action: 'list' } };
   const rawOutput = { tasks: [{ id: 'job' }] };
-  expect(s.start('list', { ...list, rawOutput, status: 'completed' }).at(-1)).toMatchObject({ content: { rawOutput }, isError: false });
-  s.start('progress', list);
-  s.patch('progress', { content: [{ type: 'content', content: { type: 'text', text: 'Diagnostic' } }] });
+  expect(s.start('list', { ...LIST_TASK, rawOutput, status: 'completed' }).at(-1)).toMatchObject({ content: { rawOutput }, isError: false });
+  s.start('progress', LIST_TASK);
+  s.patch('progress', { content: [textBlock('Diagnostic')] });
   expect(s.patch('progress', { status: 'failed' })).toMatchObject([{ content: { raw: 'Diagnostic' }, isError: true }]);
-  s.start('replace', { ...list, rawOutput: 'Old' });
+  s.start('replace', { ...LIST_TASK, rawOutput: 'Old' });
   expect(s.patch('replace', { status: 'completed', rawOutput: 'Final' })).toMatchObject([{ content: { raw: 'Final' } }]);
-  s.start('clear', { ...list, rawOutput: 'Old' });
+  s.start('clear', { ...LIST_TASK, rawOutput: 'Old' });
   expect(s.patch('clear', { status: 'completed', content: [] })[0]).toEqual(expect.objectContaining({ content: { raw: 'Old' }, isError: false }));
-  expect(s.start('empty', { ...list, status: 'completed' }).at(-1)).toEqual(expect.objectContaining({ content: {}, isError: false }));
+  expect(s.start('empty', { ...LIST_TASK, status: 'completed' }).at(-1)).toEqual(expect.objectContaining({ content: {}, isError: false }));
   s.start('cmd', { name: 'run_command', rawInput: { CommandLine: 'false' } });
   s.patch('cmd', { rawOutput: { exit_code: 1 } });
   expect(s.patch('cmd', { status: 'completed' })).toMatchObject([{ content: { exitCode: 1 }, isError: true }]);
@@ -73,12 +78,12 @@ test.each(['raw first', 'blocks first'] as const)('stores an output echo only on
   const s = session();
   const output = 'x'.repeat(8 * 1024 * 1024);
   const attachment = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
-  const update = { type: 'content', content: { type: 'text', text: 'Still checking' } };
+  const update = textBlock('Still checking');
   const raw = { rawOutput: { output, count: 1 } };
-  const blocks = { content: [{ type: 'content', content: { type: 'text', text: output + '\n' } }, update, attachment] };
-  s.start('list', { name: 'manage_task', rawInput: { Action: 'list' },
-    ...(order === 'raw first' ? raw : blocks) });
-  const result = s.patch('list', { status: 'completed', ...(order === 'raw first' ? blocks : raw) })[0];
+  const blocks = { content: [textBlock(output + '\n'), update, attachment] };
+  const [first, last] = order === 'raw first' ? [raw, blocks] : [blocks, raw];
+  s.start('list', { ...LIST_TASK, ...first });
+  const [result] = s.patch('list', { status: 'completed', ...last });
   if (result?.type !== 'tool-result') throw new Error('Expected a tool result');
   expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(output.length + 1024);
   expect(result.content).toEqual({ ...raw, items: [update, attachment] });
@@ -86,20 +91,18 @@ test.each(['raw first', 'blocks first'] as const)('stores an output echo only on
 
 test('echoes confirm the primary output without turning repeated progress into a new diagnostic', () => {
   const s = session();
-  const block = (text: string) => ({ type: 'content', content: { type: 'text', text } });
-  const progress = block('Sending '.repeat(500));
+  const progress = textBlock('Sending '.repeat(500));
   const error = 'Operation refused';
-  const list = { name: 'manage_task', rawInput: { Action: 'list' } };
   for (const rawOutput of [error, { output: error }, { output: error, attempt: 2 }]) {
     const id = JSON.stringify(rawOutput);
-    s.start(id, { ...list, content: [progress] });
+    s.start(id, { ...LIST_TASK, content: [progress] });
     s.patch(id, { rawOutput });
-    const [row] = s.patch(id, { content: [progress, block(error + '\n')], status: 'failed' });
+    const [row] = s.patch(id, { content: [progress, textBlock(error + '\n')], status: 'failed' });
     const primary = typeof rawOutput === 'object' && 'attempt' in rawOutput ? { rawOutput } : { raw: error };
     expect(row).toMatchObject({ content: { ...primary, items: [progress], status: 'failed' } });
   }
-  s.start('confirmed', { ...list, rawOutput: 'Waiting', content: [block('Waiting')] });
-  expect(s.patch('confirmed', { status: 'failed', content: [block('Waiting'), block(error)] })[0])
+  s.start('confirmed', { ...LIST_TASK, rawOutput: 'Waiting', content: [textBlock('Waiting')] });
+  expect(s.patch('confirmed', { status: 'failed', content: [textBlock('Waiting'), textBlock(error)] })[0])
     .toMatchObject({ content: { raw: error, rawOutput: 'Waiting' } });
 });
 
@@ -107,22 +110,20 @@ test('drops an exact whitespace-only echo without discarding the structured prov
   const s = session();
   const output = ' '.repeat(8 * 1024 * 1024);
   const rawOutput = { output, count: 1 };
-  const block = (text: string) => ({ type: 'content', content: { type: 'text', text } });
-  s.start('list', { name: 'manage_task', rawInput: { Action: 'list' }, content: [block(output), block('Checking')] });
+  s.start('list', { ...LIST_TASK, content: [textBlock(output), textBlock('Checking')] });
   const [row] = s.patch('list', { status: 'completed', rawOutput });
   if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
   expect(Buffer.byteLength(JSON.stringify(row))).toBeLessThan(output.length + 1024);
-  expect(row.content).toEqual({ rawOutput, items: [block('Checking')] });
+  expect(row.content).toEqual({ rawOutput, items: [textBlock('Checking')] });
 });
 
 test('merges rawOutput and content as independent ACP fields and treats null rawOutput as unchanged', () => {
   const s = session();
-  const list = { name: 'manage_task', rawInput: { Action: 'list' } };
   const rawOutput = { tasks: ['one'] };
-  s.start('task', { ...list, rawOutput, content: [{ type: 'content', content: { type: 'text', text: 'Earlier' } }] });
+  s.start('task', { ...LIST_TASK, rawOutput, content: [textBlock('Earlier')] });
   expect(s.patch('task', { status: 'completed', rawOutput: null, content: [] })[0])
     .toEqual(expect.objectContaining({ content: { rawOutput }, isError: false }));
-  s.start('text', { ...list, rawOutput: 'Previous', content: [{ type: 'content', content: { type: 'text', text: 'Diagnostic' } }] });
+  s.start('text', { ...LIST_TASK, rawOutput: 'Previous', content: [textBlock('Diagnostic')] });
   expect(s.patch('text', { status: 'failed', rawOutput: {} })[0])
     .toEqual(expect.objectContaining({ content: { raw: 'Diagnostic', status: 'failed' }, isError: true }));
 });
@@ -166,41 +167,40 @@ test('does not present an inferred checklist as the identity of a permission req
 
 test('keeps the terminal diagnostic visible even when another output field reported progress', () => {
   const s = session();
-  const blocks = (text: string) => [{ type: 'content', content: { type: 'text', text } }];
   const send = { name: 'send_message', rawInput: { Recipient: 'peer', Message: 'Hello' } };
   const progress = { output: 'In progress' };
   s.start('send', { ...send, rawOutput: progress });
-  expect(s.patch('send', { status: 'failed', content: blocks('Operation refused') }))
+  expect(s.patch('send', { status: 'failed', content: [textBlock('Operation refused')] }))
     .toMatchObject([{ content: { raw: 'Operation refused', rawOutput: progress }, isError: true }]);
   s.start('sparse', { ...send, rawOutput: progress });
-  s.patch('sparse', { content: blocks('Operation refused') });
+  s.patch('sparse', { content: [textBlock('Operation refused')] });
   expect(s.patch('sparse', { status: 'failed' })).toMatchObject([{ content: { raw: 'Operation refused', rawOutput: progress } }]);
   s.start('repeat-raw', { ...send, rawOutput: progress });
-  expect(s.patch('repeat-raw', { status: 'failed', rawOutput: progress, content: blocks('Operation refused') }))
+  expect(s.patch('repeat-raw', { status: 'failed', rawOutput: progress, content: [textBlock('Operation refused')] }))
     .toMatchObject([{ content: { raw: 'Operation refused', rawOutput: progress } }]);
-  s.start('repeat-blocks', { ...send, content: blocks('In progress') });
-  expect(s.patch('repeat-blocks', { status: 'failed', rawOutput: 'Operation refused', content: blocks('In progress') }))
-    .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') } }]);
-  s.start('structured', { ...send, content: blocks('In progress') });
+  s.start('repeat-blocks', { ...send, content: [textBlock('In progress')] });
+  expect(s.patch('repeat-blocks', { status: 'failed', rawOutput: 'Operation refused', content: [textBlock('In progress')] }))
+    .toMatchObject([{ content: { raw: 'Operation refused', items: [textBlock('In progress')] } }]);
+  s.start('structured', { ...send, content: [textBlock('In progress')] });
   expect(s.patch('structured', { status: 'failed', rawOutput: { reason: 'Operation refused' } })[0])
-    .toEqual(expect.objectContaining({ content: { rawOutput: { reason: 'Operation refused' }, items: blocks('In progress'), status: 'failed' } }));
+    .toEqual(expect.objectContaining({ content: { rawOutput: { reason: 'Operation refused' }, items: [textBlock('In progress')], status: 'failed' } }));
   s.start('repeated-data', { ...send, rawOutput: { delivered: 0 } });
-  s.patch('repeated-data', { content: blocks('Operation refused') });
+  s.patch('repeated-data', { content: [textBlock('Operation refused')] });
   expect(s.patch('repeated-data', { status: 'failed', rawOutput: { delivered: 0 } })[0])
     .toEqual(expect.objectContaining({ content: { raw: 'Operation refused', rawOutput: { delivered: 0 }, status: 'failed' } }));
   s.start('retry', { ...send, rawOutput: { output: 'Operation refused', attempt: 1 } });
-  s.patch('retry', { content: blocks('Retrying') });
+  s.patch('retry', { content: [textBlock('Retrying')] });
   expect(s.patch('retry', { status: 'failed', rawOutput: { output: 'Operation refused', attempt: 2 } })[0])
     .toEqual(expect.objectContaining({ content: { rawOutput: { output: 'Operation refused', attempt: 2 },
-      items: blocks('Retrying'), status: 'failed' } }));
-  s.start('cancel', { ...send, content: blocks('Sending') });
+      items: [textBlock('Retrying')], status: 'failed' } }));
+  s.start('cancel', { ...send, content: [textBlock('Sending')] });
   expect(s.patch('cancel', { status: 'cancelled' })[0])
     .toEqual(expect.objectContaining({ content: { raw: 'Sending', status: 'cancelled' }, isError: true }));
-  s.start('reverse', { ...send, content: blocks('In progress') });
+  s.start('reverse', { ...send, content: [textBlock('In progress')] });
   expect(s.patch('reverse', { status: 'failed', rawOutput: 'Operation refused' }))
-    .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') }, isError: true }]);
+    .toMatchObject([{ content: { raw: 'Operation refused', items: [textBlock('In progress')] }, isError: true }]);
   s.start('edit', { name: 'replace_file_content', rawInput: { TargetFile: '/work/file' }, rawOutput: progress });
-  expect(s.patch('edit', { status: 'failed', content: blocks('Operation refused') })[0])
+  expect(s.patch('edit', { status: 'failed', content: [textBlock('Operation refused')] })[0])
     .toEqual(expect.objectContaining({ content: { raw: 'Operation refused' }, isError: true }));
 });
 
@@ -215,7 +215,7 @@ test('publishes the oldest incomplete call rather than losing it when the pendin
 
 test('ordinary progress at the active-call limit cannot evict an unpublished use row', () => {
   const s = session();
-  for (let i = 0; i < 513; i++) s.start(`job-${i}`, { name: 'manage_task', rawInput: { Action: 'list' } });
+  for (let i = 0; i < 513; i++) s.start(`job-${i}`, LIST_TASK);
   expect(s.start('plan', { title: 'Run update_steps' })).toEqual([]);
   // Recent calls publish no new rows on progress, even with the active cache full.
   for (let i = 1; i < 513; i++) expect(s.patch(`job-${i}`, { status: 'in_progress' })).toEqual([]);
@@ -239,7 +239,7 @@ test('publishes waiting calls before the first transcript frame for a permission
   const s = session();
   expect(s.start('earlier', { name: 'run_command' })).toEqual([]);
   s.permission('later');
-  expect(s.patch('later', { name: 'manage_task', rawInput: { Action: 'list' }, status: 'completed' })).toMatchObject([
+  expect(s.patch('later', { ...LIST_TASK, status: 'completed' })).toMatchObject([
     { toolId: 'earlier', type: 'external-tool-use' }, { toolId: 'later', type: 'background-task-tool-use' },
     { toolId: 'later', type: 'tool-result' },
   ]);

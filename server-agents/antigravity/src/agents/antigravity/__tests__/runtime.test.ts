@@ -314,6 +314,12 @@ function publishedMessages(events: readonly AgentRuntimeEvent[]) {
   return events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
 }
 
+function interactivePermission(events: readonly AgentRuntimeEvent[]) {
+  const permission = events.find(event => event.type === 'permission');
+  if (!permission?.decision) throw new Error('Expected an interactive approval');
+  return { lifecycle: permission.lifecycle, decision: permission.decision };
+}
+
 function steerRequest(runtime: AcpAgentRuntime, agentSessionId: string): RuntimeSteerRequest {
   return {
     chatId: 'chat-1',
@@ -706,7 +712,7 @@ describe('Antigravity ACP runtime', () => {
     try {
       await runtime.startSession(request());
       await waitFor(() => runEnded(events).length === 1);
-      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      const rows = publishedMessages(events);
       expect(rows.filter(row => row.type === 'assistant-message').map(row => row.content)).toEqual(['Intermediate prose', 'Final answer']);
       expect(runEnded(events)[0]).toMatchObject({ finalResponse: { type: 'text', text: 'Final answer' } });
     } finally { runtime.shutdown(); }
@@ -740,8 +746,11 @@ describe('Antigravity ACP runtime', () => {
     try {
       await runtime.startSession(request({ permissionMode: mode }));
       await waitFor(() => runEnded(events).length === 1);
-      const order = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => String(row.message.type)) :
-        event.type === 'permission' && event.lifecycle.kind === 'requested' ? ['permission'] : []);
+      const order = events.flatMap<string>(event => {
+        if (event.type === 'rows') return event.rows.map(row => row.message.type);
+        if (event.type === 'permission' && event.lifecycle.kind === 'requested') return ['permission'];
+        return [];
+      });
       expect(order).toEqual(mode === 'default'
         ? ['external-tool-use', 'assistant-message', 'permission', 'tool-result']
         : ['agent-message-tool-use', 'assistant-message', 'tool-result']);
@@ -763,7 +772,7 @@ describe('Antigravity ACP runtime', () => {
       agent.update(agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { text: ' complete**' } });
       agent.endPrompt();
       await waitFor(() => runEnded(events).length === 1);
-      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      const rows = publishedMessages(events);
       expect(rows.map(row => row.type)).toEqual(['external-tool-use', 'error', 'assistant-message']);
       expect(runEnded(events)[0]).toMatchObject({ finalResponse: { text: '**Report complete**' } });
     } finally { runtime.shutdown(); }
@@ -781,18 +790,16 @@ describe('Antigravity ACP runtime', () => {
     try {
       const { agentSessionId } = await runtime.startSession(request());
       await waitFor(() => events.some(e => e.type === 'permission'));
-      const permission = events.find(e => e.type === 'permission');
-      if (!permission?.decision) throw new Error('Expected an interactive approval');
+      const permission = interactivePermission(events);
       expect(permission.lifecycle).toMatchObject({ kind: 'requested', requestedTool: { type: 'unknown-tool-use' } });
-      const rows = () => events.flatMap(e => e.type === 'rows' ? e.rows.map(row => row.message) : []);
-      expect(rows()).toMatchObject([{ toolId: 'first' }, { type: 'assistant-message', content: 'Before approval' }]);
+      expect(publishedMessages(events)).toMatchObject([{ toolId: 'first' }, { type: 'assistant-message', content: 'Before approval' }]);
       await permission.decision.respond({ allow: true });
       agent.update(agentSessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'preview', _meta: { is_mcp_tool_call: true },
         rawInput: { server: 'docs', tool: 'lookup' } });
       agent.update(agentSessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'after', rawInput: { Message: 'Hello' }, status: 'completed' });
       agent.endPrompt();
       await waitFor(() => runEnded(events).length === 1);
-      expect(rows().slice(2)).toMatchObject([{ type: 'mcp-tool-use', server: 'docs' }, { type: 'agent-message-tool-use', message: 'Hello' }, { type: 'tool-result' }]);
+      expect(publishedMessages(events).slice(2)).toMatchObject([{ type: 'mcp-tool-use', server: 'docs' }, { type: 'agent-message-tool-use', message: 'Hello' }, { type: 'tool-result' }]);
     } finally { runtime.shutdown(); }
   });
 
@@ -807,10 +814,8 @@ describe('Antigravity ACP runtime', () => {
     try {
       const { agentSessionId } = await runtime.startSession(request());
       await waitFor(() => updates.mock.calls.length === 2);
-      const permission = events.find(e => e.type === 'permission');
-      if (!permission?.decision) throw new Error('Expected an interactive approval');
-      await permission.decision.respond({ allow: true });
-      expect(events.flatMap(e => e.type === 'rows' ? e.rows.map(row => row.message) : [])).toMatchObject([{ toolId: 'later' }]);
+      await interactivePermission(events).decision.respond({ allow: true });
+      expect(publishedMessages(events)).toMatchObject([{ toolId: 'later' }]);
       agent.update(agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { text: ' complete**' } });
       agent.endPrompt();
       await waitFor(() => runEnded(events).length === 1);
@@ -828,13 +833,11 @@ describe('Antigravity ACP runtime', () => {
     try {
       const { agentSessionId } = await runtime.startSession(request());
       await waitFor(() => events.some(e => e.type === 'permission'));
-      const permission = events.find(e => e.type === 'permission');
-      if (!permission?.decision) throw new Error('Expected an interactive approval');
-      await permission.decision.respond({ allow: true });
+      await interactivePermission(events).decision.respond({ allow: true });
       agent.update(agentSessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'plan', rawInput: { steps: [] }, status: 'completed' });
       agent.endPrompt();
       await waitFor(() => runEnded(events).length === 1);
-      expect(events.flatMap(e => e.type === 'rows' ? e.rows.map(row => row.message.type) : []))
+      expect(publishedMessages(events).map(row => row.type))
         .toEqual(['bash-tool-use', 'update-plan-tool-use', 'tool-result']);
     } finally { runtime.shutdown(); }
   });

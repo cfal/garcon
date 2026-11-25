@@ -50,6 +50,10 @@ export function antigravityMcpArguments(input: Record<string, unknown>): Record<
   return value && typeof value === 'object' && !Array.isArray(value) ? asObject(value) : undefined;
 }
 
+export function antigravityToolName(call: AntigravityToolCall): string | null {
+  return call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
+}
+
 function lineField(input: Record<string, unknown>, ...names: string[]): number | undefined {
   const value = field(input, ...names);
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
@@ -97,7 +101,7 @@ export function convertAntigravityToolUse(
   if (mcpServer && mcpTool) {
     return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, antigravityMcpArguments(input) ?? {});
   }
-  const name = call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
+  const name = antigravityToolName(call);
   switch (call.isMcp && name !== 'call_mcp_tool' ? null : name) {
     case 'run_command': {
       const command = stringField(input, 'CommandLine', 'command_line', 'commandLine', 'command');
