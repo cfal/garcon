@@ -1,4 +1,5 @@
 import { BrowserNotificationCoordinator } from './browser-notification-coordinator.js';
+import { createRandomId } from '$lib/utils/random-id.js';
 
 export type BrowserNotificationPermission = NotificationPermission | 'unsupported';
 
@@ -26,7 +27,7 @@ export interface BrowserNotificationDeliveryPort {
 
 interface NotificationDelivery {
 	cancelled: boolean;
-	workerStarted: boolean;
+	workerDeliveryId?: string;
 	notification?: Notification;
 }
 
@@ -58,16 +59,16 @@ export class BrowserNotificationService implements BrowserNotificationDeliveryPo
 
 	show(title: string, chatId: string, tag: string): void {
 		if (this.#destroyed || this.#deliveries.has(tag)) return;
-		const delivery: NotificationDelivery = { cancelled: false, workerStarted: false };
+		const delivery: NotificationDelivery = { cancelled: false };
 		this.#deliveries.set(tag, delivery);
 		while (this.#deliveries.size > 20) this.closeOwned(this.#deliveries.keys().next().value!);
 		void this.#deliver(title, chatId, tag, delivery)
 			.catch(() => {
-				if (delivery.workerStarted) this.close(tag);
+				if (this.#deliveries.get(tag) === delivery) this.closeOwned(tag);
 			})
 			.finally(() => {
 				if (
-					!delivery.workerStarted &&
+					!delivery.workerDeliveryId &&
 					!delivery.notification &&
 					this.#deliveries.get(tag) === delivery
 				)
@@ -87,9 +88,10 @@ export class BrowserNotificationService implements BrowserNotificationDeliveryPo
 		const publish = async () => {
 			if (!this.#canDeliver(delivery)) return;
 			if (registration?.active && registration.showNotification) {
-				delivery.workerStarted = true;
-				await registration.showNotification(title, { tag, data: { chatId } });
-				if (!this.#canDeliver(delivery)) await this.#closeWorkerTag(tag, registration);
+				const deliveryId = createRandomId();
+				delivery.workerDeliveryId = deliveryId;
+				await registration.showNotification(title, { tag, data: { chatId, deliveryId } });
+				if (!this.#canDeliver(delivery)) await this.#closeWorkerTag(tag, deliveryId, registration);
 			} else {
 				const notification = new Notification(title, { tag });
 				delivery.notification = notification;
@@ -116,10 +118,11 @@ export class BrowserNotificationService implements BrowserNotificationDeliveryPo
 		);
 	}
 
-	async #closeWorkerTag(tag: string, registration?: ServiceWorkerRegistration): Promise<void> {
+	async #closeWorkerTag(tag: string, deliveryId?: string, registration?: ServiceWorkerRegistration): Promise<void> {
 		registration ??= await navigator.serviceWorker?.getRegistration();
-		for (const notification of (await registration?.getNotifications({ tag })) ?? [])
-			notification.close();
+		for (const notification of (await registration?.getNotifications({ tag })) ?? []) {
+			if (deliveryId === undefined || notification.data?.deliveryId === deliveryId) notification.close();
+		}
 	}
 
 	close(tag: string): void {
@@ -138,7 +141,8 @@ export class BrowserNotificationService implements BrowserNotificationDeliveryPo
 	}
 
 	closeOwned(tag: string): void {
-		if (this.#cancel(tag)?.workerStarted) void this.#closeWorkerTag(tag).catch(() => {});
+		const deliveryId = this.#cancel(tag)?.workerDeliveryId;
+		if (deliveryId) void this.#closeWorkerTag(tag, deliveryId).catch(() => {});
 	}
 
 	destroy(): void {

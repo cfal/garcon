@@ -76,12 +76,14 @@ async function fixture(
 }
 
 describe('root browser notifications routing', () => {
-	it('releases local permission deliveries on disconnect without retracting a peer notification', async () => {
+	it.each(['remove', 'clear-run'] as const)('leaves peer notifications alone on disconnect until authoritative %s', async (kind) => {
 		const f = await fixture([permission()], true, true);
 		expect(f.delivery.show).not.toHaveBeenCalled();
 		f.router.releasePermissions();
 		expect(f.delivery.closeOwned).toHaveBeenCalledExactlyOnceWith('permission:synthetic-instance:background:occurrence');
 		expect(f.delivery.close).not.toHaveBeenCalled();
+		f.send(permission(kind));
+		expect(f.delivery.close).toHaveBeenCalledExactlyOnceWith('permission:synthetic-instance:background:occurrence');
 	});
 	it('suppresses intermediate queued completion and notifies after the queue becomes idle', async () => {
 		const completed = new AgentRunFinishedMessage(

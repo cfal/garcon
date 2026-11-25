@@ -7,6 +7,36 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser notification delivery', () => {
+	it('leaves a same-tag replacement from another tab alone during local cleanup', async () => {
+		const published: { tag: string; data: unknown; close: ReturnType<typeof vi.fn> }[] = [];
+		const registration = {
+			active: {},
+			showNotification: async (_title: string, options: NotificationOptions) => {
+				published.push({ tag: options.tag!, data: options.data, close: vi.fn() });
+			},
+			getNotifications: vi.fn(async () => published.slice(-1)),
+		};
+		vi.stubGlobal('Notification', { permission: 'granted' });
+		vi.stubGlobal('isSecureContext', true);
+		vi.stubGlobal('navigator', { serviceWorker: { getRegistration: async () => registration } });
+		const deps = { enabled: () => true, isFocused: () => false, openChat: vi.fn() };
+		const first = new BrowserNotificationService(deps);
+		const peer = new BrowserNotificationService(deps);
+		try {
+			first.show('Permission', 'chat', 'same-tag');
+			await vi.waitFor(() => expect(published).toHaveLength(1));
+			peer.show('Permission', 'chat', 'same-tag');
+			await vi.waitFor(() => expect(published).toHaveLength(2));
+			first.closeOwned('same-tag');
+			await vi.waitFor(() => expect(registration.getNotifications).toHaveBeenCalled());
+			expect(published[1].close).not.toHaveBeenCalled();
+			first.close('same-tag');
+			await vi.waitFor(() => expect(published[1].close).toHaveBeenCalledOnce());
+		} finally {
+			first.destroy();
+			peer.destroy();
+		}
+	});
 	it('distinguishes releasing a local delivery from globally resolving a permission', async () => {
 		const close = vi.fn();
 		const getNotifications = vi.fn(async () => [{ close }]);
@@ -83,14 +113,14 @@ describe('browser notification delivery', () => {
 
 	it('closes each late service worker delivery after destruction', async () => {
 		const releases: (() => void)[] = [];
-		const notices: { tag: string; close: ReturnType<typeof vi.fn> }[] = [];
+		const notices: { tag: string; data: unknown; close: ReturnType<typeof vi.fn> }[] = [];
 		const registration = {
 			active: {},
 			showNotification: async (_title: string, options: NotificationOptions) => {
 				await new Promise<void>((resolve) => {
 					releases.push(resolve);
 				});
-				notices.push({ tag: options.tag!, close: vi.fn() });
+				notices.push({ tag: options.tag!, data: options.data, close: vi.fn() });
 			},
 			getNotifications: async (options?: { tag?: string }) =>
 				notices.filter((notice) => !options?.tag || notice.tag === options.tag),
