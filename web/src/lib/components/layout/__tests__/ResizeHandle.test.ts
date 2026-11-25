@@ -85,4 +85,19 @@ describe('ResizeHandle', () => {
 		await fireEvent.keyDown(separator, { key: 'ArrowRight' });
 		expect(onCommit).toHaveBeenCalledWith(560);
 	});
+
+	it('leaves modified, composing, and already-consumed arrows alone', async () => {
+		const onCommit = vi.fn();
+		render(ResizeHandle, { width: 400, onPreview: vi.fn(), onCommit });
+		const separator = screen.getByRole('separator');
+		for (const modifiers of [{ altKey: true }, { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { isComposing: true }]) {
+			const event = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true, ...modifiers });
+			await fireEvent(separator, event);
+			expect(event.defaultPrevented).toBe(false);
+		}
+		const consumed = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+		consumed.preventDefault();
+		await fireEvent(separator, consumed);
+		expect(onCommit).not.toHaveBeenCalled();
+	});
 });

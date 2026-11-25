@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
@@ -168,6 +169,7 @@
 	let isAtCursor = $derived(rightClickPos !== null);
 
 	let menuMounted = $state(false);
+	let menuTrigger = $state<HTMLButtonElement | null>(null);
 	const menuTriggerClass = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground';
 
 	function prepareMenu(): void {
@@ -177,6 +179,12 @@
 	function openDesktopMenu(): void {
 		menuMounted = true;
 		menuOpen = true;
+	}
+
+	async function prepareFocusedMenu(): Promise<void> {
+		prepareMenu();
+		await tick();
+		if (document.activeElement === document.body) menuTrigger?.focus({ preventScroll: true });
 	}
 
 	// Positions the dropdown anchor at the cursor for desktop right-click.
@@ -448,6 +456,7 @@
 					}}
 				>
 					<DropdownMenuTrigger
+						bind:ref={menuTrigger}
 						data-sidebar-touch-drag-ignore
 						class={isAtCursor
 							? 'block w-px h-px opacity-0 pointer-events-none'
@@ -498,6 +507,7 @@
 					aria-label={m.sidebar_chat_more_actions()}
 					aria-haspopup="menu"
 					aria-expanded="false"
+					onfocus={prepareFocusedMenu}
 					onclick={openDesktopMenu}
 					onkeydown={(event) => {
 						if (event.key !== 'ArrowDown') return;

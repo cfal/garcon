@@ -75,6 +75,7 @@
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
+		if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
 		if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
 		e.preventDefault();
 		if (cancelDrag) return;

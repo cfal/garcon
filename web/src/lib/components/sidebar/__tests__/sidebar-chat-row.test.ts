@@ -52,6 +52,18 @@ async function openDesktopMenu(): Promise<void> {
 }
 
 describe('shared sidebar chat row', () => {
+	it('focuses the first action on keyboard entry without a previous hover', async () => {
+		render(SidebarChatItemHost, { session: createChat() });
+		const trigger = () => screen.getByRole('button', { name: 'Chat actions' });
+		const placeholder = trigger();
+		placeholder.focus();
+		await waitFor(() => {
+			expect(trigger()).not.toBe(placeholder);
+			expect(document.activeElement).toBe(trigger());
+		});
+		await fireEvent.keyDown(trigger(), { key: 'ArrowDown' });
+		await waitFor(() => expect(document.activeElement).toBe(screen.getAllByRole('menuitem')[0]));
+	});
 	it.each(['single-line', 'compact', 'detailed'] as const)(
 		'shows an executor pill before the agent only with multiple executors in %s layout',
 		async (chatItemLayout) => {
