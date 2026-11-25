@@ -13,7 +13,7 @@
 	import { terminalContextName } from '$lib/terminal/sessions/terminal-display-name.js';
 	import { getLocalSettings, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
 	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
-	import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
+	import { collectWindowNodes } from '$lib/workspace/window-tree.js';
 	import type { TerminalToolbarKey } from '$lib/terminal/runtime/terminal-input-controls.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
@@ -76,7 +76,7 @@
 			pickerTitle: `${name} - ${initialDirectory} - ${attachmentLabel(session.attachmentState)}`,
 		};
 	});
-	let runtime = $state<Awaited<ReturnType<typeof terminals.ensureRuntime>> | null>(null);
+	let runtime = $state.raw<Awaited<ReturnType<typeof terminals.ensureRuntime>> | null>(null);
 	let runtimeTerminalId = $state<string | null>(null);
 	const showInputControls = $derived(host === 'mobile' || hasCoarsePointer);
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
@@ -173,16 +173,13 @@
 		}[attachmentState];
 	}
 
-	function placementLabel(itemTerminalId: string): string | null {
-		const surfaceId = terminalSurfaceId(itemTerminalId);
-		const snapshot = workspace.layout.snapshot;
-		const windowId = windowIdOfSurface(snapshot.desktopRoot, surfaceId);
-		if (!windowId) return null;
-		const index = collectWindowNodes(snapshot.desktopRoot).findIndex(
-			(workspaceWindow) => workspaceWindow.id === windowId,
-		);
-		return m.workspace_window_number({ number: index + 1 });
-	}
+	const windowNumberBySurface = $derived.by(() => {
+		const numbers = new Map<string, number>();
+		collectWindowNodes(workspace.layout.snapshot.desktopRoot).forEach((window, index) => {
+			for (const surfaceId of window.tabs.order) numbers.set(surfaceId, index + 1);
+		});
+		return numbers;
+	});
 
 	$effect(() => {
 		const media = window.matchMedia('(pointer: coarse)');
@@ -298,7 +295,9 @@
 					title={sessionLabels?.pickerTitle}
 				>
 					{#each terminals.orderedSessions as item (item.metadata.terminalId)}
-						{@const placement = placementLabel(item.metadata.terminalId)}
+						{@const windowNumber = windowNumberBySurface.get(
+							terminalSurfaceId(item.metadata.terminalId),
+						)}
 						<option value={item.metadata.terminalId}>
 							{m.terminal_session_status({
 								name: terminalContextName(
@@ -306,7 +305,7 @@
 									terminals.executorLabel(terminals.executorIdFor(item.metadata.terminalId)),
 								),
 								status: item.metadata.processStatus,
-							})}{placement ? ` - ${placement}` : ''}
+							})}{windowNumber ? ` - ${m.workspace_window_number({ number: windowNumber })}` : ''}
 						</option>
 					{/each}
 				</select>
