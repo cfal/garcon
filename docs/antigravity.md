@@ -156,7 +156,7 @@ Antigravity is not a default generation agent (`generation: null`, like Cursor),
 
 ## Tool Normalization
 
-Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `rawOutput`, `content` (text or diffs), and `status`.
+Tool updates are correlated by call ID. A terminal update can carry just a status, without output text.
 
 For `run_command`, ACP `completed` means the invocation finished, not that the command succeeded. A nonzero `rawOutput.exit_code` marks the tool result as an error; the enclosing agent turn may still finish normally.
 
@@ -170,9 +170,14 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 | `read_url_content` | `web-fetch-tool-use` (`Url`) |
 | `search_web` | `web-search-tool-use` (`query`) |
 | `invoke_subagent` | `task-tool-use` (`Role`/`TypeName`, `Prompt`, `Model`) |
+| `manage_task` | `background-task-tool-use`: list tasks, check status, request stop (`kill`), or send input to a task |
+| `update_steps` (also identified by the native title `Run update_steps`) | `update-plan-tool-use`: step titles and statuses; `done` becomes `completed`, while `skipped` and `failed` remain distinct |
+| `send_message` | `agent-message-tool-use`: recipient and literal message body |
 | MCP calls (`rawInput.server` + `rawInput.tool`) | `mcp-tool-use` |
-| Any other named agy tool, such as `ask_question`, `manage_task`, `run_workflow`, or `command_status` | `external-tool-use` with namespace `antigravity` |
-| A call without a tool name | `unknown-tool-use` |
+| Any other named agy tool, such as `ask_question` or `run_workflow` | `external-tool-use` with namespace `antigravity` |
+| A call without an identifiable tool | `unknown-tool-use` |
+
+A background task row describes an operation, not the state of the task. For example, a successful `kill` call is not proof that the process exited. When ACP supplies no output, Garcon does not reconstruct it from native history. Previously stored rows retain their original representation.
 
 `ask_question` is not interactive over ACP without elicitation support. The CLI prints the question as assistant text and ends the turn, so the user answers in the next message.
 
