@@ -4,6 +4,7 @@ import {
 	ApiError,
 	ApiMutationOutcomeUnknownError,
 	isDefiniteMutationFailure,
+	withDefaultTimeout,
 	apiGet,
 	apiPost,
 	apiPatch,
@@ -131,10 +132,6 @@ import {
 } from '$shared/chat-order-contracts';
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
-
-function withDefaultTimeout(options: ApiFetchOptions | undefined, timeoutMs: number | null): ApiFetchOptions {
-	return options?.timeoutMs === undefined ? { ...options, timeoutMs } : options;
-}
 
 function withParsedControl<T extends { control: ChatExecutionControlState }>(response: T): T {
 	const control = parseChatExecutionControlState(response.control);
