@@ -76,23 +76,29 @@ test('retains inline images across chat switches and evicts them when the cache 
     const composerBounds = await composer.boundingBox();
     for (const chatId of [chats[1], chats[2]]) await switchChat(chatId);
     await page.evaluate(() => {
-      const samples: Array<{ loading: number; height: number }> = [];
+      const samples: Array<{ loading: number; height: number; chatId?: string }> = [];
       const monitor = { samples, running: true };
       Object.assign(window, { imageCacheMonitor: monitor });
       function sample(): void {
         if (!monitor.running) return;
-        const message = document.querySelector('[data-chat-message-type="assistant-message"]');
-        const thumbnail = message?.querySelector('.markdown-image');
-        if (thumbnail) samples.push({
-          loading: thumbnail.querySelectorAll('[aria-busy="true"]').length,
-          height: thumbnail.getBoundingClientRect().height,
-        });
+        for (const panel of document.querySelectorAll<HTMLElement>('[data-conversation-panel]')) {
+          if (panel.closest('[inert], [aria-hidden="true"], [hidden]')) continue;
+          const thumbnail = panel.querySelector('[data-chat-message-type="assistant-message"] .markdown-image');
+          if (!thumbnail) continue;
+          samples.push({
+            loading: thumbnail.querySelectorAll('[aria-busy="true"]').length,
+            height: thumbnail.getBoundingClientRect().height,
+            chatId: panel.dataset.conversationPanelChatId,
+          });
+        }
         requestAnimationFrame(sample);
       }
       requestAnimationFrame(sample);
     });
-    for (const chatId of [chats[0], chats[1], chats[0]]) await switchChat(chatId);
-    await browserExpect.poll(() => page.evaluate(() => Reflect.get(window, 'imageCacheMonitor').samples.length)).toBeGreaterThan(2);
+    for (const chatId of [chats[0], chats[1], chats[0]]) {
+      await switchChat(chatId);
+      await page.waitForFunction(id => Reflect.get(window, 'imageCacheMonitor').samples.at(-1)?.chatId === id, chatId);
+    }
     const frames: Array<{ loading: number; height: number }> = await page.evaluate(() => {
       const monitor = Reflect.get(window, 'imageCacheMonitor');
       monitor.running = false;

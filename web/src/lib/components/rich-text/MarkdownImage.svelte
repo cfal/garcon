@@ -220,14 +220,16 @@
 </script>
 
 {#snippet thumbnail(current: typeof attempt, url: string)}
+	{@const cached = lease?.image}
 	<img
 		loading={requestedRetry === current ? 'eager' : 'lazy'}
 		src={url}
 		alt={text}
 		{title}
 		decoding="async"
-		width={lease?.image?.width}
-		height={lease?.image?.height}
+		width={cached?.width}
+		height={cached?.height}
+		style:contain-intrinsic-size={cached ? `${cached.width}px ${cached.height}px` : undefined}
 		referrerpolicy="no-referrer"
 		style:display={externalRetryPending ? 'none' : undefined}
 		onload={() => {
@@ -347,6 +349,11 @@
 		max-height: var(--inline-image-max-height);
 		object-fit: contain;
 		margin: 0;
+	}
+
+	/* Uses the decoded cache dimensions before a remounted blob image has intrinsic size. */
+	img[width][height] {
+		contain: size;
 	}
 
 	.placeholder {
