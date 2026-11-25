@@ -97,12 +97,37 @@ describe('GitPorcelainState stash actions', () => {
 		},
 	);
 
+	it('retains loading and abort ownership until the mutation refresh settles', async () => {
+		const refreshEntered = deferred<void>();
+		const finishRefresh = deferred<void>();
+		vi.mocked(gitApi.gitCreateStash).mockResolvedValueOnce({ success: true });
+		vi.mocked(gitApi.getGitStashes).mockResolvedValueOnce({ stashes: [] });
+		const porcelain = createState({
+			refreshAfterMutation: () => {
+				refreshEntered.resolve();
+				return finishRefresh.promise;
+			},
+		});
+		const mutation = porcelain.createStash(project);
+		await refreshEntered.promise;
+		expect(porcelain.isLoading).toBe(true);
+		const options = vi.mocked(gitApi.getGitStashes).mock.calls[0][1];
+		porcelain.cancelActiveLoad();
+		expect(options?.signal?.aborted).toBe(true);
+		finishRefresh.resolve();
+		await mutation;
+		expect(porcelain.isLoading).toBe(false);
+	});
+
 	it.each(stashActions)(
 		'%s reloads the list after a stale selection without retrying',
 		async (method, request, verb) => {
 			const current = makeStash(0, 'd'.repeat(40), 'Current stash');
-			const message = 'The stash list changed since it was loaded. Select the stash again from the current list.';
-			vi.mocked(gitApi[request]).mockRejectedValueOnce(new ApiError(409, message, 'GIT_STALE_STASH'));
+			const message =
+				'The stash list changed since it was loaded. Select the stash again from the current list.';
+			vi.mocked(gitApi[request]).mockRejectedValueOnce(
+				new ApiError(409, message, 'GIT_STALE_STASH'),
+			);
 			vi.mocked(gitApi.getGitStashes).mockResolvedValueOnce({ stashes: [current] });
 			const surfaceError = vi.fn();
 			const porcelain = createState({ surfaceError });

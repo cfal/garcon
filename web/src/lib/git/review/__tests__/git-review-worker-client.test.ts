@@ -222,7 +222,7 @@ describe('review Worker admission and lifetime', () => {
 		expect((await result).message).toContain('deadline');
 		expect(workers[0].terminate).toHaveBeenCalledOnce();
 	});
-	it('includes queue wait in the deadline rather than restarting it on dispatch', async () => {
+	it('gives a queued request its full deadline after dispatch', async () => {
 		vi.useFakeTimers();
 		const { client, workers } = setup();
 		const first = client.run(input);
@@ -233,6 +233,8 @@ describe('review Worker admission and lifetime', () => {
 		await first;
 		expect(workers[0].postMessage).toHaveBeenCalledTimes(2);
 		await vi.advanceTimersByTimeAsync(LIMITS.requestTimeoutMs - 3_000);
+		expect(workers[0].terminate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(3_000);
 		expect(await queued).toMatchObject({ message: 'Diff Worker deadline exceeded.' });
 		expect(workers[0].terminate).toHaveBeenCalledOnce();
 		const next = client.run(input);

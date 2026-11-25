@@ -1,3 +1,4 @@
+import { storeMostRecent, takeMostRecent } from '$lib/git/surface/git-recent-cache.js';
 import { getGitTargetCandidates, type GitRefKind, type GitTargetCandidate } from '$lib/api/git.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { singletonSurfaceId, type PortableSingletonKind } from '$lib/workspace/surface-types.js';
@@ -53,8 +54,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 	presentationVisible = $state(false);
 	projectIdentityPending = $state(false);
 	branchChangePending = $state(false);
-	targets = $state<GitTargetCandidate[]>([]);
-	activeTarget = $state<GitTarget | null>(null);
+	targets = $state.raw<GitTargetCandidate[]>([]);
+	activeTarget = $state.raw<GitTarget | null>(null);
 	isLoadingTargets = $state(false);
 	lastError = $state<string | null>(null);
 	baseProjectPath = $state<string | null>(null);
@@ -220,7 +221,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 		) {
 			return this.#activation.promise;
 		}
-		if (this.effectiveProjectKey && (this.#sessionRefreshPending || this.#appliedIdentity === null)) {
+		if (
+			this.effectiveProjectKey &&
+			(this.#sessionRefreshPending || this.#appliedIdentity === null)
+		) {
 			const key = JSON.stringify([this.executorId, this.effectiveProjectKey]);
 			// A fresh activation snapshot includes prior executor invalidations.
 			storeMostRecent(
@@ -230,6 +234,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 					this.#handledInvalidationVersions.get(key) ?? 0,
 					this.deps.invalidationVersion(this.executorId),
 				),
+				TARGET_CACHE_LIMIT,
 			);
 		}
 		const activation = (async () => {
@@ -382,10 +387,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 			return false;
 		}
 		if (this.branchChangePending) {
-			storeMostRecent(this.#deferredBranchInvalidationVersions, key, version);
+			storeMostRecent(this.#deferredBranchInvalidationVersions, key, version, TARGET_CACHE_LIMIT);
 			return false;
 		}
-		storeMostRecent(this.#pendingInvalidationVersions, key, version);
+		storeMostRecent(this.#pendingInvalidationVersions, key, version, TARGET_CACHE_LIMIT);
 		const applicationGeneration = this.#targetApplicationGeneration;
 		const contextGeneration = this.#contextGeneration;
 		try {
@@ -401,7 +406,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 				return false;
 			}
 			await this.#applyTarget('invalidation', true);
-			storeMostRecent(this.#handledInvalidationVersions, key, version);
+			storeMostRecent(this.#handledInvalidationVersions, key, version, TARGET_CACHE_LIMIT);
 			return true;
 		} finally {
 			if (this.#pendingInvalidationVersions.get(key) === version) {
@@ -529,7 +534,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		if (effectiveProjectKey !== this.effectiveProjectKey) return;
 		const currentVersion = this.deps.invalidationVersion(this.executorId);
 		if (reconciled && currentVersion === checkoutVersion) {
-			storeMostRecent(this.#handledInvalidationVersions, key, currentVersion);
+			storeMostRecent(this.#handledInvalidationVersions, key, currentVersion, TARGET_CACHE_LIMIT);
 			return;
 		}
 		if (!changed && deferred <= 0) return;
@@ -545,11 +550,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	#targetChangeAllowed(): boolean {
-		return (
-			this.projectReady &&
-			this.activeProjectPath !== null &&
-			this.deps.canChangeTarget()
-		);
+		return this.projectReady && this.activeProjectPath !== null && this.deps.canChangeTarget();
 	}
 
 	#suspendContext(): void {
@@ -655,7 +656,12 @@ export class GitTargetSessionController implements PortableSingletonController {
 		const key = this.effectiveProjectKey;
 		const target = this.activeTarget;
 		if (!key || !target) return;
-		storeMostRecent(this.#targetByProject, JSON.stringify([target.executorId, key]), { ...target });
+		storeMostRecent(
+			this.#targetByProject,
+			JSON.stringify([target.executorId, key]),
+			{ ...target },
+			TARGET_CACHE_LIMIT,
+		);
 	}
 
 	#updateActiveBranch(branch: string): void {
@@ -698,21 +704,4 @@ export class GitTargetSessionController implements PortableSingletonController {
 			projectKey === this.effectiveProjectKey
 		);
 	}
-}
-
-function storeMostRecent<V>(entries: Map<string, V>, key: string, value: V): void {
-	entries.delete(key);
-	entries.set(key, value);
-	while (entries.size > TARGET_CACHE_LIMIT) {
-		const oldest = entries.keys().next().value;
-		if (oldest === undefined) break;
-		entries.delete(oldest);
-	}
-}
-
-function takeMostRecent<V>(entries: Map<string, V>, key: string): V | null {
-	const value = entries.get(key);
-	if (value === undefined) return null;
-	storeMostRecent(entries, key, value);
-	return value;
 }

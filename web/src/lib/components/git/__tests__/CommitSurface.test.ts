@@ -9,7 +9,15 @@ import * as m from '$lib/paraglide/messages.js';
 
 function makeController(): CommitController {
 	const controller = new CommitController(createGitSurfaceTestDeps());
-	void controller.setContext('/project', '/project');
+	void controller.setProjectState({
+		kind: 'available',
+		project: {
+			target: { kind: 'path', executorId: 'local', projectPath: '/project' },
+			chatId: '/project',
+			effectiveProjectKey: '/project',
+			projectPath: '/project',
+		},
+	});
 	vi.spyOn(controller, 'projectIdentityPending', 'get').mockReturnValue(false);
 	return controller;
 }

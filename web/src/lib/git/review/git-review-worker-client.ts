@@ -23,6 +23,7 @@ interface Request {
 	resolve: (output: GitReviewWorkerOutput) => void;
 	reject: (error: Error) => void;
 	cleanup: () => void;
+	timer?: ReturnType<typeof setTimeout>;
 }
 
 // Shares bounded admission across review surfaces; their existing demand schedulers own priority.
@@ -60,16 +61,11 @@ export class GitReviewWorkerClient {
 				resolve,
 				reject,
 				cleanup: () => {
-					clearTimeout(timer);
 					signal?.removeEventListener('abort', abort);
 				},
 			};
 			const abort = () =>
 				this.fail(request, new DOMException('Diff work cancelled.', 'AbortError'));
-			const timer = setTimeout(
-				() => this.fail(request, new Error('Diff Worker deadline exceeded.')),
-				LIMITS.requestTimeoutMs,
-			);
 			signal?.addEventListener('abort', abort, { once: true });
 			this.bytes += bytes;
 			this.queue.push(request);
@@ -119,6 +115,10 @@ export class GitReviewWorkerClient {
 			worker.onerror = worker.onmessageerror = () => {
 				if (this.worker === worker) this.fail(request, new Error('Diff Worker unavailable.'));
 			};
+			request.timer = setTimeout(
+				() => this.fail(request, new Error('Diff Worker deadline exceeded.')),
+				LIMITS.requestTimeoutMs,
+			);
 			worker.postMessage({ id: request.id, input: request.input });
 		} catch (error) {
 			this.fail(request, error instanceof Error ? error : new Error('Diff Worker unavailable.'));
@@ -140,6 +140,7 @@ export class GitReviewWorkerClient {
 	}
 
 	private settle(request: Request, error: Error | null, output?: GitReviewWorkerOutput): void {
+		clearTimeout(request.timer);
 		request.cleanup();
 		this.bytes -= request.bytes;
 		if (error) request.reject(error);

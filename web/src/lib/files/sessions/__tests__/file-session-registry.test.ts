@@ -1073,6 +1073,8 @@ describe('FileSessionRegistry', () => {
 		const original = await harness.registry.open(request('src/queued-reopen.ts'));
 		if (!original) throw new Error('Expected original file session');
 		await vi.waitFor(() => expect(original.loading).toBe(false));
+		original.content = 'checkpoint before teardown';
+		await harness.registry.flushRecovery();
 
 		const blocker = harness.registry.open(request('src/placement-blocker.ts'));
 		await vi.waitFor(() => expect(placementCount).toBe(2));
@@ -1081,6 +1083,7 @@ describe('FileSessionRegistry', () => {
 			openToSide: true,
 		});
 		await vi.waitFor(() => expect(harness.resolveFileIdentity).toHaveBeenCalledTimes(3));
+		original.content = original.baseline;
 		const destruction = harness.registry.destroy(original.id);
 		await vi.waitFor(() => expect(repository.deleteDraft).toHaveBeenCalledOnce());
 
@@ -1202,6 +1205,7 @@ describe('FileSessionRegistry', () => {
 		if (!opened) throw new Error('Expected file session');
 		await vi.waitFor(() => expect(opened.loading).toBe(false));
 		opened.content = 'old edit';
+		await harness.registry.flushRecovery();
 		const deletion = deferred<void>();
 		const deleteDraft = repository.deleteDraft.bind(repository);
 		vi.spyOn(repository, 'deleteDraft').mockImplementation(async (...args) => {
@@ -1257,6 +1261,7 @@ describe('FileSessionRegistry', () => {
 		});
 		if (!second) throw new Error('Expected second file session');
 		first.content = 'first edit';
+		await harness.registry.flushRecovery();
 		vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new Error('quota'));
 
 		const failed = harness.registry.prepareDestructiveViews([first.id, second.id], 'close');
@@ -1264,7 +1269,7 @@ describe('FileSessionRegistry', () => {
 		harness.registry.resolveGuard('discard');
 		const release = await failed;
 		expect(release).toBeTypeOf('function');
-		expect(first.document.recoveryError).toBe('quota');
+		await vi.waitFor(() => expect(first.document.recoveryError).toBe('quota'));
 		release?.();
 		first.content = 'second edit';
 

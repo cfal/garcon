@@ -515,11 +515,17 @@ describe('GitComparisonController', () => {
 			documentId: 'comparison-doc-recovered',
 		};
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
-			status: 'document-expired',
-			documentId: 'expired-doc',
-			message: 'This comparison expired.',
-		});
+		vi.mocked(getGitComparisonFileBodies)
+			.mockResolvedValueOnce({
+				status: 'document-expired',
+				documentId: first.documentId,
+				message: 'This comparison expired.',
+			})
+			.mockResolvedValueOnce({
+				status: 'document-expired',
+				documentId: second.documentId,
+				message: 'This comparison expired.',
+			});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 

@@ -257,6 +257,27 @@ describe('FileImageCache', () => {
 		expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
 	});
 
+	it('reschedules for an earlier idle deadline discovered during trimming', async () => {
+		const { cache } = setup(1);
+		const initial = cache.acquire(target);
+		const later = cache.acquire({ ...target, filePath: 'later.png' });
+		const earlier = cache.acquire({ ...target, filePath: 'earlier.png' });
+		await Promise.all([initial.ensureCurrent(), later.ensureCurrent(), earlier.ensureCurrent()]);
+
+		initial.release();
+		await vi.advanceTimersByTimeAsync(200);
+		later.release();
+		vi.spyOn(Date, 'now').mockReturnValueOnce(Date.now() - 100);
+		earlier.release();
+
+		await vi.advanceTimersByTimeAsync(900);
+		expect(initial.image).toBeNull();
+		expect(earlier.image).toBeNull();
+		expect(later.image).not.toBeNull();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(later.image).toBeNull();
+	});
+
 	it('counts file bytes and decoded pixels, evicting oversized images once idle', async () => {
 		const { cache, read, decode } = setup(8 * MiB);
 		read.mockResolvedValue({

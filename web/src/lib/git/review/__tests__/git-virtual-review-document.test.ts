@@ -554,7 +554,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		);
 		const summary = makeSummary([makeFile('a.ts'), makeFile('b.ts')]);
 		controller.summary = summary;
-		controller.fileBodies = { 'a.ts': makeBody('a.ts'), 'b.ts': makeBody('b.ts') };
+		controller.bodies.fileBodies = { 'a.ts': makeBody('a.ts'), 'b.ts': makeBody('b.ts') };
 		controller.applySummary(summary);
 
 		controller.requestInitialBodies('/project', ['a.ts', 'b.ts']);
@@ -577,7 +577,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		const summary = makeSummary([makeFile('a.ts'), makeFile('b.ts')]);
 		const bodies = { 'a.ts': makeBody('a.ts'), 'b.ts': makeBody('b.ts') };
 		controller.summary = summary;
-		controller.fileBodies = bodies;
+		controller.bodies.fileBodies = bodies;
 		controller.applySummary(summary);
 
 		controller.handleBodyDemand({
@@ -613,7 +613,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		);
 		const summary = makeSummary([makeFile('a.ts')]);
 		controller.summary = summary;
-		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
+		controller.bodies.fileBodies = { 'a.ts': makeBody('a.ts') };
 		controller.applySummary(summary);
 
 		controller.handleBodyDemand({
@@ -632,14 +632,14 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		controller.clearForDisplayChange();
 		expect(controller.rowSource.rowCount).toBe(0);
 		controller.summary = summary;
-		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
+		controller.bodies.fileBodies = { 'a.ts': makeBody('a.ts') };
 		controller.applySummary(summary);
 		await vi.waitFor(() => expect(addedSyntaxSegments(controller)).toBeDefined());
 		expect(highlighter).toHaveBeenCalledOnce();
 
 		controller.refreshAllData();
 		controller.summary = summary;
-		controller.fileBodies = { 'a.ts': makeBody('a.ts') };
+		controller.bodies.fileBodies = { 'a.ts': makeBody('a.ts') };
 		controller.applySummary(summary);
 		controller.handleBodyDemand({
 			kind: 'viewport',

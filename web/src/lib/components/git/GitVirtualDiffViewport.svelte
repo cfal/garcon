@@ -15,11 +15,12 @@
 	import {
 		markGitReviewFirstRow,
 		markGitReviewViewportReady,
+		pendingGitReviewViewportMilestones,
 	} from '$lib/git/review/git-review-performance.js';
+	import { indexesInRange, currentAnchor } from './git-virtual-list.js';
 	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 	import {
 		virtualItems as selectVirtualItems,
-		type VirtualMutationAnchor,
 		type VirtualRange,
 	} from '$lib/virt/virtual-list-types.js';
 	import { measureVirtualRow } from './git-virtual-row-measurement.js';
@@ -63,11 +64,12 @@
 	let servicedScrollTargetStart = Number.NaN;
 	let completedScrollRequestId = '';
 	let configuredLayoutIdentity: string | null | undefined;
-	let performanceFrame: number | null = null;
+	let performanceRevision = $state(0);
 	let configuredMeasurementKey = '';
 	let configuredOverscan = Number.NaN;
 	let presentedSource: GitVirtualReviewRowSource | null = null;
 	let presentedMeasurementRevision = '';
+	let presentedSyntaxRevision: object | undefined;
 	let scrollIntentRevision = 0;
 	let demandEffectRuns = 0;
 	let demandPublications = 0;
@@ -125,15 +127,6 @@
 		virtual.scrollBy((direction === 'later' ? 1 : -1) * (element.clientHeight / 2));
 	});
 
-	function indexesInRange(range: VirtualRange | null): number[] {
-		return range
-			? Array.from(
-					{ length: range.endIndex - range.startIndex + 1 },
-					(_, offset) => range.startIndex + offset,
-				)
-			: [];
-	}
-
 	function fallbackRange(includeOverscan: boolean): VirtualRange | null {
 		if (source.rowCount === 0) return null;
 		const offset = Math.max(0, viewportRef?.scrollTop ?? 0);
@@ -146,14 +139,6 @@
 			startIndex: Math.max(0, startIndex - extra),
 			endIndex: Math.min(source.rowCount - 1, endIndex + extra),
 		};
-	}
-
-	function currentAnchor(): VirtualMutationAnchor {
-		const position = virtual.viewportPosition;
-		const item = position
-			? virtual.snapshot.positions.itemAtOffset(position.paintedOffset)
-			: undefined;
-		return item ? { kind: 'item', key: item.key } : { kind: 'none' };
 	}
 
 	function restorePresentationOffset(
@@ -204,6 +189,7 @@
 	$effect.pre(() => {
 		const nextSource = source;
 		const nextMeasurementRevision = nextSource.measurementRevision;
+		const nextSyntaxRevision = nextSource.syntaxRevision;
 		const nextLayoutIdentity = layoutIdentity;
 		const rowOverscan = overscan;
 		const lineHeight = rowLineHeight;
@@ -213,7 +199,7 @@
 			const presentationOnly =
 				!layoutChanged &&
 				presentedSource !== null &&
-				presentedSource !== nextSource &&
+				(presentedSource !== nextSource || presentedSyntaxRevision !== nextSyntaxRevision) &&
 				presentedMeasurementRevision === nextMeasurementRevision &&
 				measurementKey === configuredMeasurementKey;
 			const restoreOffset = presentationOnly ? virtual.viewportPosition?.logicalOffset : undefined;
@@ -235,7 +221,7 @@
 				virtual.apply({
 					kind: layoutChanged ? 'reset-measurements' : 'update',
 					...next,
-					anchor: layoutChanged ? { kind: 'none' } : currentAnchor(),
+					anchor: layoutChanged ? { kind: 'none' } : currentAnchor(virtual),
 				});
 				configuredMeasurementKey = measurementKey;
 			}
@@ -255,6 +241,7 @@
 			configuredOverscan = rowOverscan;
 			presentedSource = nextSource;
 			presentedMeasurementRevision = nextMeasurementRevision;
+			presentedSyntaxRevision = nextSyntaxRevision;
 		});
 	});
 
@@ -263,7 +250,7 @@
 			virtual.apply({
 				kind: 'reset-measurements',
 				...source.buildVirtualMeasurements(rowLineHeight),
-				anchor: currentAnchor(),
+				anchor: currentAnchor(virtual),
 			});
 			virtual.remeasureAll();
 		}, ['code-diff', 'interface']),
@@ -312,33 +299,32 @@
 	});
 
 	$effect(() => {
-		const activeDocumentId = reviewDocumentId;
+		const documentId = reviewDocumentId;
+		if (!active || !documentId) return;
+		const revision = performanceRevision;
+		const pending = pendingGitReviewViewportMilestones(documentId);
+		if (!pending || source.rowCount === 0) return;
 		const range = virtualSnapshot.visibleRange ?? fallbackRange(false);
-		const rows = range ? source.rowsInRange(range.startIndex, range.endIndex + 1) : [];
-		if (!active || !activeDocumentId || rows.length === 0) return;
-		const hasPendingFile = rows.some(
-			(row) => row.filePath && source.fileState(row.filePath) === 'pending',
-		);
-		const hasRealDiffRow = rows.some(
-			(row) => row.kind === 'unified-row' || row.kind === 'split-row',
-		);
-		if (!hasRealDiffRow && hasPendingFile) return;
-		const readyDocumentId = activeDocumentId;
-		untrack(() => {
-			if (performanceFrame !== null) cancelAnimationFrame(performanceFrame);
-			performanceFrame = requestAnimationFrame(() => {
-				performanceFrame = null;
-				if (reviewDocumentId !== readyDocumentId) return;
-				if (hasRealDiffRow) markGitReviewFirstRow(readyDocumentId);
-				if (!hasPendingFile) markGitReviewViewportReady(readyDocumentId);
-			});
+		if (!range || range.startIndex >= source.rowCount) return;
+		const firstRow =
+			pending.firstRow &&
+			renderedVirtualItems.some(
+				({ virtualItem, row }) =>
+					virtualItem.index >= range.startIndex &&
+					virtualItem.index <= range.endIndex &&
+					(row.kind === 'unified-row' || row.kind === 'split-row'),
+			);
+		const viewportReady =
+			pending.viewportReady &&
+			!demandedFilePaths.some((filePath) => source.fileState(filePath) === 'pending');
+		if (!firstRow && !viewportReady) return;
+		const frame = requestAnimationFrame(() => {
+			if (reviewDocumentId !== documentId || !active) return;
+			if (firstRow) markGitReviewFirstRow(documentId);
+			if (viewportReady) markGitReviewViewportReady(documentId);
+			performanceRevision = revision + 1;
 		});
-		return () => {
-			if (performanceFrame !== null) {
-				cancelAnimationFrame(performanceFrame);
-				performanceFrame = null;
-			}
-		};
+		return () => cancelAnimationFrame(frame);
 	});
 
 	$effect(() => {

@@ -8,7 +8,7 @@ import {
 	type FileDraftSummary,
 } from './file-draft-repository.js';
 
-export const FILE_DRAFT_IDLE_DELAY_MS = 750;
+const FILE_DRAFT_IDLE_DELAY_MS = 750;
 export const FILE_DRAFT_MAX_INTERVAL_MS = 5_000;
 
 interface FileDraftCoordinatorOptions {
@@ -36,6 +36,8 @@ export class FileDraftCoordinator {
 	readonly #pending = new Map<string, PendingCheckpoint>();
 	readonly #writes = new Map<string, Promise<void>>();
 	readonly #queuedCheckpoints = new Map<string, QueuedCheckpoint>();
+	readonly #persistedDrafts = new Set<string>();
+	#discovered = false;
 	#discoveryGeneration = 0;
 	#destroyed = false;
 
@@ -49,6 +51,8 @@ export class FileDraftCoordinator {
 				this.options.deploymentId,
 			);
 			if (this.#destroyed || generation !== this.#discoveryGeneration) return;
+			for (const draft of available) this.#persistedDrafts.add(draft.documentId);
+			this.#discovered = true;
 			this.available = available;
 			this.error = null;
 		} catch (error) {
@@ -117,6 +121,7 @@ export class FileDraftCoordinator {
 		void this.#enqueue(draft.documentId, async () => {
 			try {
 				await this.options.repository.deleteDraft(draft.documentId);
+				this.#persistedDrafts.delete(draft.documentId);
 				this.error = null;
 			} catch (error) {
 				this.error = errorMessage(error);
@@ -156,6 +161,8 @@ export class FileDraftCoordinator {
 				this.options.userNamespace,
 				this.options.deploymentId,
 			);
+			this.#persistedDrafts.clear();
+			this.#discovered = true;
 			this.available = [];
 			this.error = null;
 			return true;
@@ -210,6 +217,8 @@ export class FileDraftCoordinator {
 			: null;
 		if (!record) {
 			this.#queuedCheckpoints.delete(documentId);
+			if (!this.#writes.has(documentId) && !this.#needsCleanup(documentId, document))
+				return Promise.resolve();
 			return this.#enqueue(documentId, () => this.#writeCheckpoint(documentId, document, null));
 		}
 		const queued = this.#queuedCheckpoints.get(documentId);
@@ -235,9 +244,12 @@ export class FileDraftCoordinator {
 		try {
 			if (record && !this.options.repository.durable)
 				throw new Error(m.file_recovery_storage_unavailable());
-			if (record) await this.options.repository.putDraft(record);
-			else {
+			if (record) {
+				await this.options.repository.putDraft(record);
+				this.#persistedDrafts.add(documentId);
+			} else if (this.#needsCleanup(documentId, document)) {
 				await this.options.repository.deleteDraft(documentId);
+				this.#persistedDrafts.delete(documentId);
 				this.available = this.available.filter((entry) => entry.documentId !== documentId);
 			}
 			document.recoveryError = null;
@@ -246,6 +258,12 @@ export class FileDraftCoordinator {
 			document.recoveryError = cause.message;
 			this.options.onError?.(document, cause);
 		}
+	}
+
+	#needsCleanup(documentId: string, document: FileDocumentState): boolean {
+		return (
+			!this.#discovered || this.#persistedDrafts.has(documentId) || document.recoveryError !== null
+		);
 	}
 
 	#enqueue(documentId: string, operation: () => Promise<void>): Promise<void> {

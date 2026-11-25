@@ -1,4 +1,3 @@
-import * as m from '$lib/paraglide/messages.js';
 import { effectiveExecutorId } from '$shared/executors';
 import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
 import {
@@ -27,7 +26,6 @@ import {
 import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.svelte.js';
 import {
 	FileDocumentIoCoordinator,
-	type FileDiskSnapshot,
 	type FileEditorRuntimeModule,
 } from '$lib/files/persistence/file-document-io-coordinator.js';
 import {
@@ -54,11 +52,21 @@ import {
 import { FileIdentityTeardownQueue } from '$lib/files/sessions/file-identity-teardown-queue.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { DesktopPlacement, PresentationHostId } from '$lib/workspace/surface-types.js';
-import type {
-	CanonicalFileIdentity,
-	FileIdentityResponse,
-	FileRevision,
-} from '$shared/file-contracts';
+import type { CanonicalFileIdentity, FileIdentityResponse } from '$shared/file-contracts';
+
+import {
+	FileDialogCoordinator,
+	type FileConflictChoice,
+	type FileThresholdChoice,
+} from './file-dialog-coordinator.svelte.js';
+import { FileConflictResolver } from './file-conflict-resolver.js';
+
+export type {
+	FileGuardRequest,
+	FileOverwriteRequest,
+	FileThresholdChoice,
+	FileThresholdRequest,
+} from './file-dialog-coordinator.svelte.js';
 
 export type { FileOpenMode };
 export type FilePlacementResult = 'placed' | 'cancelled';
@@ -83,38 +91,6 @@ export interface FilePlacementPort {
 		publication: { publish(): void; rollback(): void },
 	): Promise<FilePlacementResult>;
 	focusFileSession(sessionId: string): Promise<void>;
-}
-
-export interface FileGuardRequest {
-	sessionId: string;
-	fileName: string;
-	reason: FileDestructiveReason;
-}
-
-export interface FileOverwriteRequest {
-	sessionId: string;
-	fileName: string;
-	baseContent: string;
-	localContent: string;
-	diskContent: string;
-	diskRevision: FileRevision;
-	localBufferVersion: number;
-	lineSeparator: '\n' | '\r' | '\r\n';
-}
-
-type FileConflictChoice = 'save-checked' | 'accept-disk' | 'cancel';
-
-interface FileConflictDecision {
-	choice: FileConflictChoice;
-	snapshot: FileOverwriteRequest;
-	resolvedContent: string;
-}
-
-export type FileThresholdChoice = 'open' | 'cancel';
-
-export interface FileThresholdRequest {
-	identity: CanonicalFileIdentity;
-	resolve: (value: FileThresholdChoice) => void;
 }
 
 export interface FileSessionsDeps {
@@ -149,25 +125,19 @@ export { fileIdentityKey };
 export class FileSessionRegistry {
 	sessions = $state.raw<Readonly<Record<string, FileViewSession>>>({});
 	documents = $state.raw<Readonly<Record<string, FileDocumentState>>>({});
-	guardRequest = $state<FileGuardRequest | null>(null);
-	overwriteRequest = $state<FileOverwriteRequest | null>(null);
-	thresholdRequest = $state<FileThresholdRequest | null>(null);
-	draftRequest = $state<{ fileName: string } | null>(null);
+	readonly #dialogs = new FileDialogCoordinator((commitOpen) => this.#openMainInert(commitOpen));
 
 	#documentIdByIdentity = new Map<string, string>();
 	#pendingByIdentity = new Map<string, Promise<FileViewSession | null>>();
 	readonly #teardowns = new FileIdentityTeardownQueue();
 	readonly #close = new FileCloseCoordinator((viewId) => this.get(viewId));
-	#guardResolve: ((choice: 'save' | 'discard' | 'cancel') => void) | null = null;
-	#overwriteResolve: ((decision: FileConflictDecision) => void) | null = null;
 	#creationQueue = new SerialQueue();
-	#decisionQueue = new SerialQueue();
 	#editorThemeId: RendererThemeId = 'standard-light';
 	readonly #draftRepository: FileDraftRepository;
 	#drafts = $state.raw<FileDraftCoordinator | null>(null);
-	#draftResolve: ((choice: 'resume' | 'discard' | 'cancel') => void) | null = null;
 	readonly #io: FileDocumentIoCoordinator;
 	readonly #saves: FileSaveCoordinator;
+	readonly #conflicts: FileConflictResolver;
 	readonly #deploymentId: string;
 	#userNamespace: string | null = null;
 	#initialization: Promise<void> = Promise.resolve();
@@ -192,10 +162,34 @@ export class FileSessionRegistry {
 			reloadApplication: deps.reloadApplication,
 			isDocumentVisible: (documentId) => deps.isDocumentVisible?.(documentId) ?? true,
 		});
+		this.#conflicts = new FileConflictResolver({
+			dialogs: this.#dialogs,
+			getSession: (id) => this.get(id),
+			commitLoadedContent: (session, snapshot) => this.#io.commitLoadedContent(session, snapshot),
+			settle: (document) => {
+				void this.#drafts?.settle(document);
+			},
+		});
 		this.#saves = new FileSaveCoordinator({
 			saveText: deps.saveText ?? saveText,
 			getTimeoutMs: () => deps.saveTimeoutMs ?? FILE_SAVE_TIMEOUT_MS,
 		});
+	}
+
+	get guardRequest() {
+		return this.#dialogs.guardRequest;
+	}
+
+	get overwriteRequest() {
+		return this.#dialogs.overwriteRequest;
+	}
+
+	get thresholdRequest() {
+		return this.#dialogs.thresholdRequest;
+	}
+
+	get draftRequest() {
+		return this.#dialogs.draftRequest;
 	}
 
 	get all(): readonly FileViewSession[] {
@@ -426,19 +420,18 @@ export class FileSessionRegistry {
 
 	async #confirmDocumentDestructive(
 		session: FileViewSession,
-		reason: FileGuardRequest['reason'],
+		reason: FileDestructiveReason,
 	): Promise<boolean> {
 		while (true) {
 			const version = session.document.bufferVersion;
-			const choice = await this.#decisionQueue.enqueue(async () => {
+			const choice = await this.#dialogs.serialize(async () => {
 				if (this.get(session.id) !== session) return 'not-needed' as const;
 				if (session.document.mutationGuarded) return 'blocked' as const;
 				if (!session.dirty) return 'not-needed' as const;
-				return new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
-					this.#openMainInert(() => {
-						this.#guardResolve = resolve;
-						this.guardRequest = { sessionId: session.id, fileName: session.fileName, reason };
-					});
+				return this.#dialogs.askGuard({
+					sessionId: session.id,
+					fileName: session.fileName,
+					reason,
 				});
 			});
 			if (choice === 'not-needed') return true;
@@ -467,19 +460,11 @@ export class FileSessionRegistry {
 	}
 
 	resolveGuard(choice: 'save' | 'discard' | 'cancel'): void {
-		const resolve = this.#guardResolve;
-		this.#guardResolve = null;
-		this.guardRequest = null;
-		resolve?.(choice);
+		this.#dialogs.resolveGuard(choice);
 	}
 
 	resolveOverwrite(choice: FileConflictChoice, resolvedContent?: string): void {
-		const resolve = this.#overwriteResolve;
-		const snapshot = this.overwriteRequest;
-		this.#overwriteResolve = null;
-		this.overwriteRequest = null;
-		if (!resolve || !snapshot) return;
-		resolve({ choice, snapshot, resolvedContent: resolvedContent ?? snapshot.localContent });
+		this.#dialogs.resolveOverwrite(choice, resolvedContent);
 	}
 
 	async destroy(sessionId: string): Promise<void> {
@@ -545,10 +530,7 @@ export class FileSessionRegistry {
 	}
 
 	resolveThreshold(choice: FileThresholdChoice): void {
-		const request = this.thresholdRequest;
-		if (!request) return;
-		this.thresholdRequest = null;
-		request.resolve(choice);
+		this.#dialogs.resolveThreshold(choice);
 	}
 
 	async #createAndOpen(
@@ -558,11 +540,7 @@ export class FileSessionRegistry {
 	): Promise<FileViewSession | null> {
 		if (this.#destroyed) return null;
 		if (this.sessionCount >= FILE_SESSION_SOFT_LIMIT && request.reason === 'user-open') {
-			const choice = await new Promise<FileThresholdChoice>((resolve) => {
-				this.#openMainInert(() => {
-					this.thresholdRequest = { identity, resolve };
-				});
-			});
+			const choice = await this.#dialogs.askThreshold(identity);
 			if (choice !== 'open') return null;
 		}
 		await this.#teardowns.drain(key);
@@ -636,9 +614,9 @@ export class FileSessionRegistry {
 		if (!session || !session.document.executorAvailable || session.document.mutationGuarded) return;
 		const disk = await this.#io.loadConflictSnapshot(session);
 		if (!disk) return;
-		const decision = await this.#confirmConflict(session, disk);
+		const decision = await this.#conflicts.confirm(session, disk);
 		if (decision.choice !== 'save-checked' || !canSubmitFileWrite(session)) return;
-		if (!this.#applyConflictResolution(session, decision)) return;
+		if (!this.#conflicts.apply(session, decision)) return;
 		const controller = this.#beginSave(session.document);
 		try {
 			await this.#saves.submit(
@@ -655,10 +633,7 @@ export class FileSessionRegistry {
 	}
 
 	resolveDraft(choice: 'resume' | 'discard' | 'cancel'): void {
-		const resolve = this.#draftResolve;
-		this.#draftResolve = null;
-		this.draftRequest = null;
-		resolve?.(choice);
+		this.#dialogs.resolveDraft(choice);
 	}
 
 	#prepareDraftRecovery(document: FileDocumentState): Promise<boolean> {
@@ -674,7 +649,7 @@ export class FileSessionRegistry {
 			)
 		)
 			return Promise.resolve(true);
-		return this.#decisionQueue.enqueue(async () => {
+		return this.#dialogs.serialize(async () => {
 			if (this.#destroyed) return false;
 			if (document.loadedRevision || document.dirty || document.pendingRecoveryContent !== null)
 				return true;
@@ -685,12 +660,7 @@ export class FileSessionRegistry {
 				document.executorId,
 			);
 			if (!draft || !drafts) return true;
-			const choice = await new Promise<'resume' | 'discard' | 'cancel'>((resolve) => {
-				this.#openMainInert(() => {
-					this.#draftResolve = resolve;
-					this.draftRequest = { fileName: document.relativePath };
-				});
-			});
+			const choice = await this.#dialogs.askDraft(document.relativePath);
 			if (choice === 'cancel' || this.#destroyed || this.#drafts !== drafts) return false;
 			if (choice === 'resume') {
 				const body = await drafts.read(draft);
@@ -780,76 +750,15 @@ export class FileSessionRegistry {
 	): Promise<boolean> {
 		const disk = await this.#io.loadConflictSnapshot(session);
 		if (!disk) return false;
-		const decision = await this.#confirmConflict(session, disk, true);
+		const decision = await this.#conflicts.confirm(session, disk, true);
 		if (decision.choice !== 'save-checked' || !session.document.executorAvailable) return false;
-		if (!this.#applyConflictResolution(session, decision)) return false;
+		if (!this.#conflicts.apply(session, decision)) return false;
 		await this.#saves.submit(
 			session.document,
 			decision.resolvedContent,
 			controller,
 			decision.snapshot.diskRevision,
 		);
-		return true;
-	}
-
-	#confirmConflict(
-		session: FileViewSession,
-		disk: FileDiskSnapshot,
-		allowOwnedMutation = false,
-	): Promise<FileConflictDecision> {
-		return this.#decisionQueue.enqueue(async () => {
-			const snapshot: FileOverwriteRequest = {
-				sessionId: session.id,
-				fileName: session.fileName,
-				baseContent: session.baseline,
-				localContent: session.document.currentContent(),
-				diskContent: disk.content,
-				diskRevision: disk.revision,
-				localBufferVersion: session.document.bufferVersion,
-				lineSeparator: session.document.lineSeparator,
-			};
-			const cancelled = (): FileConflictDecision => ({
-				choice: 'cancel',
-				snapshot,
-				resolvedContent: snapshot.localContent,
-			});
-			const canResolve = () =>
-				this.get(session.id) === session &&
-				(allowOwnedMutation || !session.document.mutationGuarded);
-			if (!canResolve()) return cancelled();
-			const decision = await new Promise<FileConflictDecision>((resolve) => {
-				this.#openMainInert(() => {
-					this.#overwriteResolve = resolve;
-					this.overwriteRequest = snapshot;
-				});
-			});
-			if (
-				decision.choice !== 'cancel' &&
-				(!canResolve() || session.document.bufferVersion !== decision.snapshot.localBufferVersion)
-			) {
-				session.saveError = m.file_conflict_buffer_changed();
-				return cancelled();
-			}
-			if (decision.choice === 'accept-disk') {
-				this.#io.commitLoadedContent(session, {
-					kind: 'text',
-					content: decision.snapshot.diskContent,
-					revision: decision.snapshot.diskRevision,
-				});
-				void this.#drafts?.settle(session.document);
-			}
-			return this.get(session.id) === session ? decision : cancelled();
-		});
-	}
-
-	#applyConflictResolution(session: FileViewSession, decision: FileConflictDecision): boolean {
-		if (session.document.bufferVersion !== decision.snapshot.localBufferVersion) {
-			session.saveError = m.file_conflict_buffer_changed();
-			return false;
-		}
-		if (decision.resolvedContent !== session.document.currentContent()) {
-			session.document.applyUserEdit(decision.resolvedContent);
-		}
 		return true;
 	}
 

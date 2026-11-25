@@ -8,7 +8,10 @@ const VIM_CONTROL_KEYS = new Set(['b', 'd', 'e', 'r', 'u', 'y', 'o', 'i', 'w', '
 let modulePromise: Promise<VimModule> | null = null;
 
 function loadVim(): Promise<VimModule> {
-	return (modulePromise ??= import('@replit/codemirror-vim'));
+	return (modulePromise ??= import('@replit/codemirror-vim').catch((error: unknown) => {
+		modulePromise = null;
+		throw error;
+	}));
 }
 
 export class FileVimMode {

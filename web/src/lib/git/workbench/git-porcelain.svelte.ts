@@ -43,13 +43,13 @@ interface PorcelainLoadContext {
 export class GitPorcelainState {
 	inspectorView = $state<GitInspectorView>('none');
 	isLoading = $state(false);
-	conflicts = $state<GitConflictFile[]>([]);
+	conflicts = $state.raw<GitConflictFile[]>([]);
 	conflictDetails = $state<GitConflictDetails | null>(null);
-	stashes = $state<GitStashEntry[]>([]);
-	fileHistory = $state<GitFileHistoryEntry[]>([]);
-	blameLines = $state<GitBlameLine[]>([]);
+	stashes = $state.raw<GitStashEntry[]>([]);
+	fileHistory = $state.raw<GitFileHistoryEntry[]>([]);
+	blameLines = $state.raw<GitBlameLine[]>([]);
 	blameTruncated = $state(false);
-	graphCommits = $state<GitGraphCommit[]>([]);
+	graphCommits = $state.raw<GitGraphCommit[]>([]);
 	stashMessage = $state('');
 	stashIncludeUntracked = $state(false);
 	private activeLoadId = $state(0);
@@ -70,15 +70,11 @@ export class GitPorcelainState {
 	}
 
 	async loadCurrentView(project: GitProjectTarget): Promise<void> {
-		const context = this.beginTrackedLoad();
-		try {
-			if (this.inspectorView === 'conflicts') await this.loadConflicts(project, context);
-			else if (this.inspectorView === 'stash') await this.loadStashes(project, context);
-			else if (this.inspectorView === 'history') await this.loadHistory(project, context);
-			else if (this.inspectorView === 'graph') await this.loadGraph(project, context);
-		} finally {
-			if (this.activeLoadId === context.requestId) this.activeLoadAbort = null;
-		}
+		if (this.inspectorView === 'conflicts') await this.loadConflicts(project);
+		else if (this.inspectorView === 'stash') await this.loadStashes(project);
+		else if (this.inspectorView === 'history') await this.loadHistory(project);
+		else if (this.inspectorView === 'graph') await this.loadGraph(project);
+		else this.cancelActiveLoad();
 	}
 
 	cancelActiveLoad(): void {
@@ -88,20 +84,17 @@ export class GitPorcelainState {
 		this.isLoading = false;
 	}
 
-	async loadConflicts(
-		project: GitProjectTarget,
-		context: PorcelainLoadContext = this.beginTrackedLoad(),
-	): Promise<void> {
+	async loadConflicts(project: GitProjectTarget, parent?: PorcelainLoadContext): Promise<void> {
 		await this.withLoading(
 			'Failed to load conflicts',
-			async () => {
-				const result = await getGitConflicts(project, { signal: context?.signal });
+			async (context) => {
+				const result = await getGitConflicts(project, { signal: context.signal });
 				if (!this.isActiveLoad(context)) return;
 				const conflicts = result.conflicts;
 				let details: GitConflictDetails | null = null;
 				if (conflicts.length > 0) {
 					details = await getGitConflictDetails(project, conflicts[0].path, {
-						signal: context?.signal,
+						signal: context.signal,
 					});
 				}
 				if (!this.isActiveLoad(context)) return;
@@ -112,27 +105,15 @@ export class GitPorcelainState {
 					this.conflictDetails = null;
 				}
 			},
-			context,
+			parent,
 		);
 	}
 
 	async selectConflict(project: GitProjectTarget, filePath: string): Promise<void> {
-		const context = this.beginTrackedLoad();
-		try {
-			await this.withLoading(
-				'Failed to load conflict details',
-				async () => {
-					const details = await getGitConflictDetails(project, filePath, {
-						signal: context.signal,
-					});
-					if (!this.isActiveLoad(context)) return;
-					this.conflictDetails = details;
-				},
-				context,
-			);
-		} finally {
-			if (this.activeLoadId === context.requestId) this.activeLoadAbort = null;
-		}
+		await this.withLoading('Failed to load conflict details', async (context) => {
+			const details = await getGitConflictDetails(project, filePath, { signal: context.signal });
+			if (this.isActiveLoad(context)) this.conflictDetails = details;
+		});
 	}
 
 	async acceptConflictSide(
@@ -167,18 +148,15 @@ export class GitPorcelainState {
 		});
 	}
 
-	async loadStashes(
-		project: GitProjectTarget,
-		context: PorcelainLoadContext = this.beginTrackedLoad(),
-	): Promise<void> {
+	async loadStashes(project: GitProjectTarget, parent?: PorcelainLoadContext): Promise<void> {
 		await this.withLoading(
 			'Failed to load stashes',
-			async () => {
-				const result = await getGitStashes(project, { signal: context?.signal });
+			async (context) => {
+				const result = await getGitStashes(project, { signal: context.signal });
 				if (!this.isActiveLoad(context)) return;
 				this.stashes = result.stashes;
 			},
-			context,
+			parent,
 		);
 	}
 
@@ -266,47 +244,32 @@ export class GitPorcelainState {
 		}
 	}
 
-	async loadHistory(
-		project: GitProjectTarget,
-		context: PorcelainLoadContext = this.beginTrackedLoad(),
-	): Promise<void> {
+	private async loadHistory(project: GitProjectTarget): Promise<void> {
 		const filePath = this.deps.selectedFile();
-		if (!filePath) {
-			if (!this.isActiveLoad(context)) return;
-			this.fileHistory = [];
-			this.blameLines = [];
-			this.blameTruncated = false;
-			return;
-		}
-		await this.withLoading(
-			'Failed to load file history',
-			async () => {
-				const [history, blame] = await Promise.all([
-					getGitFileHistory(project, filePath, 50, { signal: context?.signal }),
-					getGitBlame(project, filePath, 'HEAD', 300, { signal: context?.signal }),
-				]);
-				if (!this.isActiveLoad(context) || this.deps.selectedFile() !== filePath) return;
-				this.fileHistory = history.commits;
-				this.blameLines = blame.lines;
-				this.blameTruncated = blame.truncated;
-			},
-			context,
-		);
+		await this.withLoading('Failed to load file history', async (context) => {
+			const { signal } = context;
+			if (!filePath) {
+				this.fileHistory = [];
+				this.blameLines = [];
+				this.blameTruncated = false;
+				return;
+			}
+			const [history, blame] = await Promise.all([
+				getGitFileHistory(project, filePath, 8, { signal }),
+				getGitBlame(project, filePath, 'HEAD', 12, { signal }),
+			]);
+			if (!this.isActiveLoad(context) || this.deps.selectedFile() !== filePath) return;
+			this.fileHistory = history.commits;
+			this.blameLines = blame.lines;
+			this.blameTruncated = blame.truncated;
+		});
 	}
 
-	async loadGraph(
-		project: GitProjectTarget,
-		context: PorcelainLoadContext = this.beginTrackedLoad(),
-	): Promise<void> {
-		await this.withLoading(
-			'Failed to load commit graph',
-			async () => {
-				const result = await getGitGraph(project, 200, { signal: context?.signal });
-				if (!this.isActiveLoad(context)) return;
-				this.graphCommits = result.commits;
-			},
-			context,
-		);
+	private async loadGraph(project: GitProjectTarget): Promise<void> {
+		await this.withLoading('Failed to load commit graph', async (context) => {
+			const result = await getGitGraph(project, 30, { signal: context.signal });
+			if (this.isActiveLoad(context)) this.graphCommits = result.commits;
+		});
 	}
 
 	reset(): void {
@@ -340,9 +303,11 @@ export class GitPorcelainState {
 	private async withLoading(
 		label: string,
 		action: (context: PorcelainLoadContext) => Promise<void>,
-		context: PorcelainLoadContext = this.beginTrackedLoad(),
+		parent?: PorcelainLoadContext,
 	): Promise<void> {
-		if (this.isActiveLoad(context)) this.isLoading = true;
+		const context = parent ?? this.beginTrackedLoad();
+		if (!this.isActiveLoad(context)) return;
+		if (!parent) this.isLoading = true;
 		try {
 			await action(context);
 		} catch (error) {
@@ -353,7 +318,7 @@ export class GitPorcelainState {
 				);
 			}
 		} finally {
-			if (this.isActiveLoad(context)) {
+			if (!parent && this.isActiveLoad(context)) {
 				this.isLoading = false;
 				this.activeLoadAbort = null;
 			}

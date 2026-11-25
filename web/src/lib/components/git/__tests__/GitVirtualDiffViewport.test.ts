@@ -4,7 +4,14 @@ import type {
 	GitVirtualFileHeaderRow,
 	GitVirtualReviewRow,
 } from '$lib/git/review/git-virtual-review-document.svelte.js';
-import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/__tests__/array-git-virtual-review-row-source.js';
+import { buildUnifiedDiffRowView } from '$lib/git/review/git-diff-rows.js';
+import {
+	finishGitReviewPerformanceSpan,
+	pendingGitReviewViewportMilestones,
+	registerGitReviewDocument,
+	startGitReviewPerformanceSpan,
+} from '$lib/git/review/git-review-performance.js';
 import { installGitVirtualDiffTestLayout } from './git-virtual-diff-test-layout.js';
 import GitVirtualDiffViewportTestHost from './GitVirtualDiffViewportTestHost.svelte';
 
@@ -51,6 +58,54 @@ describe('GitVirtualDiffViewport', () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+	});
+
+	it('uses rendered rows for telemetry and stops inspecting file state after both milestones', async () => {
+		const span = startGitReviewPerformanceSpan('snapshot');
+		registerGitReviewDocument('test-document', span);
+		finishGitReviewPerformanceSpan(span);
+		const header = makeRows()[0];
+		if (header.kind !== 'file-header') throw new Error('Expected a file header');
+		const row: GitVirtualReviewRow = {
+			kind: 'unified-row',
+			id: 'telemetry-row',
+			filePath: header.filePath,
+			file: header.file,
+			estimatedHeight: 22,
+			actionTarget: null,
+			selectableLineKeys: () => [],
+			view: buildUnifiedDiffRowView(
+				{
+					filePath: header.filePath,
+					activeTab: 'staged',
+					readOnly: true,
+					selectedLineKeys: new Set(),
+					composerTarget: null,
+				},
+				{
+					key: 'line',
+					kind: 'add',
+					beforeLine: null,
+					afterLine: 1,
+					beforeText: '',
+					afterText: 'new line',
+					hunkIndex: 0,
+					diffLineIndex: 0,
+				},
+			),
+		};
+		const fileState = vi.fn(() => 'resolved' as const);
+		const rowsInRange = vi.fn(() => [header, row]);
+		const source = { ...arrayGitVirtualReviewRowSource([header, row]), fileState, rowsInRange };
+		const panel = render(GitVirtualDiffViewportTestHost, {
+			props: { source, pinFileHeaders: false },
+		});
+		await waitFor(() => expect(pendingGitReviewViewportMilestones('test-document')).toBeNull());
+		expect(fileState).toHaveBeenCalled();
+		expect(rowsInRange).not.toHaveBeenCalled();
+		fileState.mockClear();
+		await panel.rerender({ source: { ...source } });
+		expect(fileState).not.toHaveBeenCalled();
 	});
 
 	it('does not materialize a header copy when the caller disables pinning', async () => {

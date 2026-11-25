@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 import type { GitVirtualFilePlaceholderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
-import { arrayGitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
+import { arrayGitVirtualReviewRowSource } from '$lib/git/review/__tests__/array-git-virtual-review-row-source.js';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,

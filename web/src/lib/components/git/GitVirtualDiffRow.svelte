@@ -38,13 +38,13 @@
 	function selectLine(
 		event: MouseEvent | KeyboardEvent,
 		selectionKey: string | null,
-		selectableLineKeys: string[],
+		selectableLineKeys: () => string[],
 	): void {
 		if (interaction.kind !== 'workbench' || !selectionKey || !row.actionTarget) return;
 		if (event.shiftKey && interaction.selectedLineKeys.size > 0) {
 			const last = Array.from(interaction.selectedLineKeys).at(-1);
 			if (last)
-				interaction.onSelectLineRange(last, selectionKey, selectableLineKeys, row.actionTarget);
+				interaction.onSelectLineRange(last, selectionKey, selectableLineKeys(), row.actionTarget);
 			return;
 		}
 		interaction.onToggleLineSelection(selectionKey, row.actionTarget);
@@ -71,7 +71,7 @@
 		filePath: string,
 		target: GitDiffLineContextTarget | null,
 		selectionKey: string | null,
-		selectableLineKeys: string[],
+		selectableLineKeys: () => string[],
 	): void {
 		if (hasSelectedText(event.currentTarget)) return;
 		if (interaction.kind === 'workbench' && usesLineSelectionModifier(event) && selectionKey) {
@@ -157,6 +157,70 @@
 	{/if}
 {/snippet}
 
+{#snippet hunkHeader(
+	text: string,
+	background: string,
+	actionTarget: GitDiffActionTarget | null,
+	hunkIndex: number,
+)}
+	<div class="flex items-center gap-2 px-2 py-1 text-muted-foreground {background}">
+		<span
+			class="typography-code-diff min-w-0 flex-1 truncate"
+			style:font-size={`${headerFontSize}px`}
+		>
+			{text}
+		</span>
+		{#if workbenchControls && actionTarget}
+			<button
+				type="button"
+				disabled={workbenchControls.operationPending}
+				onclick={() => startHunkAction(actionTarget, hunkIndex)}
+				class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+				title={hunkActionTitle()}
+			>
+				{#if workbenchControls.activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
+						class="h-3 w-3"
+					/>{/if}
+				{workbenchControls.activeTab === 'unstaged' ? m.git_action_stage() : m.git_action_unstage()}
+			</button>
+		{/if}
+	</div>
+{/snippet}
+
+{#snippet commentArea(
+	showComposer: boolean,
+	before: GitDiffLineContextTarget | null,
+	after: GitDiffLineContextTarget | null,
+)}
+	{#if showComposer && commentControls?.composerState.open && (interaction.kind !== 'workbench' || interaction.showInlineCommentComposer)}
+		<GitVirtualCommentComposer
+			body={commentControls.composerState.body}
+			severity={commentControls.composerState.severity}
+			focusPending={commentControls.composerState.focusPending}
+			submitLabel={m.git_comment_add_to_chat()}
+			onBodyChange={commentControls.onComposerBodyChange}
+			onSeverityChange={commentControls.onComposerSeverityChange}
+			onSubmit={commentControls.onComposerSubmit}
+			onClose={commentControls.onComposerClose}
+			onFocusHandled={commentControls.onComposerFocusHandled}
+		/>
+		{#if commentControls.commentError}<GitCommentAppendError
+				error={commentControls.commentError}
+				copyText={commentControls.commentCopyText}
+			/>{/if}
+	{/if}
+	{#if commentControls && (feedbackMatches(before) || feedbackMatches(after))}<div
+			class="flex items-center gap-2 border-t border-border bg-interactive-accent/10 px-3 py-1.5 text-xs text-interactive-accent"
+			role="status"
+		>
+			<span class="flex-1">{commentControls.commentFeedback?.message}</span><button
+				type="button"
+				class="font-medium underline underline-offset-2"
+				onclick={commentControls.onOpenChat}>{m.git_comment_open_chat()}</button
+			>
+		</div>{/if}
+{/snippet}
+
 {#if row.kind === 'unified-row'}
 	<div
 		class="flow-root font-mono"
@@ -164,30 +228,12 @@
 		data-git-diff-content-row
 	>
 		{#if row.view.isHunkHeader}
-			<div class="flex items-center gap-2 px-2 py-1 text-muted-foreground {row.view.bgClass}">
-				<span
-					class="typography-code-diff min-w-0 flex-1 truncate"
-					style:font-size={`${headerFontSize}px`}
-				>
-					{row.view.row.beforeText}
-				</span>
-				{#if workbenchControls && row.actionTarget}
-					<button
-						type="button"
-						disabled={workbenchControls.operationPending}
-						onclick={() => startHunkAction(row.actionTarget!, row.view.row.hunkIndex)}
-						class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						title={hunkActionTitle()}
-					>
-						{#if workbenchControls.activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
-								class="h-3 w-3"
-							/>{/if}
-						{workbenchControls.activeTab === 'unstaged'
-							? m.git_action_stage()
-							: m.git_action_unstage()}
-					</button>
-				{/if}
-			</div>
+			{@render hunkHeader(
+				row.view.row.beforeText,
+				row.view.bgClass,
+				row.actionTarget,
+				row.view.row.hunkIndex,
+			)}
 		{:else}
 			{@const defaultTarget = row.view.rowContextTarget}
 			<div
@@ -229,7 +275,7 @@
 								row.file.path,
 								row.view.beforeContextTarget,
 								row.view.selectionKey,
-								row.selectableLineKeys(),
+								row.selectableLineKeys,
 							)}
 						ondblclick={() => openEditor(row.file.path, row.view.row.beforeLine)}
 						title={m.git_comment_add_old_line_to_chat({
@@ -259,7 +305,7 @@
 								row.file.path,
 								row.view.afterContextTarget,
 								row.view.selectionKey,
-								row.selectableLineKeys(),
+								row.selectableLineKeys,
 							)}
 						ondblclick={() => openEditor(row.file.path, row.view.row.afterLine)}
 						title={m.git_comment_add_new_line_to_chat({ line: row.view.afterContextTarget.line })}
@@ -288,7 +334,7 @@
 								row.file.path,
 								defaultTarget,
 								row.view.selectionKey,
-								row.selectableLineKeys(),
+								row.selectableLineKeys,
 							)}
 					>
 						<GitDiffSyntaxText
@@ -311,33 +357,11 @@
 				{@render reviewAffordance(row.file.path, defaultTarget)}
 			</div>
 		{/if}
-		{#if row.view.showComposer && commentControls?.composerState.open && (interaction.kind !== 'workbench' || interaction.showInlineCommentComposer)}
-			<GitVirtualCommentComposer
-				body={commentControls.composerState.body}
-				severity={commentControls.composerState.severity}
-				focusPending={commentControls.composerState.focusPending}
-				submitLabel={m.git_comment_add_to_chat()}
-				onBodyChange={commentControls.onComposerBodyChange}
-				onSeverityChange={commentControls.onComposerSeverityChange}
-				onSubmit={commentControls.onComposerSubmit}
-				onClose={commentControls.onComposerClose}
-				onFocusHandled={commentControls.onComposerFocusHandled}
-			/>
-			{#if commentControls.commentError}<GitCommentAppendError
-					error={commentControls.commentError}
-					copyText={commentControls.commentCopyText}
-				/>{/if}
-		{/if}
-		{#if commentControls && (feedbackMatches(row.view.beforeContextTarget) || feedbackMatches(row.view.afterContextTarget))}<div
-				class="flex items-center gap-2 border-t border-border bg-interactive-accent/10 px-3 py-1.5 text-xs text-interactive-accent"
-				role="status"
-			>
-				<span class="flex-1">{commentControls.commentFeedback?.message}</span><button
-					type="button"
-					class="font-medium underline underline-offset-2"
-					onclick={commentControls.onOpenChat}>{m.git_comment_open_chat()}</button
-				>
-			</div>{/if}
+		{@render commentArea(
+			row.view.showComposer,
+			row.view.beforeContextTarget,
+			row.view.afterContextTarget,
+		)}
 	</div>
 {:else}
 	<div
@@ -346,30 +370,12 @@
 		data-git-diff-content-row
 	>
 		{#if row.view.isHunkHeader}
-			<div class="flex items-center gap-2 bg-diff-hunk-header px-2 py-1 text-muted-foreground">
-				<span
-					class="typography-code-diff min-w-0 flex-1 truncate"
-					style:font-size={`${headerFontSize}px`}
-				>
-					{row.view.row.headerText}
-				</span>
-				{#if workbenchControls && row.actionTarget}
-					<button
-						type="button"
-						disabled={workbenchControls.operationPending}
-						onclick={() => startHunkAction(row.actionTarget!, row.view.row.hunkIndex ?? -1)}
-						class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-						title={hunkActionTitle()}
-					>
-						{#if workbenchControls.activeTab === 'unstaged'}<Plus class="h-3 w-3" />{:else}<Minus
-								class="h-3 w-3"
-							/>{/if}
-						{workbenchControls.activeTab === 'unstaged'
-							? m.git_action_stage()
-							: m.git_action_unstage()}
-					</button>
-				{/if}
-			</div>
+			{@render hunkHeader(
+				row.view.row.headerText ?? '',
+				'bg-diff-hunk-header',
+				row.actionTarget,
+				row.view.row.hunkIndex ?? -1,
+			)}
 		{:else}
 			<div
 				data-git-diff-review-row
@@ -391,7 +397,7 @@
 										row.file.path,
 										cellView.contextTarget,
 										cellView.selectionKey,
-										row.selectableLineKeys(),
+										row.selectableLineKeys,
 									)}
 								ondblclick={() =>
 									openEditor(row.file.path, cellView.side === 'after' ? cellView.cell.line : null)}
@@ -427,7 +433,7 @@
 												row.file.path,
 												cellView.contextTarget,
 												cellView.selectionKey,
-												row.selectableLineKeys(),
+												row.selectableLineKeys,
 											)}
 									>
 										<GitDiffSyntaxText
@@ -476,32 +482,10 @@
 				{/each}
 			</div>
 		{/if}
-		{#if row.view.showComposer && commentControls?.composerState.open && (interaction.kind !== 'workbench' || interaction.showInlineCommentComposer)}
-			<GitVirtualCommentComposer
-				body={commentControls.composerState.body}
-				severity={commentControls.composerState.severity}
-				focusPending={commentControls.composerState.focusPending}
-				submitLabel={m.git_comment_add_to_chat()}
-				onBodyChange={commentControls.onComposerBodyChange}
-				onSeverityChange={commentControls.onComposerSeverityChange}
-				onSubmit={commentControls.onComposerSubmit}
-				onClose={commentControls.onComposerClose}
-				onFocusHandled={commentControls.onComposerFocusHandled}
-			/>
-			{#if commentControls.commentError}<GitCommentAppendError
-					error={commentControls.commentError}
-					copyText={commentControls.commentCopyText}
-				/>{/if}
-		{/if}
-		{#if commentControls && (feedbackMatches(row.view.left?.contextTarget ?? null) || feedbackMatches(row.view.right?.contextTarget ?? null))}<div
-				class="flex items-center gap-2 border-t border-border bg-interactive-accent/10 px-3 py-1.5 text-xs text-interactive-accent"
-				role="status"
-			>
-				<span class="flex-1">{commentControls.commentFeedback?.message}</span><button
-					type="button"
-					class="font-medium underline underline-offset-2"
-					onclick={commentControls.onOpenChat}>{m.git_comment_open_chat()}</button
-				>
-			</div>{/if}
+		{@render commentArea(
+			row.view.showComposer,
+			row.view.left?.contextTarget ?? null,
+			row.view.right?.contextTarget ?? null,
+		)}
 	</div>
 {/if}
