@@ -1,6 +1,7 @@
 export interface MobileViewportSnapshot {
 	visualViewportHeight: number;
 	visualViewportOffsetTop: number;
+	visualViewportScale?: number;
 	windowInnerHeight: number;
 	baselineAppHeight?: number | null;
 	previousAppHeight?: number | null;
@@ -34,6 +35,7 @@ export function computeMobileViewportMetrics(
 	const windowInnerHeight = finitePositive(snapshot.windowInnerHeight);
 	const visualViewportHeight = finitePositive(snapshot.visualViewportHeight);
 	const visualViewportOffsetTop = finitePositive(snapshot.visualViewportOffsetTop) ?? 0;
+	const scale = Math.max(1, finitePositive(snapshot.visualViewportScale) ?? 1);
 	const fallbackHeight = previousAppHeight ?? windowInnerHeight ?? minAppHeight;
 	const stableVisualHeight =
 		visualViewportHeight && visualViewportHeight >= minAppHeight
@@ -41,11 +43,13 @@ export function computeMobileViewportMetrics(
 			: fallbackHeight;
 	const appHeight = Math.round(Math.max(minAppHeight, stableVisualHeight));
 	const keyboardReferenceHeight = visualViewportHeight ?? appHeight;
+	// Zoom reduces the expected visual height, and panning alone does not occlude it.
+	const expectedVisualHeight = windowInnerHeight === null ? appHeight : windowInnerHeight / scale;
 	const keyboardHeight = Math.max(
 		0,
-		Math.round((windowInnerHeight ?? appHeight) - keyboardReferenceHeight),
+		Math.round(expectedVisualHeight - keyboardReferenceHeight),
 		Math.round((baselineAppHeight ?? appHeight) - keyboardReferenceHeight),
-		Math.round(visualViewportOffsetTop),
+		scale === 1 ? Math.round(visualViewportOffsetTop) : 0,
 	);
 	const keyboardVisible = keyboardHeight >= keyboardVisibleThreshold;
 

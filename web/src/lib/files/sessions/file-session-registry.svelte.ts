@@ -22,7 +22,6 @@ import {
 	createFileDraftRepository,
 	type FileDraftRepository,
 	type FileDraftSummary,
-	type FileDraftVersion,
 } from '$lib/files/persistence/file-draft-repository.js';
 import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.svelte.js';
 import {
@@ -371,14 +370,8 @@ export class FileSessionRegistry {
 		revision: FileRevision,
 	): Promise<void> {
 		const drafts = this.#drafts;
-		let observed: FileDraftVersion | undefined;
-		// A late storage observation does not delay or authorize cleanup after Save.
-		void drafts?.observeBeforeSave(document).then((version) => {
-			observed = version;
-		});
 		await this.#saves.submit(document, content, controller, revision);
-		if (observed && !document.dirty && drafts === this.#drafts)
-			void drafts?.settle(document, observed);
+		if (!document.dirty && drafts === this.#drafts) drafts?.confirmSave(document, content);
 	}
 
 	async refresh(sessionId: string): Promise<void> {

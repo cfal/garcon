@@ -7,7 +7,6 @@ import {
 	type FileDraftRepository,
 	type FileDraft,
 	type FileDraftSummary,
-	type FileDraftVersion,
 } from './file-draft-repository.js';
 
 const FILE_DRAFT_IDLE_DELAY_MS = 750;
@@ -22,6 +21,7 @@ interface FileDraftCoordinatorOptions {
 
 interface PendingCheckpoint {
 	document: FileDocumentState;
+	savedContent?: string;
 	idleTimer: ReturnType<typeof setTimeout> | null;
 	maxTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -34,7 +34,7 @@ interface QueuedCheckpoint {
 
 interface CleanCheckpoint {
 	cleanContent: string;
-	observed?: FileDraftVersion;
+	savedContent?: string;
 }
 
 export class FileDraftCoordinator {
@@ -43,7 +43,7 @@ export class FileDraftCoordinator {
 	readonly #pending = new Map<string, PendingCheckpoint>();
 	readonly #writes = new Map<string, Promise<void>>();
 	readonly #queuedCheckpoints = new Map<string, QueuedCheckpoint>();
-	readonly #ownedCheckpoints = new Map<string, FileDraftVersion>();
+	readonly #ownedCheckpoints = new Map<string, Pick<FileDraft, 'savedAt' | 'checkpointId'>>();
 	#discoveryGeneration = 0;
 	#destroyed = false;
 
@@ -147,19 +147,12 @@ export class FileDraftCoordinator {
 		);
 	}
 
-	async observeBeforeSave(document: FileDocumentState): Promise<FileDraftVersion | undefined> {
-		if (!this.options.repository.durable) return undefined;
-		try {
-			return (
-				(await this.options.repository.snapshotDraftVersion(this.#draftKey(document))) ?? undefined
-			);
-		} catch {
-			return undefined;
-		}
+	confirmSave(document: FileDocumentState, content: string): void {
+		this.#entry(document).savedContent = content;
 	}
 
-	settle(document: FileDocumentState, observed?: FileDraftVersion): Promise<void> {
-		return this.#checkpoint(this.#entry(document), observed);
+	settle(document: FileDocumentState): Promise<void> {
+		return this.#checkpoint(this.#entry(document));
 	}
 
 	closeDocument(document: FileDocumentState): void {
@@ -222,7 +215,7 @@ export class FileDraftCoordinator {
 		this.#ownedCheckpoints.set(documentId, { savedAt, checkpointId });
 	}
 
-	#checkpoint(pending: PendingCheckpoint, observed?: FileDraftVersion): Promise<void> {
+	#checkpoint(pending: PendingCheckpoint): Promise<void> {
 		this.#clearTimers(pending);
 		const document = pending.document;
 		if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
@@ -244,13 +237,20 @@ export class FileDraftCoordinator {
 			: null;
 		if (!record) {
 			this.#queuedCheckpoints.delete(documentId);
-			if (!observed && !this.#writes.has(documentId) && !this.#ownedCheckpoints.has(documentId))
+			if (
+				pending.savedContent === undefined &&
+				!this.#writes.has(documentId) &&
+				!this.#ownedCheckpoints.has(documentId)
+			) {
+				document.recoveryError = null;
 				return Promise.resolve();
-			const checkpoint = { cleanContent: document.baseline, observed };
+			}
+			const checkpoint = { cleanContent: document.baseline, savedContent: pending.savedContent };
 			return this.#enqueue(documentId, () =>
-				this.#writeCheckpoint(documentId, document, checkpoint),
+				this.#writeCheckpoint(documentId, pending, checkpoint),
 			);
 		}
+		pending.savedContent = undefined;
 		const queued = this.#queuedCheckpoints.get(documentId);
 		if (queued?.document === document) {
 			queued.record = record;
@@ -260,7 +260,7 @@ export class FileDraftCoordinator {
 		checkpoint.completion = this.#enqueue(documentId, async () => {
 			if (this.#queuedCheckpoints.get(documentId) === checkpoint)
 				this.#queuedCheckpoints.delete(documentId);
-			await this.#writeCheckpoint(documentId, document, checkpoint.record);
+			await this.#writeCheckpoint(documentId, pending, checkpoint.record);
 		});
 		this.#queuedCheckpoints.set(documentId, checkpoint);
 		return checkpoint.completion;
@@ -268,21 +268,24 @@ export class FileDraftCoordinator {
 
 	async #writeCheckpoint(
 		documentId: string,
-		document: FileDocumentState,
+		pending: PendingCheckpoint,
 		record: FileDraft | CleanCheckpoint,
 	): Promise<void> {
+		const { document } = pending;
 		try {
 			if ('cleanContent' in record) {
 				const owned = this.#ownedCheckpoints.get(documentId);
-				if (!owned && !record.observed) return;
-				await this.options.repository.deleteDraft(documentId, (current) => {
-					const matchesContent = current.content === record.cleanContent;
-					return (
-						(matchesVersion(current, owned) &&
-							(current.checkpointId !== undefined || matchesContent)) ||
-						(matchesContent && matchesVersion(current, record.observed))
+				if (owned || record.savedContent !== undefined)
+					await this.options.repository.deleteDraft(
+						documentId,
+						(current) =>
+							current.content === record.savedContent ||
+							(owned !== undefined &&
+								current.savedAt === owned.savedAt &&
+								current.checkpointId === owned.checkpointId &&
+								(current.checkpointId !== undefined || current.content === record.cleanContent)),
 					);
-				});
+				if (pending.savedContent === record.savedContent) pending.savedContent = undefined;
 				this.#ownedCheckpoints.delete(documentId);
 				this.available = this.available.filter((entry) => entry.documentId !== documentId);
 			} else {
@@ -316,14 +319,6 @@ export class FileDraftCoordinator {
 		pending.idleTimer = null;
 		pending.maxTimer = null;
 	}
-}
-
-function matchesVersion(current: FileDraftVersion, expected: FileDraftVersion | undefined): boolean {
-	return (
-		expected !== undefined &&
-		current.savedAt === expected.savedAt &&
-		current.checkpointId === expected.checkpointId
-	);
 }
 
 function errorMessage(error: unknown): string {

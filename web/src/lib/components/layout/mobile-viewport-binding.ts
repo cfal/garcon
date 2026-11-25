@@ -19,11 +19,10 @@ export function bindMobileViewport(
 
 	function applyViewportMetrics() {
 		frameId = null;
-		// Desktop window resizing and pinch zoom are not keyboard signals.
-		const zoomed = overlayOnly && viewport.scale > 1;
 		const metrics = computeMobileViewportMetrics({
-			visualViewportHeight: zoomed ? window.innerHeight : viewport.height,
-			visualViewportOffsetTop: zoomed ? 0 : viewport.offsetTop,
+			visualViewportHeight: viewport.height,
+			visualViewportOffsetTop: viewport.offsetTop,
+			visualViewportScale: overlayOnly ? viewport.scale : undefined,
 			windowInnerHeight: window.innerHeight,
 			baselineAppHeight,
 			previousAppHeight,

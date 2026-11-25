@@ -109,7 +109,7 @@ describe('bindMobileViewport', () => {
 		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('');
 	});
 
-	it('ignores ordinary window shrink and zoom but detects a wide-device keyboard overlay', () => {
+	it('ignores ordinary window shrink but detects a wide-device keyboard overlay', () => {
 		unbind = bindMobileViewport(onMetrics, 'overlay-only');
 		flushFrame();
 
@@ -120,20 +120,42 @@ describe('bindMobileViewport', () => {
 		expect(onMetrics).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardHeight: 0 }));
 		expect(style.getPropertyValue('--app-height')).toBe('');
 
-		viewport.scale = 1.5;
 		viewport.height = 430;
 		viewport.offsetTop = 100;
-		viewport.dispatchEvent(new Event('resize'));
-		flushFrame();
-		expect(onMetrics).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardHeight: 0 }));
-		expect(style.getPropertyValue('--app-height')).toBe('');
-
-		viewport.scale = 1;
 		viewport.dispatchEvent(new Event('resize'));
 		flushFrame();
 		expect(onMetrics).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardHeight: 220 }));
 		expect(style.getPropertyValue('--app-height')).toBe('430px');
 		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('315px');
+	});
+
+	it('distinguishes a pinch-zoomed viewport from a keyboard overlay at the same scale', () => {
+		vi.stubGlobal('innerHeight', 900);
+		viewport.height = 600;
+		viewport.offsetTop = 120;
+		viewport.scale = 1.5;
+		unbind = bindMobileViewport(onMetrics, 'overlay-only');
+		flushFrame();
+
+		expect(onMetrics).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardHeight: 0 }));
+		expect(style.getPropertyValue('--app-height')).toBe('');
+		expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('');
+		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('');
+
+		viewport.height = 390;
+		viewport.offsetTop = 60;
+		viewport.dispatchEvent(new Event('resize'));
+		flushFrame();
+		expect(onMetrics).toHaveBeenLastCalledWith({
+			appHeight: 390,
+			viewportOffsetTop: 60,
+			viewportCenterY: 255,
+			keyboardHeight: 210,
+			keyboardVisible: true,
+		});
+		expect(style.getPropertyValue('--app-height')).toBe('390px');
+		expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('60px');
+		expect(style.getPropertyValue('--app-viewport-center-y')).toBe('255px');
 	});
 
 	it('refreshes on pageshow and visible-only visibility changes', () => {
