@@ -21,6 +21,7 @@
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { bindCatalogReconnect } from '$lib/snippets/catalog-reconnect.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -356,6 +357,7 @@
 			} else browserNotificationsRouter.releasePermissions();
 		});
 	});
+	onMount(() => bindCatalogReconnect(ws, [preambles, snippets]));
 	onMount(() =>
 		installNativeConnectionNotification(
 			ws,
@@ -389,8 +391,6 @@
 		untrack(() => void transcriptSearchStatus.refresh());
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
 		untrack(() => pullRequestReviews.invalidate());
-		untrack(() => void preambles.refreshIfLoaded());
-		untrack(() => void snippets.refreshIfLoaded());
 		untrack(() => void executors.refresh());
 		untrack(() => {
 			apiProviders.invalidate();

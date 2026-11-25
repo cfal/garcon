@@ -107,10 +107,7 @@
 	});
 
 	function retryLoad(): void {
-		void Promise.all([
-			snippets.refresh({ initial: true }),
-			preambles.refresh({ initial: true }),
-		]).catch(() => undefined);
+		void Promise.all([snippets.refresh(), preambles.refresh()]).catch(() => undefined);
 	}
 
 	function handleOpenChange(nextOpen: boolean): void {
