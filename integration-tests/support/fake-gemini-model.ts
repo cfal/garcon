@@ -43,6 +43,15 @@ export interface GeminiFault {
   readonly reason: string;
 }
 
+// Streams its frames this far apart instead of all at once. agy relays
+// updates that arrive together as one batch, so only a paced stream shows how
+// it relays output a real model streams over time.
+export interface PacedGeminiTurn {
+  readonly kind: 'paced';
+  readonly parts: readonly GeminiPart[];
+  readonly frameIntervalMs: number;
+}
+
 export interface HeldGeminiTurn {
   readonly requested: Promise<RecordedGeminiRequest>;
   release(): void;
@@ -97,7 +106,7 @@ function wirePart(part: GeminiPart): Record<string, unknown> {
   return { functionCall: { id: part.id, name: part.name, args: part.args } };
 }
 
-function sseResponse(parts: readonly GeminiPart[]): Response {
+function sseResponse(parts: readonly GeminiPart[], frameIntervalMs = 0): Response {
   const usageMetadata = { promptTokenCount: 42, candidatesTokenCount: 7, totalTokenCount: 49 };
   const frames = parts.map((part, index) => ({
     candidates: [{
@@ -107,17 +116,25 @@ function sseResponse(parts: readonly GeminiPart[]): Response {
     ...(index === parts.length - 1 ? { usageMetadata } : {}),
   }));
   const encoder = new TextEncoder();
+  let cancelled = false;
   return new Response(new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const frame of frames) controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\r\n\r\n`));
+    async start(controller) {
+      for (const [index, frame] of frames.entries()) {
+        if (index > 0 && frameIntervalMs > 0) await Bun.sleep(frameIntervalMs);
+        if (cancelled) return;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\r\n\r\n`));
+      }
       controller.close();
+    },
+    cancel() {
+      cancelled = true;
     },
   }), { headers: { 'content-type': 'text/event-stream' } });
 }
 
 export class FakeGeminiModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: Array<GeminiTurn | GeminiFault> = [];
+  readonly #turns: Array<GeminiTurn | GeminiFault | PacedGeminiTurn> = [];
   readonly #requests: RecordedGeminiRequest[] = [];
   readonly #violations: string[] = [];
   readonly #auxiliaryRequests: string[] = [];
@@ -144,6 +161,10 @@ export class FakeGeminiModel {
 
   scriptTurn(turn: GeminiTurn): void {
     this.#turns.push(turn);
+  }
+
+  scriptPacedTurn(parts: readonly GeminiPart[], frameIntervalMs: number): void {
+    this.#turns.push({ kind: 'paced', parts, frameIntervalMs });
   }
 
   // Holds the response before its first frame until the test releases it.
@@ -237,15 +258,16 @@ export class FakeGeminiModel {
       );
       return Response.json({ error: { code: 500, message: 'no scripted turn', status: 'INTERNAL' } }, { status: 500 });
     }
-    if (!Array.isArray(turn) && typeof turn !== 'function') {
-      return Response.json({
-        error: {
-          code: turn.status,
-          message: turn.message,
-          status: turn.reason,
-        },
-      }, { status: turn.status });
+    if (Array.isArray(turn) || typeof turn === 'function') {
+      return sseResponse(await (typeof turn === 'function' ? turn(recorded) : turn));
     }
-    return sseResponse(await (typeof turn === 'function' ? turn(recorded) : turn));
+    if (turn.kind === 'paced') return sseResponse(turn.parts, turn.frameIntervalMs);
+    return Response.json({
+      error: {
+        code: turn.status,
+        message: turn.message,
+        status: turn.reason,
+      },
+    }, { status: turn.status });
   }
 }

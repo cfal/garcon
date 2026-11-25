@@ -206,6 +206,36 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     }, { serverEnvironment });
   }, TURN_TIMEOUT_MS);
 
+  test('keeps an answer whole when the model interleaves thought parts with it', async () => {
+    const { model } = requireEnvironment();
+    const hash = marker('HASH');
+    const half = Math.floor(hash.length / 2);
+    // Each text boundary falls inside Markdown, as a streamed answer's can.
+    model.scriptPacedTurn([
+      geminiThought('Checking the merge.'),
+      geminiText('- **Merged:** at `'),
+      geminiThought(' Then the deploy.'),
+      geminiText(hash.slice(0, half)),
+      geminiThought(' Then the status.'),
+      geminiText(`${hash.slice(half)}\`.\n- **Deployed:** **Not`),
+      geminiThought(' Done.'),
+      geminiText(' started**.'),
+    ], 50);
+    await withIntegrationFixture('antigravity-scripted-interleaved-thought', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(scriptedAntigravityStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: 'summarize the release',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, afterIndex: cursor });
+      const messages = (await fixture.client.getMessages(chatId)).messages;
+      expect(assistantContents(messages)).toEqual([`- **Merged:** at \`${hash}\`.\n- **Deployed:** **Not started**.`]);
+      expect(messagesOfType(messages, 'thinking').map((message) => message.content))
+        .toEqual(['Checking the merge. Then the deploy. Then the status. Done.']);
+      model.assertSettled();
+    }, withScriptedAntigravity());
+  }, TURN_TIMEOUT_MS);
+
   test('offers no selectable models when the executor lacks agy', async () => {
     await withIntegrationFixture('antigravity-missing-cli', async ({ client }) => {
       const catalog = await client.listAgentCatalog();

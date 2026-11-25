@@ -65,6 +65,10 @@ After a cancelled turn, agy merges the next user message into the unanswered one
 
 A chat's project path cannot change. agy keeps the working directory recorded with the conversation and ignores the `cwd` that `session/resume` passes, even in a new process started in the new directory, so a moved chat would keep reading and editing the old one. The descriptor therefore declares `supportsProjectPathUpdate: false`, and the scripted tier asserts that Garcon refuses the move.
 
+### Message And Thought Text
+
+agy relays the model's thought and text parts in the order the model streams them, so `agent_thought_chunk` updates can fall between the `agent_message_chunk` updates of a single answer. The converter keeps the two in separate buffers and publishes them only at a tool frame or the end of the turn. Each segment therefore becomes at most one thinking row followed by one assistant row, as with Cursor. Publishing at every switch between thought and text made each chunk its own row, and Markdown that spans a chunk boundary rendered broken ([#1060](https://github.com/cfal/garcon/issues/1060)).
+
 ### Executor Errors
 
 Upstream model failures (invalid key, quota, HTTP 4xx/5xx) do not fail the ACP prompt. The CLI emits one complete `agent_message_chunk` whose text begins with `\n⚠ agent executor error: ` and then ends the turn normally with `end_turn`. The converter treats the marker as a failure only when two things hold:

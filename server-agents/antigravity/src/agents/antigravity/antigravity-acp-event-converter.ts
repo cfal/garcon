@@ -114,20 +114,18 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     context: AcpSessionUpdateContext,
   ): ChatMessage[] {
     switch (updateType) {
-      // Switching between thought and message text flushes the other buffer, so
-      // interleaved output keeps the order the agent produced it in.
+      // Thought and message text buffer separately until a tool frame or the
+      // turn's end. agy forwards thought parts wherever the model streams them,
+      // including between chunks of one answer; publishing on every switch made
+      // each chunk its own row and broke Markdown that spans chunks.
       // A whole `agent_message` carries the same content as a run of chunks.
       case 'agent_message':
-      case 'agent_message_chunk': {
-        const flushed = session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
+      case 'agent_message_chunk':
         session.assistantText += session.failure.offer(acpContentText(update.content));
-        return flushed;
-      }
-      case 'agent_thought_chunk': {
-        const flushed = session.assistantText.trim() ? this.#flush(session, context.timestamp) : [];
+        return [];
+      case 'agent_thought_chunk':
         session.thinkingText += acpContentText(update.content);
-        return flushed;
-      }
+        return [];
       case 'tool_call':
       case 'tool_call_update':
         return this.#toolCallUpdate(session, update, context.timestamp);
