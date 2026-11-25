@@ -1,5 +1,6 @@
 import type { ChatMessage } from '$shared/chat-types';
 import type { ChatHistoryState, ResendCandidate, TranscriptMessage } from '$shared/chat-view';
+import { ActiveTranscriptRowIndex } from './active-transcript-row-index.svelte.js';
 import { displayLocalNotices } from './degraded-history-notice.js';
 import type { LocalNoticeRow, LocalNoticeType } from './local-notice.js';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
@@ -25,7 +26,19 @@ export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
 export class ActiveTranscriptPresentationState {
 	activeChatId = $state<string | null>(null);
 	// Ledger rows are immutable; only interval replacement needs reactive publication.
-	entries = $state.raw<TranscriptMessage[]>([]);
+	#entries = $state.raw<TranscriptMessage[]>([]);
+	readonly rowIndex = new ActiveTranscriptRowIndex();
+
+	get entries(): TranscriptMessage[] { return this.#entries; }
+	set entries(value: TranscriptMessage[]) {
+		this.rowIndex.replace(value);
+		this.#entries = value;
+	}
+
+	protected setAppendedEntries(value: TranscriptMessage[]): void {
+		this.rowIndex.append(value, this.#entries.length);
+		this.#entries = value;
+	}
 	transcriptViewId = $state('');
 	windowRevision = $state(0);
 	lastOrdinal = $state(0);
@@ -44,12 +57,9 @@ export class ActiveTranscriptPresentationState {
 	loadError = $state<string | null>(null);
 	historyState = $state<ChatHistoryState>({ kind: 'complete' });
 
-	protected readonly resend = new TranscriptResendCandidates();
-	protected readonly notices = new TranscriptNoticeFeed();
-	protected readonly optimisticInputs = new TranscriptOptimisticInputs(() => {
-		this.growExpandedVisibleWindow();
-		this.feedMutations.record('presentation-structure');
-	});
+	#standaloneResend?: TranscriptResendCandidates;
+	#standaloneNotices?: TranscriptNoticeFeed;
+	#standaloneOptimisticInputs?: TranscriptOptimisticInputs;
 	protected readonly feedMutations = new ConversationFeedMutationState();
 	protected expandedVisibleStartOrdinal: number | null = null;
 
@@ -92,6 +102,21 @@ export class ActiveTranscriptPresentationState {
 
 	protected get usesSharedOverlay(): boolean {
 		return this.#sharedOverlay !== null;
+	}
+
+	protected get resend(): TranscriptResendCandidates {
+		return this.#standaloneResend ??= new TranscriptResendCandidates();
+	}
+
+	protected get notices(): TranscriptNoticeFeed {
+		return this.#standaloneNotices ??= new TranscriptNoticeFeed();
+	}
+
+	protected get optimisticInputs(): TranscriptOptimisticInputs {
+		return this.#standaloneOptimisticInputs ??= new TranscriptOptimisticInputs(() => {
+			this.growExpandedVisibleWindow();
+			this.feedMutations.record('presentation-structure');
+		});
 	}
 
 	protected get noticeRevision(): number {

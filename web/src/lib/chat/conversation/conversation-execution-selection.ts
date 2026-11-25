@@ -4,6 +4,7 @@ import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
 import { cloneAgentSettings } from '$shared/agent-settings';
+import { stableJsonStringify } from '$shared/json';
 
 export interface ConversationExecutionSelection extends AgentHandoffTarget {
 	agentId: string;
@@ -16,7 +17,7 @@ export interface ConversationExecutionSelection extends AgentHandoffTarget {
 	agentSettings: AgentSettingsEnvelope;
 }
 
-interface ConversationExecutionProjection {
+export interface ConversationExecutionProjection {
 	executorId?: string | null;
 	projectPath?: string;
 	agentId: string;
@@ -27,6 +28,24 @@ interface ConversationExecutionProjection {
 	permissionMode: PermissionMode;
 	thinkingMode: ThinkingMode;
 	agentSettings: AgentSettingsEnvelope;
+}
+
+export function sameExecutionProjection(
+	left: ConversationExecutionProjection | undefined,
+	right: ConversationExecutionProjection | undefined,
+): boolean {
+	return left === right || Boolean(left && right
+		&& left.executorId === right.executorId
+		&& left.projectPath === right.projectPath
+		&& left.agentId === right.agentId
+		&& left.model === right.model
+		&& left.apiProviderId === right.apiProviderId
+		&& left.modelEndpointId === right.modelEndpointId
+		&& left.modelProtocol === right.modelProtocol
+		&& left.permissionMode === right.permissionMode
+		&& left.thinkingMode === right.thinkingMode
+		&& (left.agentSettings === right.agentSettings
+			|| stableJsonStringify(left.agentSettings) === stableJsonStringify(right.agentSettings)));
 }
 
 export function executionSelectionFromProjection(

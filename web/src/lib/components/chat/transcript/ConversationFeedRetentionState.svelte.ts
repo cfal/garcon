@@ -9,7 +9,7 @@ interface TransientRegistration {
 export class ConversationFeedRetentionState {
 	#leases = new Map<string, Map<ConversationFeedRetentionReason, Set<symbol>>>();
 	#transients = new Map<symbol, TransientRegistration>();
-	#retainedKeys = $state<string[]>([]);
+	#retainedKeys = $state.raw<string[]>([]);
 
 	get retainedKeys(): readonly string[] {
 		return this.#retainedKeys;
@@ -74,6 +74,7 @@ export class ConversationFeedRetentionState {
 	}
 
 	prune(validKeys: Iterable<string>): void {
+		if (this.#leases.size === 0) return;
 		const valid = new Set(validKeys);
 		const removed = [...this.#leases.keys()].filter((key) => !valid.has(key));
 		if (removed.length === 0) return;

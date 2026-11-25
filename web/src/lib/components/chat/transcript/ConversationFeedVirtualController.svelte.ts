@@ -52,7 +52,7 @@ import {
 	type ToolGroupVirtualFeedItem,
 } from './conversation-feed-virtual-items.js';
 
-export const CHAT_VIRTUAL_OVERSCAN = 6;
+const CHAT_VIRTUAL_OVERSCAN = 6;
 const CHAT_FALLBACK_VIEWPORT_HEIGHT = 720;
 const MAX_TARGET_READY_ITERATIONS = 180;
 const FONT_SCOPES = ['interface', 'chat-feed', 'chat-code', 'chat-output', 'code-diff'] as const;
@@ -99,7 +99,13 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#virt: VirtualListController;
 	#configuredGeometry: ConversationVirtualGeometrySnapshot;
 	#configuredModel: ConversationVirtualFeedModel;
-	#configuredTranscriptKeys: ReadonlySet<string>;
+	readonly #configuredTranscriptKeys = {
+		has: (key: string) => {
+			const index = this.#configuredModel.indexByKey.get(key);
+			const item = index === undefined ? undefined : this.#configuredModel.items[index];
+			return item?.kind === 'transcript' || item?.kind === 'tool-group';
+		},
+	};
 	#configuredVisible: boolean;
 	#configuredPinned: boolean;
 	#appliedDataRevision: number;
@@ -128,7 +134,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	constructor(private readonly options: ConversationFeedVirtualControllerOptions) {
 		this.#configuredGeometry = untrack(() => options.geometry);
 		this.#configuredModel = untrack(() => options.model);
-		this.#configuredTranscriptKeys = transcriptKeys(this.#configuredModel);
 		this.#configuredVisible = untrack(() => options.visible);
 		this.#configuredPinned = untrack(() => options.pinned);
 		this.#appliedDataRevision = untrack(() => options.projectedDataRevision);
@@ -175,14 +180,16 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		$effect(() => this.#publishPinned(options.pinned));
 		$effect(() => this.#publishVisibility(options.visible));
 		$effect(() =>
-			observeTypographyChanges(document, () => this.#invalidateMeasurements(), FONT_SCOPES),
+			observeTypographyChanges(document, () => untrack(() => this.#invalidateMeasurements()), FONT_SCOPES),
 		);
 		$effect(() => {
 			void options.viewport;
 			void options.virtualRoot;
-			this.#resumePendingSurface();
-			if (this.#nativeScrollActivity === 'idle') this.#queuePendingEndScrollFlush();
-			this.#virt.refreshLayout();
+			untrack(() => {
+				this.#resumePendingSurface();
+				if (this.#nativeScrollActivity === 'idle') this.#queuePendingEndScrollFlush();
+				this.#virt.refreshLayout();
+			});
 		});
 	}
 
@@ -317,7 +324,6 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#configuredGeometry = nextGeometry;
 		this.#configuredModel = input.next.model;
 		this.#hiddenAnchor = nextHiddenAnchor;
-		this.#configuredTranscriptKeys = transcriptKeys(input.next.model);
 		this.#configuredPinned = input.pinned;
 		this.#appliedDataRevision = Math.max(
 			this.#appliedDataRevision,
@@ -953,12 +959,4 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#cancelTargetScroll(): void {
 		this.#targetToken += 1;
 	}
-}
-
-function transcriptKeys(model: ConversationVirtualFeedModel): ReadonlySet<string> {
-	const keys = new Set<string>();
-	for (const item of model.items) {
-		if (item.kind === 'transcript' || item.kind === 'tool-group') keys.add(item.key);
-	}
-	return keys;
 }

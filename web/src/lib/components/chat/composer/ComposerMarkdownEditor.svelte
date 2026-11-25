@@ -81,13 +81,15 @@
 		onOverflow: (source: string) => void;
 	} = $props();
 	let container: HTMLDivElement;
+	let editor = $state.raw<Editor | null>(null);
+	let appliedViewOptions: typeof viewOptions | undefined;
 	const viewOptions = $derived({
 		editable: !readOnly,
 		placeholder,
 		label: m.chat_composer_formatted_markdown(),
 	});
 	onMount(() => {
-		let appliedViewOptions = viewOptions;
+		appliedViewOptions = viewOptions;
 		const extensions = composerMarkdownEditorExtensions();
 		const cache = new ComposerMarkdownCache(composerMarkdownCodec.serialize);
 		let original: readonly DocumentNode[] = [];
@@ -366,13 +368,14 @@
 			restored.setStoredMarks(selectionMarks.map((mark) => mountedEditor.schema.markFromJSON(mark)));
 		if (restored.selectionSet || restored.storedMarksSet) mountedEditor.view.dispatch(restored);
 		onReady(mountedEditor.view.dom);
-		$effect(() => {
-			// setEditable refreshes view attributes and decorations even when no option changed.
-			if (viewOptions === appliedViewOptions) return;
-			appliedViewOptions = viewOptions;
-			mountedEditor.setEditable(appliedViewOptions.editable, false);
-		});
+		editor = mountedEditor;
 		return () => mountedEditor.destroy();
+	});
+
+	$effect(() => {
+		if (!editor || viewOptions === appliedViewOptions) return;
+		appliedViewOptions = viewOptions;
+		editor.setEditable(viewOptions.editable, false);
 	});
 </script>
 

@@ -21,7 +21,7 @@ export interface ChatArchiveProjectionOperation {
 }
 
 export class ChatArchiveProjectionState {
-	#pendingByChatId = $state<Record<string, PendingArchiveChange>>({});
+	#pendingByChatId = $state.raw<Record<string, PendingArchiveChange>>({});
 	#nextOperationId = 1;
 
 	isPending(chatId: string): boolean {

@@ -45,6 +45,14 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		return this.#transcript().entries;
 	}
 
+	get rowIndex() {
+		return this.#transcript().rowIndex;
+	}
+
+	get visibleOptimisticInputs() {
+		return this.#transcript().visibleOptimisticInputs;
+	}
+
 	get resendCandidates(): readonly ResendCandidate[] {
 		const chatId = this.options.getSelectedChatId();
 		return chatId ? (this.options.panels.overlayFor(chatId)?.includedResendCandidates ?? []) : [];

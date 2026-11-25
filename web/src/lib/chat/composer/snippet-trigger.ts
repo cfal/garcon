@@ -3,7 +3,7 @@
 // which replaces the trigger span with the expanded snippet at the caret.
 
 export const DEFAULT_SNIPPET_TRIGGER = ';;';
-export const SNIPPET_TRIGGER_MIN_LENGTH = 2;
+const SNIPPET_TRIGGER_MIN_LENGTH = 2;
 export const SNIPPET_TRIGGER_MAX_LENGTH = 4;
 
 const FORBIDDEN_SNIPPET_TRIGGER_CHARS = /[\s/@]/;

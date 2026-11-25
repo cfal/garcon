@@ -8,7 +8,7 @@ export type ConversationVirtualStructureChange =
 	'none' | 'identity' | 'edge-qualified' | 'interior-only';
 
 function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
-	return left.length === right.length && left.every((value, index) => value === right[index]);
+	return left === right || (left.length === right.length && left.every((value, index) => value === right[index]));
 }
 
 export function classifyConversationVirtualStructure(input: {
@@ -19,9 +19,6 @@ export function classifyConversationVirtualStructure(input: {
 	nextEstimates: readonly number[];
 }): ConversationVirtualStructureChange {
 	if (input.identityChanged) return 'identity';
-	const keysChanged = !arraysEqual(input.previousKeys, input.nextKeys);
-	const estimatesChanged = !arraysEqual(input.previousEstimates, input.nextEstimates);
-	if (!keysChanged && !estimatesChanged) return 'none';
 	if (
 		input.previousKeys.length !== input.nextKeys.length ||
 		input.previousKeys[0] !== input.nextKeys[0] ||
@@ -29,7 +26,8 @@ export function classifyConversationVirtualStructure(input: {
 	) {
 		return 'edge-qualified';
 	}
-	return 'interior-only';
+	return arraysEqual(input.previousKeys, input.nextKeys)
+		&& arraysEqual(input.previousEstimates, input.nextEstimates) ? 'none' : 'interior-only';
 }
 
 export function shouldPreserveConversationVirtualEdge(input: {

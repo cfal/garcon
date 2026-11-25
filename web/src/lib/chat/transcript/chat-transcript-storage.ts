@@ -8,6 +8,7 @@ import {
 } from '$lib/utils/local-storage-cache-recovery';
 
 const SCHEMA_VERSION = 6;
+const INDEX_VERSION = 7;
 const MAX_ENTRIES = 25;
 const MAX_SNAPSHOT_CHARACTERS = 250_000;
 const MAX_RETAINED_CHARACTERS = 1_500_000;
@@ -24,16 +25,14 @@ interface ChatSnapshotEnvelope {
 	entries: TranscriptMessage[];
 }
 
-interface ChatSnapshotIndexEntry {
-	chatId: string;
+interface ChatSnapshotIndexEntry extends CachedChatCursor {
 	lastAccessedAt: string;
-	lastValidatedAt: string | null;
-	schemaVersion: 6;
+	characters: number;
 	stale: boolean;
 }
 
 interface ChatSnapshotIndex {
-	version: 6;
+	version: typeof INDEX_VERSION;
 	entries: ChatSnapshotIndexEntry[];
 }
 
@@ -64,7 +63,7 @@ function nowIso(): string {
 }
 
 function emptyIndex(): ChatSnapshotIndex {
-	return { version: SCHEMA_VERSION, entries: [] };
+	return { version: INDEX_VERSION, entries: [] };
 }
 
 function readIndex(): ChatSnapshotIndex {
@@ -72,19 +71,30 @@ function readIndex(): ChatSnapshotIndex {
 		const raw = localStorage.getItem(INDEX_KEY);
 		if (!raw) return emptyIndex();
 		const parsed = JSON.parse(raw) as ChatSnapshotIndex;
-		if (parsed.version !== SCHEMA_VERSION || !Array.isArray(parsed.entries)) {
-			localStorage.removeItem(INDEX_KEY);
-			return emptyIndex();
-		}
-		return parsed;
+		if (parsed.version !== INDEX_VERSION || !Array.isArray(parsed.entries)) return emptyIndex();
+		return {
+			version: INDEX_VERSION,
+			entries: parsed.entries.filter(entry =>
+				entry
+				&& typeof entry.chatId === 'string'
+				&& typeof entry.lastAccessedAt === 'string'
+				&& typeof entry.transcriptViewId === 'string'
+				&& Boolean(entry.transcriptViewId)
+				&& Number.isSafeInteger(entry.lastOrdinal)
+				&& entry.lastOrdinal > 0
+				&& Number.isSafeInteger(entry.characters)
+				&& entry.characters > 0
+				&& typeof entry.stale === 'boolean',
+			),
+		};
 	} catch {
-		localStorage.removeItem(INDEX_KEY);
 		return emptyIndex();
 	}
 }
 
 function writeIndex(index: ChatSnapshotIndex): void {
-	setLocalStorageWithCacheRecovery(localStorage, INDEX_KEY, JSON.stringify(index));
+	// Quota recovery can evict snapshots referenced by the index being written.
+	if (canPersistBrowserData()) localStorage.setItem(INDEX_KEY, JSON.stringify(index));
 }
 
 function windowEntries(
@@ -97,24 +107,8 @@ function windowEntries(
 }
 
 
-function upsertEntry(
-	index: ChatSnapshotIndex,
-	chatId: string,
-	patch: Partial<ChatSnapshotIndexEntry>,
-): ChatSnapshotIndex {
-	const existing = index.entries.find((entry) => entry.chatId === chatId);
-	const base: ChatSnapshotIndexEntry = existing ?? {
-		chatId,
-		lastAccessedAt: nowIso(),
-		lastValidatedAt: null,
-		schemaVersion: SCHEMA_VERSION,
-		stale: false,
-	};
-
-	const nextEntry = { ...base, ...patch };
-	const nextEntries = index.entries.filter((entry) => entry.chatId !== chatId);
-	nextEntries.push(nextEntry);
-	return { ...index, entries: nextEntries };
+function upsertEntry(index: ChatSnapshotIndex, entry: ChatSnapshotIndexEntry): ChatSnapshotIndex {
+	return { ...index, entries: [...index.entries.filter(item => item.chatId !== entry.chatId), entry] };
 }
 
 function removeEntry(index: ChatSnapshotIndex, chatId: string): ChatSnapshotIndex {
@@ -133,7 +127,7 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 	const keep: ChatSnapshotIndexEntry[] = [];
 	let retainedCharacters = 0;
 	for (const entry of countBounded) {
-		const characters = localStorage.getItem(snapshotKey(entry.chatId))?.length ?? 0;
+		const { characters } = entry;
 		if (
 			characters > MAX_SNAPSHOT_CHARACTERS
 			|| retainedCharacters + characters > MAX_RETAINED_CHARACTERS
@@ -152,10 +146,6 @@ function pruneIndex(index: ChatSnapshotIndex): ChatSnapshotIndex {
 		}
 	}
 	return { ...index, entries: keep };
-}
-
-function hasSnapshot(chatId: string): boolean {
-	return Boolean(localStorage.getItem(snapshotKey(chatId)));
 }
 
 export class LocalChatTranscriptStorage {
@@ -180,6 +170,8 @@ export class LocalChatTranscriptStorage {
 				entries === null
 				|| typeof parsed.transcriptViewId !== 'string'
 				|| !parsed.transcriptViewId
+				|| !Number.isSafeInteger(parsed.lastOrdinal)
+				|| parsed.lastOrdinal <= 0
 				|| (
 					parsed.nextBeforeOrdinal !== null
 					&& (
@@ -198,13 +190,22 @@ export class LocalChatTranscriptStorage {
 				: parsed.nextBeforeOrdinal;
 			const index = readIndex();
 			const entry = index.entries.find((candidate) => candidate.chatId === chatId);
-			writeIndex(pruneIndex(upsertEntry(index, chatId, { lastAccessedAt: nowIso() })));
+			const stale = entry?.transcriptViewId !== parsed.transcriptViewId
+				|| entry.lastOrdinal !== parsed.lastOrdinal || entry.stale;
+			writeIndex(pruneIndex(upsertEntry(index, {
+				chatId,
+				lastAccessedAt: nowIso(),
+				characters: raw.length,
+				transcriptViewId: parsed.transcriptViewId,
+				lastOrdinal: parsed.lastOrdinal,
+				stale,
+			})));
 			return {
 				entries: restoredEntries,
 				transcriptViewId: parsed.transcriptViewId,
-				lastOrdinal: Number(parsed.lastOrdinal) || 0,
+				lastOrdinal: parsed.lastOrdinal,
 				nextBeforeOrdinal,
-				stale: entry?.stale ?? false,
+				stale,
 			};
 		} catch {
 			this.remove(chatId);
@@ -251,11 +252,13 @@ export class LocalChatTranscriptStorage {
 			const index = readIndex();
 			writeIndex(
 				pruneIndex(
-					upsertEntry(index, chatId, {
+					upsertEntry(index, {
+						chatId,
 						lastAccessedAt: nowIso(),
-						schemaVersion: SCHEMA_VERSION,
+						characters: serialized.length,
+						transcriptViewId: cursor.transcriptViewId,
+						lastOrdinal: cursor.lastOrdinal,
 						stale: false,
-						lastValidatedAt: nowIso(),
 					}),
 				),
 			);
@@ -278,12 +281,9 @@ export class LocalChatTranscriptStorage {
 	markStale(chatId: string): void {
 		if (!chatId || !canPersistBrowserData()) return;
 		try {
-			if (!hasSnapshot(chatId)) {
-				this.remove(chatId);
-				return;
-			}
 			const index = readIndex();
-			writeIndex(upsertEntry(index, chatId, { stale: true }));
+			const entry = index.entries.find(item => item.chatId === chatId);
+			if (entry && !entry.stale) writeIndex(upsertEntry(index, { ...entry, stale: true }));
 		} catch {
 			// Leaves stale marking best-effort.
 		}
@@ -304,42 +304,27 @@ export class LocalChatTranscriptStorage {
 		}
 	}
 
+	hasCurrentCursor({ chatId, transcriptViewId, lastOrdinal }: CachedChatCursor): boolean {
+		if (!canPersistBrowserData()) return false;
+		return readIndex().entries.some(entry => !entry.stale
+			&& entry.characters <= MAX_SNAPSHOT_CHARACTERS
+			&& entry.chatId === chatId
+			&& entry.transcriptViewId === transcriptViewId
+			&& entry.lastOrdinal === lastOrdinal);
+	}
+
 	listCursors(limit = 20): CachedChatCursor[] {
 		if (!canPersistBrowserData()) return [];
 		const boundedLimit = Math.max(0, Math.floor(limit));
 		if (boundedLimit === 0) return [];
 		try {
-			const sorted = readIndex()
-				.entries.filter((entry) => !entry.stale)
+			return readIndex()
+				.entries.filter((entry) => !entry.stale && entry.characters <= MAX_SNAPSHOT_CHARACTERS)
 				.sort(
 					(a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime(),
-				);
-			const cursors: CachedChatCursor[] = [];
-			for (const entry of sorted) {
-				if (cursors.length >= boundedLimit) break;
-				const raw = localStorage.getItem(snapshotKey(entry.chatId));
-				if (!raw || raw.length > MAX_SNAPSHOT_CHARACTERS) {
-					this.remove(entry.chatId);
-					continue;
-				}
-				const parsed = JSON.parse(raw) as Partial<ChatSnapshotEnvelope>;
-				if (
-					parsed.version !== SCHEMA_VERSION ||
-					parsed.chatId !== entry.chatId ||
-					typeof parsed.transcriptViewId !== 'string' ||
-					!parsed.transcriptViewId ||
-					!(Number(parsed.lastOrdinal) > 0)
-				) {
-					this.remove(entry.chatId);
-					continue;
-				}
-				cursors.push({
-					chatId: entry.chatId,
-					transcriptViewId: parsed.transcriptViewId,
-					lastOrdinal: Number(parsed.lastOrdinal),
-				});
-			}
-			return cursors;
+				)
+				.slice(0, boundedLimit)
+				.map(({ chatId, transcriptViewId, lastOrdinal }) => ({ chatId, transcriptViewId, lastOrdinal }));
 		} catch {
 			return [];
 		}
@@ -348,9 +333,9 @@ export class LocalChatTranscriptStorage {
 	clearAll(): void {
 		if (!canPersistBrowserData()) return;
 		try {
-			const index = readIndex();
-			for (const entry of index.entries) {
-				localStorage.removeItem(snapshotKey(entry.chatId));
+			for (let i = localStorage.length - 1; i >= 0; i--) {
+				const key = localStorage.key(i);
+				if (key?.startsWith(SNAPSHOT_PREFIX)) localStorage.removeItem(key);
 			}
 			localStorage.removeItem(INDEX_KEY);
 		} catch {

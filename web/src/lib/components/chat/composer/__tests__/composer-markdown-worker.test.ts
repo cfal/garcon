@@ -32,6 +32,7 @@ describe('composer Markdown worker', () => {
 		vi.stubGlobal('Worker', FakeWorker);
 	});
 	afterEach(() => {
+		vi.runOnlyPendingTimers();
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
 	});
@@ -64,7 +65,27 @@ describe('composer Markdown worker', () => {
 		expect(worker.terminate).not.toHaveBeenCalled();
 		worker.reply({ type: 'pasted', source: 'serialized' });
 		expect(await result).toBe('serialized');
+		expect(worker.terminate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(30_000);
 		expect(worker.terminate).toHaveBeenCalledOnce();
+	});
+	it('reuses the worker for queued work without dispatching an aborted request', async () => {
+		const parse = parseComposerMarkdownInWorker({ source: 'draft' }, new AbortController().signal);
+		const cancelled = new AbortController();
+		const discarded = serializeComposerMarkdownPasteInWorker(pasteRequest, cancelled.signal);
+		const paste = serializeComposerMarkdownPasteInWorker(pasteRequest, new AbortController().signal);
+		const worker = FakeWorker.instances[0];
+		worker.ready();
+		cancelled.abort();
+		expect(await discarded).toBeNull();
+		expect(worker.postMessage).toHaveBeenCalledTimes(1);
+		worker.reply({ type: 'parsed', document: null });
+		expect(await parse).toBeNull();
+		expect(FakeWorker.instances).toEqual([worker]);
+		expect(worker.postMessage).toHaveBeenCalledTimes(2);
+		worker.reply({ type: 'pasted', source: 'serialized' });
+		expect(await paste).toBe('serialized');
+		expect(worker.terminate).not.toHaveBeenCalled();
 	});
 	it('cancels a pending paste when aborted', async () => {
 		const abort = new AbortController();
@@ -72,5 +93,20 @@ describe('composer Markdown worker', () => {
 		abort.abort();
 		expect(await result).toBeNull();
 		expect(FakeWorker.instances[0].terminate).toHaveBeenCalledOnce();
+	});
+
+	it('does not accept replies from the retired worker after aborting active work', async () => {
+		const abort = new AbortController();
+		const first = serializeComposerMarkdownPasteInWorker(pasteRequest, abort.signal);
+		const next = serializeComposerMarkdownPasteInWorker(pasteRequest, new AbortController().signal);
+		const oldWorker = FakeWorker.instances[0];
+		abort.abort();
+		expect(await first).toBeNull();
+		expect(oldWorker.terminate).toHaveBeenCalledOnce();
+		expect(FakeWorker.instances).toHaveLength(2);
+		oldWorker.reply({ type: 'pasted', source: 'stale' });
+		FakeWorker.instances[1].ready();
+		FakeWorker.instances[1].reply({ type: 'pasted', source: 'new' });
+		expect(await next).toBe('new');
 	});
 });

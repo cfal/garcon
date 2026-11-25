@@ -131,6 +131,7 @@
 	setCanonicalWorkspaceLayout();
 
 	const appShell = createAppShellStore();
+	appShell.isMobile = window.matchMedia('(max-width: 768px)').matches;
 	appShell.projectBasePath = '/workspace';
 	setAppShell(appShell);
 	setNewChatPromptDrafts(new NewChatPromptDraftStore());

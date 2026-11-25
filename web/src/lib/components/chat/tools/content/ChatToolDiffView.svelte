@@ -5,7 +5,7 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
 	import * as m from '$lib/paraglide/messages.js';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { ChatClipboardFeedback } from '../../chat-clipboard-feedback.svelte.js';
 	import { buildChatToolDiff } from './chat-tool-diff';
 
 	interface DiffViewerProps {
@@ -36,22 +36,12 @@
 
 	let diff = $derived(buildChatToolDiff(oldContent ?? '', newContent ?? ''));
 
-	let pathCopied = $state(false);
-	let copyTimer: ReturnType<typeof setTimeout> | null = null;
-	async function handleCopyPath() {
-		const didCopy = await copyToClipboard(filePath);
-		if (!didCopy) return;
-		pathCopied = true;
-		if (copyTimer) clearTimeout(copyTimer);
-		copyTimer = setTimeout(() => {
-			pathCopied = false;
-			copyTimer = null;
-		}, 2000);
-	}
+	const clipboard = new ChatClipboardFeedback();
+	onDestroy(() => clipboard.reset());
 
-	onDestroy(() => {
-		if (copyTimer) clearTimeout(copyTimer);
-	});
+	function handleCopyPath(): Promise<void> {
+		return clipboard.copy(filePath);
+	}
 </script>
 
 <div class="border border-border rounded overflow-hidden">
@@ -61,6 +51,7 @@
 			<div class="flex items-center gap-1.5 min-w-0">
 				{#if onFileClick}
 					<button
+						type="button"
 						onclick={onFileClick}
 						class="text-[11px] font-mono text-primary hover:text-primary/80 truncate cursor-pointer transition-colors"
 					>
@@ -72,14 +63,15 @@
 					</span>
 				{/if}
 				<button
+					type="button"
 					onclick={handleCopyPath}
-					class="p-0.5 rounded transition-colors shrink-0 {pathCopied
+					class="p-0.5 rounded transition-colors shrink-0 {clipboard.copied
 						? 'text-status-success-foreground'
 						: 'text-muted-foreground/60 hover:text-foreground hover:bg-accent'}"
-					title={pathCopied ? m.git_file_path_copied_short() : m.git_file_path_copy()}
-					aria-label={pathCopied ? m.git_file_path_copied() : m.git_file_path_copy()}
+					title={clipboard.copied ? m.git_file_path_copied_short() : m.git_file_path_copy()}
+					aria-label={clipboard.copied ? m.git_file_path_copied() : m.git_file_path_copy()}
 				>
-					{#if pathCopied}
+					{#if clipboard.copied}
 						<Check class="w-3 h-3" />
 					{:else}
 						<Copy class="w-3 h-3" />

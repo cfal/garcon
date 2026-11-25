@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 	import {
@@ -115,10 +116,16 @@
 	const iconButtonClass =
 		'grid size-11 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pointer-fine:size-8';
 	$effect(() => {
-		onRetain('menu', menuOpen);
+		if (!menuOpen) return;
+		const retain = untrack(() => onRetain);
+		untrack(() => retain('menu', true));
+		return () => retain('menu', false);
 	});
 	$effect(() => {
-		onRetain('drag', keyboardDrag.active || dragging);
+		if (!keyboardDrag.active && !dragging) return;
+		const retain = untrack(() => onRetain);
+		untrack(() => retain('drag', true));
+		return () => retain('drag', false);
 	});
 
 	$effect(() => {

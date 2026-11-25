@@ -48,8 +48,24 @@ describe('ChatDraftStore', () => {
 		drafts.setText('chat-a', 'shared text');
 
 		expect(first).toBe(second);
+		expect(drafts.view('chat-a')).toBe(first);
 		expect(drafts.view('chat-a').text).toBe('shared text');
 		expect(drafts.view('chat-a').revision).toBe(1);
+	});
+
+	it('evicts least-recently loaded empty drafts without losing edited revisions or attachments', () => {
+		const drafts = new ChatDraftStore();
+		drafts.load('old');
+		const old = drafts.view('old');
+		const file = new File(['synthetic'], 'synthetic.png', { type: 'image/png' });
+		drafts.setAttachments('edited', [file]);
+		const attachments = drafts.view('edited').attachments;
+		drafts.setText('edited', 'synthetic prompt');
+		expect(drafts.view('edited').attachments).toBe(attachments);
+		for (let i = 0; i < 100; i++) drafts.load(`empty-${i}`);
+		drafts.load('old');
+		expect(drafts.view('old')).not.toBe(old);
+		expect(drafts.view('edited')).toMatchObject({ revision: 2, attachments });
 	});
 
 	it('appends against the latest text and preserves attachments', () => {

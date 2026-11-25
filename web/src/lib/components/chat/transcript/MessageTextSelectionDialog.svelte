@@ -6,7 +6,7 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import Check from '@lucide/svelte/icons/check';
 	import TextSelect from '@lucide/svelte/icons/text-select';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { ChatClipboardFeedback } from '../chat-clipboard-feedback.svelte.js';
 
 	interface Props {
 		open: boolean;
@@ -17,15 +17,14 @@
 	let { open, text, onClose }: Props = $props();
 
 	let textSurfaceRef = $state<HTMLElement | null>(null);
-	let copied = $state(false);
-	let copyTimer: ReturnType<typeof setTimeout> | null = null;
+	const clipboard = new ChatClipboardFeedback();
 
 	function handleOpenChange(nextOpen: boolean): void {
 		if (!nextOpen) onClose();
 	}
 
 	$effect(() => {
-		if (!open) copied = false;
+		if (!open) clipboard.reset();
 	});
 
 	function selectAllDialogText(): void {
@@ -39,22 +38,12 @@
 		selection.addRange(range);
 	}
 
-	async function copyDialogText(event: MouseEvent): Promise<void> {
-		if (!text) return;
+	function copyDialogText(event: MouseEvent): Promise<void> {
 		const container = (event.currentTarget as HTMLElement)?.closest('[role="dialog"]') ?? undefined;
-		const didCopy = await copyToClipboard(text, container);
-		if (!didCopy) return;
-		copied = true;
-		if (copyTimer) clearTimeout(copyTimer);
-		copyTimer = setTimeout(() => {
-			copied = false;
-			copyTimer = null;
-		}, 2000);
+		return clipboard.copy(text, container);
 	}
 
-	onDestroy(() => {
-		if (copyTimer) clearTimeout(copyTimer);
-	});
+	onDestroy(() => clipboard.reset());
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
@@ -79,8 +68,8 @@
 				<TextSelect class="size-4" />
 				{m.chat_message_select_text_select_all()}
 			</Button>
-			<Button onclick={copyDialogText} variant={copied ? 'outline' : 'default'}>
-				{#if copied}
+			<Button onclick={copyDialogText} variant={clipboard.copied ? 'outline' : 'default'}>
+				{#if clipboard.copied}
 					<Check class="size-4" />
 					{m.chat_message_select_text_copied()}
 				{:else}

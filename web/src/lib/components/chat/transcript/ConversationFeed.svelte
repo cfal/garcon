@@ -79,7 +79,6 @@
 		pinnedToBottom: boolean;
 		surfaceIdentity: string;
 		onViewportPortChange?: (port: ConversationViewportPort | null) => void;
-		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		onPresentationPortChange?: (port: ConversationFeedPresentationPort | null) => void;
 		onInitialEndRestored?: () => void;
 		onCoverageChange?: () => void;
@@ -111,7 +110,6 @@
 		pinnedToBottom,
 		surfaceIdentity,
 		onViewportPortChange,
-		onRegisterPrepareHide,
 		onPresentationPortChange,
 		onInitialEndRestored,
 	}: Props = $props();
@@ -414,11 +412,6 @@
 		};
 		onPresentationPortChange?.(port);
 		return () => onPresentationPortChange?.(null);
-	});
-
-	$effect(() => {
-		onRegisterPrepareHide?.(prepareForHide);
-		return () => onRegisterPrepareHide?.(null);
 	});
 
 	$effect(() => {

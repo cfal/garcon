@@ -1,8 +1,4 @@
-// Shared constants for permission modes, thinking modes, and related
-// UI labels. Consolidates duplicated definitions from agent-state
-// and new-chat-form-state into a single source of truth.
-
-import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ThinkingMode } from '$lib/types/chat';
 
 export interface ThinkingModeOption {
 	id: ThinkingMode;
@@ -55,11 +51,3 @@ export const THINKING_MODES: ThinkingModeOption[] = [
 		color: 'text-foreground',
 	},
 ];
-
-export const MODE_LABELS: Record<PermissionMode, string> = {
-	default: 'Default',
-	acceptEdits: 'Accept Edits',
-	manualBypass: 'Manual Bypass',
-	bypassPermissions: 'Bypass Permissions',
-	plan: 'Plan Mode',
-};

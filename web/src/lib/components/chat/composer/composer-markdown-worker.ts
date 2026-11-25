@@ -38,27 +38,107 @@ function runComposerMarkdownWorker(
 	deadlineMs?: number,
 ): Promise<ComposerMarkdownResult | null> {
 	if (signal.aborted) return Promise.resolve(null);
-	return new Promise((resolve) => {
-		const worker = new Worker(new URL('./composer-markdown.worker.ts', import.meta.url), {
-			type: 'module',
-		});
-		let timeout: ReturnType<typeof setTimeout> | undefined;
-		const finish = (result: ComposerMarkdownResult | null) => {
-			clearTimeout(timeout);
-			signal.removeEventListener('abort', cancel);
-			worker.terminate();
-			resolve(result);
+	return new Promise(resolve => {
+		const work: PendingWork = {
+			request,
+			deadlineMs,
+			complete(result) {
+				signal.removeEventListener('abort', cancel);
+				resolve(result);
+			},
 		};
-		const cancel = () => finish(null);
+		const cancel = () => {
+			if (activeWork === work) finishActiveWork(null, true);
+			else {
+				const index = pendingWork.indexOf(work);
+				if (index < 0) return;
+				pendingWork.splice(index, 1);
+				work.complete(null);
+			}
+		};
 		signal.addEventListener('abort', cancel, { once: true });
-		worker.onmessage = (
-			event: MessageEvent<ComposerMarkdownResult | ComposerMarkdownReady | null>,
-		) => {
-			if (event.data?.type !== 'ready') return finish(event.data);
-			// The deadline bounds the work, not the time a cold cache takes to fetch the script.
-			if (deadlineMs !== undefined) timeout = setTimeout(cancel, deadlineMs);
-		};
-		worker.onerror = cancel;
-		worker.postMessage(request);
+		pendingWork.push(work);
+		startNextWork();
 	});
+}
+
+interface PendingWork {
+	request: ComposerMarkdownTask;
+	deadlineMs?: number;
+	complete(result: ComposerMarkdownResult | null): void;
+}
+
+const pendingWork: PendingWork[] = [];
+const IDLE_TIMEOUT_MS = 30_000;
+let activeWork: PendingWork | undefined;
+let worker: Worker | undefined;
+let ready = false;
+let deadline: ReturnType<typeof setTimeout> | undefined;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+function startNextWork(): void {
+	if (activeWork || pendingWork.length === 0) return;
+	clearTimeout(idleTimer);
+	idleTimer = undefined;
+	activeWork = pendingWork.shift()!;
+	try {
+		worker ??= createWorker();
+		worker.postMessage(activeWork.request);
+		if (ready) armDeadline();
+	} catch (error) {
+		console.error('Failed to start the composer Markdown worker', error);
+		finishActiveWork(null, true);
+	}
+}
+
+function createWorker(): Worker {
+	const instance = new Worker(new URL('./composer-markdown.worker.ts', import.meta.url), {
+		type: 'module',
+	});
+	instance.onmessage = (event: MessageEvent<ComposerMarkdownResult | ComposerMarkdownReady | null>) => {
+		if (worker !== instance || !activeWork) return;
+		if (event.data?.type === 'ready') {
+			if (ready) return;
+			ready = true;
+			armDeadline();
+		} else {
+			finishActiveWork(event.data, event.data === null);
+		}
+	};
+	instance.onerror = (error) => {
+		if (worker !== instance) return;
+		console.error('Composer Markdown worker failed', error);
+		finishActiveWork(null, true);
+	};
+	instance.onmessageerror = () => {
+		if (worker === instance) finishActiveWork(null, true);
+	};
+	return instance;
+}
+
+function armDeadline(): void {
+	const deadlineMs = activeWork?.deadlineMs;
+	// Bounds execution rather than loading the cold worker script.
+	if (deadlineMs !== undefined) {
+		deadline = setTimeout(() => finishActiveWork(null, true), deadlineMs);
+	}
+}
+
+function stopWorker(): void {
+	worker?.terminate();
+	worker = undefined;
+	ready = false;
+}
+
+function finishActiveWork(result: ComposerMarkdownResult | null, terminate: boolean): void {
+	clearTimeout(deadline);
+	deadline = undefined;
+	clearTimeout(idleTimer);
+	idleTimer = undefined;
+	const completed = activeWork;
+	activeWork = undefined;
+	if (terminate) stopWorker();
+	completed?.complete(result);
+	if (pendingWork.length > 0) startNextWork();
+	else if (worker) idleTimer = setTimeout(stopWorker, IDLE_TIMEOUT_MS);
 }

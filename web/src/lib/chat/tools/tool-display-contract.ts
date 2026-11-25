@@ -24,6 +24,7 @@ export interface ToolInputDisplayRule {
 	getLabel?: (input: ToolPayload) => string;
 	getValue?: (input: ToolPayload) => string;
 	getSecondary?: (input: ToolPayload) => string | undefined;
+	getPattern?: (input: ToolPayload) => string | undefined;
 	getLanguage?: (input: ToolPayload) => string;
 	action?: ToolInlineAction;
 	style?: string;
