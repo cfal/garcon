@@ -50,6 +50,18 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('<b>unformatted</b>')).toBeTruthy();
 	});
 
+	it.each(['', '\n', '  '])('makes literal task input %j visible', (input) => {
+		const toolMessage = new BackgroundTaskToolUseMessage('', 'stdin', 'send_input', 'job', input);
+		const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
+		expect(container.textContent).toContain(`Input: ${JSON.stringify(input)}`);
+	});
+
+	it('shows the supplied plan result instead of replacing it with an acknowledgment', () => {
+		render(ChatToolEventRenderer, { toolMessage: new UpdatePlanToolUseMessage('', 'plan', []), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { raw: 'Only one change was accepted' }, isError: false } });
+		expect(screen.getByText('Only one change was accepted')).toBeTruthy();
+	});
+
 	it('renders distinct outcomes for plan steps with the same title', () => {
 		const toolMessage = new UpdatePlanToolUseMessage('', 'plan', [
 			{ content: 'Check', status: 'failed' }, { content: 'Check', status: 'skipped' },

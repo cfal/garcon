@@ -7,9 +7,8 @@ import type { ToolUseChatMessage } from '$shared/chat-types';
 import { extractContentString } from '$lib/chat/tools/tool-display-presenters.js';
 import * as m from '$lib/paraglide/messages.js';
 
-const FAILED_RESULT_RULE: ToolResultDisplayRule = {
+const TEXT_RESULT_RULE: ToolResultDisplayRule = {
 	mode: 'collapsible',
-	title: () => m.chat_message_error(),
 	defaultOpen: false,
 	contentKind: 'text',
 	getContentProps: (result) => {
@@ -20,6 +19,8 @@ const FAILED_RESULT_RULE: ToolResultDisplayRule = {
 		return { content: text || extractContentString(result.content), format: 'plain' };
 	},
 };
+
+const FAILED_RESULT_RULE: ToolResultDisplayRule = { ...TEXT_RESULT_RULE, title: () => m.chat_message_error() };
 
 function hasEmptyRequiredInput(tool: ToolUseChatMessage | undefined): boolean {
 	switch (tool?.type) {
@@ -50,6 +51,7 @@ export function resolveToolResultDisplayRule(
 		return FAILED_RESULT_RULE;
 	}
 	if (isAgentWork && toolResult && Object.keys(toolResult.content ?? {}).length === 0) return undefined;
+	if (tool?.type === 'update-plan-tool-use' && toolResult && Object.keys(toolResult.content ?? {}).length > 0) return TEXT_RESULT_RULE;
 	return rule.result;
 }
 

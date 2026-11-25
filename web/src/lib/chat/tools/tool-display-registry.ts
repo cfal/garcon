@@ -596,7 +596,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 					default: return 'Background task';
 				}
 			},
-			getValue: ({ taskId, input }) => [taskId, input].filter(Boolean).join('\n'),
+			getValue: ({ taskId, input }) => [taskId, typeof input === 'string' ? `Input: ${JSON.stringify(input)}` : undefined].filter(Boolean).join('\n'),
 			wrapText: true,
 		},
 		result: {

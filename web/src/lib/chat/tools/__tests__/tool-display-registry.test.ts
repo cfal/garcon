@@ -79,7 +79,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 	it('displays task operations without claiming the target stopped or inventing output', () => {
 		const { input, result } = TOOL_DISPLAY_REGISTRY['background-task-tool-use'];
 		expect(input.getLabel?.({ action: 'stop' })).toBe('Request stop');
-		expect(input.getValue?.({ action: 'send_input', taskId: 'job', input: 'ok\n' })).toBe('job\nok\n');
+		expect(input.getValue?.({ action: 'send_input', taskId: 'job', input: 'ok\n' })).toBe('job\nInput: "ok\\n"');
 		expect(result?.getContentProps?.({ content: {} })?.content).toBe('');
 		expect(result?.getContentProps?.({ content: { raw: 'Task is running' } })?.content).toBe('Task is running');
 	});
