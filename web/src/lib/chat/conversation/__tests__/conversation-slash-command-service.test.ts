@@ -1168,20 +1168,25 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.scrollToBottom).toHaveBeenCalled();
 	});
 
-	it('restores compact text when the API fails', async () => {
-		const { deps, composerState, appendLocalNotice } = createDeps();
-		mockCompactChat.mockRejectedValueOnce(new Error('compact unavailable'));
+	it('restores the compact draft and reports a late failure to the source chat', async () => {
+		const { deps, composerState, appendLocalNoticeForChat } = createDeps();
+		const pending = deferred<Awaited<ReturnType<typeof compactChat>>>();
+		mockCompactChat.mockReturnValueOnce(pending.promise);
 
-		await new ConversationSlashCommandService(deps).submitCompactCommand(
+		const outcome = new ConversationSlashCommandService(deps).submitCompactCommand(
 			'chat-1',
 			deps.sessions.byId['chat-1'],
 			'keep decisions',
 			true,
 		);
+		deps.sessions.selectedChatId = 'other-chat';
+		pending.reject(new Error('compact unavailable'));
+		expect(await outcome).toBe('rejected');
 
 		expect(composerState.inputText).toBe('original command');
 		expect(composerState.restoreDraftIfRevision).toHaveReturnedWith(true);
-		expect(appendLocalNotice).toHaveBeenCalledWith(
+		expect(appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
 			'error',
 			expect.stringContaining('compact unavailable'),
 		);

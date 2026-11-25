@@ -362,7 +362,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		let entriesChanged = applied.status === 'applied' && applied.changed;
 		if (applied.status === 'applied') {
 			this.transcriptViewId = transcriptViewId;
-			if (applied.messages !== this.entries) this.entries = applied.messages;
+			if (applied.messages !== this.entries) this.setAppendedEntries(applied.messages);
 			this.loadedThroughOrdinal = applied.lastOrdinal;
 			this.hasLaterMessages = this.loadedThroughOrdinal < this.lastOrdinal;
 			if (entriesChanged && this.isUserScrolledUp && !this.combinedMode) {
@@ -753,7 +753,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 				const latest = mergeCachedLatestAnchorWindow(result.page, this.#snapshots.restoreCache(chatId));
 				const applied = this.#installSnapshotPage(chatId, latest, loadEpoch, 'replace', result);
 				if (applied === 'view-changed' || applied === 'gap-detected') {
-					void this.loadMessages(chatId).catch(() => {});
+					void this.loadMessages(chatId).catch(error => console.error('Failed to reload the transcript', error));
 				}
 				return applied === 'applied' ? 'loaded' : 'invalidated';
 			}
@@ -776,7 +776,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		const chatId = this.activeChatId;
 		if (!chatId) return;
 		if (this.#replayBufferedBatches(chatId, buffered) !== 'applied') {
-			void this.loadMessages(chatId).catch(() => {});
+			void this.loadMessages(chatId).catch(error => console.error('Failed to reload the transcript', error));
 		}
 	}
 

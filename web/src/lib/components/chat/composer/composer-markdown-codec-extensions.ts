@@ -176,6 +176,9 @@ const DraftTable = Table.extend({
 	},
 });
 
+const DraftTableCell = TableCell.extend({ content: 'paragraph' });
+const DraftTableHeader = TableHeader.extend({ content: 'paragraph' });
+
 export function composerMarkdownCodecExtensions() {
 	return [
 		Blockquote,
@@ -195,8 +198,8 @@ export function composerMarkdownCodecExtensions() {
 		DraftStrike,
 		DraftHardBreak,
 		DraftCodeBlock,
-		TableCell.extend({ content: 'paragraph' }),
-		TableHeader.extend({ content: 'paragraph' }),
+		DraftTableCell,
+		DraftTableHeader,
 		TableRow,
 		DraftTable.configure({ resizable: false }),
 		DraftImage.configure({ inline: true }),

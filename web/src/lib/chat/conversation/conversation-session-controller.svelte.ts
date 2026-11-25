@@ -51,6 +51,8 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 import {
 	executionSelectionFromProjection,
+	sameExecutionProjection,
+	type ConversationExecutionProjection,
 	type ConversationExecutionSelection,
 } from './conversation-execution-selection.js';
 import { ApiError } from '$lib/api/client.js';
@@ -87,7 +89,7 @@ export class ConversationSessionController {
 	readonly #queue: ConversationQueueController;
 	readonly #settings: ConversationSettingsController;
 	readonly #permissions: ConversationPermissionService;
-	#observedExecutionSelection = '';
+	#observedExecutionProjection: ConversationExecutionProjection | undefined;
 	readonly #handoffForkConfirmation = new HandoffForkConfirmationState();
 	readonly executorHandoff: ExecutorHandoffProjectState;
 	readonly clearHistory: ConversationClearController;
@@ -237,7 +239,7 @@ export class ConversationSessionController {
 
 	#resetSelectionState(): void {
 		const { deps } = this;
-		this.#observedExecutionSelection = '';
+		this.#observedExecutionProjection = undefined;
 		deps.chatState.activateChat(null);
 		deps.lifecycle.setCurrentChatId(null);
 		deps.conversationUi.activateTransientFeed(null);
@@ -247,10 +249,10 @@ export class ConversationSessionController {
 
 	#reconcileExecutionSelection(chatId: string | null): void {
 		if (!chatId || chatId !== this.deps.sessions.selectedChatId) return;
-		const selection = executionSelectionFromProjection(this.deps.sessions.byId[chatId]);
-		const key = JSON.stringify(selection);
-		if (key === this.#observedExecutionSelection) return;
-		this.#observedExecutionSelection = key;
+		const projection = this.deps.sessions.byId[chatId];
+		if (sameExecutionProjection(this.#observedExecutionProjection, projection)) return;
+		this.#observedExecutionProjection = projection;
+		const selection = executionSelectionFromProjection(projection);
 		if (selection) this.#applyExecutionSelection(selection);
 	}
 
@@ -301,7 +303,7 @@ export class ConversationSessionController {
 		deps.conversationUi.activateTransientFeed(chatId);
 		if (!preservesMountedPresentation) deps.setIsViewportPinnedToBottom(true);
 
-		this.#observedExecutionSelection = '';
+		this.#observedExecutionProjection = undefined;
 		this.#reconcileExecutionSelection(chatId);
 
 		if (selected.status === 'draft') {
@@ -884,10 +886,6 @@ export class ConversationSessionController {
 		await this.#queue.replaceForChat(chatId, entryId, content, expectedRevision);
 	}
 
-	async deleteQueueEntryForChat(chatId: string, entryId: string): Promise<void> {
-		await this.#queue.deleteForChat(chatId, entryId);
-	}
-
 	async deleteQueueEntryFromPanelForChat(chatId: string, entryId: string): Promise<void> {
 		await this.#queue.deleteFromPanelForChat(chatId, entryId);
 	}
@@ -914,11 +912,6 @@ export class ConversationSessionController {
 		if (this.isDirectAdmissionPending(this.deps.sessions.selectedChatId)) return;
 		this.#reconcileExecutionSelection(this.deps.sessions.selectedChatId);
 		this.#settings.handleModelSelectionChange(next);
-	}
-
-	handleModelChange(model: string): void {
-		if (this.isDirectAdmissionPending(this.deps.sessions.selectedChatId)) return;
-		this.#settings.handleModelChange(model);
 	}
 
 	handlePermissionModeChange(mode: PermissionMode): void {

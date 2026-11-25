@@ -8,6 +8,8 @@ import {
 } from '$lib/utils/local-persistence';
 
 const DEFAULT_DRAFT_SAVE_DELAY_MS = 250;
+const MAX_EMPTY_DRAFTS = 100;
+const EMPTY_ATTACHMENTS: readonly File[] = Object.freeze([]);
 
 export interface ChatDraftView {
 	readonly text: string;
@@ -23,7 +25,7 @@ export interface ChatDraftSnapshot {
 
 const EMPTY_DRAFT: ChatDraftView = Object.freeze({
 	text: '',
-	attachments: Object.freeze([]) as readonly File[],
+	attachments: EMPTY_ATTACHMENTS,
 	revision: 0,
 });
 
@@ -37,19 +39,54 @@ function persistText(chatId: string, text: string): void {
 	else removeLocalStorageItem(key);
 }
 
+class ChatDraftEntry implements ChatDraftView {
+	text = $state('');
+	attachments = $state.raw<readonly File[]>(EMPTY_ATTACHMENTS);
+	revision = $state(0);
+
+	constructor(text: string) {
+		this.text = text;
+	}
+}
+
 export class ChatDraftStore {
-	#entries = new SvelteMap<string, ChatDraftView>();
+	#entries = new SvelteMap<string, ChatDraftEntry>();
+	#emptyUnedited = new Set<string>();
 	#dirtyChatIds = new Set<string>();
 	#saveTimer: ReturnType<typeof setTimeout> | null = null;
 	#removePersistenceListeners: (() => void) | null = null;
 
 	load(chatId: string): void {
-		if (!chatId || this.#entries.has(chatId)) return;
-		this.#entries.set(chatId, {
-			text: persistedText(chatId),
-			attachments: [],
-			revision: 0,
-		});
+		if (chatId) this.#loadEntry(chatId);
+	}
+
+	#loadEntry(chatId: string): ChatDraftEntry {
+		const existing = this.#entries.get(chatId);
+		if (existing) {
+			if (this.#emptyUnedited.delete(chatId)) this.#emptyUnedited.add(chatId);
+			return existing;
+		}
+		const text = persistedText(chatId);
+		const entry = new ChatDraftEntry(text);
+		this.#entries.set(chatId, entry);
+		if (text) return entry;
+		this.#emptyUnedited.add(chatId);
+		if (this.#emptyUnedited.size > MAX_EMPTY_DRAFTS) {
+			const oldest = this.#emptyUnedited.values().next().value;
+			if (oldest !== undefined) {
+				this.#emptyUnedited.delete(oldest);
+				this.#entries.delete(oldest);
+			}
+		}
+		return entry;
+	}
+
+	#editEntry(chatId: string): ChatDraftEntry {
+		const entry = this.#loadEntry(chatId);
+		// Edited entries retain attachments and revision fences until the chat is discarded.
+		this.#emptyUnedited.delete(chatId);
+		entry.revision += 1;
+		return entry;
 	}
 
 	view(chatId: string): ChatDraftView {
@@ -69,11 +106,9 @@ export class ChatDraftStore {
 
 	setText(chatId: string, text: string): number {
 		if (!chatId) return 0;
-		this.load(chatId);
-		const current = this.view(chatId);
-		const revision = current.revision + 1;
-		this.#entries.set(chatId, { ...current, text, revision });
-		return revision;
+		const entry = this.#editEntry(chatId);
+		entry.text = text;
+		return entry.revision;
 	}
 
 	setTextAndFlush(chatId: string, text: string): number {
@@ -84,15 +119,9 @@ export class ChatDraftStore {
 
 	setAttachments(chatId: string, attachments: readonly File[]): number {
 		if (!chatId) return 0;
-		this.load(chatId);
-		const current = this.view(chatId);
-		const revision = current.revision + 1;
-		this.#entries.set(chatId, {
-			...current,
-			attachments: [...attachments],
-			revision,
-		});
-		return revision;
+		const entry = this.#editEntry(chatId);
+		entry.attachments = attachments.length > 0 ? [...attachments] : EMPTY_ATTACHMENTS;
+		return entry.revision;
 	}
 
 	appendBlock(
@@ -143,13 +172,13 @@ export class ChatDraftStore {
 
 	clear(chatId: string): number {
 		if (!chatId) return 0;
-		this.load(chatId);
-		const revision = this.view(chatId).revision + 1;
-		this.#entries.set(chatId, { text: '', attachments: [], revision });
+		const entry = this.#editEntry(chatId);
+		entry.text = '';
+		entry.attachments = EMPTY_ATTACHMENTS;
 		this.#dirtyChatIds.delete(chatId);
 		removeLocalStorageItem(chatDraftStorageKey(chatId));
 		this.#clearIdleTimer();
-		return revision;
+		return entry.revision;
 	}
 
 	restoreIfRevision(
@@ -158,14 +187,11 @@ export class ChatDraftStore {
 		snapshot: Pick<ChatDraftSnapshot, 'text' | 'attachments'>,
 	): boolean {
 		if (!chatId) return false;
-		this.load(chatId);
-		const current = this.view(chatId);
+		const current = this.#loadEntry(chatId);
 		if (current.revision !== expectedRevision) return false;
-		this.#entries.set(chatId, {
-			text: snapshot.text,
-			attachments: [...snapshot.attachments],
-			revision: current.revision + 1,
-		});
+		const entry = this.#editEntry(chatId);
+		entry.text = snapshot.text;
+		entry.attachments = snapshot.attachments.length > 0 ? [...snapshot.attachments] : EMPTY_ATTACHMENTS;
 		this.flushChat(chatId);
 		return true;
 	}
@@ -173,6 +199,7 @@ export class ChatDraftStore {
 	discardChat(chatId: string): void {
 		if (!chatId) return;
 		this.#entries.delete(chatId);
+		this.#emptyUnedited.delete(chatId);
 		this.#dirtyChatIds.delete(chatId);
 		removeLocalStorageItem(chatDraftStorageKey(chatId));
 		this.#clearIdleTimer();

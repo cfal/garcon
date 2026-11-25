@@ -7,8 +7,10 @@ import {
 import { ACTIVE_TRANSCRIPT_RETENTION_LIMIT } from '../transcript-page-progress.js';
 import { ChatTranscriptCache } from '../chat-transcript-cache.svelte';
 import {
+	AgentSwitchMessage,
 	AssistantMessage,
 	BashToolUseMessage,
+	CodexSubagentToolUseMessage,
 	TranscriptNoticeMessage,
 	UserMessage,
 	type ChatMessage,
@@ -220,6 +222,31 @@ describe('ActiveTranscriptState', () => {
 		expect(messages).toHaveLength(1);
 		expect(display).toHaveLength(1);
 		expect(visible).toHaveLength(1);
+		chat.transcriptCache.flush();
+	});
+
+	it('keeps question and subagent projections stable when appending unrelated output', () => {
+		const chat = new ActiveTranscriptState();
+		const answer = user('Synthetic answer', { questionReply: {
+			questionId: 'question', question: 'Synthetic question', answer: 'Synthetic answer',
+		} });
+		const subagent = new CodexSubagentToolUseMessage(TS, 'tool', 'list_agents', {});
+		seedTranscript(chat, 'chat-1', 'generation-1', [
+			entry(1, new AgentSwitchMessage(TS, 'claude', 'codex')),
+			entry(2, answer),
+			entry(3, subagent),
+		], { lastOrdinal: 3, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		const index = chat.rowIndex;
+		const answers = index.questionAnswers;
+		const subagentMessages = index.subagentMessages;
+		expect(index.lastOwnershipBoundary).toBe(1);
+		expect(answers).toEqual([answer]);
+		expect(subagentMessages).toEqual([answer, subagent]);
+
+		expect(applyMessages(chat, 'chat-1', 'generation-1', [entry(4, assistant('Synthetic output'))])).toBe('applied');
+		expect(index.questionAnswers).toBe(answers);
+		expect(index.subagentMessages).toBe(subagentMessages);
+		expect(index.lastOwnershipBoundary).toBe(1);
 		chat.transcriptCache.flush();
 	});
 

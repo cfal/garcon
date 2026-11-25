@@ -313,6 +313,19 @@ describe('ConversationUiState', () => {
 		cleanup();
 	});
 
+	it('prunes transient and plan controls when a previously listed chat is removed', () => {
+		const store = new ConversationUiState();
+		store.setTransientFeedFromSnapshot(makeTransientFeed('removed'));
+		store.setTransientFeedFromSnapshot(makeTransientFeed('retained'));
+		store.beginPlanModeForChat('removed', 'default');
+		store.pruneExecutionControls(new Set(['removed', 'retained']));
+		store.pruneExecutionControls(new Set(['retained']));
+
+		expect(store.transientFeedChatIds).toEqual(['retained']);
+		expect(store.pendingPermissionsFor('removed')).toHaveLength(0);
+		expect(store.previousPermissionModeFor('removed')).toBeNull();
+	});
+
 	it('does not let refresh responses overwrite same-version live execution-control state', () => {
 		const store = new ConversationUiState();
 		const live = makeControl(makeQueue({ entries: [makeEntry('entry-live', 'live')] }), {

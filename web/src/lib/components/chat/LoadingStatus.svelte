@@ -9,8 +9,8 @@
 	interface Props {
 		isVisible: boolean;
 		status: ChatLoadingStatus | null;
-		agentId: string;
 		onAbort: (() => void) | null;
+		reduceMotion?: boolean;
 		spinnerSelectionKey?: string | null;
 		showCommit?: boolean;
 		gitSummary?: GitQuickSummaryReady | null;
@@ -23,8 +23,8 @@
 	let {
 		isVisible,
 		status,
-		agentId,
 		onAbort,
+		reduceMotion = false,
 		spinnerSelectionKey = null,
 		showCommit = false,
 		gitSummary = null,
@@ -54,21 +54,30 @@
 	] as const;
 
 	let animationPhase = $state(0);
-	let activeSpinners = $state<string[]>([...SPINNER_SETS[0]]);
+	let activeSpinners = $state.raw<readonly string[]>(SPINNER_SETS[0]);
 
 	let hasSpinnerSelection = false;
 	let lastSpinnerSelectionKey: string | null = null;
 
-	function pickRandomSpinnerSet(): string[] {
-		return [...SPINNER_SETS[Math.floor(Math.random() * SPINNER_SETS.length)]];
-	}
-
 	$effect(() => {
-		if (!isVisible) return;
-		const timer = setInterval(() => {
-			animationPhase = (animationPhase + 1) % activeSpinners.length;
-		}, FRAME_INTERVAL_MS);
-		return () => clearInterval(timer);
+		if (!isVisible || reduceMotion) return;
+		let timer: ReturnType<typeof setInterval> | undefined;
+		function syncAnimation(): void {
+			if (document.visibilityState === 'hidden') {
+				clearInterval(timer);
+				timer = undefined;
+			} else {
+				timer ??= setInterval(() => {
+					animationPhase = (animationPhase + 1) % activeSpinners.length;
+				}, FRAME_INTERVAL_MS);
+			}
+		}
+		syncAnimation();
+		document.addEventListener('visibilitychange', syncAnimation);
+		return () => {
+			document.removeEventListener('visibilitychange', syncAnimation);
+			clearInterval(timer);
+		};
 	});
 
 	// Spinner set selection is randomized once per load and reset whenever
@@ -82,16 +91,14 @@
 			return;
 		}
 		if (!hasSpinnerSelection || lastSpinnerSelectionKey !== nextSelectionKey) {
-			activeSpinners = pickRandomSpinnerSet();
+			activeSpinners = SPINNER_SETS[Math.floor(Math.random() * SPINNER_SETS.length)];
 			animationPhase = 0;
 			hasSpinnerSelection = true;
 			lastSpinnerSelectionKey = nextSelectionKey;
 		}
 	});
 
-	const statusText = $derived(
-		agentId === 'codex' ? m.chat_loading_thinking() : status?.text || m.chat_loading_thinking(),
-	);
+	const statusText = $derived(status?.text || m.chat_loading_thinking());
 	const canInterrupt = $derived(status?.can_interrupt !== false);
 </script>
 

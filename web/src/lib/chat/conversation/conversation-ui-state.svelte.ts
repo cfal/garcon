@@ -20,6 +20,18 @@ import {
 } from '$lib/chat/transcript/transient-feed-state.js';
 import { untrack } from 'svelte';
 
+const EMPTY_PENDING_PERMISSIONS: readonly PendingPermissionRequest[] = Object.freeze([]);
+
+function pruneByChatId<T>(records: Record<string, T>, removed: (chatId: string) => boolean): Record<string, T> {
+	let retained = records;
+	for (const chatId of Object.keys(records)) {
+		if (!removed(chatId)) continue;
+		if (retained === records) retained = { ...records };
+		delete retained[chatId];
+	}
+	return retained;
+}
+
 export type PendingPermissionRequestUpdate =
 	| PendingPermissionRequest[]
 	| ((previous: PendingPermissionRequest[]) => PendingPermissionRequest[]);
@@ -69,15 +81,16 @@ export interface ConversationUiPort {
 
 export class ConversationUiState implements ConversationUiPort {
 	pendingViewChat = $state<PendingViewChat | null>(null);
-	private executionControlByChatId = $state<Record<string, ChatExecutionControlState>>({});
+	private executionControlByChatId = $state.raw<Record<string, ChatExecutionControlState>>({});
 	private transientFeedByChatId = $state.raw<Record<string, ChatTransientFeedSnapshot>>({});
 	private pendingPermissionRequestsByChatId = $state.raw<
 		Record<string, PendingPermissionRequest[]>
 	>({});
-	private unassignedPendingPermissionRequests = $state<PendingPermissionRequest[]>([]);
+	private unassignedPendingPermissionRequests = $state.raw<PendingPermissionRequest[]>([]);
 	private previousPermissionModeByChatId = $state.raw<Record<string, PermissionMode>>({});
 	private unassignedPreviousPermissionMode = $state<PermissionMode | null>(null);
 	private activeTransientChatId = $state<string | null>(null);
+	#observedChatIds: ReadonlySet<string> = new Set();
 	private readonly executionControlAuthority = new ExecutionControlInstanceAuthority();
 
 	constructor(private readonly onExecutionControlChanged?: (
@@ -139,7 +152,7 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	pendingPermissionsFor(chatId: string): readonly PendingPermissionRequest[] {
-		return this.pendingPermissionRequestsByChatId[chatId] ?? [];
+		return this.pendingPermissionRequestsByChatId[chatId] ?? EMPTY_PENDING_PERMISSIONS;
 	}
 
 	updatePendingPermissionsForChat(chatId: string, update: PendingPermissionRequestUpdate): void {
@@ -325,6 +338,12 @@ export class ConversationUiState implements ConversationUiPort {
 	}
 
 	pruneExecutionControls(activeChatIds: ReadonlySet<string>): void {
+		// Live events can arrive before the record enters the chat list.
+		const removed = (chatId: string) => this.#observedChatIds.has(chatId) && !activeChatIds.has(chatId);
+		this.transientFeedByChatId = pruneByChatId(this.transientFeedByChatId, removed);
+		this.pendingPermissionRequestsByChatId = pruneByChatId(this.pendingPermissionRequestsByChatId, removed);
+		this.previousPermissionModeByChatId = pruneByChatId(this.previousPermissionModeByChatId, removed);
+		this.#observedChatIds = activeChatIds;
 		const staleIds = Object.keys(this.executionControlByChatId).filter(
 			(chatId) => !activeChatIds.has(chatId),
 		);

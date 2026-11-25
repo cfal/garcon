@@ -16,7 +16,6 @@ describe('LoadingStatus', () => {
 		const { container, rerender, unmount } = render(LoadingStatus, {
 			isVisible: false,
 			status: null,
-			agentId: 'claude',
 			onAbort: null,
 			spinnerSelectionKey: 'chat-1',
 		});
@@ -46,12 +45,28 @@ describe('LoadingStatus', () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
+	it('pauses the interval for hidden documents and reduced motion', async () => {
+		vi.useFakeTimers();
+		const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+		const { rerender } = render(LoadingStatus, { isVisible: true, status: null, onAbort: null });
+		expect(vi.getTimerCount()).toBe(0);
+		visibility.mockReturnValue('visible');
+		document.dispatchEvent(new Event('visibilitychange'));
+		expect(vi.getTimerCount()).toBe(1);
+		await rerender({ reduceMotion: true });
+		expect(vi.getTimerCount()).toBe(0);
+		await rerender({ reduceMotion: false });
+		expect(vi.getTimerCount()).toBe(1);
+		visibility.mockReturnValue('hidden');
+		document.dispatchEvent(new Event('visibilitychange'));
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
 	it('keeps the status bar height stable when stopping hides the stop action', async () => {
 		const { rerender } = render(LoadingStatus, {
 			props: {
 				isVisible: true,
 				status: { text: 'Processing', tokens: 0, can_interrupt: true },
-				agentId: 'claude',
 				onAbort: vi.fn(),
 				spinnerSelectionKey: 'chat-1',
 			},
@@ -63,7 +78,6 @@ describe('LoadingStatus', () => {
 		await rerender({
 			isVisible: true,
 			status: { text: 'Stopping', tokens: 0, can_interrupt: false },
-			agentId: 'claude',
 			onAbort: vi.fn(),
 			spinnerSelectionKey: 'chat-1',
 		});
@@ -78,7 +92,6 @@ describe('LoadingStatus', () => {
 			props: {
 				isVisible: true,
 				status: { text: 'Processing', tokens: 0, can_interrupt: true },
-				agentId: 'claude',
 				onAbort: vi.fn(),
 				spinnerSelectionKey: 'chat-1',
 				announcementsEnabled: false,

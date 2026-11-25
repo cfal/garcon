@@ -40,6 +40,7 @@
 	let { snippetTemplate = null, onCreateDraft = () => {}, shell, initialSeed, sessions: suppliedSessions }: Props = $props();
 
 	const appShell = untrack(() => shell ?? createAppShellStore());
+	appShell.isMobile = window.matchMedia('(max-width: 768px)').matches;
 	setCanonicalWorkspaceLayout();
 	appShell.projectBasePath = '/workspace';
 	appShell.openNewChatDialog(untrack(() => initialSeed));

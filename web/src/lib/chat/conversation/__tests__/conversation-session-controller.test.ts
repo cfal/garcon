@@ -2471,7 +2471,7 @@ describe('ConversationSessionController', () => {
 
 		await controller.submitForChat('123');
 
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith('progress', 'Forking chat...');
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('123', 'progress', 'Forking chat...');
 		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
 		expect(deps.chatState.localNotices).toEqual([]);
 		expect(deps.chatState.isUserScrolledUp).toBe(false);
@@ -2515,7 +2515,7 @@ describe('ConversationSessionController', () => {
 			chatId: expect.stringMatching(/^\d+$/),
 			clientRequestId: expect.any(String),
 		});
-		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith('progress', 'Forking chat...');
+		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith('123', 'progress', 'Forking chat...');
 		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
 		expect(deps.chatState.localNotices).toEqual([]);
 		expect(deps.sessions.upsertServerChat).toHaveBeenCalledWith(createServerEntry('456'));
@@ -4927,7 +4927,7 @@ describe('ConversationSessionController', () => {
 		const controller = new ConversationSessionController(deps);
 
 		await controller.replaceQueueEntryForChat('chat-1', 'entry-2', 'edited', 4);
-		await controller.deleteQueueEntryForChat('chat-1', 'entry-3');
+		await controller.deleteQueueEntryFromPanelForChat('chat-1', 'entry-3');
 
 		expect(mockReplaceQueuedInput).toHaveBeenCalledWith({
 			clientRequestId: expect.any(String),
@@ -5643,7 +5643,7 @@ describe('ConversationSessionController', () => {
 					status: 'accepted',
 					acceptedAt: '2026-05-14T00:00:00.000Z',
 				});
-				controller.handleModelChange('opus');
+				controller.handleModelSelectionChange({ agentId: 'claude', modelValue: 'opus' });
 				const submission = controller.submitForChat('chat-1');
 				await flushPromises();
 				expect(controller.isDirectAdmissionPending('chat-1')).toBe(true);

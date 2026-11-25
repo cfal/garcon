@@ -18,7 +18,6 @@
 		isProcessing: boolean;
 		isVisible?: boolean;
 		status: ChatLoadingStatus | null;
-		agentId: string;
 		spinnerSelectionKey: string;
 		statusBar: ComposerStatusBarPresentation;
 		projectPath: string;
@@ -39,7 +38,6 @@
 		isProcessing,
 		isVisible = true,
 		status,
-		agentId,
 		spinnerSelectionKey,
 		statusBar,
 		projectPath,
@@ -76,7 +74,7 @@
 				<LoadingStatus
 					{isVisible}
 					{status}
-					{agentId}
+					{reduceMotion}
 					{spinnerSelectionKey}
 					showCommit={statusBar.commit}
 					{gitSummary}

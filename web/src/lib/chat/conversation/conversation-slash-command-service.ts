@@ -1,12 +1,11 @@
 import { compactChat } from '$lib/api/chats.js';
-import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
+import { ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
-import type { ChatImage } from '$shared/chat-types';
 import type { ScheduledPromptExecutionSelection } from '$shared/scheduled-prompts';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
 import { effectiveExecutorId } from '$shared/executors';
-import { resolveConversationModelSelection } from './conversation-model-selection.js';
+import { ConversationForkHandoffService } from './conversation-fork-handoff-service.js';
 import {
 	steerSubmissionRejection,
 	steerSubmissionRejectionNotice,
@@ -24,7 +23,6 @@ import {
 	parseTagCommand,
 	isLiteralAppCommand,
 } from '$lib/chat/composer/slash-commands.js';
-import { createClientChatId } from '$shared/client-chat-id';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
 import type {
 	ScheduleInCommandError,
@@ -33,26 +31,8 @@ import type {
 	TagCommandParseResult,
 } from '$lib/chat/composer/slash-commands.js';
 import { formatScheduledInstant } from '$lib/scheduling/local-schedule.js';
-import {
-	errorDetail,
-	prepareChatImages,
-} from '$lib/chat/conversation/conversation-submission-helpers.js';
-import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
-import {
-	AcceptedInputSubmissionService,
-	type PreparedForkInput,
-} from '$lib/chat/conversation/accepted-input-submission-service.js';
-import {
-	remapForkAtMessage,
-	selectForkAtMessage,
-	type ForkAtMessageSelection,
-} from '$lib/chat/actions/fork-at-message-action.js';
-import {
-	forkFailureNotice,
-	isHandoffForkConfirmationError,
-	requestChatFork,
-} from '$lib/chat/actions/fork-chat-request.js';
-import type { ForkChatResponse } from '$shared/chat-command-contracts';
+import { errorDetail } from '$lib/chat/conversation/conversation-submission-helpers.js';
+import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -157,14 +137,19 @@ export type SlashCommandSubmissionResolution =
 	| { kind: 'continue'; content: string };
 
 export class ConversationSlashCommandService {
+	readonly #forkHandoff: ConversationForkHandoffService;
 	readonly #scheduleInFlight = new Set<string>();
 	// Serializes each chat's complete incremental tag read-modify-write operation.
 	readonly #tagMutationTails = new Map<string, Promise<void>>();
 
 	constructor(
 		private readonly deps: ConversationSlashCommandDeps,
-		private readonly acceptedInputs = new AcceptedInputSubmissionService(),
-	) {}
+		acceptedInputs = new AcceptedInputSubmissionService(),
+	) {
+		this.#forkHandoff = new ConversationForkHandoffService(
+			deps, acceptedInputs, (chat, submit) => this.#submitAfterPendingSettings(chat, false, submit),
+		);
+	}
 
 	#submitAfterPendingSettings(
 		chat: ChatSessionRecord,
@@ -556,7 +541,7 @@ export class ConversationSlashCommandService {
 	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
 		if (chat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_compact_draft());
+			deps.chatState.appendLocalNoticeForChat(chatId, 'error', m.chat_notice_cannot_compact_draft());
 			return 'rejected';
 		}
 
@@ -580,7 +565,8 @@ export class ConversationSlashCommandService {
 					previousImages,
 				);
 			}
-			deps.chatState.appendLocalNotice(
+			deps.chatState.appendLocalNoticeForChat(
+				chatId,
 				'error',
 				m.chat_notice_failed_compact({ detail: errorDetail(error) }),
 			);
@@ -588,340 +574,21 @@ export class ConversationSlashCommandService {
 		}
 	}
 
-	// Continues the chat under the same agent in a fresh chat, then navigates
-	// there so the user lands in the continuation rather than the chat they left.
-	async submitHandoffCommand(
-		sourceChatId: string,
-		sourceChat: ChatSessionRecord,
-		message: string,
-		images: File[],
-		clearComposer: boolean,
+	submitHandoffCommand(
+		...args: Parameters<ConversationForkHandoffService['submitHandoffCommand']>
 	): Promise<ConversationSubmissionOutcome> {
-		const { deps } = this;
-		if (sourceChat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_handoff_draft());
-			return 'rejected';
-		}
-		if (!message.trim()) {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_handoff_requires_message());
-			return 'rejected';
-		}
-
-		const previousText = deps.composerState.inputText;
-		const previousImages = [...deps.composerState.images];
-		deps.chatState.appendLocalNotice('progress', m.chat_notice_handing_off_chat());
-		// Clearing through this revision on settle removes the progress notice while
-		// keeping any error notice the failure paths append after it.
-		const progressNoticeRevision = deps.chatState.noticeRevisionForChat(sourceChatId);
-		deps.chatState.isUserScrolledUp = false;
-		const clearedRevision = clearComposer
-			? deps.composerState.clearAfterSubmit(sourceChatId)
-			: null;
-
-		try {
-			let imagePayload: ChatImage[] = [];
-			if (images.length > 0) {
-				try {
-					imagePayload = await prepareChatImages(images);
-				} catch (error) {
-					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-					deps.chatState.appendLocalNotice(
-						'error',
-						m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
-					);
-					return 'rejected';
-				}
-			}
-
-			const submission = this.acceptedInputs.selfHandoff({
-				sourceChatId,
-				chatId: createClientChatId(),
-				command: message.trim(),
-				...(imagePayload.length > 0 ? { images: imagePayload } : {}),
-			});
-			try {
-				const response = await submission.submit();
-				deps.sessions.upsertServerChat(response.chat);
-				deps.sessions.setSelectedChatId(response.chat.id);
-				deps.navigation.navigateToChat?.(response.chat.id);
-				if (response.status === 'accepted') {
-					deps.lifecycle.beginTurn(response.chat.id);
-				}
-				return 'accepted';
-			} catch (error) {
-				// An ambiguous transport outcome may have already created the target and
-				// started its turn. Restoring the composer and calling it a failure
-				// invites a resubmission that would produce a second continuation.
-				const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
-				if (!outcomeUnknown) {
-					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					outcomeUnknown
-						? m.chat_notice_handoff_outcome_unconfirmed()
-						: m.chat_notice_failed_handoff({ detail: errorDetail(error) }),
-				);
-				return outcomeUnknown ? 'unknown' : 'rejected';
-			}
-		} finally {
-			deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
-		}
+		return this.#forkHandoff.submitHandoffCommand(...args);
 	}
 
-	async #submitForkRunWithConfirmation(
-		submission: PreparedForkInput,
-	): Promise<Awaited<ReturnType<PreparedForkInput['submit']>> | null> {
-		try {
-			return await submission.submit();
-		} catch (error) {
-			if (!isHandoffForkConfirmationError(error) || !this.deps.confirmHandoffFork) throw error;
-			if (!(await this.deps.confirmHandoffFork())) return null;
-			return submission.submitWithHandoffFork();
-		}
-	}
-
-	async submitForkCommand(
-		sourceChatId: string,
-		sourceChat: ChatSessionRecord,
-		message: string,
-		images: File[],
-		clearComposer: boolean,
+	submitForkCommand(
+		...args: Parameters<ConversationForkHandoffService['submitForkCommand']>
 	): Promise<ConversationSubmissionOutcome> {
-		const { deps } = this;
-		if (sourceChat.status !== 'running') {
-			deps.chatState.appendLocalNotice('error', m.chat_notice_cannot_fork_draft());
-			return 'rejected';
-		}
-
-		const model = sourceChat.model ?? deps.agentState.model;
-		const previousText = deps.composerState.inputText;
-		const previousImages = [...deps.composerState.images];
-		deps.chatState.appendLocalNotice('progress', m.chat_notice_forking_chat());
-		// Clearing through this revision on settle removes the progress notice while
-		// keeping any error notice the failure paths append after it.
-		const progressNoticeRevision = deps.chatState.noticeRevisionForChat(sourceChatId);
-		deps.chatState.isUserScrolledUp = false;
-		const clearedRevision = clearComposer
-			? deps.composerState.clearAfterSubmit(sourceChatId)
-			: null;
-
-		try {
-			if (!message.trim()) {
-				return await this.#submitForkOnlyCommand(
-					sourceChatId,
-					previousText,
-					previousImages,
-					clearedRevision,
-				);
-			}
-
-			let imagePayload: ChatImage[] = [];
-			if (images.length > 0) {
-				try {
-					imagePayload = await prepareChatImages(images);
-				} catch (error) {
-					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-					deps.chatState.appendLocalNotice(
-						'error',
-						m.chat_notice_failed_prepare_attachments({ detail: errorDetail(error) }),
-					);
-					return 'rejected';
-				}
-			}
-
-			const forkChatId = createClientChatId();
-			const selection = resolveConversationModelSelection(
-				{
-					agentId: sourceChat.agentId,
-					model,
-					apiProviderId: sourceChat.apiProviderId ?? null,
-					modelEndpointId: sourceChat.modelEndpointId ?? null,
-					modelProtocol: sourceChat.modelProtocol ?? null,
-				},
-				deps.modelCatalogForExecutor(effectiveExecutorId(sourceChat.executorId)),
-			);
-			const submission = this.acceptedInputs.fork({
-				sourceChatId,
-				chatId: forkChatId,
-				command: message.trim(),
-				permissionMode: sourceChat.permissionMode,
-				thinkingMode: sourceChat.thinkingMode,
-				agentSettings: sourceChat.agentSettings,
-				images: imagePayload.length > 0 ? imagePayload : undefined,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			try {
-				const response = await this.#submitForkRunWithConfirmation(submission);
-				if (!response) {
-					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-					return 'rejected';
-				}
-				deps.sessions.upsertServerChat(response.chat);
-				deps.navigation.openForkedChat(response.chat.id, sourceChatId);
-				if (response.status === 'accepted') {
-					deps.lifecycle.beginTurn(response.chat.id);
-				}
-				return 'accepted';
-			} catch (error) {
-				const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
-				if (!outcomeUnknown) {
-					this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-				}
-				deps.chatState.appendLocalNotice(
-					'error',
-					outcomeUnknown
-						? m.chat_notice_fork_outcome_unconfirmed()
-						: m.chat_notice_failed_fork_chat({ detail: errorDetail(error) }),
-				);
-				return outcomeUnknown ? 'unknown' : 'rejected';
-			}
-		} finally {
-			deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
-		}
+		return this.#forkHandoff.submitForkCommand(...args);
 	}
 
-	async forkChat(
-		sourceChatId: string,
-		upToOrdinal?: number,
-		source?: ConversationForkSource,
-	): Promise<void> {
-		const sourceChat = this.deps.sessions.byId[sourceChatId];
-		if (!sourceChat || sourceChat.status === 'draft') {
-			this.deps.chatState.appendLocalNoticeForChat(
-				sourceChatId,
-				'error',
-				m.chat_notice_cannot_fork_draft(),
-			);
-			return;
-		}
-		this.deps.chatState.appendLocalNoticeForChat(
-			sourceChatId,
-			'progress',
-			m.chat_notice_forking_chat(),
-		);
-		const progressNoticeRevision = this.deps.chatState.noticeRevisionForChat(sourceChatId);
-		try {
-			await this.#submitAfterPendingSettings(sourceChat, false, async () => {
-				await this.#performForkOnly(sourceChatId, upToOrdinal, source);
-				return 'accepted';
-			});
-		} catch (error) {
-			this.deps.chatState.appendLocalNoticeForChat(sourceChatId, 'error', forkFailureNotice(error));
-		} finally {
-			this.deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
-		}
+	forkChat(...args: Parameters<ConversationForkHandoffService['forkChat']>): Promise<void> {
+		return this.#forkHandoff.forkChat(...args);
 	}
-
-	// Resolves null when the user declines a handoff fork, so callers stay silent instead of
-	// reporting a failure.
-	async #performForkOnly(
-		sourceChatId: string,
-		upToOrdinal?: number,
-		source?: ConversationForkSource,
-	): Promise<ChatListEntry | null> {
-		const sourceTranscript = source?.transcript ?? this.deps.chatState;
-		const chatId = createClientChatId();
-		const selection =
-			upToOrdinal === undefined
-				? null
-				: selectForkAtMessage(
-						sourceTranscript.entries,
-						sourceTranscript.getCursor().transcriptViewId,
-						upToOrdinal,
-					);
-		if (upToOrdinal !== undefined && !selection) {
-			throw new Error(m.chat_notice_fork_message_no_longer_available());
-		}
-		let result: ForkChatResponse | null;
-		try {
-			result = await requestChatFork(
-				{ sourceChatId, chatId, ...(selection ? forkPointParams(selection) : {}) },
-				this.deps.confirmHandoffFork,
-			);
-		} catch (error) {
-			const defaultRefetch = this.deps.refetchTranscript;
-			const refetchTranscript =
-				source?.refetchTranscript ?? (defaultRefetch ? () => defaultRefetch(sourceChatId) : null);
-			if (!selection || !isStaleForkPointError(error) || !refetchTranscript) {
-				throw error;
-			}
-			try {
-				await refetchTranscript();
-			} catch {
-				throw error;
-			}
-			const remapped = remapForkAtMessage(
-				sourceTranscript.entries,
-				sourceTranscript.getCursor().transcriptViewId,
-				selection,
-			);
-			if (!remapped) throw error;
-			result = await requestChatFork(
-				{ sourceChatId, chatId, ...forkPointParams(remapped) },
-				this.deps.confirmHandoffFork,
-			);
-		}
-		if (!result) return null;
-		this.deps.sessions.upsertServerChat(result.chat);
-		this.deps.navigation.openForkedChat(result.chat.id, sourceChatId);
-		return result.chat;
-	}
-
-	async #submitForkOnlyCommand(
-		sourceChatId: string,
-		previousText: string,
-		previousImages: File[],
-		clearedRevision: number | null,
-	): Promise<ConversationSubmissionOutcome> {
-		try {
-			if (!(await this.#performForkOnly(sourceChatId))) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-				return 'rejected';
-			}
-			return 'accepted';
-		} catch (error) {
-			// An unconfirmed fork may already exist; restoring the command would invite a second one.
-			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
-			if (!outcomeUnknown) {
-				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
-			}
-			this.deps.chatState.appendLocalNotice('error', forkFailureNotice(error));
-			return outcomeUnknown ? 'unknown' : 'rejected';
-		}
-	}
-
-	#restoreComposer(
-		chatId: string,
-		previousText: string,
-		previousImages: File[],
-		clearedRevision: number | null,
-	): void {
-		if (clearedRevision === null) return;
-		this.deps.composerState.restoreDraftIfRevision(
-			chatId,
-			clearedRevision,
-			previousText,
-			previousImages,
-		);
-	}
-}
-
-function forkPointParams(selection: ForkAtMessageSelection): {
-	upToOrdinal: number;
-	transcriptViewId: string;
-} {
-	return {
-		upToOrdinal: selection.ordinal,
-		transcriptViewId: selection.transcriptViewId,
-	};
-}
-
-function isStaleForkPointError(error: unknown): error is ApiError {
-	return error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW';
 }
 
 function moveChatNotice(boundary: 'top' | 'bottom', changed: boolean): string {

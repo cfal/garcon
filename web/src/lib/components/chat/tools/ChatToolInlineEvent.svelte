@@ -6,7 +6,7 @@
 	import ChatEventCard from '../transcript/rows/ChatEventCard.svelte';
 	import HighlightedCodeText from '$lib/components/rich-text/HighlightedCodeText.svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { ChatClipboardFeedback } from '../chat-clipboard-feedback.svelte.js';
 	import type { ToolInlineAction } from '$lib/chat/tools/tool-display-contract.js';
 
 	interface OneLineDisplayProps {
@@ -14,6 +14,7 @@
 		label?: string;
 		value: string;
 		secondary?: string;
+		pattern?: string;
 		action?: ToolInlineAction;
 		onAction?: () => void;
 		style?: string;
@@ -41,6 +42,7 @@
 		label,
 		value,
 		secondary,
+		pattern,
 		action = 'none',
 		onAction,
 		style,
@@ -51,41 +53,20 @@
 		toolResult,
 	}: OneLineDisplayProps = $props();
 
-	let copied = $state(false);
-	let copyTimer: ReturnType<typeof setTimeout> | null = null;
+	const clipboard = new ChatClipboardFeedback();
+	onDestroy(() => clipboard.reset());
 
-	async function handleAction() {
-		if (action === 'copyValue' && value) {
-			const didCopy = await copyToClipboard(value);
-			if (!didCopy) return;
-			copied = true;
-			if (copyTimer) clearTimeout(copyTimer);
-			copyTimer = setTimeout(() => {
-				copied = false;
-				copyTimer = null;
-			}, 2000);
-		} else if (onAction) {
-			onAction();
-		}
+	async function handleAction(): Promise<void> {
+		if (action === 'copyValue' && value) await clipboard.copy(value);
+		else onAction?.();
 	}
-
-	onDestroy(() => {
-		if (copyTimer) clearTimeout(copyTimer);
-	});
 
 	let isTerminal = $derived(style === 'terminal');
 	let displayName = $derived(value.split('/').pop() || value);
-	let grepPatternValue = $derived.by(() => {
-		if (toolName !== 'Grep' || !secondary) return '';
-		const trimmed = secondary.trim();
-		if (!trimmed) return '';
-		return trimmed.replace(/^Pattern:\s*/i, '');
-	});
-	let showGrepPatternRow = $derived(toolName === 'Grep' && grepPatternValue.length > 0);
 </script>
 
 {#snippet copyIcon()}
-	{#if copied}
+	{#if clipboard.copied}
 		<svg
 			class="w-3 h-3 text-status-success-foreground"
 			fill="none"
@@ -108,6 +89,7 @@
 
 {#snippet copyButton()}
 	<button
+		type="button"
 		onclick={handleAction}
 		class="opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100 text-muted-foreground hover:text-foreground flex-shrink-0"
 		title={m.chat_tool_display_copy_to_clipboard()}
@@ -163,6 +145,7 @@
 					<div class="flex items-center gap-1.5 min-w-0">
 						<span class="text-xs text-muted-foreground flex-shrink-0">{label || toolName}</span>
 						<button
+							type="button"
 							onclick={handleAction}
 							class="text-xs text-primary hover:text-primary/80 font-mono hover:underline transition-colors truncate"
 							title={value}
@@ -232,15 +215,14 @@
 							{@render copyButton()}
 						{/if}
 					</div>
-					{#if showGrepPatternRow}
+					{#if pattern}
 						<div class="mt-0.5 flex items-center gap-1.5 min-w-0">
-							<span class="text-xs text-muted-foreground flex-shrink-0">Pattern</span>
 							<span
 								class="text-xs font-mono {wrapText
 									? 'whitespace-pre-wrap break-all'
 									: 'truncate'} flex-1 min-w-0 {colorScheme.primary}"
 							>
-								{grepPatternValue}
+								{m.chat_tool_pattern({ pattern })}
 							</span>
 						</div>
 					{:else if secondary}
