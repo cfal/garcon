@@ -43,12 +43,16 @@ export interface GeminiFault {
   readonly reason: string;
 }
 
-// Streams its frames this far apart instead of all at once. agy relays
-// updates that arrive together as one batch, so only a paced stream shows how
-// it relays output a real model streams over time.
-export interface PacedGeminiTurn {
-  readonly kind: 'paced';
-  readonly parts: readonly GeminiPart[];
+export interface GeminiStreamOptions {
+  // Spaces the response's frames this far apart instead of sending them at
+  // once. agy relays updates that arrive together as one batch, so only a paced
+  // stream shows how it relays output a real model streams over time.
+  readonly frameIntervalMs?: number;
+}
+
+interface ScriptedGeminiStream {
+  readonly kind: 'stream';
+  readonly turn: GeminiTurn;
   readonly frameIntervalMs: number;
 }
 
@@ -134,7 +138,7 @@ function sseResponse(parts: readonly GeminiPart[], frameIntervalMs = 0): Respons
 
 export class FakeGeminiModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: Array<GeminiTurn | GeminiFault | PacedGeminiTurn> = [];
+  readonly #turns: Array<ScriptedGeminiStream | GeminiFault> = [];
   readonly #requests: RecordedGeminiRequest[] = [];
   readonly #violations: string[] = [];
   readonly #auxiliaryRequests: string[] = [];
@@ -159,16 +163,12 @@ export class FakeGeminiModel {
     return `http://${this.#server.hostname}:${this.#server.port}`;
   }
 
-  scriptTurn(turn: GeminiTurn): void {
-    this.#turns.push(turn);
-  }
-
-  scriptPacedTurn(parts: readonly GeminiPart[], frameIntervalMs: number): void {
-    this.#turns.push({ kind: 'paced', parts, frameIntervalMs });
+  scriptTurn(turn: GeminiTurn, options: GeminiStreamOptions = {}): void {
+    this.#turns.push({ kind: 'stream', turn, frameIntervalMs: options.frameIntervalMs ?? 0 });
   }
 
   // Holds the response before its first frame until the test releases it.
-  scriptHeldTurn(turn: GeminiTurn): HeldGeminiTurn {
+  scriptHeldTurn(turn: GeminiTurn, options: GeminiStreamOptions = {}): HeldGeminiTurn {
     const requested = Promise.withResolvers<RecordedGeminiRequest>();
     const gate = Promise.withResolvers<void>();
     const release = () => {
@@ -176,11 +176,11 @@ export class FakeGeminiModel {
       gate.resolve();
     };
     this.#pendingReleases.add(release);
-    this.#turns.push(async (request) => {
+    this.scriptTurn(async (request) => {
       requested.resolve(request);
       await gate.promise;
       return typeof turn === 'function' ? turn(request) : turn;
-    });
+    }, options);
     return { requested: requested.promise, release };
   }
 
@@ -258,10 +258,10 @@ export class FakeGeminiModel {
       );
       return Response.json({ error: { code: 500, message: 'no scripted turn', status: 'INTERNAL' } }, { status: 500 });
     }
-    if (Array.isArray(turn) || typeof turn === 'function') {
-      return sseResponse(await (typeof turn === 'function' ? turn(recorded) : turn));
+    if (turn.kind === 'stream') {
+      const parts = typeof turn.turn === 'function' ? await turn.turn(recorded) : turn.turn;
+      return sseResponse(parts, turn.frameIntervalMs);
     }
-    if (turn.kind === 'paced') return sseResponse(turn.parts, turn.frameIntervalMs);
     return Response.json({
       error: {
         code: turn.status,

@@ -211,7 +211,7 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     const hash = marker('HASH');
     const half = Math.floor(hash.length / 2);
     // Each text boundary falls inside Markdown, as a streamed answer's can.
-    model.scriptPacedTurn([
+    model.scriptTurn([
       geminiThought('Checking the merge.'),
       geminiText('- **Merged:** at `'),
       geminiThought(' Then the deploy.'),
@@ -220,7 +220,7 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       geminiText(`${hash.slice(half)}\`.\n- **Deployed:** **Not`),
       geminiThought(' Done.'),
       geminiText(' started**.'),
-    ], 50);
+    ], { frameIntervalMs: 50 });
     await withIntegrationFixture('antigravity-scripted-interleaved-thought', async (fixture) => {
       const chatId = fixture.newChatId();
       const cursor = fixture.client.markEvents();
@@ -230,8 +230,9 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, afterIndex: cursor });
       const messages = (await fixture.client.getMessages(chatId)).messages;
       expect(assistantContents(messages)).toEqual([`- **Merged:** at \`${hash}\`.\n- **Deployed:** **Not started**.`]);
-      expect(messagesOfType(messages, 'thinking').map((message) => message.content))
-        .toEqual(['Checking the merge. Then the deploy. Then the status. Done.']);
+      // Where thinking rows split depends on how agy batches the frames.
+      expect(messagesOfType(messages, 'thinking').map((message) => message.content).join(' '))
+        .toBe('Checking the merge. Then the deploy. Then the status. Done.');
       model.assertSettled();
     }, withScriptedAntigravity());
   }, TURN_TIMEOUT_MS);

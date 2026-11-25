@@ -29,7 +29,9 @@ describe('AntigravityAcpEventConverter', () => {
 
     expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Consider' } }), context)).toEqual([]);
     expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'ing.' } }), context)).toEqual([]);
-    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Running ' } }), context)).toEqual([]);
+    // Message text after thinking publishes the thinking first.
+    expect(plain(converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Running ' } }), context)))
+      .toEqual([{ type: 'thinking', content: 'Considering.' }]);
     converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'it.' } }), context);
 
     const atTool = converter.fromSessionUpdate(toolCall('tool-1', 'run_command', 'execute', {
@@ -38,7 +40,6 @@ describe('AntigravityAcpEventConverter', () => {
       WaitMsBeforeAsync: 5000,
     }), context);
     expect(plain(atTool)).toEqual([
-      { type: 'thinking', content: 'Considering.' },
       { type: 'assistant-message', content: 'Running it.' },
       { type: 'bash-tool-use', toolId: 'tool-1', command: 'echo synthetic', description: 'Echo text' },
     ]);
@@ -324,6 +325,7 @@ describe('AntigravityAcpEventConverter', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
     const rows = [
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Reviewing the merge.' } }),
       update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '**Merged** at `b62' } }),
       update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Checking ' } }),
       update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '20dd97`.' } }),
@@ -332,7 +334,10 @@ describe('AntigravityAcpEventConverter', () => {
       update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' Not **deployed**.' } }),
     ].flatMap((row) => converter.fromSessionUpdate(row, context));
     rows.push(...converter.endTurn(SESSION, context));
+    // Thinking before the answer is published as the answer starts; thinking
+    // within it waits, so the answer stays one row.
     expect(plain(rows)).toEqual([
+      { type: 'thinking', content: 'Reviewing the merge.' },
       { type: 'thinking', content: 'Checking the hash.' },
       { type: 'assistant-message', content: '**Merged** at `b6220dd97`. Not **deployed**.' },
     ]);

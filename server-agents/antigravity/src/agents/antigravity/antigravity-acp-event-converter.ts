@@ -114,15 +114,20 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     context: AcpSessionUpdateContext,
   ): ChatMessage[] {
     switch (updateType) {
-      // Thought and message text buffer separately until a tool frame or the
-      // turn's end. agy forwards thought parts wherever the model streams them,
-      // including between chunks of one answer; publishing on every switch made
-      // each chunk its own row and broke Markdown that spans chunks.
+      // An answer stays one buffer until a tool frame or the turn's end. agy
+      // forwards thought parts wherever the model streams them, including
+      // between chunks of one answer; publishing on every switch made each chunk
+      // its own row and broke Markdown that spans chunks. Thinking that precedes
+      // the answer is still published when the answer starts, so a long answer
+      // does not hide it.
       // A whole `agent_message` carries the same content as a run of chunks.
       case 'agent_message':
-      case 'agent_message_chunk':
+      case 'agent_message_chunk': {
+        const answerStarted = session.assistantText.trim() !== '';
+        const flushed = !answerStarted && session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
         session.assistantText += session.failure.offer(acpContentText(update.content));
-        return [];
+        return flushed;
+      }
       case 'agent_thought_chunk':
         session.thinkingText += acpContentText(update.content);
         return [];

@@ -67,7 +67,7 @@ A chat's project path cannot change. agy keeps the working directory recorded wi
 
 ### Message And Thought Text
 
-agy relays the model's thought and text parts in the order the model streams them, so `agent_thought_chunk` updates can fall between the `agent_message_chunk` updates of a single answer. The converter keeps the two in separate buffers and publishes them only at a tool frame or the end of the turn. Each segment therefore becomes at most one thinking row followed by one assistant row, as with Cursor. Publishing at every switch between thought and text made each chunk its own row, and Markdown that spans a chunk boundary rendered broken ([#1060](https://github.com/cfal/garcon/issues/1060)).
+agy relays the model's thought and text parts in the order the model streams them, so `agent_thought_chunk` updates can fall between the `agent_message_chunk` updates of a single answer. The converter keeps the answer in one buffer until a tool frame or the end of the turn, so each segment has at most one assistant row. Thinking that precedes the answer is published when the answer starts; thinking that arrives within the answer is held and published ahead of it. Publishing at every switch between thought and text made each chunk its own row, and Markdown that spans a chunk boundary rendered broken ([#1060](https://github.com/cfal/garcon/issues/1060)).
 
 ### Executor Errors
 
