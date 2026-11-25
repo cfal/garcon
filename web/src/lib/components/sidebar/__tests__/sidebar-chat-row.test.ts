@@ -450,7 +450,7 @@ describe('shared sidebar chat row', () => {
 			document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'),
 		).toBeNull();
 		await fireEvent.click(trigger);
-		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Pin', exact: true }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Pin' }));
 		expect(onTogglePinned).toHaveBeenCalledWith('chat-1');
 		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 		expect(screen.getByRole('button', { name: 'Chat actions' })).toBe(trigger);
