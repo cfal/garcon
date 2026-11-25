@@ -422,7 +422,7 @@ export class VirtualListTransaction {
 	}
 
 	cancelOwnedScroll(): void {
-		const restoreDeviation = this.#pendingCommit?.restoreDeviation;
+		const pending = this.#pendingCommit;
 		this.#pendingCommit = null;
 		this.#ownedEpoch += 1;
 		this.#ownsScrollPosition = false;
@@ -430,9 +430,10 @@ export class VirtualListTransaction {
 			this.options.environment.cancelAnimationFrame(this.#ownedFrame);
 			this.#ownedFrame = null;
 		}
-		if (restoreDeviation && !this.#destroyed) {
-			this.#setDeviation(restoreDeviation);
-			this.#publish(this.#driver?.read() ?? this.#lastDom, true);
+		if (pending && !this.#destroyed) {
+			if (pending.restoreDeviation) this.#setDeviation(pending.restoreDeviation);
+			const dom = this.#driver?.read() ?? this.#lastDom;
+			if (dom) this.#publishScrollPosition(dom);
 		}
 	}
 

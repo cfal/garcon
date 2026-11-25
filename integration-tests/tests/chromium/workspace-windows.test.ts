@@ -93,17 +93,17 @@ async function createChat(fixture: ChromiumFixture, content: string): Promise<st
   return chatId;
 }
 
-function scrollableTurn(label: string, index: number): string {
+function scrollableTurn(label: string, index: number, words = 60): string {
   return `${label}-turn-${index} ${Array.from(
-    { length: 60 }, (_, wordIndex) => `${label}-wrapping-word-${wordIndex + 1}`,
+    { length: words }, (_, wordIndex) => `${label}-wrapping-word-${wordIndex + 1}`,
   ).join(' ')}`;
 }
 
-async function createScrollableChat(fixture: ChromiumFixture, label: string): Promise<string> {
-  const chatId = await createChat(fixture, scrollableTurn(label, 0));
+async function createScrollableChat(fixture: ChromiumFixture, label: string, words?: number): Promise<string> {
+  const chatId = await createChat(fixture, scrollableTurn(label, 0, words));
   for (let index = 1; index < 8; index++) {
     const turn = await fixture.integration.client.runDirectChat({
-      chatId, content: scrollableTurn(label, index), agent: fixture.integration.directAgents.openAi,
+      chatId, content: scrollableTurn(label, index, words), agent: fixture.integration.directAgents.openAi,
     });
     await fixture.integration.client.waitForTurnTerminal(chatId, turn.turnId);
   }
@@ -2858,10 +2858,17 @@ describe('Chromium workspace windows', () => {
     );
   });
 
-  test('restores a partially visible row without showing its start when moving Chat to a pane below', async () => {
-    await withChromiumFixture('workspace-reader-split', async (fixture, markPhase) => {
+  test.each([
+    { firstRow: false, clip: 8, retain: false },
+    { firstRow: false, clip: 300, retain: true },
+    { firstRow: true, clip: 8, retain: false },
+    { firstRow: true, clip: 8, retain: true },
+  ])('restores a partially visible row when moving Chat to a pane below: %j', async ({ firstRow, clip, retain }) => {
+    await withChromiumFixture(`workspace-reader-split-${firstRow}-${clip}-${retain}`, async (fixture, markPhase) => {
       const { page } = fixture;
-      const chatId = await createScrollableChat(fixture, 'reader');
+      await fixture.context.addInitScript(seedLocalSettings, { combineToolUseMessages: retain });
+      const words = clip === 8 ? 60 : 280;
+      const chatId = await createScrollableChat(fixture, 'reader', words);
       await openChat(fixture, chatId);
       const source = await page.locator('[data-workspace-window-current="true"]')
         .getAttribute('data-workspace-window-id');
@@ -2871,31 +2878,32 @@ describe('Chromium workspace windows', () => {
       await page.locator(`[id="${source}-tab-chat-view:${source}"]`).click();
       const sourceFeed = `[data-conversation-panel="chat-view:${source}"] [data-chat-scroll-viewport]`;
       const feed = page.locator(sourceFeed);
-      await feed.getByText(`echo:${scrollableTurn('reader', 7)}`, { exact: true }).waitFor();
+      await feed.getByText(`echo:${scrollableTurn('reader', 7, words)}`, { exact: true }).waitFor();
 
       markPhase('detaching the reader on a clipped row');
-      await feed.evaluate(element => {
+      await feed.evaluate((element, firstRow) => {
         element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 }));
-        element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
-      });
-      const clipped = await page.waitForFunction(selector => {
+        element.scrollTop = firstRow ? 0 : (element.scrollHeight - element.clientHeight) / 2;
+      }, firstRow);
+      const clipped = await page.waitForFunction(({ selector, clip, firstRow }) => {
         const element = document.querySelector<HTMLElement>(selector);
         if (element?.dataset.chatPinnedToBottom !== 'false') return null;
         const view = element.getBoundingClientRect();
         const row = [...element.querySelectorAll<HTMLElement>('[data-chat-row-id]')].find(item => {
           const rect = item.getBoundingClientRect();
-          return rect.top >= view.top && rect.top < view.bottom && rect.height > 8;
+          return (!firstRow || item.dataset.chatRowId?.endsWith(':1')) &&
+            rect.bottom > view.top && rect.top < view.bottom && rect.height > clip + 1;
         });
         if (!row) return null;
-        element.scrollTop += row.getBoundingClientRect().top - view.top + 8;
+        element.scrollTop += row.getBoundingClientRect().top - view.top + clip;
         return row.dataset.chatRowId!;
-      }, sourceFeed);
+      }, { selector: sourceFeed, clip, firstRow });
       const rowId = (await clipped.jsonValue())!;
       await page.locator(`[data-workspace-window-menu-trigger="${source}"]`).click();
       const savedOffset = await feed.locator(`[data-chat-row-id="${rowId}"]`).evaluate(row =>
         row.getBoundingClientRect().top - row.closest('[data-chat-scroll-viewport]')!.getBoundingClientRect().top,
       );
-      expect(Math.abs(savedOffset + 8)).toBeLessThanOrEqual(1);
+      expect(Math.abs(savedOffset + clip)).toBeLessThanOrEqual(1);
 
       markPhase('checking the first readable position in the new pane');
       const movedPanel = `[data-conversation-panel-chat-id="${chatId}"]:not([data-conversation-panel="chat-view:${source}"])`;
@@ -2918,6 +2926,7 @@ describe('Chromium workspace windows', () => {
       ]);
       const { offset } = (await first.jsonValue())!;
       expect(Math.abs(offset - savedOffset), `first: ${offset}px, saved: ${savedOffset}px`).toBeLessThanOrEqual(1);
+      fixture.assertNoBrowserErrors();
     });
   });
 

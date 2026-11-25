@@ -2318,30 +2318,37 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it('retries a pending restore when the attached viewport becomes ready', async () => {
+	it.each([
+		['unavailable', 'ready', 2],
+		['cancelled', 'ready', 1],
+		['cancelled', 'reattached', 2],
+	] as const)('handles a %s restore when its presentation is %s', async (result, presentationState, expectedSeeks) => {
 		const { cache, registry } = fixture();
 		seed(cache);
 		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
 		const panel = registry.panel('chat-view:window-left');
 		if (!panel) throw new Error('Expected panel');
-		const firstJump = deferred<'unavailable'>();
+		const firstJump = deferred<typeof result>();
 		const jump = vi
 			.spyOn(panel.scroll, 'jumpToMessageRow')
 			.mockImplementationOnce(() => firstJump.promise)
 			.mockResolvedValueOnce('completed');
 
-		await panel.restore({
+		panel.attachPresentation(port({ kind: 'end' }));
+		const restore = panel.restore({
 			kind: 'row',
 			transcriptViewId: 'view-1',
 			ordinal: 1,
 			viewportOffset: -3,
 		});
-		panel.attachPresentation(port({ kind: 'end' }));
 		await vi.waitFor(() => expect(jump).toHaveBeenCalledOnce());
 
-		panel.resumePendingRestore();
-		firstJump.resolve('unavailable');
-		await vi.waitFor(() => expect(jump).toHaveBeenCalledTimes(2));
+		if (presentationState === 'reattached') panel.attachPresentation(port({ kind: 'end' }));
+		else panel.resumePendingRestore();
+		firstJump.resolve(result);
+		await restore;
+		expect(jump).toHaveBeenCalledTimes(expectedSeeks);
+		registry.destroy();
 		cache.flush();
 	});
 

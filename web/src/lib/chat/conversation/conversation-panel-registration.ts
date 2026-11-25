@@ -288,7 +288,8 @@ export class PanelRegistration implements ConversationPanelRegistration {
 			this.#prepareInitialBottomRestore();
 			return;
 		}
-		if (!this.#presentation) return;
+		const presentation = this.#presentation;
+		if (!presentation) return;
 		this.#applyingRestoreEpoch = restoreEpoch;
 		this.scroll.setPinnedToBottom(false);
 		try {
@@ -309,8 +310,9 @@ export class PanelRegistration implements ConversationPanelRegistration {
 					viewportOffset: target.viewportOffset,
 				});
 			}
+			const cancelledHere = result === 'cancelled' && this.isPresentationVisible && this.#presentation === presentation;
 			if (
-				result === 'completed' &&
+				(result === 'completed' || cancelledHere) &&
 				restoreEpoch === this.#restoreEpoch &&
 				restoreEpoch === this.#readyRestoreEpoch
 			)

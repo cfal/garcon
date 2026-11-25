@@ -1050,6 +1050,7 @@ describe('VirtualListController', () => {
 		test.environment.flushMicrotasks();
 		expect(test.controller.snapshot.positions.itemAt(1)!.start).toBe(paintedStart);
 		expect(test.controller.snapshot.sizerSize).toBe(sizer);
+		expect(test.controller.snapshot.visibleRange?.startIndex).toBe(0);
 		test.setPhysicalScrollTop(offset < 0 ? 279 : 50);
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(afterInput);
