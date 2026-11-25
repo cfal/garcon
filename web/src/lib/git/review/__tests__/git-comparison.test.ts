@@ -1,11 +1,13 @@
+import { getGitReviewDocumentFileBodies } from '$lib/api/git.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	getGitComparisonFreshness,
-	getGitComparisonFileBodies,
 	getGitComparisonSnapshot,
 	type GitComparisonSnapshotReady,
 } from '$lib/api/git-comparison.js';
 import { GitComparisonController } from '../git-comparison.svelte.js';
+
+vi.mock('$lib/api/git.js', () => ({ getGitReviewDocumentFileBodies: vi.fn() }));
 
 vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
@@ -14,7 +16,6 @@ vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
 		...actual,
 		getGitComparisonFreshness: vi.fn(),
 		getGitComparisonSnapshot: vi.fn(),
-		getGitComparisonFileBodies: vi.fn(),
 	};
 });
 
@@ -207,7 +208,7 @@ describe('GitComparisonController', () => {
 	it('loads a frozen Working Tree comparison and detects later changes', async () => {
 		const snapshot = { ...workingTreeSnapshot(), repoRoot: '/repo' };
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
-		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
+		vi.mocked(getGitReviewDocumentFileBodies).mockResolvedValue({
 			status: 'ready',
 			documentId: snapshot.documentId,
 			files: {},
@@ -343,7 +344,7 @@ describe('GitComparisonController', () => {
 			firstBodyCandidates: ['src/a.ts'],
 		};
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
-		vi.mocked(getGitComparisonFileBodies)
+		vi.mocked(getGitReviewDocumentFileBodies)
 			.mockRejectedValueOnce(new Error('temporary network failure'))
 			.mockResolvedValueOnce({
 				status: 'ready',
@@ -358,7 +359,7 @@ describe('GitComparisonController', () => {
 		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 		await vi.waitFor(() => expect(comparison.bodyError).toContain('temporary network failure'));
 		comparison.focusFile('src/a.ts');
-		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(getGitReviewDocumentFileBodies).toHaveBeenCalledTimes(2));
 		await vi.waitFor(() => expect(comparison.bodyError).toBeNull());
 	});
 
@@ -515,7 +516,7 @@ describe('GitComparisonController', () => {
 			documentId: 'comparison-doc-recovered',
 		};
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-		vi.mocked(getGitComparisonFileBodies)
+		vi.mocked(getGitReviewDocumentFileBodies)
 			.mockResolvedValueOnce({
 				status: 'document-expired',
 				documentId: first.documentId,
@@ -532,7 +533,7 @@ describe('GitComparisonController', () => {
 		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 
 		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2));
-		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(getGitReviewDocumentFileBodies).toHaveBeenCalledTimes(2));
 		expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2);
 		expect(comparison.staleMessage).toBe('This comparison expired.');
 	});
@@ -540,7 +541,7 @@ describe('GitComparisonController', () => {
 	it('requires explicit refresh before applying context changes to a Working Tree snapshot', async () => {
 		const snapshot = workingTreeSnapshotWithFile();
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
-		vi.mocked(getGitComparisonFileBodies).mockResolvedValue({
+		vi.mocked(getGitReviewDocumentFileBodies).mockResolvedValue({
 			status: 'ready',
 			documentId: snapshot.documentId,
 			files: {},
@@ -555,9 +556,9 @@ describe('GitComparisonController', () => {
 		expect(getGitComparisonSnapshot).toHaveBeenCalledOnce();
 		expect(comparison.staleMessage).toContain('Refresh the comparison');
 		comparison.focusFile('src/a.ts');
-		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(getGitReviewDocumentFileBodies).toHaveBeenCalledOnce());
 
-		expect(vi.mocked(getGitComparisonFileBodies).mock.calls[0]?.[5]).toMatchObject({ context: 5 });
+		expect(vi.mocked(getGitReviewDocumentFileBodies).mock.calls[0]?.[1]).toEqual(snapshot.document);
 		await comparison.refresh({ executorId: 'local', projectPath: '/project' });
 		expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[1]?.[4]).toMatchObject({ context: 12 });

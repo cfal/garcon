@@ -8,6 +8,9 @@ import type {
 } from '$lib/git/history/git-history.svelte.js';
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import {
+	currentAnchor,
+	currentMutationAnchor,
+	indexesInRange,
 	virtualItems as selectVirtualItems,
 	type VirtualItem,
 	type VirtualListSnapshot,
@@ -44,12 +47,7 @@ export function retainedGitHistoryFocusRange(
 	range: VirtualRange | null,
 	focusedIndex: number | undefined,
 ): number[] {
-	const indexes = range
-		? Array.from(
-				{ length: range.endIndex - range.startIndex + 1 },
-				(_, offset) => range.startIndex + offset,
-			)
-		: [];
+	const indexes = indexesInRange(range);
 	if (focusedIndex !== undefined && !indexes.includes(focusedIndex)) indexes.push(focusedIndex);
 	return indexes.sort((left, right) => left - right);
 }
@@ -110,16 +108,16 @@ export class GitCommitListVirtualController {
 		this.#applyVirtualSource('replace');
 		$effect(() =>
 			observeTypographyChanges(document, () => {
-				const position = this.#virt.viewportPosition;
-				const anchor = position
-					? this.#virt.snapshot.positions.itemAtOffset(position.paintedOffset)
-					: undefined;
+				const anchor = currentMutationAnchor(
+					this.#virt.snapshot.positions,
+					this.#virt.viewportPosition,
+				);
 				this.#estimatedRowHeight = estimatedCommitRowHeight();
 				this.#virt.apply({
 					kind: 'reset-measurements',
 					keys: this.#virtualCommits.map((commit) => commit.hash),
 					estimates: this.#virtualCommits.map(() => this.#estimatedRowHeight),
-					anchor: anchor ? { kind: 'item', key: anchor.key } : { kind: 'none' },
+					anchor,
 				});
 				this.#virt.remeasureAll();
 			}, ['interface']),
@@ -388,20 +386,20 @@ export class GitCommitListVirtualController {
 		const viewport = this.options.viewport;
 		if (!viewport) return;
 		const scrollTop = viewport.scrollTop;
-		const snapshot = this.#virt.snapshot;
-		const paintedOffset = this.#virt.viewportPosition?.paintedOffset ?? scrollTop;
-		const firstVisible = snapshot.positions.itemAtOffset(paintedOffset);
-		const commit = firstVisible ? this.#virtualCommits[firstVisible.index] : undefined;
+		const anchor = currentAnchor(
+			this.#virt.snapshot.positions,
+			this.#virt.viewportPosition ?? { paintedOffset: scrollTop },
+		);
 		const activeMounted = this.activeHash
 			? viewport.querySelector(`[data-git-history-commit-hash="${CSS.escape(this.activeHash)}"]`)
 			: null;
-		if (!this.focusedHash && commit && (!preserveMountedActive || !activeMounted)) {
-			this.activeHash = commit.hash;
+		if (!this.focusedHash && anchor && (!preserveMountedActive || !activeMounted)) {
+			this.activeHash = anchor.key;
 		}
 		this.options.onPositionSave({
 			scrollTop,
-			anchorHash: commit?.hash ?? null,
-			anchorOffset: firstVisible ? firstVisible.start - paintedOffset : 0,
+			anchorHash: anchor?.key ?? null,
+			anchorOffset: 0 - (anchor?.offset ?? 0),
 			activeHash: this.activeHash,
 		});
 	}

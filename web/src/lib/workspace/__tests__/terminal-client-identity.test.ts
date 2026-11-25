@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalClientIdentity } from '../terminal-client-identity.svelte.js';
+import { TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX } from '../terminal-client-storage.js';
 import { SESSION_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 
@@ -10,7 +11,6 @@ vi.mock('$lib/utils/random-id.js', () => ({
 const mockCreateRandomId = vi.mocked(createRandomId);
 
 const CLAIM_WINDOW_MS = 200;
-const FALLBACK_STORAGE_PREFIX = 'garcon_terminal_client_identity_claim_v1:';
 
 class FakeBroadcastChannel {
 	static instances = new Set<FakeBroadcastChannel>();
@@ -107,7 +107,7 @@ describe('TerminalClientIdentity', () => {
 		vi.stubGlobal('BroadcastChannel', undefined);
 		sessionStorage.setItem(SESSION_STORAGE_KEYS.terminalClientId, 'shared-client');
 		localStorage.setItem(
-			`${FALLBACK_STORAGE_PREFIX}other:probe:1`,
+			`${TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX}other:probe:1`,
 			JSON.stringify({
 				type: 'probe',
 				candidateId: 'shared-client',
@@ -168,5 +168,23 @@ describe('TerminalClientIdentity', () => {
 		vi.advanceTimersByTime(CLAIM_WINDOW_MS);
 
 		expect(replacement.clientId).toBe(retained);
+	});
+
+	it('settles readiness as cancelled when destroyed before establishing a claim', async () => {
+		mockCreateRandomId.mockReturnValue(uuid(1));
+		const identity = create();
+		const initialize = vi.fn();
+		const continuation = identity.ready.then((clientId) => {
+			if (clientId !== null) initialize(clientId);
+		});
+
+		identity.destroy();
+		await continuation;
+		await expect(identity.ready).resolves.toBeNull();
+		vi.advanceTimersByTime(CLAIM_WINDOW_MS);
+
+		expect(initialize).not.toHaveBeenCalled();
+		expect(identity.established).toBe(false);
+		expect(sessionStorage.getItem(SESSION_STORAGE_KEYS.terminalClientId)).toBeNull();
 	});
 });

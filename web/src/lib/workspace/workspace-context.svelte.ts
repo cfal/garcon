@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages.js';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { ProjectTarget, ProjectUnavailableReason } from '$shared/project-resolution';
@@ -64,7 +65,7 @@ export class WorkspaceContextStore {
 			return {
 				kind: 'request-failed',
 				context: current,
-				message: 'Git is unavailable on this executor.',
+				message: m.workspace_git_unavailable_on_executor(),
 			};
 		}
 		const project = this.#resolvedProjectState;
@@ -91,7 +92,7 @@ export class WorkspaceContextStore {
 			return {
 				kind: 'request-failed',
 				context: current,
-				message: 'Files are unavailable on this executor.',
+				message: m.file_command_executor_unavailable(),
 			};
 		}
 		return this.#resolvedProjectState;

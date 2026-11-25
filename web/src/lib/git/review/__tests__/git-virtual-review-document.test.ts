@@ -314,7 +314,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		).toBeLessThan(byteLimit);
 		let visiblePaths: string[] = [];
 		const load = vi
-			.spyOn(gitApi, 'getGitReviewFileBodies')
+			.spyOn(gitApi, 'getGitReviewDocumentFileBodies')
 			.mockImplementation(async (_target, document, files) => ({
 				...ready(files),
 				documentId: document.documentId,
@@ -350,7 +350,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 	it('loads adjacent visible bodies that fit patch limits despite retained index overhead', async () => {
 		const paths = ['large.ts', 'small.ts'];
 		const load = vi
-			.spyOn(gitApi, 'getGitReviewFileBodies')
+			.spyOn(gitApi, 'getGitReviewDocumentFileBodies')
 			.mockImplementation(async (_target, _document, files) => ready(files));
 		const controller = new GitVirtualReviewDocumentController({
 			...documentDeps(() => paths),
@@ -379,8 +379,8 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		const held = Promise.withResolvers<ReturnType<typeof ready>>();
 		let publish!: NonNullable<GitReviewBodyFetchOptions['onIndexedBodies']>;
 		const load = vi
-			.spyOn(gitApi, 'getGitReviewFileBodies')
-			.mockImplementation((_target, _document, _files, _tab, _context, options) => {
+			.spyOn(gitApi, 'getGitReviewDocumentFileBodies')
+			.mockImplementation((_target, _document, _files, _purpose, options) => {
 				publish = options!.onIndexedBodies!;
 				return held.promise;
 			});
@@ -410,10 +410,10 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 			const held = Promise.withResolvers<ReturnType<typeof ready>>();
 			let publish!: NonNullable<GitReviewBodyFetchOptions['onIndexedBodies']>;
 			const load = vi
-				.spyOn(gitApi, 'getGitReviewFileBodies')
-				.mockImplementation(async (_target, _document, files, _tab, _context, options) => {
-					if (options?.purpose !== 'prefetch') return ready(files);
-					publish = options.onIndexedBodies!;
+				.spyOn(gitApi, 'getGitReviewDocumentFileBodies')
+				.mockImplementation(async (_target, _document, files, purpose, options) => {
+					if (purpose !== 'prefetch') return ready(files);
+					publish = options!.onIndexedBodies!;
 					return held.promise;
 				});
 			const controller = new GitVirtualReviewDocumentController({
@@ -433,7 +433,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 				);
 				expect(controller.fileBodies['blocked.ts']).toBeUndefined();
 				expect(controller.aggregateLimit).toBeNull();
-				expect(load.mock.calls.at(-1)?.[5]?.purpose).toBe('visible');
+				expect(load.mock.calls.at(-1)?.[3]).toBe('visible');
 			} finally {
 				controller.reset();
 				load.mockRestore();
@@ -455,7 +455,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 			limitReason: 'file-too-many-bytes',
 		};
 		const load = vi
-			.spyOn(gitApi, 'getGitReviewFileBodies')
+			.spyOn(gitApi, 'getGitReviewDocumentFileBodies')
 			.mockImplementation(async (_target, document, requested) => ({
 				status: 'ready',
 				documentId: document.documentId,
@@ -491,9 +491,9 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 			if (change === 'executor') next.document = { ...next.document, executorId: 'remote' };
 			if (change === 'instance') next.document = { ...next.document, instanceId: 'replacement' };
 			const refreshed =
-				Promise.withResolvers<Awaited<ReturnType<typeof gitApi.getGitReviewFileBodies>>>();
+				Promise.withResolvers<Awaited<ReturnType<typeof gitApi.getGitReviewDocumentFileBodies>>>();
 			const load = vi
-				.spyOn(gitApi, 'getGitReviewFileBodies')
+				.spyOn(gitApi, 'getGitReviewDocumentFileBodies')
 				.mockResolvedValueOnce({
 					status: 'ready',
 					documentId: first.documentId,

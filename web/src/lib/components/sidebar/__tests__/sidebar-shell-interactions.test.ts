@@ -1,4 +1,4 @@
-import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
+import { normalizeSidebarGroupingFields } from '$lib/sidebar/display/sidebar-preferences';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -167,12 +167,12 @@ describe('sidebar search dialog flow', () => {
 		});
 	});
 
-	it.each(['none', 'activity', 'status'] as const)(
+	it.each([[[]], [['executor', 'activity']], [['executor', 'status']]])(
 		'omits project actions in %s grouping',
 		(sidebarGrouping) => {
 			render(SidebarHost, {
 				chats: [createChat('chat-1', 'First chat')],
-				sidebarGroupingFields: migrateSidebarGrouping(sidebarGrouping),
+				sidebarGroupingFields: normalizeSidebarGroupingFields(sidebarGrouping.map((field) => ({ field, enabled: true }))),
 				autoLoadSavedSearches: false,
 			});
 			expect(screen.queryByRole('button', { name: /^New chat in / })).toBeNull();
@@ -390,7 +390,7 @@ describe('sidebar search dialog flow', () => {
 		const view = render(SidebarHost, {
 			chats,
 			autoLoadSavedSearches: false,
-			sidebarGroupingFields: migrateSidebarGrouping('project-and-activity'),
+			sidebarGroupingFields: normalizeSidebarGroupingFields(['executor', 'activity', 'project'].map((field) => ({ field, enabled: true }))),
 			sidebarInactivityDuration: '2-weeks',
 		});
 
@@ -400,7 +400,7 @@ describe('sidebar search dialog flow', () => {
 		await view.rerender({
 			chats,
 			autoLoadSavedSearches: false,
-			sidebarGroupingFields: migrateSidebarGrouping('project-and-activity'),
+			sidebarGroupingFields: normalizeSidebarGroupingFields(['executor', 'activity', 'project'].map((field) => ({ field, enabled: true }))),
 			sidebarInactivityDuration: '2-days',
 		});
 
@@ -523,12 +523,12 @@ describe('sidebar search dialog flow', () => {
 		expect(screen.queryByText('First chat preview')).toBeNull();
 	});
 
-	it.each(['none', 'project', 'project-and-activity', 'activity', 'status'] as const)(
+	it.each([[[]], [['executor', 'project']], [['executor', 'activity', 'project']], [['executor', 'activity']], [['executor', 'status']]])(
 		'toggles the project line without changing layout or %s grouping',
 		async (sidebarGrouping) => {
 			render(SidebarHost, {
 				chats: [createChat('chat-1', 'First chat')],
-				sidebarGroupingFields: migrateSidebarGrouping(sidebarGrouping),
+				sidebarGroupingFields: normalizeSidebarGroupingFields(sidebarGrouping.map((field) => ({ field, enabled: true }))),
 				sidebarChatItemLayout: 'single-line',
 				autoLoadSavedSearches: false,
 			});

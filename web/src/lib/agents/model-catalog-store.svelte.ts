@@ -1,3 +1,5 @@
+import * as m from '$lib/paraglide/messages.js';
+import { errorMessage } from '$lib/utils/error-message.js';
 import { fetchModelCatalogResponse } from '$lib/api/model-catalog';
 import { ApiError, isTransientRequestFailure } from '$lib/api/client';
 import { effectiveExecutorId, type ExecutorSnapshot } from '$shared/executors';
@@ -432,11 +434,11 @@ export class ModelCatalogStore {
 			if (requestVersion !== this.#requestVersion) return;
 			if ((ordinaryFallback && servingInstance !== confirmation) ||
 				(servingInstance && this.#inventoryInstance && this.#inventoryInstance !== servingInstance)) {
-				throw new Error('Executor changed during model discovery.');
+				throw new Error(m.model_catalog_executor_changed());
 			}
 
 			if (response.status === 304) {
-				if (ordinaryFallback) throw new Error('Expected a complete executor model catalog.');
+				if (ordinaryFallback) throw new Error(m.model_catalog_incomplete());
 				this.etag = responseEtag ?? this.etag;
 				this.#recordValidation(Date.now(), servingInstance, confirmation);
 				return;
@@ -444,7 +446,7 @@ export class ModelCatalogStore {
 
 			const catalogResult = parseCatalogResponse(data);
 			if (!catalogResult || Object.keys(catalogResult.agentMetadata).length === 0) {
-				throw new Error('Model catalog response is invalid');
+				throw new Error(m.model_catalog_invalid());
 			}
 			this.agentModels = catalogResult.agentModels;
 			this.agentMetadata = catalogResult.agentMetadata;
@@ -460,7 +462,7 @@ export class ModelCatalogStore {
 				if (this.isValidated && (temporarilyBusy || isTransientRequestFailure(error))) return;
 				if (error instanceof ApiError && error.errorCode === 'LOGIN_INSTANCE_CHANGED') this.#loginRefreshInstance = null;
 			}
-			this.error = error instanceof Error ? error.message : 'Unknown error';
+			this.error = errorMessage(error, m.model_catalog_unknown_error());
 		} finally {
 			if (requestVersion === this.#requestVersion) this.isRefreshing = false;
 		}

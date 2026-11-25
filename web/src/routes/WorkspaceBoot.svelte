@@ -305,8 +305,8 @@
 		const authenticated = auth.isAuthenticated;
 		let current = true;
 		untrack(() => {
-			void terminalIdentity.ready.then(async () => {
-				if (!current) return;
+			void terminalIdentity.ready.then(async (clientId) => {
+				if (!current || clientId === null || !terminalIdentity.established) return;
 				if (!authenticated) {
 					terminals.authChanged(false);
 					return;

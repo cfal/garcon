@@ -17,7 +17,7 @@
 		markGitReviewViewportReady,
 		pendingGitReviewViewportMilestones,
 	} from '$lib/git/review/git-review-performance.js';
-	import { indexesInRange, currentAnchor } from './git-virtual-list.js';
+	import { indexesInRange, currentMutationAnchor } from '$lib/virt/virtual-list-types.js';
 	import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 	import {
 		virtualItems as selectVirtualItems,
@@ -219,7 +219,7 @@
 				virtual.apply({
 					kind: layoutChanged ? 'reset-measurements' : 'update',
 					...next,
-					anchor: layoutChanged ? { kind: 'none' } : currentAnchor(virtual),
+					anchor: layoutChanged ? { kind: 'none' } : currentMutationAnchor(virtual.snapshot.positions, virtual.viewportPosition),
 				});
 				configuredMeasurementKey = measurementKey;
 			}
@@ -247,7 +247,7 @@
 			virtual.apply({
 				kind: 'reset-measurements',
 				...source.buildVirtualMeasurements(rowLineHeight),
-				anchor: currentAnchor(virtual),
+				anchor: currentMutationAnchor(virtual.snapshot.positions, virtual.viewportPosition),
 			});
 			virtual.remeasureAll();
 		}, ['code-diff', 'interface']),

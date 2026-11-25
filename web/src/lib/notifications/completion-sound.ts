@@ -5,10 +5,12 @@ import type {
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
 import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
+import {
+	COMPLETION_SOUND_DATABASE_NAME,
+	COMPLETION_SOUND_STORE_NAME,
+} from './completion-sound-storage.js';
 
-const DATABASE_NAME = 'garcon-local-media';
 const DATABASE_VERSION = 1;
-const STORE_NAME = 'completion-sounds';
 const CUSTOM_SOUND_KEY = 'custom';
 
 export const MAX_CUSTOM_COMPLETION_SOUND_BYTES = 10 * 1024 * 1024;
@@ -56,10 +58,10 @@ export function validateCustomCompletionSound(
 
 function openDatabase(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
-		const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+		const request = indexedDB.open(COMPLETION_SOUND_DATABASE_NAME, DATABASE_VERSION);
 		request.onupgradeneeded = () => {
-			if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-				request.result.createObjectStore(STORE_NAME);
+			if (!request.result.objectStoreNames.contains(COMPLETION_SOUND_STORE_NAME)) {
+				request.result.createObjectStore(COMPLETION_SOUND_STORE_NAME);
 			}
 		};
 		request.onsuccess = () => resolve(request.result);
@@ -74,9 +76,9 @@ async function runStoreRequest<T>(
 	const database = await openDatabase();
 	try {
 		if (mode === 'readwrite' && !canPersistBrowserData()) throw new Error('Browser session ended');
-		const transaction = database.transaction(STORE_NAME, mode);
+		const transaction = database.transaction(COMPLETION_SOUND_STORE_NAME, mode);
 		const completion = indexedDbTransactionCompletion(transaction);
-		const request = operation(transaction.objectStore(STORE_NAME));
+		const request = operation(transaction.objectStore(COMPLETION_SOUND_STORE_NAME));
 		const [result] = await Promise.all([
 			indexedDbRequest(request, 'Sound storage request failed'),
 			completion,

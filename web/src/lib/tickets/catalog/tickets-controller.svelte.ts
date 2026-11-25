@@ -1,3 +1,5 @@
+import * as m from '$lib/paraglide/messages.js';
+import { errorMessage } from '$lib/utils/error-message.js';
 import { untrack } from 'svelte';
 import type {
 	Ticket,
@@ -430,7 +432,7 @@ export class TicketsController implements PortableSingletonController {
 			this.stale = true;
 		} catch (error) {
 			this.stale = true;
-			this.error = error instanceof Error ? error.message : 'Could not load Tickets';
+			this.error = errorMessage(error, m.tickets_load_failed());
 		} finally {
 			this.loading = false;
 			this.#request = null;
@@ -573,7 +575,7 @@ export class TicketsController implements PortableSingletonController {
 					request.signal,
 				);
 				requireTicketVersion(page, bootstrap.storeId);
-				if (!page.items.length) throw new Error('Empty activity continuation');
+				if (!page.items.length) throw new Error(m.tickets_activity_empty_continuation());
 				history = { ...page, items: [...page.items, ...history.items] };
 			}
 			if (epoch !== this.#epoch || this.#pageRequest !== request) return;
@@ -596,7 +598,7 @@ export class TicketsController implements PortableSingletonController {
 		} catch (error) {
 			if (!request.signal.aborted && epoch === this.#epoch)
 				this.detail.historyError =
-					error instanceof Error ? error.message : 'Could not load activity';
+					errorMessage(error, m.tickets_activity_load_failed());
 		} finally {
 			this.#finishPage(request);
 		}
@@ -610,7 +612,7 @@ export class TicketsController implements PortableSingletonController {
 		) {
 			this.#needsBootstrap ||= error.errorCode === 'TICKET_STORE_CHANGED';
 			this.#supersede();
-		} else this.error = error instanceof Error ? error.message : 'Could not load the next page';
+		} else this.error = errorMessage(error, m.tickets_page_load_failed());
 	}
 
 	async beginCreate(directory: string | null, executorId = 'local'): Promise<void> {
@@ -632,10 +634,10 @@ export class TicketsController implements PortableSingletonController {
 
 	async facets(field: 'project' | 'label', prefix: string, signal: AbortSignal) {
 		const partition = this.bootstrap;
-		if (!partition) throw new Error('Tickets is not available');
+		if (!partition) throw new Error(m.tickets_unavailable());
 		const result = await this.#api.facets(field, prefix, signal);
 		if (this.bootstrap !== partition || signal.aborted)
-			throw new Error('Ticket suggestions were superseded');
+			throw new Error(m.tickets_suggestions_superseded());
 		requireTicketVersion(result, partition.storeId);
 		return result;
 	}
@@ -648,7 +650,7 @@ export class TicketsController implements PortableSingletonController {
 		const draft = this.drafts.open('mutation', { ticket });
 		if (!draft) return false;
 		if (draft.needsExitGuard) {
-			draft.error ??= 'Finish or discard the retained request before starting another mutation.';
+			draft.error ??= m.tickets_mutation_retained();
 			return false;
 		}
 		await draft.submit(payload);

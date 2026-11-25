@@ -1,6 +1,7 @@
 import { parseChatCanvas, type ChatCanvas } from '$shared/chat-canvas';
 import { authTokenIdentity, canDispatchAuthenticated, getAuthToken } from '$lib/auth/session';
 import { canPersistBrowserData, isBrowserDataCurrent } from '$lib/utils/browser-data-lifetime';
+import { CANVAS_RECOVERY_STORAGE_PREFIX } from './canvas-recovery-storage.js';
 
 export interface CanvasRecoveryPort {
 	list(): ChatCanvas[];
@@ -9,7 +10,6 @@ export interface CanvasRecoveryPort {
 	remove(id: string): void;
 }
 
-const prefix = 'chat-canvas-recovery-v1:viewer:';
 const capacity = 32;
 
 function parseRecovery(raw: string, id: string): ChatCanvas {
@@ -29,7 +29,7 @@ function currentViewer(): string | null {
 // Captures the viewer for the lifetime of the controller, including late saves.
 export function createBrowserCanvasRecovery(viewer = currentViewer): CanvasRecoveryPort {
 	const owner = viewer();
-	const scope = `${prefix}${encodeURIComponent(owner ?? '')}:`;
+	const scope = `${CANVAS_RECOVERY_STORAGE_PREFIX}viewer:${encodeURIComponent(owner ?? '')}:`;
 	const canRead = () => owner !== null && viewer() === owner && isBrowserDataCurrent();
 	const keys = (storage: Storage) => {
 		const scoped: string[] = [];

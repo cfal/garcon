@@ -42,13 +42,22 @@ export function indexesInRange(range: VirtualRange | null): number[] {
 
 export function currentAnchor(
 	positions: VirtualPositionView,
-	position: VirtualViewportPosition | null,
+	position: Pick<VirtualViewportPosition, 'paintedOffset'> | null,
 ) {
 	const item = position && positions.itemAtOffset(position.paintedOffset);
 	return position && item
 		? { key: item.key, offset: position.paintedOffset - item.start, size: item.size }
 		: null;
 }
+
+export function currentMutationAnchor(
+	positions: VirtualPositionView,
+	position: VirtualViewportPosition | null,
+): VirtualMutationAnchor {
+	const anchor = currentAnchor(positions, position);
+	return anchor ? { kind: 'item', key: anchor.key } : { kind: 'none' };
+}
+
 export function virtualItems(
 	snapshot: VirtualListSnapshot,
 	indexes: readonly number[],
