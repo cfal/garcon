@@ -321,19 +321,25 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.takeTurnFailure(SESSION)).toBeNull();
   });
 
-  it('keeps interleaved message and thought text in order', () => {
+  it('keeps an answer whole when thought chunks interleave with it', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
     const rows = [
-      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'A' } }),
-      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'T' } }),
-      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'B' } }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Reviewing the merge.' } }),
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '**Merged** at `b62' } }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Checking ' } }),
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '20dd97`.' } }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '' } }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'the hash.' } }),
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' Not **deployed**.' } }),
     ].flatMap((row) => converter.fromSessionUpdate(row, context));
     rows.push(...converter.endTurn(SESSION, context));
+    // Thinking before the answer is published as the answer starts; thinking
+    // within it waits, so the answer stays one row.
     expect(plain(rows)).toEqual([
-      { type: 'assistant-message', content: 'A' },
-      { type: 'thinking', content: 'T' },
-      { type: 'assistant-message', content: 'B' },
+      { type: 'thinking', content: 'Reviewing the merge.' },
+      { type: 'thinking', content: 'Checking the hash.' },
+      { type: 'assistant-message', content: '**Merged** at `b6220dd97`. Not **deployed**.' },
     ]);
   });
 
