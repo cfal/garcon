@@ -108,6 +108,28 @@ export interface EditorStatusSnapshot {
 }
 
 const MIN_TOUCH_EDITOR_FONT_SIZE = 16;
+const editorChrome = EditorView.theme({
+	'&': { isolation: 'isolate' },
+	'.cm-content, .cm-gutters': {
+		fontSize: `max(${MIN_TOUCH_EDITOR_FONT_SIZE}px, var(--file-editor-font-size))`,
+	},
+	'.cm-panel input, .cm-panel select, .cm-panel button': {
+		fontSize: 'max(16px, calc(12px * var(--interface-font-scale, 1)))',
+	},
+	'.cm-panels': {
+		backgroundColor: 'hsl(var(--card))',
+		color: 'hsl(var(--foreground))',
+		fontFamily: 'var(--interface-font-override, var(--system-ui-font))',
+	},
+	'.cm-searchMatch': { backgroundColor: 'hsl(var(--accent) / 0.45)' },
+	'.cm-searchMatch.cm-searchMatch-selected': { outline: '2px solid hsl(var(--ring))' },
+	'@media (pointer: fine)': {
+		'.cm-content, .cm-gutters': { fontSize: 'var(--file-editor-font-size)' },
+		'.cm-panel input, .cm-panel select, .cm-panel button': {
+			fontSize: 'calc(12px * var(--interface-font-scale, 1))',
+		},
+	},
+});
 const INDENTATION_SAMPLE_LENGTH = 16 * 1024;
 const CONFIGURABLE_EDITOR_BINDINGS = new Set([
 	'Alt-ArrowUp',
@@ -168,6 +190,13 @@ export class CodeEditorController {
 	#view: EditorView | null = null;
 	#languageCompartment = new Compartment();
 	#dynamicCompartment = new Compartment();
+	#presentation:
+		| (Omit<EditorPresentationSettings, 'vimMode'> & {
+				readOnly: boolean;
+				extensions: Extension[];
+		  })
+		| null = null;
+	#vimEnabled: boolean | null = null;
 	#languageGeneration = 0;
 	#rendererGeneration = 0;
 	#unregisterRuntime: (() => void) | null = null;
@@ -178,7 +207,9 @@ export class CodeEditorController {
 	#syntaxLabel = $state<string>(m.editor_status_plain_text());
 	readonly #handleScroll = (): void => {
 		const view = this.#view;
-		if (view) this.#captureScroll(view);
+		if (!view) return;
+		this.session.editorScrollSnapshot = null;
+		this.#captureScrollOffsets(view);
 	};
 
 	constructor(
@@ -273,9 +304,15 @@ export class CodeEditorController {
 		if (this.#view) throw new Error('File editor renderer is already attached');
 		const lease = ++this.#rendererGeneration;
 		const storedState = this.session.editorState;
-		const editorState = storedState
+		let editorState = storedState
 			? this.#stateWithCanonicalDocument(storedState)
 			: this.createState(this.#runtime.canonicalState.doc);
+		const extensions = this.dynamicExtensions();
+		if (this.#dynamicCompartment.get(editorState) !== extensions) {
+			editorState = editorState.update({
+				effects: this.#dynamicCompartment.reconfigure(extensions),
+			}).state;
+		}
 		this.session.editorState = editorState;
 		const scrollSnapshot = this.session.editorScrollSnapshot;
 		const scrollLeft = this.session.textScrollLeft;
@@ -287,7 +324,7 @@ export class CodeEditorController {
 			dispatchTransactions: (transactions) => {
 				if (this.#view !== attachedView || lease !== this.#rendererGeneration) return;
 				if (
-					attachedView.state.readOnly &&
+					(attachedView.state.readOnly || this.#readOnly) &&
 					transactions.some((transaction) => transaction.docChanged)
 				)
 					return;
@@ -295,8 +332,8 @@ export class CodeEditorController {
 			},
 		});
 		this.#view = attachedView;
-		attachedView.scrollDOM.addEventListener('scroll', this.#handleScroll);
-		this.reconfigure();
+		attachedView.scrollDOM.addEventListener('scroll', this.#handleScroll, { passive: true });
+		this.#configureVim();
 		void this.applyLanguage();
 		attachedView.requestMeasure({
 			key: this,
@@ -338,13 +375,24 @@ export class CodeEditorController {
 		this.session.editorState = view.state;
 		view.destroy();
 		this.#view = null;
+		this.#vimEnabled = null;
 	}
 
 	reconfigure(): void {
-		this.#view?.dispatch({
-			effects: this.#dynamicCompartment.reconfigure(this.dynamicExtensions()),
-		});
-		this.vim.configure(Boolean(this.settings.vimMode));
+		const view = this.#view;
+		if (!view) return;
+		const extensions = this.dynamicExtensions();
+		if (this.#dynamicCompartment.get(view.state) !== extensions) {
+			view.dispatch({ effects: this.#dynamicCompartment.reconfigure(extensions) });
+		}
+		this.#configureVim();
+	}
+
+	#configureVim(): void {
+		const enabled = Boolean(this.settings.vimMode);
+		if (enabled === this.#vimEnabled) return;
+		this.#vimEnabled = enabled;
+		this.vim.configure(enabled);
 	}
 
 	focus(): void {
@@ -502,6 +550,7 @@ export class CodeEditorController {
 				]),
 				this.#languageCompartment.of([]),
 				editorFont(SYSTEM_EDITOR_FONT),
+				editorChrome,
 				this.#dynamicCompartment.of(this.dynamicExtensions()),
 			],
 		});
@@ -509,37 +558,34 @@ export class CodeEditorController {
 	}
 
 	private dynamicExtensions(): Extension[] {
-		const configuredFontSize = this.settings.fontSize;
-		const extensions: Extension[] = [
-			EditorView.theme({
-				'&': { isolation: 'isolate' },
-				'.cm-content, .cm-gutters': {
-					fontSize: `${Math.max(MIN_TOUCH_EDITOR_FONT_SIZE, configuredFontSize)}px`,
-				},
-				'.cm-panel input, .cm-panel select, .cm-panel button': {
-					fontSize: 'max(16px, calc(12px * var(--interface-font-scale, 1)))',
-				},
-				'.cm-panels': {
-					backgroundColor: 'hsl(var(--card))',
-					color: 'hsl(var(--foreground))',
-					fontFamily: 'var(--interface-font-override, var(--system-ui-font))',
-				},
-				'.cm-searchMatch': { backgroundColor: 'hsl(var(--accent) / 0.45)' },
-				'.cm-searchMatch.cm-searchMatch-selected': { outline: '2px solid hsl(var(--ring))' },
-				'@media (pointer: fine)': {
-					'.cm-content, .cm-gutters': { fontSize: `${configuredFontSize}px` },
-					'.cm-panel input, .cm-panel select, .cm-panel button': {
-						fontSize: 'calc(12px * var(--interface-font-scale, 1))',
-					},
-				},
-			}),
-		];
-		extensions.push(editorThemeExtension(this.settings.editorThemeId));
-		if (this.settings.showLineNumbers) extensions.push(lineNumbers());
-		if (this.settings.wordWrap) extensions.push(EditorView.lineWrapping);
-		if (this.#readOnly) {
-			extensions.push(EditorState.readOnly.of(true));
+		const { fontSize, editorThemeId, showLineNumbers, wordWrap } = this.settings;
+		const readOnly = this.#readOnly;
+		const current = this.#presentation;
+		if (
+			current &&
+			current.fontSize === fontSize &&
+			current.editorThemeId === editorThemeId &&
+			current.showLineNumbers === showLineNumbers &&
+			current.wordWrap === wordWrap &&
+			current.readOnly === readOnly
+		) {
+			return current.extensions;
 		}
+		const extensions: Extension[] = [
+			EditorView.editorAttributes.of({ style: `--file-editor-font-size: ${fontSize}px` }),
+			editorThemeExtension(editorThemeId),
+		];
+		if (showLineNumbers) extensions.push(lineNumbers());
+		if (wordWrap) extensions.push(EditorView.lineWrapping);
+		if (readOnly) extensions.push(EditorState.readOnly.of(true));
+		this.#presentation = {
+			fontSize,
+			editorThemeId,
+			showLineNumbers,
+			wordWrap,
+			readOnly,
+			extensions,
+		};
 		return extensions;
 	}
 
@@ -550,6 +596,10 @@ export class CodeEditorController {
 
 	#captureScroll(view: EditorView): void {
 		this.session.editorScrollSnapshot = view.scrollSnapshot();
+		this.#captureScrollOffsets(view);
+	}
+
+	#captureScrollOffsets(view: EditorView): void {
 		this.session.textScrollLeft = view.scrollDOM.scrollLeft;
 		this.session.textScrollTop = view.scrollDOM.scrollTop;
 	}

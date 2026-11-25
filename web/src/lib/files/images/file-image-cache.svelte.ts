@@ -66,6 +66,7 @@ export class FileImageCache {
 	#generation = $state(0);
 	#destroyed = false;
 	#trimTimer: ReturnType<typeof setTimeout> | undefined;
+	#trimAt = Infinity;
 
 	constructor(private readonly options: CacheOptions) {
 		this.#budgetBytes = options.budgetBytes;
@@ -140,6 +141,7 @@ export class FileImageCache {
 		untrack(() => {
 			clearTimeout(this.#trimTimer);
 			this.#trimTimer = undefined;
+			this.#trimAt = Infinity;
 			for (const entry of this.#entries.values()) this.#drop(entry);
 			this.#generation += 1;
 		});
@@ -186,7 +188,11 @@ export class FileImageCache {
 	}
 
 	#scheduleTrim(delay: number): void {
-		this.#trimTimer ??= setTimeout(
+		const deadline = Date.now() + delay;
+		if (deadline >= this.#trimAt) return;
+		clearTimeout(this.#trimTimer);
+		this.#trimAt = deadline;
+		this.#trimTimer = setTimeout(
 			() => untrack(() => this.#trimIdle(Date.now() - RELEASE_GRACE_MS)),
 			delay,
 		);
@@ -195,6 +201,7 @@ export class FileImageCache {
 	#trimIdle(releasedBefore: number): void {
 		clearTimeout(this.#trimTimer);
 		this.#trimTimer = undefined;
+		this.#trimAt = Infinity;
 		let bytes = 0;
 		let retainedCount = 0;
 		// Oversized images expire independently instead of displacing retainable images.

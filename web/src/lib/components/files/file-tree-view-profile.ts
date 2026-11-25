@@ -4,12 +4,11 @@ import type {
 	OptionalFileTreeColumnKey,
 } from '$lib/files/tree/file-tree.svelte.js';
 
-export const FILE_TREE_VIEW_MODES = ['columns', 'details'] as const;
-export type FileTreeViewMode = (typeof FILE_TREE_VIEW_MODES)[number];
+export type FileTreeViewMode = 'columns' | 'details';
 
-export const FILE_TREE_NAME_ONLY_MINIMUM_WIDTH_PX = 240;
-export const FILE_TREE_MULTI_COLUMN_MINIMUM_WIDTH_PX = 520;
-export const FILE_TREE_DETAILS_MINIMUM_WIDTH_PX = 240;
+const FILE_TREE_NAME_ONLY_MINIMUM_WIDTH_PX = 240;
+const FILE_TREE_MULTI_COLUMN_MINIMUM_WIDTH_PX = 520;
+const FILE_TREE_DETAILS_MINIMUM_WIDTH_PX = 240;
 
 export interface FileTreeViewGeometry {
 	readonly headerHeight: number;

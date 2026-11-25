@@ -31,6 +31,30 @@ function harness(durable = true) {
 }
 
 describe('FileDraftCoordinator', () => {
+	it('skips clean checkpoints without a draft, but deletes confirmed writes before close', async () => {
+		const { repository, coordinator } = harness();
+		const remove = vi.spyOn(repository, 'deleteDraft');
+		await coordinator.initialize();
+		const value = document();
+		value.dirty = false;
+		await coordinator.settle(value);
+		coordinator.closeDocument(value);
+		await coordinator.flush();
+		expect(remove).not.toHaveBeenCalled();
+
+		value.content = 'pending backup';
+		const write = coordinator.settle(value);
+		value.dirty = false;
+		coordinator.closeDocument(value);
+		await write;
+		await coordinator.flush();
+		expect(remove).toHaveBeenCalledOnce();
+		expect(await repository.getDrafts('user', 'deployment')).toEqual([]);
+
+		await coordinator.settle(value);
+		expect(remove).toHaveBeenCalledOnce();
+		coordinator.destroy();
+	});
 	it('keeps only the latest pending checkpoint while a write is blocked', async () => {
 		const { repository, coordinator } = harness();
 		const put = repository.putDraft.bind(repository);

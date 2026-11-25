@@ -44,9 +44,12 @@ export function buildVisibleFileRows(args: {
 	return rows;
 }
 
-export function filterFileRows(rows: readonly FileTableRow[], query: string): FileTableRow[] {
+export function filterFileRows(
+	rows: readonly FileTableRow[],
+	query: string,
+): readonly FileTableRow[] {
 	const normalized = query.trim().toLocaleLowerCase();
-	if (!normalized) return [...rows];
+	if (!normalized) return rows;
 	const includedKeys = new Set<string>();
 	for (const row of rows) {
 		if (!row.entry.name.toLocaleLowerCase().includes(normalized)) continue;
