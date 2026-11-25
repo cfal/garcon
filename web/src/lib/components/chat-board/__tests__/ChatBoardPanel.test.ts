@@ -417,8 +417,9 @@ describe('ChatBoardPanel', () => {
 		const readySelector = `[data-chat-board-lane-list="${column.id}"]`;
 		const reviewSelector = `[data-chat-board-lane-list="${reviewColumn.id}"]`;
 		const panel = container.querySelector<HTMLElement>('[data-chat-board-panel]')!;
-		let panelWidth = 700;
-		Object.defineProperty(panel, 'clientWidth', { get: () => panelWidth });
+		let panelWidth = 899.75;
+		Object.defineProperty(panel, 'clientWidth', { get: () => Math.round(panelWidth) });
+		TestResizeObserver.emit(panelWidth);
 		const bounds = vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(
 			() => ({ width: panelWidth }) as DOMRect,
 		);

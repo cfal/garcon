@@ -149,7 +149,7 @@ export class ChatBoardViewportState {
 
 	#isPresentationChangePending(): boolean {
 		// Chromium can reset scrollTop before ResizeObserver commits the new band.
-		const width = this.root?.clientWidth ?? 0;
+		const width = this.root?.getBoundingClientRect().width ?? 0;
 		return width > 0 && this.#presentationBandForWidth(width) !== this.presentationBand;
 	}
 
