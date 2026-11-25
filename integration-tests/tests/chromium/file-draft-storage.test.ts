@@ -295,12 +295,15 @@ describe('File draft storage', () => {
         const newer = { ...original, checkpointId: 'newer' };
         try {
           await peer.putDraft(original);
-          const observed = await repository.getDraftSummary(documentId);
+          const unopened = await repository.snapshotDraftVersion(documentId);
+          await repository.getDrafts('user', 'deployment');
+          const observation = repository.snapshotDraftVersion(documentId);
           await peer.putDraft(replacement);
+          const observed = await observation;
           await repository.deleteDraft(documentId, current =>
             current.checkpointId === observed?.checkpointId && current.content === original.content,
           );
-          const preserved = await repository.getDraftSummary(documentId);
+          const preserved = await repository.snapshotDraftVersion(documentId);
 
           let writing: Promise<void> | undefined;
           await repository.deleteDraft(documentId, current => {
@@ -313,17 +316,26 @@ describe('File draft storage', () => {
             current.checkpointId === newer.checkpointId && current.content === newer.content,
           );
           return {
+            unopened,
+            observed: observed?.checkpointId,
             preserved: preserved?.checkpointId,
             retained: retained?.checkpointId,
             body: await repository.getDraft(documentId),
-            summary: await repository.getDraftSummary(documentId),
+            summary: await repository.snapshotDraftVersion(documentId),
           };
         } finally {
           repository.close();
           peer.close();
         }
       }, source);
-      expect(result).toEqual({ preserved: 'replacement', retained: 'newer', body: null, summary: null });
+      expect(result).toEqual({
+        unopened: null,
+        observed: 'original',
+        preserved: 'replacement',
+        retained: 'newer',
+        body: null,
+        summary: null,
+      });
     }));
 
   test('upgrades populated recents and evicts only within the writing user and deployment', () =>
