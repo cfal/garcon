@@ -11,22 +11,25 @@ describe('service worker helpers', () => {
 	it('inherits only previously used current-build assets without replacing current responses', async () => {
 		const url = (name: string) => new URL(name, 'https://garcon.test/').href;
 		const currentResponse = new Response('current');
-		const inherited = new Response('previous');
+		const inherited = new Response('previous', { headers: { Vary: 'Accept' } });
+		const font = new Request(url('kept.woff2'));
+		const theme = new Request(url('theme.abc.css'), { headers: { Accept: 'text/css' } });
 		const current = {
 			match: vi
 				.fn<Cache['match']>()
-				.mockImplementation(async (path) => (path === url('kept.woff2') ? currentResponse : undefined)),
+				.mockImplementation(async (request) => request === font ? currentResponse : undefined),
 			put: vi.fn<Cache['put']>().mockResolvedValue(undefined),
 		} satisfies Pick<Cache, 'match' | 'put'>;
 		const previous = {
-			keys: async () => ['kept.woff2', 'theme.abc.css', 'obsolete.js'].map(path => new Request(url(path))),
+			keys: async () => [font, theme, new Request(url('obsolete.js'))],
 			match: vi
 				.fn<Cache['match']>()
-				.mockResolvedValue(inherited),
+				.mockImplementation(async (request) =>
+					request instanceof Request && request.headers.get('Accept') === 'text/css' ? inherited : undefined),
 		} satisfies Pick<Cache, 'match' | 'keys'>;
 		await preserveCachedAssets(current, previous, new Set(['kept.woff2', 'theme.abc.css', 'unused.js'].map(url)));
-		expect(previous.match).toHaveBeenCalledExactlyOnceWith(url('theme.abc.css'));
-		expect(current.put).toHaveBeenCalledExactlyOnceWith(url('theme.abc.css'), inherited);
+		expect(previous.match).toHaveBeenCalledExactlyOnceWith(theme);
+		expect(current.put).toHaveBeenCalledExactlyOnceWith(theme, inherited);
 	});
 
 	it('propagates migration failure so activation retains the donor cache', async () => {

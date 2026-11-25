@@ -21,10 +21,10 @@ export async function preserveCachedAssets(
 	previous: Pick<Cache, 'match' | 'keys'>,
 	immutable: ReadonlySet<string>,
 ): Promise<void> {
-	for (const { url: path } of await previous.keys()) {
-		if (!immutable.has(path) || await current.match(path)) continue;
-		const response = await previous.match(path);
-		if (response?.ok) await current.put(path, response);
+	for (const request of await previous.keys()) {
+		if (!immutable.has(request.url) || await current.match(request)) continue;
+		const response = await previous.match(request);
+		if (response?.ok) await current.put(request, response);
 	}
 }
 
