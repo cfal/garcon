@@ -181,7 +181,8 @@
 		menuOpen = true;
 	}
 
-	async function prepareFocusedMenu(): Promise<void> {
+	async function prepareFocusedMenu(event: FocusEvent & { currentTarget: HTMLButtonElement }): Promise<void> {
+		if (!event.currentTarget.matches(':focus-visible')) return;
 		prepareMenu();
 		await tick();
 		if (document.activeElement === document.body) menuTrigger?.focus({ preventScroll: true });
