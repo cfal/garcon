@@ -101,10 +101,9 @@ export async function getPullRequestReviewRecovery(options?: {
 	signal?: AbortSignal;
 	cursor?: string;
 }): Promise<PullRequestReviewRecoveryResponse> {
-	const query = new URLSearchParams();
-	if (options?.cursor) query.set('cursor', options.cursor);
+	const query = options?.cursor ? `?${new URLSearchParams({ cursor: options.cursor })}` : '';
 	const result = await apiGet<PullRequestReviewRecoveryResponse>(
-		`${BASE}/runs/recovery?${query}`,
+		`${BASE}/runs/recovery${query}`,
 		options,
 	);
 	if (!Array.isArray(result?.runs))

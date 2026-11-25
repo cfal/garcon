@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 import { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
 import { CanvasSession, type CanvasSessionPort } from '$lib/chat-canvas/canvas-session.svelte';
 import { canvas, recoveryMemory } from '$lib/chat-canvas/__tests__/canvas-fixtures';
@@ -11,7 +12,9 @@ import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';
 import CanvasWorkspace from '../CanvasWorkspace.svelte';
 
 const shortcuts = vi.hoisted(() => ({ registerLocalShortcutOwner: vi.fn(() => vi.fn()) }));
+let minuteClock: MinuteClockStore | undefined;
 vi.mock('$lib/context', () => ({
+	getMinuteClock: () => (minuteClock ??= new MinuteClockStore()),
 	getWorkspaceShortcuts: () =>
 		shortcuts satisfies Pick<WorkspaceShortcutDispatcher, 'registerLocalShortcutOwner'>,
 	getWorkspaceWindowDnd: () =>
@@ -22,6 +25,8 @@ vi.mock('$lib/context', () => ({
 
 afterEach(() => {
 	cleanup();
+	minuteClock?.destroy();
+	minuteClock = undefined;
 	vi.useRealTimers();
 	vi.restoreAllMocks();
 	shortcuts.registerLocalShortcutOwner.mockClear();
@@ -87,8 +92,8 @@ describe('CanvasWorkspace visibility', () => {
 			expect(shortcuts.registerLocalShortcutOwner.mock.results[0].value).toHaveBeenCalledOnce();
 			const intermediate = [{ ...chat, title: 'Synthetic intermediate chat' }];
 			const latest = [{ ...chat, title: 'Synthetic latest chat', isArchived: true }];
-			const intermediateProjection = vi.spyOn(intermediate, 'map');
-			const latestProjection = vi.spyOn(latest, 'map');
+			const intermediateProjection = vi.spyOn(intermediate, 'filter');
+			const latestProjection = vi.spyOn(latest, 'filter');
 			await view.rerender({ chats: intermediate });
 			await view.rerender({ chats: latest });
 			expect(intermediateProjection).not.toHaveBeenCalled();
@@ -189,6 +194,8 @@ describe('CanvasWorkspace retention', () => {
 				expect(session.document.content).toBe(content);
 				expect(session.document.canUndo).toBe(true);
 				vi.setSystemTime(new Date('2026-09-07T02:00:00Z'));
+				vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+				document.dispatchEvent(new Event('visibilitychange'));
 				await view.rerender({ visible: true });
 				expect(timestamp()).toBe(formatRelativeTimestamp(chat.lastActivityAt, new Date())?.label);
 				const restored = view.container.querySelector<HTMLElement>(selector)!;

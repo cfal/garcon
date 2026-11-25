@@ -1,6 +1,6 @@
 import type { GitExecutorScope, GitProjectTarget, GitReviewDocumentRef } from '$shared/git-execution';
 import { isRecord } from '$shared/json';
-import { apiGet, apiPost, ApiError, type ApiFetchOptions } from './client.js';
+import { apiGet, apiPost, ApiError, isDefiniteMutationFailure, type ApiFetchOptions } from './client.js';
 
 export type {
 	GitProjectTarget,
@@ -26,17 +26,18 @@ export function gitDocumentKey(document: GitReviewDocumentRef): string {
 
 export function assertGitResponseScope(
 	value: unknown,
-	target: GitProjectTarget,
+	executorId: string,
+	service = 'Git',
 ): asserts value is GitExecutorScope {
 	if (
 		!isRecord(value) ||
-		value.executorId !== target.executorId ||
+		value.executorId !== executorId ||
 		typeof value.instanceId !== 'string' ||
 		!value.instanceId
 	) {
 		throw new ApiError(
 			502,
-			'Git returned a different executor or an invalid serving instance.',
+			`${service} returned a different executor or an invalid serving instance.`,
 			'GIT_INVALID_RESULT',
 		);
 	}
@@ -48,7 +49,7 @@ export async function gitApiGet<T>(
 	options?: ApiFetchOptions,
 ): Promise<T & GitExecutorScope> {
 	const result = await apiGet<T>(url, options);
-	assertGitResponseScope(result, target);
+	assertGitResponseScope(result, target.executorId);
 	return result;
 }
 
@@ -59,7 +60,7 @@ export async function gitApiPost<T>(
 	options?: ApiFetchOptions,
 ): Promise<T & GitExecutorScope> {
 	const result = await apiPost<T>(url, body, options);
-	assertGitResponseScope(result, target);
+	assertGitResponseScope(result, target.executorId);
 	return result;
 }
 
@@ -76,12 +77,7 @@ export async function gitApiMutation<T>(
 		}
 		return result;
 	} catch (error) {
-		if (
-			error instanceof ApiError &&
-			error.errorCode !== 'GIT_INVALID_RESULT' &&
-			(error.errorCode || error.status < 500)
-		)
-			throw error;
+		if (isDefiniteMutationFailure(error, { unknownCode: 'GIT_INVALID_RESULT' })) throw error;
 		throw new ApiError(
 			503,
 			'Git mutation could not be confirmed. Inspect the repository before trying again.',

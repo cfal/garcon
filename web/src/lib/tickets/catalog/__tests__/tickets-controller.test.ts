@@ -6,7 +6,6 @@ import type {
 	TicketDetail,
 	TicketListQuery,
 	TicketPage,
-	TicketReadQuery,
 	TicketWriteResult,
 } from '$shared/tickets';
 import { ApiError } from '$lib/api/client';
@@ -97,7 +96,7 @@ function harness(items = [ticket()], savedPreferences?: ReturnType<TicketPrefere
 				nextBeforeNumber: matching.length > selected.length ? selected.at(-1)!.number : null,
 			};
 		}),
-		read: vi.fn(async (query: TicketReadQuery): Promise<TicketDetail> => ({
+		read: vi.fn<TicketsApi['read']>(async (query) => ({
 			...version(),
 			ticket: items.find((entry) => entry.id === query.ticketId)!,
 			links: [],
@@ -200,8 +199,8 @@ describe('Tickets controller', () => {
 		},
 	);
 
-	it.each([false, true])('allows an idle equal-query refresh after failure: %s', async (failed) => {
-		const { controller, api } = harness();
+	it.each([false, true])('ignores equivalent idle queries but allows explicit refresh: %s', async (failed) => {
+		const { controller, api, preferences } = harness();
 		controller.setPresentationVisible(true);
 		await controller.refresh();
 		if (failed) api.counts.mockRejectedValueOnce(new ApiError(503, 'Synthetic refresh failure'));
@@ -209,7 +208,13 @@ describe('Tickets controller', () => {
 		await controller.refresh();
 		expect(controller.stale).toBe(failed);
 		const countsCalls = api.counts.mock.calls.length;
-		controller.setQuery({ query: 'Synthetic' });
+		const writes = preferences.write.mock.calls.length;
+		const query = controller.query;
+		controller.setQuery({ query: ' Synthetic ' });
+		expect(controller.query).toBe(query);
+		expect(controller.loading).toBe(false);
+		expect(preferences.write).toHaveBeenCalledTimes(writes);
+		expect(api.counts).toHaveBeenCalledTimes(countsCalls);
 		await controller.refresh();
 		expect(api.counts).toHaveBeenCalledTimes(countsCalls + 1);
 		expect(controller.error).toBeNull();
@@ -340,6 +345,28 @@ describe('Tickets controller', () => {
 		expect(controller.saveFeedback).toBeNull();
 		expect(controller.mutations.busy('G-1')).toBe(false);
 	});
+	it.each(['link', 'unlink'] as const)('cancels pending %s reads on disposal without mutating', async (action) => {
+		const { controller, api } = harness();
+		controller.setPresentationVisible(true);
+		await controller.refresh();
+		const held = deferred<TicketDetail>();
+		const original = await api.read({ ticketId: 'G-1' });
+		api.read.mockClear();
+		api.read.mockReturnValueOnce(held.promise);
+
+		const operation = action === 'link'
+			? controller.link(original.ticket, 'G-2', 'blocks', 'link')
+			: controller.unlink({ sourceId: 'G-1', targetId: 'G-2', kind: 'blocks' });
+		const signal = api.read.mock.lastCall?.[1];
+		expect(signal?.aborted).toBe(false);
+		controller.dispose();
+		expect(signal?.aborted).toBe(true);
+		held.resolve(original);
+		await operation;
+		expect(api.read).toHaveBeenCalledOnce();
+		expect(api.mutate).not.toHaveBeenCalled();
+	});
+
 	it('uses both current endpoint revisions and invalidates both cached link projections', async () => {
 		const source = ticket(1, { revision: 3 });
 		const target = ticket(2, { revision: 7 });

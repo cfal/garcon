@@ -4,7 +4,6 @@ import { gitDocumentKey, gitProjectQuery, type GitProjectTarget } from './git-cl
 import type {
 	GhRepositoryIdentity,
 	PullRequestDetail as PullRequestDetailWire,
-	PullRequestListResult,
 } from '$shared/gh';
 import { ghOperationTimeoutMs } from '$shared/git-execution';
 export type {
@@ -24,16 +23,6 @@ export type {
 export interface PullRequestDetail extends PullRequestDetailWire {
 	reviewId: string;
 	documentId: string;
-}
-
-export async function getPullRequests(
-	target: GitProjectTarget,
-	options?: ApiFetchOptions,
-): Promise<PullRequestListResult> {
-	return ghApiGet(target.executorId, `/api/v1/gh/pull-requests?${gitProjectQuery(target)}`, {
-		timeoutMs: ghOperationTimeoutMs('listPullRequests'),
-		...options,
-	});
 }
 
 export async function getPullRequest(

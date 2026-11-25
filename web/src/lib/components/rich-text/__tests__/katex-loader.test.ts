@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MAX_MATH_SOURCE_LENGTH, renderMath } from '$lib/components/rich-text/katex-loader';
+import { MAX_MATH_SOURCE_LENGTH, readCachedMath, renderMath } from '$lib/components/rich-text/katex-loader';
 
 function parseRenderedMath(html: string): HTMLDivElement {
 	const container = document.createElement('div');
@@ -69,5 +69,18 @@ describe('renderMath', () => {
 		await expect(renderMath('x'.repeat(MAX_MATH_SOURCE_LENGTH + 1), false)).rejects.toThrow(
 			'render limit',
 		);
+	});
+
+	it('keeps a bounded cache, preserves recently used math, and separates display modes', async () => {
+		const source = 'x+9000';
+		const inline = await renderMath(source, false);
+		expect(readCachedMath(source, true)).toBeUndefined();
+		await renderMath(source, true);
+		for (let index = 0; index < 127; index += 1) {
+			expect(readCachedMath(source, false)).toBe(inline);
+			await renderMath(`x+${index}`, false);
+		}
+		expect(readCachedMath(source, false)).toBe(inline);
+		expect(readCachedMath(source, true)).toBeUndefined();
 	});
 });

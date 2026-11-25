@@ -1,5 +1,8 @@
 <!-- Renders one agent auth/readiness card. -->
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { agentProviderStyle } from '$lib/agents/agent-provider-style';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
@@ -45,9 +48,15 @@
 		noLogin?: boolean;
 	} = $props();
 
-	let codeCopied = $state(false);
+	let copiedCode = $state<string>();
 	let authCode = $state('');
 	let hadDeviceAuth = false;
+	let copyTimer: ReturnType<typeof setTimeout> | undefined;
+	let copyVersion = 0;
+	onDestroy(() => {
+		copyVersion += 1;
+		clearTimeout(copyTimer);
+	});
 
 	// Requests expansion only when auth details appear so polling cannot undo a manual close.
 	$effect(() => {
@@ -58,12 +67,16 @@
 	});
 
 	async function copyDeviceCode() {
-		if (!deviceAuth?.code) return;
-		await navigator.clipboard.writeText(deviceAuth.code);
-		codeCopied = true;
-		setTimeout(() => {
-			codeCopied = false;
-		}, 2000);
+		const code = deviceAuth?.code;
+		if (!code) return;
+		const version = ++copyVersion;
+		const isCurrent = () => version === copyVersion && deviceAuth?.code === code;
+		clearTimeout(copyTimer);
+		copiedCode = undefined;
+		const container = document.activeElement?.closest('[role=dialog]') ?? undefined;
+		if (!(await copyToClipboard(code, container, isCurrent)) || !isCurrent()) return;
+		copiedCode = code;
+		copyTimer = setTimeout(() => { copiedCode = undefined; }, 2_000);
 	}
 
 	function submitAuthCode() {
@@ -78,19 +91,7 @@
 		submitAuthCode();
 	}
 
-	const borderColorClass: Record<AgentId, string> = {
-		claude: 'border-l-provider-claude-border',
-		codex: 'border-l-provider-codex-border',
-		cursor: 'border-l-provider-cursor-border',
-		opencode: 'border-l-provider-opencode-border',
-		amp: 'border-l-provider-amp-border',
-		factory: 'border-l-provider-factory-border',
-		pi: 'border-l-provider-pi-border',
-		antigravity: 'border-l-provider-antigravity-border',
-		'direct-openai-compatible': 'border-l-border',
-		'direct-openai-responses-compatible': 'border-l-border',
-		'direct-anthropic-compatible': 'border-l-border',
-	};
+	const borderColorClass = $derived(agentProviderStyle(agentId)?.leftBorderClass ?? 'border-l-border');
 
 	let isReady = $derived(auth.authenticated || readiness?.ready === true);
 	let statusLabel = $derived(
@@ -109,7 +110,7 @@
 	<Collapsible.Root
 		{open}
 		{onOpenChange}
-		class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}"
+		class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass}"
 	>
 		<div class="flex flex-wrap items-center gap-3 px-4 py-3">
 			<Collapsible.Trigger class="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-left cursor-pointer">
@@ -176,7 +177,8 @@
 								<Button
 									variant="ghost"
 									size="icon-sm"
-									onclick={() => window.open(deviceAuth.url, '_blank', 'noopener')}
+									aria-label="Open verification link"
+									onclick={() => window.open(deviceAuth.url, '_blank', 'noopener,noreferrer')}
 								>
 									<ExternalLinkIcon class="size-3.5" />
 								</Button>
@@ -194,8 +196,8 @@
 									>
 										{deviceAuth.code}
 									</code>
-									<Button variant="ghost" size="icon-sm" onclick={copyDeviceCode}>
-										{#if codeCopied}
+									<Button variant="ghost" size="icon-sm" aria-label={m.chat_tool_display_copy_to_clipboard()} onclick={copyDeviceCode}>
+										{#if copiedCode === deviceAuth.code}
 											<CheckIcon class="size-3.5 text-status-success" />
 										{:else}
 											<CopyIcon class="size-3.5" />
@@ -297,7 +299,7 @@
 	</Collapsible.Root>
 {:else}
 	<div
-		class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass[agentId]}"
+		class="border border-border rounded-lg overflow-hidden border-l-4 {borderColorClass}"
 	>
 		<div class="flex flex-wrap items-center gap-3 px-4 py-3">
 			<span class="break-words font-medium text-foreground">{agentName}</span>

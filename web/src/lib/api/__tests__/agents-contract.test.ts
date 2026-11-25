@@ -28,6 +28,13 @@ describe('agent login API contract', () => {
 		vi.restoreAllMocks();
 	});
 
+	it('rejects a response that omits the requested agent', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponse({ claude: { authenticated: true } }));
+		await expect(getAgentAuthStatus('codex', 'worker')).rejects.toMatchObject({
+			errorCode: 'AGENT_INVALID_RESULT',
+		});
+	});
+
 	it('gets the active login session with an encoded agent query', async () => {
 		const payload = {
 			state: 'running',

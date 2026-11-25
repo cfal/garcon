@@ -15,6 +15,20 @@ describe('mermaid-loader', () => {
 		mermaid.render.mockResolvedValue({ svg: '<svg></svg>' });
 	});
 
+	it('retries the import after a rejected lazy module load', async () => {
+		vi.doMock('mermaid', () => { throw new Error('Synthetic chunk failure'); });
+		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
+		const source = 'flowchart LR\nA --> B';
+		try {
+			await expect(renderMermaid(source, 'standard-light')).rejects.toThrow();
+			expect(mermaid.render).not.toHaveBeenCalled();
+		} finally {
+			vi.doMock('mermaid', () => ({ default: mermaid }));
+		}
+		await expect(renderMermaid(source, 'standard-light')).resolves.toBe('<svg></svg>');
+		expect(mermaid.render).toHaveBeenCalledOnce();
+	});
+
 	it('keys completed and in-flight renders by source and renderer theme', async () => {
 		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
 		const source = 'flowchart LR\nA --> B';

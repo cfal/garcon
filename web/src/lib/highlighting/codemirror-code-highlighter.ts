@@ -35,7 +35,6 @@ export const codeTagHighlighter = tagHighlighter([
 			tags.labelName,
 			tags.namespace,
 			tags.annotation,
-			tags.attributeName,
 		],
 		class: 'cm-code-meta',
 	},

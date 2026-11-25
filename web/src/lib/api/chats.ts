@@ -3,7 +3,7 @@
 import {
 	ApiError,
 	ApiMutationOutcomeUnknownError,
-	isIntermediaryResponse,
+	isDefiniteMutationFailure,
 	apiGet,
 	apiPost,
 	apiPatch,
@@ -117,6 +117,7 @@ import {
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '$shared/chat-types';
 import type { AgentCommandImage } from '$shared/ws-requests';
 import { AGENT_HANDOFF_HTTP_TIMEOUT_MS } from '$shared/handoff-timeouts';
+import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
 import {
 	parseReorderChatResponse,
 	parseSortChatOrderResponse,
@@ -170,20 +171,22 @@ export type { ChatDetailsResponse } from '$shared/chat-details';
 export type ListChatsResponse = ChatListResponse;
 
 /** Lists all chat sessions. */
-export async function listChats(): Promise<ListChatsResponse> {
-	return parseChatListResponse(await apiGet<unknown>('/api/v1/chats'));
+export async function listChats(options?: ApiFetchOptions): Promise<ListChatsResponse> {
+	return parseChatListResponse(await apiGet<unknown>('/api/v1/chats', options));
 }
 
 export async function setLastSelectedChat(
 	chatId: string | null,
+	options?: ApiFetchOptions,
 ): Promise<SetLastSelectedChatResponse> {
 	const body: SetLastSelectedChatRequest = { chatId };
-	return apiPut<SetLastSelectedChatResponse>('/api/v1/chats/last-selected', body);
+	return apiPut<SetLastSelectedChatResponse>('/api/v1/chats/last-selected', body, options);
 }
 
 /** Starts a new chat session. */
 export async function startChat(
 	params: StartChatParams,
+	options?: ApiFetchOptions,
 ): Promise<StartChatCommandResponse & { chat: ChatListEntry }> {
 	const { permissionMode, thinkingMode, ...rest } = params;
 	const response = await apiPost<StartChatCommandResponse>('/api/v1/chats/start', {
@@ -191,7 +194,7 @@ export async function startChat(
 		...rest,
 		permissionMode: normalizePermissionMode(permissionMode),
 		thinkingMode: normalizeThinkingMode(thinkingMode),
-	});
+	}, options);
 	if (!response.chat) {
 		throw new ApiError(
 			410,
@@ -202,11 +205,11 @@ export async function startChat(
 	return { ...response, chat: response.chat };
 }
 
-export async function runChat(params: AgentRunCommandRequest): Promise<AgentTurnCommandResponse> {
+export async function runChat(params: AgentRunCommandRequest, options?: ApiFetchOptions): Promise<AgentTurnCommandResponse> {
 	const response = await apiPost<AgentTurnCommandResponse>(
 		'/api/v1/chats/run',
 		params,
-		params.handoff ? { timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS } : undefined,
+		params.handoff ? { timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS, ...options } : options,
 	);
 	if (params.handoff && !response.chat) {
 		throw new Error('Invalid handoff response: durable chat projection is missing');
@@ -216,12 +219,14 @@ export async function runChat(params: AgentRunCommandRequest): Promise<AgentTurn
 
 export async function handoffChat(
 	params: AgentHandoffCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<AgentHandoffCommandResponse> {
 	const response = await apiPost<AgentHandoffCommandResponse>(
 		'/api/v1/chats/agent-handoff',
 		params,
 		{
 			timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS,
+			...options,
 		},
 	);
 	if (!response.chat || response.chat.id !== params.chatId)
@@ -231,104 +236,119 @@ export async function handoffChat(
 
 export async function generateChatTitle(
 	params: GenerateChatTitleRequest,
+	options?: ApiFetchOptions,
 ): Promise<GenerateChatTitleResponse> {
 	return apiPost<GenerateChatTitleResponse>('/api/v1/chats/title/generate', params, {
 		timeoutMs: CHAT_TITLE_GENERATION_TIMEOUT_MS,
+		...options,
 	});
 }
 
-export async function forkRunChat(params: ForkRunCommandRequest): Promise<ForkRunCommandResponse> {
-	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params, { timeoutMs: null });
+export async function forkRunChat(params: ForkRunCommandRequest, options?: ApiFetchOptions): Promise<ForkRunCommandResponse> {
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params, { timeoutMs: null, ...options });
 }
-
-import type { SelfHandoffRunCommandRequest } from '$shared/self-handoff-contracts';
 
 export async function selfHandoffRunChat(
 	params: SelfHandoffRunCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<ForkRunCommandResponse> {
-	return apiPost<ForkRunCommandResponse>('/api/v1/chats/handoff-run', params);
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/handoff-run', params, {
+		timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS,
+		...options,
+	});
 }
 
-export async function stopChat(params: AgentStopCommandRequest): Promise<AgentStopResponse> {
-	return withParsedStopOutcome(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params));
+export async function stopChat(params: AgentStopCommandRequest, options?: ApiFetchOptions): Promise<AgentStopResponse> {
+	return withParsedStopOutcome(await apiPost<AgentStopResponse>('/api/v1/chats/stop', params, options));
 }
 
 export async function interruptAndSendChat(
 	params: AgentInterruptAndSendCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<AgentInterruptAndSendResponse> {
 	return withParsedStopOutcome(
-		await apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params),
+		await apiPost<AgentInterruptAndSendResponse>('/api/v1/chats/interrupt-and-send', params, options),
 	);
 }
 
-export async function compactChat(params: CompactCommandRequest): Promise<CommandAcceptedResponse> {
-	return apiPost<CommandAcceptedResponse>('/api/v1/chats/compact', params);
+export async function compactChat(params: CompactCommandRequest, options?: ApiFetchOptions): Promise<CommandAcceptedResponse> {
+	return apiPost<CommandAcceptedResponse>('/api/v1/chats/compact', params, options);
 }
 
 export async function sendPermissionDecision(
 	params: PermissionDecisionCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<CommandAcceptedResponse> {
-	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params);
+	return apiPost<CommandAcceptedResponse>('/api/v1/chats/permissions/decision', params, options);
 }
 
 export async function getChatSnapshot(
 	chatId: string,
 	messageLimit = 1,
+	options?: ApiFetchOptions,
 ): Promise<ChatSnapshotResponse> {
 	const value = await apiGet<unknown>(
 		`/api/v1/chats/snapshot?chatId=${encodeURIComponent(chatId)}&limit=${messageLimit}`,
+		options,
 	);
 	return parseChatSnapshotResponse(value);
 }
 
 export async function createQueuedInput(
 	params: QueueEntryCreateCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<QueueEntryCommandResponse> {
 	return withParsedControl(
-		await apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params),
+		await apiPost<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params, options),
 	);
 }
 
 export async function replaceQueuedInput(
 	params: QueueEntryReplaceCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<QueueEntryCommandResponse> {
 	return withParsedControl(
-		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params),
+		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries', params, options),
 	);
 }
 
 export async function deleteQueuedInput(
 	params: QueueEntryDeleteCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<QueueEntryDeleteResponse> {
 	return withParsedControl(
-		await apiDelete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', params),
+		await apiDelete<QueueEntryDeleteResponse>('/api/v1/chats/queue/entries', params, options),
 	);
 }
 
 export async function moveQueuedInput(
 	params: QueueEntryMoveCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<QueueEntryCommandResponse> {
 	return withParsedControl(
-		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries/move', params),
+		await apiPut<QueueEntryCommandResponse>('/api/v1/chats/queue/entries/move', params, options),
 	);
 }
 
 export async function steerChat(
 	params: SteerCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<SteerCommandResponse | QueuedSteerCommandResponse> {
 	const response = await apiPost<SteerCommandResponse | QueuedSteerCommandResponse>(
 		'/api/v1/chats/steer',
 		params,
+		options,
 	);
 	return response.delivery === 'queued' ? withParsedControl(response) : response;
 }
 
 export async function steerQueuedEntry(
 	params: QueueEntrySteerCommandRequest,
+	options?: ApiFetchOptions,
 ): Promise<QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse> {
 	const response = await apiPost<
 		QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse
-	>('/api/v1/chats/queue/entries/steer', params);
+	>('/api/v1/chats/queue/entries/steer', params, options);
 	const serverInstanceId = parseExecutionControlServerInstanceId(response.serverInstanceId);
 	if (!serverInstanceId) throw new Error('Invalid queued steer server instance response');
 	if (!response.control && response.delivery !== 'queued') {
@@ -344,47 +364,51 @@ export async function steerQueuedEntry(
 
 export async function getChatExecutionControl(
 	chatId: string,
+	options?: ApiFetchOptions,
 ): Promise<{ success: true; chatId: string; control: ChatExecutionControlState }> {
 	return withParsedControl(
 		await apiGet<{
 			success: true;
 			chatId: string;
 			control: ChatExecutionControlState;
-		}>(`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`),
+		}>(`/api/v1/chats/queue?chatId=${encodeURIComponent(chatId)}`, options),
 	);
 }
 
-export async function pauseChatQueue(chatId: string): Promise<QueueMutationResponse> {
+export async function pauseChatQueue(chatId: string, options?: ApiFetchOptions): Promise<QueueMutationResponse> {
 	const request: QueuePauseRequest = { chatId };
 	return withParsedControl(
-		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', request),
+		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/pause', request, options),
 	);
 }
 
 export async function resumeChatQueue(
 	chatId: string,
 	pauseId: string,
+	options?: ApiFetchOptions,
 ): Promise<QueueMutationResponse> {
 	const request: QueueResumeRequest = { chatId, pauseId };
 	return withParsedControl(
-		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request),
+		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/resume', request, options),
 	);
 }
 
 export async function updateExecutionSettings(
 	params: ExecutionSettingsPatchRequest,
+	options?: ApiFetchOptions,
 ): Promise<ExecutionSettingsPatchResponse> {
-	return apiPatch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', params);
+	return apiPatch<ExecutionSettingsPatchResponse>('/api/v1/chats/execution-settings', params, options);
 }
 
-export async function updateChatModel(params: ModelPatchRequest): Promise<ModelPatchResponse> {
-	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params);
+export async function updateChatModel(params: ModelPatchRequest, options?: ApiFetchOptions): Promise<ModelPatchResponse> {
+	return apiPatch<ModelPatchResponse>('/api/v1/chats/model', params, options);
 }
 
 export async function updateChatProjectPath(
 	params: ProjectPathPatchRequest,
+	options?: ApiFetchOptions,
 ): Promise<ProjectPathPatchResponse> {
-	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params);
+	return apiPatch<ProjectPathPatchResponse>('/api/v1/chats/project-path', params, options);
 }
 
 export async function getCombinedChatMessages(
@@ -469,27 +493,29 @@ export interface DeleteChatResponse {
 }
 
 /** Deletes a chat session. */
-export async function deleteChat(chatId: string): Promise<DeleteChatResponse> {
-	return apiDelete<DeleteChatResponse>('/api/v1/chats', { chatId });
+export async function deleteChat(chatId: string, options?: ApiFetchOptions): Promise<DeleteChatResponse> {
+	return apiDelete<DeleteChatResponse>('/api/v1/chats', { chatId }, options);
 }
 
 /** Fetches detailed chat metadata for sidebar details dialog. */
-export async function getChatDetails(chatId: string): Promise<ChatDetailsResponse> {
-	return apiGet<ChatDetailsResponse>(`/api/v1/chats/details?chatId=${encodeURIComponent(chatId)}`);
+export async function getChatDetails(chatId: string, options?: ApiFetchOptions): Promise<ChatDetailsResponse> {
+	return apiGet<ChatDetailsResponse>(`/api/v1/chats/details?chatId=${encodeURIComponent(chatId)}`, options);
 }
 
 /** Toggles the pinned state of a chat session. */
 export async function togglePinned(
 	chatId: string,
+	options?: ApiFetchOptions,
 ): Promise<{ success: boolean; isPinned: boolean }> {
-	return apiPost('/api/v1/chats/pin', { chatId });
+	return apiPost('/api/v1/chats/pin', { chatId }, options);
 }
 
 /** Sets the archived state without reversing a concurrent restore. */
 export async function setChatArchived(
 	request: SetChatArchivedRequest,
+	options?: ApiFetchOptions,
 ): Promise<SetChatOrderStateResponse> {
-	const response = await apiPut<unknown>('/api/v1/chats/archive', request);
+	const response = await apiPut<unknown>('/api/v1/chats/archive', request, options);
 	const parsed = parseSetChatOrderStateResponse(response);
 	if (!parsed || parsed.chatId !== request.chatId || parsed.isArchived !== request.isArchived) {
 		throw new ApiMutationOutcomeUnknownError('The archived state could not be confirmed.');
@@ -500,9 +526,10 @@ export async function setChatArchived(
 /** Marks chats as read in a single batched request. */
 export async function markChatsReadBatch(
 	entries: MarkChatsReadEntry[],
+	options?: ApiFetchOptions,
 ): Promise<MarkChatsReadResponse> {
 	const request: MarkChatsReadRequest = { entries };
-	return apiPost<MarkChatsReadResponse>('/api/v1/chats/read', request);
+	return apiPost<MarkChatsReadResponse>('/api/v1/chats/read', request, options);
 }
 
 export type ValidateStartErrorCode =
@@ -544,28 +571,28 @@ export interface ForkChatParams {
 }
 
 /** Forks (clones) an existing chat session into a new chat. */
-export async function forkChat(params: ForkChatParams): Promise<ForkChatResponse> {
-	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params, { timeoutMs: null });
+export async function forkChat(params: ForkChatParams, options?: ApiFetchOptions): Promise<ForkChatResponse> {
+	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params, { timeoutMs: null, ...options });
 }
 
 /** Persists a chat placement within its server-resolved section. */
-export async function reorderChat(request: ReorderChatRequest): Promise<ReorderChatResponse> {
-	const response = await apiPost<unknown>('/api/v1/chats/reorder', request);
+export async function reorderChat(request: ReorderChatRequest, options?: ApiFetchOptions): Promise<ReorderChatResponse> {
+	const response = await apiPost<unknown>('/api/v1/chats/reorder', request, options);
 	const parsed = parseReorderChatResponse(response);
 	if (!parsed) throw new Error('Invalid chat reorder response');
 	return parsed;
 }
 
-export async function sortChatOrder(request: SortChatOrderRequest): Promise<SortChatOrderResponse> {
-	const response = await apiPost<unknown>('/api/v1/chats/sort', request);
+export async function sortChatOrder(request: SortChatOrderRequest, options?: ApiFetchOptions): Promise<SortChatOrderResponse> {
+	const response = await apiPost<unknown>('/api/v1/chats/sort', request, options);
 	const parsed = parseSortChatOrderResponse(response);
 	if (!parsed) throw new Error('Invalid chat order sort response');
 	return parsed;
 }
 
-export async function setChatParent(request: SetChatParentRequest): Promise<SetChatParentResponse> {
+export async function setChatParent(request: SetChatParentRequest, options?: ApiFetchOptions): Promise<SetChatParentResponse> {
 	try {
-		const response = parseSetChatParentResponse(await apiPut<unknown>('/api/v1/chats/parent', request));
+		const response = parseSetChatParentResponse(await apiPut<unknown>('/api/v1/chats/parent', request, options));
 		if (
 			!response ||
 			response.chatId !== request.chatId ||
@@ -576,13 +603,7 @@ export async function setChatParent(request: SetChatParentRequest): Promise<SetC
 		return response;
 	} catch (error) {
 		if (error instanceof ApiMutationOutcomeUnknownError) throw error;
-		if (
-			error instanceof ApiError &&
-			!isIntermediaryResponse(error) &&
-			error.errorCode !== 'CHAT_PARENT_SAVE_UNKNOWN'
-		) {
-			throw error;
-		}
+		if (isDefiniteMutationFailure(error, { unknownCode: 'CHAT_PARENT_SAVE_UNKNOWN' })) throw error;
 		throw new ApiMutationOutcomeUnknownError(
 			'The parent save may have completed. Inspect the chat before trying again.',
 			{ cause: error },
@@ -601,7 +622,7 @@ async function requestChatTagMutation(
 		return parsed;
 	} catch (error) {
 		if (error instanceof ApiMutationOutcomeUnknownError) throw error;
-		if (error instanceof ApiError && !isIntermediaryResponse(error)) throw error;
+		if (isDefiniteMutationFailure(error)) throw error;
 		throw new ApiMutationOutcomeUnknownError(
 			'The chat tag mutation outcome could not be confirmed.',
 			{ cause: error },
@@ -618,33 +639,36 @@ export function getChatTagConflictResponse(error: unknown): ChatTagConflictRespo
 
 export async function replaceChatTags(
 	request: ReplaceChatTagsRequest,
+	options?: ApiFetchOptions,
 ): Promise<ChatTagsMutationResponse> {
 	return requestChatTagMutation(
-		() => apiPatch<unknown>('/api/v1/chats/tags', request),
+		() => apiPatch<unknown>('/api/v1/chats/tags', request, options),
 		'Invalid chat tag mutation response',
 	);
 }
 
 export async function applyChatTagDelta(
 	request: ApplyChatTagDeltaRequest,
+	options?: ApiFetchOptions,
 ): Promise<ChatTagsMutationResponse> {
 	return requestChatTagMutation(
-		() => apiPatch<unknown>('/api/v1/chats/tags/delta', request),
+		() => apiPatch<unknown>('/api/v1/chats/tags/delta', request, options),
 		'Invalid chat tag mutation response',
 	);
 }
 
 export async function transitionChatTags(
 	request: TransitionChatTagsRequest,
+	options?: ApiFetchOptions,
 ): Promise<ChatTagsMutationResponse> {
 	return requestChatTagMutation(
-		() => apiPost<unknown>('/api/v1/chats/tag-transition', request),
+		() => apiPost<unknown>('/api/v1/chats/tag-transition', request, options),
 		'Invalid chat tag transition response',
 	);
 }
 
-export async function recoverChatTags(chatId: string): Promise<RecoverChatTagsResponse> {
-	const response = await apiGet<unknown>(`/api/v1/chats/tags?chatId=${encodeURIComponent(chatId)}`);
+export async function recoverChatTags(chatId: string, options?: ApiFetchOptions): Promise<RecoverChatTagsResponse> {
+	const response = await apiGet<unknown>(`/api/v1/chats/tags?chatId=${encodeURIComponent(chatId)}`, options);
 	const parsed = normalizeRecoverChatTagsResponse(response);
 	if (!parsed) throw new Error('Invalid chat tag recovery response');
 	return parsed;

@@ -35,6 +35,30 @@ function summaryFor(read: PendingRead): UsageSummary {
 }
 
 describe('UsageController', () => {
+	it('reuses one calendar calculation within a minute and detects the next day', async () => {
+		const { controller, reads, now } = harness();
+		controller.setPresentationVisible(true);
+		reads[0]!.resolve(usageSummary({
+			executorId: 'local',
+			sinceDay: '2026-09-28',
+			untilDay: '2026-10-27',
+			timeZone: 'UTC',
+		}));
+		await vi.waitFor(() => expect(controller.loading).toBe(false));
+		const format = vi.spyOn(Intl, 'DateTimeFormat');
+		try {
+			now.mockReturnValue(new Date('2026-10-27T23:59:45Z'));
+			expect(controller.stale).toBe(false);
+			expect(controller.stale).toBe(false);
+			expect(format).toHaveBeenCalledOnce();
+			now.mockReturnValue(new Date('2026-10-28T00:00:00Z'));
+			expect(controller.stale).toBe(true);
+			expect(format).toHaveBeenCalledTimes(2);
+		} finally {
+			format.mockRestore();
+		}
+	});
+
 	it('reads when first revealed and keeps the summary until it is stale', async () => {
 		const { controller, reads, now } = harness();
 		controller.setPresentationVisible(true);

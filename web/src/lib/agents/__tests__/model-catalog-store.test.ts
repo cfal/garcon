@@ -173,7 +173,20 @@ describe('ModelCatalogStore', () => {
 		expect(remote.isRefreshing).toBe(false);
 		expect(remote.getModels('sample')).toEqual([]);
 		expect(store.forExecutor(remoteExecutor.id)).not.toBe(remote);
-		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors)).toBe('{}');
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors)).toBeNull();
+	});
+
+	it('does not rewrite persisted snapshots for equivalent executor inventories', async () => {
+		const store = createModelCatalogStore();
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample')])));
+		await store.forExecutor(remoteExecutor.id).forceRefresh();
+		const write = vi.spyOn(localStorage, 'setItem');
+		store.reconcileExecutors([localExecutor, remoteExecutor]);
+		store.reconcileExecutors([localExecutor, { ...remoteExecutor }]);
+		expect(write).not.toHaveBeenCalled();
+		store.reconcileExecutors([localExecutor]);
+		expect(write).toHaveBeenCalledOnce();
+		write.mockRestore();
 	});
 
 	it('starts empty instead of embedding integration-specific fallbacks', () => {

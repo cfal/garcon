@@ -190,11 +190,11 @@ describe('ProjectPathField', () => {
 		await waitFor(() =>
 			expect(browseDirectory).toHaveBeenCalledWith(
 				'/workspace',
-				expect.any(AbortSignal),
+				{ signal: expect.any(AbortSignal) },
 				first.executorId,
 			),
 		);
-		const signal = vi.mocked(browseDirectory).mock.calls[0][1];
+		const signal = vi.mocked(browseDirectory).mock.calls[0][1]?.signal;
 		const next = browser({
 			open: true,
 			executorId: '33333333-3333-4333-8333-333333333333',
@@ -205,7 +205,7 @@ describe('ProjectPathField', () => {
 		expect(signal?.aborted).toBe(true);
 		expect(browseDirectory).toHaveBeenLastCalledWith(
 			'/workspace',
-			expect.any(AbortSignal),
+			{ signal: expect.any(AbortSignal) },
 			next.executorId,
 		);
 		await fireEvent.click(current);

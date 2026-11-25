@@ -211,6 +211,22 @@ describe('Git executor response boundaries', () => {
 		expect(fetchMock.mock.calls[0][0]).toContain('executorId=remote-executor');
 	});
 
+	it.each([408, 425, 429])('treats an uncoded proxy %i during a mutation as unknown', async (status) => {
+		fetchMock.mockResolvedValueOnce(new Response('proxy response', { status }));
+		await expect(gitCommitIndex(target, 'synthetic commit')).rejects.toMatchObject({
+			errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN',
+		});
+	});
+
+	it('preserves a coded rejection at a proxy-like status', async () => {
+		fetchMock.mockResolvedValueOnce(response({
+			success: false, error: 'Busy', errorCode: 'EXECUTOR_BUSY', retryable: true,
+		}, 429));
+		await expect(gitCommitIndex(target, 'synthetic commit')).rejects.toMatchObject({
+			errorCode: 'EXECUTOR_BUSY', retryable: true,
+		});
+	});
+
 	it.each([
 		{ ...scope, executorId: 'local', success: true },
 		{ ...scope },

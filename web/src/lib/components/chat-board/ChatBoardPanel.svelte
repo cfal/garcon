@@ -14,7 +14,6 @@
 		type ChatSessionsPort,
 	} from '$lib/chat/sessions/chat-sessions-contract.js';
 	import { getLocalSettings } from '$lib/context';
-	import { getSurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import type { ChatBoard } from '$shared/chat-boards';
 	import type { ChatTagTransitionTarget } from '$shared/chat-tag-mutations';
@@ -25,11 +24,8 @@
 	import ChatBoardTransitionDialog from './ChatBoardTransitionDialog.svelte';
 	import EditColumnsDialog from './EditColumnsDialog.svelte';
 	import ManageBoardsDialog from './ManageBoardsDialog.svelte';
-	import {
-		ChatBoardFocusController,
-		type ChatBoardFocusTarget,
-		type ChatBoardPresentationBand,
-	} from './chat-board-focus-controller.js';
+	import { ChatBoardFocusController } from './chat-board-focus-controller.js';
+	import { ChatBoardViewportState } from './chat-board-viewport-state.svelte.js';
 	import { isChatBoardCardDragData, resolveChatBoardColumnDropData } from './chat-board-dnd.js';
 	import { getChatBoardPanelMemory } from './chat-board-panel-memory.js';
 
@@ -48,29 +44,11 @@
 	} = $props();
 
 	const localSettings = getLocalSettings();
-	const frameBridge = getSurfaceFrameBridge();
 	const instanceId = crypto.randomUUID();
 	const focusController = new ChatBoardFocusController();
 	const panelMemory = getChatBoardPanelMemory(untrack(() => controller));
 	const laneScrollers = new Map<string, (key: string) => void>();
-	const laneScrollOffsets = panelMemory.laneScrollOffsets;
-	const pendingLaneScrollWrites = new Map<string, number>();
-	let pendingHostScrollRestore: ReadonlyMap<string, number> | null =
-		laneScrollOffsets.size > 0 ? new Map(laneScrollOffsets) : null;
-	let hostFocusTarget = $state<ChatBoardFocusTarget | null>(panelMemory.focusTarget);
-	let remountFocusTarget = $state<ChatBoardFocusTarget | null>(null);
-	let hostFocusRestorePending = panelMemory.focusTarget !== null;
-	let hostFocusRestoreCanceled = false;
-	let laneScrollWriteFrame: number | null = null;
-	let laneRemountGeneration = 0;
-	let hostRestoreGeneration = 0;
-	let pendingLaneScrollRestore: {
-		readonly generation: number;
-		readonly targets: ReadonlyMap<string, number>;
-	} | null = null;
-	let rootRef = $state<HTMLElement | null>(null);
 	let boardViewportRef = $state<HTMLDivElement | null>(null);
-	let presentationBand = $state<ChatBoardPresentationBand>('medium');
 	let manageOpen = $state(false);
 	let editBoard = $state<ChatBoard | null>(null);
 	let transitionOccurrence = $state<ChatBoardOccurrence | null>(null);
@@ -90,100 +68,29 @@
 			? controller.activeColumnId
 			: (selectedBoard?.columns[0]?.id ?? null),
 	);
+	const viewport = new ChatBoardViewportState({
+		memory: panelMemory,
+		focus: focusController,
+		catalogBoards: () => controller.catalog.boards,
+		selectedBoardId: () => selectedBoard?.id,
+		activeColumnId: () => activeColumnId,
+	});
 	let narrowLane = $derived(
 		lanes.find((lane) => lane.column.id === activeColumnId) ?? lanes[0] ?? null,
 	);
 	let initialCatalogFailure = $derived(controller.status === 'error');
 	let initialChatFailure = $derived(sessions.chatListStatus === 'error');
 	let loading = $derived(controller.status === 'idle' || controller.status === 'loading');
-	let canDrag = $derived(presentationBand !== 'narrow');
+	let canDrag = $derived(viewport.presentationBand !== 'narrow');
 	let chatLoading = $derived(sessions.chatListStatus === 'loading');
 	let effectiveFocusedTabId = $derived(
 		selectedBoard?.columns.some((column) => column.id === focusedTabId)
 			? focusedTabId
 			: activeColumnId,
 	);
-	let validLaneScrollKeys = $derived(
-		new Set(
-			controller.catalog.boards.flatMap((board) =>
-				board.columns.map((column) => laneScrollKey(board.id, column.id)),
-			),
-		),
-	);
-
-	$effect(() => {
-		focusController.setRoot(rootRef);
-	});
-
-	// Supplies bookmark-aware focus while the workspace replaces presentation hosts.
-	$effect(() =>
-		frameBridge.provideRenderer({
-			attach: () => {},
-			detach: () => {},
-			focusPrimary: restorePrimaryFocus,
-		}),
-	);
-
-	$effect(() => {
-		const root = rootRef;
-		if (!root) return;
-		const generation = ++hostRestoreGeneration;
-		const rememberFocus = (event: FocusEvent) => {
-			const target = event.target;
-			if (!(target instanceof HTMLElement)) return;
-			if (root.contains(target)) {
-				const focusTarget = focusController.captureFocusTarget(target);
-				if (focusTarget || !hostFocusTarget) panelMemory.focusTarget = focusTarget;
-				return;
-			}
-			if (!hostFocusTarget && !target.closest('[data-chat-board-panel]')) {
-				panelMemory.focusTarget = null;
-			}
-		};
-		const cancelFocusRestore = () => {
-			if (!hostFocusRestorePending) return;
-			hostFocusRestoreCanceled = true;
-			hostFocusTarget = null;
-		};
-		document.addEventListener('focusin', rememberFocus, true);
-		document.addEventListener('pointerdown', cancelFocusRestore, true);
-		document.addEventListener('keydown', cancelFocusRestore, true);
-		void restoreAfterHostMount(generation);
-		return () => {
-			hostRestoreGeneration += 1;
-			document.removeEventListener('focusin', rememberFocus, true);
-			document.removeEventListener('pointerdown', cancelFocusRestore, true);
-			document.removeEventListener('keydown', cancelFocusRestore, true);
-			discardPendingLaneScrollWrites();
-		};
-	});
-
-	$effect(() => {
-		const validKeys = validLaneScrollKeys;
-		for (const key of laneScrollOffsets.keys()) {
-			if (!validKeys.has(key)) laneScrollOffsets.delete(key);
-		}
-	});
-
-	$effect(() => {
-		if (!rootRef || typeof ResizeObserver === 'undefined') return;
-		const observer = new ResizeObserver(([entry]) => {
-			const width = entry?.contentRect.width ?? rootRef?.clientWidth ?? 0;
-			const nextBand = presentationBandForWidth(width);
-			if (nextBand === presentationBand) return;
-			const generation = beginLaneRemount();
-			focusController.preparePresentationChange(nextBand, activeColumnId);
-			remountFocusTarget = focusController.pendingTarget;
-			presentationBand = nextBand;
-			void restoreAfterLaneRemount(generation);
-		});
-		observer.observe(rootRef);
-		return () => observer.disconnect();
-	});
-
 	$effect(() => {
 		const board = selectedBoard;
-		if (!board || presentationBand === 'narrow') return;
+		if (!board || viewport.presentationBand === 'narrow') return;
 		return monitorForElements({
 			canMonitor: ({ source }) =>
 				isChatBoardCardDragData(source.data) &&
@@ -209,7 +116,7 @@
 	});
 
 	$effect(() => {
-		if (!boardViewportRef || presentationBand === 'narrow') return;
+		if (!boardViewportRef || viewport.presentationBand === 'narrow') return;
 		let disposed = false;
 		let cleanup: (() => void) | undefined;
 		void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then((module) => {
@@ -220,6 +127,8 @@
 					isChatBoardCardDragData(source.data) && source.data.instanceId === instanceId,
 				getAllowedAxis: () => 'horizontal',
 			});
+		}).catch(() => {
+			// Dragging remains usable without auto-scroll.
 		});
 		return () => {
 			disposed = true;
@@ -230,7 +139,7 @@
 	$effect.pre(() => {
 		const nextLanes = lanes;
 		const active = typeof document !== 'undefined' ? document.activeElement : null;
-		if (!(active instanceof HTMLElement) || !rootRef?.contains(active)) return;
+		if (!(active instanceof HTMLElement) || !viewport.root?.contains(active)) return;
 		const occurrenceElement = active.closest<HTMLElement>('[data-chat-board-occurrence]');
 		if (!occurrenceElement) return;
 		const key = occurrenceElement.dataset.chatBoardOccurrence;
@@ -274,156 +183,6 @@
 		else laneScrollers.delete(columnId);
 	}
 
-	function laneScrollKey(boardId: string, columnId: string): string {
-		return `${boardId}:${columnId}`;
-	}
-
-	function laneScrollTop(boardId: string, columnId: string): number {
-		return laneScrollOffsets.get(laneScrollKey(boardId, columnId)) ?? 0;
-	}
-
-	function pinnedOccurrenceKey(columnId: string): string | null {
-		const target = hostFocusTarget ?? remountFocusTarget;
-		return target?.kind === 'occurrence' && target.columnId === columnId
-			? target.occurrenceKey
-			: null;
-	}
-
-	function presentationBandForWidth(width: number): ChatBoardPresentationBand {
-		if (width < 560) return 'narrow';
-		if (width < 900) return 'medium';
-		return 'wide';
-	}
-
-	function isPresentationChangePending(): boolean {
-		// Chromium can reset scrollTop before ResizeObserver commits the new band.
-		const width = rootRef?.getBoundingClientRect().width ?? 0;
-		return width > 0 && presentationBandForWidth(width) !== presentationBand;
-	}
-
-	function rememberLaneScroll(boardId: string, columnId: string, scrollTop: number): void {
-		if (isPresentationChangePending()) return;
-		const key = laneScrollKey(boardId, columnId);
-		if (pendingHostScrollRestore?.has(key)) return;
-		if (pendingLaneScrollRestore?.targets.has(key)) return;
-		if (!validLaneScrollKeys.has(key)) return;
-		pendingLaneScrollWrites.set(key, scrollTop);
-		if (laneScrollWriteFrame !== null) return;
-		laneScrollWriteFrame = requestAnimationFrame(() => flushPendingLaneScrollWrites());
-	}
-
-	function flushPendingLaneScrollWrites(): void {
-		if (laneScrollWriteFrame !== null) cancelAnimationFrame(laneScrollWriteFrame);
-		laneScrollWriteFrame = null;
-		for (const [key, scrollTop] of pendingLaneScrollWrites) {
-			if (pendingHostScrollRestore?.has(key)) continue;
-			if (pendingLaneScrollRestore?.targets.has(key)) continue;
-			if (validLaneScrollKeys.has(key)) laneScrollOffsets.set(key, scrollTop);
-		}
-		pendingLaneScrollWrites.clear();
-	}
-
-	function discardPendingLaneScrollWrites(): void {
-		if (laneScrollWriteFrame !== null) cancelAnimationFrame(laneScrollWriteFrame);
-		laneScrollWriteFrame = null;
-		pendingLaneScrollWrites.clear();
-	}
-
-	function beginLaneRemount(): number {
-		discardPendingLaneScrollWrites();
-		const generation = ++laneRemountGeneration;
-		pendingLaneScrollRestore = {
-			generation,
-			targets: new Map(pendingLaneScrollRestore?.targets ?? laneScrollOffsets),
-		};
-		return generation;
-	}
-
-	function isCurrentLaneRemount(generation: number): boolean {
-		return pendingLaneScrollRestore?.generation === generation;
-	}
-
-	function nextAnimationFrame(): Promise<void> {
-		return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-	}
-
-	async function restoreAfterHostMount(generation: number): Promise<void> {
-		await tick();
-		await nextAnimationFrame();
-		await nextAnimationFrame();
-		if (generation !== hostRestoreGeneration) return;
-		const scrollTargets = pendingHostScrollRestore;
-		if (scrollTargets) {
-			restoreMountedLaneScrollPositions(scrollTargets);
-			await nextAnimationFrame();
-			if (generation !== hostRestoreGeneration) return;
-			pendingHostScrollRestore = null;
-			commitLaneScrollOffsets(scrollTargets);
-		}
-		if (!hostFocusRestorePending) return;
-		hostFocusRestorePending = false;
-		const canceled = hostFocusRestoreCanceled;
-		hostFocusRestoreCanceled = false;
-		const target = hostFocusTarget;
-		hostFocusTarget = null;
-		if (canceled || !target) return;
-		const active = document.activeElement;
-		if (active instanceof HTMLElement && active !== document.body) return;
-		focusController.restoreFocusTarget(target, presentationBand, activeColumnId);
-	}
-
-	function restorePrimaryFocus(): void {
-		let target: ChatBoardFocusTarget | null;
-		let canceled = false;
-		if (hostFocusRestorePending) {
-			hostFocusRestorePending = false;
-			canceled = hostFocusRestoreCanceled;
-			hostFocusRestoreCanceled = false;
-			target = hostFocusTarget;
-		} else {
-			target = panelMemory.focusTarget;
-		}
-		hostFocusTarget = null;
-		if (canceled) return;
-		if (target && focusController.restoreFocusTarget(target, presentationBand, activeColumnId)) {
-			return;
-		}
-		focusController.focusToolbar();
-	}
-
-	function restoreMountedLaneScrollPositions(targets: ReadonlyMap<string, number>): void {
-		const boardId = selectedBoard?.id;
-		if (!boardId || !rootRef) return;
-		for (const viewport of rootRef.querySelectorAll<HTMLElement>('[data-chat-board-lane-list]')) {
-			const columnId = viewport.dataset.chatBoardLaneList;
-			const scrollTop = columnId ? targets.get(laneScrollKey(boardId, columnId)) : undefined;
-			if (scrollTop !== undefined) viewport.scrollTop = scrollTop;
-		}
-	}
-
-	function commitLaneScrollOffsets(targets: ReadonlyMap<string, number>): void {
-		for (const [key, scrollTop] of targets) {
-			if (validLaneScrollKeys.has(key)) laneScrollOffsets.set(key, scrollTop);
-		}
-	}
-
-	async function restoreAfterLaneRemount(generation: number): Promise<void> {
-		await tick();
-		if (!isCurrentLaneRemount(generation)) return;
-		await nextAnimationFrame();
-		if (!isCurrentLaneRemount(generation)) return;
-		await nextAnimationFrame();
-		const pending = pendingLaneScrollRestore;
-		if (pending?.generation !== generation) return;
-		restoreMountedLaneScrollPositions(pending.targets);
-		await nextAnimationFrame();
-		if (!isCurrentLaneRemount(generation)) return;
-		pendingLaneScrollRestore = null;
-		focusController.completePresentationChange();
-		remountFocusTarget = null;
-		commitLaneScrollOffsets(pending.targets);
-	}
-
 	function openTransition(
 		occurrence: ChatBoardOccurrence,
 		targetColumnId: string | null = null,
@@ -453,7 +212,7 @@
 			focusAfterNoneTransition(sourceColumnId);
 		} else {
 			const targetColumnId = target.columnId;
-			if (presentationBand === 'narrow') controller.selectColumn(targetColumnId);
+			if (viewport.presentationBand === 'narrow') controller.selectColumn(targetColumnId);
 			await tick();
 			laneScrollers.get(targetColumnId)?.(`${targetColumnId}:${chatId}`);
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -505,10 +264,10 @@
 	}
 
 	function selectTab(columnId: string): void {
-		const generation = beginLaneRemount();
-		controller.selectColumn(columnId);
-		focusedTabId = columnId;
-		void restoreAfterLaneRemount(generation);
+		viewport.remountLanes(() => {
+			controller.selectColumn(columnId);
+			focusedTabId = columnId;
+		});
 	}
 
 	function handleTabKeydown(event: KeyboardEvent, columnId: string): void {
@@ -529,18 +288,18 @@
 		const targetId = columns[targetIndex]?.id;
 		if (!targetId) return;
 		focusedTabId = targetId;
-		rootRef?.querySelector<HTMLElement>(`[data-chat-board-tab="${CSS.escape(targetId)}"]`)?.focus();
+		viewport.root?.querySelector<HTMLElement>(`[data-chat-board-tab="${CSS.escape(targetId)}"]`)?.focus();
 	}
 </script>
 
 <section
-	bind:this={rootRef}
+	bind:this={viewport.root}
 	class="flex h-full min-h-0 min-w-0 flex-col bg-chat-board-canvas text-foreground"
 	class:chat-board-reduce-motion={localSettings.reduceMotion}
 	aria-label={m.workspace_surface_chat_board()}
 	data-chat-board-panel
 	data-presentation={presentation}
-	data-presentation-band={presentationBand}
+	data-presentation-band={viewport.presentationBand}
 >
 	<ChatBoardToolbar
 		boards={controller.catalog.boards}
@@ -646,7 +405,7 @@
 				>
 			</div>
 		</div>
-	{:else if presentationBand === 'narrow'}
+	{:else if viewport.presentationBand === 'narrow'}
 		<div class="flex min-h-0 flex-1 flex-col">
 			<div
 				class="shrink-0 overflow-x-auto border-b border-border bg-card px-2"
@@ -694,9 +453,9 @@
 							onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
 							onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
 							onRegisterScroller={registerScroller}
-							initialScrollTop={laneScrollTop(selectedBoard.id, narrowLane.column.id)}
-							pinnedOccurrenceKey={pinnedOccurrenceKey(narrowLane.column.id)}
-							onScrollTopChange={rememberLaneScroll}
+							initialScrollTop={viewport.laneScrollTop(selectedBoard.id, narrowLane.column.id)}
+							pinnedOccurrenceKey={viewport.pinnedOccurrenceKey(narrowLane.column.id)}
+							onScrollTopChange={viewport.rememberLaneScroll}
 						/>
 					</div>
 				{/key}
@@ -724,9 +483,9 @@
 						onTransition={(occurrence, invoker) => openTransition(occurrence, null, invoker)}
 						onReconcileTags={(chatId) => void retryTagReconciliation(chatId)}
 						onRegisterScroller={registerScroller}
-						initialScrollTop={laneScrollTop(selectedBoard.id, lane.column.id)}
-						pinnedOccurrenceKey={pinnedOccurrenceKey(lane.column.id)}
-						onScrollTopChange={rememberLaneScroll}
+						initialScrollTop={viewport.laneScrollTop(selectedBoard.id, lane.column.id)}
+						pinnedOccurrenceKey={viewport.pinnedOccurrenceKey(lane.column.id)}
+						onScrollTopChange={viewport.rememberLaneScroll}
 					/>
 				{/each}
 			</div>

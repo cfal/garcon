@@ -4,7 +4,7 @@ import {
 	type ProjectResolutionResponse,
 	type ProjectTarget,
 } from '$shared/project-resolution';
-import { apiFetch, parseApiResponse } from './client.js';
+import { apiGet } from './client.js';
 
 export async function resolveProject(
 	target: ProjectTarget,
@@ -17,8 +17,9 @@ export async function resolveProject(
 			})
 		: new URLSearchParams({ projectPath: target.projectPath });
 	query.set('executorId', target.executorId ?? 'local');
-	const response = await apiFetch(`/api/v1/projects/resolve?${query}`, { signal });
-	const parsed = parseProjectResolutionResponse(await parseApiResponse<unknown>(response));
+	const parsed = parseProjectResolutionResponse(
+		await apiGet<unknown>(`/api/v1/projects/resolve?${query}`, { signal }),
+	);
 	if (!parsed || projectTargetKey(parsed.target) !== projectTargetKey(target)) {
 		throw new Error('Invalid project resolution response');
 	}

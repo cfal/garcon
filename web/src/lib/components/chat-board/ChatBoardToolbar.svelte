@@ -45,7 +45,7 @@
 	};
 </script>
 
-<header class="shrink-0 border-b border-border/80 bg-card/95 px-3 py-1.5 backdrop-blur sm:px-4">
+<header class="shrink-0 border-b border-border/80 bg-card/95 px-3 py-1.5 sm:px-4">
 	<div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
 		{#if selectedBoard}
 			<DropdownMenu>

@@ -163,6 +163,8 @@
 					isChatBoardCardDragData(source.data) && source.data.instanceId === instanceId,
 				getAllowedAxis: () => 'vertical',
 			});
+		}).catch(() => {
+			// Dragging remains usable without auto-scroll.
 		});
 		return () => {
 			disposed = true;

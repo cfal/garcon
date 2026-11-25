@@ -31,6 +31,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	let renderError = $state('');
 	let loading = $state(true);
 	let viewerOpen = $state(false);
+	let thumbnailButton = $state<HTMLButtonElement>();
 	let releaseViewer: (() => void) | null = null;
 
 	function openViewer(): void {
@@ -43,6 +44,9 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 		releaseViewer = null;
 		viewerOpen = false;
 		await tick();
+		if (!viewerOpen && document.activeElement === document.body) {
+			thumbnailButton?.focus({ preventScroll: true });
+		}
 		release?.();
 	}
 
@@ -113,6 +117,7 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 			</div>
 			<button
 				type="button"
+				bind:this={thumbnailButton}
 				class="mermaid-thumbnail-open focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				onclick={openViewer}
 				aria-label={m.chat_mermaid_expand()}
@@ -123,12 +128,9 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	{/if}
 </div>
 
-<MermaidViewerDialog
-	open={viewerOpen}
-	source={renderedSource}
-	svg={renderedSvg}
-	onOpenChange={handleViewerOpenChange}
-/>
+{#if viewerOpen}
+	<MermaidViewerDialog open source={renderedSource} svg={renderedSvg} onOpenChange={handleViewerOpenChange} />
+{/if}
 
 <style>
 	.mermaid-container {

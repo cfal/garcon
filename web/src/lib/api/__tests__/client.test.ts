@@ -5,7 +5,6 @@ import {
 	apiPut,
 	apiPatch,
 	apiDelete,
-	apiPostForm,
 	ApiError,
 	isIntermediaryResponse,
 	publicApiFetch,
@@ -76,7 +75,7 @@ describe('API client helpers', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/test');
 		expect(opts.headers.get('Authorization')).toBe('Bearer test-token');
-		expect(opts.headers.get('Content-Type')).toBe('application/json');
+		expect(opts.headers.has('Content-Type')).toBe(false);
 	});
 
 	describe.each([
@@ -95,34 +94,9 @@ describe('API client helpers', () => {
 				expect(options.method).toBe(method);
 				expect(options.body).toBe(body === undefined ? undefined : JSON.stringify(body));
 				expect(options.headers.get('Authorization')).toBe('Bearer test-token');
+				expect(options.headers.get('Content-Type')).toBe(body === undefined ? null : 'application/json');
 			},
 		);
-	});
-
-	it('apiPostForm sends FormData without Content-Type', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ uploaded: true }));
-
-		const formData = new FormData();
-		formData.append('file', 'data');
-		await apiPostForm('/api/upload', formData);
-
-		const [, opts] = fetchMock.mock.calls[0];
-		expect(opts.method).toBe('POST');
-		expect(opts.body).toBeInstanceOf(FormData);
-		// FormData requests should NOT have Content-Type set
-		// (browser sets it with boundary automatically)
-		expect(opts.headers.has('Content-Type')).toBe(false);
-	});
-
-	it('apiPostForm preserves caller headers', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ uploaded: true }));
-
-		const formData = new FormData();
-		await apiPostForm('/api/upload', formData, { headers: { 'X-Upload-Token': 'token-1' } });
-
-		const [, opts] = fetchMock.mock.calls[0];
-		expect(opts.headers.get('X-Upload-Token')).toBe('token-1');
-		expect(opts.headers.has('Content-Type')).toBe(false);
 	});
 
 	it.each<{ headers: HeadersInit }>([
@@ -346,7 +320,7 @@ describe('API client helpers', () => {
 		expect(opts.headers.has('Authorization')).toBe(false);
 	});
 
-	it('accepts timeout options for PUT, DELETE, and form POST helpers', async () => {
+	it('accepts timeout options for PUT, DELETE, and POST helpers', async () => {
 		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
 		fetchMock
 			.mockResolvedValueOnce(jsonResponse({ ok: true }))
@@ -355,8 +329,7 @@ describe('API client helpers', () => {
 
 		await apiPut('/api/update', { name: 'updated' }, { timeoutMs: 5_000 });
 		await apiDelete('/api/remove', undefined, { timeoutMs: 6_000 });
-		const formData = new FormData();
-		await apiPostForm('/api/upload', formData, { timeoutMs: 7_000 });
+		await apiPost('/api/create', { name: 'created' }, { timeoutMs: 7_000 });
 
 		expect(timeoutSpy).toHaveBeenNthCalledWith(1, 5_000);
 		expect(timeoutSpy).toHaveBeenNthCalledWith(2, 6_000);

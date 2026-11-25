@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { getChatSessions, getExecutors, getModelCatalog, getScheduledPrompts } from '$lib/context';
+	import { getChatSessions, getExecutors, getMinuteClock, getModelCatalog, getScheduledPrompts } from '$lib/context';
 	import type { NewChatDialogSeed } from '$lib/chat/new-chat/new-chat-seed';
 	import { canOpenScheduledPromptInNewChat, scheduledPromptStartup } from '$lib/scheduling/scheduled-prompt-new-chat';
 	import { ScheduledPromptNewChatController } from '$lib/scheduling/scheduled-prompt-new-chat-controller.svelte';
@@ -24,8 +24,6 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import * as m from '$lib/paraglide/messages.js';
-
-	const MINUTE_MS = 60_000;
 
 	interface Props {
 		active: boolean;
@@ -85,7 +83,8 @@
 	let movingPromptId = $state<string | null>(null);
 	let togglingPromptId = $state<string | null>(null);
 	let operationError = $state<string | null>(null);
-	let currentTime = $state(new Date());
+	const minuteClock = getMinuteClock();
+	const currentTime = $derived(minuteClock.currentTime);
 	const lastRunByPromptId = $derived.by(() => {
 		const lastRuns = new Map<string, ScheduledPromptRunLogEntry>();
 		for (const entry of prompts.runLog) {
@@ -96,37 +95,9 @@
 
 	$effect(() => {
 		if (!active) return;
-		void prompts.ensureLoaded().catch(() => {});
+		untrack(() => void prompts.loadInBackground());
 	});
 
-	$effect(() => {
-		if (!active) return;
-		let intervalId: ReturnType<typeof setInterval> | null = null;
-
-		const refreshCurrentTime = () => {
-			currentTime = new Date();
-		};
-		const elapsedInMinute = Date.now() % MINUTE_MS;
-		const timeoutId = setTimeout(
-			() => {
-				refreshCurrentTime();
-				intervalId = setInterval(refreshCurrentTime, MINUTE_MS);
-			},
-			elapsedInMinute === 0 ? MINUTE_MS : MINUTE_MS - elapsedInMinute,
-		);
-		const handleVisibilityChange = () => {
-			if (document.visibilityState === 'visible') refreshCurrentTime();
-		};
-
-		refreshCurrentTime();
-		document.addEventListener('visibilitychange', handleVisibilityChange);
-
-		return () => {
-			clearTimeout(timeoutId);
-			if (intervalId !== null) clearInterval(intervalId);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
-		};
-	});
 
 	function openCreate(): void {
 		editingPrompt = null;
@@ -215,7 +186,10 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={() => void prompts.refresh().catch(() => {})}
+				onclick={() => {
+					operationError = null;
+					void prompts.refreshInBackground();
+				}}
 				disabled={prompts.isRefreshing}
 				title={m.scheduled_prompts_refresh()}
 				aria-label={m.scheduled_prompts_refresh()}
@@ -252,7 +226,7 @@
 			<p class="max-w-md text-sm text-muted-foreground">
 				{prompts.error ?? m.scheduled_prompts_load_error()}
 			</p>
-			<Button variant="secondary" onclick={() => void prompts.ensureLoaded().catch(() => {})}>
+			<Button variant="secondary" onclick={() => void prompts.loadInBackground()}>
 				{m.scheduled_prompts_retry()}
 			</Button>
 		</div>
@@ -305,26 +279,32 @@
 	{/if}
 </div>
 
-<ScheduledPromptDialog
-	open={formOpen}
-	{currentTime}
-	scheduledPrompt={editingPrompt}
-	onSave={save}
-	onClose={() => (formOpen = false)}
-/>
-<ScheduledPromptRemoveDialog
-	open={removePrompt !== null}
-	scheduledPrompt={removePrompt}
-	{removing}
-	error={removeError}
-	onConfirm={() => void confirmRemove()}
-	onClose={() => (removePrompt = null)}
-/>
-<ScheduledPromptRunLogDialog
-	open={runLogOpen}
-	entries={prompts.runLog}
-	{currentTime}
-	{openableChatId}
-	{onOpenChat}
-	onClose={() => (runLogOpen = false)}
-/>
+{#if formOpen}
+	<ScheduledPromptDialog
+		open
+		{currentTime}
+		scheduledPrompt={editingPrompt}
+		onSave={save}
+		onClose={() => (formOpen = false)}
+	/>
+{/if}
+{#if removePrompt}
+	<ScheduledPromptRemoveDialog
+		open
+		scheduledPrompt={removePrompt}
+		{removing}
+		error={removeError}
+		onConfirm={() => void confirmRemove()}
+		onClose={() => (removePrompt = null)}
+	/>
+{/if}
+{#if runLogOpen}
+	<ScheduledPromptRunLogDialog
+		open
+		entries={prompts.runLog}
+		{currentTime}
+		{openableChatId}
+		{onOpenChat}
+		onClose={() => (runLogOpen = false)}
+	/>
+{/if}

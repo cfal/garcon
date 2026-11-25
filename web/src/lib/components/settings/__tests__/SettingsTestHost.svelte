@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { setMinuteClock } from '$lib/context';
+	import { MinuteClockStore } from '$lib/stores/minute-clock.svelte';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import Settings from '../Settings.svelte';
 	import { PullRequestReviewsStore } from '$lib/git/pull-requests/pull-request-reviews-store.svelte';
@@ -33,6 +35,10 @@
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte';
 	import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import { getThemeProfile, resolveThemeId } from '$lib/theme/themes.js';
+
+	const minuteClock = new MinuteClockStore();
+	setMinuteClock(minuteClock);
+	onDestroy(() => minuteClock.destroy());
 
 	function emptyReviews(): PullRequestReviewsStore {
 		const reviews = new PullRequestReviewsStore();

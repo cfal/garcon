@@ -2,6 +2,7 @@ import { render, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { highlightCodeFence } from '$lib/highlighting/code-fence-highlighter';
+import { codeFenceHighlightCache } from '$lib/highlighting/code-highlight-cache';
 import type { CodeHighlightSegment } from '$lib/highlighting/code-highlight-types';
 import HighlightedCodeText from '../HighlightedCodeText.svelte';
 
@@ -12,6 +13,14 @@ vi.mock('$lib/highlighting/code-fence-highlighter', () => ({
 describe('HighlightedCodeText', () => {
 	beforeEach(() => {
 		vi.mocked(highlightCodeFence).mockReset();
+	});
+
+	it('renders a warmed cache synchronously without invoking the lazy highlighter', () => {
+		const text = 'const cached = 42;';
+		codeFenceHighlightCache.set(`javascript\0${text}`, [{ text, className: 'cm-code-keyword' }]);
+		const { container } = render(HighlightedCodeText, { language: 'js', text });
+		expect(container.querySelector('.cm-code-keyword')?.textContent).toBe(text);
+		expect(highlightCodeFence).not.toHaveBeenCalled();
 	});
 
 	it('replaces token arrays without retaining earlier spans', async () => {
