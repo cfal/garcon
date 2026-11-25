@@ -62,6 +62,11 @@ describe('FileDraftCoordinator', () => {
 			vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new Error('Storage busy'));
 			await coordinator.settle(value);
 			expect(value.recoveryError).toBe('Storage busy');
+			value.content = 'unsaved edit';
+			vi.spyOn(repository, 'putDraft').mockRejectedValueOnce(new Error('Backup unavailable'));
+			await coordinator.settle(value);
+			expect(value.recoveryError).toBe('Backup unavailable');
+			value.content = value.baseline;
 			if (replaced) await repository.putDraft({ ...stored, content: 'new peer edit' });
 			await coordinator.flush();
 			expect(value.recoveryError).toBeNull();
@@ -72,6 +77,49 @@ describe('FileDraftCoordinator', () => {
 			peer.destroy();
 		},
 	);
+
+	it('does not let delayed or duplicate cleanup delete bytes from an older Save', async () => {
+		const { repository, coordinator } = harness();
+		const value = document();
+		const peer = new FileDraftCoordinator({
+			repository,
+			deploymentId: 'deployment',
+			userNamespace: 'user',
+		});
+		await peer.settle(value);
+		const [draft] = await repository.getDrafts('user', 'deployment');
+		const prior = (await repository.getDraft(draft.documentId))!;
+		const remove = repository.deleteDraft.bind(repository);
+		const gate = Promise.withResolvers<void>();
+		const started = Promise.withResolvers<void>();
+		vi.spyOn(repository, 'deleteDraft').mockImplementationOnce(async (...args) => {
+			started.resolve();
+			await gate.promise;
+			return remove(...args);
+		});
+		try {
+			value.baseline = value.content;
+			value.dirty = false;
+			coordinator.confirmSave(value, value.baseline);
+			const first = coordinator.settle(value);
+			const duplicate = coordinator.settle(value);
+			await started.promise;
+			value.baseline = 'newer Save';
+			value.content = value.baseline;
+			coordinator.confirmSave(value, value.baseline);
+			await repository.putDraft({ ...prior, checkpointId: 'new-peer' });
+			gate.resolve();
+			await Promise.all([first, duplicate, coordinator.settle(value)]);
+			expect(await repository.getDraft(draft.documentId)).toMatchObject({
+				checkpointId: 'new-peer',
+				content: prior.content,
+			});
+		} finally {
+			gate.resolve();
+			coordinator.destroy();
+			peer.destroy();
+		}
+	});
 
 	it('skips clean checkpoints without a draft, but deletes confirmed writes before close', async () => {
 		const { repository, coordinator } = harness();
