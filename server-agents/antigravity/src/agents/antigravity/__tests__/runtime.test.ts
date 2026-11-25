@@ -1,4 +1,5 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { setImmediate } from 'node:timers/promises';
 import type { AcpInitializeResult, AcpJsonRpcMessage } from '@garcon/server-agent-common/acp/protocol';
 import { AcpAgentRuntime } from '@garcon/server-agent-common/acp/agent-runtime';
 import { AcpExecution } from '@garcon/server-agent-common/acp/execution';
@@ -38,6 +39,8 @@ const PERMISSION_OPTIONS = [
   { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
 ];
 
+const AGY_STEER_REFUSAL = "Can't add this prompt to session: the running prompt is waiting for a permission or question answer; answer it or send session/cancel, then send this prompt again";
+
 // Speaks the agy 1.5 ACP shapes the runtime depends on: agent-defined
 // permission option ids, `session/cancel` as a notification, upstream
 // failures reported as a message chunk followed by `end_turn`, and a prompt
@@ -50,10 +53,13 @@ class FakeAntigravityAgent {
   // When set, sessions offer only these models, as another account would.
   resumeAvailableModels: unknown = MODELS.availableModels;
   #stdout!: ReadableStreamDefaultController<Uint8Array>;
+  #batched: AcpJsonRpcMessage[] | null = null;
   #openPrompt: { id: number | string; sessionId: string } | null = null;
   readonly #unansweredPermissions = new Set<string>();
   // When set, a prompt sent during a turn is refused, as agy refuses one while a permission is unanswered.
   refusesOverlappingPrompts = false;
+  manualReplies = false;
+  overlapReplyGate: Promise<void> | null = null;
   #script: (agent: FakeAntigravityAgent, sessionId: string) => void = () => {};
   // Delays or drops the reply to `session/cancel`, as a slow or unresponsive agent would.
   cancelReply: 'immediate' | 'deferred' | 'ignored' = 'immediate';
@@ -101,6 +107,7 @@ class FakeAntigravityAgent {
     const exited = Promise.withResolvers<number>();
     this.#exitCurrent = exited.resolve;
     this.#openPrompt = null;
+    this.#unansweredPermissions.clear();
     return {
       stdin: { write: (data: string | Uint8Array) => this.#receive(String(data)), flush: () => this.promptFlush ?? 0 },
       stdout: new ReadableStream<Uint8Array>({ start: (controller) => { this.#stdout = controller; } }),
@@ -151,8 +158,14 @@ class FakeAntigravityAgent {
     this.#send({ jsonrpc: '2.0', id: this.#takeOpenPrompt().id, error: { code: -32603, message } });
   }
 
-  endPrompt(stopReason = 'end_turn'): void {
-    this.#send({ jsonrpc: '2.0', id: this.#takeOpenPrompt().id, result: { stopReason } });
+  endPrompt(stopReason = 'end_turn', usage?: { totalTokens: number }): void {
+    this.#send({ jsonrpc: '2.0', id: this.#takeOpenPrompt().id, result: { stopReason, usage } });
+  }
+
+  replyToPrompt(index: number, reply: { result: Record<string, unknown> } | { error: { code: number; message: string } }): void {
+    const frame = this.requests('session/prompt')[index];
+    if (!frame) throw new Error(`No prompt at index ${index}`);
+    this.#send({ jsonrpc: '2.0', id: frame.id, ...reply });
   }
 
   #receive(data: string): number {
@@ -208,12 +221,16 @@ class FakeAntigravityAgent {
         return reply(result, this.configReplyGate);
       }
       case 'session/prompt':
+        if (this.manualReplies) return;
         if (this.#openPrompt) {
-          if (this.refusesOverlappingPrompts || this.#unansweredPermissions.size > 0) {
-            return this.#send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Can\'t add this prompt to session' } });
-          }
-          this.endPrompt();
-          this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
+          const refused = this.refusesOverlappingPrompts || this.#unansweredPermissions.size > 0;
+          const response = refused
+            ? { id: message.id, error: { code: -32603, message: AGY_STEER_REFUSAL } }
+            : { id: this.#openPrompt.id, result: { stopReason: 'end_turn' } };
+          if (!refused) this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
+          const settleOverlap = () => this.#send({ jsonrpc: '2.0', ...response });
+          if (this.overlapReplyGate) void this.overlapReplyGate.then(settleOverlap);
+          else settleOverlap();
           return;
         }
         this.#openPrompt = { id: message.id!, sessionId: String(params.sessionId) };
@@ -225,8 +242,16 @@ class FakeAntigravityAgent {
     }
   }
 
+  batchOutput(emit: () => void): void {
+    this.#batched = [];
+    emit();
+    this.#stdout.enqueue(new TextEncoder().encode(this.#batched.map(message => JSON.stringify(message) + '\n').join('')));
+    this.#batched = null;
+  }
+
   #send(message: AcpJsonRpcMessage): void {
-    queueMicrotask(() => this.#stdout.enqueue(new TextEncoder().encode(`${JSON.stringify(message)}\n`)));
+    if (this.#batched) this.#batched.push(message);
+    else queueMicrotask(() => this.#stdout.enqueue(new TextEncoder().encode(`${JSON.stringify(message)}\n`)));
   }
 }
 
@@ -236,13 +261,14 @@ const CONFIG: AntigravityConfig = {
   authMethod: () => 'oauth-personal',
 };
 
-function harness(options: { readonly requestTimeoutMs?: number } = {}) {
+function harness(options: { readonly requestTimeoutMs?: number; readonly steerDecisionTimeoutMs?: number } = {}) {
   const agent = new FakeAntigravityAgent();
   const converter = new AntigravityAcpEventConverter();
   const runtime = new AcpAgentRuntime(createAntigravityAcpPolicy(CONFIG), {
     converter,
     createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: options.requestTimeoutMs ?? 2_000 }),
     cancelSettleTimeoutMs: 100,
+    steerDecisionTimeoutMs: options.steerDecisionTimeoutMs,
   });
   const events: AgentRuntimeEvent[] = [];
   const request = (overrides: Partial<AcpStartRequest> = {}): AcpStartRequest => ({
@@ -1396,7 +1422,9 @@ describe('Antigravity ACP runtime', () => {
     const { agent, runtime, events, request } = harness();
     agent.cancelReply = 'ignored';
     agent.onPrompt((fake, sessionId) => {
-      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Partial reply.' } });
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Partial ' } });
+      fake.update(sessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Checking.' } });
+      fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'reply.' } });
     });
     const started = await runtime.startSession(request());
     await waitFor(() => agent.requests('session/prompt').length === 1);
@@ -1405,7 +1433,10 @@ describe('Antigravity ACP runtime', () => {
     runtime.abort(started.agentSessionId);
     await waitFor(() => !runtime.isRunning(started.agentSessionId));
     const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
-    expect(rows).toEqual([expect.objectContaining({ type: 'assistant-message', content: 'Partial reply.' })]);
+    expect(rows).toEqual([
+      expect.objectContaining({ type: 'thinking', content: 'Checking.' }),
+      expect.objectContaining({ type: 'assistant-message', content: 'Partial reply.' }),
+    ]);
   });
 
   it('bounds a configure call that hangs after Stop', async () => {
@@ -1574,6 +1605,7 @@ describe('Antigravity ACP runtime', () => {
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: '\n⚠ agent executor error: generating and executing: Error 429, Status: RESOURCE_EXHAUSTED\n' },
       });
+      fake.update(sessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '' } });
       fake.endPrompt();
     });
 
@@ -1586,6 +1618,23 @@ describe('Antigravity ACP runtime', () => {
     }]);
     const rows = events.flatMap((event) => event.type === 'rows' ? event.rows.map((row) => row.message) : []);
     expect(rows.map((row) => row.type)).toEqual(['error']);
+  });
+
+  it('does not reinterpret an executor error when the same pipe read also carries later output', async () => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      agent.batchOutput(() => {
+        agent.update(agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: model failed' } });
+        agent.endPrompt();
+        agent.update(agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Late output.' } });
+      });
+      await waitFor(() => runEnded(events).length === 1);
+      expect(runEnded(events)[0]?.outcome).toBe('failed');
+      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      expect(rows.filter(row => row.type === 'error').map(row => row.content)).toEqual([expect.stringContaining('model failed')]);
+      expect(rows.filter(row => row.type === 'assistant-message').map(row => row.content)).toEqual(['Late output.']);
+    } finally { runtime.shutdown(); }
   });
 
   it('resumes a session in a new process after it was released', async () => {
@@ -1606,15 +1655,23 @@ describe('Antigravity ACP runtime', () => {
   it('folds an accepted steer into the running turn, which ends when the steer settles', async () => {
     const { agent, runtime, events, request } = harness();
     try {
-      agent.onPrompt(() => {});
+      agent.onPrompt((fake, sessionId) => {
+        fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Did ' } });
+      });
       const started = await runtime.startSession(request());
 
       const steered = await runtime.steer(steerRequest(runtime, started.agentSessionId));
-      agent.update(started.agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Did both.' } });
+      agent.update(started.agentSessionId, { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Including the steer.' } });
+      agent.update(started.agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'both.' } });
       agent.endPrompt();
       await waitFor(() => runEnded(events).length > 0);
 
       expect(steered).toEqual({ kind: 'accepted' });
+      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      expect(rows).toEqual([
+        expect.objectContaining({ type: 'thinking', content: 'Including the steer.' }),
+        expect.objectContaining({ type: 'assistant-message', content: 'Did both.' }),
+      ]);
       expect(agent.requests('session/prompt')[1]?.params).toEqual({
         sessionId: started.agentSessionId,
         prompt: [{ type: 'text', text: 'Also do this.' }],
@@ -1642,18 +1699,26 @@ describe('Antigravity ACP runtime', () => {
         },
       });
       await preparing.promise;
+      agent.update(started.agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'First answer.' } });
       agent.endPrompt();
-      await Bun.sleep(10);
+      await setImmediate();
       const endedBeforeDelivery = runEnded(events).length;
       prepared.resolve();
       const steered = await steering;
+      agent.update(started.agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Second answer.' } });
       agent.endPrompt();
       await waitFor(() => runEnded(events).length > 0);
 
       expect(endedBeforeDelivery).toBe(0);
       expect(steered).toEqual({ kind: 'accepted' });
       expect(agent.requests('session/prompt')).toHaveLength(2);
-      expect(runEnded(events)).toEqual([expect.objectContaining({ outcome: 'finished' })]);
+      const rows = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+      expect(rows.map(row => [row.type, 'content' in row && row.content])).toEqual([
+        ['assistant-message', 'First answer.'], ['assistant-message', 'Second answer.'],
+      ]);
+      expect(runEnded(events)).toEqual([expect.objectContaining({
+        outcome: 'finished', finalResponse: { type: 'text', text: 'Second answer.' },
+      })]);
     } finally { runtime.shutdown(); }
   });
 
@@ -1669,9 +1734,119 @@ describe('Antigravity ACP runtime', () => {
       agent.endPrompt();
       await waitFor(() => runEnded(events).length > 0);
 
-      expect(steered).toEqual({ kind: 'rejected', reason: 'provider-rejected', message: 'Can\'t add this prompt to session' });
+      expect(steered).toEqual({ kind: 'rejected', reason: 'provider-rejected', message: AGY_STEER_REFUSAL });
       expect(runningAfterRefusal).toBe(true);
       expect(runEnded(events)).toEqual([expect.objectContaining({ outcome: 'finished' })]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it('reports an unknown steer and fails the run if its frame cannot be flushed', async () => {
+    const { agent, runtime, events, request } = harness({ requestTimeoutMs: 50 });
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      agent.promptFlush = Promise.withResolvers<number>().promise;
+      expect(await runtime.steer(steerRequest(runtime, agentSessionId))).toMatchObject({
+        kind: 'failed', outcome: 'unknown', message: 'ACP frame write timed out',
+      });
+      await waitFor(() => runEnded(events).length > 0);
+      expect(runEnded(events)).toEqual([expect.objectContaining({ outcome: 'failed' })]);
+    } finally { runtime.shutdown(); }
+  });
+
+  it.each(['accepted', 'refused'])('resumes steering only after a timed-out overlap is %s', async (outcome) => {
+    const { agent, runtime, events, request } = harness({ steerDecisionTimeoutMs: 30 });
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      const previouslyCaptured = steerRequest(runtime, agentSessionId);
+      const gate = Promise.withResolvers<void>();
+      agent.overlapReplyGate = gate.promise;
+      agent.refusesOverlappingPrompts = outcome === 'refused';
+      expect(await runtime.steer(steerRequest(runtime, agentSessionId))).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+      expect(runtime.captureSteerTarget(agentSessionId)).toBeNull();
+      expect(await runtime.steer(previouslyCaptured)).toMatchObject({ kind: 'rejected', reason: 'turn-not-steerable' });
+      expect(agent.requests('session/prompt')).toHaveLength(2);
+      gate.resolve();
+      await waitFor(() => events.filter(event => event.type === 'steerable').length === 2);
+      agent.refusesOverlappingPrompts = false;
+      expect(await runtime.steer(steerRequest(runtime, agentSessionId))).toEqual({ kind: 'accepted' });
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length === 1);
+      expect(runEnded(events)[0]?.outcome).toBe('finished');
+    } finally { runtime.shutdown(); }
+  });
+
+  it.each(['cancelled', 'completed', 'executor-error'])('does not acknowledge a steer from an independent %s reply', async (outcome) => {
+    const { agent, runtime, events, request } = harness({ steerDecisionTimeoutMs: 30 });
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      const gate = Promise.withResolvers<void>();
+      agent.overlapReplyGate = gate.promise;
+      agent.refusesOverlappingPrompts = true;
+      const steering = runtime.steer(steerRequest(runtime, agentSessionId));
+      await waitFor(() => agent.requests('session/prompt').length === 2);
+      if (outcome === 'executor-error') agent.update(agentSessionId, {
+        sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: model failed' },
+      });
+      agent.endPrompt(outcome === 'cancelled' ? 'cancelled' : 'end_turn', outcome === 'completed' ? { totalTokens: 12 } : undefined);
+      expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+      gate.resolve();
+      await waitFor(() => !runtime.isRunning(agentSessionId));
+      if (outcome === 'executor-error') {
+        expect(runEnded(events)).toEqual([expect.objectContaining({
+          outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: expect.stringContaining('model failed') },
+        })]);
+      } else if (outcome === 'completed') {
+        expect(runEnded(events)[0]?.outcome).toBe('finished');
+      }
+    } finally { runtime.shutdown(); }
+  });
+
+  it.each(['completed', 'executor-error', 'stopped'])('settles a %s steer before its predecessor without offering the old target', async (outcome) => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      const gate = Promise.withResolvers<void>();
+      agent.overlapReplyGate = gate.promise;
+      const steering = runtime.steer(steerRequest(runtime, agentSessionId));
+      await waitFor(() => agent.requests('session/prompt').length === 2);
+      if (outcome === 'stopped') runtime.abort(agentSessionId);
+      else {
+        if (outcome === 'executor-error') agent.update(agentSessionId, {
+          sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '\n⚠ agent executor error: steer failed' },
+        });
+        agent.endPrompt('end_turn', outcome === 'completed' ? { totalTokens: 12 } : undefined);
+      }
+      expect(await steering).toMatchObject(outcome === 'completed' ? { kind: 'accepted' } : { kind: 'failed', outcome: 'unknown' });
+      expect(runtime.captureSteerTarget(agentSessionId)).toBeNull();
+      gate.resolve();
+      await waitFor(() => !runtime.isRunning(agentSessionId));
+      expect(runEnded(events).map(event => event.outcome)).toEqual(
+        outcome === 'stopped' ? [] : [outcome === 'completed' ? 'finished' : 'failed'],
+      );
+    } finally { runtime.shutdown(); }
+  });
+
+  it.each(['RPC', 'in-band'])('preserves a %s prompt failure while a steer is being prepared', async (source) => {
+    const { agent, runtime, events, request } = harness();
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      const gate = Promise.withResolvers<void>();
+      const steering = runtime.steer({ ...steerRequest(runtime, agentSessionId), prepareDelivery: () => gate.promise });
+      if (source === 'RPC') agent.failPrompt('Original prompt failed');
+      else {
+        agent.update(agentSessionId, { sessionUpdate: 'agent_message_chunk', content: {
+          type: 'text', text: '\n⚠ agent executor error: Original prompt failed',
+        } });
+        agent.endPrompt();
+      }
+      await setImmediate();
+      gate.resolve();
+      expect(await steering).toMatchObject({ kind: 'rejected', reason: 'turn-changed' });
+      await waitFor(() => runEnded(events).length > 0);
+      expect(agent.requests('session/prompt')).toHaveLength(1);
+      expect(runEnded(events)).toEqual([expect.objectContaining({
+        outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: expect.stringContaining('Original prompt failed') },
+      })]);
     } finally { runtime.shutdown(); }
   });
 
@@ -1691,6 +1866,137 @@ describe('Antigravity ACP runtime', () => {
       expect(runtime.captureSteerTarget(started.agentSessionId)).not.toBeNull();
       expect(events.filter((event) => event.type === 'steerable')).toHaveLength(2);
     } finally { runtime.shutdown(); }
+  });
+});
+
+describe('Antigravity ACP wire ordering', () => {
+  const bare = { result: { stopReason: 'end_turn' } };
+  const natural = { result: { stopReason: 'end_turn', usage: { totalTokens: 8 } } };
+  const rpcError = (message: string) => ({ error: { code: -32603, message } });
+
+  async function open() {
+    const { agent, runtime, events, request } = harness();
+    agent.manualReplies = true;
+    const { agentSessionId } = await runtime.startSession(request());
+    return {
+      agent, runtime, events,
+      steer: () => runtime.steer(steerRequest(runtime, agentSessionId)),
+      stop: () => runtime.abort(agentSessionId),
+      update: (text: string, sessionUpdate = 'agent_message_chunk') => agent.update(agentSessionId, { sessionUpdate, content: { type: 'text', text } }),
+      rows: () => events.flatMap(event => event.type === 'rows' ? event.rows.map(({ message }) => [message.type, 'content' in message && message.content]) : []),
+      requestCount: (count: number) => waitFor(() => agent.requests('session/prompt').length === count),
+      drained: () => waitFor(() => !runtime.isRunning(agentSessionId)),
+    };
+  }
+
+  it('keeps received answer frames when a concurrent steer write fails', async () => {
+    const t = await open();
+    try {
+      const flush = Promise.withResolvers<number>();
+      t.agent.promptFlush = flush.promise;
+      const steering = t.steer();
+      await t.requestCount(2);
+      t.agent.batchOutput(() => {
+        t.update('First.');
+        t.agent.replyToPrompt(0, natural);
+      });
+      await waitFor(() => t.rows().length === 1);
+      flush.reject(new Error('write failed'));
+      expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+      await t.drained();
+      expect(t.rows()).toEqual([['assistant-message', 'First.'], ['error', 'write failed']]);
+    } finally { t.runtime.shutdown(); }
+  });
+
+  it('a refused steer cannot supersede its predecessor in the same pipe read', async () => {
+    const t = await open();
+    try {
+      const refused = t.steer();
+      const queued = t.steer();
+      await t.requestCount(2);
+      t.agent.batchOutput(() => {
+        t.agent.replyToPrompt(1, rpcError(AGY_STEER_REFUSAL));
+        t.update('First.');
+        t.agent.replyToPrompt(0, bare);
+      });
+      expect(await refused).toMatchObject({ kind: 'rejected', reason: 'provider-rejected' });
+      expect(await queued).toEqual({ kind: 'accepted' });
+      t.agent.batchOutput(() => {
+        t.update('Second.');
+        t.agent.replyToPrompt(2, natural);
+        t.update('Late thought.', 'agent_thought_chunk');
+      });
+      await t.drained();
+      expect(t.rows()).toEqual([['assistant-message', 'First.'], ['assistant-message', 'Second.'], ['thinking', 'Late thought.']]);
+      expect(runEnded(t.events)[0]?.finalResponse).toEqual({ type: 'text', text: 'Second.' });
+    } finally { t.runtime.shutdown(); }
+  });
+
+  it.each(['original', 'steer'])('keeps the %s RPC failure in transcript order without advertising a safe retry', async (which) => {
+    const t = await open();
+    try {
+      const steering = t.steer();
+      await t.requestCount(2);
+      t.agent.batchOutput(() => {
+        t.update('First.');
+        t.agent.replyToPrompt(0, which === 'original' ? rpcError('Failed.') : natural);
+        t.update('Second.');
+        t.agent.replyToPrompt(1, which === 'steer' ? rpcError('Failed.') : bare);
+      });
+      expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+      await t.drained();
+      const first = ['assistant-message', 'First.'];
+      const second = ['assistant-message', 'Second.'];
+      const error = ['error', 'Failed.'];
+      expect(t.rows()).toEqual(which === 'original' ? [first, error, second] : [first, second, error]);
+      expect(runEnded(t.events)[0]?.outcome).toBe('failed');
+    } finally { t.runtime.shutdown(); }
+  });
+
+  it('does not acknowledge the steer from a bare reply after an overlapping executor failure', async () => {
+    const t = await open();
+    try {
+      const steering = t.steer();
+      await t.requestCount(2);
+      t.agent.batchOutput(() => {
+        t.update('\n⚠ agent executor error: model failed');
+        t.agent.replyToPrompt(0, natural);
+        t.agent.replyToPrompt(1, bare);
+      });
+      expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+      await t.drained();
+      expect(t.rows()).toEqual([['error', expect.stringContaining('model failed')]]);
+    } finally { t.runtime.shutdown(); }
+  });
+
+  it('does not reopen steering when both replies have drained in reverse order', async () => {
+    const t = await open();
+    try {
+      const steering = t.steer();
+      await t.requestCount(2);
+      t.agent.batchOutput(() => {
+        t.agent.replyToPrompt(1, natural);
+        t.agent.replyToPrompt(0, bare);
+      });
+      expect(await steering).toEqual({ kind: 'accepted' });
+      await t.drained();
+      expect(t.events.filter(e => e.type === 'steerable')).toHaveLength(1);
+    } finally { t.runtime.shutdown(); }
+  });
+
+  it('drops a cancellation error delivered after the stop reply in the same read', async () => {
+    const t = await open();
+    try {
+      t.agent.cancelReply = 'ignored';
+      t.stop();
+      t.agent.batchOutput(() => {
+        t.agent.replyToPrompt(0, { result: { stopReason: 'cancelled' } });
+        t.update('\n⚠ agent executor error: context canceled');
+      });
+      await t.drained();
+      expect(t.rows()).toEqual([]);
+      expect(runEnded(t.events)).toEqual([]);
+    } finally { t.runtime.shutdown(); }
   });
 });
 
@@ -1756,17 +2062,18 @@ describe('Antigravity one-shot query', () => {
   it('fails only when the executor error is the final output, keeping earlier text', async () => {
     const run = async (chunks: readonly string[]) => {
       const agent = new FakeAntigravityAgent();
-      agent.onPrompt((fake, sessionId) => {
+      agent.onPrompt((fake, sessionId) => fake.batchOutput(() => {
         for (const text of chunks) fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
-        setTimeout(() => fake.endPrompt(), 20);
-      });
+        fake.endPrompt();
+        fake.update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'After the query.' } });
+      }));
       return runAntigravitySingleQuery('Name this chat.', {
         projectPath: '/work',
         signal: new AbortController().signal,
         createTransport: () => new AcpTransport({ spawn: () => agent.process(), requestTimeoutMs: 2_000 }),
       }, CONFIG);
     };
-    await expect(run(['Partial.\n⚠ agent executor error: Error 429\n'])).rejects.toThrow('Antigravity agent executor error: Error 429');
+    await expect(run(['Partial.\n⚠ agent executor error: Error 429\n', ''])).rejects.toThrow('Antigravity agent executor error: Error 429');
     expect(await run(['Quoted:', '\n⚠ agent executor error: x\n', 'and more.'])).toBe('Quoted:\n⚠ agent executor error: x\nand more.');
   });
 

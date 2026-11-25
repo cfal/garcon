@@ -13,6 +13,7 @@ import {
   asString,
   evictOldestToolEntry,
   type AcpEventConverter,
+  type AcpSteeringProtocol,
   type AcpSessionUpdateContext,
 } from '@garcon/server-agent-common/acp/event-converter';
 import { ACP_NEW_OUTPUT_UPDATES, AcpInBandFailure, acpOutputUpdateType } from '@garcon/server-agent-common/acp/in-band-failure';
@@ -153,6 +154,13 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   takeTurnFailure(sessionId: string): string | null {
     return this.#sessions.get(sessionId)?.failure.take() ?? null;
   }
+
+  readonly steering: AcpSteeringProtocol = {
+    // agy 1.5.13 sends the same bare end_turn for supersession and a natural completion without usage.
+    // Garcon favors immediate steering acknowledgment here; that ambiguous completion can be a false positive.
+    likelySuperseded: result => result?.stopReason === 'end_turn' && result.usage == null,
+    refused: error => error.code === -32603 && error.message.includes('answer it or send session/cancel, then send this prompt again'),
+  };
 
   // A call's row waits for its arguments when the first frame carries none, so a
   // later frame can still give it its shared tool type; a terminal frame emits

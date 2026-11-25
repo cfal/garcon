@@ -94,6 +94,7 @@ export interface AcpSessionNewResult {
 
 export interface AcpSessionPromptResult {
   stopReason?: string;
+  usage?: Record<string, unknown> | null;
   requestId?: string;
 }
 

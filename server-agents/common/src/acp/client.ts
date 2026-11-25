@@ -8,7 +8,7 @@ import type {
   AcpSessionPromptResult,
 } from './protocol.js';
 import type { AcpAdvertisedCapabilities } from './reconnect-policy.js';
-import { AcpTransport, type AcpSpawnSpec } from './transport.js';
+import { AcpTransport, type AcpRequestOptions, type AcpSpawnSpec } from './transport.js';
 
 export interface AcpClientOptions {
   initialize: AcpInitializeParams;
@@ -93,10 +93,10 @@ export class AcpClient {
     sessionId: string;
     prompt: Array<{ type: string; text?: string; [key: string]: unknown }>;
     config?: Record<string, unknown>;
-  }, onSent?: () => void, timeoutMs = 0): Promise<AcpSessionPromptResult> {
+  }, options: AcpRequestOptions<AcpSessionPromptResult> = {}): Promise<AcpSessionPromptResult> {
     // A prompt lasts as long as the agent's turn, so by default it has no
     // transport deadline; Stop, process exit, and caller timeouts end it.
-    return this.#transport.request<AcpSessionPromptResult>('session/prompt', params, onSent, timeoutMs);
+    return this.#transport.request('session/prompt', params, { timeoutMs: 0, ...options });
   }
 
   async setSessionConfigOption(params: {

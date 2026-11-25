@@ -142,8 +142,6 @@ export function createAntigravityAcpPolicy(config: AntigravityConfig): AcpAgentP
     command: config.binary,
     args: ['acp'],
     abortStrategy: 'cancel',
-    // Verified against agy 1.5.13; see docs/antigravity.md#steering.
-    steersWithOverlappingPrompts: true,
     authenticateMethodId: config.authMethod,
     clientCapabilities: {},
     configureSession: configureAntigravitySession,
