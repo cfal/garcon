@@ -125,6 +125,12 @@ test('keeps the terminal diagnostic visible even when another output field repor
   s.start('sparse', { ...send, rawOutput: progress });
   s.patch('sparse', { content: blocks('Operation refused') });
   expect(s.patch('sparse', { status: 'failed' })).toMatchObject([{ content: { raw: 'Operation refused', rawOutput: progress } }]);
+  s.start('repeat-raw', { ...send, rawOutput: progress });
+  expect(s.patch('repeat-raw', { status: 'failed', rawOutput: progress, content: blocks('Operation refused') }))
+    .toMatchObject([{ content: { raw: 'Operation refused', rawOutput: progress } }]);
+  s.start('repeat-blocks', { ...send, content: blocks('In progress') });
+  expect(s.patch('repeat-blocks', { status: 'failed', rawOutput: 'Operation refused', content: blocks('In progress') }))
+    .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') } }]);
   s.start('reverse', { ...send, content: blocks('In progress') });
   expect(s.patch('reverse', { status: 'failed', rawOutput: 'Operation refused' }))
     .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') }, isError: true }]);

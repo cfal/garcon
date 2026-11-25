@@ -62,6 +62,12 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText('Only one change was accepted')).toBeTruthy();
 	});
 
+	it('prefers the primary failure diagnostic over supplementary progress blocks', () => {
+		render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hello'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { raw: 'Operation refused', items: [{ type: 'text', text: 'In progress' }] }, isError: true } });
+		expect(screen.getByText('Operation refused')).toBeTruthy();
+	});
+
 	it('renders distinct outcomes for plan steps with the same title', () => {
 		const toolMessage = new UpdatePlanToolUseMessage('', 'plan', [
 			{ content: 'Check', status: 'failed' }, { content: 'Check', status: 'skipped' },

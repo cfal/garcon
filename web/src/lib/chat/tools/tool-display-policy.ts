@@ -12,7 +12,8 @@ const TEXT_RESULT_RULE: ToolResultDisplayRule = {
 	defaultOpen: false,
 	contentKind: 'text',
 	getContentProps: (result) => {
-		const content = result.content as { items?: unknown } | undefined;
+		const content = result.content as { raw?: unknown; items?: unknown } | undefined;
+		if (typeof content?.raw === 'string' && content.raw.length > 0) return { content: content.raw, format: 'plain' };
 		const text = Array.isArray(content?.items)
 			? content.items.flatMap((item) => item?.type === 'text' && typeof item.text === 'string' ? [item.text] : []).join('\n')
 			: '';
