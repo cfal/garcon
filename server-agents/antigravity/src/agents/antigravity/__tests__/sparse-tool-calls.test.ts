@@ -44,7 +44,7 @@ test('prefers explicit MCP metadata or envelopes over native names and provision
   const s = session();
   expect(s.start('named', { name: 'update_steps', rawInput: { steps: [] }, _meta: { is_mcp_tool_call: true } })).toEqual([]);
   expect(s.end()).toMatchObject([{ type: 'external-tool-use', name: 'update_steps', input: { steps: [] } }]);
-  expect(s.start('envelope', { title: 'Run update_steps', rawInput: { server: 'docs', tool: 'lookup', steps: [] } }))
+  expect(s.start('envelope', { title: 'Run update_steps', rawInput: { server: 'docs', tool: 'lookup', arguments: {}, steps: [] } }))
     .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }]);
   expect(s.start('title', { title: 'Run update_steps', rawInput: { steps: [] } })).toEqual([]);
   expect(s.patch('title', { status: 'completed', _meta: { is_mcp_tool_call: true } }))
@@ -101,6 +101,10 @@ test('waits for the second half of an MCP envelope even after seeing its marker'
   s.start('late-name', { rawInput: { server: 'docs' } });
   expect(s.patch('late-name', { name: 'mcp_docs_lookup', rawInput: { tool: 'lookup' }, status: 'completed' }))
     .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }, { type: 'tool-result' }]);
+  s.start('late-args', { _meta: { is_mcp_tool_call: true }, rawInput: { server: 'docs' } });
+  expect(s.patch('late-args', { rawInput: { tool: 'lookup' } })).toEqual([]);
+  expect(s.patch('late-args', { rawInput: { arguments: { term: 'needle' } } }))
+    .toMatchObject([{ type: 'mcp-tool-use', input: { term: 'needle' } }]);
 });
 
 test('does not present an inferred checklist as the identity of a permission request', () => {
@@ -131,6 +135,13 @@ test('keeps the terminal diagnostic visible even when another output field repor
   s.start('repeat-blocks', { ...send, content: blocks('In progress') });
   expect(s.patch('repeat-blocks', { status: 'failed', rawOutput: 'Operation refused', content: blocks('In progress') }))
     .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') } }]);
+  s.start('structured', { ...send, content: blocks('In progress') });
+  expect(s.patch('structured', { status: 'failed', rawOutput: { reason: 'Operation refused' } })[0])
+    .toEqual(expect.objectContaining({ content: { rawOutput: { reason: 'Operation refused' }, items: blocks('In progress') } }));
+  s.start('repeated-data', { ...send, rawOutput: { delivered: 0 } });
+  s.patch('repeated-data', { content: blocks('Operation refused') });
+  expect(s.patch('repeated-data', { status: 'failed', rawOutput: { delivered: 0 } })[0])
+    .toEqual(expect.objectContaining({ content: { raw: 'Operation refused', rawOutput: { delivered: 0 } } }));
   s.start('reverse', { ...send, content: blocks('In progress') });
   expect(s.patch('reverse', { status: 'failed', rawOutput: 'Operation refused' }))
     .toMatchObject([{ content: { raw: 'Operation refused', items: blocks('In progress') }, isError: true }]);

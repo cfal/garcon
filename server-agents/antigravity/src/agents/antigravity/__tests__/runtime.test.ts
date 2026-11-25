@@ -772,14 +772,40 @@ describe('Antigravity ACP runtime', () => {
     agent.onPrompt((fake, id) => {
       fake.requestPermission(id, 'cmd');
       fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'later', name: 'send_message', rawInput: { Recipient: 'peer' } });
+      fake.update(id, { sessionUpdate: 'agent_message_chunk', content: { text: '**Report' } });
     });
     try {
-      await runtime.startSession(request());
-      await waitFor(() => updates.mock.calls.length === 1);
+      const { agentSessionId } = await runtime.startSession(request());
+      await waitFor(() => updates.mock.calls.length === 2);
       const permission = events.find(e => e.type === 'permission');
       if (!permission?.decision) throw new Error('Expected an interactive approval');
       await permission.decision.respond({ allow: true });
       expect(events.flatMap(e => e.type === 'rows' ? e.rows.map(row => row.message) : [])).toMatchObject([{ toolId: 'later' }]);
+      agent.update(agentSessionId, { sessionUpdate: 'agent_message_chunk', content: { text: ' complete**' } });
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length === 1);
+      expect(runEnded(events)[0]).toMatchObject({ finalResponse: { text: '**Report complete**' } });
+    } finally { runtime.shutdown(); }
+  });
+
+  it('does not freeze a newer plan while approving an already published command', async () => {
+    const { agent, runtime, events, request } = harness();
+    agent.onPrompt((fake, id) => {
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'cmd', name: 'run_command', rawInput: { CommandLine: 'echo test' } });
+      fake.update(id, { sessionUpdate: 'tool_call', toolCallId: 'plan', title: 'Run update_steps' });
+      fake.requestPermission(id, 'cmd');
+    });
+    try {
+      const { agentSessionId } = await runtime.startSession(request());
+      await waitFor(() => events.some(e => e.type === 'permission'));
+      const permission = events.find(e => e.type === 'permission');
+      if (!permission?.decision) throw new Error('Expected an interactive approval');
+      await permission.decision.respond({ allow: true });
+      agent.update(agentSessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'plan', rawInput: { steps: [] }, status: 'completed' });
+      agent.endPrompt();
+      await waitFor(() => runEnded(events).length === 1);
+      expect(events.flatMap(e => e.type === 'rows' ? e.rows.map(row => row.message.type) : []))
+        .toEqual(['bash-tool-use', 'update-plan-tool-use', 'tool-result']);
     } finally { runtime.shutdown(); }
   });
 

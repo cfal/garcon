@@ -52,7 +52,7 @@ import {
   type AcpTurnContext,
   type PendingPermissionRequest,
 } from './runtime-session.js';
-import { asObject, asString, type AcpBlockingRequestToolUse, type AcpEventConverter, type AcpSessionUpdateContext } from './event-converter.js';
+import { asObject, asString, type AcpBlockingRequestToolUse, type AcpEventConverter, type AcpRuntimeBoundary, type AcpSessionUpdateContext } from './event-converter.js';
 import { IdleSessionPurger } from '../shared/idle-session-purger.js';
 import { waitUnlessAborted } from '../shared/shared-probe.js';
 import {
@@ -421,7 +421,7 @@ export class AcpAgentRuntime {
       pending.requestId,
       pending.responseForDecision(decision),
     );
-    this.#flushBeforeRuntimeRow(pending.turn, pending.toolCallId);
+    this.#flushBeforeRuntimeRow(pending.turn, { kind: 'permission-settlement', toolCallId: pending.toolCallId });
     this.#pendingPermissions.delete(pending);
     pending.turn.pendingPermissions.delete(pending);
     this.#announceSteerable(pending.turn);
@@ -721,7 +721,7 @@ export class AcpAgentRuntime {
     turn.detachSourceListeners.push(session.client.onStderr((line) => {
       if (!this.#canRouteSource(turn)) return;
       if (!line.trim()) return;
-      this.#flushBeforeRuntimeRow(turn);
+      this.#flushBeforeRuntimeRow(turn, { kind: 'stderr' });
       this.#publishMessages(turn, [new ErrorMessage(new Date().toISOString(), line)]);
     }));
   }
@@ -834,7 +834,7 @@ export class AcpAgentRuntime {
     };
     turn.pendingPermissions.add(pending);
     this.#pendingPermissions.add(pending);
-    this.#flushBeforeRuntimeRow(turn, pending.toolCallId);
+    this.#flushBeforeRuntimeRow(turn, { kind: 'permission-request', toolCallId: pending.toolCallId });
     this.#publishTurnEvent(turn, {
       type: 'permission',
       runId: turn.operation.runId,
@@ -855,7 +855,7 @@ export class AcpAgentRuntime {
       try {
         turn.session.client.respond(pending.requestId, pending.responseForCancellation(reason));
       } catch {}
-      this.#flushBeforeRuntimeRow(turn, pending.toolCallId);
+      this.#flushBeforeRuntimeRow(turn, { kind: 'permission-settlement', toolCallId: pending.toolCallId });
       this.#publishTurnEvent(turn, {
         type: 'permission',
         runId: turn.operation.runId,
@@ -898,9 +898,9 @@ export class AcpAgentRuntime {
     for (const message of messages) this.#publishTurnEvent(turn, { type: 'rows', rows: runtimeRows([message]) });
   }
 
-  #flushBeforeRuntimeRow(turn: AcpTurnContext, beforeToolCallId?: string): void {
+  #flushBeforeRuntimeRow(turn: AcpTurnContext, boundary: AcpRuntimeBoundary): void {
     if (!this.#canRouteSource(turn)) return;
-    this.#publishMessages(turn, this.#converter.flushPending?.(this.#sessionUpdateContext(turn), beforeToolCallId) ?? []);
+    this.#publishMessages(turn, this.#converter.flushPending?.(this.#sessionUpdateContext(turn), boundary) ?? []);
   }
 
   #publishTurnEvent(turn: AcpTurnContext, event: AgentRuntimeEvent): void {

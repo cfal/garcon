@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   AssistantMessage,
   ErrorMessage,
@@ -14,10 +15,12 @@ import {
   asString,
   evictOldestToolEntry,
   type AcpEventConverter,
+  type AcpRuntimeBoundary,
   type AcpSessionUpdateContext,
 } from '@garcon/server-agent-common/acp/event-converter';
 import { AcpInBandFailure, acpOutputUpdateType } from '@garcon/server-agent-common/acp/in-band-failure';
 import {
+  antigravityMcpArguments,
   antigravityToolCall,
   antigravityToolResultText,
   convertAntigravityToolUse,
@@ -78,6 +81,11 @@ function rawOutputText(raw: unknown): string {
   return asString(raw) ?? asString(asObject(raw).output) ?? '';
 }
 
+function isStructuredOutput(raw: unknown): boolean {
+  return raw != null && typeof raw !== 'string' && (typeof raw !== 'object' || Array.isArray(raw) ||
+    Object.entries(asObject(raw)).some(([key, value]) => key !== 'output' || typeof value !== 'string'));
+}
+
 function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): ToolResultMessage['content'] {
   const name = call.isMcp ? null : call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
   const agentWork = isAgentWork(name);
@@ -90,15 +98,15 @@ function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): T
   const text = output.trim() && !(agentWork && call.contentIsNewer && blockText.trim()) ? output : blockText;
   const distinct = output.trim() !== '' && blockText.trim() !== '' && output !== blockText;
   const result: ToolResultMessage['content'] = {};
-  const structured = raw != null && typeof raw !== 'string' && (typeof raw !== 'object' || Array.isArray(raw) ||
-    Object.keys(asObject(raw)).some(key => key !== 'output' || typeof asObject(raw).output !== 'string'));
+  const structured = agentWork && isStructuredOutput(raw);
+  const structuredIsPrimary = structured && !output.trim() && !call.contentIsNewer;
   if (agentWork && (structured || (distinct && text === blockText))) {
     result.rawOutput = raw;
   }
-  if (agentWork && ((distinct && text === output) ||
+  if (agentWork && ((structuredIsPrimary && blocks.length) || (distinct && text === output) ||
       blocks.some(block => block.type !== 'content' || asObject(block.content).type !== 'text'))) result.items = blocks;
   const normalized = antigravityToolResultText(name ?? '', text);
-  if (normalized.trim()) result.raw = normalized;
+  if (normalized.trim() && !structuredIsPrimary) result.raw = normalized;
   return result;
 }
 
@@ -118,7 +126,9 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
   const priorText = previous?.blockText ?? '';
   const blockText = content === previous?.content ? priorText
     : (content ?? []).map(block => asString(asObject(block.content).text)).filter(Boolean).join('\n');
-  const rawChanged = rawOutputText(rawOutput) !== rawOutputText(previous?.rawOutput);
+  const rawText = rawOutputText(rawOutput);
+  const rawChanged = rawText !== rawOutputText(previous?.rawOutput) ||
+    (rawOutput !== previous?.rawOutput && !rawText && isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
   return {
     ...call,
     name,
@@ -129,13 +139,13 @@ function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall,
     rawOutput,
     content,
     blockText,
-    contentIsNewer: !rawChanged && (blockText !== priorText || !!previous?.contentIsNewer),
+    contentIsNewer: blockText !== priorText ? !(rawChanged && rawText.trim()) : !rawChanged && !!previous?.contentIsNewer,
   };
 }
 
 function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean {
   if (!Object.keys(call.input).length) return true;
-  if (row.type === 'mcp-tool-use') return false;
+  if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(call.input);
   if (call.isMcp || !call.name) return true;
   return row.type === 'external-tool-use' && (isAgentWork(call.name) || call.name === 'call_mcp_tool' ||
     !!(asString(call.input.server) || asString(call.input.tool)));
@@ -231,14 +241,18 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     this.#sessions.delete(sessionId);
   }
 
-  flushPending(context: AcpSessionUpdateContext, beforeToolCallId?: string): ChatMessage[] {
+  flushPending(context: AcpSessionUpdateContext, boundary: AcpRuntimeBoundary): ChatMessage[] {
     const session = this.#sessions.get(context.sessionId);
     if (!session?.deferred.size) return [];
-    const rows = this.#emitDeferred(session, context.timestamp, beforeToolCallId);
-    const target = beforeToolCallId && session.deferred.get(beforeToolCallId);
+    if (boundary.kind === 'stderr') return this.#emitDeferred(session, context.timestamp);
+    const { toolCallId } = boundary;
+    // Publishing the target already released everything older than it.
+    if (session.emittedToolIds.has(toolCallId) || session.calls.has(toolCallId) || session.completedToolIds.has(toolCallId)) return [];
+    const rows = this.#emitDeferred(session, context.timestamp, toolCallId);
+    const target = session.deferred.get(toolCallId);
     if (target) rows.push(...target.preceding.splice(0));
-    // An unrelated approval is a tool boundary; stderr can arrive mid-answer.
-    else if (beforeToolCallId !== undefined) rows.push(...this.#flush(session, context.timestamp));
+    // A new unrelated request is a tool boundary; its decision can arrive mid-answer.
+    else if (boundary.kind === 'permission-request') rows.push(...this.#flush(session, context.timestamp));
     return rows;
   }
 

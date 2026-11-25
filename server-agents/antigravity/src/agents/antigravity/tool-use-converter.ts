@@ -45,6 +45,11 @@ function stringField(input: Record<string, unknown>, ...names: string[]): string
   return asString(field(input, ...names));
 }
 
+export function antigravityMcpArguments(input: Record<string, unknown>): Record<string, unknown> | undefined {
+  const value = input.arguments ?? input.args ?? input.Arguments;
+  return value && typeof value === 'object' && !Array.isArray(value) ? asObject(value) : undefined;
+}
+
 function lineField(input: Record<string, unknown>, ...names: string[]): number | undefined {
   const value = field(input, ...names);
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
@@ -90,7 +95,7 @@ export function convertAntigravityToolUse(
   const mcpServer = asString(input.server);
   const mcpTool = asString(input.tool);
   if (mcpServer && mcpTool) {
-    return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, asObject(input.arguments ?? input.args));
+    return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, antigravityMcpArguments(input) ?? {});
   }
   const name = call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
   switch (call.isMcp && name !== 'call_mcp_tool' ? null : name) {
@@ -203,7 +208,7 @@ export function convertAntigravityToolUse(
     case 'call_mcp_tool': {
       const server = stringField(input, 'ServerName', 'server_name');
       const tool = stringField(input, 'ToolName', 'tool_name');
-      if (server && tool) return new McpToolUseMessage(timestamp, id, server, tool, asObject(field(input, 'Arguments', 'arguments')));
+      if (server && tool) return new McpToolUseMessage(timestamp, id, server, tool, antigravityMcpArguments(input) ?? {});
       break;
     }
   }

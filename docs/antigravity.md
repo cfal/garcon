@@ -179,7 +179,9 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 
 A background task row describes an operation, not the state of the task. For example, a successful `kill` call is not proof that the process exited. When ACP supplies no output, Garcon does not reconstruct it from native history. Previously stored rows retain their original representation.
 
-ACP can split a call's name, arguments, and result across frames. Garcon correlates them by call ID and settles the result with the terminal status. An unresolved call can wait across buffered text and other incomplete calls. It publishes with the available evidence before a later tool row or result, at turn end, or at the pending-call limit. An interactive approval releases calls older than the requested call, leaving its own identity open to later evidence. Automatic approvals do not force publication. A stderr diagnostic releases pending calls but does not split a streamed answer. Published rows are not revised. An MCP marker or MCP envelope takes precedence over a native tool label.
+ACP can split a call's name, arguments, and result across frames. Garcon correlates them by call ID and settles the result with the terminal status. An unresolved call can wait across buffered text and other incomplete calls. It publishes with the available evidence before a later tool row or result, at turn end, or at the pending-call limit. An MCP envelope takes precedence over a native tool label; if its arguments are missing, the call can still accept them on a later frame. Published rows are not revised.
+
+An interactive permission releases calls older than its target, or all waiting calls if the target has not sent a tool frame. An approval for an already published call leaves newer calls alone. Automatic approvals do not force publication. A permission decision or stderr diagnostic does not split a streamed answer.
 
 `ask_question` is not interactive over ACP without elicitation support. The CLI prints the question as assistant text and ends the turn, so the user answers in the next message.
 
