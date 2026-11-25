@@ -77,6 +77,10 @@ The shared ACP runtime enables this through the policy's `steersWithOverlappingP
 
 A chat's project path cannot change. agy keeps the working directory recorded with the conversation and ignores the `cwd` that `session/resume` passes, even in a new process started in the new directory, so a moved chat would keep reading and editing the old one. The descriptor therefore declares `supportsProjectPathUpdate: false`, and the scripted tier asserts that Garcon refuses the move.
 
+### Message And Thought Text
+
+agy relays the model's thought and text parts in the order the model streams them, so `agent_thought_chunk` updates can fall between the `agent_message_chunk` updates of a single answer. The converter keeps the answer in one buffer until a tool frame or the end of the turn, so each segment has at most one assistant row. Thinking that precedes the answer is published when the answer starts; thinking that arrives within the answer is held and published ahead of it. Publishing at every switch between thought and text made each chunk its own row, and Markdown that spans a chunk boundary rendered broken ([#1060](https://github.com/cfal/garcon/issues/1060)).
+
 ### Executor Errors
 
 Upstream model failures (invalid key, quota, HTTP 4xx/5xx) do not fail the ACP prompt. The CLI emits one complete `agent_message_chunk` whose text begins with `\n⚠ agent executor error: ` and then ends the turn normally with `end_turn`. The converter treats the marker as a failure only when two things hold:
