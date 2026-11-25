@@ -46,6 +46,20 @@ function fixture(remoteAgent = 'sample', executor: 'fixed' | 'select' = 'select'
 describe('model selector executor selection', () => {
 	beforeEach(() => localStorage.clear());
 
+	it('only retains the most recent filter result for a stable set of rows', () => {
+		const { selector } = fixture();
+		selector.query = 'local';
+		const first = selector.filteredModelRows;
+		expect(selector.filteredModelRows).toBe(first);
+		for (let i = 0; i < 32; i += 1) {
+			selector.query = `query-${i}`;
+			void selector.filteredModelRows;
+		}
+		selector.query = 'local';
+		expect(selector.filteredModelRows).toEqual(first);
+		expect(selector.filteredModelRows).not.toBe(first);
+	});
+
 	it.each(['local', remoteExecutor.id])(
 		'hides executor selection for a Local-only inventory with %s selected',
 		(executorId) => {

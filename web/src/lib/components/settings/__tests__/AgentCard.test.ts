@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import AgentCard from '../AgentCard.svelte';
 
@@ -30,6 +30,36 @@ function renderCard(
 }
 
 describe('AgentCard', () => {
+	it('labels device auth actions and renews only the most recent clipboard confirmation', async () => {
+		const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+		const timer = vi.spyOn(globalThis, 'setTimeout');
+		const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
+		const { unmount } = render(AgentCard, {
+			agentId: 'codex', agentName: 'Codex', open: true,
+			auth: { authenticated: false, canReauth: true, label: '', loading: false, error: null },
+			deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBB' },
+		});
+		try {
+			expect(screen.getByRole('button', { name: 'Open verification link' })).toBeTruthy();
+			const copy = screen.getByRole('button', { name: 'Copy to clipboard' });
+			await fireEvent.click(copy);
+			await waitFor(() => expect(timer.mock.calls.some(([, delay]) => delay === 2_000)).toBe(true));
+			const first = timer.mock.results[timer.mock.calls.findIndex(([, delay]) => delay === 2_000)]?.value;
+			await fireEvent.click(copy);
+			await waitFor(() => {
+				expect(timer.mock.calls.filter(([, delay]) => delay === 2_000)).toHaveLength(2);
+			});
+			const second = timer.mock.results[timer.mock.calls.findLastIndex(([, delay]) => delay === 2_000)]?.value;
+			expect(write).toHaveBeenNthCalledWith(2, 'AAAA-BBBB');
+			expect(clearTimer).toHaveBeenCalledWith(first);
+			unmount();
+			expect(clearTimer).toHaveBeenCalledWith(second);
+		} finally {
+			write.mockRestore();
+			timer.mockRestore();
+			clearTimer.mockRestore();
+		}
+	});
 	it('renders a single Sign in button when unauthenticated and expanded', () => {
 		renderCard(
 			{ authenticated: false, canReauth: true, label: '', loading: false, error: null },

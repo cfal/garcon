@@ -1,208 +1,20 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
-	import {
-		beginTelegramRecipientLink,
-		clearTelegramBotToken,
-		clearTelegramRecipient,
-		resolveTelegramRecipientLink,
-		saveTelegramBotToken,
-		sendTelegramTest,
-		testTelegramBotToken,
-	} from '$lib/api/settings.js';
-	import { ApiError } from '$lib/api/client.js';
-	import { errorMessage } from '$lib/utils/error-message.js';
 	import { getRemoteSettings } from '$lib/context';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import SaveIcon from '@lucide/svelte/icons/save';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import * as m from '$lib/paraglide/messages.js';
+	import { TelegramSettingsState } from './telegram-settings-state.svelte.js';
 
-	const remoteSettings = getRemoteSettings();
-
-	let telegramStatus = $derived(remoteSettings.snapshot?.telegram);
-	let telegramBotAvailable = $derived(telegramStatus?.botTokenAvailable === true);
-	let telegramBotUsername = $derived(telegramStatus?.botUsername ?? null);
-	let telegramRecipientLinked = $derived(telegramStatus?.recipientLinked === true);
-	let telegramRecipientUsername = $derived(telegramStatus?.recipientUsername ?? null);
-	let telegramRecipientDisplayName = $derived(telegramStatus?.recipientDisplayName ?? null);
-	let telegramLinkUrl = $derived(telegramStatus?.linkUrl ?? null);
-	let telegramEnabled = $derived(
-		remoteSettings.snapshot?.ui?.notifications?.telegram?.enabled === true,
-	);
-	let telegramReady = $derived(telegramBotAvailable && telegramRecipientLinked);
-	let telegramNotificationsActive = $derived(telegramReady && telegramEnabled);
-	let linkedRecipientLabel = $derived(
-		telegramRecipientUsername
-			? `@${telegramRecipientUsername}`
-			: (telegramRecipientDisplayName ??
-					(telegramRecipientLinked ? m.settings_telegram_linked_account() : '')),
-	);
-
-	let telegramBotToken = $state('');
-	let tokenBusy = $state(false);
-	let tokenTestBusy = $state(false);
-	let recipientLinkBusy = $state(false);
-	let recipientResolveBusy = $state(false);
-	let recipientClearBusy = $state(false);
-	let testMessageBusy = $state(false);
-	let autoLinkAttemptKey = $state('');
-	let tokenResult = $state<{ ok: boolean; message: string } | null>(null);
-	let recipientResult = $state<{ ok: boolean; message: string } | null>(null);
-	let testMessageResult = $state<{ ok: boolean; message: string } | null>(null);
-
-	$effect(() => {
-		if (!telegramBotAvailable) {
-			autoLinkAttemptKey = '';
-			return;
-		}
-		if (telegramRecipientLinked || telegramLinkUrl || tokenBusy || recipientLinkBusy) return;
-		const botKey = telegramBotUsername ?? 'configured';
-		if (autoLinkAttemptKey === botKey) return;
-		autoLinkAttemptKey = botKey;
-		void ensureRecipientLink();
-	});
-
-	async function persistTelegramEnabled(enabled: boolean) {
-		await remoteSettings.update({
-			ui: {
-				notifications: {
-					telegram: { enabled },
-				},
-			},
-		});
-	}
-
-	function telegramErrorMessage(error: unknown): string {
-		if (error instanceof ApiError) {
-			const message =
-				error.errorCode === 'telegram_token_test_failed'
-					? m.settings_telegram_error_token_test_failed()
-					: error.errorCode === 'telegram_bot_token_required'
-						? m.settings_telegram_error_bot_token_required()
-						: error.message;
-			const detail = error.details ? `: ${error.details}` : '';
-			const code = error.errorCode ? ` (${error.errorCode})` : '';
-			return `${message}${detail}${code}`;
-		}
-		return errorMessage(error, m.settings_telegram_request_failed());
-	}
-
-	async function handleTokenSave() {
-		const botToken = telegramBotToken.trim();
-		if (!botToken) return;
-		tokenBusy = true;
-		tokenResult = null;
-		recipientResult = null;
-		try {
-			const res = await saveTelegramBotToken(botToken);
-			remoteSettings.applySnapshot(res.settings);
-			telegramBotToken = '';
-			tokenResult = null;
-		} catch (error) {
-			tokenResult = { ok: false, message: telegramErrorMessage(error) };
-		} finally {
-			tokenBusy = false;
-		}
-	}
-
-	async function handleTokenTest() {
-		if (!telegramBotAvailable) return;
-		tokenTestBusy = true;
-		tokenResult = null;
-		try {
-			const res = await testTelegramBotToken();
-			tokenResult = {
-				ok: true,
-				message: m.settings_telegram_token_valid_for({ username: `@${res.bot.username}` }),
-			};
-		} catch (error) {
-			tokenResult = { ok: false, message: telegramErrorMessage(error) };
-		} finally {
-			tokenTestBusy = false;
-		}
-	}
-
-	async function handleTokenClear() {
-		if (!telegramBotAvailable) return;
-		tokenBusy = true;
-		tokenResult = null;
-		recipientResult = null;
-		try {
-			const res = await clearTelegramBotToken();
-			remoteSettings.applySnapshot(res.settings);
-			telegramBotToken = '';
-			tokenResult = { ok: true, message: m.settings_telegram_token_cleared() };
-		} catch (error) {
-			tokenResult = { ok: false, message: telegramErrorMessage(error) };
-		} finally {
-			tokenBusy = false;
-		}
-	}
-
-	async function ensureRecipientLink() {
-		if (!telegramBotAvailable) return;
-		recipientLinkBusy = true;
-		recipientResult = null;
-		try {
-			const res = await beginTelegramRecipientLink();
-			remoteSettings.applySnapshot(res.settings);
-		} catch (error) {
-			recipientResult = { ok: false, message: telegramErrorMessage(error) };
-		} finally {
-			recipientLinkBusy = false;
-		}
-	}
-
-	async function handleRecipientResolve() {
-		if (!telegramLinkUrl) return;
-		recipientResolveBusy = true;
-		recipientResult = null;
-		try {
-			const res = await resolveTelegramRecipientLink();
-			remoteSettings.applySnapshot(res.settings);
-			recipientResult = res.success
-				? { ok: true, message: m.settings_telegram_recipient_linked() }
-				: { ok: false, message: res.error ?? m.settings_telegram_link_not_found() };
-		} catch (error) {
-			recipientResult = { ok: false, message: telegramErrorMessage(error) };
-		} finally {
-			recipientResolveBusy = false;
-		}
-	}
-
-	async function handleRecipientClear() {
-		if (!telegramRecipientLinked && !telegramLinkUrl) return;
-		recipientClearBusy = true;
-		recipientResult = null;
-		try {
-			const res = await clearTelegramRecipient();
-			remoteSettings.applySnapshot(res.settings);
-			recipientResult = { ok: true, message: m.settings_telegram_recipient_cleared() };
-		} catch (error) {
-			recipientResult = { ok: false, message: telegramErrorMessage(error) };
-		} finally {
-			recipientClearBusy = false;
-		}
-	}
-
-	async function handleTelegramTest() {
-		if (!telegramReady) return;
-		testMessageBusy = true;
-		testMessageResult = null;
-		try {
-			const res = await sendTelegramTest();
-			testMessageResult = res.success
-				? { ok: true, message: m.settings_telegram_test_sent() }
-				: { ok: false, message: res.error ?? m.settings_telegram_send_failed() };
-		} catch (error) {
-			testMessageResult = { ok: false, message: telegramErrorMessage(error) };
-		} finally {
-			testMessageBusy = false;
-		}
-	}
+	const telegram = new TelegramSettingsState(getRemoteSettings());
+	const busy = $derived(telegram.operation !== null);
+	onDestroy(() => telegram.dispose());
+	$effect(() => telegram.autoLink());
 </script>
 
 <div class="bg-muted/50 border border-border rounded-lg px-4">
@@ -211,14 +23,15 @@
 			<div class="text-sm font-medium text-foreground">{m.settings_telegram_notifications()}</div>
 		</div>
 		<Switch
-			checked={telegramNotificationsActive}
-			disabled={!telegramReady}
-			onCheckedChange={async (next) => {
-				await persistTelegramEnabled(Boolean(next));
-			}}
+			bind:checked={() => telegram.active, (next) => void telegram.persistEnabled(Boolean(next))}
+			disabled={busy || !telegram.ready}
 			aria-label={m.settings_telegram_notifications()}
 		/>
 	</div>
+
+	{#if telegram.enabledResult}
+		<p role="alert" class="text-xs text-destructive">{telegram.enabledResult.message}</p>
+	{/if}
 
 	<div class="flex flex-col gap-2 py-2">
 		<label class="text-sm font-medium text-foreground" for="telegram-bot-token">
@@ -230,33 +43,33 @@
 				type="password"
 				class="min-w-0 flex-1"
 				autocomplete="off"
-				placeholder={telegramBotAvailable
+				placeholder={telegram.botAvailable
 					? m.settings_telegram_bot_token_configured()
 					: m.settings_telegram_bot_token_placeholder()}
-				disabled={telegramBotAvailable || tokenBusy || tokenTestBusy}
-				value={telegramBotToken}
+				disabled={telegram.botAvailable || busy}
+				value={telegram.token}
 				oninput={(e) => {
-					telegramBotToken = (e.currentTarget as HTMLInputElement).value;
+					telegram.token = (e.currentTarget as HTMLInputElement).value;
 				}}
 			/>
 			<div class="flex flex-wrap gap-2">
-				{#if telegramBotAvailable}
+				{#if telegram.botAvailable}
 					<Button
 						type="button"
 						variant="outline"
 						size="sm"
-						disabled={tokenBusy || tokenTestBusy}
-						onclick={handleTokenTest}
+						disabled={busy}
+						onclick={() => void telegram.testToken()}
 					>
 						<CheckIcon class="size-3.5 mr-1.5" />
-						{tokenTestBusy ? m.settings_telegram_testing_token() : m.settings_telegram_test_token()}
+						{telegram.operation === 'testToken' ? m.settings_telegram_testing_token() : m.settings_telegram_test_token()}
 					</Button>
 					<Button
 						type="button"
 						variant="outline"
 						size="sm"
-						disabled={tokenBusy || tokenTestBusy}
-						onclick={handleTokenClear}
+						disabled={busy}
+						onclick={() => void telegram.clearToken()}
 					>
 						<Trash2Icon class="size-3.5 mr-1.5" />
 						{m.settings_telegram_clear_token()}
@@ -266,51 +79,47 @@
 						type="button"
 						variant="outline"
 						size="sm"
-						disabled={tokenBusy || tokenTestBusy || !telegramBotToken.trim()}
-						onclick={handleTokenSave}
+						disabled={busy || !telegram.token.trim()}
+						onclick={() => void telegram.saveToken()}
 					>
 						<SaveIcon class="size-3.5 mr-1.5" />
-						{tokenBusy ? m.settings_telegram_saving_token() : m.settings_telegram_save_token()}
-					</Button>
-					<Button type="button" variant="outline" size="sm" disabled onclick={handleTokenClear}>
-						<Trash2Icon class="size-3.5 mr-1.5" />
-						{m.settings_telegram_clear_token()}
+						{telegram.operation === 'saveToken' ? m.settings_telegram_saving_token() : m.settings_telegram_save_token()}
 					</Button>
 				{/if}
 			</div>
 		</div>
-		{#if tokenResult}
-			<span class="text-xs {tokenResult.ok ? 'text-accent-foreground' : 'text-destructive'}">
-				{tokenResult.message}
+		{#if telegram.tokenResult}
+			<span class="text-xs {telegram.tokenResult.ok ? 'text-accent-foreground' : 'text-destructive'}">
+				{telegram.tokenResult.message}
 			</span>
 		{/if}
 	</div>
 
-	{#if telegramBotAvailable}
+	{#if telegram.botAvailable}
 		<div class="flex flex-col gap-2 py-2">
 			<div class="min-w-0">
-				{#if telegramRecipientLinked && linkedRecipientLabel}
+				{#if telegram.recipientLinked && telegram.linkedRecipientLabel}
 					<div class="text-sm text-muted-foreground truncate">
-						{m.settings_telegram_linked_recipient({ recipient: linkedRecipientLabel })}
+						{m.settings_telegram_linked_recipient({ recipient: telegram.linkedRecipientLabel })}
 					</div>
-				{:else if telegramLinkUrl}
+				{:else if telegram.linkUrl}
 					<div
 						class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-muted-foreground"
 					>
 						<span class="shrink-0">{m.settings_telegram_link_instruction()}</span>
 						<a
 							class="min-w-0 truncate text-foreground underline underline-offset-2"
-							href={telegramLinkUrl}
+							href={telegram.linkUrl}
 							target="_blank"
 							rel="noreferrer"
-							title={telegramLinkUrl}
+							title={telegram.linkUrl}
 						>
-							{telegramLinkUrl}
+							{telegram.linkUrl}
 						</a>
 					</div>
 				{:else}
 					<div class="text-sm text-muted-foreground">
-						{recipientLinkBusy
+						{telegram.operation === 'createLink'
 							? m.settings_telegram_creating_link()
 							: m.settings_telegram_recipient_not_linked()}
 					</div>
@@ -319,16 +128,20 @@
 
 			<div class="flex flex-col gap-2">
 				<div class="flex flex-wrap gap-2">
-					{#if !telegramRecipientLinked}
+					{#if !telegram.recipientLinked && !telegram.linkUrl}
+						<Button type="button" variant="outline" size="sm" disabled={busy} onclick={() => void telegram.createLink()}>
+							{telegram.recipientResult?.ok === false ? m.common_retry() : 'Create link'}
+						</Button>
+					{:else if !telegram.recipientLinked}
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							disabled={recipientResolveBusy || recipientLinkBusy || !telegramLinkUrl}
-							onclick={handleRecipientResolve}
+							disabled={busy || !telegram.linkUrl}
+							onclick={() => void telegram.resolveLink()}
 						>
 							<CheckIcon class="size-3.5 mr-1.5" />
-							{recipientResolveBusy
+							{telegram.operation === 'resolveLink'
 								? m.settings_telegram_checking_message()
 								: m.settings_telegram_check_message()}
 						</Button>
@@ -337,19 +150,19 @@
 						type="button"
 						variant="outline"
 						size="sm"
-						disabled={testMessageBusy || !telegramReady}
-						onclick={handleTelegramTest}
+						disabled={busy || !telegram.ready}
+						onclick={() => void telegram.sendTest()}
 					>
 						<SendIcon class="size-3.5 mr-1.5" />
-						{testMessageBusy ? m.settings_telegram_sending() : m.settings_telegram_send_test()}
+						{telegram.operation === 'sendTest' ? m.settings_telegram_sending() : m.settings_telegram_send_test()}
 					</Button>
-					{#if telegramRecipientLinked}
+					{#if telegram.recipientLinked}
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							disabled={recipientClearBusy}
-							onclick={handleRecipientClear}
+							disabled={busy}
+							onclick={() => void telegram.clearRecipient()}
 						>
 							<Trash2Icon class="size-3.5 mr-1.5" />
 							{m.settings_telegram_clear_recipient()}
@@ -357,18 +170,18 @@
 					{/if}
 				</div>
 				<div class="min-w-0 flex flex-col gap-1">
-					{#if recipientResult}
+					{#if telegram.recipientResult}
 						<span
-							class="text-xs {recipientResult.ok ? 'text-accent-foreground' : 'text-destructive'}"
+							class="text-xs {telegram.recipientResult.ok ? 'text-accent-foreground' : 'text-destructive'}"
 						>
-							{recipientResult.message}
+							{telegram.recipientResult.message}
 						</span>
 					{/if}
-					{#if testMessageResult}
+					{#if telegram.testMessageResult}
 						<span
-							class="text-xs {testMessageResult.ok ? 'text-accent-foreground' : 'text-destructive'}"
+							class="text-xs {telegram.testMessageResult.ok ? 'text-accent-foreground' : 'text-destructive'}"
 						>
-							{testMessageResult.message}
+							{telegram.testMessageResult.message}
 						</span>
 					{/if}
 				</div>

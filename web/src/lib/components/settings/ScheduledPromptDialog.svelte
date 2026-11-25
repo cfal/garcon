@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { ApiMutationOutcomeUnknownError } from '$lib/api/client';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -94,7 +94,7 @@
 	}
 	const selectableAgentIds = $derived(selectableAgentsForExecutor(form.startup.executorId));
 	let pickerOpen = $state(false);
-	let isMobile = $state(false);
+	const isMobile = $derived(appShell.isMobile);
 	let initialization = 0;
 
 	const selectedChat = $derived(
@@ -163,7 +163,8 @@
 	$effect(() => {
 		if (!open) return;
 		void modelCatalog.version;
-		form.startup.validateAllModelsAgainstLive();
+		const startup = form.startup;
+		untrack(() => startup.validateAllModelsAgainstLive());
 	});
 
 	$effect(() => {
@@ -171,14 +172,6 @@
 		const eligibleAgentIds = selectableAgentIds;
 		const activeForm = form;
 		untrack(() => activeForm.startup.reconcileAgentSelection(eligibleAgentIds));
-	});
-
-	onMount(() => {
-		const media = window.matchMedia('(max-width: 768px)');
-		isMobile = media.matches;
-		const handleChange = (event: MediaQueryListEvent) => (isMobile = event.matches);
-		media.addEventListener('change', handleChange);
-		return () => media.removeEventListener('change', handleChange);
 	});
 
 	onDestroy(() => {
