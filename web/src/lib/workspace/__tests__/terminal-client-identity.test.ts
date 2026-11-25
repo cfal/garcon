@@ -130,13 +130,44 @@ describe('TerminalClientIdentity', () => {
 		expect(identity.clientId).not.toBe('shared-client');
 	});
 
-	it('does not scan or subscribe to storage with a working BroadcastChannel', () => {
-		const subscribe = vi.spyOn(window, 'addEventListener');
-		const scan = vi.spyOn(Storage.prototype, 'key');
+	it('does not scan or write storage claims for a fresh channel identity', () => {
+		const scan = vi.spyOn(localStorage, 'key');
+		localStorage.setItem('unrelated', 'value');
 		mockCreateRandomId.mockReturnValue(uuid(5));
 		create();
-		expect(subscribe.mock.calls.some(([name]) => name === 'storage')).toBe(false);
+		expect(localStorage.length).toBe(1);
 		expect(scan).not.toHaveBeenCalled();
+	});
+
+	it.each([false, true])('protects a copied ID across transports (owner has channel: %s)', (channelOwner) => {
+		let sequence = 0;
+		mockCreateRandomId.mockImplementation(() => uuid(++sequence));
+		function deliverClaim(type: string, documentId: string): void {
+			for (let i = 0; i < localStorage.length; i++) {
+				const key = localStorage.key(i);
+				if (!key?.startsWith(TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX)) continue;
+				const value = localStorage.getItem(key)!;
+				const record = JSON.parse(value);
+				if (record.type === type && record.senderDocumentId === documentId) {
+					window.dispatchEvent(new StorageEvent('storage', { key, newValue: value }));
+					return;
+				}
+			}
+			throw new Error(`Missing storage claim: ${type}`);
+		}
+		vi.stubGlobal('BroadcastChannel', channelOwner ? FakeBroadcastChannel : undefined);
+		const owner = create();
+		vi.advanceTimersByTime(CLAIM_WINDOW_MS + 1);
+		const saved = owner.clientId;
+		expect(saved).not.toBeNull();
+		vi.stubGlobal('BroadcastChannel', channelOwner ? undefined : FakeBroadcastChannel);
+		const contender = create();
+		deliverClaim('probe', contender.documentId);
+		deliverClaim('occupied', owner.documentId);
+		vi.advanceTimersByTime(CLAIM_WINDOW_MS * 2);
+		expect(owner.clientId).toBe(saved);
+		expect(contender.established).toBe(true);
+		expect(contender.clientId).not.toBe(saved);
 	});
 
 	it('uses storage coordination when BroadcastChannel construction is rejected', () => {
