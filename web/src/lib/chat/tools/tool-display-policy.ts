@@ -45,7 +45,9 @@ export function resolveToolResultDisplayRule(
 	toolResult: ToolPayload | null | undefined,
 	tool?: ToolUseChatMessage,
 ): ToolResultDisplayRule | undefined {
-	if (toolResult?.isError === true && hasEmptyRequiredInput(tool)) return FAILED_RESULT_RULE;
+	if (toolResult?.isError === true && (hasEmptyRequiredInput(tool) || tool?.type === 'update-plan-tool-use')) {
+		return FAILED_RESULT_RULE;
+	}
 	return rule.result;
 }
 

@@ -12,10 +12,13 @@ import {
 } from './command-output.js';
 import {
   asAllowedPrompts, asAskUserQuestions, asChatImages, asCodexSubagentInputItems,
-  asCursorPlanPhases, asCursorPlanTodos,
   asOptionalBoolean, asOptionalChanges, asOptionalNumber, asOptionalString, asOptionalStringArray,
-  asRecord, asStringArray, coerceTodoItems, parseChatMessageMetadata, str,
+  asRecord, asStringArray, parseChatMessageMetadata, str,
 } from './chat-message-coercion.js';
+import {
+  asCursorPlanPhases, asCursorPlanTodos, coercePlanSteps, coerceTodoItems,
+  type CursorPlanPhase, type CursorPlanTodo, type PlanStep, type TodoItem,
+} from './chat-plan.js';
 import {
   coerceDurableCliBodyDisclosure,
   coerceDurableCliPresentation,
@@ -34,7 +37,8 @@ import {
 } from './transcript-notice-details.js';
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
-export { coerceTodoItems } from './chat-message-coercion.js';
+export { coerceTodoItems } from './chat-plan.js';
+export type { CursorPlanPhase, CursorPlanTodo, CursorPlanTodoStatus, PlanStep, TodoItem, TodoStatus } from './chat-plan.js';
 
 export interface ChatImage {
   data: string;
@@ -61,15 +65,6 @@ export interface ChatMessageMetadata {
   clientMessageId?: string;
   upstreamRequestId?: string;
   turnId?: string;
-}
-
-// Canonical shape for a single todo/plan item. All provider-specific
-// formats are normalized to this at the converter boundary.
-export type TodoStatus = 'pending' | 'in_progress' | 'completed';
-
-export interface TodoItem {
-  content: string;
-  status: TodoStatus;
 }
 
 export class UserMessage {
@@ -402,7 +397,7 @@ export class UpdatePlanToolUseMessage {
   constructor(
     public timestamp: string,
     public toolId: string,
-    public todos?: TodoItem[],
+    public todos?: PlanStep[],
   ) {}
 }
 
@@ -463,19 +458,6 @@ export class AskUserQuestionToolUseMessage {
     public title: string | undefined,
     public questions: AskUserQuestionPrompt[],
   ) {}
-}
-
-export type CursorPlanTodoStatus = TodoStatus | 'cancelled';
-
-export interface CursorPlanTodo {
-  id?: string;
-  content: string;
-  status: CursorPlanTodoStatus;
-}
-
-export interface CursorPlanPhase {
-  name: string;
-  todos: CursorPlanTodo[];
 }
 
 export class CursorCreatePlanToolUseMessage {
@@ -1030,7 +1012,7 @@ const TOOL_USE_MESSAGE_PARSERS = {
   'update-plan-tool-use': (data) =>
     new UpdatePlanToolUseMessage(
       str(data.timestamp), str(data.toolId),
-      coerceTodoItems(data.todos)),
+      coercePlanSteps(data.todos)),
 
   'write-stdin-tool-use': (data) =>
     new WriteStdinToolUseMessage(

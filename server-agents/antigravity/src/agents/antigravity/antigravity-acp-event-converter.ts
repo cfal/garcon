@@ -168,10 +168,11 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   // Records the frame, then fills the name and arguments it omits from earlier
   // frames of the same call.
   #resolvedCall(session: SessionState, call: AntigravityToolCall): AntigravityToolCall {
-    this.#rememberCall(session, call);
+    const name = call.name ?? session.toolNames.get(call.toolCallId) ?? call.titleName;
+    this.#rememberCall(session, { ...call, name });
     return {
       ...call,
-      name: call.name ?? session.toolNames.get(call.toolCallId) ?? null,
+      name,
       input: Object.keys(call.input).length > 0 ? call.input : session.toolInputs.get(call.toolCallId) ?? {},
     };
   }

@@ -12,7 +12,7 @@ import {
   UserMessage,
   parseChatMessage,
   type ChatMessage,
-  type TodoItem,
+  type PlanStep,
   type ToolUseChatMessage,
 } from '../../../../common/chat-types.ts';
 import type { CliPresentationStyle } from '../../../../common/cli-presentation.ts';
@@ -28,7 +28,7 @@ interface TranscriptEntry {
   content: string;
 }
 
-function summarizeTodos(todos: TodoItem[] | undefined): string {
+function summarizeTodos(todos: readonly PlanStep[] | undefined): string {
   if (!todos || todos.length === 0) return 'No tasks recorded.';
   return todos
     .map((item) => `- [${item.status}] ${item.content}`)

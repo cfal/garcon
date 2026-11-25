@@ -57,6 +57,17 @@ function roundTrip<T>(message: T): T {
 }
 
 describe('tool-use serialization round-trip', () => {
+	it('preserves skipped and failed plan steps and empty snapshots without widening todo statuses', () => {
+		const plan = new UpdatePlanToolUseMessage(TS, 'plan', [
+			{ content: 'First', status: 'skipped' }, { content: 'Second', status: 'failed' },
+		]);
+		expect(roundTrip(plan)).toEqual(plan);
+		expect(roundTrip(new UpdatePlanToolUseMessage(TS, 'plan', [])).todos).toEqual([]);
+		expect(parseChatMessage({ ...plan, type: 'todo-write-tool-use' })).toMatchObject({
+			todos: [{ status: 'pending' }, { status: 'pending' }],
+		});
+	});
+
 	it('preserves task targets and literal input and rejects unrecognized actions', () => {
 		const msg = new BackgroundTaskToolUseMessage(TS, 'call', 'send_input', 'job-id', '\n');
 		expect(roundTrip(msg)).toEqual(msg);

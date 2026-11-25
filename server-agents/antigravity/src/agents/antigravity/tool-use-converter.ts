@@ -10,10 +10,12 @@ import {
   ReadToolUseMessage,
   TaskToolUseMessage,
   UnknownToolUseMessage,
+  UpdatePlanToolUseMessage,
   WebFetchToolUseMessage,
   WebSearchToolUseMessage,
   WriteToolUseMessage,
   type ToolUseChatMessage,
+  type PlanStep,
 } from '@garcon/common/chat-types';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
 
@@ -23,6 +25,7 @@ export interface AntigravityToolCall {
   readonly toolCallId: string;
   // Null when the frame names no tool; `kind` then only describes the category.
   readonly name: string | null;
+  readonly titleName: string | null;
   readonly kind: string | null;
   readonly input: Record<string, unknown>;
 }
@@ -45,6 +48,20 @@ function lineField(input: Record<string, unknown>, ...names: string[]): number |
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
+function antigravityPlanSteps(raw: unknown): PlanStep[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const steps: PlanStep[] = [];
+  for (const entry of raw) {
+    const { title, status } = asObject(entry);
+    if (typeof title !== 'string') return undefined;
+    if (status === 'done') steps.push({ content: title, status: 'completed' });
+    else if (status === 'pending' || status === 'in_progress' || status === 'failed' || status === 'skipped') {
+      steps.push({ content: title, status });
+    } else return undefined;
+  }
+  return steps;
+}
+
 // Reads the tool identity from a `tool_call` update or a permission's `toolCall`.
 export function antigravityToolCall(raw: Record<string, unknown>): AntigravityToolCall | null {
   const toolCallId = asString(raw.toolCallId);
@@ -52,6 +69,9 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
   return {
     toolCallId,
     name: asString(raw.name) ?? null,
+    // Some agy builds identify the checklist only by this literal ACP title.
+    titleName: raw.title === 'Run update_steps' && (!raw.kind || raw.kind === 'other')
+      && !asObject(raw._meta).is_mcp_tool_call ? 'update_steps' : null,
     kind: asString(raw.kind) ?? null,
     input: asObject(raw.rawInput ?? raw.args),
   };
@@ -138,6 +158,11 @@ export function convertAntigravityToolUse(
       const query = stringField(input, 'query', 'Query');
       if (query === undefined) break;
       return new WebSearchToolUseMessage(timestamp, id, query);
+    }
+    case 'update_steps': {
+      const steps = antigravityPlanSteps(input.steps);
+      if (steps) return new UpdatePlanToolUseMessage(timestamp, id, steps);
+      break;
     }
     case 'manage_task': {
       const action = field(input, 'Action', 'action');

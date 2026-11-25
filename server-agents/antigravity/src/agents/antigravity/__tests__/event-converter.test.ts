@@ -23,6 +23,34 @@ function plain(messages: readonly object[]) {
 }
 
 describe('AntigravityAcpEventConverter', () => {
+  it('converts a checklist snapshot even when the name and arguments arrive separately', () => {
+    const converter = new AntigravityAcpEventConverter();
+    expect(converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call', toolCallId: 'plan', title: 'Run update_steps', kind: 'other',
+    }), context)).toEqual([]);
+    const statuses = ['pending', 'in_progress', 'done', 'skipped', 'failed'];
+    const rows = converter.fromSessionUpdate(update({
+      sessionUpdate: 'tool_call_update', toolCallId: 'plan', status: 'completed',
+      rawInput: { steps: statuses.map(status => ({ title: 'Check', status })) },
+    }), context);
+    expect(plain(rows)).toEqual([
+      { type: 'update-plan-tool-use', toolId: 'plan', todos: statuses.map(status => ({
+        content: 'Check', status: status === 'done' ? 'completed' : status,
+      })) },
+      { type: 'tool-result', toolId: 'plan', content: {}, isError: false },
+    ]);
+  });
+
+  it('does not coerce unsupported plan steps or mistake an MCP title for a native checklist', () => {
+    const converter = new AntigravityAcpEventConverter();
+    const input = { steps: [{ title: 'Check', status: 'future' }] };
+    expect(converter.fromSessionUpdate(toolCall('bad', 'update_steps', 'other', input), context))
+      .toMatchObject([{ type: 'external-tool-use', input }]);
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call', toolCallId: 'mcp',
+      title: 'Run update_steps', _meta: { is_mcp_tool_call: true }, rawInput: { steps: [] } }), context))
+      .toMatchObject([{ type: 'unknown-tool-use' }]);
+  });
+
   it.each([
     [{ Action: 'list' }, { action: 'list' }],
     [{ Action: 'kill', TaskId: 'job-1' }, { action: 'stop', taskId: 'job-1' }],

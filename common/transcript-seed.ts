@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ChatMessage, TodoItem, ToolUseChatMessage } from './chat-types.js';
+import type { ChatMessage, PlanStep, ToolUseChatMessage } from './chat-types.js';
 import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
   projectionPriorityLevel,
@@ -740,7 +740,7 @@ function extractToolDetail(message: ToolUseChatMessage): string {
   }
 }
 
-function summarizeTodos(todos: readonly TodoItem[] | undefined): string {
+function summarizeTodos(todos: readonly PlanStep[] | undefined): string {
   if (!todos?.length) return '';
   const active = todos.find((todo) => todo.status === 'in_progress') ?? todos[0];
   return `${todos.length} item(s), current: ${active.content}`;

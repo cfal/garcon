@@ -19,6 +19,7 @@ import {
 	PiToolSearchToolUseMessage,
 	ReadToolUseMessage,
 	UnknownToolUseMessage,
+	UpdatePlanToolUseMessage,
 	WebFetchToolUseMessage,
 	WebSearchToolUseMessage,
 	WriteStdinToolUseMessage,
@@ -31,6 +32,14 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('renders distinct outcomes for plan steps with the same title', () => {
+		const toolMessage = new UpdatePlanToolUseMessage('', 'plan', [
+			{ content: 'Check', status: 'failed' }, { content: 'Check', status: 'skipped' },
+		]);
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+		expect(screen.getByText('Failed: Check')).toBeTruthy();
+		expect(screen.getByText('Skipped: Check')).toBeTruthy();
+	});
 	it('scopes plain tool results independently of commands', () => {
 		const toolMessage = new WebSearchToolUseMessage('', 'plain-output', 'Synthetic search');
 		render(ChatToolEventRenderer, {
@@ -70,6 +79,7 @@ describe('ChatToolEventRenderer', () => {
 		new BashToolUseMessage('', 'invalid-bash', ''),
 		new ClaudeToolSearchToolUseMessage('', 'invalid-search', ''),
 		new ClaudeMonitorToolUseMessage('', 'invalid-monitor', ''),
+		new UpdatePlanToolUseMessage('', 'invalid-plan', [{ content: 'Check', status: 'pending' }]),
 		new ReadToolUseMessage('', 'invalid-read', ''),
 		new WriteToolUseMessage('', 'invalid-write', ''),
 		new EditToolUseMessage('', 'invalid-edit', ''),
