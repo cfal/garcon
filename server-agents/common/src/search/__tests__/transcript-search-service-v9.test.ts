@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -817,33 +817,51 @@ describe('transcript search service v9', () => {
   }, 15_000);
 
   test('[TLV5-SEARCH.08-SVC-07] grace exhaustion quarantines only its reader', async () => {
+    const readerDeadlineMs = 4_000;
     const records: Array<{ message: string; fields: unknown }> = [];
+    const servingReaders: number[] = [];
     const service = new TranscriptSearchService({
       workspaceDirectory: workspace(),
       logger: logger(records),
-      readerRequestTimeoutMs: 500,
+      readerRequestTimeoutMs: readerDeadlineMs,
       workerFactory: interceptingWorkerFactory((reader, event, deliver) => {
-        if (reader === 0 && (event.data as { type?: unknown }).type === 'search-result') return;
+        if ((event.data as { type?: unknown }).type === 'search-result') {
+          if (reader === 0) return;
+          servingReaders.push(reader);
+        }
         deliver(event);
       }),
     });
-    await service.enable(new AbortController().signal);
-    await build(service, 'chat-grace', 'view-grace', 20, 'gracemarker #731');
-    await expect(service.search({
-      ...searchRequest('chat-grace', 'view-grace', 20, 'gracemarker'),
-      query: compileChatSearchQuery('"gracemarker" #731'),
-    })).rejects.toThrow('SEARCH_TIMEOUT');
-    expect(service.queryStats().timedOut).toBe(1);
-    expect(records.find((record) => record.message === 'Transcript search query timeout')?.fields)
-      .toMatchObject({ clauseCount: 2, phraseClauseCount: 1, literalClauseCount: 1 });
-    await expect(service.search(searchRequest(
-      'chat-grace', 'view-grace', 20, 'gracemarker',
-    ))).resolves.toMatchObject({ results: [expect.objectContaining({ chatId: 'chat-grace' })] });
-    await waitFor(() => service.status().phase === 'degraded');
-    await waitFor(() => records.some((record) => (
-      (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
-    )));
-    await service.close();
+    try {
+      await service.enable(new AbortController().signal);
+      await build(service, 'chat-grace', 'view-grace', 20, 'gracemarker #731');
+      const request = searchRequest('chat-grace', 'view-grace', 20, 'gracemarker');
+      // Only the stalled reader's deadline is accelerated. Its peer runs on real time.
+      const schedule = globalThis.setTimeout;
+      const timer = spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
+        schedule(callback, delay === readerDeadlineMs ? 0 : delay, ...args));
+      try {
+        const failure = await service.search({ ...request, query: compileChatSearchQuery('"gracemarker" #731') })
+          .then(() => null, (error: unknown) => error);
+        expect(failure).toMatchObject({ message: 'SEARCH_TIMEOUT' });
+      } finally {
+        timer.mockRestore();
+      }
+      expect(service.queryStats().timedOut).toBe(1);
+      expect(records.find((record) => record.message === 'Transcript search query timeout')?.fields)
+        .toMatchObject({ clauseCount: 2, phraseClauseCount: 1, literalClauseCount: 1 });
+      const [healthy] = await Promise.all([
+        service.search(request),
+        waitFor(() => service.status().phase === 'degraded'),
+      ]);
+      expect(healthy.results).toEqual([expect.objectContaining({ chatId: 'chat-grace' })]);
+      expect(servingReaders).toEqual([1]);
+      await waitFor(() => records.some((record) => (
+        (record.fields as { code?: string } | undefined)?.code === 'SEARCH_READER_RESTARTED'
+      )));
+    } finally {
+      await service.close();
+    }
   }, 10_000);
 
   test('[TLV5-SEARCH.07-SVC-05] deletion sequences bounded maintenance after checkpoint', async () => {

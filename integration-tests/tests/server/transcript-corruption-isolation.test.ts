@@ -66,7 +66,8 @@ describe('transcript corruption isolation', () => {
       const search = await fixture.client.waitForChatSearch(
         { query: 'healthy-ledger-chat', chatIds: [corruptChatId, healthyChatId] },
         (response) => response.index.pendingChatCount === 0
-          && response.index.failedChatCount === 1,
+          && response.index.failedChatCount === 1
+          && response.index.indexedChatCount === 1,
       );
       expect(search.results.map((result) => result.chatId)).toEqual([healthyChatId]);
       expect(search.index).toEqual({
