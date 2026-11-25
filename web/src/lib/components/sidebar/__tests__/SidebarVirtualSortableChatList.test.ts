@@ -2760,6 +2760,23 @@ describe('SidebarVirtualSortableChatList', () => {
 		expect(removeBodyStyleProperty).toHaveBeenCalledWith('-webkit-touch-callout');
 	});
 
+	it('releases the touch gesture when the active source leaves the projection', async () => {
+		vi.useFakeTimers();
+		const rows = makeRows(20);
+		const view = render(SidebarVirtualSortableChatListHost, { rows, isMobile: true, rowHeight });
+		await tick();
+		const { row0 } = installTouchGeometry();
+		const contacts = [touchAt(1, 20, 44)];
+		await fireEvent.touchStart(row0, { touches: contacts, changedTouches: contacts });
+		vi.advanceTimersByTime(370);
+		await tick();
+		expect(document.body.style.userSelect).toBe('none');
+		await view.rerender({ rows: rows.slice(1) });
+		expect(row0.isConnected).toBe(false);
+		expect(document.body.style.userSelect).toBe('');
+		expect(await fireEvent.touchMove(window, { touches: contacts, changedTouches: contacts })).toBe(true);
+	});
+
 	it('clears existing text selection when a touch long press drag activates', async () => {
 		vi.useFakeTimers();
 		const selection = window.getSelection();

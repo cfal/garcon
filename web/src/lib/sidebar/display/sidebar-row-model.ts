@@ -90,6 +90,13 @@ export function sidebarProjectKey(path: string, executorId?: string | null): str
 	return projectKey(effectiveExecutorId(executorId), normalizeProjectPath(path));
 }
 
+function groupLookupKey(executorId: string, normalizedPath: string): string {
+	// Removing a path segment or its trailing slash can expose whitespace and another slash.
+	return normalizedPath.trimEnd() === normalizedPath
+		? projectKey(executorId, normalizedPath)
+		: sidebarProjectKey(normalizedPath, executorId);
+}
+
 interface SidebarProject {
 	key: string;
 	executorId: string;
@@ -115,8 +122,7 @@ function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean) {
 	for (const [executorId, paths] of byExecutor) {
 		const groups = new Map<string, SidebarProject | undefined>();
 		for (const [rawPath, project] of paths) {
-			// A trailing slash can expose whitespace: group the normalized spelling, retain the label.
-			const key = projectKey(executorId, project.normalizedPath.trimEnd());
+			const key = groupLookupKey(executorId, project.normalizedPath);
 			if (!groups.has(key)) {
 				let group = byKey.get(key);
 				let path = project.normalizedPath;
@@ -124,7 +130,7 @@ function projectGroups(chats: readonly ChatSessionRecord[], combine: boolean) {
 					const separator = path.lastIndexOf('/');
 					if (separator < 0) break;
 					path = separator === 0 ? '/' : path.slice(0, separator);
-					group = byKey.get(projectKey(executorId, path.trimEnd())) ?? group;
+					group = byKey.get(groupLookupKey(executorId, path)) ?? group;
 				}
 				groups.set(key, group);
 			}

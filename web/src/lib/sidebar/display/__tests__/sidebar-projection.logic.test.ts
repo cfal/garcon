@@ -99,9 +99,9 @@ describe('recursive sidebar projection', () => {
 		});
 		expect(collapsed.visibleChatIds).toEqual([]);
 	});
-	it('preserves project grouping when removing a trailing slash exposes whitespace', () => {
+	it.each(['/repo /', '/repo/ /'])('groups the normalized spelling of %s', (projectPath) => {
 		const input = projectionInput(
-			[chat('a', { projectPath: '/repo' }), chat('b', { projectPath: '/repo /' })],
+			[chat('a', { projectPath: '/repo' }), chat('b', { projectPath })],
 			{ groupingFields: selections(['project']), groupNestedProjectPaths: false },
 		);
 		const model = buildSidebarRowModel(input);
