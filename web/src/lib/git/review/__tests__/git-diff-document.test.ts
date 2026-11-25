@@ -1315,6 +1315,35 @@ describe('GitDiffDocumentController', () => {
 		}
 	});
 
+	it('does not refetch an over-budget cached prefetch when reopening a document', async () => {
+		const controller = new GitDiffDocumentController();
+		const paths = ['a.ts', 'b.ts'];
+		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (_snapshot, requested) =>
+			bodyResponse('doc', requested),
+		);
+		const open = (maxLoadedRows: number) => controller.open({
+			project: '/project', documentId: 'doc', files: paths.map(file),
+			limits: { ...limits, maxLoadedRows, maxLoadedPatchBytes: 10_000 },
+			firstBodyCandidates: paths,
+		}, {
+			contextLines: 5, diffMode: 'unified', loadBodies, onError: vi.fn(),
+			commentSource: testCommentSource(),
+		});
+		try {
+			open(20);
+			await vi.waitFor(() => expect(Object.keys(controller.fileBodies).sort()).toEqual(paths));
+			loadBodies.mockClear();
+			open(10);
+			expect(Object.keys(controller.fileBodies)).toEqual(['a.ts']);
+			expect(loadBodies).not.toHaveBeenCalled();
+			controller.focusFile('b.ts');
+			expect(controller.fileBodies['b.ts']?.bodyState).toBe('loaded');
+			expect(loadBodies).not.toHaveBeenCalled();
+		} finally {
+			controller.clear();
+		}
+	});
+
 	it('bounds cached bodies across document changes', async () => {
 		const controller = new GitDiffDocumentController();
 		const boundedLimits = { ...limits, maxLoadedPatchBytes: gitReviewBodyBytes(body('a.ts')) };

@@ -211,6 +211,7 @@ export class GitReviewBodyStore {
 		const unique = normalizeGitReviewDemandFilePaths(paths);
 		this.seedCache(document, loader, unique, purpose === 'navigation' ? 'visible' : purpose);
 		if (this.aggregateLimit) return 'limited';
+		if (purpose === 'prefetch' && this.prefetchStopped) return 'already-satisfied';
 		const candidates = unique.filter(
 			(path) => this.files.get(path)?.bodyState === 'unloaded' && !this.fileBodies[path],
 		);
