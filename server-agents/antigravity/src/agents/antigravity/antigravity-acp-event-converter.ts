@@ -104,10 +104,14 @@ function reportedResult(call: TrackedCall, terminal: Record<string, unknown>): T
   if (agentWork && (structured || (distinct && text === blockText))) {
     result.rawOutput = raw;
   }
-  if (agentWork && ((structuredIsPrimary && blocks.length) || (distinct && text === output) ||
-      blocks.some(block => block.type !== 'content' || asObject(block.content).type !== 'text'))) result.items = blocks;
+  if (agentWork) {
+    // Keeps separate progress and attachments, not a second copy of the primary text.
+    const items = structuredIsPrimary || (distinct && text === output) ? blocks
+      : blocks.filter(block => block.type !== 'content' || asObject(block.content).type !== 'text');
+    if (items.length) result.items = items;
+  }
   const normalized = antigravityToolResultText(name ?? '', text);
-  if (normalized.trim() && !structuredIsPrimary) result.raw = normalized;
+  if (normalized.trim() && !structuredIsPrimary && !(structured && normalized === output)) result.raw = normalized;
   return result;
 }
 

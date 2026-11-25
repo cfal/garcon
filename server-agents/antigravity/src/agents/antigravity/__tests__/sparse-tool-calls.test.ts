@@ -69,6 +69,18 @@ test('keeps reported structured and progress output without manufacturing a succ
   expect(s.patch('cmd', { status: 'completed' })).toMatchObject([{ content: { exitCode: 1 }, isError: true }]);
 });
 
+test('stores large structured output once even when content echoes it alongside another block', () => {
+  const s = session();
+  const output = 'x'.repeat(8 * 1024 * 1024);
+  const attachment = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  s.start('list', { name: 'manage_task', rawInput: { Action: 'list' },
+    content: [{ type: 'content', content: { type: 'text', text: output } }, attachment] });
+  const result = s.patch('list', { status: 'completed', rawOutput: { output, count: 1 } })[0];
+  if (result?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(output.length + 1024);
+  expect(result.content).toEqual({ rawOutput: { output, count: 1 }, items: [attachment] });
+});
+
 test('merges rawOutput and content as independent ACP fields and treats null rawOutput as unchanged', () => {
   const s = session();
   const list = { name: 'manage_task', rawInput: { Action: 'list' } };
@@ -145,7 +157,7 @@ test('keeps the terminal diagnostic visible even when another output field repor
   s.start('retry', { ...send, rawOutput: { output: 'Operation refused', attempt: 1 } });
   s.patch('retry', { content: blocks('Retrying') });
   expect(s.patch('retry', { status: 'failed', rawOutput: { output: 'Operation refused', attempt: 2 } })[0])
-    .toEqual(expect.objectContaining({ content: { raw: 'Operation refused', rawOutput: { output: 'Operation refused', attempt: 2 },
+    .toEqual(expect.objectContaining({ content: { rawOutput: { output: 'Operation refused', attempt: 2 },
       items: blocks('Retrying'), status: 'failed' } }));
   s.start('cancel', { ...send, content: blocks('Sending') });
   expect(s.patch('cancel', { status: 'cancelled' })[0])

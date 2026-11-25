@@ -74,12 +74,15 @@ export function reportedToolResultText(content: unknown): string {
 	const { raw, rawOutput, items } = content as Record<string, unknown>;
 	const text = typeof raw === 'string' ? raw : '';
 	if (rawOutput !== undefined) {
+		if (rawOutput && typeof rawOutput === 'object' && 'output' in rawOutput && typeof rawOutput.output === 'string') {
+			const { output, ...metadata } = rawOutput;
+			const hasMetadata = Object.keys(metadata).length > 0;
+			if (!text || text === output) return [output, hasMetadata ? JSON.stringify(metadata, null, 2) : ''].filter(Boolean).join('\n\n');
+			if (!hasMetadata) return text;
+		}
 		if (!text) return JSON.stringify(rawOutput, null, 2);
 		// A second plain output string is supplementary progress, not another result.
-		if (typeof rawOutput !== 'string' && !(rawOutput && typeof rawOutput === 'object' &&
-			Object.keys(rawOutput).length === 1 && 'output' in rawOutput && typeof rawOutput.output === 'string')) {
-			return text + '\n\n' + JSON.stringify(rawOutput, null, 2);
-		}
+		if (typeof rawOutput !== 'string') return text + '\n\n' + JSON.stringify(rawOutput, null, 2);
 	}
 	if (text) return text;
 	const parts = Array.isArray(items) ? items.flatMap(item => item?.type === 'text' && typeof item.text === 'string' ? [item.text] : []) : [];

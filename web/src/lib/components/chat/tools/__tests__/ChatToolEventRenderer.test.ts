@@ -88,6 +88,15 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.queryByText(/Sending/)).toBeNull();
 	});
 
+	it('renders nested output as literal text once, with its metadata', () => {
+		const output = 'First line\nSecond line';
+		const { container } = render(ChatToolEventRenderer, { toolMessage: new AgentMessageToolUseMessage('', 'send', 'peer', 'Hi'),
+			mode: 'result', autoExpandTools: true, toolResult: { content: { rawOutput: { output, attempt: 2 } }, isError: false } });
+		expect(container.textContent).toContain(output);
+		expect(container.textContent).toContain('"attempt": 2');
+		expect(container.textContent?.split('First line')).toHaveLength(2);
+	});
+
 	it('renders distinct outcomes for plan steps with the same title', () => {
 		const toolMessage = new UpdatePlanToolUseMessage('', 'plan', [
 			{ content: 'Check', status: 'failed' }, { content: 'Check', status: 'skipped' },
