@@ -34,7 +34,6 @@ interface QueuedCheckpoint {
 
 interface CleanCheckpoint {
 	cleanContent: string;
-	savedContent?: string;
 }
 
 export class FileDraftCoordinator {
@@ -237,6 +236,7 @@ export class FileDraftCoordinator {
 			: null;
 		if (!record) {
 			this.#queuedCheckpoints.delete(documentId);
+			if (pending.savedContent !== document.baseline) pending.savedContent = undefined;
 			if (
 				pending.savedContent === undefined &&
 				!this.#writes.has(documentId) &&
@@ -245,12 +245,11 @@ export class FileDraftCoordinator {
 				document.recoveryError = null;
 				return Promise.resolve();
 			}
-			const checkpoint = { cleanContent: document.baseline, savedContent: pending.savedContent };
+			const checkpoint = { cleanContent: document.baseline };
 			return this.#enqueue(documentId, () =>
 				this.#writeCheckpoint(documentId, pending, checkpoint),
 			);
 		}
-		pending.savedContent = undefined;
 		const queued = this.#queuedCheckpoints.get(documentId);
 		if (queued?.document === document) {
 			queued.record = record;
@@ -275,17 +274,20 @@ export class FileDraftCoordinator {
 		try {
 			if ('cleanContent' in record) {
 				const owned = this.#ownedCheckpoints.get(documentId);
-				if (owned || record.savedContent !== undefined)
+				// A queued cleanup may outlive the confirmed baseline that authorized it.
+				const stillSaved = () =>
+					pending.savedContent === record.cleanContent && document.baseline === record.cleanContent;
+				if (owned || stillSaved())
 					await this.options.repository.deleteDraft(
 						documentId,
 						(current) =>
-							current.content === record.savedContent ||
+							(stillSaved() && current.content === record.cleanContent) ||
 							(owned !== undefined &&
 								current.savedAt === owned.savedAt &&
 								current.checkpointId === owned.checkpointId &&
 								(current.checkpointId !== undefined || current.content === record.cleanContent)),
 					);
-				if (pending.savedContent === record.savedContent) pending.savedContent = undefined;
+				if (stillSaved()) pending.savedContent = undefined;
 				this.#ownedCheckpoints.delete(documentId);
 				this.available = this.available.filter((entry) => entry.documentId !== documentId);
 			} else {
