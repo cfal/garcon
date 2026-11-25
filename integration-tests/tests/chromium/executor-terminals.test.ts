@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
+import type { Page } from 'playwright';
 import { parseTerminalStreamServerMessage, type TerminalCreateResponse, type TerminalListResponse, type TerminalStreamServerMessage } from '../../../common/terminal.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
@@ -9,23 +10,47 @@ import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.
 type TerminalReconnectScope = typeof globalThis & { __terminalSocket?: WebSocket };
 type TerminalDrainScope = TerminalReconnectScope & { __releaseTerminalTimers?: () => number };
 
+function terminalFrames(page: Page): TerminalStreamServerMessage[] {
+  const frames: TerminalStreamServerMessage[] = [];
+  page.on('websocket', socket => socket.on('framereceived', frame => {
+    const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
+    if (message) frames.push(message);
+  }));
+  return frames;
+}
+
 test('a restored page reclaims its terminal identity before reconnecting', async () => {
   await withChromiumFixture('terminal-page-restore', async ({ page, integration }) => {
-    const attached: string[] = [];
-    page.on('websocket', socket => socket.on('framereceived', frame => {
-      const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
-      if (message?.type === 'terminal-attached') attached.push(message.terminal.terminalId);
-    }));
+    const frames = terminalFrames(page);
+    const attached = () => frames.filter(message => message.type === 'terminal-attached').map(message => message.terminal.terminalId);
     await page.goto(integration.garcon.baseUrl);
     await clickWorkspaceWindowAddAction(page, 'New Terminal');
-    await browserExpect.poll(() => attached.length).toBe(1);
+    await browserExpect.poll(attached).toHaveLength(1);
     const owner = await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'));
     expect(owner).toBeTruthy();
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
-    await browserExpect.poll(() => attached.length).toBe(2);
-    expect(attached[1]).toBe(attached[0]);
+    await browserExpect.poll(attached).toHaveLength(2);
+    expect(attached()[1]).toBe(attached()[0]);
     expect(await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBe(owner);
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    const opened = page.waitForEvent('popup');
+    await page.evaluate(() => { window.open('about:blank', '_blank'); });
+    const peer = await opened;
+    try {
+      const peerFrames = terminalFrames(peer);
+      await peer.goto(integration.garcon.baseUrl);
+      await browserExpect.poll(() => peerFrames.some(message => message.type === 'terminal-attached'
+        && message.terminal.terminalId === attached()[0])).toBe(true);
+      expect(await peer.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBe(owner);
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+      await browserExpect.poll(() => frames.some(message =>
+        message.type === 'terminal-error' && message.code === 'terminal-takeover-required')).toBe(true);
+      const restoredId = await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'));
+      expect(restoredId).toBeTruthy();
+      expect(restoredId).not.toBe(owner);
+      expect(attached()).toHaveLength(2);
+    } finally { await peer.close(); }
   });
 }, 60_000);
 
@@ -39,11 +64,7 @@ test('a duplicated tab cannot reclaim a terminal from a tab using storage coordi
         },
       });
     });
-    const ownerFrames: TerminalStreamServerMessage[] = [];
-    page.on('websocket', socket => socket.on('framereceived', frame => {
-      const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
-      if (message) ownerFrames.push(message);
-    }));
+    const ownerFrames = terminalFrames(page);
     await page.goto(integration.garcon.baseUrl);
     await clickWorkspaceWindowAddAction(page, 'New Terminal');
     await browserExpect.poll(() => ownerFrames.some(message => message.type === 'terminal-attached')).toBe(true);
@@ -55,11 +76,7 @@ test('a duplicated tab cannot reclaim a terminal from a tab using storage coordi
     const copy = await opened;
     try {
       expect(await copy.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBe(ownerId);
-      const peerFrames: TerminalStreamServerMessage[] = [];
-      copy.on('websocket', socket => socket.on('framereceived', frame => {
-        const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
-        if (message) peerFrames.push(message);
-      }));
+      const peerFrames = terminalFrames(copy);
       await copy.goto(integration.garcon.baseUrl);
       await browserExpect.poll(() => peerFrames.some(message =>
         message.type === 'terminal-error' && message.code === 'terminal-takeover-required',
