@@ -98,7 +98,7 @@ test('retains inline images across chat switches and evicts them when the cache 
       monitor.running = false;
       return monitor.samples;
     });
-    expect(frames.every((frame) => frame.loading === 0 && Math.abs(frame.height - 320) < 1)).toBe(true);
+    expect(frames.filter(frame => frame.loading !== 0 || Math.abs(frame.height - 320) >= 1)).toEqual([]);
     expect(requests).toHaveLength(3);
     await browserExpect(image).toHaveAttribute('src', originalSource!);
     expect(await composer.evaluate((element, original) => element === original, originalComposer)).toBe(true);
