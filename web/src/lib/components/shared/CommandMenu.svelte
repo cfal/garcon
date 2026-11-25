@@ -11,7 +11,7 @@
 
 <script lang="ts">
 	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
-	import { flushSync, untrack } from 'svelte';
+	import { flushSync } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
@@ -44,7 +44,9 @@
 	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
 	let optionList = $state<HTMLDivElement>();
-	let Fuse = $state.raw<typeof import('fuse.js').default>();
+	type FuseConstructor = typeof import('fuse.js').default;
+	let loadedFuse: FuseConstructor | undefined;
+	let Fuse = $state.raw<FuseConstructor>();
 	let opener: HTMLElement | null = null;
 
 	let commandContext = $derived(commandRegistry.context());
@@ -81,10 +83,8 @@
 	let filteredCommands = $derived.by(() => {
 		const needle = query.trim().toLowerCase();
 		if (needle) {
-			// A late import takes effect on the next edit, not under a pending click or Enter.
-			const index = untrack(() => fuse);
-			if (index)
-				return index.search(query, { limit: searchResultLimit }).map((result) => result.item);
+			if (fuse)
+				return fuse.search(query, { limit: searchResultLimit }).map((result) => result.item);
 			return commands
 				.filter((command) =>
 					[command.label, command.description, categoryLabels[command.category]()].some((field) =>
@@ -111,14 +111,16 @@
 	}
 
 	function handleQueryInput(e: Event) {
+		// A late import takes effect on the next edit, not under a pending click or Enter.
+		Fuse = loadedFuse;
 		query = (e.target as HTMLInputElement).value;
 		selectedIndex = 0;
 	}
 
 	function open() {
-		if (!Fuse) {
+		if (!loadedFuse) {
 			void loadFuse().then(
-				({ default: SearchIndex }) => { Fuse = SearchIndex; },
+				({ default: SearchIndex }) => { loadedFuse = SearchIndex; },
 				(error: unknown) => console.warn('Fuzzy command search failed to load:', error),
 			);
 		}
