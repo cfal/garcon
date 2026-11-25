@@ -12,6 +12,10 @@ const responseTokens = new WeakMap<Response, string | null>();
 
 export type ApiFetchOptions = RequestInit & { timeoutMs?: number | null };
 
+export function withDefaultTimeout(options: ApiFetchOptions | undefined, timeoutMs: number | null): ApiFetchOptions {
+	return options?.timeoutMs === undefined ? { ...options, timeoutMs } : options;
+}
+
 /** Merges a default timeout signal with any caller-provided signal unless disabled. */
 function withTimeout(
 	options: RequestInit,
@@ -26,7 +30,7 @@ function withTimeout(
 	};
 }
 
-/** Wraps fetch with Authorization header, JSON content type for request bodies,
+/** Wraps fetch with Authorization header, JSON content type for non-form request bodies,
  *  and a configurable timeout (default 30s). */
 export async function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Response> {
 	if (!canDispatchAuthenticated())
@@ -35,7 +39,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}): Prom
 	const token = getAuthToken();
 
 	const headers = new Headers(fetchOptions.headers);
-	if (fetchOptions.body != null && !headers.has('Content-Type')) {
+	if (fetchOptions.body != null && !(fetchOptions.body instanceof FormData) && !headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');
 	}
 	if (token && !headers.has('Authorization')) {

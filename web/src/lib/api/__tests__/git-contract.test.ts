@@ -592,7 +592,9 @@ describe('git API contract', () => {
 		expect(body.message).toBe('feat: add login');
 	});
 
-	it('generateCommitMessage posts only project and files', async () => {
+	it('generateCommitMessage posts the executor, project and files with its default deadline', async () => {
+		const timeout = vi.spyOn(AbortSignal, 'timeout');
+		const caller = new AbortController();
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				message: 'src/app: feat: add login',
@@ -603,6 +605,7 @@ describe('git API contract', () => {
 		const result = await generateCommitMessage(
 			{ executorId: 'remote-executor', projectPath: '/project' },
 			['src/app/login.ts'],
+			{ signal: caller.signal, timeoutMs: undefined },
 		);
 
 		expect(result.message).toBe('src/app: feat: add login');
@@ -615,6 +618,10 @@ describe('git API contract', () => {
 			project: '/project',
 			files: ['src/app/login.ts'],
 		});
+		expect(timeout).toHaveBeenCalledWith(120_000);
+		expect(opts.signal.aborted).toBe(false);
+		caller.abort();
+		expect(opts.signal.aborted).toBe(true);
 	});
 
 	it('gitStagePaths sends POST with project, paths, and mode', async () => {
