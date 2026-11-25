@@ -49,9 +49,18 @@ type MutableTransactionRecord = {
 	-readonly [Key in keyof VirtualTransactionRecord]: VirtualTransactionRecord[Key];
 };
 type CapturedAnchor =
-	| { kind: 'item'; key: string; nextKey: string; index: number; start: number; viewportOffset?: number }
+	| {
+			kind: 'item';
+			key: string;
+			nextKey: string;
+			index: number;
+			start: number;
+			viewportOffset?: number;
+	  }
 	| { kind: 'end' }
 	| { kind: 'none' };
+
+const SCROLL_EDGE_TOLERANCE_PX = 1;
 
 export interface VirtualListTransactionOptions {
 	readonly environment: VirtualListEnvironment;
@@ -155,8 +164,10 @@ export class VirtualListTransaction {
 		const pendingCommit = this.#pendingCommit;
 		if (pendingCommit?.measurementAnchor?.kind === 'item') {
 			const key = pendingCommit.measurementAnchor.key;
-			const nextKey = mutation.anchor.kind === 'item-remap' && mutation.anchor.oldKey === key
-				? mutation.anchor.newKey : key;
+			const nextKey =
+				mutation.anchor.kind === 'item-remap' && mutation.anchor.oldKey === key
+					? mutation.anchor.newKey
+					: key;
 			if (this.geometry.indexOf(nextKey) === undefined) delete pendingCommit.measurementAnchor;
 			else if (nextKey !== key) pendingCommit.measurementAnchor = { kind: 'item', key: nextKey };
 		}
@@ -181,17 +192,13 @@ export class VirtualListTransaction {
 			correction = 0;
 		}
 
-		const provenance = anchor.kind === 'end' ? 'follow' : 'measurement';
 		this.#applyCorrection({
 			source: 'items',
-			provenance,
-			anchor: mutation.anchor,
-			anchorIndex: anchor.kind === 'item' ? anchor.index : null,
-			anchorStart: anchor.kind === 'item' ? anchor.start - this.#deviation.value : null,
+			anchor,
+			mutationAnchor: mutation.anchor,
 			correction,
 			dom,
 			started,
-			followEnd: anchor.kind === 'end',
 		});
 		return { kind: 'applied' };
 	}
@@ -216,7 +223,7 @@ export class VirtualListTransaction {
 		);
 		this.#driver?.recordIgnoredEntries(measurements.length - accepted.length);
 		if (accepted.length === 0) return;
-		const dom = this.#driver?.read() ?? this.#lastDom;
+		let dom = this.#driver?.read() ?? this.#lastDom;
 		const started = this.options.environment.now();
 		const firstMeasurements = new Set<string>();
 		for (const measurement of accepted) {
@@ -228,29 +235,35 @@ export class VirtualListTransaction {
 			return;
 		}
 		const anchor = this.#captureMeasurementAnchor(dom, firstMeasurements);
-		// A zoomed pane can attain a fractional bottom beyond its integer CSSOM maximum.
-		const roundedBottom = dom && !dom.inPhysicalBounds && this.#activity === 'idle' &&
-			anchor.kind === 'item' && anchor.viewportOffset !== undefined &&
-			dom.scrollTop > dom.physicalMaximum && dom.scrollTop <= dom.physicalMaximum + 1;
-		const measurementDom = roundedBottom ? { ...dom, inPhysicalBounds: true } : dom;
 		const { delta, changedCount } = this.geometry.measureMany(accepted);
-		const start = anchor.kind === 'item' ? this.geometry.item(anchor.index)!.start : 0;
-		const correction = anchor.kind === 'end' ? delta : anchor.kind === 'item' ? start - anchor.start : 0;
-		// The seek is a destination, not a geometry change to restore on cancellation.
-		const exactOffset = changedCount > 0 && anchor.kind === 'item' && anchor.viewportOffset !== undefined &&
-			measurementDom?.inPhysicalBounds && this.#deviation.value === 0 && this.#activity === 'idle'
-			? start - anchor.viewportOffset : undefined;
+		let correction = 0;
+		let exactOffset: number | undefined;
+		if (anchor.kind === 'end') {
+			correction = delta;
+		} else if (anchor.kind === 'item') {
+			const start = this.geometry.item(anchor.index)!.start;
+			correction = start - anchor.start;
+			if (anchor.viewportOffset !== undefined && this.#activity === 'idle' && dom) {
+				// A zoomed pane can attain a fractional bottom beyond its integer CSSOM maximum.
+				if (
+					!dom.inPhysicalBounds && dom.scrollTop > dom.physicalMaximum &&
+					dom.scrollTop <= dom.physicalMaximum + SCROLL_EDGE_TOLERANCE_PX
+				) {
+					dom = { ...dom, inPhysicalBounds: true };
+				}
+				// Cancellation restores only the relative correction, never this destination.
+				if (changedCount > 0 && dom.inPhysicalBounds && this.#deviation.value === 0) {
+					exactOffset = start - anchor.viewportOffset;
+				}
+			}
+		}
 		this.#applyCorrection({
 			source,
-			provenance: anchor.kind === 'end' ? 'follow' : 'measurement',
-			anchor: anchor.kind === 'item' ? { kind: 'item', key: anchor.key } : anchor,
-			anchorIndex: anchor.kind === 'item' ? anchor.index : null,
-			anchorStart: anchor.kind === 'item' ? anchor.start - this.#deviation.value : null,
+			anchor,
 			correction,
 			exactOffset,
-			dom: measurementDom,
+			dom,
 			started,
-			followEnd: anchor.kind === 'end',
 		});
 	}
 
@@ -289,17 +302,12 @@ export class VirtualListTransaction {
 			clampedRemainder = this.#lastLogicalOffset - desired;
 		}
 
-		const anchor = this.#captureMeasurementAnchor(this.#lastDom);
 		this.#applyCorrection({
 			source: 'viewport',
-			provenance: anchor.kind === 'end' ? 'follow' : 'measurement',
-			anchor: anchor.kind === 'item' ? { kind: 'item', key: anchor.key } : anchor,
-			anchorIndex: anchor.kind === 'item' ? anchor.index : null,
-			anchorStart: anchor.kind === 'item' ? anchor.start - this.#deviation.value : null,
+			anchor: this.#captureMeasurementAnchor(this.#lastDom),
 			correction,
 			dom,
 			started,
-			followEnd: anchor.kind === 'end',
 			clampedRemainder,
 		});
 	}
@@ -474,24 +482,27 @@ export class VirtualListTransaction {
 
 	#applyCorrection(input: {
 		source: VirtualTransactionSource;
-		provenance: VirtualCorrectionProvenance;
-		anchor: VirtualMutationAnchor;
-		anchorIndex: number | null;
-		anchorStart: number | null;
+		anchor: CapturedAnchor;
+		mutationAnchor?: VirtualMutationAnchor;
 		correction: number;
 		exactOffset?: number;
 		dom: VirtualDomGeometry | null;
 		started: number;
-		followEnd: boolean;
 		clampedRemainder?: number;
 	}): void {
+		const { anchor } = input;
+		const mutationAnchor: VirtualMutationAnchor =
+			input.mutationAnchor ?? (anchor.kind === 'item' ? { kind: 'item', key: anchor.key } : anchor);
+		const correctionProvenance = anchor.kind === 'end' ? 'follow' : 'measurement';
 		const pendingCorrection = this.#pendingCommit;
 		const pendingNavigation = pendingCorrection?.provenance === 'navigation';
-		const provenance = pendingNavigation ? 'navigation' : input.provenance;
+		const provenance = pendingNavigation ? 'navigation' : correctionProvenance;
 		const source = pendingNavigation ? pendingCorrection.source : input.source;
-		const record = this.#record(source, provenance, input.anchor, input.dom, input.started);
-		record.anchorIndex = input.anchorIndex;
-		record.anchorPaintedStartBefore = input.anchorStart;
+		const record = this.#record(source, provenance, mutationAnchor, input.dom, input.started);
+		if (anchor.kind === 'item') {
+			record.anchorIndex = anchor.index;
+			record.anchorPaintedStartBefore = anchor.start - this.#deviation.value;
+		}
 		record.correction = input.correction;
 		record.clampedRemainder = input.clampedRemainder ?? 0;
 		const decision = applyVirtualCorrection({
@@ -504,8 +515,8 @@ export class VirtualListTransaction {
 		});
 		this.#setDeviation(decision.state);
 		record.deviationAfter = decision.state.value;
-		if (input.anchor.kind === 'item' || input.anchor.kind === 'item-remap') {
-			const key = input.anchor.kind === 'item' ? input.anchor.key : input.anchor.newKey;
+		if (mutationAnchor.kind === 'item' || mutationAnchor.kind === 'item-remap') {
+			const key = mutationAnchor.kind === 'item' ? mutationAnchor.key : mutationAnchor.newKey;
 			const index = this.geometry.indexOf(key);
 			const item = index === undefined ? undefined : this.geometry.item(index);
 			record.anchorPaintedStartAfter = item ? item.start - decision.state.value : null;
@@ -531,7 +542,7 @@ export class VirtualListTransaction {
 
 		const amount = decision.kind === 'redeem' ? decision.amount : 0;
 		let target: PendingTarget;
-		if (input.followEnd || pendingCorrection?.target.kind === 'end') {
+		if (anchor.kind === 'end' || pendingCorrection?.target.kind === 'end') {
 			target = { kind: 'end' };
 		} else if (input.exactOffset !== undefined) {
 			target = { kind: 'logical', offset: input.exactOffset };
@@ -542,7 +553,11 @@ export class VirtualListTransaction {
 			const from = input.dom && pendingCorrection
 				? this.#physicalOffsetForTarget(pendingCorrection.target, input.dom)
 				: (input.dom?.scrollTop ?? 0);
-			target = { kind: 'relative', offset: from + amount, leadingOffset: input.dom?.leadingOffset ?? 0 };
+			target = {
+				kind: 'relative',
+				offset: from + amount,
+				leadingOffset: input.dom?.leadingOffset ?? 0,
+			};
 		}
 		this.#publish(
 			input.dom,
@@ -551,11 +566,12 @@ export class VirtualListTransaction {
 			input.dom ? this.#logicalOffsetForTarget(target, input.dom) : undefined,
 		);
 		record.redeemed = decision.kind === 'redeem';
-		const measurementAnchor: VirtualMutationAnchor = input.anchor.kind === 'item-remap'
-			? { kind: 'item', key: input.anchor.newKey }
-			: input.source !== 'items' && input.anchor.kind === 'none'
-				? pendingCorrection?.measurementAnchor ?? input.anchor
-				: input.anchor;
+		let measurementAnchor = mutationAnchor;
+		if (mutationAnchor.kind === 'item-remap') {
+			measurementAnchor = { kind: 'item', key: mutationAnchor.newKey };
+		} else if (input.source !== 'items' && mutationAnchor.kind === 'none') {
+			measurementAnchor = pendingCorrection?.measurementAnchor ?? mutationAnchor;
+		}
 		const restoreValue = (pendingCorrection?.restoreDeviation?.value ?? 0) + amount;
 		this.#queueCommit({
 			revision: this.#snapshot.revision,
@@ -564,8 +580,10 @@ export class VirtualListTransaction {
 			target,
 			measurementAnchor,
 			barriers: 0,
-			restoreDeviation: pendingNavigation || Math.abs(restoreValue) < Number.EPSILON
-				? null : { value: restoreValue, pendingSince: input.started },
+			restoreDeviation:
+				pendingNavigation || Math.abs(restoreValue) < Number.EPSILON
+					? null
+					: { value: restoreValue, pendingSince: input.started },
 			record,
 		});
 	}
@@ -779,10 +797,12 @@ export class VirtualListTransaction {
 		commit.record.intendedScrollTop = intended;
 		commit.record.leadingOffsetAfter = dom.leadingOffset;
 		commit.record.published = true;
+		const atRoundedBottom =
+			intended === dom.physicalMaximum && Math.abs(intended - dom.scrollTop) <= SCROLL_EDGE_TOLERANCE_PX;
 		if (
-			commit.provenance === 'measurement' && commit.target.kind === 'logical' &&
-			(intended === dom.scrollTop ||
-				(intended === dom.physicalMaximum && Math.abs(intended - dom.scrollTop) <= 1))
+			commit.provenance === 'measurement' &&
+			commit.target.kind === 'logical' &&
+			(intended === dom.scrollTop || atRoundedBottom)
 		) {
 			commit.record.attainedScrollTop = dom.scrollTop;
 			commit.record.clampedRemainder += intended - dom.scrollTop;
@@ -897,8 +917,11 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 function wasPhysicallyClamped(previous: VirtualDomGeometry, current: VirtualDomGeometry): boolean {
 	const attainable = clamp(previous.scrollTop, 0, current.physicalMaximum);
-	return previous.scrollTop !== current.scrollTop && previous.scrollTop !== attainable &&
-		Math.abs(current.scrollTop - attainable) <= 1;
+	return (
+		previous.scrollTop !== current.scrollTop &&
+		previous.scrollTop !== attainable &&
+		Math.abs(current.scrollTop - attainable) <= SCROLL_EDGE_TOLERANCE_PX
+	);
 }
 
 function rangesEqual(left: VirtualRange | null, right: VirtualRange | null): boolean {
