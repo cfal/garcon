@@ -185,13 +185,13 @@
 			.filter((entry): entry is { index: number; command: SlashCommand } => Boolean(entry.command)),
 	);
 
-	// Resets selectedIndex when the filtered results change.
+	// Resets selection on open and when visible results change.
 	$effect(() => {
-		filteredCommands;
+		if (!isVisible) return;
+		void filteredCommands;
 		selectedIndex = 0;
 		untrack(() => {
-			if (!listElement) return;
-			listElement.scrollTop = 0;
+			if (listElement) listElement.scrollTop = 0;
 			virtualWindow.scrollTop = 0;
 		});
 	});
