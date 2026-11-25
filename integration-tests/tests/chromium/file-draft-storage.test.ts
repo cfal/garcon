@@ -291,37 +291,24 @@ describe('File draft storage', () => {
           savedAt: 1,
           checkpointId: 'original',
         };
-        const replacement = { ...original, checkpointId: 'replacement' };
-        const newer = { ...original, checkpointId: 'newer' };
+        const newer = { ...original, checkpointId: 'newer', content: 'different edit' };
         try {
           await peer.putDraft(original);
-          const unopened = await repository.snapshotDraftVersion(documentId);
-          await repository.getDrafts('user', 'deployment');
-          const observation = repository.snapshotDraftVersion(documentId);
-          await peer.putDraft(replacement);
-          const observed = await observation;
-          await repository.deleteDraft(documentId, current =>
-            current.checkpointId === observed?.checkpointId && current.content === original.content,
-          );
-          const preserved = await repository.snapshotDraftVersion(documentId);
-
           let writing: Promise<void> | undefined;
           await repository.deleteDraft(documentId, current => {
             writing = peer.putDraft(newer);
-            return current.checkpointId === preserved?.checkpointId;
+            return current.content === original.content;
           });
           await writing;
+          await repository.deleteDraft(documentId, current => current.content === original.content);
           const retained = await repository.getDraft(documentId);
           await repository.deleteDraft(documentId, current =>
             current.checkpointId === newer.checkpointId && current.content === newer.content,
           );
           return {
-            unopened,
-            observed: observed?.checkpointId,
-            preserved: preserved?.checkpointId,
             retained: retained?.checkpointId,
             body: await repository.getDraft(documentId),
-            summary: await repository.snapshotDraftVersion(documentId),
+            summaries: await repository.getDrafts('user', 'deployment'),
           };
         } finally {
           repository.close();
@@ -329,12 +316,9 @@ describe('File draft storage', () => {
         }
       }, source);
       expect(result).toEqual({
-        unopened: null,
-        observed: 'original',
-        preserved: 'replacement',
         retained: 'newer',
         body: null,
-        summary: null,
+        summaries: [],
       });
     }));
 

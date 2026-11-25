@@ -2266,7 +2266,7 @@ describe('FileSessionRegistry', () => {
 });
 
 describe('best-effort file recovery', () => {
-	it('saves without waiting for a stalled recovery snapshot', async () => {
+	it('saves without waiting for checkpoint cleanup', async () => {
 		const repository = createMemoryFileDraftRepository();
 		const harness = createHarness({ draftRepository: repository });
 		const session = await harness.registry.open(request('file.txt'));
@@ -2274,25 +2274,29 @@ describe('best-effort file recovery', () => {
 		await vi.waitFor(() => expect(session.loading).toBe(false));
 		const draft = storedDraft('agreed edit');
 		await repository.putDraft(draft);
-		const version = await repository.snapshotDraftVersion(draft.documentId);
-		const pending = Promise.withResolvers<typeof version>();
-		vi.spyOn(repository, 'snapshotDraftVersion').mockReturnValueOnce(pending.promise);
+		const pending = Promise.withResolvers<void>();
+		const remove = repository.deleteDraft.bind(repository);
+		vi.spyOn(repository, 'deleteDraft').mockImplementationOnce(async (...args) => {
+			await pending.promise;
+			return remove(...args);
+		});
 
 		try {
 			session.content = draft.content;
 			const saving = harness.registry.save(session.id);
 			await vi.waitFor(() => expect(harness.saveText).toHaveBeenCalledOnce());
 			await expect(saving).resolves.toBe(true);
-			pending.resolve(version);
-			await harness.registry.flushRecovery();
 			expect(await recoveredContent(repository)).toBe(draft.content);
+			pending.resolve();
+			await harness.registry.flushRecovery();
+			expect(await recoveredContent(repository)).toBeUndefined();
 		} finally {
-			pending.resolve(version);
+			pending.resolve();
 			await harness.registry.destroyAll();
 		}
 	});
 
-	it.each(['same', 'different', 'replacement'] as const)(
+	it.each(['same', 'different', 'replacement-same', 'replacement-different'] as const)(
 		'cleans up only the peer checkpoint represented by the successful save (%s)',
 		async (scenario) => {
 			const repository = createMemoryFileDraftRepository();
@@ -2311,10 +2315,10 @@ describe('best-effort file recovery', () => {
 			current.saveText.mockReturnValueOnce(reply.promise);
 			const saving = current.registry.save(opening.id);
 			await vi.waitFor(() => expect(current.saveText).toHaveBeenCalledOnce());
-			if (scenario === 'replacement') {
+			if (scenario === 'replacement-same' || scenario === 'replacement-different') {
 				const [checkpoint] = await repository.getDrafts('test-user', 'test-deployment');
 				await repository.putDraft({
-					...storedDraft('agreed edit'),
+					...storedDraft(scenario === 'replacement-same' ? 'agreed edit' : 'different edit'),
 					savedAt: checkpoint.savedAt,
 					checkpointId: 'replacement',
 				});
@@ -2330,11 +2334,10 @@ describe('best-effort file recovery', () => {
 
 			const fresh = createHarness({ draftRepository: repository });
 			await fresh.registry.ready();
-			expect(fresh.registry.recoveredDrafts).toHaveLength(scenario === 'same' ? 0 : 1);
-			expect(await recoveredContent(repository)).toBe(
-				scenario === 'same' ? undefined : scenario === 'different' ? 'different edit' : 'agreed edit',
-			);
-			if (scenario === 'replacement')
+			const keep = scenario === 'different' || scenario === 'replacement-different';
+			expect(fresh.registry.recoveredDrafts).toHaveLength(keep ? 1 : 0);
+			expect(await recoveredContent(repository)).toBe(keep ? 'different edit' : undefined);
+			if (scenario === 'replacement-different')
 				expect(fresh.registry.recoveredDrafts[0]?.checkpointId).toBe('replacement');
 			await fresh.registry.destroyAll();
 			await current.registry.destroyAll();
