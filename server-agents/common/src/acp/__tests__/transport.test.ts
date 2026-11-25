@@ -59,7 +59,7 @@ describe('AcpTransport', () => {
     const transport = await connectedTransport(proc, 50);
     const onSent = mock();
 
-    const result = transport.request('echo', undefined, onSent);
+    const result = transport.request('echo', undefined, { onSent });
     expect(onSent).toHaveBeenCalledTimes(1);
     writeStdout(proc.stdout, { jsonrpc: '2.0', id: 1, result: { ok: true } });
     await expect(result).resolves.toEqual({ ok: true });
@@ -71,15 +71,16 @@ describe('AcpTransport', () => {
     const transport = await connectedTransport(proc, 1000);
     const order: string[] = [];
     transport.onRpcMessage(() => order.push('update'));
-    const prompt = transport.request('session/prompt', {}, () => order.push('sent'));
+    const prompt = transport.request('session/prompt', {}, { onSent: () => order.push('sent'), onReply: () => order.push('reply') });
     writeStdout(proc.stdout, { jsonrpc: '2.0', method: 'session/update' });
     writeStdout(proc.stdout, { jsonrpc: '2.0', id: 1, result: {} });
+    writeStdout(proc.stdout, { jsonrpc: '2.0', method: 'session/update' });
     proc.stdout.close();
     await Bun.sleep(0);
     expect(order).toEqual([]);
     flush.resolve(0);
     await prompt;
-    expect(order).toEqual(['sent', 'update']);
+    expect(order).toEqual(['sent', 'update', 'reply', 'update']);
     expect(transport.isConnected).toBe(false);
   });
 
@@ -90,7 +91,7 @@ describe('AcpTransport', () => {
     const order: string[] = [];
     transport.onRpcMessage(() => order.push('update'));
     const exit = new Promise<number>(resolve => transport.onExit(resolve));
-    const prompt = transport.request('session/prompt', {}, () => order.push('sent'), 0);
+    const prompt = transport.request('session/prompt', {}, { onSent: () => order.push('sent'), timeoutMs: 0 });
     const results = Promise.allSettled([prompt, transport.request('unanswered')]);
     writeStdout(proc.stdout, { method: 'session/update' });
     proc.stdout.enqueue(new TextEncoder().encode(JSON.stringify({ id: 1, result: 'final reply' })));
@@ -170,7 +171,7 @@ describe('AcpTransport', () => {
     transport.onStderr(() => seen.push('stderr'));
     try {
       const size = 4 * 1024 * 1024;
-      expect(await transport.request<number>('session/prompt', 'p'.repeat(size), () => seen.push('sent'))).toBeGreaterThan(size);
+      expect(await transport.request<number>('session/prompt', 'p'.repeat(size), { onSent: () => seen.push('sent') })).toBeGreaterThan(size);
       expect(seen).toEqual(['sent', ...Array(512).fill(channel)]);
     } finally {
       transport.close();
@@ -182,7 +183,7 @@ describe('AcpTransport', () => {
     const proc = createProcess(() => flush.promise);
     const transport = await connectedTransport(proc, 10);
     const sent = mock();
-    const prompt = transport.request('session/prompt', {}, sent, 0);
+    const prompt = transport.request('session/prompt', {}, { onSent: sent, timeoutMs: 0 });
     const watchdog = setTimeout(() => transport.close(), 500);
     try {
       await expect(prompt).rejects.toThrow('ACP frame write timed out');
@@ -202,7 +203,7 @@ describe('AcpTransport', () => {
     const sent = mock();
     const rpc = mock();
     transport.onRpcMessage(rpc);
-    const prompt = transport.request('session/prompt', {}, sent);
+    const prompt = transport.request('session/prompt', {}, { onSent: sent });
     writeStdout(proc.stdout, { method: 'session/update' });
     proc.stdout.enqueue(new Uint8Array(5 * 1024 * 1024));
     try {
@@ -221,7 +222,7 @@ describe('AcpTransport', () => {
     const transport = await connectedTransport(proc, 1000);
     const onSent = mock();
     proc.process.stdin.write.mockReturnValueOnce(2);
-    await expect(transport.request('session/prompt', {}, onSent)).rejects.toThrow('Incomplete ACP frame write');
+    await expect(transport.request('session/prompt', {}, { onSent })).rejects.toThrow('Incomplete ACP frame write');
     expect(onSent).not.toHaveBeenCalled();
     expect(proc.process.kill).toHaveBeenCalledTimes(1);
   });
@@ -231,7 +232,7 @@ describe('AcpTransport', () => {
     const proc = createProcess(() => flush.promise);
     const transport = await connectedTransport(proc, 1000);
     const onSent = mock();
-    const prompt = transport.request('session/prompt', {}, onSent);
+    const prompt = transport.request('session/prompt', {}, { onSent });
     transport.close();
     flush.resolve(0);
     await expect(prompt).rejects.toThrow('closed');
@@ -249,7 +250,7 @@ describe('AcpTransport', () => {
     const proc = createProcess(async () => 0);
     const transport = await connectedTransport(proc, 5);
 
-    const result = transport.request('session/prompt', undefined, () => {}, 0);
+    const result = transport.request('session/prompt', undefined, { onSent: () => {}, timeoutMs: 0 });
     await new Promise((resolve) => setTimeout(resolve, 20));
     writeStdout(proc.stdout, { jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } });
     await expect(result).resolves.toEqual({ stopReason: 'end_turn' });

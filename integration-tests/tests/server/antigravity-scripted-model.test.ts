@@ -210,10 +210,10 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     const { model } = requireEnvironment();
     const hash = marker('HASH');
     const half = Math.floor(hash.length / 2);
-    // Each text boundary falls inside Markdown, as a streamed answer's can.
+    // Leading indentation and Markdown spanning chunk boundaries must both survive.
     model.scriptTurn([
       geminiThought('Checking the merge.'),
-      geminiText('- **Merged:** at `'),
+      geminiText('    deploy --dry-run\n\n- **Merged:** at `'),
       geminiThought(' Then the deploy.'),
       geminiText(hash.slice(0, half)),
       geminiThought(' Then the status.'),
@@ -229,9 +229,12 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       }));
       await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, afterIndex: cursor });
       const messages = (await fixture.client.getMessages(chatId)).messages;
-      expect(assistantContents(messages)).toEqual([`- **Merged:** at \`${hash}\`.\n- **Deployed:** **Not started**.`]);
-      // Where thinking rows split depends on how agy batches the frames.
-      expect(messagesOfType(messages, 'thinking').map((message) => message.content).join(' '))
+      expect(assistantContents(messages)).toEqual([`    deploy --dry-run\n\n- **Merged:** at \`${hash}\`.\n- **Deployed:** **Not started**.`]);
+      const output = messages.map(({ message }) => message)
+        .filter((message) => message.type === 'thinking' || message.type === 'assistant-message');
+      expect(output.at(-1)?.type).toBe('assistant-message');
+      // agy may batch thoughts differently, but their text and order are unchanged.
+      expect(messagesOfType(messages, 'thinking').map((message) => message.content).join(''))
         .toBe('Checking the merge. Then the deploy. Then the status. Done.');
       model.assertSettled();
     }, withScriptedAntigravity());

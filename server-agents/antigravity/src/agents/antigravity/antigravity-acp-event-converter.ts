@@ -27,6 +27,7 @@ const WARNING_MARKER = '\n⚠ ';
 const EXECUTOR_ERROR = 'agent executor error: ';
 interface SessionState {
   assistantText: string;
+  answerStarted: boolean;
   thinkingText: string;
   readonly failure: AcpInBandFailure;
   // Tool rows and results already published; kept across turns because a
@@ -77,6 +78,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
   beginTurn(sessionId: string): void {
     const session = this.#sessionFor(sessionId);
     session.assistantText = '';
+    session.answerStarted = false;
     session.thinkingText = '';
     session.failure.reset();
   }
@@ -100,10 +102,11 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const updateType = asString(update.sessionUpdate);
     const outputType = acpOutputUpdateType(update, (id) => session.emittedToolIds.has(id)
       || session.deferredCalls.has(id) || session.completedToolIds.has(id) || session.toolNames.has(id));
-    session.assistantText += session.failure.continueOn(outputType);
+    const restored = session.failure.continueOn(outputType);
     // New output publishes waiting rows first, so nothing moves ahead of a call
     // that started earlier.
     const waiting = this.#emitDeferred(session, update, outputType, context.timestamp);
+    if (restored) waiting.push(...this.#appendAnswer(session, restored, context.timestamp));
     return [...waiting, ...this.#convertUpdate(session, update, updateType, context)];
   }
 
@@ -114,20 +117,9 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     context: AcpSessionUpdateContext,
   ): ChatMessage[] {
     switch (updateType) {
-      // An answer stays one buffer until a tool frame or the turn's end. agy
-      // forwards thought parts wherever the model streams them, including
-      // between chunks of one answer; publishing on every switch made each chunk
-      // its own row and broke Markdown that spans chunks. Thinking that precedes
-      // the answer is still published when the answer starts, so a long answer
-      // does not hide it.
-      // A whole `agent_message` carries the same content as a run of chunks.
       case 'agent_message':
-      case 'agent_message_chunk': {
-        const answerStarted = session.assistantText.trim() !== '';
-        const flushed = !answerStarted && session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
-        session.assistantText += session.failure.offer(acpContentText(update.content));
-        return flushed;
-      }
+      case 'agent_message_chunk':
+        return this.#appendAnswer(session, session.failure.offer(acpContentText(update.content)), context.timestamp);
       case 'agent_thought_chunk':
         session.thinkingText += acpContentText(update.content);
         return [];
@@ -271,14 +263,25 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     }
   }
 
-  #flush(session: SessionState, timestamp: string): ChatMessage[] {
-    const messages: ChatMessage[] = [];
-    const thinking = session.thinkingText.trim();
-    const assistant = session.assistantText.trim();
-    if (thinking) messages.push(new ThinkingMessage(timestamp, thinking));
-    if (assistant) messages.push(new AssistantMessage(timestamp, assistant));
+  #appendAnswer(session: SessionState, text: string, timestamp: string): ChatMessage[] {
+    session.assistantText += text;
+    if (session.answerStarted || !/\S/.test(text)) return [];
+    // Leading thinking becomes visible now; later thoughts must not split the buffered Markdown.
+    session.answerStarted = true;
+    return this.#flushThinking(session, timestamp);
+  }
+
+  #flushThinking(session: SessionState, timestamp: string): ChatMessage[] {
+    const thinking = session.thinkingText;
     session.thinkingText = '';
+    return /\S/.test(thinking) ? [new ThinkingMessage(timestamp, thinking)] : [];
+  }
+
+  #flush(session: SessionState, timestamp: string): ChatMessage[] {
+    const messages = this.#flushThinking(session, timestamp);
+    if (session.answerStarted) messages.push(new AssistantMessage(timestamp, session.assistantText));
     session.assistantText = '';
+    session.answerStarted = false;
     return messages;
   }
 
@@ -287,6 +290,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     if (existing) return existing;
     const created: SessionState = {
       assistantText: '',
+      answerStarted: false,
       thinkingText: '',
       failure: new AcpInBandFailure(splitExecutorError),
       emittedToolIds: new Set(),

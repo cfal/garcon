@@ -2,12 +2,8 @@ import type { PermissionDecisionPayload } from '@garcon/common/chat-command-cont
 import type { PermissionMode } from '@garcon/common/chat-modes';
 import type { AgentRuntimeOperation } from '../execution/runtime-events.js';
 import type { AcpClient } from './client.js';
-import type {
-  AcpJsonRpcId,
-  AcpSessionConfigOption,
-  AcpSessionModelState,
-  AcpSessionPromptResult,
-} from './protocol.js';
+import type { AcpJsonRpcId, AcpSessionConfigOption, AcpSessionModelState } from './protocol.js';
+import type { AcpTurnPrompts } from './turn-prompts.js';
 
 export type RuntimeSessionState = 'idle' | 'running' | 'failed' | 'aborted';
 
@@ -49,20 +45,11 @@ export interface AcpTurnContext {
   completed: boolean;
   aborted: boolean;
   sourceRetired: boolean;
+  finalResponseText: string | null;
+  reportedFailure: boolean;
   readonly settled: PromiseWithResolvers<void>;
   cancelTimer: ReturnType<typeof setTimeout> | null;
-  // Prompts of this turn the agent has not settled. Each steer adds one.
-  readonly openPrompts: Set<Promise<AcpSessionPromptResult>>;
-  // Steers between their target check and the agent's decision. They hold the
-  // turn open, so a steer recorded in the transcript still reaches the agent.
-  steersInFlight: number;
-  // Held by one steer at a time, from its checks to the agent's decision.
-  steerSlot: Promise<void> | null;
-  // The failure of the turn's last settled prompt, unless that was a refused steer.
-  promptFailure: { readonly error: unknown } | null;
-  // Resolved, and `promptsClosed` set, once no prompt is open and no steer is in flight.
-  readonly promptsDrained: PromiseWithResolvers<void>;
-  promptsClosed: boolean;
+  readonly prompts: AcpTurnPrompts;
 }
 
 type AcpRuntimeSessionIdentity = Pick<AcpAgentRuntimeSession,

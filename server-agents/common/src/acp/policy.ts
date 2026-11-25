@@ -1,5 +1,6 @@
 import type { AcpClient } from './client.js';
-import type { AcpInitializeParams, AcpSessionConfigOption, AcpSessionModelState } from './protocol.js';
+import type { AcpRpcError } from './errors.js';
+import type { AcpInitializeParams, AcpSessionConfigOption, AcpSessionModelState, AcpSessionPromptResult } from './protocol.js';
 import type { AcpResumeRequest, AcpStartRequest } from './runtime-types.js';
 import { createArtificialNativePath } from '../chats/artificial-native-path.js';
 import { buildEnvFallback, buildPromptFallback } from './runtime-helpers.js';
@@ -26,17 +27,17 @@ export interface AcpSessionStatePatch {
   models?: AcpSessionModelState;
 }
 
+export interface AcpSteeringProtocol {
+  likelySuperseded(result: AcpSessionPromptResult): boolean;
+  refused(error: AcpRpcError): boolean;
+}
+
 export interface AcpAgentPolicy {
   agentId: string;
   command: string | (() => string);
   args?: string[];
   abortStrategy?: AcpAbortStrategy;
-  // The agent folds a `session/prompt` sent during a running turn into that
-  // turn: it settles the earlier prompt at once, carries the new input into the
-  // turn's next model request, and settles the new prompt when the turn ends.
-  // While the turn waits for a permission answer it refuses the new prompt
-  // with an error and keeps running the earlier one.
-  steersWithOverlappingPrompts?: boolean;
+  readonly steering?: AcpSteeringProtocol;
   // Agents with native accept-edits mode decide edits themselves.
   acceptsEditsOnClient?: boolean;
   authenticateMethodId?: string | (() => string);

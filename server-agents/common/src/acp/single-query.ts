@@ -43,7 +43,7 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
   const abort = () => client.close();
   options.signal.addEventListener('abort', abort, { once: true });
 
-  client.onRpcMessage((message) => {
+  const detach = client.onRpcMessage((message) => {
     if (message.method === 'session/request_permission' && isJsonRpcId(message.id)) {
       const params = asObject(message.params);
       const permissionOptions = (Array.isArray(params.options) ? params.options : []).map(asObject);
@@ -75,11 +75,12 @@ export async function runAcpSingleQuery(options: AcpSingleQueryOptions): Promise
     await client.promptSession({
       sessionId: created.sessionId,
       prompt: [{ type: 'text', text: options.prompt.trim() }],
-    }, undefined, options.requestTimeoutMs ?? DEFAULT_SINGLE_QUERY_PROMPT_TIMEOUT_MS);
+    }, { onReply: detach, timeoutMs: options.requestTimeoutMs ?? DEFAULT_SINGLE_QUERY_PROMPT_TIMEOUT_MS });
     const reported = failure.take();
     if (reported) throw new AgentIntegrationError('PROVIDER_FAILURE', reported, false);
     return assistantChunks.join('').trim();
   } finally {
+    detach();
     options.signal.removeEventListener('abort', abort);
     client.close();
   }
