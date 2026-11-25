@@ -20,7 +20,9 @@ interface FileDraftCoordinatorOptions {
 }
 
 interface PendingCheckpoint {
+	documentId: string;
 	document: FileDocumentState;
+	closed: boolean;
 	savedContent?: string;
 	idleTimer: ReturnType<typeof setTimeout> | null;
 	maxTimer: ReturnType<typeof setTimeout> | null;
@@ -155,12 +157,19 @@ export class FileDraftCoordinator {
 	}
 
 	closeDocument(document: FileDocumentState): void {
-		void this.settle(document);
-		this.#pending.delete(document.id);
+		const pending = this.#entry(document);
+		const closing = this.#checkpoint(pending);
+		pending.closed = true;
+		void closing.finally(() => {
+			if (this.#pending.get(document.identityKey) === pending)
+				this.#pending.delete(document.identityKey);
+		});
 	}
 
 	async flush(): Promise<void> {
-		for (const pending of this.#pending.values()) void this.#checkpoint(pending);
+		for (const pending of this.#pending.values()) {
+			if (!pending.closed) void this.#checkpoint(pending);
+		}
 		await Promise.all(this.#writes.values());
 	}
 
@@ -192,10 +201,16 @@ export class FileDraftCoordinator {
 	}
 
 	#entry(document: FileDocumentState): PendingCheckpoint {
-		let pending = this.#pending.get(document.id);
-		if (!pending) {
-			pending = { document, idleTimer: null, maxTimer: null };
-			this.#pending.set(document.id, pending);
+		let pending = this.#pending.get(document.identityKey);
+		if (!pending || pending.document !== document) {
+			pending = {
+				documentId: this.#draftKey(document),
+				document,
+				closed: false,
+				idleTimer: null,
+				maxTimer: null,
+			};
+			this.#pending.set(document.identityKey, pending);
 		}
 		return pending;
 	}
@@ -219,7 +234,7 @@ export class FileDraftCoordinator {
 		const document = pending.document;
 		if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
 			return Promise.resolve();
-		const documentId = this.#draftKey(document);
+		const documentId = pending.documentId;
 		const record: FileDraft | null = document.dirty
 			? {
 					schemaVersion: 1,
@@ -276,7 +291,9 @@ export class FileDraftCoordinator {
 				const owned = this.#ownedCheckpoints.get(documentId);
 				// A queued cleanup may outlive the confirmed baseline that authorized it.
 				const stillSaved = () =>
-					pending.savedContent === record.cleanContent && document.baseline === record.cleanContent;
+					this.#pending.get(document.identityKey) === pending &&
+					pending.savedContent === record.cleanContent &&
+					(pending.closed || document.baseline === record.cleanContent);
 				if (owned || stillSaved())
 					await this.options.repository.deleteDraft(
 						documentId,

@@ -121,6 +121,59 @@ describe('FileDraftCoordinator', () => {
 		}
 	});
 
+	it.each([
+		{ saved: 'saved before close', reopen: false },
+		{ saved: '', reopen: true },
+	])(
+		'uses the latest file lifetime when cleanup finishes after close (%j)',
+		async ({ saved, reopen }) => {
+			const { repository, coordinator } = harness();
+			const peer = new FileDraftCoordinator({
+				repository,
+				deploymentId: 'deployment',
+				userNamespace: 'user',
+			});
+			const value = document();
+			value.content = saved;
+			await peer.settle(value);
+			const [draft] = await repository.getDrafts('user', 'deployment');
+			value.baseline = saved;
+			value.dirty = false;
+			coordinator.confirmSave(value, saved);
+			const gate = Promise.withResolvers<void>();
+			const started = Promise.withResolvers<void>();
+			const remove = repository.deleteDraft.bind(repository);
+			vi.spyOn(repository, 'deleteDraft').mockImplementationOnce(async (...args) => {
+				started.resolve();
+				await gate.promise;
+				return remove(...args);
+			});
+			try {
+				const saving = coordinator.settle(value);
+				await started.promise;
+				coordinator.closeDocument(value);
+				value.dispose();
+				if (reopen) {
+					const next = document();
+					next.baseline = 'new Save';
+					next.content = next.baseline;
+					coordinator.confirmSave(next, next.baseline);
+					void coordinator.settle(next);
+				}
+				gate.resolve();
+				await saving;
+				await coordinator.flush();
+				expect((await repository.getDraft(draft.documentId))?.content).toBe(
+					reopen ? saved : undefined,
+				);
+			} finally {
+				gate.resolve();
+				coordinator.destroy();
+				peer.destroy();
+			}
+		},
+	);
+
 	it('skips clean checkpoints without a draft, but deletes confirmed writes before close', async () => {
 		const { repository, coordinator } = harness();
 		const remove = vi.spyOn(repository, 'deleteDraft');

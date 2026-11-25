@@ -2296,7 +2296,13 @@ describe('best-effort file recovery', () => {
 		}
 	});
 
-	it.each(['same', 'different', 'replacement-same', 'replacement-different'] as const)(
+	it.each([
+		'same',
+		'different',
+		'replacement-same',
+		'replacement-different',
+		'editor-ahead',
+	] as const)(
 		'cleans up only the peer checkpoint represented by the successful save (%s)',
 		async (scenario) => {
 			const repository = createMemoryFileDraftRepository();
@@ -2315,6 +2321,10 @@ describe('best-effort file recovery', () => {
 			current.saveText.mockReturnValueOnce(reply.promise);
 			const saving = current.registry.save(opening.id);
 			await vi.waitFor(() => expect(current.saveText).toHaveBeenCalledOnce());
+			if (scenario === 'editor-ahead') {
+				opening.content = 'more edits while saving';
+				vi.spyOn(repository, 'putDraft').mockRejectedValue(new Error('Storage unavailable'));
+			}
 			if (scenario === 'replacement-same' || scenario === 'replacement-different') {
 				const [checkpoint] = await repository.getDrafts('test-user', 'test-deployment');
 				await repository.putDraft({
@@ -2331,6 +2341,11 @@ describe('best-effort file recovery', () => {
 			});
 			await expect(saving).resolves.toBe(true);
 			await current.registry.flushRecovery();
+			if (scenario === 'editor-ahead') {
+				expect(opening.dirty).toBe(true);
+				opening.content = 'agreed edit';
+				await current.registry.flushRecovery();
+			}
 
 			const fresh = createHarness({ draftRepository: repository });
 			await fresh.registry.ready();
