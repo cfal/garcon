@@ -385,17 +385,22 @@ describe('files API contract', () => {
 		});
 	});
 
-	it('browseDirectory calls GET /api/v1/files/browse and returns raw array', async () => {
+	it('browseDirectory preserves the executor, timeout and caller cancellation', async () => {
 		const payload = [{ name: 'src', path: '/p/src', type: 'directory' }];
+		const timeout = vi.spyOn(AbortSignal, 'timeout');
+		const caller = new AbortController();
+		const executorId = '22222222-2222-4222-8222-222222222222';
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await browseDirectory('/p');
+		const result = await browseDirectory('/p', { signal: caller.signal, timeoutMs: 1_234 }, executorId);
 
-		expect(result).toHaveLength(1);
-		expect(result[0]).toEqual({ name: 'src', path: '/p/src', type: 'directory' });
-		const [url] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/v1/files/browse');
-		expect(url).toContain('path=%2Fp');
+		expect(result).toEqual(payload);
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe(`/api/v1/files/browse?path=%2Fp&executorId=${executorId}`);
+		expect(timeout).toHaveBeenCalledWith(1_234);
+		expect(options.signal.aborted).toBe(false);
+		caller.abort();
+		expect(options.signal.aborted).toBe(true);
 	});
 
 	it('browseDirectory rejects non-array payloads and malformed entries', async () => {

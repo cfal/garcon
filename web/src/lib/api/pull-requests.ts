@@ -1,4 +1,4 @@
-import type { ApiFetchOptions } from './client.js';
+import { withDefaultTimeout, type ApiFetchOptions } from './client.js';
 import { ghApiGet } from './gh.js';
 import { gitDocumentKey, gitProjectQuery, type GitProjectTarget } from './git-client.js';
 import type {
@@ -37,7 +37,7 @@ export async function getPullRequest(
 	const detail = await ghApiGet<PullRequestDetailWire>(
 		target.executorId,
 		`/api/v1/gh/pull-request?${query}`,
-		{ timeoutMs: ghOperationTimeoutMs('getPullRequest'), ...options },
+		withDefaultTimeout(options, ghOperationTimeoutMs('getPullRequest')),
 	);
 	return {
 		...detail,
