@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import type { ConversationDisclosureStatePort } from '../../transcript/ConversationFeedItemState.svelte.js';
 import {
+	AgentMessageToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
@@ -32,6 +33,13 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('renders the destination and literal body of an agent message', () => {
+		const toolMessage = new AgentMessageToolUseMessage('', 'send', 'agent-2', '<b>unformatted</b>');
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+		expect(screen.getByText('Message to agent-2')).toBeTruthy();
+		expect(screen.getByText('<b>unformatted</b>')).toBeTruthy();
+	});
+
 	it('renders distinct outcomes for plan steps with the same title', () => {
 		const toolMessage = new UpdatePlanToolUseMessage('', 'plan', [
 			{ content: 'Check', status: 'failed' }, { content: 'Check', status: 'skipped' },

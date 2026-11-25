@@ -120,6 +120,8 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
       return { role: 'Plan Read', content: 'Read the current task list.' };
     case 'background-task-tool-use':
       return { role: 'Tool Call', content: [`Background task: ${message.action}`, message.taskId, message.input].filter(Boolean).join('\n') };
+    case 'agent-message-tool-use':
+      return { role: 'Tool Call', content: `Message to ${message.recipient}\n${message.message}` };
     case 'task-tool-use': {
       const lines = ['Run subtask'];
       if (message.subagentType) lines.push(`Agent: ${message.subagentType}`);

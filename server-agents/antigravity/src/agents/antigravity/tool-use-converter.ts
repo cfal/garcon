@@ -1,4 +1,5 @@
 import {
+  AgentMessageToolUseMessage,
   BashToolUseMessage,
   BackgroundTaskToolUseMessage,
   EditToolUseMessage,
@@ -170,6 +171,12 @@ export function convertAntigravityToolUse(
       const row = BackgroundTaskToolUseMessage.fromFields(timestamp, id, action === 'kill' ? 'stop' : action,
         field(input, 'TaskId', 'task_id'), field(input, 'Input', 'input'));
       if (row) return row;
+      break;
+    }
+    case 'send_message': {
+      const recipient = stringField(input, 'Recipient', 'recipient');
+      const message = stringField(input, 'Message', 'message');
+      if (recipient && message !== undefined) return new AgentMessageToolUseMessage(timestamp, id, recipient, message);
       break;
     }
     case 'invoke_subagent': {

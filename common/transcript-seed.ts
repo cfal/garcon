@@ -728,6 +728,7 @@ function extractToolDetail(message: ToolUseChatMessage): string {
     case 'task-tool-use': return message.description || message.prompt || message.subagentType || '';
     case 'codex-subagent-tool-use': return message.action;
     case 'background-task-tool-use': return [message.action, message.taskId, message.input].filter(Boolean).join(' ');
+    case 'agent-message-tool-use': return `To ${message.recipient}: ${message.message}`;
     case 'update-plan-tool-use':
     case 'todo-write-tool-use': return summarizeTodos(message.todos);
     case 'ask-user-question-tool-use':

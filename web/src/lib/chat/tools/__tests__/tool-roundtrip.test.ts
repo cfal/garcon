@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	BashToolUseMessage,
 	BackgroundTaskToolUseMessage,
+	AgentMessageToolUseMessage,
 	ExecToolUseMessage,
 	WaitToolUseMessage,
 	ReadToolUseMessage,
@@ -57,6 +58,12 @@ function roundTrip<T>(message: T): T {
 }
 
 describe('tool-use serialization round-trip', () => {
+	it('round-trips the agent recipient and literal message without inferring a missing destination', () => {
+		const msg = new AgentMessageToolUseMessage(TS, 'send', 'agent-2', 'Text\nwith two lines.');
+		expect(roundTrip(msg)).toEqual(msg);
+		expect(parseChatMessage({ ...msg, recipient: null })).toBeNull();
+	});
+
 	it('preserves skipped and failed plan steps and empty snapshots without widening todo statuses', () => {
 		const plan = new UpdatePlanToolUseMessage(TS, 'plan', [
 			{ content: 'First', status: 'skipped' }, { content: 'Second', status: 'failed' },

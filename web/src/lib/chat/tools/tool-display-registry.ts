@@ -50,6 +50,7 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'todo-read-tool-use': 'TodoRead',
 	'task-tool-use': 'Task',
 	'background-task-tool-use': 'Background task',
+	'agent-message-tool-use': 'Agent message',
 	'codex-subagent-tool-use': 'Subagent',
 	'update-plan-tool-use': 'UpdatePlan',
 	'write-stdin-tool-use': 'WriteStdin',
@@ -565,6 +566,21 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				const todos = coerceTodoItems(content.items || content.todos);
 				return { todos, isResult: true };
 			},
+		},
+	},
+
+	'agent-message-tool-use': {
+		input: {
+			mode: 'collapsible',
+			label: 'Agent message',
+			title: ({ recipient }) => `Message to ${recipient}`,
+			contentKind: 'text',
+			getContentProps: ({ message }) => ({ content: message, format: 'plain' }),
+		},
+		result: {
+			mode: 'collapsible',
+			contentKind: 'text',
+			getContentProps: (result) => ({ content: extractContentString(result.content), format: 'plain' }),
 		},
 	},
 

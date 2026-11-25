@@ -23,6 +23,19 @@ function plain(messages: readonly object[]) {
 }
 
 describe('AntigravityAcpEventConverter', () => {
+  it('publishes agent-to-agent messages as tool calls, not assistant replies', () => {
+    const converter = new AntigravityAcpEventConverter();
+    expect(converter.fromSessionUpdate(toolCall('send', 'send_message', 'other', {
+      Recipient: 'reviewer', Message: 'First line\nSecond line',
+    }), context)).toMatchObject([{ type: 'agent-message-tool-use', toolId: 'send', recipient: 'reviewer', message: 'First line\nSecond line' }]);
+    expect(converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call_update', toolCallId: 'send',
+      status: 'failed', rawOutput: { output: 'Recipient unavailable' } }), context))
+      .toMatchObject([{ type: 'tool-result', toolId: 'send', isError: true, content: { raw: 'Recipient unavailable' } }]);
+    const input = { Message: 'Missing destination' };
+    expect(converter.fromSessionUpdate(toolCall('bad', 'send_message', 'other', input), context))
+      .toMatchObject([{ type: 'external-tool-use', input }]);
+  });
+
   it('converts a checklist snapshot even when the name and arguments arrive separately', () => {
     const converter = new AntigravityAcpEventConverter();
     expect(converter.fromSessionUpdate(update({

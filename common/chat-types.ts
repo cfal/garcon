@@ -290,6 +290,17 @@ export class BackgroundTaskToolUseMessage {
   }
 }
 
+export class AgentMessageToolUseMessage {
+  readonly type = 'agent-message-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public recipient: string,
+    public message: string,
+  ) {}
+}
+
 export class TaskToolUseMessage {
   readonly type = 'task-tool-use' as const;
 
@@ -791,6 +802,7 @@ export type ToolUseChatMessage =
   | TodoReadToolUseMessage
   | TaskToolUseMessage
   | BackgroundTaskToolUseMessage
+  | AgentMessageToolUseMessage
   | CodexSubagentToolUseMessage
   | UpdatePlanToolUseMessage
   | WriteStdinToolUseMessage
@@ -990,6 +1002,11 @@ const TOOL_USE_MESSAGE_PARSERS = {
 
   'background-task-tool-use': (data) =>
     BackgroundTaskToolUseMessage.fromFields(str(data.timestamp), str(data.toolId), data.action, data.taskId, data.input),
+
+  'agent-message-tool-use': (data) => {
+    if (typeof data.recipient !== 'string' || !data.recipient || typeof data.message !== 'string') return null;
+    return new AgentMessageToolUseMessage(str(data.timestamp), str(data.toolId), data.recipient, data.message);
+  },
 
   'task-tool-use': (data) =>
     new TaskToolUseMessage(

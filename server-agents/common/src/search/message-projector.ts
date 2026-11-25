@@ -227,6 +227,8 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
       return joinTool(message.subagentType, message.description, message.prompt, message.model);
     case 'background-task-tool-use':
       return joinTool(message.action, message.taskId, message.input);
+    case 'agent-message-tool-use':
+      return joinTool(message.recipient, message.message);
     case 'codex-subagent-tool-use':
       return joinTool(message.action, boundedUnknownForJoin(message.details, budget));
     case 'write-stdin-tool-use':

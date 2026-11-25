@@ -46,6 +46,7 @@ describe('TOOL_DISPLAY_REGISTRY', () => {
 			'todo-read-tool-use',
 			'task-tool-use',
 			'background-task-tool-use',
+			'agent-message-tool-use',
 			'codex-subagent-tool-use',
 			'update-plan-tool-use',
 			'write-stdin-tool-use',
