@@ -267,7 +267,7 @@
 	});
 
 	$effect(() => {
-		if (!isMobile) return;
+		if (!isMobile && hoverCapability.current) return;
 		const unbindViewport = bindMobileViewport((metrics) => {
 			mobileKeyboardVisible = metrics.keyboardVisible;
 			appShell.keyboardHeight = metrics.keyboardHeight;

@@ -322,10 +322,16 @@ describe('AppShell responsive workspace binding', () => {
 		searchNavigationPort.cancel.mockClear();
 	});
 
-	it.each(['pageshow', 'visibilitychange', 'resize'])(
-		'restores CSS viewport sizing on %s without a visual viewport event',
-		async (resumeEvent) => {
-			setViewportWidth(390, false);
+	it.each([
+		['pageshow', 390, false],
+		['visibilitychange', 390, false],
+		['resize', 390, true],
+		['resize', 1024, false],
+	] as const)(
+		'restores CSS viewport sizing on %s at %ipx (hover: %s)',
+		async (resumeEvent, width, canHover) => {
+			setViewportWidth(width, false);
+			hoverMediaQuery.setMatches(canHover);
 			vi.stubGlobal('innerHeight', 800);
 			const viewport = Object.assign(new EventTarget(), {
 				height: 756,
