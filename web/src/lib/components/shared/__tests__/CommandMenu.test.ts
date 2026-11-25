@@ -156,6 +156,7 @@ it('keeps the current query stable and uses late fuzzy matching on the next edit
 		const initialOptions = screen.getAllByRole('option');
 		await fireEvent.pointerDown(initialOptions[0]);
 		gate.resolve();
+		await import('fuse.js');
 		await vi.dynamicImportSettled();
 		const highlighted = screen.getByRole('option', { selected: true });
 		expect(input.getAttribute('aria-activedescendant')).toBe(highlighted.id);
