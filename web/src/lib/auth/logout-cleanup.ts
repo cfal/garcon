@@ -8,6 +8,7 @@ import {
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX,
 } from '$lib/utils/local-storage-cache-recovery';
 import { CREDENTIAL_PENDING_KEY } from './session.js';
+import { CANVAS_RECOVERY_STORAGE_PREFIX } from '$lib/chat-canvas/canvas-recovery-storage.js';
 import {
 	readBrowserLogoutEpoch,
 	canClearBrowserData,
@@ -44,7 +45,7 @@ export function clearTabPrivateData(): boolean {
 			(key) =>
 				tabKeys.has(key) ||
 				key.startsWith('garcon-ticket-draft-v1:') ||
-				key.startsWith('chat-canvas-recovery-v1:'),
+				key.startsWith(CANVAS_RECOVERY_STORAGE_PREFIX),
 		);
 		sessionStorage.setItem(TAB_EPOCH_KEY, readBrowserLogoutEpoch() ?? '');
 		return true;

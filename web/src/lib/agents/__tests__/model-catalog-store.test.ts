@@ -292,7 +292,10 @@ describe('ModelCatalogStore', () => {
 		expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(true);
 		const replaced = createModelCatalogStore();
 		if (mounted) replaced.forExecutor(remoteExecutor.id);
+		const write = vi.spyOn(localStorage, 'setItem');
 		replaced.reconcileExecutors([{ ...remoteExecutor, instanceId: 'replacement' }]);
+		expect(write).toHaveBeenCalledExactlyOnceWith(LOCAL_STORAGE_KEYS.modelCatalogExecutors, '{}');
+		write.mockRestore();
 		expect(replaced.forExecutor(remoteExecutor.id).isValidated).toBe(false);
 		expect(replaced.forExecutor(remoteExecutor.id).isStale()).toBe(true);
 	});
