@@ -242,7 +242,7 @@ test('fresh-browser setup persists choices, fits small screens, and stays dismis
       phase('existing preferences and cleared storage');
       await page.evaluate(() => {
         localStorage.setItem('pref_local_settings', JSON.stringify({
-          sidebarGrouping: 'status',
+          sidebarGroupingFields: [{ field: 'status', enabled: true }],
           sidebarSortMode: 'manual',
         }));
       });
