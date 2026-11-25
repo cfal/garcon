@@ -132,6 +132,10 @@ import {
 
 const CHAT_TITLE_GENERATION_TIMEOUT_MS = 120_000;
 
+function withDefaultTimeout(options: ApiFetchOptions | undefined, timeoutMs: number | null): ApiFetchOptions {
+	return options?.timeoutMs === undefined ? { ...options, timeoutMs } : options;
+}
+
 function withParsedControl<T extends { control: ChatExecutionControlState }>(response: T): T {
 	const control = parseChatExecutionControlState(response.control);
 	if (!control) throw new Error('Invalid chat execution control response');
@@ -209,7 +213,7 @@ export async function runChat(params: AgentRunCommandRequest, options?: ApiFetch
 	const response = await apiPost<AgentTurnCommandResponse>(
 		'/api/v1/chats/run',
 		params,
-		params.handoff ? { timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS, ...options } : options,
+		params.handoff ? withDefaultTimeout(options, AGENT_HANDOFF_HTTP_TIMEOUT_MS) : options,
 	);
 	if (params.handoff && !response.chat) {
 		throw new Error('Invalid handoff response: durable chat projection is missing');
@@ -224,10 +228,7 @@ export async function handoffChat(
 	const response = await apiPost<AgentHandoffCommandResponse>(
 		'/api/v1/chats/agent-handoff',
 		params,
-		{
-			timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS,
-			...options,
-		},
+		withDefaultTimeout(options, AGENT_HANDOFF_HTTP_TIMEOUT_MS),
 	);
 	if (!response.chat || response.chat.id !== params.chatId)
 		throw new Error('Invalid handoff chat projection');
@@ -238,24 +239,18 @@ export async function generateChatTitle(
 	params: GenerateChatTitleRequest,
 	options?: ApiFetchOptions,
 ): Promise<GenerateChatTitleResponse> {
-	return apiPost<GenerateChatTitleResponse>('/api/v1/chats/title/generate', params, {
-		timeoutMs: CHAT_TITLE_GENERATION_TIMEOUT_MS,
-		...options,
-	});
+	return apiPost<GenerateChatTitleResponse>('/api/v1/chats/title/generate', params, withDefaultTimeout(options, CHAT_TITLE_GENERATION_TIMEOUT_MS));
 }
 
 export async function forkRunChat(params: ForkRunCommandRequest, options?: ApiFetchOptions): Promise<ForkRunCommandResponse> {
-	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params, { timeoutMs: null, ...options });
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/fork-run', params, withDefaultTimeout(options, null));
 }
 
 export async function selfHandoffRunChat(
 	params: SelfHandoffRunCommandRequest,
 	options?: ApiFetchOptions,
 ): Promise<ForkRunCommandResponse> {
-	return apiPost<ForkRunCommandResponse>('/api/v1/chats/handoff-run', params, {
-		timeoutMs: AGENT_HANDOFF_HTTP_TIMEOUT_MS,
-		...options,
-	});
+	return apiPost<ForkRunCommandResponse>('/api/v1/chats/handoff-run', params, withDefaultTimeout(options, AGENT_HANDOFF_HTTP_TIMEOUT_MS));
 }
 
 export async function stopChat(params: AgentStopCommandRequest, options?: ApiFetchOptions): Promise<AgentStopResponse> {
@@ -572,7 +567,7 @@ export interface ForkChatParams {
 
 /** Forks (clones) an existing chat session into a new chat. */
 export async function forkChat(params: ForkChatParams, options?: ApiFetchOptions): Promise<ForkChatResponse> {
-	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params, { timeoutMs: null, ...options });
+	return apiPost<ForkChatResponse>('/api/v1/chats/fork', params, withDefaultTimeout(options, null));
 }
 
 /** Persists a chat placement within its server-resolved section. */
