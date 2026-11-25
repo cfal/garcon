@@ -27,6 +27,7 @@
 		getTransientLayers,
 		getWorkspaceShortcuts,
 		getProjectResolution,
+		getOptionalWs,
 	} from '$lib/context';
 	import {
 		chatAttachmentAccept,
@@ -39,7 +40,7 @@
 		canSubmitComposer,
 		type ComposerEnterAction,
 	} from '$lib/chat/composer/composer-shortcuts.js';
-	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
+	import { ComposerSnippetController } from '$lib/chat/composer/composer-snippet-controller.js';
 	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
@@ -61,24 +62,23 @@
 		isControllerSlashCommand,
 		isClearCommand,
 		parseSnippetCommand,
-		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
-	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
-	import { ChatSnippetInsertionController } from '$lib/chat/composer/chat-snippet-insertion-controller.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import { activeComposerModel } from './active-composer-model.svelte';
-	import { snippetTemplateUsesArguments, type SnippetArgumentsInput } from '$shared/snippets';
+	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
-	import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
 	import { PromptComposerAttachmentController } from './prompt-composer-attachment-controller.js';
 	import { PromptComposerRefinementController } from './prompt-composer-refinement-controller.js';
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
-	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
+	import {
+		PromptComposerProjectState,
+		type PromptComposerSnippetContext,
+	} from './prompt-composer-project-state.svelte.js';
 	import type { PromptComposerProps } from './prompt-composer-props.js';
 	import { PromptComposerRecallController } from './prompt-composer-recall-controller';
 
@@ -137,6 +137,7 @@
 	const transientLayers = getTransientLayers();
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
+	const ws = getOptionalWs();
 	const ui = new PromptComposerUiState();
 	const formattedDraft = $derived(
 		ui.formattedDraft?.source === composerState.inputText ? ui.formattedDraft : null,
@@ -180,7 +181,38 @@
 		void recallIdentity;
 		promptRecall.reset();
 	});
-	const snippetExpansion = new SnippetExpansionController();
+	const snippetExpansion: ComposerSnippetController<PromptComposerSnippetContext> =
+		new ComposerSnippetController({
+		snippets,
+		preambles,
+		notifications,
+		isWsConnected: () => ws?.connectionStatus.phase === 'connected',
+		getExecutionKey: () => executionKey,
+		isConversationInput: () => conversationInput,
+		isTransformPending: (): boolean => promptTransformPending,
+		getText: () => composerState.inputText,
+		getSelection: () =>
+			textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd } : null,
+		hasProjectPath: () => Boolean(sessions.selectedChat && projectState.target?.projectPath.trim()),
+		getLocalChatId: () => sessions.selectedChat!.id,
+		prepareServerContext: async (signal) => {
+			const operation = await projectState.resolveSnippetContext(signal);
+			return { requestContext: operation.context, prepared: operation };
+		},
+		matchesServerContext: (prepared, response) =>
+			projectState.matchesSnippetContext(prepared, response),
+		beforeExpand: () => {
+			ui.closeSlashMenu();
+			ui.closeFileMenu();
+			composerState.isDragActive = false;
+		},
+		onExpanded: async (text, caret) => {
+			updateDraft(text);
+			ui.closeSlashMenu();
+			await settleComposerAfterSnippet(caret);
+		},
+		onSettled: () => settleComposerAfterSnippet(),
+	});
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
 		id: allocateTransientLayerId('snippet-expansion'),
@@ -491,60 +523,6 @@
 		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
 	}
 
-	const snippetInsertion = new ChatSnippetInsertionController({
-		refreshSnippets: () => snippets.refreshIfLoaded(),
-		refreshPreambles: () => preambles.refreshIfLoaded(),
-		reportError: message => notifications.error(message),
-		settle: settleComposerAfterSnippet,
-	});
-
-	function runSnippet(
-		shortName: string,
-		argumentsInput: SnippetArgumentsInput,
-		insertion?: { snippet: SelectableSnippet; selection: { start: number; end: number };
-			trigger: { start: number; end: number } | null },
-	): Promise<SnippetInsertionResult> {
-		const sourceExecutionKey = executionKey;
-		const sourceText = composerState.inputText;
-		ui.closeSlashMenu();
-		ui.closeFileMenu();
-		composerState.isDragActive = false;
-		return snippetInsertion.execute({
-			expand: () => snippetExpansion.runPrepared(shortName, async (signal) => {
-				const operation = await projectState.resolveSnippetContext(signal);
-				return { request: { shortName, arguments: argumentsInput, context: operation.context }, prepared: operation };
-			}),
-			isCurrent: ({ prepared, response }) => projectState.matchesSnippetContext(prepared, response)
-				&& (insertion !== undefined || conversationInput)
-				&& executionKey === sourceExecutionKey && composerState.inputText === sourceText,
-			apply: (text) => {
-				updateDraft(text);
-				if (!insertion) ui.closeSlashMenu();
-			},
-			insertion: insertion ? { ...insertion, source: sourceText } : undefined,
-		});
-	}
-
-	async function insertSnippet(
-		snippet: SelectableSnippet,
-		argumentsText: string,
-		range: { start: number; end: number } | null = null,
-	): Promise<SnippetInsertionResult> {
-		if (promptTransformPending || !textarea) return 'cancelled';
-		return runSnippet(snippet.shortName, { type: 'value', value: argumentsText }, {
-			snippet,
-			trigger: range,
-			selection: { start: textarea.selectionStart, end: textarea.selectionEnd },
-		});
-	}
-
-	async function expandSnippetInvocation(
-		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
-	): Promise<void> {
-		if (!conversationInput) return;
-		await runSnippet(command.shortName, command.arguments);
-	}
-
 	function editSnippets(): void {
 		appShell.openSnippets(() => appShell.requestComposerFocus());
 	}
@@ -601,7 +579,7 @@
 		}
 		if (command.kind === 'valid') {
 			returnComposerFocus();
-			void expandSnippetInvocation(command);
+			void snippetExpansion.expandInvocation(command);
 			return;
 		}
 		if (formattedDraft) void markdown.edit();
@@ -747,7 +725,7 @@
 			contextHint={snippetContextHint}
 			onInsert={async (snippet, argumentsText) => {
 				const trigger = ui.snippetPalette.trigger;
-				const result = await insertSnippet(snippet, argumentsText, trigger);
+				const result = await snippetExpansion.insert(snippet, argumentsText, trigger);
 				if (result === 'inserted') ui.snippetPalette.complete();
 				else if (
 					result !== 'failed' ||

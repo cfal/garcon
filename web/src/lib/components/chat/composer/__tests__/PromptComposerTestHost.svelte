@@ -22,7 +22,9 @@
 		setTransientLayers,
 		setWorkspaceShortcuts,
 		setChatDrafts,
+		setWs,
 	} from '$lib/context';
+	import { WsConnection, type WsConnectionPhase } from '$lib/ws/connection.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
@@ -95,6 +97,8 @@
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
+		preloadSnippets?: boolean;
+		wsPhase?: WsConnectionPhase;
 		preambleSnapshot?: PreamblesSnapshot;
 		statusBarVisible?: boolean;
 		gitRefreshing?: boolean;
@@ -138,6 +142,8 @@
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
+		preloadSnippets = false,
+		wsPhase,
 		preambleSnapshot = { revision: 0, preambles: [] },
 		statusBarVisible = false,
 		gitRefreshing = false,
@@ -452,26 +458,47 @@
 	} as never);
 	setNotifications(notifications);
 	setProjectResolution(projectResolution);
-	setSnippets(
-		createSnippetsStore({
-			get: async () => {
-				snippetLoadCount += 1;
-				return {
-					revision: 1,
-					snippets: [
-						{
-							id: 'snippet-review',
-							shortName: 'review',
-							template: snippetTemplate,
-							defaultArguments: snippetDefaultArguments,
-							createdAt: '2026-01-01T00:00:00.000Z',
-							updatedAt: '2026-01-01T00:00:00.000Z',
-						},
-					],
-				};
-			},
-		}),
-	);
+	const ws = untrack(() => (wsPhase !== undefined ? new WsConnection() : null));
+	if (ws) {
+		setWs(ws);
+		$effect(() => {
+			if (wsPhase !== undefined) ws.connectionStatus.phase = wsPhase;
+		});
+	}
+	const snippetsStore = createSnippetsStore({
+		get: async () => {
+			snippetLoadCount += 1;
+			return {
+				revision: 1,
+				snippets: [
+					{
+						id: 'snippet-review',
+						shortName: 'review',
+						template: snippetTemplate,
+						defaultArguments: snippetDefaultArguments,
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-01T00:00:00.000Z',
+					},
+				],
+			};
+		},
+	});
+	if (untrack(() => preloadSnippets)) {
+		snippetsStore.applySnapshot({
+			revision: 1,
+			snippets: [
+				{
+					id: 'snippet-review',
+					shortName: 'review',
+					template: untrack(() => snippetTemplate),
+					defaultArguments: untrack(() => snippetDefaultArguments),
+					createdAt: '2026-01-01T00:00:00.000Z',
+					updatedAt: '2026-01-01T00:00:00.000Z',
+				},
+			],
+		});
+	}
+	setSnippets(snippetsStore);
 	const preambles = createPreamblesStore();
 	preambles.applySnapshot(untrack(() => preambleSnapshot));
 	setPreambles(preambles);
@@ -485,6 +512,7 @@
 		unsubscribeSidebarRecenter();
 		chatDrafts.destroy();
 		projectResolution.destroy();
+		ws?.disconnect();
 	});
 	const shortcutWorkspace = {
 		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },

@@ -1987,7 +1987,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-edit-during-expansion',
 			selectedStatus: 'running',
-			snippetTemplate: 'Expanded review',
+			snippetTemplate: 'Expanded review in {{project_path}}',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
@@ -2024,7 +2024,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-attachment-during-expansion',
 			selectedStatus: 'running',
-			snippetTemplate: 'Expanded review',
+			snippetTemplate: 'Expanded review in {{project_path}}',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
@@ -2060,18 +2060,8 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('Original draft');
 	});
 
-	it('opens from an inline trigger and replaces only the captured span', async () => {
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'EXPANDED',
-		});
-		render(PromptComposerTestHost, {
+	it('opens from an inline trigger and replaces only the captured span locally without server calls', async () => {
+		const { component } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-inline-snippet',
 			selectedStatus: 'running',
 			snippetTemplate: 'Expanded review',
@@ -2087,30 +2077,14 @@ describe('PromptComposer focus', () => {
 		expect(search.value).toBe('review');
 		await fireEvent.click(screen.getByRole('option', { name: /^review\b/ }));
 
-		await waitFor(() => expect(textarea.value).toBe('Before EXPANDED after'));
-		expect(textarea.selectionStart).toBe('Before EXPANDED'.length);
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
-			{
-				shortName: 'review',
-				arguments: { type: 'value', value: '' },
-				context: { type: 'chat', chatId: 'chat-inline-snippet' },
-			},
-			expect.objectContaining({ signal: expect.any(AbortSignal) }),
-		);
+		await waitFor(() => expect(textarea.value).toBe('Before Expanded review after'));
+		expect(textarea.selectionStart).toBe('Before Expanded review'.length);
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(component.getProjectResolutionRequestCount()).toBe(0);
 	});
 
-	it('inserts a named preamble from the palette without collecting snippet arguments', async () => {
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'preamble',
-			sourceId: '00000000-0000-4000-8000-000000000001',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'manual',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'PREAMBLE',
-		});
-		render(PromptComposerTestHost, {
+	it('inserts a named preamble from the palette locally without collecting snippet arguments', async () => {
+		const { component } = render(PromptComposerTestHost, {
 			selectedChatId: 'chat-preamble-snippet',
 			selectedStatus: 'running',
 			preambleSnapshot: {
@@ -2137,16 +2111,112 @@ describe('PromptComposer focus', () => {
 		expect(option.textContent).toContain('preamble');
 		await fireEvent.click(option);
 
-		await waitFor(() => expect(textarea.value).toBe('Before PREAMBLE after'));
-		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
-			{
-				shortName: 'manual',
-				arguments: { type: 'value', value: '' },
-				context: { type: 'chat', chatId: 'chat-preamble-snippet' },
-			},
-			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		await waitFor(() =>
+			expect(textarea.value).toBe('Before Literal {{arguments}} for chat-preamble-snippet after'),
 		);
+		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(component.getProjectResolutionRequestCount()).toBe(0);
+	});
+
+	it('falls back to the server for palette items that use active controller date tokens', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Summary on 2026-01-01',
+		});
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-snippet-date-fallback',
+			selectedStatus: 'running',
+			snippetTemplate: 'Summary on {{current_date}}',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, ';;review', ';;review'.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+
+		await waitFor(() => expect(textarea.value).toBe('Summary on 2026-01-01'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
+	});
+
+	it('expands /s locally when WS is connected and the catalog is loaded, and falls back when disconnected or using dates', async () => {
+		const onsubmit = vi.fn();
+		const { component, rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-local-slash',
+			selectedStatus: 'running',
+			snippetTemplate: 'Review {{arguments}} in {{chat_id}}',
+			snippetDefaultArguments: 'staged diff',
+			preloadSnippets: true,
+			wsPhase: 'connected',
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('Review staged diff in chat-local-slash'));
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(component.getProjectResolutionRequestCount()).toBe(0);
+
+		await fireEvent.input(textarea, { target: { value: '/snippet review API contracts' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('Review API contracts in chat-local-slash'));
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(component.getProjectResolutionRequestCount()).toBe(0);
+
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Server fallback result',
+		});
+		await rerender({
+			selectedChatId: 'chat-local-slash',
+			selectedStatus: 'running',
+			snippetTemplate: 'Review {{arguments}} in {{chat_id}}',
+			snippetDefaultArguments: 'staged diff',
+			preloadSnippets: true,
+			wsPhase: 'reconnecting',
+			onsubmit,
+		});
+		await fireEvent.input(textarea, { target: { value: '/s review disconnected' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('Server fallback result'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
+	});
+
+	it('reopens arguments with preserved text when local expansion exceeds the output bound', async () => {
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-local-overflow',
+			selectedStatus: 'running',
+			snippetTemplate: '{{arguments}}{{arguments}}{{arguments}}',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.input(textarea, { target: { value: 'Keep draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		const largeArgs = 'x'.repeat(30_000);
+		await fireEvent.input(argumentsInput, { target: { value: largeArgs } });
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await screen.findByText(/Expanded snippet exceeds 64000 characters/);
+		const reopened = (await screen.findByRole('textbox', {
+			name: 'Arguments',
+		})) as HTMLTextAreaElement;
+		expect(reopened.value).toBe(largeArgs);
+		expect(textarea.value).toBe('Keep draft');
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
 	it('honors the configured trigger without interrupting IME composition', async () => {
