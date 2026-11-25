@@ -14,6 +14,8 @@ import * as filesApi from '$lib/api/files.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+import type { SnippetsSnapshot } from '$shared/snippets';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 function conversationalCatalog(): ModelCatalogStore {
@@ -2192,6 +2194,237 @@ describe('PromptComposer focus', () => {
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		await waitFor(() => expect(textarea.value).toBe('Server fallback result'));
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
+	});
+
+	it('expands a named preamble via /s locally, falls back while refreshing, and applies restored lower-revision catalogs', async () => {
+		let snippetsStore!: SnippetsStore;
+		let resolveRefresh!: (value: SnippetsSnapshot) => void;
+		const loadSnippets = vi
+			.fn<() => Promise<SnippetsSnapshot>>()
+			.mockImplementationOnce(
+				() =>
+					new Promise<SnippetsSnapshot>((resolve) => {
+						resolveRefresh = resolve;
+					}),
+			)
+			.mockResolvedValueOnce({ revision: 0, snippets: [] })
+			.mockResolvedValueOnce({
+				revision: 1,
+				snippets: [
+					{
+						id: 'snippet-restored',
+						shortName: 'review',
+						template: 'Restored review',
+						defaultArguments: '',
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-02T00:00:00.000Z',
+					},
+				],
+			});
+		const { component } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-preamble-slash',
+			selectedStatus: 'running',
+			snippetTemplate: 'Local review',
+			preloadSnippets: true,
+			loadSnippets,
+			onSnippets: (store) => {
+				snippetsStore = store;
+			},
+			wsPhase: 'connected',
+			preambleSnapshot: {
+				revision: 1,
+				preambles: [
+					{
+						id: '00000000-0000-4000-8000-000000000001',
+						enabled: false,
+						title: 'Manual',
+						snippetShortName: 'manual',
+						content: 'Preamble for {{chat_id}}',
+						scope: { type: 'global' },
+						agentIds: [],
+						tagFilter: { mode: 'any', tags: [] },
+						createdAt: '2026-01-01T00:00:00.000Z',
+						updatedAt: '2026-01-01T00:00:00.000Z',
+					},
+				],
+			},
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await fireEvent.input(textarea, { target: { value: '/s manual' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('Preamble for chat-preamble-slash'));
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(component.getProjectResolutionRequestCount()).toBe(0);
+
+		const refreshing = snippetsStore.refresh();
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Refreshing fallback',
+		});
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('Refreshing fallback'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(1);
+
+		resolveRefresh({
+			revision: 2,
+			snippets: [
+				{
+					id: 'snippet-review',
+					shortName: 'review',
+					template: 'Updated review',
+					defaultArguments: '',
+					createdAt: '2026-01-01T00:00:00.000Z',
+					updatedAt: '2026-01-01T00:00:00.000Z',
+				},
+			],
+		});
+		await refreshing;
+
+		// Lower-revision restore replaces revision 2 with revision 0, so deleted /s review falls back to the server.
+		await snippetsStore.refreshIfLoaded();
+		expect(snippetsStore.snapshot).toEqual({ revision: 0, snippets: [] });
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Restored-catalog fallback',
+		});
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('Restored-catalog fallback'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
+
+		// Restored lower-revision entries immediately expand locally without waiting to reach the prior revision.
+		await snippetsStore.refreshIfLoaded();
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+		await waitFor(() => expect(textarea.value).toBe('Restored review'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
+	});
+
+	it('falls back to the server when an open arguments dialog survives a 3 -> 2 -> 3 or same-revision restore', async () => {
+		let snippetsStore!: SnippetsStore;
+		const restoredAfterRegression = {
+			id: 'snippet-review',
+			shortName: 'review',
+			template: 'Restored {{arguments}}',
+			defaultArguments: '',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-02T00:00:00.000Z',
+		};
+		const restoredSameRevision = {
+			id: 'snippet-review',
+			shortName: 'review',
+			template: 'Same-rev restored {{arguments}}',
+			defaultArguments: '',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-03T00:00:00.000Z',
+		};
+		const loadSnippets = vi
+			.fn<() => Promise<SnippetsSnapshot>>()
+			.mockResolvedValueOnce({ revision: 2, snippets: [] })
+			.mockResolvedValueOnce({ revision: 3, snippets: [restoredAfterRegression] })
+			.mockResolvedValueOnce({ revision: 3, snippets: [restoredAfterRegression] })
+			.mockResolvedValueOnce({ revision: 3, snippets: [restoredSameRevision] })
+			.mockResolvedValue({ revision: 3, snippets: [restoredSameRevision] });
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-dialog-restore-recovery',
+			selectedStatus: 'running',
+			snippetTemplate: 'Old {{arguments}}',
+			loadSnippets,
+			onSnippets: (store) => {
+				snippetsStore = store;
+				store.applySnapshot({
+					revision: 3,
+					snippets: [
+						{
+							id: 'snippet-review',
+							shortName: 'review',
+							template: 'Old {{arguments}}',
+							defaultArguments: '',
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+						},
+					],
+				});
+			},
+			wsPhase: 'connected',
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, ';;review', ';;review'.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(argumentsInput, { target: { value: 'selected' } });
+
+		// Catalog regresses 3 -> 2 and recovers -> 3 while the arguments dialog stays open.
+		await snippetsStore.refreshIfLoaded();
+		await snippetsStore.refreshIfLoaded();
+		expect(snippetsStore.hasFreshSnapshot).toBe(true);
+
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Restored selected',
+		});
+		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+
+		await screen.findByText(/changed/i);
+		await waitFor(() => expect(loadSnippets).toHaveBeenCalledTimes(3));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
+		expect(textarea.value).toBe(';;review');
+
+		// Same-revision reconnect restore (3 -> 3) with changed template also forces server fallback on open dialog.
+		await inputAtCaret(textarea, '', 0);
+		await inputAtCaret(textarea, ';;review', ';;review'.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+		const secondArgsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(secondArgsInput, { target: { value: 'second' } });
+		await snippetsStore.reconcileAfterReconnect();
+		expect(loadSnippets).toHaveBeenCalledTimes(4);
+
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-03T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Same-rev restored second',
+		});
+		await fireEvent.keyDown(secondArgsInput, { key: 'Enter' });
+
+		await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(loadSnippets).toHaveBeenCalledTimes(5));
+		expect(textarea.value).toBe(';;review');
+
+		// A fresh selection after the same-revision restore expands locally without calling the server.
+		await inputAtCaret(textarea, '', 0);
+		await inputAtCaret(textarea, ';;review', ';;review'.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+		const thirdArgsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+		await fireEvent.input(thirdArgsInput, { target: { value: 'fresh' } });
+		await fireEvent.keyDown(thirdArgsInput, { key: 'Enter' });
+
+		await waitFor(() => expect(textarea.value).toBe('Same-rev restored fresh'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
 	});
 
 	it('reopens arguments with preserved text when local expansion exceeds the output bound', async () => {

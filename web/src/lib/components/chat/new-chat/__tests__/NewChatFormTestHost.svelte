@@ -196,7 +196,10 @@
 	if (ws) {
 		setWs(ws);
 		$effect(() => {
-			if (wsPhase !== undefined) ws.connectionStatus.phase = wsPhase;
+			if (wsPhase !== undefined) {
+				ws.isConnected = wsPhase === 'connected';
+				ws.connectionStatus.phase = wsPhase;
+			}
 		});
 	}
 	onDestroy(() => ws?.disconnect());

@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Preamble } from '$shared/preambles';
+import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
 import {
 	SNIPPET_ARGUMENTS_MAX_LENGTH,
 	SNIPPET_EXPANDED_MAX_LENGTH,
+	SNIPPET_VALIDATION_ERROR_MESSAGE,
 	type Snippet,
+	type SnippetsSnapshot,
 } from '$shared/snippets';
+import { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 import { preambleToSelectable, snippetToSelectable } from '$lib/snippets/selectable-snippet.js';
 import {
+	catalogMatchesSelectableSnippet,
 	findFreshSelectableSnippetByShortName,
 	tryExpandSelectableSnippetLocally,
 	type PreambleCatalogLookup,
@@ -43,9 +48,7 @@ function makePreamble(overrides: Partial<Preamble> = {}): Preamble {
 
 function snippetCatalog(overrides: Partial<SnippetCatalogLookup> = {}): SnippetCatalogLookup {
 	return {
-		hasLoaded: true,
-		isRefreshing: false,
-		error: null,
+		hasFreshSnapshot: true,
 		snippets: [makeSnippet()],
 		...overrides,
 	};
@@ -53,9 +56,7 @@ function snippetCatalog(overrides: Partial<SnippetCatalogLookup> = {}): SnippetC
 
 function preambleCatalog(overrides: Partial<PreambleCatalogLookup> = {}): PreambleCatalogLookup {
 	return {
-		hasLoaded: true,
-		isRefreshing: false,
-		error: null,
+		hasFreshSnapshot: true,
 		preambles: [makePreamble()],
 		...overrides,
 	};
@@ -89,26 +90,20 @@ describe('findFreshSelectableSnippetByShortName', () => {
 			}),
 		).toBeNull();
 
-		for (const stale of [
-			{ hasLoaded: false },
-			{ isRefreshing: true },
-			{ error: 'refresh failed' },
-		]) {
-			expect(
-				findFreshSelectableSnippetByShortName('review', {
-					wsConnected: true,
-					snippets: snippetCatalog(stale),
-					preambles: preambleCatalog(),
-				}),
-			).toBeNull();
-			expect(
-				findFreshSelectableSnippetByShortName('context', {
-					wsConnected: true,
-					snippets: snippetCatalog(),
-					preambles: preambleCatalog(stale),
-				}),
-			).toBeNull();
-		}
+		expect(
+			findFreshSelectableSnippetByShortName('review', {
+				wsConnected: true,
+				snippets: snippetCatalog({ hasFreshSnapshot: false }),
+				preambles: preambleCatalog(),
+			}),
+		).toBeNull();
+		expect(
+			findFreshSelectableSnippetByShortName('context', {
+				wsConnected: true,
+				snippets: snippetCatalog(),
+				preambles: preambleCatalog({ hasFreshSnapshot: false }),
+			}),
+		).toBeNull();
 	});
 
 	it('resolves from one fresh catalog even when the other catalog has not loaded', () => {
@@ -116,7 +111,7 @@ describe('findFreshSelectableSnippetByShortName', () => {
 			findFreshSelectableSnippetByShortName('review', {
 				wsConnected: true,
 				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasLoaded: false }),
+				preambles: preambleCatalog({ hasFreshSnapshot: false }),
 			}),
 		).toMatchObject({ source: 'snippet', shortName: 'review' });
 
@@ -124,9 +119,154 @@ describe('findFreshSelectableSnippetByShortName', () => {
 			findFreshSelectableSnippetByShortName('missing', {
 				wsConnected: true,
 				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasLoaded: false }),
+				preambles: preambleCatalog({ hasFreshSnapshot: false }),
 			}),
 		).toBeNull();
+	});
+
+	it('blocks local lookup during a retry GET and reflects restored lower-revision catalogs immediately', async () => {
+		let resolveSnippetRetry!: (value: SnippetsSnapshot) => void;
+		const snippetsStore = new SnippetsStore({
+			get: vi
+				.fn()
+				.mockImplementationOnce(
+					() =>
+						new Promise<SnippetsSnapshot>((resolve) => {
+							resolveSnippetRetry = resolve;
+						}),
+				)
+				.mockResolvedValueOnce({
+					revision: 1,
+					snippets: [makeSnippet({ id: 'restored-1', shortName: 'restored', template: 'Restored body' })],
+				}),
+		});
+		snippetsStore.applySnapshot({
+			revision: 3,
+			snippets: [makeSnippet({ shortName: 'probe', template: 'Old probe' })],
+		});
+		const preamblesStore = new PreamblesStore({
+			get: vi.fn().mockResolvedValueOnce({ revision: 1, preambles: [] } satisfies PreamblesSnapshot),
+		});
+		preamblesStore.applySnapshot({ revision: 3, preambles: [makePreamble()] });
+
+		const retrying = snippetsStore.refresh();
+		expect(
+			findFreshSelectableSnippetByShortName('probe', {
+				wsConnected: true,
+				snippets: snippetsStore,
+				preambles: preamblesStore,
+			}),
+		).toBeNull();
+
+		resolveSnippetRetry({
+			revision: 3,
+			snippets: [makeSnippet({ shortName: 'probe', template: 'Updated probe' })],
+		});
+		await retrying;
+		expect(
+			findFreshSelectableSnippetByShortName('probe', {
+				wsConnected: true,
+				snippets: snippetsStore,
+				preambles: preamblesStore,
+			}),
+		).toMatchObject({ source: 'snippet', body: 'Updated probe' });
+
+		await Promise.all([snippetsStore.refreshIfLoaded(), preamblesStore.refreshIfLoaded()]);
+		expect(
+			findFreshSelectableSnippetByShortName('probe', {
+				wsConnected: true,
+				snippets: snippetsStore,
+				preambles: preamblesStore,
+			}),
+		).toBeNull();
+		expect(
+			findFreshSelectableSnippetByShortName('restored', {
+				wsConnected: true,
+				snippets: snippetsStore,
+				preambles: preamblesStore,
+			}),
+		).toMatchObject({ source: 'snippet', body: 'Restored body' });
+		expect(
+			findFreshSelectableSnippetByShortName('context', {
+				wsConnected: true,
+				snippets: snippetsStore,
+				preambles: preamblesStore,
+			}),
+		).toBeNull();
+	});
+});
+
+describe('catalogMatchesSelectableSnippet', () => {
+	it('rejects items captured before a 3 -> 2 -> 3 or same-revision restore while allowing fresh post-restore items', async () => {
+		const snippetsStore = new SnippetsStore({
+			get: vi
+				.fn<() => Promise<SnippetsSnapshot>>()
+				.mockResolvedValueOnce({ revision: 2, snippets: [] })
+				.mockResolvedValueOnce({
+					revision: 3,
+					snippets: [makeSnippet({ shortName: 'probe', template: 'Restored {{arguments}}' })],
+				})
+				.mockResolvedValueOnce({
+					revision: 3,
+					snippets: [makeSnippet({ shortName: 'probe', template: 'Same-rev restored {{arguments}}' })],
+				}),
+		});
+		snippetsStore.applySnapshot({
+			revision: 3,
+			snippets: [makeSnippet({ shortName: 'probe', template: 'Old {{arguments}}' })],
+		});
+		const preRestoreItem = snippetToSelectable(snippetsStore.snippets[0]!);
+		expect(catalogMatchesSelectableSnippet(preRestoreItem, null)).toBe(false);
+		expect(catalogMatchesSelectableSnippet(preRestoreItem, snippetsStore)).toBe(true);
+
+		// Revision regresses 3 -> 2 (deleted in restored backup).
+		await snippetsStore.refreshIfLoaded();
+		expect(catalogMatchesSelectableSnippet(preRestoreItem, snippetsStore)).toBe(false);
+
+		// Revision recovers 2 -> 3 with restored template: previously captured item still mismatches.
+		await snippetsStore.refreshIfLoaded();
+		expect(snippetsStore.hasFreshSnapshot).toBe(true);
+		expect(catalogMatchesSelectableSnippet(preRestoreItem, snippetsStore)).toBe(false);
+
+		// Fresh selection captured after 3 -> 2 -> 3 recovery matches.
+		const postRecoveryItem = snippetToSelectable(snippetsStore.snippets[0]!);
+		expect(catalogMatchesSelectableSnippet(postRecoveryItem, snippetsStore)).toBe(true);
+
+		// Same-revision restore (3 -> 3) with changed template invalidates the captured selection even with identical updatedAt.
+		await snippetsStore.reconcileAfterReconnect();
+		expect(catalogMatchesSelectableSnippet(postRecoveryItem, snippetsStore)).toBe(false);
+		expect(
+			catalogMatchesSelectableSnippet(snippetToSelectable(snippetsStore.snippets[0]!), snippetsStore),
+		).toBe(true);
+	});
+
+	it('rejects items when the owning catalog is refreshing, errored, or updated for preambles', async () => {
+		const preamble = makePreamble();
+		const captured = preambleToSelectable(preamble)!;
+		let resolveRead!: (value: PreamblesSnapshot) => void;
+		const store = new PreamblesStore({
+			get: vi.fn(
+				() =>
+					new Promise<PreamblesSnapshot>((resolve) => {
+						resolveRead = resolve;
+					}),
+			),
+		});
+		store.applySnapshot({ revision: 1, preambles: [preamble] });
+		expect(catalogMatchesSelectableSnippet(captured, store)).toBe(true);
+
+		const refreshing = store.refresh();
+		expect(catalogMatchesSelectableSnippet(captured, store)).toBe(false);
+
+		resolveRead({
+			revision: 1,
+			preambles: [{ ...preamble, content: 'Restored preamble content' }],
+		});
+		await refreshing;
+		expect(catalogMatchesSelectableSnippet(captured, store)).toBe(false);
+		expect(
+			catalogMatchesSelectableSnippet(preambleToSelectable(store.preambles[0]!)!, store),
+		).toBe(true);
 	});
 });
 
@@ -221,7 +361,7 @@ describe('tryExpandSelectableSnippetLocally (immediate mode)', () => {
 			),
 		).toEqual({
 			kind: 'error',
-			message: `Snippet arguments exceed ${SNIPPET_ARGUMENTS_MAX_LENGTH} characters`,
+			message: SNIPPET_VALIDATION_ERROR_MESSAGE,
 		});
 
 		expect(

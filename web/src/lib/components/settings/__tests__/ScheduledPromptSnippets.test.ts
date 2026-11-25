@@ -114,6 +114,44 @@ describe('scheduled prompt snippet interactions', () => {
 		expect(expand).not.toHaveBeenCalled();
 	});
 
+	it('falls back to the server when the rendered arguments dialog survives a catalog restore', async () => {
+		const { snippets, getSnippets } = renderEditor([localSnippet]);
+		await openArguments('local-review');
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
+			target: { value: 'pull requests' },
+		});
+
+		// Drive the store through a 3 -> 2 -> 3 restore with a changed template while arguments stay open.
+		snippets.applySnapshot({ revision: 3, snippets: [localSnippet] });
+		getSnippets
+			.mockResolvedValueOnce({ revision: 2, snippets: [] })
+			.mockResolvedValueOnce({
+				revision: 3,
+				snippets: [
+					{
+						...localSnippet,
+						template: 'Restored {{arguments}} on {{current_date}}',
+						updatedAt: '2026-01-02T00:00:00.000Z',
+					},
+				],
+			});
+		await snippets.refreshIfLoaded();
+		await snippets.refreshIfLoaded();
+
+		expand.mockResolvedValueOnce({
+			...response,
+			sourceId: localSnippet.id,
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
+			shortName: localSnippet.shortName,
+			expandedText: 'Restored pull requests on {{current_date}}',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+
+		await screen.findByText(/That snippet changed/);
+		expect(expand).toHaveBeenCalledOnce();
+		expect(screen.getByTestId('prompt-draft').textContent).toBe('Before ');
+	});
+
 	it('reopens arguments with preserved edits when local deferred boundary validation fails', async () => {
 		renderEditor([boundarySnippet]);
 		await openArguments('boundary');

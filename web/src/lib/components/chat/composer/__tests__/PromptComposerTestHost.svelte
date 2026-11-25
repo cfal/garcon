@@ -43,9 +43,10 @@
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
-	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createSnippetsStore, type SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
+	import type { SnippetsSnapshot } from '$shared/snippets';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
@@ -98,6 +99,8 @@
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
 		preloadSnippets?: boolean;
+		loadSnippets?: () => Promise<SnippetsSnapshot>;
+		onSnippets?: (store: SnippetsStore) => void;
 		wsPhase?: WsConnectionPhase;
 		preambleSnapshot?: PreamblesSnapshot;
 		statusBarVisible?: boolean;
@@ -143,6 +146,8 @@
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
 		preloadSnippets = false,
+		loadSnippets,
+		onSnippets,
 		wsPhase,
 		preambleSnapshot = { revision: 0, preambles: [] },
 		statusBarVisible = false,
@@ -462,12 +467,16 @@
 	if (ws) {
 		setWs(ws);
 		$effect(() => {
-			if (wsPhase !== undefined) ws.connectionStatus.phase = wsPhase;
+			if (wsPhase !== undefined) {
+				ws.isConnected = wsPhase === 'connected';
+				ws.connectionStatus.phase = wsPhase;
+			}
 		});
 	}
 	const snippetsStore = createSnippetsStore({
 		get: async () => {
 			snippetLoadCount += 1;
+			if (loadSnippets) return loadSnippets();
 			return {
 				revision: 1,
 				snippets: [
@@ -498,6 +507,7 @@
 			],
 		});
 	}
+	untrack(() => onSnippets?.(snippetsStore));
 	setSnippets(snippetsStore);
 	const preambles = createPreamblesStore();
 	preambles.applySnapshot(untrack(() => preambleSnapshot));

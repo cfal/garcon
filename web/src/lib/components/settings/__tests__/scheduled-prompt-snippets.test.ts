@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ScheduledPromptSnippets } from '../scheduled-prompt-snippets.svelte';
 import { expandSnippet } from '$lib/api/snippets.js';
-import { selectableSnippets } from '$lib/snippets/selectable-snippet.js';
+import { selectableSnippets, type SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
+import { catalogMatchesSelectableSnippet } from '$lib/snippets/local-snippet-expansion.js';
+import { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 
 vi.mock('$lib/api/snippets.js', () => ({ expandSnippet: vi.fn() }));
 const expand = vi.mocked(expandSnippet);
@@ -72,9 +74,15 @@ const response = {
 	expandedText: 'Review API in /repo {{chat_id}}',
 };
 
-function fixture() {
+function fixture(
+	options: {
+		matchesCatalogItem?: ((item: SelectableSnippet) => boolean) | undefined;
+		omitMatcher?: boolean;
+		onInsert?: (text: string, caret: number) => Promise<void>;
+	} = {},
+) {
 	const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
-	const onInsert = vi.fn(async (_text: string, _caret: number) => {});
+	const onInsert = vi.fn(options.onInsert ?? (async (_text: string, _caret: number) => {}));
 	const onPendingChange = vi.fn();
 	const onSourceChanged = vi.fn();
 	const controller = new ScheduledPromptSnippets({
@@ -90,6 +98,7 @@ function fixture() {
 				target: { type: 'new-chat' as const, projectPath: '/repo' },
 			};
 		},
+		...(options.omitMatcher ? {} : { matchesCatalogItem: options.matchesCatalogItem ?? (() => true) }),
 		onInsert,
 		onPendingChange,
 		onSourceChanged,
@@ -143,6 +152,47 @@ describe('scheduled prompt snippets', () => {
 		);
 	});
 
+	it('falls back to the server when the captured selection no longer matches the catalog after a restore', async () => {
+		if (localItem.source !== 'snippet') throw new Error('expected snippet fixture');
+		const store = new SnippetsStore({
+			get: vi
+				.fn()
+				.mockResolvedValueOnce({ revision: 2, snippets: [] })
+				.mockResolvedValueOnce({
+					revision: 3,
+					snippets: [
+						{
+							...localItem.snippet,
+							template: 'Restored {{arguments}}',
+							updatedAt: '2026-01-02T00:00:00.000Z',
+						},
+					],
+				}),
+		});
+		store.applySnapshot({ revision: 3, snippets: [localItem.snippet] });
+		const capturedItem = selectableSnippets(store.snippets, [])[0]!;
+		const { controller, onInsert } = fixture({
+			matchesCatalogItem: (selected) => catalogMatchesSelectableSnippet(selected, store),
+		});
+
+		await store.refreshIfLoaded();
+		await store.refreshIfLoaded();
+		expect(store.hasFreshSnapshot).toBe(true);
+
+		expand.mockResolvedValueOnce({
+			...response,
+			sourceId: capturedItem.id,
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
+			shortName: capturedItem.shortName,
+			expandedText: 'Restored API',
+		});
+		controller.open(7, 15);
+		expect(await controller.insert(capturedItem, 'API')).toBe('cancelled');
+		expect(expand).toHaveBeenCalledOnce();
+		expect(onInsert).not.toHaveBeenCalled();
+		expect(controller.error).toContain('changed');
+	});
+
 	it('rejects ambiguous deferred token boundaries locally without calling the server', async () => {
 		const { controller, onInsert, onPendingChange } = fixture();
 		controller.open(7, 15);
@@ -151,6 +201,31 @@ describe('scheduled prompt snippets', () => {
 		expect(onPendingChange).not.toHaveBeenCalled();
 		expect(onInsert).not.toHaveBeenCalled();
 		expect(controller.error).toContain('Add a separator');
+	});
+
+	it('falls back to the server when no catalog matcher is provided and catches local insertion errors', async () => {
+		const { controller: unmatched, onInsert: unmatchedInsert } = fixture({ omitMatcher: true });
+		expand.mockResolvedValueOnce({
+			...response,
+			sourceId: localItem.id,
+			sourceUpdatedAt: localItem.updatedAt,
+			shortName: localItem.shortName,
+			expandedText: 'Server expanded',
+		});
+		unmatched.open(7, 15);
+		expect(await unmatched.insert(localItem, 'API')).toBe('inserted');
+		expect(expand).toHaveBeenCalledOnce();
+		expect(unmatchedInsert).toHaveBeenCalledWith('Before Server expanded after', 'Before Server expanded'.length);
+
+		const { controller: failingLocal, onPendingChange } = fixture({
+			onInsert: async () => {
+				throw new Error('insert callback failed');
+			},
+		});
+		failingLocal.open(7, 15);
+		expect(await failingLocal.insert(localItem, 'API')).toBe('failed');
+		expect(failingLocal.error).toBe('insert callback failed');
+		expect(onPendingChange).not.toHaveBeenCalled();
 	});
 
 	it('replaces the configured inline trigger while preserving surrounding prose', async () => {

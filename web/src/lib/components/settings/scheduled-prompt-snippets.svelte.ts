@@ -15,6 +15,7 @@ interface Options {
 	get prompt(): string;
 	get context(): ScheduledSnippetExpansionContext | null;
 	get interactionKey(): string;
+	matchesCatalogItem?(item: SelectableSnippet): boolean;
 	onInsert(text: string, caret: number): Promise<void>;
 	onPendingChange(pending: boolean): void;
 	onSourceChanged(source: SelectableSnippet['source']): void;
@@ -54,23 +55,27 @@ export class ScheduledPromptSnippets {
 		const source = this.options.prompt;
 		const range = this.palette.trigger ?? this.#selection;
 		this.error = null;
-		const local = tryExpandSelectableSnippetLocally(
-			snippet,
-			{ type: 'value', value: argumentsText },
-			{ kind: 'scheduled' },
-		);
-		if (local.kind === 'expanded') {
-			const replacement = applySnippetTriggerReplacement(source, range, local.expandedText);
-			this.palette.complete();
-			await this.options.onInsert(replacement.text, replacement.caret);
-			return 'inserted';
-		}
-		if (local.kind === 'error') {
-			this.error = local.message;
-			return 'failed';
-		}
-		this.options.onPendingChange(true);
+		let pendingNotified = false;
 		try {
+			if (this.options.matchesCatalogItem?.(snippet) === true) {
+				const local = tryExpandSelectableSnippetLocally(
+					snippet,
+					{ type: 'value', value: argumentsText },
+					{ kind: 'scheduled' },
+				);
+				if (local.kind === 'expanded') {
+					const replacement = applySnippetTriggerReplacement(source, range, local.expandedText);
+					this.palette.complete();
+					await this.options.onInsert(replacement.text, replacement.caret);
+					return 'inserted';
+				}
+				if (local.kind === 'error') {
+					this.error = local.message;
+					return 'failed';
+				}
+			}
+			pendingNotified = true;
+			this.options.onPendingChange(true);
 			const result = await this.expansion.run({
 				shortName: snippet.shortName,
 				arguments: { type: 'value', value: argumentsText },
@@ -110,7 +115,7 @@ export class ScheduledPromptSnippets {
 			this.error = error instanceof Error ? error.message : String(error);
 			return 'failed';
 		} finally {
-			if (!this.expansion.pending) this.options.onPendingChange(false);
+			if (pendingNotified && !this.expansion.pending) this.options.onPendingChange(false);
 		}
 	}
 }

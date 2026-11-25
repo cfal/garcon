@@ -128,7 +128,7 @@
 		snippets,
 		preambles,
 		notifications,
-		isWsConnected: () => ws?.connectionStatus.phase === 'connected',
+		isWsConnected: () => ws?.isConnected === true,
 		getExecutionKey: () => executionKey,
 		isConversationInput: () => conversationInput,
 		isTransformPending: (): boolean => promptTransformPending,

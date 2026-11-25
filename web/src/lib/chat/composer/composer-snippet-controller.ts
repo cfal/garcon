@@ -4,6 +4,7 @@ import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertio
 import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 import {
+	catalogMatchesSelectableSnippet,
 	findFreshSelectableSnippetByShortName,
 	tryExpandSelectableSnippetLocally,
 	type PreambleCatalogLookup,
@@ -94,32 +95,35 @@ export class ComposerSnippetController<Prepared> {
 		if (this.options.isTransformPending() || !selection) return 'cancelled';
 		const sourceExecutionKey = this.options.getExecutionKey();
 		this.options.beforeExpand?.();
-		if (!this.options.hasProjectPath() && this.options.onMissingProjectPath) {
-			this.options.onMissingProjectPath();
-			await this.options.onSettled();
-			return 'cancelled';
-		}
-		const sourceText = this.options.getText();
-		const start = range?.start ?? selection.start;
-		const end = range?.end ?? selection.end;
-		if (this.options.hasProjectPath()) {
-			const local = tryExpandSelectableSnippetLocally(
-				snippet,
-				{ type: 'value', value: argumentsText },
-				{ kind: 'immediate', getChatId: () => this.options.getLocalChatId() },
-			);
-			if (local.kind === 'expanded') {
-				const replacement = replaceSnippetText(sourceText, start, end, range, local.expandedText);
-				await this.options.onExpanded(replacement.text, replacement.caret);
-				return 'inserted';
-			}
-			if (local.kind === 'error') {
-				this.options.notifications.error(m.snippets_expand_error({ detail: local.message }));
-				await this.options.onSettled();
-				return 'failed';
-			}
-		}
+		const owningCatalog =
+			snippet.source === 'snippet' ? this.options.snippets : this.options.preambles;
 		try {
+			const hasProjectPath = this.options.hasProjectPath();
+			if (!hasProjectPath && this.options.onMissingProjectPath) {
+				this.options.onMissingProjectPath();
+				await this.options.onSettled();
+				return 'cancelled';
+			}
+			const sourceText = this.options.getText();
+			const start = range?.start ?? selection.start;
+			const end = range?.end ?? selection.end;
+			if (hasProjectPath && catalogMatchesSelectableSnippet(snippet, owningCatalog)) {
+				const local = tryExpandSelectableSnippetLocally(
+					snippet,
+					{ type: 'value', value: argumentsText },
+					{ kind: 'immediate', getChatId: () => this.options.getLocalChatId() },
+				);
+				if (local.kind === 'expanded') {
+					const replacement = replaceSnippetText(sourceText, start, end, range, local.expandedText);
+					await this.options.onExpanded(replacement.text, replacement.caret);
+					return 'inserted';
+				}
+				if (local.kind === 'error') {
+					this.options.notifications.error(m.snippets_expand_error({ detail: local.message }));
+					await this.options.onSettled();
+					return 'failed';
+				}
+			}
 			const result = await this.#expansion.runPrepared(snippet.shortName, async (signal) => {
 				const operation = await this.options.prepareServerContext(signal);
 				return {
@@ -168,33 +172,34 @@ export class ComposerSnippetController<Prepared> {
 		const sourceExecutionKey = this.options.getExecutionKey();
 		const sourceText = this.options.getText();
 		this.options.beforeExpand?.();
-		if (!this.options.hasProjectPath() && this.options.onMissingProjectPath) {
-			this.options.onMissingProjectPath();
-			return;
-		}
-		if (this.options.hasProjectPath()) {
-			const item = findFreshSelectableSnippetByShortName(command.shortName, {
-				wsConnected: this.options.isWsConnected(),
-				snippets: this.options.snippets,
-				preambles: this.options.preambles,
-			});
-			if (item) {
-				const local = tryExpandSelectableSnippetLocally(item, command.arguments, {
-					kind: 'immediate',
-					getChatId: () => this.options.getLocalChatId(),
+		try {
+			const hasProjectPath = this.options.hasProjectPath();
+			if (!hasProjectPath && this.options.onMissingProjectPath) {
+				this.options.onMissingProjectPath();
+				return;
+			}
+			if (hasProjectPath) {
+				const item = findFreshSelectableSnippetByShortName(command.shortName, {
+					wsConnected: this.options.isWsConnected(),
+					snippets: this.options.snippets,
+					preambles: this.options.preambles,
 				});
-				if (local.kind === 'expanded') {
-					await this.options.onExpanded(local.expandedText, local.expandedText.length);
-					return;
-				}
-				if (local.kind === 'error') {
-					this.options.notifications.error(m.snippets_expand_error({ detail: local.message }));
-					await this.options.onSettled();
-					return;
+				if (item) {
+					const local = tryExpandSelectableSnippetLocally(item, command.arguments, {
+						kind: 'immediate',
+						getChatId: () => this.options.getLocalChatId(),
+					});
+					if (local.kind === 'expanded') {
+						await this.options.onExpanded(local.expandedText, local.expandedText.length);
+						return;
+					}
+					if (local.kind === 'error') {
+						this.options.notifications.error(m.snippets_expand_error({ detail: local.message }));
+						await this.options.onSettled();
+						return;
+					}
 				}
 			}
-		}
-		try {
 			const result = await this.#expansion.runPrepared(command.shortName, async (signal) => {
 				const operation = await this.options.prepareServerContext(signal);
 				return {

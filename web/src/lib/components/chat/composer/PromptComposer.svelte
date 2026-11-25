@@ -186,7 +186,7 @@
 		snippets,
 		preambles,
 		notifications,
-		isWsConnected: () => ws?.connectionStatus.phase === 'connected',
+		isWsConnected: () => ws?.isConnected === true,
 		getExecutionKey: () => executionKey,
 		isConversationInput: () => conversationInput,
 		isTransformPending: (): boolean => promptTransformPending,
@@ -194,7 +194,7 @@
 		getSelection: () =>
 			textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd } : null,
 		hasProjectPath: () => Boolean(sessions.selectedChat && projectState.target?.projectPath.trim()),
-		getLocalChatId: () => sessions.selectedChat!.id,
+		getLocalChatId: () => sessions.selectedChat?.id ?? '',
 		prepareServerContext: async (signal) => {
 			const operation = await projectState.resolveSnippetContext(signal);
 			return { requestContext: operation.context, prepared: operation };

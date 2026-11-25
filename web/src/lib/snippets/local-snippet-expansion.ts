@@ -13,6 +13,7 @@ import {
 } from '$shared/snippet-template';
 import {
 	SNIPPET_ARGUMENTS_MAX_LENGTH,
+	SNIPPET_VALIDATION_ERROR_MESSAGE,
 	snippetTemplateUsesChatId,
 	snippetTemplateUsesCurrentDate,
 	snippetTemplateUsesCurrentDateLocal,
@@ -37,31 +38,48 @@ export type LocalSnippetExpansionResult =
 	| { readonly kind: 'fallback' };
 
 export interface SnippetCatalogLookup {
-	readonly hasLoaded: boolean;
-	readonly isRefreshing: boolean;
-	readonly error: string | null;
+	readonly hasFreshSnapshot: boolean;
 	readonly snippets: readonly Snippet[];
 }
 
 export interface PreambleCatalogLookup {
-	readonly hasLoaded: boolean;
-	readonly isRefreshing: boolean;
-	readonly error: string | null;
+	readonly hasFreshSnapshot: boolean;
 	readonly preambles: readonly Preamble[];
 }
 
 const UNUSED_DATE = new Date(0);
 
-function isCatalogFresh(catalog: {
-	readonly hasLoaded: boolean;
-	readonly isRefreshing: boolean;
-	readonly error: string | null;
-}): boolean {
-	return catalog.hasLoaded && !catalog.isRefreshing && catalog.error === null;
+// Returns true when the owning catalog holds a settled snapshot whose entry still matches
+// the captured selection, so edits, restores, or in-flight refreshes while a dialog is open
+// fall back to the server instead of expanding stale captured text.
+export function catalogMatchesSelectableSnippet(
+	item: SelectableSnippet,
+	catalog: SnippetCatalogLookup | PreambleCatalogLookup | null,
+): boolean {
+	if (!catalog || !catalog.hasFreshSnapshot) return false;
+	if (item.source === 'snippet') {
+		if (!('snippets' in catalog)) return false;
+		const current = catalog.snippets.find((entry) => entry.id === item.id);
+		return (
+			current !== undefined &&
+			current.shortName === item.shortName &&
+			current.updatedAt === item.updatedAt &&
+			current.template === item.body &&
+			current.defaultArguments === item.snippet.defaultArguments
+		);
+	}
+	if (!('preambles' in catalog)) return false;
+	const current = catalog.preambles.find((entry) => entry.id === item.id);
+	return (
+		current !== undefined &&
+		current.snippetShortName === item.shortName &&
+		current.updatedAt === item.updatedAt &&
+		current.content === item.body
+	);
 }
 
 // Finds a snippet or named preamble for slash-command fast-path expansion only when the
-// owning catalog is loaded, clean, and backed by a live WebSocket for invalidations.
+// owning catalog holds an uncontradicted, settled snapshot backed by a live WebSocket.
 export function findFreshSelectableSnippetByShortName(
 	shortName: string,
 	options: {
@@ -71,11 +89,11 @@ export function findFreshSelectableSnippetByShortName(
 	},
 ): SelectableSnippet | null {
 	if (!options.wsConnected) return null;
-	if (isCatalogFresh(options.snippets)) {
+	if (options.snippets.hasFreshSnapshot) {
 		const snippet = options.snippets.snippets.find((entry) => entry.shortName === shortName);
 		if (snippet) return snippetToSelectable(snippet);
 	}
-	if (isCatalogFresh(options.preambles)) {
+	if (options.preambles.hasFreshSnapshot) {
 		const preamble = options.preambles.preambles.find(
 			(entry) => entry.snippetShortName === shortName,
 		);
@@ -97,7 +115,7 @@ export function tryExpandSelectableSnippetLocally(
 	) {
 		return {
 			kind: 'error',
-			message: `Snippet arguments exceed ${SNIPPET_ARGUMENTS_MAX_LENGTH} characters`,
+			message: SNIPPET_VALIDATION_ERROR_MESSAGE,
 		};
 	}
 	if (item.source === 'preamble') {
