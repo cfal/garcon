@@ -933,7 +933,7 @@ describe('VirtualListController', () => {
 	});
 
 	it.each(['before', 'after'])('keeps the reader offset when its row first measures %s the seek commits', timing => {
-		const test = harness({ viewportSize: 200, measurementAnchor: { kind: 'item', key: 'reader' } });
+		const test = harness({ viewportSize: 200, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: -300.25 } });
 		test.controller.apply({
 			kind: 'update', keys: ['before', 'reader', 'after', 'tail'], estimates: [1000, 192, 300, 2000],
 			anchor: { kind: 'none' },
@@ -951,7 +951,7 @@ describe('VirtualListController', () => {
 	});
 
 	it('falls back to the visible row when a pending measurement anchor is removed', () => {
-		const test = harness({ measurementAnchor: { kind: 'item', key: 'reader' } });
+		const test = harness({ measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: 10 } });
 		test.controller.apply({
 			kind: 'update', keys: ['before', 'visible', 'reader', 'tail'], estimates: [100, 100, 100, 500],
 			anchor: { kind: 'none' },
@@ -969,6 +969,28 @@ describe('VirtualListController', () => {
 		test.environment.observer.emit(before.element, 150);
 		test.environment.flushMicrotasks();
 		expect(test.viewport.scrollTop).toBe(240);
+	});
+
+	it.each([
+		{ offset: 100, before: 90, tailEstimate: 500, tail: 500, first: 0, expected: 0 },
+		{ offset: 100, before: 130, tailEstimate: 500, tail: 500, first: 0, expected: 30 },
+		{ offset: 50, before: 90, tailEstimate: 500, tail: 500, first: 0, expected: 40 },
+		{ offset: -50, before: 50, tailEstimate: 60, tail: 70, first: 10, expected: 20 },
+		{ offset: -50, before: 50, tailEstimate: 20, tail: 30, first: 0, expected: 0 },
+	])('preserves the attainable reader offset at a physical edge: %j', ({ offset, before, tailEstimate, tail, first, expected }) => {
+		const test = harness({ viewportSize: 200, measurementAnchor: { kind: 'item', key: 'reader', viewportOffset: offset } });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'reader', 'tail'], estimates: [50, 100, tailEstimate],
+			anchor: { kind: 'none' },
+		});
+		test.controller.scrollToAnchor('reader', offset);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(first);
+		test.mountItem('before', before);
+		test.mountItem('tail', tail);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(expected);
+		expect(test.writes).toBe(expected === first ? 1 : 2);
 	});
 
 	it('preserves a pending navigation target through a resize batch', () => {

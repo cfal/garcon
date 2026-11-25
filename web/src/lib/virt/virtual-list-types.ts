@@ -45,8 +45,8 @@ export function virtualItems(
 	return items;
 }
 type VirtualItemAnchor = { readonly kind: 'item'; readonly key: string };
-/** A consumer can pin a known row during measurement instead of inferring it from estimates. */
-export type VirtualMeasurementAnchor = 'geometric' | 'end' | VirtualItemAnchor;
+/** A reader restore preserves the requested row offset as far as physical bounds allow. */
+export type VirtualMeasurementAnchor = 'geometric' | 'end' | (VirtualItemAnchor & { readonly viewportOffset: number });
 export type VirtualMutationAnchor =
 	| VirtualItemAnchor
 	| { readonly kind: 'item-remap'; readonly oldKey: string; readonly newKey: string }

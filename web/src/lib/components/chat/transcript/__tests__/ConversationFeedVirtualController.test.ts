@@ -345,6 +345,22 @@ describe('ConversationFeedVirtualController', () => {
 		expect(writes).toEqual([edge]);
 	});
 
+	it('does not scroll away from the top while the saved offset remains out of reach', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, firstWrite, writes } = observeReadingTarget(exposure, 1);
+		const preceding = view.querySelector<HTMLElement>('[data-chat-virtual-item][data-index="0"]')!;
+		Object.defineProperty(preceding, 'offsetHeight', { configurable: true, value: 55 });
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-1' }, { viewportOffset: 60 });
+		await firstWrite;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await nextFrame();
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(node.getBoundingClientRect().top).toBe(55);
+		expect(writes).toEqual([0]);
+	});
+
 	it('does not write for a missing reader or a superseded seek', async () => {
 		const { exposure } = await renderController({ initialPinned: false });
 		const { writes } = observeReadingTarget(exposure, 3);

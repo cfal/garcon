@@ -49,7 +49,7 @@ type MutableTransactionRecord = {
 	-readonly [Key in keyof VirtualTransactionRecord]: VirtualTransactionRecord[Key];
 };
 type CapturedAnchor =
-	| { kind: 'item'; key: string; nextKey: string; index: number; start: number }
+	| { kind: 'item'; key: string; nextKey: string; index: number; start: number; viewportOffset?: number }
 	| { kind: 'end' }
 	| { kind: 'none' };
 
@@ -230,13 +230,7 @@ export class VirtualListTransaction {
 		}
 		const anchor = this.#captureMeasurementAnchor(dom, firstMeasurements);
 		this.geometry.measureMany(accepted);
-		const correction =
-			anchor.kind === 'end'
-				? this.geometry.totalSize() - oldTotal
-				: anchor.kind === 'item'
-					? (this.geometry.item(this.geometry.indexOf(anchor.key) ?? -1)?.start ?? anchor.start) -
-						anchor.start
-					: 0;
+		const correction = this.#measurementCorrection(anchor, dom, this.geometry.totalSize() - oldTotal);
 		this.#applyCorrection({
 			source,
 			provenance: anchor.kind === 'end' ? 'follow' : 'measurement',
@@ -580,6 +574,25 @@ export class VirtualListTransaction {
 		return { kind: 'item', key: oldKey, nextKey, index, start: item.start };
 	}
 
+	#measurementCorrection(anchor: CapturedAnchor, dom: VirtualDomGeometry | null, sizeDelta: number): number {
+		if (anchor.kind === 'end') return sizeDelta;
+		if (anchor.kind !== 'item') return 0;
+		const startDelta = this.geometry.item(anchor.index)!.start - anchor.start;
+		if (anchor.viewportOffset === undefined || !dom || this.#deviation.value !== 0) return startDelta;
+
+		// A clamped seek preserves the attainable part of the saved offset, not its initial error.
+		const desired = dom.leadingOffset + anchor.start - anchor.viewportOffset;
+		const attainable = clamp(desired, 0, dom.physicalMaximum);
+		const position = this.#pendingCommit
+			? this.#physicalOffsetForTarget(this.#pendingCommit.target, dom)
+			: dom.scrollTop;
+		if (attainable === desired || position !== attainable) return startDelta;
+		const nextMaximum = dom.physicalMaximum > 0
+			? Math.max(0, dom.physicalMaximum + sizeDelta)
+			: Math.max(0, dom.leadingOffset + this.geometry.totalSize() - dom.viewportSize);
+		return clamp(desired + startDelta, 0, nextMaximum) - attainable;
+	}
+
 	#captureMeasurementAnchor(
 		dom: VirtualDomGeometry | null,
 		firstMeasurements?: ReadonlySet<string>,
@@ -589,7 +602,7 @@ export class VirtualListTransaction {
 		if (!dom || this.geometry.count === 0) return { kind: 'none' };
 		if (policy !== 'geometric') {
 			const anchor = this.#captureMutationAnchor(policy);
-			if (anchor.kind === 'item') return anchor;
+			if (anchor.kind === 'item') return { ...anchor, viewportOffset: policy.viewportOffset };
 		}
 		const pendingAnchor = this.#pendingCommit?.measurementAnchor;
 		if (pendingAnchor?.kind === 'end') return pendingAnchor;
