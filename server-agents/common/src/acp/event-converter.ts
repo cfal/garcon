@@ -46,7 +46,7 @@ export interface AcpEventConverter {
 export const ACP_TERMINAL_TOOL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
 
 // Bounds a converter's per-session tool collections; the oldest entry goes first.
-const MAX_TOOL_ENTRIES_PER_SESSION = 512;
+export const MAX_TOOL_ENTRIES_PER_SESSION = 512;
 
 export function evictOldestToolEntry(entries: Set<string> | Map<string, unknown>): void {
   if (entries.size <= MAX_TOOL_ENTRIES_PER_SESSION) return;

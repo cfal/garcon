@@ -8,6 +8,7 @@ import {
 } from '@garcon/common/chat-types';
 import {
   ACP_TERMINAL_TOOL_STATUSES,
+  MAX_TOOL_ENTRIES_PER_SESSION,
   acpContentText,
   asObject,
   asString,
@@ -27,8 +28,13 @@ const WARNING_MARKER = '\n⚠ ';
 const EXECUTOR_ERROR = 'agent executor error: ';
 
 interface TrackedCall extends AntigravityToolCall {
-  readonly result?: ToolResultMessage['content'];
-  readonly exitCode?: number;
+  readonly rawOutput?: unknown;
+  readonly content?: readonly Record<string, unknown>[];
+}
+
+interface DeferredCall {
+  call: TrackedCall;
+  readonly preceding: ChatMessage[];
 }
 
 interface SessionState {
@@ -43,7 +49,7 @@ interface SessionState {
   readonly calls: Map<string, TrackedCall>;
   // Permission-only traffic must not evict an active tool's identity or result.
   readonly permissions: Map<string, TrackedCall>;
-  deferredId: string | null;
+  readonly deferred: Map<string, DeferredCall>;
 }
 
 // Upstream model failures (bad key, quota, HTTP errors) do not fail the ACP
@@ -62,44 +68,54 @@ export function splitExecutorError(text: string): { readonly text: string; reado
   };
 }
 
-function reportedResult(update: Record<string, unknown>): ToolResultMessage['content'] | undefined {
-  const rawOutput = asObject(update.rawOutput);
-  const output = asString(update.rawOutput) ?? asString(rawOutput.output);
-  if (output?.trim()) return { raw: output };
-  const blocks = Array.isArray(update.content) ? update.content.map(asObject) : [];
-  if (blocks.some(block => block.type !== 'content' || asObject(block.content).type !== 'text')) return { items: update.content };
-  const text = blocks.map(block => asString(asObject(block.content).text) ?? '').join('\n');
-  if (text.trim()) return { raw: text };
-  // Command transport fields alone are not a result body.
-  if (Object.keys(rawOutput).some(key => key !== 'exit_code' && (key !== 'output' || typeof rawOutput.output !== 'string')) ||
-      Array.isArray(update.rawOutput) || typeof update.rawOutput === 'boolean' || typeof update.rawOutput === 'number') {
-    return { rawOutput: update.rawOutput };
+function isAgentWork(name: string | null): boolean {
+  return name === 'manage_task' || name === 'update_steps' || name === 'send_message';
+}
+
+function reportedResult(call: TrackedCall): ToolResultMessage['content'] {
+  const name = call.isMcp ? null : call.name ?? (call.planTitle === 'matched' ? 'update_steps' : null);
+  const agentWork = isAgentWork(name);
+  const raw = call.rawOutput;
+  const blocks = call.content ?? [];
+  const output = asString(raw) ?? asString(asObject(raw).output);
+  const text = output?.trim() ? output : blocks.map(block => asString(asObject(block.content).text) ?? '').filter(Boolean).join('\n');
+  const result: ToolResultMessage['content'] = {};
+  if (agentWork && raw != null && typeof raw !== 'string' &&
+      (typeof raw !== 'object' || Array.isArray(raw) || Object.keys(asObject(raw)).some(key => key !== 'output' || output === undefined))) {
+    result.rawOutput = raw;
   }
-  if (update.content !== undefined || output !== undefined || (update.rawOutput !== undefined && rawOutput.exit_code === undefined)) return {};
-  return undefined;
+  if (agentWork && blocks.some(block => block.type !== 'content' || asObject(block.content).type !== 'text')) result.items = blocks;
+  const normalized = antigravityToolResultText(name ?? '', text);
+  if (normalized.trim()) result.raw = normalized;
+  return result;
 }
 
 function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
-  const code = asObject(update?.rawOutput).exit_code;
-  const input = !previous ? call.input : Object.keys(call.input).length ? { ...previous.input, ...call.input } : previous.input;
+  const name = call.name || previous?.name || null;
+  const partial = !name || isAgentWork(name) || call.isMcp || previous?.isMcp;
+  let input = call.input;
+  if (previous && !Object.keys(input).length) input = previous.input;
+  else if (previous && partial) input = { ...previous.input, ...input };
   return {
     ...call,
-    name: call.name || previous?.name || null,
+    name,
     kind: call.kind || previous?.kind || null,
     isMcp: call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool)),
     planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
     input,
-    result: (update && reportedResult(update)) ?? previous?.result,
-    exitCode: typeof code === 'number' ? code : previous?.exitCode,
+    // ACP patches rawOutput and content independently. Null rawOutput is unchanged;
+    // an explicit content array replaces its predecessor, including an empty one.
+    rawOutput: update?.rawOutput ?? previous?.rawOutput,
+    content: Array.isArray(update?.content)
+      ? update.content.map(asObject).filter(block => block.type !== 'diff') : previous?.content,
   };
 }
 
 function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean {
   if (!Object.keys(call.input).length) return true;
   if (row.type === 'mcp-tool-use') return false;
-  if (!call.name) return !call.isMcp;
-  return row.type === 'external-tool-use' && !call.isMcp &&
-    (call.name === 'manage_task' || call.name === 'send_message' || call.name === 'update_steps');
+  if (call.isMcp || !call.name) return true;
+  return row.type === 'external-tool-use' && isAgentWork(call.name);
 }
 
 export class AntigravityAcpEventConverter implements AcpEventConverter {
@@ -119,10 +135,14 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const call = antigravityToolCall(toolCall);
     if (!call) return null;
     const session = this.#sessionFor(context.sessionId);
+    const deferred = session.deferred.get(call.toolCallId);
     const calls = session.calls.has(call.toolCallId) ? session.calls : session.permissions;
-    const resolved = mergeCall(calls.get(call.toolCallId), call);
-    calls.set(call.toolCallId, resolved);
-    evictOldestToolEntry(calls);
+    const resolved = mergeCall(deferred?.call ?? calls.get(call.toolCallId), call);
+    if (deferred) deferred.call = resolved;
+    else {
+      calls.set(call.toolCallId, resolved);
+      evictOldestToolEntry(calls);
+    }
     return convertAntigravityToolUse(context.timestamp, resolved);
   }
 
@@ -134,7 +154,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const session = this.#sessionFor(context.sessionId);
     const updateType = asString(update.sessionUpdate);
     const outputType = acpOutputUpdateType(update, (id) => session.emittedToolIds.has(id)
-      || session.calls.has(id) || session.completedToolIds.has(id) || session.permissions.has(id));
+      || session.deferred.has(id) || session.calls.has(id) || session.completedToolIds.has(id) || session.permissions.has(id));
     session.assistantText += session.failure.continueOn(outputType);
     return this.#convertUpdate(session, update, updateType, context);
   }
@@ -156,7 +176,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       case 'agent_message':
       case 'agent_message_chunk': {
         const answerStarted = session.assistantText.trim() !== '';
-        const flushed = !session.deferredId && !answerStarted && session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
+        const flushed = !session.deferred.size && !answerStarted && session.thinkingText.trim() ? this.#flush(session, context.timestamp) : [];
         session.assistantText += session.failure.offer(acpContentText(update.content));
         return flushed;
       }
@@ -197,44 +217,45 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const { toolCallId } = parsed;
     const status = asString(update.status);
     const terminal = ACP_TERMINAL_TOOL_STATUSES.has(status ?? '');
-    const call = mergeCall(session.calls.get(toolCallId) ?? session.permissions.get(toolCallId), parsed, update);
+    const pending = session.deferred.get(toolCallId);
+    const call = mergeCall(pending?.call ?? session.calls.get(toolCallId) ?? session.permissions.get(toolCallId), parsed, update);
     session.permissions.delete(toolCallId);
-    const emitted = session.emittedToolIds.has(toolCallId);
-    if (!terminal) {
-      session.calls.set(toolCallId, call);
-      evictOldestToolEntry(session.calls);
-    }
-    if (emitted && !terminal) return [];
-
-    // Buffered prose after a deferred call can wait for its identity; another
-    // tool row or result is a publication boundary and cannot overtake it.
-    const wasDeferred = session.deferredId === toolCallId;
-    const messages = wasDeferred ? [] : [...this.#emitDeferred(session, timestamp), ...this.#flush(session, timestamp)];
+    const emitted = session.calls.has(toolCallId) || session.emittedToolIds.has(toolCallId);
+    const messages: ChatMessage[] = [];
     if (!emitted) {
       const row = convertAntigravityToolUse(timestamp, call);
       if (!terminal && needsMoreEvidence(call, row)) {
-        session.deferredId = toolCallId;
+        if (pending) pending.call = call;
+        else {
+          if (session.deferred.size >= MAX_TOOL_ENTRIES_PER_SESSION) {
+            const oldest = session.deferred.values().next().value;
+            if (oldest) messages.push(...this.#publishDeferred(session, timestamp, oldest));
+          }
+          const preceding = this.#flush(session, timestamp);
+          if (!session.deferred.size) messages.push(...preceding);
+          session.deferred.set(toolCallId, { call, preceding: session.deferred.size ? preceding : [] });
+        }
         return messages;
       }
-      session.deferredId = null;
+      messages.push(...this.#emitDeferred(session, timestamp, toolCallId));
+      messages.push(...(pending?.preceding ?? this.#flush(session, timestamp)), row);
+      session.deferred.delete(toolCallId);
       this.#remember(session.emittedToolIds, toolCallId);
-      messages.push(row);
     }
-    if (!terminal) return messages;
-    if (wasDeferred) messages.push(...this.#flush(session, timestamp));
+    if (!terminal) {
+      session.calls.set(toolCallId, call);
+      evictOldestToolEntry(session.calls);
+      return messages;
+    }
+    messages.push(...this.#emitDeferred(session, timestamp), ...this.#flush(session, timestamp));
     this.#remember(session.completedToolIds, toolCallId);
     session.calls.delete(toolCallId);
     // agy completes the tool invocation even when the command exits unsuccessfully.
     const name = call.isMcp ? null : call.name;
-    const exitCode = name === 'run_command' ? call.exitCode : undefined;
+    const exitCode = name === 'run_command' ? asObject(call.rawOutput).exit_code : undefined;
     const commandFailed = typeof exitCode === 'number' && exitCode !== 0;
     const failed = status !== 'completed' || commandFailed;
-    const content = { ...call.result };
-    if (typeof content.raw === 'string') {
-      const text = antigravityToolResultText(name ?? '', content.raw);
-      if (text.trim()) content.raw = text;
-      else delete content.raw;
-    }
+    const content = reportedResult(call);
     if (!Object.keys(content).length && failed) {
       if (commandFailed) content.exitCode = exitCode;
       else content.status = status;
@@ -243,14 +264,23 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     return messages;
   }
 
-  #emitDeferred(session: SessionState, timestamp: string): ChatMessage[] {
-    const id = session.deferredId;
-    if (!id) return [];
-    session.deferredId = null;
-    const call = session.calls.get(id);
-    if (!call) return [];
-    this.#remember(session.emittedToolIds, id);
-    return [convertAntigravityToolUse(timestamp, call)];
+  // Only actual publication (or the memory bound) fixes an incomplete call's
+  // place. Another incomplete start and the prose between them can still wait.
+  #emitDeferred(session: SessionState, timestamp: string, beforeId?: string): ChatMessage[] {
+    const messages: ChatMessage[] = [];
+    for (const [id, pending] of session.deferred) {
+      if (id === beforeId) break;
+      messages.push(...this.#publishDeferred(session, timestamp, pending));
+    }
+    return messages;
+  }
+
+  #publishDeferred(session: SessionState, timestamp: string, { call, preceding }: DeferredCall): ChatMessage[] {
+    session.deferred.delete(call.toolCallId);
+    this.#remember(session.emittedToolIds, call.toolCallId);
+    session.calls.set(call.toolCallId, call);
+    evictOldestToolEntry(session.calls);
+    return [...preceding, convertAntigravityToolUse(timestamp, call)];
   }
 
   #remember(ids: Set<string>, toolCallId: string): void {
@@ -280,7 +310,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
       completedToolIds: new Set(),
       calls: new Map(),
       permissions: new Map(),
-      deferredId: null,
+      deferred: new Map(),
     };
     this.#sessions.set(sessionId, created);
     return created;

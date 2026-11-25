@@ -62,7 +62,8 @@ describe('AntigravityAcpEventConverter', () => {
     expect(converter.endTurn(SESSION, context))
       .toMatchObject([{ type: 'external-tool-use', input }]);
     expect(converter.fromSessionUpdate(update({ sessionUpdate: 'tool_call', toolCallId: 'mcp',
-      title: 'Run update_steps', _meta: { is_mcp_tool_call: true }, rawInput: { steps: [] } }), context))
+      title: 'Run update_steps', _meta: { is_mcp_tool_call: true }, rawInput: { steps: [] } }), context)).toEqual([]);
+    expect(converter.endTurn(SESSION, context))
       .toMatchObject([{ type: 'unknown-tool-use' }]);
   });
 

@@ -12,6 +12,7 @@ function session() {
     start: (id: string, data: Record<string, unknown>) => frame({ toolCallId: id, sessionUpdate: 'tool_call', ...data }),
     patch: (id: string, data: Record<string, unknown>) => frame({ toolCallId: id, sessionUpdate: 'tool_call_update', ...data }),
     permission: (id: string, data = {}) => converter.permissionToolUse({ toolCallId: id, ...data }, context),
+    end: () => converter.endTurn(context.sessionId, context),
   };
 }
 
@@ -41,8 +42,8 @@ test('does not let interleaved prose overtake an incomplete checklist or discard
 
 test('prefers explicit MCP metadata or envelopes over native names and provisional titles', () => {
   const s = session();
-  expect(s.start('named', { name: 'update_steps', rawInput: { steps: [] }, _meta: { is_mcp_tool_call: true } }))
-    .toMatchObject([{ type: 'external-tool-use', name: 'update_steps', input: { steps: [] } }]);
+  expect(s.start('named', { name: 'update_steps', rawInput: { steps: [] }, _meta: { is_mcp_tool_call: true } })).toEqual([]);
+  expect(s.end()).toMatchObject([{ type: 'external-tool-use', name: 'update_steps', input: { steps: [] } }]);
   expect(s.start('envelope', { title: 'Run update_steps', rawInput: { server: 'docs', tool: 'lookup', steps: [] } }))
     .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }]);
   expect(s.start('title', { title: 'Run update_steps', rawInput: { steps: [] } })).toEqual([]);
@@ -61,11 +62,71 @@ test('keeps reported structured and progress output without manufacturing a succ
   s.start('replace', { ...list, rawOutput: 'Old' });
   expect(s.patch('replace', { status: 'completed', rawOutput: 'Final' })).toMatchObject([{ content: { raw: 'Final' } }]);
   s.start('clear', { ...list, rawOutput: 'Old' });
-  expect(s.patch('clear', { status: 'completed', content: [] })[0]).toEqual(expect.objectContaining({ content: {}, isError: false }));
+  expect(s.patch('clear', { status: 'completed', content: [] })[0]).toEqual(expect.objectContaining({ content: { raw: 'Old' }, isError: false }));
   expect(s.start('empty', { ...list, status: 'completed' }).at(-1)).toEqual(expect.objectContaining({ content: {}, isError: false }));
   s.start('cmd', { name: 'run_command', rawInput: { CommandLine: 'false' } });
   s.patch('cmd', { rawOutput: { exit_code: 1 } });
   expect(s.patch('cmd', { status: 'completed' })).toMatchObject([{ content: { exitCode: 1 }, isError: true }]);
+});
+
+test('merges rawOutput and content as independent ACP fields and treats null rawOutput as unchanged', () => {
+  const s = session();
+  const list = { name: 'manage_task', rawInput: { Action: 'list' } };
+  const rawOutput = { tasks: ['one'] };
+  s.start('task', { ...list, rawOutput, content: [{ type: 'content', content: { type: 'text', text: 'Earlier' } }] });
+  expect(s.patch('task', { status: 'completed', rawOutput: null, content: [] })[0])
+    .toEqual(expect.objectContaining({ content: { rawOutput }, isError: false }));
+  s.start('text', { ...list, rawOutput: 'Previous', content: [{ type: 'content', content: { type: 'text', text: 'Diagnostic' } }] });
+  expect(s.patch('text', { status: 'failed', rawOutput: {} })[0])
+    .toEqual(expect.objectContaining({ content: { raw: 'Diagnostic' }, isError: true }));
+});
+
+test('retains adjacent incomplete calls and their intervening prose until an actual row must publish', () => {
+  const s = session();
+  expect(s.start('send', { name: 'send_message', rawInput: { Recipient: 'peer' } })).toEqual([]);
+  expect(s.frame({ sessionUpdate: 'agent_message_chunk', content: { text: 'Between calls' } })).toEqual([]);
+  expect(s.start('plan', { name: 'update_steps' })).toEqual([]);
+  expect(s.patch('send', { rawInput: { Message: 'Hello' } })).toMatchObject([{ type: 'agent-message-tool-use', message: 'Hello' }]);
+  expect(s.patch('plan', { rawInput: { steps: [] }, status: 'completed' })).toMatchObject([
+    { type: 'assistant-message', content: 'Between calls' }, { type: 'update-plan-tool-use' }, { type: 'tool-result', toolId: 'plan' },
+  ]);
+});
+
+test('waits for the second half of an MCP envelope even after seeing its marker', () => {
+  const s = session();
+  s.start('mcp', { title: 'Run update_steps' });
+  expect(s.patch('mcp', { _meta: { is_mcp_tool_call: true }, rawInput: { server: 'docs' } })).toEqual([]);
+  expect(s.patch('mcp', { rawInput: { tool: 'lookup' }, status: 'completed' }))
+    .toMatchObject([{ type: 'mcp-tool-use', server: 'docs', tool: 'lookup' }, { type: 'tool-result' }]);
+});
+
+test('publishes the oldest incomplete call rather than losing it when the pending budget fills', () => {
+  const s = session();
+  for (let i = 0; i < 512; i++) expect(s.start(`call-${i}`, {})).toEqual([]);
+  expect(s.start('overflow', {})).toMatchObject([{ type: 'unknown-tool-use', toolId: 'call-0' }]);
+  const remaining = s.end();
+  expect(remaining).toHaveLength(512);
+  expect(remaining.at(-1)).toMatchObject({ toolId: 'overflow' });
+});
+
+test('ordinary progress at the active-call limit cannot evict an unpublished use row', () => {
+  const s = session();
+  for (let i = 0; i < 513; i++) s.start(`job-${i}`, { name: 'manage_task', rawInput: { Action: 'list' } });
+  expect(s.start('plan', { title: 'Run update_steps' })).toEqual([]);
+  // Recent calls publish no new rows on progress, even with the active cache full.
+  for (let i = 1; i < 513; i++) expect(s.patch(`job-${i}`, { status: 'in_progress' })).toEqual([]);
+  expect(s.patch('job-512', { status: 'completed' })).toMatchObject([
+    { toolId: 'plan', type: 'external-tool-use' }, { toolId: 'job-512', type: 'tool-result' },
+  ]);
+});
+
+test('does not store proposed edit diffs as successful or failed tool output', () => {
+  const s = session();
+  const edit = { name: 'replace_file_content', rawInput: { TargetFile: '/work/file', TargetContent: 'one', ReplacementContent: 'two' } };
+  const content = [{ type: 'diff', path: '/work/file', oldText: 'one', newText: 'two' }];
+  expect(s.start('edit', { ...edit, content, status: 'completed' }).at(-1)).toEqual(expect.objectContaining({ content: {}, isError: false }));
+  s.start('proposal', { ...edit, content });
+  expect(s.patch('proposal', { status: 'failed' })[0]).toEqual(expect.objectContaining({ content: { status: 'failed' }, isError: true }));
 });
 
 test('publishes waiting calls before the first transcript frame for a permission-only ID', () => {

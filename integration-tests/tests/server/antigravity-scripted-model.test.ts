@@ -588,6 +588,9 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
       expect(messagesOfType(messages, 'edit-tool-use')).toEqual([
         expect.objectContaining({ toolId: 'scripted-edit', oldString: 'alpha', newString: 'beta' }),
       ]);
+      const editResult = messagesOfType(messages, 'tool-result').find(row => row.toolId === 'scripted-edit');
+      expect(editResult).toMatchObject({ isError: false });
+      expect(editResult?.content).not.toHaveProperty('items');
       expect(messagesOfType(messages, 'unknown-tool-use')).toEqual([]);
       expect(messagesOfType(messages, 'permission-resolved')).toEqual([]);
       testEnvironment.model.assertSettled();
