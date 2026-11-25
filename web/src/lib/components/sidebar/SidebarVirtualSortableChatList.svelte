@@ -464,6 +464,23 @@
 		applySidebarDropInstruction(instruction);
 	}
 
+	function acceptedDropInstruction(
+		source: SidebarChatDragData,
+		dropTargets: DropTargetRecord[],
+		input: Input,
+	): SidebarDropInstruction | null {
+		// Cancellation clears the accepted targets, even when the pointer is still over a row.
+		const accepted = dropTargets.some(
+			({ element, isActiveDueToStickiness }) => element === viewportRef && !isActiveDueToStickiness,
+		);
+		if (!accepted || !inputIsInsideViewport(input)) return null;
+
+		const instruction = resolveSidebarDropInstruction(source, dropTargets);
+		if (instruction) return instruction;
+		const context = pointDropContext(source, input.clientX, input.clientY);
+		return fallbackInstructionForPointContext(source, context);
+	}
+
 	function finishSidebarDrop(
 		sourceData: unknown,
 		dropTargets: DropTargetRecord[],
@@ -472,20 +489,7 @@
 		if (!isSidebarChatDragData(sourceData) || sourceData.instanceId !== instanceId) return;
 		if (draggingChatId !== sourceData.chatId) return;
 		if (reorderEnabled && reorder.activeChatId === sourceData.chatId) {
-			// Cancellation clears the accepted targets. Only a real viewport drop may use the row fallback.
-			const accepted = dropTargets.some(
-				({ element, isActiveDueToStickiness }) =>
-					element === viewportRef && !isActiveDueToStickiness,
-			);
-			const instruction =
-				accepted && inputIsInsideViewport(input)
-					? (resolveSidebarDropInstruction(sourceData, dropTargets) ??
-						fallbackInstructionForPointContext(
-							sourceData,
-							pointDropContext(sourceData, input.clientX, input.clientY),
-						))
-					: null;
-
+			const instruction = acceptedDropInstruction(sourceData, dropTargets, input);
 			if (instruction) {
 				applySidebarDropInstruction(instruction);
 				persistReorderRequest(reorder.finish(sourceData.list));

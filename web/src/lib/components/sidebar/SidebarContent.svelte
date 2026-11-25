@@ -100,36 +100,34 @@
 			showBackToTop = false;
 			return;
 		}
-		const scrollViewport: HTMLElement = viewport;
-
-		function updateVisibility(): void {
-			if (viewportRef !== scrollViewport) return;
-			const height = scrollViewport.clientHeight;
+		const updateViewport = () => {
+			if (viewportRef !== viewport) return;
+			const height = viewport.clientHeight;
 			viewportHeight = height;
 			const nextVisible = shouldShowSidebarBackToTop({
-				scrollTop: scrollViewport.scrollTop,
+				scrollTop: viewport.scrollTop,
 				viewportHeight: height,
 				currentlyVisible: showBackToTop,
 			});
 			if (nextVisible === showBackToTop) return;
 			if (
 				!nextVisible &&
-				scrollViewport.ownerDocument.activeElement?.closest('[data-sidebar-back-to-top]')
+				viewport.ownerDocument.activeElement?.closest('[data-sidebar-back-to-top]')
 			) {
-				scrollViewport.focus({ preventScroll: true });
+				viewport.focus({ preventScroll: true });
 			}
 			showBackToTop = nextVisible;
-		}
+		};
 
 		// Keeps visibility state reads from re-subscribing the DOM lifecycle effect.
-		untrack(updateVisibility);
-		measuredViewport = scrollViewport;
-		scrollViewport.addEventListener('scroll', updateVisibility, { passive: true });
+		untrack(updateViewport);
+		measuredViewport = viewport;
+		viewport.addEventListener('scroll', updateViewport, { passive: true });
 		const resizeObserver =
-			typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateVisibility);
-		resizeObserver?.observe(scrollViewport);
+			typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateViewport);
+		resizeObserver?.observe(viewport);
 		return () => {
-			scrollViewport.removeEventListener('scroll', updateVisibility);
+			viewport.removeEventListener('scroll', updateViewport);
 			resizeObserver?.disconnect();
 		};
 	});

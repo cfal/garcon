@@ -133,10 +133,13 @@ async function sortFromChatMenu(
   return parsed;
 }
 
-async function previewRelativeDrag(
-  page: Page,
-  input: { sourceId: string; targetId: string; edge: 'top' | 'bottom' },
-): Promise<void> {
+interface RelativeDrag {
+  sourceId: string;
+  targetId: string;
+  edge: 'top' | 'bottom';
+}
+
+async function previewRelativeDrag(page: Page, input: RelativeDrag): Promise<void> {
   const source = page.locator(`[data-sidebar-virtual-row="${input.sourceId}"]`);
   const target = page.locator(`[data-sidebar-virtual-row="${input.targetId}"]`);
   // Menu dismissal can leave the body pointer-locked after the rows update.
@@ -154,10 +157,7 @@ async function previewRelativeDrag(
   await page.locator('[data-sidebar-branch-drop-indicator]').waitFor();
 }
 
-async function dragRelative(
-  page: Page,
-  input: { sourceId: string; targetId: string; edge: 'top' | 'bottom' },
-): Promise<ReorderChatResponse> {
+async function dragRelative(page: Page, input: RelativeDrag): Promise<ReorderChatResponse> {
   await previewRelativeDrag(page, input);
   const [response] = await Promise.all([
     page.waitForResponse((response) => isReorderRequest(response.request()), { timeout: 10_000 }),

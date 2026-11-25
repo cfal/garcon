@@ -421,12 +421,10 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 		await settleAutoScroll();
 		expect(screen.getByText('Renamed recipient')).toBeTruthy();
-		expect({
-			registrations: added.mock.calls.filter(([name]) => name === 'data-auto-scrollable').length,
-			cleanups: removed.mock.calls.filter(([name]) => name === 'data-auto-scrollable').length,
-			scrollHeight: scrollHeight.mock.calls.length,
-			clientHeight: clientHeight.mock.calls.length,
-		}).toEqual({ registrations: 0, cleanups: 0, scrollHeight: 0, clientHeight: 0 });
+		expect(added.mock.calls.map(([name]) => name)).not.toContain('data-auto-scrollable');
+		expect(removed).not.toHaveBeenCalledWith('data-auto-scrollable');
+		expect(scrollHeight).not.toHaveBeenCalled();
+		expect(clientHeight).not.toHaveBeenCalled();
 	});
 
 	it('edge-scrolls only while the live viewport overflows and reordering is allowed', async () => {
@@ -550,6 +548,11 @@ describe('SidebarVirtualSortableChatList', () => {
 				vi.advanceTimersByTime(32);
 				await tick();
 			};
+			const releaseOver = async (target: HTMLElement) => {
+				hit.mockReturnValue(target);
+				await drag('dragover', target, 150);
+				await drag('drop', target, 150);
+			};
 			try {
 				hit.mockReturnValue(row0);
 				await drag('dragstart', row0, 44);
@@ -563,35 +566,30 @@ describe('SidebarVirtualSortableChatList', () => {
 					// Escape ends a drag over the valid row without a native drop.
 					await drag('dragend', row0, 150);
 				} else if (ending === 'no target') {
-					hit.mockReturnValue(document.body);
-					await drag('dragover', document.body, 150);
-					await drag('drop', document.body, 150);
+					await releaseOver(document.body);
 				} else if (ending === 'unmounted row') {
 					viewport.scrollTop = rowHeight * 45;
 					await fireEvent.scroll(viewport);
 					expect(row1.isConnected).toBe(false);
-					hit.mockReturnValue(viewport);
-					await drag('dragover', viewport, 150);
-					await drag('drop', viewport, 150);
+					await releaseOver(viewport);
 				} else {
 					const target =
 						ending === 'header'
 							? viewport.querySelector<HTMLElement>('[data-sidebar-virtual-item="project-header"]')!
 							: viewport.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-60"]')!;
-					hit.mockReturnValue(target);
-					await drag('dragover', target, 150);
-					await drag('drop', target, 150);
+					await releaseOver(target);
 					expect(stickyRowAtDrop).toBe(true);
 				}
 				if (ending === 'row' || ending === 'unmounted row') {
-					expect(persist).toHaveBeenCalledTimes(1);
-					expect(persist).toHaveBeenCalledWith(
+					expect(persist).toHaveBeenCalledExactlyOnceWith(
 						expect.objectContaining({
 							chatId: 'chat-0',
 							placement: { kind: 'relative', referenceChatId: 'chat-1', position: 'after' },
 						}),
 					);
-				} else expect(persist).not.toHaveBeenCalled();
+				} else {
+					expect(persist).not.toHaveBeenCalled();
+				}
 				expect(ended).toHaveBeenCalledExactlyOnceWith('chat-0');
 			} finally {
 				stopMonitor();
