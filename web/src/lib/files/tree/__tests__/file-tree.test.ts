@@ -108,7 +108,7 @@ describe('FileTreeStore', () => {
 	it('keeps a newly collapsed listing for immediate reuse at the cold directory limit', async () => {
 		const src = entry('src', 'directory');
 		vi.mocked(filesApi.getTree).mockImplementation(async ({ directoryPath } = {}) =>
-			response(directoryPath, directoryPath === '/workspace/project' ? [src] : []),
+			response(directoryPath ?? undefined, directoryPath === '/workspace/project' ? [src] : []),
 		);
 		store.setProjectState(availableProject());
 		store.activate();
