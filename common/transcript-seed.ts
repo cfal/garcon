@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ChatMessage, PlanStep, ToolUseChatMessage } from './chat-types.js';
+import type { ChatMessage, PlanStep, TodoItem, ToolUseChatMessage } from './chat-types.js';
 import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
   projectionPriorityLevel,
@@ -665,6 +665,7 @@ export interface ProjectedToolUseSummary {
 export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToolUseSummary {
   if (message.type === 'update-plan-tool-use') return summarizePlan(message.todos);
   if (message.type === 'background-task-tool-use' && message.input !== undefined) {
+    // Collapsing whitespace here would change the literal input sent to the task.
     const raw = `${message.action} ${message.taskId ?? ''} Input: ${JSON.stringify(message.input.slice(0, TOOL_SUMMARY_MAX_CHARS))}`;
     const text = truncate(raw, TOOL_SUMMARY_MAX_CHARS);
     return { text, abridged: text !== raw };
@@ -747,19 +748,20 @@ function extractToolDetail(message: ToolUseChatMessage): string {
 }
 
 function summarizePlan(steps: readonly PlanStep[] | undefined): ProjectedToolUseSummary {
-  if (!steps?.length) return { text: steps ? 'Empty plan snapshot' : '', abridged: false };
+  if (!steps) return { text: '', abridged: false };
+  if (!steps.length) return { text: 'Empty plan snapshot', abridged: false };
   const parts: string[] = [];
   let abridged = false;
-  const current = steps.find(step => step.status === 'in_progress');
-  for (const [label, step] of [
-    ['failed', steps.find(item => item.status === 'failed')],
-    ['skipped', steps.find(item => item.status === 'skipped')],
-    [current ? 'current' : 'next', current ?? steps.find(item => item.status === 'pending')],
-  ] as const) {
-    if (!step) continue;
+  const addStep = (label: string, step: PlanStep | undefined) => {
+    if (!step) return;
     parts.push(`${label}: ${boundedCollapse(step.content)}`);
     abridged ||= step.content.length > PROJECTED_BODY_MAX_CHARS;
-  }
+  };
+  addStep('failed', steps.find(step => step.status === 'failed'));
+  addStep('skipped', steps.find(step => step.status === 'skipped'));
+  const current = steps.find(step => step.status === 'in_progress');
+  if (current) addStep('current', current);
+  else addStep('next', steps.find(step => step.status === 'pending'));
   if (!parts.length) return { text: `${steps.length} item(s), all completed`, abridged: false };
   const summary = parts.join('; ');
   if (summary.length <= TOOL_SUMMARY_MAX_CHARS) return { text: summary, abridged };
@@ -769,7 +771,7 @@ function summarizePlan(steps: readonly PlanStep[] | undefined): ProjectedToolUse
   return { text, abridged: true };
 }
 
-function summarizeTodos(todos: readonly PlanStep[] | undefined): string {
+function summarizeTodos(todos: readonly TodoItem[] | undefined): string {
   if (!todos?.length) return '';
   const active = todos.find((todo) => todo.status === 'in_progress') ?? todos[0];
   return `${todos.length} item(s), current: ${active.content}`;

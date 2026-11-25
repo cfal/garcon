@@ -50,7 +50,10 @@ export function coerceTodoItems(raw: unknown): TodoItem[] | undefined {
 
 export function coercePlanSteps(raw: unknown): PlanStep[] | undefined {
   if (Array.isArray(raw) && raw.length === 0) return [];
-  return checklistItems(raw, obj => obj.status === 'failed' || obj.status === 'skipped' ? obj.status : todoStatus(obj));
+  return checklistItems(raw, item => {
+    if (item.status === 'failed' || item.status === 'skipped') return item.status;
+    return todoStatus(item);
+  });
 }
 
 function asCursorPlanTodoStatus(value: unknown): CursorPlanTodoStatus {

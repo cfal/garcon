@@ -8,6 +8,7 @@ const MAX_BODY_CHARS = 64_000;
 const MAX_TOOL_INPUT_CHARS = 16_000;
 const MAX_TOOL_RESULT_HEAD_CHARS = 2_000;
 const MAX_TOOL_RESULT_TAIL_CHARS = 512;
+const MAX_TOOL_RESULT_CHARS = MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS;
 const MAX_RECURSIVE_CHARS = 4_000;
 const MAX_RECURSIVE_DEPTH = 8;
 const MAX_RECURSIVE_NODES = 512;
@@ -24,6 +25,17 @@ const TOOL_RESULT_FIELDS: PreferredFields = { raw: null, rawOutput: { output: nu
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled transcript search message type: ${String(value)}`);
+}
+
+function collapseSearchWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function searchablePrefix(text: string, budget: ExtractionBudget): string {
+  // Only searchable text spends the preferred field's budget; never scan beyond the prefix.
+  const prefix = text.slice(0, budget.remaining);
+  budget.truncated ||= prefix.length < text.length;
+  return collapseSearchWhitespace(prefix);
 }
 
 function appendText(parts: string[], value: unknown, budget: ExtractionBudget): void {
@@ -117,17 +129,14 @@ function boundedUnknownText(
   } else {
     const record = value as Record<string, unknown>;
     if (preferred) {
-      for (const key of Object.keys(preferred)) {
+      for (const [key, fields] of Object.entries(preferred)) {
         if (!Object.hasOwn(record, key)) continue;
         let child = record[key];
         if (typeof child === 'string') {
-          // Only searchable text spends the budget; never scan beyond the bounded prefix.
-          const prefix = child.slice(0, budget.remaining);
-          budget.truncated ||= prefix.length < child.length;
-          child = prefix.replace(/\s+/g, ' ').trim();
+          child = searchablePrefix(child, budget);
           if (!child) continue;
         }
-        appendChild(key, child, preferred[key]);
+        appendChild(key, child, fields);
       }
     }
     for (const key in record) {
@@ -157,16 +166,15 @@ function boundedUnknownForJoin(value: unknown, outerBudget: ExtractionBudget): s
 }
 
 function boundedToolResult(value: unknown, budget: ExtractionBudget): string {
-  const limit = MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS;
   if (typeof value !== 'string') {
-    const nestedBudget = { ...budget, remaining: limit };
+    const nestedBudget = { ...budget, remaining: MAX_TOOL_RESULT_CHARS };
     // Indexes the user-visible diagnostic before supplementary tool payloads.
     const text = boundedUnknownText(value, nestedBudget, 0, TOOL_RESULT_FIELDS);
     budget.remainingNodes = nestedBudget.remainingNodes;
     budget.truncated ||= nestedBudget.truncated;
     return text;
   }
-  if (value.length <= limit) return value;
+  if (value.length <= MAX_TOOL_RESULT_CHARS) return value;
   budget.truncated = true;
   return `${value.slice(0, MAX_TOOL_RESULT_HEAD_CHARS)} ${value.slice(-MAX_TOOL_RESULT_TAIL_CHARS)}`;
 }
@@ -318,21 +326,24 @@ function roleForMessage(message: ChatMessage): ChatSearchSnippetRole {
   return 'system';
 }
 
+function searchBodyLimit(type: ChatMessage['type']): number {
+  if (type === 'tool-result') return MAX_TOOL_RESULT_CHARS;
+  if (type.endsWith('-tool-use') || type === 'permission-request') return MAX_TOOL_INPUT_CHARS;
+  return MAX_BODY_CHARS;
+}
+
 function projectOne(message: ChatMessage): {
   row: SearchMessageRowInput | null;
   truncated: boolean;
 } {
   const budget: ExtractionBudget = {
-    remaining: message.type === 'tool-result' ? MAX_TOOL_RESULT_HEAD_CHARS + MAX_TOOL_RESULT_TAIL_CHARS
-      : message.type.endsWith('-tool-use') || message.type === 'permission-request'
-        ? MAX_TOOL_INPUT_CHARS
-        : MAX_BODY_CHARS,
+    remaining: searchBodyLimit(message.type),
     remainingNodes: MAX_RECURSIVE_NODES,
     seen: new Set(),
     truncated: false,
   };
   const raw = messageText(message, budget);
-  const body = raw.replace(/\s+/g, ' ').trim();
+  const body = collapseSearchWhitespace(raw);
   const timestamp = typeof message.timestamp === 'string'
     && Buffer.byteLength(message.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES
     ? message.timestamp
