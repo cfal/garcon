@@ -47,10 +47,14 @@ export interface CommitControllerDeps extends GitSurfaceControllerDeps {
 type QueueAction = 'generate' | 'commit' | null;
 type QuickCommitTreeLoadState = 'idle' | 'initial-loading' | 'refreshing';
 
+function pathIntents(previous?: Record<string, QuickCommitPathIntent>): Record<string, QuickCommitPathIntent> {
+	return Object.assign(Object.create(null), previous);
+}
+
 export class CommitController implements PortableSingletonController {
 	readonly target: GitTargetSessionController;
 	tree = $state.raw<GitTreeNode[]>([]);
-	intents = $state.raw<Record<string, QuickCommitPathIntent>>({});
+	intents = $state.raw(pathIntents());
 	readonly fileNodes = $derived.by(() => flattenCommitFileNodes(this.tree));
 	#message = $state('');
 	#messageRevision = 0;
@@ -599,7 +603,7 @@ export class CommitController implements PortableSingletonController {
 				this.treeValidated = false;
 				if (options.clearOnNotReady) {
 					this.tree = [];
-					this.intents = {};
+					this.intents = pathIntents();
 				}
 				this.lastError = snapshot.message;
 				return;
@@ -623,7 +627,7 @@ export class CommitController implements PortableSingletonController {
 
 	private applyTree(tree: GitTreeNode[], preserveDesired: boolean): void {
 		const previous = this.intents;
-		const nextIntents: Record<string, QuickCommitPathIntent> = {};
+		const nextIntents = pathIntents();
 		for (const node of flattenCommitFileNodes(tree)) {
 			const actualSelected = Boolean(node.staged);
 			const previousIntent = previous[node.path];
@@ -687,7 +691,7 @@ export class CommitController implements PortableSingletonController {
 			const intent = previous[path];
 			if (!intent) continue;
 			const update = patch(intent);
-			if (update) (next ??= { ...previous })[path] = { ...intent, ...update };
+			if (update) (next ??= pathIntents(previous))[path] = { ...intent, ...update };
 		}
 		if (next) this.intents = next;
 	}
@@ -715,7 +719,7 @@ export class CommitController implements PortableSingletonController {
 		this.queue.reset();
 		this.loadedTargetIdentity = identity;
 		this.tree = [];
-		this.intents = {};
+		this.intents = pathIntents();
 		this.shouldRefreshAfterDrain = false;
 		this.activationPromise = null;
 		this.treeLoadState = this.projectPath ? 'initial-loading' : 'idle';
@@ -808,20 +812,19 @@ export class CommitController implements PortableSingletonController {
 		const snapshot = this.snapshots.restore(key);
 		if (!snapshot) return;
 		this.tree = snapshot.tree;
-		this.intents = Object.fromEntries(
-			Object.entries(snapshot.intents).map(([path, intent]) => [
-				path,
-				{
-					...intent,
-					isRunning: false,
-					runningMode: null,
-					desiredSelected: intent.error ? intent.desiredSelected : intent.actualSelected,
-					error: intent.isRunning
-						? 'Git operation was interrupted. Inspect the repository before trying again.'
-						: intent.error,
-				},
-			]),
-		);
+		const restored = pathIntents();
+		for (const [path, intent] of Object.entries(snapshot.intents)) {
+			restored[path] = {
+				...intent,
+				isRunning: false,
+				runningMode: null,
+				desiredSelected: intent.error ? intent.desiredSelected : intent.actualSelected,
+				error: intent.isRunning
+					? 'Git operation was interrupted. Inspect the repository before trying again.'
+					: intent.error,
+			};
+		}
+		this.intents = restored;
 		this.message = snapshot.message;
 	}
 

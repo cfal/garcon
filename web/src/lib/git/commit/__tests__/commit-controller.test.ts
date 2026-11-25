@@ -495,6 +495,24 @@ describe('CommitController', () => {
 		controller.dispose();
 	});
 
+	it('includes a root file named __proto__ in selection and staging errors', async () => {
+		mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(snapshot([fileNode('__proto__')]));
+		const stage = deferred<{ success: boolean }>();
+		mockedApi.gitStagePaths.mockReturnValueOnce(stage.promise);
+		const controller = makeController();
+		await setProject(controller, '/project', '/project');
+		await controller.setPresentationVisible(true);
+		controller.message = 'Commit file';
+		controller.togglePath('__proto__', true);
+		expect(controller.desiredSelectedFiles).toEqual(['__proto__']);
+		expect(controller.canCommit).toBe(true);
+		stage.reject(new Error('Stage failed'));
+		await controller.waitForQueue();
+		expect(controller.hasErrors).toBe(true);
+		expect(controller.canCommit).toBe(false);
+		controller.dispose();
+	});
+
 	it('stops queued staging after uncertainty while retaining selections and commit text', async () => {
 		const staging = deferred<{ success: boolean }>();
 		mockedApi.gitStagePaths.mockReturnValueOnce(staging.promise);
