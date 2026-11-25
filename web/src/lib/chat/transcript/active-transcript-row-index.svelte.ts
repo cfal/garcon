@@ -1,4 +1,4 @@
-import type { ChatMessage } from '$shared/chat-types';
+import type { ChatMessage, ToolResultMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 
 type QuestionAnswer = Extract<ChatMessage, { type: 'user-message' }>;
@@ -9,6 +9,8 @@ export class ActiveTranscriptRowIndex {
 	subagentMessages = $state.raw<ChatMessage[]>([]);
 	hasSubagentEvents = $state(false);
 	#subagentToolIds = new Set<string>();
+	// Keeps the latest result for each unmatched ID within the loaded window.
+	#unmatchedResults = new Map<string, ToolResultMessage>();
 
 	replace(entries: readonly TranscriptMessage[]): void {
 		this.lastOwnershipBoundary = 0;
@@ -16,6 +18,7 @@ export class ActiveTranscriptRowIndex {
 		this.subagentMessages = [];
 		this.hasSubagentEvents = false;
 		this.#subagentToolIds.clear();
+		this.#unmatchedResults.clear();
 		this.append(entries);
 	}
 
@@ -23,38 +26,35 @@ export class ActiveTranscriptRowIndex {
 		let boundary = this.lastOwnershipBoundary;
 		let answers: QuestionAnswer[] | undefined;
 		let subagentMessages: ChatMessage[] | undefined;
-		let newSubagentToolIds: Set<string> | undefined;
 		for (let index = start; index < entries.length; index++) {
 			const { ordinal, message } = entries[index];
-			if (message.type === 'agent-switch') boundary = ordinal;
-			if (message.type === 'user-message' && message.metadata?.questionReply) {
-				(answers ??= []).push(message);
-			}
-			if (message.type === 'codex-subagent-tool-use' && !this.#subagentToolIds.has(message.toolId)) {
-				this.#subagentToolIds.add(message.toolId);
-				(newSubagentToolIds ??= new Set()).add(message.toolId);
+			switch (message.type) {
+				case 'agent-switch':
+					boundary = ordinal;
+					break;
+				case 'user-message':
+					if (message.metadata?.questionReply) (answers ??= []).push(message);
+					(subagentMessages ??= []).push(message);
+					break;
+				case 'codex-subagent-tool-use': {
+					this.#subagentToolIds.add(message.toolId);
+					const result = this.#unmatchedResults.get(message.toolId);
+					if (result) {
+						(subagentMessages ??= []).push(result);
+						this.#unmatchedResults.delete(message.toolId);
+					}
+					(subagentMessages ??= []).push(message);
+					break;
+				}
+				case 'tool-result':
+					if (this.#subagentToolIds.has(message.toolId)) (subagentMessages ??= []).push(message);
+					else this.#unmatchedResults.set(message.toolId, message);
+					break;
 			}
 		}
 		this.lastOwnershipBoundary = boundary;
 		this.hasSubagentEvents = this.#subagentToolIds.size > 0;
 		if (answers) this.questionAnswers = [...this.questionAnswers, ...answers];
-		// The reducer pairs each call with the last result for its tool ID, including
-		// results that may have arrived in an earlier retained page.
-		if (newSubagentToolIds && start > 0) {
-			for (let index = start - 1; index >= 0 && newSubagentToolIds.size > 0; index--) {
-				const { message } = entries[index];
-				if (message.type === 'tool-result' && newSubagentToolIds.delete(message.toolId)) {
-					(subagentMessages ??= []).push(message);
-				}
-			}
-		}
-		for (let index = start; index < entries.length; index++) {
-			const { message } = entries[index];
-			if (message.type === 'codex-subagent-tool-use' || message.type === 'user-message'
-				|| (message.type === 'tool-result' && this.#subagentToolIds.has(message.toolId))) {
-				(subagentMessages ??= []).push(message);
-			}
-		}
 		if (subagentMessages) this.subagentMessages = [...this.subagentMessages, ...subagentMessages];
 	}
 }
