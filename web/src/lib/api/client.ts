@@ -125,12 +125,16 @@ export class ApiMutationOutcomeUnknownError extends Error {
 	}
 }
 
+function hasErrorCode(code: unknown): code is string {
+	return typeof code === 'string' && code.trim().length > 0;
+}
+
 export function isHttpErrorResponse(value: unknown): value is HttpErrorResponse {
 	return (
 		isRecord(value) &&
 		value.success === false &&
 		typeof value.error === 'string' &&
-		typeof value.errorCode === 'string' &&
+		hasErrorCode(value.errorCode) &&
 		typeof value.retryable === 'boolean' &&
 		(value.details === undefined || typeof value.details === 'string')
 	);
@@ -154,7 +158,7 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
 				retryable = body.retryable;
 			} else if (isRecord(body) && typeof body.error === 'string') {
 				message = body.error;
-				if (typeof body.errorCode === 'string') errorCode = body.errorCode;
+				if (hasErrorCode(body.errorCode)) errorCode = body.errorCode;
 				if (typeof body.details === 'string') details = body.details;
 			}
 		} catch {
