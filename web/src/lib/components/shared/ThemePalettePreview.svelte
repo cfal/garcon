@@ -1,9 +1,13 @@
 <script lang="ts">
 	import type { ThemeId } from '$lib/theme/themes.js';
+	import { loadThemeStyles } from '$lib/theme/theme-styles.js';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Minus from '@lucide/svelte/icons/minus';
 
 	let { themeId }: { themeId: ThemeId } = $props();
+	$effect(() => {
+		void loadThemeStyles(themeId)?.catch((error: unknown) => console.warn(error));
+	});
 </script>
 
 <span

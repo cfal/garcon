@@ -22,10 +22,9 @@ describe('service worker helpers', () => {
 				.fn<Cache['match']>()
 				.mockImplementation(async (path) => (path === '/used.woff2' ? inherited : undefined)),
 		} satisfies Pick<Cache, 'match'>;
-		await preserveCachedFonts(current, previous, {
-			build: ['/kept.woff2', '/used.woff2', '/unused.woff2', '/app.js'],
-			files: ['/unversioned.woff2'],
-		});
+		await preserveCachedFonts(current, previous, [
+			'/kept.woff2', '/used.woff2', '/unused.woff2',
+		]);
 		expect(previous.match.mock.calls.map(([path]) => path)).toEqual([
 			'/used.woff2',
 			'/unused.woff2',
@@ -42,7 +41,7 @@ describe('service worker helpers', () => {
 			match: vi.fn<Cache['match']>().mockResolvedValue(new Response('font')),
 		} satisfies Pick<Cache, 'match'>;
 		await expect(
-			preserveCachedFonts(current, previous, { build: ['/used.woff2'], files: [] }),
+			preserveCachedFonts(current, previous, ['/used.woff2']),
 		).rejects.toThrow('quota');
 	});
 	beforeEach(() => {
@@ -54,87 +53,30 @@ describe('service worker helpers', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('pre-caches build assets strictly and static files tolerantly', async () => {
+	it.each(['', '/tools/garcon'])('precaches only the provided shell assets at "%s"', async (base) => {
 		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
-		const add = vi.fn<Cache['add']>((url) => {
-			if (url === '/missing-static-file.png') {
-				return Promise.reject(new Error('missing'));
-			}
-			return Promise.resolve();
-		});
-
-		await expect(
-			precacheAppShell(
-				{ addAll, add },
-				{ build: ['/build/app.js'], files: ['/favicon.png', '/missing-static-file.png'] },
-			),
-		).resolves.toBeUndefined();
-
-		expect(addAll).toHaveBeenCalledWith(['/', '/build/app.js']);
-		expect(add).toHaveBeenCalledWith('/favicon.png');
-		expect(add).toHaveBeenCalledWith('/missing-static-file.png');
-	});
-
-	it('does not precache the remote title manifest', async () => {
-		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
-		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
-
 		await precacheAppShell(
-			{ addAll, add },
-			{
-				build: ['/build/app.js'],
-				files: ['/site.webmanifest', '/icon.svg'],
-			},
+			{ addAll },
+			['_app/immutable/entry/app.js', '_app/immutable/assets/shell.css'],
+			base,
 		);
 
-		expect(addAll).toHaveBeenCalledWith(['/', '/build/app.js']);
-		expect(add).not.toHaveBeenCalledWith('/site.webmanifest');
-		expect(add).toHaveBeenCalledWith('/icon.svg');
+		expect(addAll).toHaveBeenCalledExactlyOnceWith([
+			`${base}/`,
+			`${base}/_app/immutable/entry/app.js`,
+			`${base}/_app/immutable/assets/shell.css`,
+		]);
 	});
 
-	it('leaves both immutable and static fonts to demand loading under a runtime mount', async () => {
-		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
-		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
-		await precacheAppShell(
-			{ addAll, add },
-			{
-				build: [
-					'/mounted/_app/app.js',
-					'/mounted/_app/Inter-core.woff2',
-					'/mounted/_app/Inter-extended.woff2',
-				],
-				files: [
-					'/mounted/font.woff',
-					'/mounted/font.ttf',
-					'/mounted/font.otf',
-					'/mounted/icon.svg',
-				],
-			},
-			'/mounted',
-		);
-		expect(addAll).toHaveBeenCalledExactlyOnceWith(['/mounted/', '/mounted/_app/app.js']);
-		expect(add).toHaveBeenCalledExactlyOnceWith('/mounted/icon.svg');
+	it('fails installation when an eager asset cannot be cached', async () => {
+		const addAll = vi.fn<Cache['addAll']>().mockRejectedValue(new Error('not found'));
+		await expect(precacheAppShell({ addAll }, ['app.js'])).rejects.toThrow('not found');
 	});
 
 	it('recognizes manifest paths for cache bypass', () => {
 		expect(isManifestPath('/site.webmanifest')).toBe(true);
 		expect(isManifestPath('https://garcon.test/site.webmanifest')).toBe(true);
 		expect(isManifestPath('/icon.svg')).toBe(false);
-	});
-
-	it('keeps framework-prefixed assets and manifest filtering under the mount', async () => {
-		const addAll = vi.fn<Cache['addAll']>().mockResolvedValue(undefined);
-		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
-		await precacheAppShell(
-			{ addAll, add },
-			{
-				build: ['/tools/garcon/_app/app.js'],
-				files: ['/tools/garcon/site.webmanifest', '/tools/garcon/icons/icon.svg'],
-			},
-			'/tools/garcon',
-		);
-		expect(addAll).toHaveBeenCalledWith(['/tools/garcon/', '/tools/garcon/_app/app.js']);
-		expect(add).toHaveBeenCalledExactlyOnceWith('/tools/garcon/icons/icon.svg');
 	});
 
 	it('does not cache navigation responses marked no-store', () => {

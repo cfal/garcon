@@ -1,10 +1,5 @@
 export const NAVIGATION_TIMEOUT_MS = 3000;
 
-export interface ServiceWorkerPrecacheManifest {
-	build: string[];
-	files: string[];
-}
-
 export function isManifestPath(value: string, basePath = ''): boolean {
 	try {
 		return new URL(value, 'http://localhost').pathname === `${basePath}/site.webmanifest`;
@@ -21,17 +16,13 @@ export function shouldCacheNavigationResponse(response: Response): boolean {
 		.some((directive) => directive.trim().toLowerCase() === 'no-store');
 }
 
-function isFontPath(path: string): boolean {
-	return /\.(?:woff2?|ttf|otf)$/.test(path);
-}
-
 // Only immutable current-build fonts can safely survive a version change.
 export async function preserveCachedFonts(
 	current: Pick<Cache, 'match' | 'put'>,
 	previous: Pick<Cache, 'match'>,
-	manifest: ServiceWorkerPrecacheManifest,
+	fonts: readonly string[],
 ): Promise<void> {
-	for (const path of manifest.build.filter(isFontPath)) {
+	for (const path of fonts) {
 		if (await current.match(path)) continue;
 		const response = await previous.match(path);
 		if (response?.ok) await current.put(path, response);
@@ -39,18 +30,11 @@ export async function preserveCachedFonts(
 }
 
 export async function precacheAppShell(
-	cache: Pick<Cache, 'addAll' | 'add'>,
-	manifest: ServiceWorkerPrecacheManifest,
+	cache: Pick<Cache, 'addAll'>,
+	eager: readonly string[],
 	basePath = '',
 ): Promise<void> {
-	// Keeps the offline navigation fallback strict while allowing optional static files to drift.
-	// Fonts are cached when requested; eager downloads defeat unicode-range and font preferences.
-	await cache.addAll([`${basePath}/`, ...manifest.build.filter((url) => !isFontPath(url))]);
-	await Promise.allSettled(
-		manifest.files
-			.filter((url) => !isManifestPath(url, basePath) && !isFontPath(url))
-			.map((url) => cache.add(url)),
-	);
+	await cache.addAll([`${basePath}/`, ...eager.map((path) => `${basePath}/${path}`)]);
 }
 
 export function withNavigationTimeout(

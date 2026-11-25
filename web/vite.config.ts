@@ -59,6 +59,16 @@ export default defineConfig({
 							priority: 20,
 						},
 						{
+							name: 'shared-icons',
+							test: /\/node_modules\/@lucide\/svelte\/.*\/icons\//,
+							minShareCount: 2,
+						},
+						{
+							name: 'shared-utilities',
+							test: /\/src\/lib\/utils\//,
+							minShareCount: 2,
+						},
+						{
 							name: 'vendor-canvas',
 							test: (id) => id.includes('@xyflow/') || id.includes('@svelte-put/shortcut'),
 							priority: 10,
@@ -78,6 +88,7 @@ export default defineConfig({
 							debugName: 'vendor-by-package',
 							name(id) {
 								if (!id.includes('/node_modules/')) return;
+								if (id.includes('/node_modules/fuse.js/')) return 'vendor-fuse';
 								if (id.includes('@xterm/')) return 'vendor-xterm';
 								if (id.includes('@tiptap/') || id.includes('prosemirror-'))
 									return 'vendor-markdown-editor';

@@ -181,6 +181,13 @@ export const DEFAULT_THEME_PREFERENCE: ThemePreference = {
 	darkThemeId: 'phosphor-dark',
 };
 
+export function isDefaultThemeId(id: ThemeId): boolean {
+	return (
+		id === resolveThemeId(DEFAULT_THEME_PREFERENCE, 'light') ||
+		id === resolveThemeId(DEFAULT_THEME_PREFERENCE, 'dark')
+	);
+}
+
 export const THEME_FAMILIES = [
 	{ id: 'classic', lightThemeId: 'classic-light', darkThemeId: 'classic-dark' },
 	{ id: 'phosphor', lightThemeId: 'phosphor-light', darkThemeId: 'phosphor-dark' },

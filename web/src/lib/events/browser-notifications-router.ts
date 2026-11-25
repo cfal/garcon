@@ -1,24 +1,24 @@
-import { createDrainCursor, type DrainHandle, type WsMessageLog } from '$lib/ws/drain';
-import {
+import type { WsPushEvents } from '$lib/ws/connection.svelte.js';
+import type {
 	AgentRunFinishedMessage,
 	ChatSessionDeletedWsMessage,
 	ChatTranscriptReplacedMessage,
 	ChatTransientFeedMutationMessage,
-	parseServerWsMessage,
 } from '$shared/ws-events';
 import type { TransientFeedRow } from '$shared/chat-transient-feed';
 import type { BrowserNotificationDeliveryPort } from '$lib/notifications/browser-notifications.js';
 import * as m from '$lib/paraglide/messages.js';
 
 export class BrowserNotificationsRouter {
-	#handle: DrainHandle | null = null;
+	#unsubscribe: (() => void) | null = null;
+	#permissionFlushQueued = false;
 	readonly #seen = new Map<string, string>();
 	readonly #permissions = new Map<
 		string,
 		{ chatId: string; row: TransientFeedRow; announced: boolean }
 	>();
 	constructor(
-		private readonly ws: WsMessageLog,
+		private readonly ws: WsPushEvents,
 		private readonly delivery: Pick<BrowserNotificationDeliveryPort, 'show' | 'close'>,
 		private readonly deps: {
 			enabled(): boolean;
@@ -29,71 +29,86 @@ export class BrowserNotificationsRouter {
 	) {}
 
 	start(): void {
-		if (!this.#handle) this.#handle = createDrainCursor(this.ws);
+		if (this.#unsubscribe) return;
+		const unsubscribe = [
+			this.ws.onMessageType('agent-run-finished', (message) => this.#receive(message)),
+			this.ws.onMessageType('chat-transient-feed-mutation', (message) => this.#receive(message)),
+			this.ws.onMessageType('chat-session-deleted', (message) => this.#receive(message)),
+			this.ws.onMessageType('chat-transcript-replaced', (message) => this.#receive(message)),
+		];
+		this.#unsubscribe = () => unsubscribe.forEach((cleanup) => cleanup());
 	}
 
-	tick(): void {
-		for (const { data } of this.#handle?.drain() ?? []) {
+	#receive(
+		message:
+			| AgentRunFinishedMessage
+			| ChatTransientFeedMutationMessage
+			| ChatSessionDeletedWsMessage
+			| ChatTranscriptReplacedMessage,
+	): void {
+		if (message.type === 'agent-run-finished') {
 			if (
-				data.type !== 'agent-run-finished' &&
-				data.type !== 'chat-transient-feed-mutation' &&
-				data.type !== 'chat-session-deleted' &&
-				data.type !== 'chat-transcript-replaced'
+				message.outcome !== 'finished' ||
+				!message.turnId ||
+				(message.exitCode !== undefined && message.exitCode !== 0) ||
+				this.deps.isChatProcessing(message.chatId)
 			)
-				continue;
-			const message = parseServerWsMessage(data);
-			if (message instanceof AgentRunFinishedMessage) {
-				if (
-					message.outcome !== 'finished' ||
-					!message.turnId ||
-					(message.exitCode !== undefined && message.exitCode !== 0) ||
-					this.deps.isChatProcessing(message.chatId)
-				)
-					continue;
-				this.#notify(
-					`completion:${message.chatId}:${message.turnId}`,
-					message.chatId,
-					m.browser_notification_completed(),
-				);
-			} else if (message instanceof ChatTransientFeedMutationMessage) {
-				const prefix = `permission:${message.serverInstanceId}:${message.chatId}:`;
-				const mutation = message.mutation;
-				if (mutation.kind === 'upsert') {
-					const key = prefix + mutation.row.permissionOccurrenceId;
-					this.#permissions.set(key, {
-						chatId: message.chatId,
-						row: mutation.row,
-						announced: this.#permissions.get(key)?.announced ?? false,
-					});
-				}
-				if (mutation.kind === 'remove')
-					this.#closePermission(prefix + mutation.permissionOccurrenceId);
-				if (mutation.kind === 'clear-run') {
-					for (const [key, entry] of this.#permissions)
-						if (entry.chatId === message.chatId && entry.row.runId === mutation.runId)
-							this.#closePermission(key);
-				}
-			} else if (
-				message instanceof ChatSessionDeletedWsMessage ||
-				message instanceof ChatTranscriptReplacedMessage
-			) {
-				for (const [key, entry] of this.#permissions)
-					if (entry.chatId === message.chatId) this.#closePermission(key);
-				for (const [key, chatId] of this.#seen)
-					if (chatId === message.chatId) {
-						this.delivery.close(key);
-						this.#seen.delete(key);
-					}
+				return;
+			this.#notify(
+				`completion:${message.chatId}:${message.turnId}`,
+				message.chatId,
+				m.browser_notification_completed(),
+			);
+		} else if (message.type === 'chat-transient-feed-mutation') {
+			const prefix = `permission:${message.serverInstanceId}:${message.chatId}:`;
+			const mutation = message.mutation;
+			if (mutation.kind === 'upsert') {
+				const key = prefix + mutation.row.permissionOccurrenceId;
+				this.#permissions.set(key, {
+					chatId: message.chatId,
+					row: mutation.row,
+					announced: this.#permissions.get(key)?.announced ?? false,
+				});
+				this.#queuePermissionFlush();
 			}
+			if (mutation.kind === 'remove')
+				this.#closePermission(prefix + mutation.permissionOccurrenceId);
+			if (mutation.kind === 'clear-run') {
+				for (const [key, entry] of this.#permissions)
+					if (entry.chatId === message.chatId && entry.row.runId === mutation.runId)
+						this.#closePermission(key);
+			}
+		} else if (
+			message.type === 'chat-session-deleted' ||
+			message.type === 'chat-transcript-replaced'
+		) {
+			for (const [key, entry] of this.#permissions)
+				if (entry.chatId === message.chatId) this.#closePermission(key);
+			for (const [key, chatId] of this.#seen)
+				if (chatId === message.chatId) {
+					this.delivery.close(key);
+					this.#seen.delete(key);
+				}
 		}
+	}
+
+	#queuePermissionFlush(): void {
+		if (this.#permissionFlushQueued) return;
+		this.#permissionFlushQueued = true;
+		queueMicrotask(() => {
+			this.#permissionFlushQueued = false;
+			this.#announcePermissions();
+		});
+	}
+
+	#announcePermissions(): void {
 		while (this.#permissions.size > 256)
 			this.#closePermission(this.#permissions.keys().next().value!);
 		for (const [key, entry] of this.#permissions) {
 			if (entry.announced) continue;
 			entry.announced = true;
 			const { chatId, row } = entry;
-			const question =
-				row.message.requestedTool.type === 'ask-user-question-tool-use';
+			const question = row.message.requestedTool.type === 'ask-user-question-tool-use';
 			this.#notify(
 				key,
 				chatId,
@@ -119,8 +134,8 @@ export class BrowserNotificationsRouter {
 	}
 
 	destroy(): void {
-		this.#handle?.cleanup();
-		this.#handle = null;
+		this.#unsubscribe?.();
+		this.#unsubscribe = null;
 		this.clearPermissions();
 		this.#seen.clear();
 	}

@@ -131,6 +131,14 @@ function createCatalog(count: number): ChatSessionsStore {
 	return sessions;
 }
 
+it('loads fuzzy matching after opening the palette', async () => {
+	const { component } = render(CommandMenu);
+	component.toggle();
+	const input = await screen.findByRole('combobox');
+	await fireEvent.input(input, { target: { value: 'settngs' } });
+	expect(await screen.findByRole('option', { name: /settings/i })).toBeTruthy();
+});
+
 it('keeps static command lookup independent of the chat catalog and caches candidates per opening', async () => {
 	const sessions = createCatalog(120);
 	let enumerations = 0;

@@ -8,6 +8,7 @@ import {
 import {
 	getThemeProfile,
 	resolveThemeId,
+	DEFAULT_THEME_PREFERENCE,
 	type ColorScheme,
 	type ThemeId,
 	type ThemePreference,
@@ -16,6 +17,7 @@ import {
 	type TerminalThemeColors,
 } from './themes.js';
 import { applyThemeToDocument, hasResolvedThemeStyles, readTerminalColors } from './theme-dom.js';
+import { loadThemeStyles } from './theme-styles.js';
 
 const SYSTEM_DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 
@@ -43,26 +45,28 @@ export class ThemeController {
 	#profile = $derived.by(() =>
 		getThemeProfile(resolveThemeId(this.deps.getPreference(), this.#systemColorScheme)),
 	);
+	#appliedProfile = $state.raw<ThemeProfile>();
 	#reportedMissingTerminalThemeIds = new Set<ThemeId>();
 
 	constructor(private readonly deps: ThemeControllerDeps) {
 		for (const { id, fontKey, sizeKey } of TYPOGRAPHY_SURFACES) {
 			$effect(() => {
 				const root = document.documentElement;
-				const attribute = `data-${id}-font`;
 				const font = this.deps.typography[fontKey];
-				if (font === 'default') root.style.removeProperty(`--${id}-font-override`);
-				else root.style.setProperty(`--${id}-font-override`, typographyFontOverride(id, font));
-				if (root.getAttribute(attribute) !== font) root.setAttribute(attribute, font);
-			});
-			$effect(() => {
-				const root = document.documentElement;
 				const size = this.deps.typography[sizeKey];
-				if (size === 'default') root.style.removeProperty(`--${id}-font-size`);
-				else root.style.setProperty(`--${id}-font-size`, `${size}px`);
-				root.style.setProperty(`--${id}-font-scale`, String(typographyScale(id, size)));
-				const attribute = `data-${id}-font-size`;
-				if (root.getAttribute(attribute) !== size) root.setAttribute(attribute, size);
+				if (root.getAttribute(`data-${id}-font`) !== font) {
+					const override = `--${id}-font-override`;
+					if (font === 'default') root.style.removeProperty(override);
+					else root.style.setProperty(override, typographyFontOverride(id, font));
+					root.setAttribute(`data-${id}-font`, font);
+				}
+				if (root.getAttribute(`data-${id}-font-size`) !== size) {
+					const override = `--${id}-font-size`;
+					if (size === 'default') root.style.removeProperty(override);
+					else root.style.setProperty(override, `${size}px`);
+					root.style.setProperty(`--${id}-font-scale`, String(typographyScale(id, size)));
+					root.setAttribute(`data-${id}-font-size`, size);
+				}
 			});
 		}
 
@@ -84,29 +88,55 @@ export class ThemeController {
 		});
 
 		$effect(() => {
-			const profile = this.profile;
-			applyThemeToDocument(document, profile);
-			const presentation: ThemeRendererPresentation = {
-				colorScheme: profile.colorScheme,
-				rendererPalette: profile.rendererPalette,
+			const profile = this.#profile;
+			const loading = loadThemeStyles(profile.id);
+			if (!loading) {
+				untrack(() => this.#applyProfile(profile));
+				return;
+			}
+			let current = true;
+			void loading.then(
+				() => {
+					if (current) this.#applyProfile(profile);
+				},
+				(error: unknown) => {
+					if (!current) return;
+					this.deps.reportError(String(error));
+					if (!this.#appliedProfile) {
+						this.#applyProfile(
+							getThemeProfile(resolveThemeId(DEFAULT_THEME_PREFERENCE, profile.colorScheme)),
+						);
+					}
+				},
+			);
+			return () => {
+				current = false;
 			};
-			const terminalColors = readTerminalColors(document.documentElement);
-			untrack(() => {
-				if (terminalColors) {
-					this.deps.setTerminalPresentation({ ...presentation, ...terminalColors });
-				} else if (
-					hasResolvedThemeStyles(document.documentElement) &&
-					!this.#reportedMissingTerminalThemeIds.has(profile.id)
-				) {
-					this.#reportedMissingTerminalThemeIds.add(profile.id);
-					this.deps.reportError(`Theme ${profile.id} has invalid terminal color tokens`);
-				}
-				this.deps.setEditorPresentation(presentation);
-			});
 		});
 	}
 
+	#applyProfile(profile: ThemeProfile): void {
+		if (this.#appliedProfile === profile) return;
+		this.#appliedProfile = profile;
+		applyThemeToDocument(document, profile);
+		const presentation: ThemeRendererPresentation = {
+			colorScheme: profile.colorScheme,
+			rendererPalette: profile.rendererPalette,
+		};
+		const terminalColors = readTerminalColors(document.documentElement);
+		if (terminalColors) {
+			this.deps.setTerminalPresentation({ ...presentation, ...terminalColors });
+		} else if (
+			hasResolvedThemeStyles(document.documentElement) &&
+			!this.#reportedMissingTerminalThemeIds.has(profile.id)
+		) {
+			this.#reportedMissingTerminalThemeIds.add(profile.id);
+			this.deps.reportError(`Theme ${profile.id} has invalid terminal color tokens`);
+		}
+		this.deps.setEditorPresentation(presentation);
+	}
+
 	get profile(): ThemeProfile {
-		return this.#profile;
+		return this.#appliedProfile ?? this.#profile;
 	}
 }
