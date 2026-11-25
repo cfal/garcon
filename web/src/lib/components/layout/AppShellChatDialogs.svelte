@@ -84,17 +84,15 @@
 	onConfirm={(target, projectPath) => chatActionController.updateProjectPath(target, projectPath)}
 />
 
-{#if chatActionDialogs.parentDialog}
-	<ChatParentDialog
-		parentDialog={chatActionDialogs.parentDialog}
-		chats={sessions.orderedChats}
-		isConnected={ws.isConnected}
-		executorLabel={(id) => executors.label(id)}
-		onRefresh={() => sessions.quietRefreshChats()}
-		onClose={() => chatActionDialogs.closeParentDialog()}
-		onConfirm={(chatId, parentChatId) => chatActionController.setParent(chatId, parentChatId)}
-	/>
-{/if}
+<ChatParentDialog
+	parentDialog={chatActionDialogs.parentDialog}
+	chats={chatActionDialogs.parentDialog ? sessions.orderedChats : []}
+	isConnected={ws.isConnected}
+	executorLabel={(id) => executors.label(id)}
+	onRefresh={() => sessions.quietRefreshChats()}
+	onClose={() => chatActionDialogs.closeParentDialog()}
+	onConfirm={(chatId, parentChatId) => chatActionController.setParent(chatId, parentChatId)}
+/>
 
 {#if chatActionDialogs.tagDialog}
 	<SidebarTagDialog
