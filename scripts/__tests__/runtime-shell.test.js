@@ -65,7 +65,7 @@ test('strips dynamic CSS from the shell and rebases lazily selected theme sheets
 test('injects shell precache paths without rewriting the worker code', () => {
   const worker = 'const manifest = __GARCON_PRECACHE__;';
   expect(configureServiceWorkerPrecache(worker, ['app.js'], ['font.woff2'])).toBe(
-    'const __GARCON_PRECACHE__ = {"eager":["app.js"],"fonts":["font.woff2"]};\n' + worker,
+    'const __GARCON_PRECACHE__ = {"eager":["app.js"],"immutable":["font.woff2"]};\n' + worker,
   );
   expect(() => configureServiceWorkerPrecache(worker.repeat(2), [], [])).toThrow('precache binding');
 });

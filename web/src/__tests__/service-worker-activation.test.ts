@@ -7,7 +7,7 @@ describe('service worker activation', () => {
 		vi.resetModules();
 		vi.stubGlobal('__GARCON_PRECACHE__', {
 			eager: ['_app/immutable/entry/start.js'],
-			fonts: ['_app/immutable/assets/test.woff2'],
+			immutable: ['_app/immutable/assets/test.woff2'],
 		});
 	});
 
@@ -30,9 +30,9 @@ describe('service worker activation', () => {
 			const storage = {
 				open: vi
 					.fn()
-					.mockResolvedValue({ match: vi.fn().mockResolvedValue(undefined) } satisfies Pick<
+					.mockResolvedValue({ keys: vi.fn().mockResolvedValue([]), match: vi.fn().mockResolvedValue(undefined) } satisfies Pick<
 						Cache,
-						'match'
+						'keys' | 'match'
 					>),
 				keys: vi.fn<CacheStorage['keys']>().mockResolvedValue(names),
 				delete: vi.fn<CacheStorage['delete']>().mockReturnValue(pendingDelete.promise),

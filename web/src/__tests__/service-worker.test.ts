@@ -3,33 +3,30 @@ import {
 	withNavigationTimeout,
 	isManifestPath,
 	precacheAppShell,
-	preserveCachedFonts,
+	preserveCachedAssets,
 	shouldCacheNavigationResponse,
 } from '../service-worker-helpers';
 
 describe('service worker helpers', () => {
-	it('inherits only requested immutable fonts and preserves current responses', async () => {
+	it('inherits only previously used current-build assets without replacing current responses', async () => {
+		const url = (name: string) => new URL(name, 'https://garcon.test/').href;
 		const currentResponse = new Response('current');
 		const inherited = new Response('previous');
 		const current = {
 			match: vi
 				.fn<Cache['match']>()
-				.mockImplementation(async (path) => (path === '/kept.woff2' ? currentResponse : undefined)),
+				.mockImplementation(async (path) => (path === url('kept.woff2') ? currentResponse : undefined)),
 			put: vi.fn<Cache['put']>().mockResolvedValue(undefined),
 		} satisfies Pick<Cache, 'match' | 'put'>;
 		const previous = {
+			keys: async () => ['kept.woff2', 'theme.abc.css', 'obsolete.js'].map(path => new Request(url(path))),
 			match: vi
 				.fn<Cache['match']>()
-				.mockImplementation(async (path) => (path === '/used.woff2' ? inherited : undefined)),
-		} satisfies Pick<Cache, 'match'>;
-		await preserveCachedFonts(current, previous, [
-			'/kept.woff2', '/used.woff2', '/unused.woff2',
-		]);
-		expect(previous.match.mock.calls.map(([path]) => path)).toEqual([
-			'/used.woff2',
-			'/unused.woff2',
-		]);
-		expect(current.put).toHaveBeenCalledExactlyOnceWith('/used.woff2', inherited);
+				.mockResolvedValue(inherited),
+		} satisfies Pick<Cache, 'match' | 'keys'>;
+		await preserveCachedAssets(current, previous, new Set(['kept.woff2', 'theme.abc.css', 'unused.js'].map(url)));
+		expect(previous.match).toHaveBeenCalledExactlyOnceWith(url('theme.abc.css'));
+		expect(current.put).toHaveBeenCalledExactlyOnceWith(url('theme.abc.css'), inherited);
 	});
 
 	it('propagates migration failure so activation retains the donor cache', async () => {
@@ -38,10 +35,11 @@ describe('service worker helpers', () => {
 			put: vi.fn<Cache['put']>().mockRejectedValue(new Error('quota')),
 		} satisfies Pick<Cache, 'match' | 'put'>;
 		const previous = {
+			keys: async () => [new Request('https://garcon.test/used.woff2')],
 			match: vi.fn<Cache['match']>().mockResolvedValue(new Response('font')),
-		} satisfies Pick<Cache, 'match'>;
+		} satisfies Pick<Cache, 'match' | 'keys'>;
 		await expect(
-			preserveCachedFonts(current, previous, ['/used.woff2']),
+			preserveCachedAssets(current, previous, new Set(['https://garcon.test/used.woff2'])),
 		).rejects.toThrow('quota');
 	});
 	beforeEach(() => {

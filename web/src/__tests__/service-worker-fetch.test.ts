@@ -69,7 +69,7 @@ describe('installed service worker fetch handler', () => {
 	beforeEach(() => {
 		vi.resetModules();
 		deployment.base = '';
-		vi.stubGlobal('__GARCON_PRECACHE__', { eager: [], fonts: [] });
+		vi.stubGlobal('__GARCON_PRECACHE__', { eager: [], immutable: [] });
 	});
 	afterEach(() => {
 		vi.useRealTimers();

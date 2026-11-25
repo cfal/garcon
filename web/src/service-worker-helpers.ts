@@ -16,14 +16,13 @@ export function shouldCacheNavigationResponse(response: Response): boolean {
 		.some((directive) => directive.trim().toLowerCase() === 'no-store');
 }
 
-// Only immutable current-build fonts can safely survive a version change.
-export async function preserveCachedFonts(
+export async function preserveCachedAssets(
 	current: Pick<Cache, 'match' | 'put'>,
-	previous: Pick<Cache, 'match'>,
-	fonts: readonly string[],
+	previous: Pick<Cache, 'match' | 'keys'>,
+	immutable: ReadonlySet<string>,
 ): Promise<void> {
-	for (const path of fonts) {
-		if (await current.match(path)) continue;
+	for (const { url: path } of await previous.keys()) {
+		if (!immutable.has(path) || await current.match(path)) continue;
 		const response = await previous.match(path);
 		if (response?.ok) await current.put(path, response);
 	}

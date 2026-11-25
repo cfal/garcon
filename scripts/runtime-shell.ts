@@ -1,6 +1,7 @@
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { RUNTIME_BASE_PATH_TOKEN } from '../common/runtime-shell.js';
 import { collectEagerAssets, linkedAssets, type ManifestEntry } from '../web/scripts/eager-assets.js';
 import { isDefaultThemeId, THEME_PROFILES } from '../web/src/lib/theme/themes.js';
@@ -124,12 +125,12 @@ export async function prepareRuntimeShell(html: string, assets?: RuntimeShellAss
 export function configureServiceWorkerPrecache(
   worker: string,
   eager: readonly string[],
-  fonts: readonly string[],
+  immutable: readonly string[],
 ): string {
   if (worker.split(SW_PRECACHE_BINDING).length !== 2) {
     throw new Error('Expected one service worker precache binding');
   }
-  return `const ${SW_PRECACHE_BINDING} = ${JSON.stringify({ eager, fonts })};\n${worker}`;
+  return `const ${SW_PRECACHE_BINDING} = ${JSON.stringify({ eager, immutable })};\n${worker}`;
 }
 
 if (import.meta.main) {
@@ -142,17 +143,23 @@ if (import.meta.main) {
   const html = await readFile(filename, 'utf8');
   const preloads = linkedAssets(html, 'modulepreload');
   const shell = collectEagerAssets(preloads, [], manifest);
-  // Kit loads the error node and the /, /chat, /chat/[id] wrappers even to show offline recovery.
-  const routeFiles = ['nodes/1', 'nodes/2', 'nodes/3', 'nodes/4'].map(name => {
+  const { manifest: kit } = await import(new URL('../web/.svelte-kit/output/server/manifest-full.js', import.meta.url).href);
+  type Route = { id: string; page?: { layouts: (number | undefined)[]; errors: (number | undefined)[]; leaf: number } };
+  const routes = new Map((kit.routes as Route[]).map(route => [route.id, route.page]));
+  const nodes = new Set<number>();
+  for (const id of ['/', '/chat', '/chat/[id]', '/login', '/setup', '/shared/[token]']) {
+    const page = routes.get(id);
+    if (!page) throw new Error(`Missing offline route: ${id}`);
+    for (const node of [...page.layouts, ...page.errors, page.leaf]) if (node !== undefined) nodes.add(node);
+  }
+  const routeFiles = [...nodes].map(node => {
+    const name = `nodes/${node}`;
     const entry = Object.values(manifest).find(candidate => candidate.name === name);
     if (!entry) throw new Error(`Missing SvelteKit startup entry: ${name}`);
     return entry.file;
   });
   const offline = collectEagerAssets([...preloads, ...routeFiles], [], manifest);
   const eager = [...offline.files, ...offline.cssFiles].sort();
-  const fonts = [...new Set(Object.values(manifest).map(entry => entry.file))]
-    .filter(file => /\.(?:woff2?|ttf|otf)$/.test(file))
-    .sort();
 
   const themeStylesheets: Record<string, string> = {};
   for (const { id } of THEME_PROFILES) {
@@ -167,5 +174,7 @@ if (import.meta.main) {
   const worker = await readFile(workerFilename, 'utf8');
   const prepared = await prepareRuntimeShell(html, { eagerStyles: shell.cssFiles, themeStylesheets });
   await writeFile(filename, prepared);
-  await writeFile(workerFilename, configureServiceWorkerPrecache(worker, eager, fonts));
+  const immutable = [...new Bun.Glob('_app/immutable/**/*').scanSync({ cwd: fileURLToPath(build), onlyFiles: true })]
+    .filter(path => !path.endsWith('.map')).sort();
+  await writeFile(workerFilename, configureServiceWorkerPrecache(worker, eager, immutable));
 }

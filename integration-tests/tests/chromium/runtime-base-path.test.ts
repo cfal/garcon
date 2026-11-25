@@ -111,6 +111,13 @@ for (const basePath of ['', '/garcon', '/tools/garcon']) {
           expect(offline?.status()).toBe(200);
           expect(await offline?.text()).toContain(`base: "${basePath}"`);
           await page.waitForLoadState('networkidle');
+          await page.evaluate(() => {
+            localStorage.setItem('garcon.logout-epoch', crypto.randomUUID());
+            localStorage.removeItem('bearer-token');
+          });
+          const login = await page.goto(`${baseUrl}/login?loggedOut=unconfirmed`);
+          expect(login?.fromServiceWorker()).toBe(true);
+          await browserExpect(page.getByRole('alert')).toContainText('the server could not confirm logout');
         } finally {
           await context.setOffline(false);
         }
