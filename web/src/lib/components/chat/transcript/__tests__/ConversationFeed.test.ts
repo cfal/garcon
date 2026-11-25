@@ -341,6 +341,9 @@ describe('ConversationFeed', () => {
 		expect(seek).toHaveLastReturnedWith({ kind: 'scheduled' });
 		expect(aligned).not.toHaveBeenCalled();
 		expect(group.getAttribute('aria-expanded')).toBe('true');
+		await fireEvent.click(group);
+		await waitFor(() => expect(group.getAttribute('aria-expanded')).toBe('false'));
+		expect(container.querySelector('[data-chat-row-id]')).toBeNull();
 		for (const ordinal of [1, 3]) {
 			aligned.mockClear();
 			const memberId = `generation-1:${ordinal}`;
@@ -348,6 +351,7 @@ describe('ConversationFeed', () => {
 			const row = container.querySelector(`[data-chat-row-id="${memberId}"]`);
 			const wrapper = row?.closest<HTMLElement>('[data-chat-virtual-item]');
 			expect(wrapper).toBeTruthy();
+			expect(group.getAttribute('aria-expanded')).toBe('true');
 			expect(aligned).toHaveBeenCalledExactlyOnceWith(Number(wrapper!.dataset.index), { align: 'center' });
 			expect(aligned).toHaveLastReturnedWith({ kind: 'scheduled' });
 		}

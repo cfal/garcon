@@ -303,6 +303,40 @@ describe('ConversationFeedVirtualController', () => {
 		expect(node.getBoundingClientRect().top).toBe(6.5);
 	});
 
+	it.each([
+		{ growingRow: 3, viewportOffset: -60.25 },
+		{ growingRow: 2, viewportOffset: 10 },
+	])('preserves offset $viewportOffset while row $growingRow first measures', async ({ growingRow, viewportOffset }) => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { view, node, firstWrite } = observeReadingTarget(exposure, 3);
+		const wrapper = view.querySelector<HTMLElement>(`[data-chat-virtual-item][data-index="${growingRow}"]`)!;
+		Object.defineProperty(wrapper, 'offsetHeight', { configurable: true, value: 120 });
+		expect(exposure.controller.snapshot.positions.itemAt(growingRow)?.size).toBe(40);
+		node.dataset.chatLayoutPending = 'true';
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset });
+		await firstWrite;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await nextFrame();
+		const measured = exposure.controller.snapshot.positions.itemAt(growingRow)?.size;
+		const offsetBeforeSettlement = node.getBoundingClientRect().top;
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe('completed');
+		expect(measured).toBe(120);
+		expect(offsetBeforeSettlement).toBe(viewportOffset);
+	});
+
+	it('seeks to the wrapper start before measuring an inner DOM anchor offset', async () => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const { node, writes, setInset } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		setInset(13);
+		expect(await exposure.controller.scrollToTarget(
+			{ kind: 'dom-anchor', id: 'row-3' }, { viewportOffset: 6.5 },
+		)).toBe('completed');
+		expect(writes).toEqual([start, start + 13 - 6.5]);
+		expect(node.getBoundingClientRect().top).toBe(6.5);
+	});
+
 	it.each([[0, 14.5], [11, -12.25]])('clamps the first restore write at row %i', async (index, viewportOffset) => {
 		const { exposure } = await renderController({ initialPinned: false });
 		const { view, writes } = observeReadingTarget(exposure, index);
@@ -349,6 +383,31 @@ describe('ConversationFeedVirtualController', () => {
 		delete node.dataset.chatLayoutPending;
 		expect(await seek).toBe('cancelled');
 		expect(writes).toEqual([start + 8.25, 200]);
+	});
+
+	it.each(['completed', 'cancelled'] as const)('releases the measurement anchor on a %s restore', async result => {
+		const { exposure } = await renderController({ initialPinned: false });
+		const view = exposure.viewport()!;
+		ResizeObserverHarness.emit(view, view.clientWidth, view.clientHeight);
+		await settleController();
+		const { firstWrite, writes, node } = observeReadingTarget(exposure, 3);
+		const start = exposure.controller.snapshot.positions.itemAt(3)!.start;
+		const preceding = view.querySelector<HTMLElement>('[data-chat-virtual-item][data-index="2"]')!;
+		const seek = exposure.controller.scrollToTarget({ kind: 'row', id: 'row-3' }, { viewportOffset: 10 });
+		if (result === 'cancelled') {
+			node.dataset.chatLayoutPending = 'true';
+			await firstWrite;
+			exposure.controller.cancelForUserIntent(null);
+		} else {
+			await seek;
+		}
+		// The preceding row now straddles the viewport top; its own growth must not scroll it.
+		ResizeObserverHarness.emit(preceding, view.clientWidth, 80);
+		delete node.dataset.chatLayoutPending;
+		expect(await seek).toBe(result);
+		await settleController();
+		expect(exposure.controller.snapshot.positions.itemAt(2)?.size).toBe(80);
+		expect(writes).toEqual([start - 10]);
 	});
 
 	it('restores summary focus after an intervening same-surface publication', async () => {

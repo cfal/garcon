@@ -15,6 +15,7 @@ import type {
 import { VirtualListController } from '$lib/virt/virtual-list-controller.svelte.js';
 import type {
 	VirtualListSnapshot,
+	VirtualMeasurementAnchor,
 	VirtualMutationAnchor,
 	VirtualResumeTarget,
 	VirtualTransactionRecord,
@@ -104,6 +105,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 	#appliedDataRevision: number;
 	#layoutMutationToken = 0;
 	#targetToken = 0;
+	#readingRestore: { token: number; key: string } | null = null;
 	#endRestoreEpoch = 0;
 	#activeTargetScrolls = 0;
 	#hiddenAnchor: ConversationVirtualAnchor | null = null;
@@ -600,6 +602,8 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			try {
 				const align = options.viewportOffset === undefined ? (options.align ?? 'center') : 'start';
 				if (options.viewportOffset !== undefined && target.kind !== 'dom-anchor') {
+					// The saved clip can lie beyond the row's estimated height until it measures.
+					this.#readingRestore = { token, key };
 					this.#virt.scrollToAnchor(key, options.viewportOffset);
 				} else {
 					this.#virt.scrollToIndex(resolved.index, { align });
@@ -621,6 +625,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 					},
 				});
 			} finally {
+				if (this.#readingRestore?.token === token) this.#readingRestore = null;
 				releaseTarget();
 			}
 		} finally {
@@ -917,7 +922,10 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 			: null;
 	}
 
-	#measurementAnchor(): 'geometric' | 'end' {
+	#measurementAnchor(): VirtualMeasurementAnchor {
+		if (this.#readingRestore?.token === this.#targetToken) {
+			return { kind: 'item', key: this.#readingRestore.key };
+		}
 		return this.#configuredPinned &&
 			this.#configuredGeometry.endBehavior === 'restore-if-pinned' &&
 			this.#activeTargetScrolls === 0

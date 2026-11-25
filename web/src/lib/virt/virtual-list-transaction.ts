@@ -12,6 +12,7 @@ import type {
 	VirtualKeyScrollResult,
 	LogicalVirtualItem,
 	VirtualListSnapshot,
+	VirtualMeasurementAnchor,
 	VirtualMutationAnchor,
 	VirtualMutationResult,
 	VirtualPositionView,
@@ -55,7 +56,7 @@ type CapturedAnchor =
 export interface VirtualListTransactionOptions {
 	readonly environment: VirtualListEnvironment;
 	getOverscan(): number;
-	getMeasurementAnchor(): 'geometric' | 'end';
+	getMeasurementAnchor(): VirtualMeasurementAnchor;
 	publish(snapshot: VirtualListSnapshot): void;
 	onTransaction?(record: VirtualTransactionRecord): void;
 }
@@ -585,8 +586,13 @@ export class VirtualListTransaction {
 		dom: VirtualDomGeometry | null,
 		firstMeasurements?: ReadonlySet<string>,
 	): CapturedAnchor {
-		if (this.options.getMeasurementAnchor() === 'end') return { kind: 'end' };
+		const policy = this.options.getMeasurementAnchor();
+		if (policy === 'end') return { kind: 'end' };
 		if (!dom || this.geometry.count === 0) return { kind: 'none' };
+		if (policy !== 'geometric') {
+			const anchor = this.#captureMutationAnchor(policy);
+			if (anchor.kind === 'item') return anchor;
+		}
 		const pendingAnchor = this.#pendingCommit?.measurementAnchor;
 		if (pendingAnchor?.kind === 'end') return pendingAnchor;
 		if (pendingAnchor?.kind === 'item') return this.#captureMutationAnchor(pendingAnchor);

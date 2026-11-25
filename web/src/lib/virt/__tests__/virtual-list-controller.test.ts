@@ -932,6 +932,36 @@ describe('VirtualListController', () => {
 		expect(test.viewport.scrollTop).toBe(0);
 	});
 
+	it.each(['before', 'after'])('keeps the reader offset when its row first measures %s the seek commits', timing => {
+		const test = harness({ viewportSize: 200, measurementAnchor: { kind: 'item', key: 'reader' } });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'reader', 'after', 'tail'], estimates: [1000, 192, 300, 2000],
+			anchor: { kind: 'none' },
+		});
+		if (timing === 'before') test.mountItem('reader', 800);
+		expect(test.controller.scrollToAnchor('reader', -300.25)).toEqual({ kind: 'scheduled' });
+		test.environment.flushMicrotasks();
+		if (timing === 'after') {
+			test.mountItem('reader', 800);
+			test.environment.flushMicrotasks();
+		}
+		expect(test.controller.measuredSize('reader')).toBe(800);
+		expect(test.viewport.scrollTop).toBe(1300.25);
+		expect(test.writes).toBe(1);
+	});
+
+	it('uses the visible row when the requested measurement anchor is absent', () => {
+		const test = harness({ measurementAnchor: { kind: 'item', key: 'missing' } });
+		test.controller.apply({
+			kind: 'update', keys: ['before', 'visible', 'tail'], estimates: [100, 100, 300],
+			anchor: { kind: 'none' },
+		});
+		test.setPhysicalScrollTop(110);
+		test.mountItem('before', 140);
+		test.environment.flushMicrotasks();
+		expect(test.viewport.scrollTop).toBe(150);
+	});
+
 	it('preserves a pending navigation target through a resize batch', () => {
 		const test = harness({ viewportSize: 100, overscan: 0 });
 		const keys = Array.from({ length: 100 }, (_, index) => `item-${index}`);

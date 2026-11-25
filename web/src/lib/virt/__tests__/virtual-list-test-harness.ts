@@ -1,6 +1,6 @@
 import { VirtualListController } from '../virtual-list-controller.svelte';
 import type { VirtualListEnvironment } from '../virtual-list-environment';
-import type { VirtualTransactionRecord } from '../virtual-list-types';
+import type { VirtualMeasurementAnchor, VirtualTransactionRecord } from '../virtual-list-types';
 
 class TestResizeObserver implements ResizeObserver {
 	readonly observed = new Set<Element>();
@@ -105,7 +105,7 @@ export function createVirtualListHarness(options?: {
 	viewportSize?: number;
 	initialViewportSize?: number;
 	overscan?: number;
-	measurementAnchor?: 'geometric' | 'end';
+	measurementAnchor?: VirtualMeasurementAnchor;
 	measureElement?(element: HTMLElement, entry: ResizeObserverEntry | undefined): number | null;
 }) {
 	const environment = new TestEnvironment();
