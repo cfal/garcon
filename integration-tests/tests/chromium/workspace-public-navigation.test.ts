@@ -49,6 +49,7 @@ test('Back to a share closes only this workspace socket; returning reconciles wi
     const started = await client.runDirectChat({ chatId, content, agent: directAgents.openAi });
     try {
       await held.received;
+      await page.locator(`[data-sidebar-virtual-row="${chatId}"] [data-slot="chat-activity-indicator"][data-status="working"]`).waitFor();
       await page.goBack();
       await page.getByText('echo:Shared synthetic chat', { exact: true }).waitFor();
       await browserExpect.poll(() => workspaceSocket.isClosed()).toBe(true);
