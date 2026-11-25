@@ -105,11 +105,7 @@ export class GitPorcelainState {
 				}
 				if (!this.isActiveLoad(context)) return;
 				this.conflicts = conflicts;
-				if (conflicts.length > 0) {
-					this.conflictDetails = details;
-				} else {
-					this.conflictDetails = null;
-				}
+				this.conflictDetails = details;
 			},
 			parent,
 		);
@@ -156,8 +152,12 @@ export class GitPorcelainState {
 	}
 
 	private canMutateConflict(project: GitProjectTarget, path: string): boolean {
-		return !this.isLoading && this.conflictDetails?.path === path &&
-			this.deps.isCurrentTarget(project) && this.deps.ensureFreshForGitMutation();
+		return (
+			!this.isLoading &&
+			this.conflictDetails?.path === path &&
+			this.deps.isCurrentTarget(project) &&
+			this.deps.ensureFreshForGitMutation()
+		);
 	}
 
 	async loadStashes(project: GitProjectTarget, parent?: PorcelainLoadContext): Promise<void> {

@@ -163,6 +163,18 @@ describe('GitPorcelainState conflict details', () => {
 		expect(runGitMutation).not.toHaveBeenCalled();
 	});
 
+	it('cannot act on a path other than the loaded conflict preview', async () => {
+		const project = { executorId: 'remote', projectPath: '/project' };
+		const runGitMutation = vi.fn(async () => {
+			throw new Error('A mismatched path must not dispatch a mutation');
+		});
+		const porcelain = createState({ runGitMutation });
+		porcelain.conflictDetails = makeConflictDetails('file.ts');
+		await porcelain.acceptConflictSide(project, 'other.ts', 'ours');
+		await porcelain.markConflictResolved(project, 'other.ts');
+		expect(runGitMutation).not.toHaveBeenCalled();
+	});
+
 	it('ignores a direct stash load after reset', async () => {
 		const pending = deferred<Awaited<ReturnType<typeof gitApi.getGitStashes>>>();
 		vi.mocked(gitApi.getGitStashes).mockReturnValueOnce(pending.promise);

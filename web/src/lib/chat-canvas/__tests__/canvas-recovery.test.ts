@@ -51,6 +51,19 @@ describe('canvas recovery ownership', () => {
 		expect(browserCanvasRecovery.list()).toHaveLength(32);
 	});
 
+	it('does not read or claim an unowned draft', () => {
+		const tab = storage();
+		vi.stubGlobal('sessionStorage', tab);
+		const key = 'chat-canvas-recovery-v1:board';
+		const draft = JSON.stringify(canvas());
+		tab.setItem(key, draft);
+		expect(browserCanvasRecovery.list()).toEqual([]);
+		expect(browserCanvasRecovery.read('board')).toBeNull();
+		browserCanvasRecovery.write(canvas());
+		browserCanvasRecovery.remove('board');
+		expect(tab.getItem(key)).toBe(draft);
+	});
+
 	it('removes malformed drafts without hiding valid drafts', () => {
 		const tab = storage();
 		vi.stubGlobal('sessionStorage', tab);

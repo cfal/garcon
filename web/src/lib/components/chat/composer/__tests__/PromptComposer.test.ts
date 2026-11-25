@@ -10,6 +10,7 @@ import { ImageAttachmentState } from '$lib/chat/composer/image-attachment.svelte
 import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
+import * as filesApi from '$lib/api/files.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
@@ -146,6 +147,27 @@ describe('PromptComposer focus', () => {
 			expect(screen.queryByText('/clear')).toBeNull();
 		} finally {
 			commands.mockRestore();
+		}
+	});
+
+	it.each(['@', '/'])('does not let a hidden %s completion menu intercept Escape', async (trigger) => {
+		const commands = vi.spyOn(commandsApi, 'getSlashCommands').mockResolvedValue([]);
+		const files = vi.spyOn(filesApi, 'getFileList').mockResolvedValue([]);
+		try {
+			const props = { selectedChatId: 'synthetic-hidden-completion' };
+			const { component, rerender } = render(PromptComposerTestHost, props);
+			const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+			await inputAtCaret(input, trigger, trigger.length);
+			await screen.findByRole('listbox');
+
+			await rerender({ ...props, isVisible: false });
+
+			expect(screen.queryByRole('listbox')).toBeNull();
+			const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+			expect(component.getFocusServices().transientLayers.handleEscape(escape)).toBe(false);
+		} finally {
+			commands.mockRestore();
+			files.mockRestore();
 		}
 	});
 	it.each(['', 'printf command'])('preserves incompatible draft attachments and blocks all submit paths: %s', async (source) => {

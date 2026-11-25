@@ -30,7 +30,6 @@
 		]),
 	);
 	const loadOwner = $derived(porcelain);
-	const loadTarget = $derived(project);
 	let confirmationKey = $derived(JSON.stringify([loadKey, porcelain.confirmationScope]));
 	let title = $derived(
 		porcelain.inspectorView === 'conflicts'
@@ -60,7 +59,7 @@
 	$effect(() => {
 		void loadKey;
 		const owner = loadOwner;
-		const target = loadTarget;
+		const target = project;
 		return untrack(() => {
 			if (owner.inspectorView === 'none') {
 				owner.cancelActiveLoad();

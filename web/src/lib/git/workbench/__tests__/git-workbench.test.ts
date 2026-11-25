@@ -2245,12 +2245,19 @@ describe('GitWorkbenchStore', () => {
 	describe('porcelain inspector', () => {
 		it.each([12, 13])('labels a %i-line blame preview only when lines are omitted', async (count) => {
 			mockedApi.getGitFileHistory.mockResolvedValue({ commits: [] });
-			mockedApi.getGitBlame.mockImplementation(async (_project, _file, _ref, limit) => {
+			mockedApi.getGitBlame.mockImplementation(async (_project, _file, _ref, limit = 12) => {
 				const lines = Array.from({ length: count }, (_, i) => ({
-					line: i + 1, originalLine: i + 1, finalLine: i + 1, commit: 'head', author: 'A',
-					authorMail: '', authorTime: '', summary: '', content: 'text',
+					line: i + 1,
+					originalLine: i + 1,
+					finalLine: i + 1,
+					commit: 'head',
+					author: 'A',
+					authorMail: '',
+					authorTime: '',
+					summary: '',
+					content: 'text',
 				}));
-				return { lines: lines.slice(0, limit), truncated: count >= limit! };
+				return { lines: lines.slice(0, limit), truncated: count >= limit };
 			});
 			wb.files.selectedFile = 'file.ts';
 			wb.porcelain.setInspectorView('history');

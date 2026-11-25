@@ -1,6 +1,6 @@
 import type * as Wire from '$shared/git';
 import type { GitExecutorScope } from '$shared/git-execution';
-import { apiPost, type ApiFetchOptions } from './client.js';
+import { apiPost, withDefaultTimeout, type ApiFetchOptions } from './client.js';
 import {
 	gitApiGet,
 	gitApiPost,
@@ -327,7 +327,7 @@ export async function generateCommitMessage(
 	return apiPost(
 		'/api/v1/git/generate-commit-message',
 		{ ...gitProjectFields(target), files },
-		{ timeoutMs: 120_000, ...options },
+		withDefaultTimeout(options, 120_000),
 	);
 }
 
