@@ -272,10 +272,8 @@
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).
 	let fileRecoveryInitialized = false;
-	let missedSettingsUpdates = false;
 	$effect(() => {
 		if (!visible) {
-			missedSettingsUpdates = true;
 			untrack(() => ws.pause('workspace-inactive'));
 		} else if (auth.isAuthenticated) {
 			const token = auth.token;
@@ -355,14 +353,10 @@
 	onMount(() => {
 		browserNotifications.start();
 		return ws.onConnectionChange((connected) => {
-			if (!connected) {
-				missedSettingsUpdates = true;
-				browserNotificationsRouter.releasePermissions();
-			} else if (missedSettingsUpdates) {
-				missedSettingsUpdates = false;
+			if (connected) {
 				void remoteSettings.refreshLatest().catch((error: unknown) =>
-					console.warn('Failed to refresh remote settings after reconnect:', error));
-			}
+					console.warn('Failed to refresh remote settings on connection:', error));
+			} else browserNotificationsRouter.releasePermissions();
 		});
 	});
 	onMount(() =>
