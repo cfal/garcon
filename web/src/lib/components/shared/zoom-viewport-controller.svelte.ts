@@ -123,7 +123,9 @@ export class ZoomViewportController {
 		const view = this.options.view;
 		const next = clampZoomScale(scale, this.minScale, this.options.maxScale);
 		if (next === view.scale && this.options.input === 'pointer-gestures') return;
-		const anchor = this.captureAnchor(client);
+		const anchor = this.options.input === 'native-scroll' && this.#pendingAnchor
+			? this.#pendingAnchor
+			: this.captureAnchor(client);
 		view.mode = 'manual';
 		view.scale = next;
 		this.restoreAfterLayout(anchor);
