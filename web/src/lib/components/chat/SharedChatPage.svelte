@@ -26,6 +26,7 @@
 	import { commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 	import CliPresentationHeader from '$lib/components/chat/transcript/rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from '$lib/components/chat/transcript/rows/CollapsibleBody.svelte';
+	import UserMessageAttachments from '$lib/components/chat/transcript/UserMessageAttachments.svelte';
 	import TranscriptNoticeRow from '$lib/components/chat/transcript/rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
@@ -52,7 +53,7 @@
 
 	type SharedViewError = 'not-found' | 'load-failed';
 
-	let messages = $state<SharedMessageEntry[]>([]);
+	let messages = $state.raw<SharedMessageEntry[]>([]);
 	const renderedMessages = $derived.by(() => {
 		const output = projectCommandOutput(messages.map(entry => entry.message));
 		return messages.map((entry, index) => {
@@ -170,7 +171,7 @@
 	}
 
 	function toggleThinking(messageIndex: number) {
-		thinkingStates[messageIndex] = !thinkingStates[messageIndex];
+		thinkingStates[messageIndex] = !(thinkingStates[messageIndex] ?? true);
 	}
 </script>
 
@@ -179,14 +180,13 @@
 	{#if canonicalPath}
 		<link rel="canonical" href={canonicalPath} />
 	{/if}
-	<!-- Overrides the app-wide overflow:hidden on html/body for this standalone page.
-	     html stays at 100% height so body overflows within it, enabling trackpad scroll. -->
-	<!-- eslint-disable-next-line svelte/no-at-html-tags -- The value is a static style literal with no external input. -->
-	{@html '<style>html { overflow: auto !important; } body { overflow: visible !important; height: auto !important; }</style>'}
 </svelte:head>
 
-<div class="min-h-dvh bg-background text-foreground flex flex-col">
-	<header class="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border">
+<div class="shared-chat-page min-h-dvh bg-background text-foreground flex flex-col">
+	<header class={cn(
+		'sticky top-0 z-10 border-b border-border',
+		localSettings.overlayBackdropEffects ? 'bg-background/95 backdrop-blur' : 'bg-background',
+	)}>
 		<div class="max-w-4xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
 			<a
 				href={resolve('/')}
@@ -335,16 +335,8 @@
 												{/if}
 											</div>
 										</CollapsibleBody>
-										{#if message.images && message.images.length > 0}
-											<div class="mt-2 grid grid-cols-2 gap-2">
-												{#each message.images as image, imageIndex (imageIndex)}
-													<img
-														src={image.data}
-														alt={image.name}
-														class="rounded-lg max-w-full h-auto"
-													/>
-												{/each}
-											</div>
+										{#if message.images}
+											<UserMessageAttachments attachments={message.images} />
 										{/if}
 									</div>
 								</div>
@@ -425,3 +417,15 @@
 		</div>
 	</footer>
 </div>
+
+<style>
+	/* The standalone view scrolls the document rather than the app shell. */
+	:global(html:has(.shared-chat-page)) {
+		overflow: auto !important;
+	}
+
+	:global(body:has(.shared-chat-page)) {
+		overflow: visible !important;
+		height: auto !important;
+	}
+</style>

@@ -2,20 +2,30 @@ import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderMath } from '$lib/components/rich-text/katex-loader';
+import { readCachedMath, renderMath } from '$lib/components/rich-text/katex-loader';
 import MathRenderer from '$lib/components/rich-text/MathRenderer.svelte';
 
 vi.mock('$lib/components/rich-text/katex-loader', () => ({
+	readCachedMath: vi.fn(),
 	renderMath: vi.fn(),
 }));
 
 describe('MathRenderer', () => {
 	beforeEach(() => {
 		vi.mocked(renderMath).mockReset();
+		vi.mocked(readCachedMath).mockReset();
 	});
 
 	afterEach(() => {
 		cleanup();
+	});
+
+	it('renders a cache hit immediately without the pending layout marker', () => {
+		vi.mocked(readCachedMath).mockReturnValue('<span class="katex">cached</span>');
+		const { container } = render(MathRenderer, { text: 'cached' });
+		expect(container.querySelector('.katex')?.textContent).toBe('cached');
+		expect(container.querySelector('[data-chat-layout-pending]')).toBeNull();
+		expect(renderMath).not.toHaveBeenCalled();
 	});
 
 	it('keeps escaped raw source visible while loading', () => {

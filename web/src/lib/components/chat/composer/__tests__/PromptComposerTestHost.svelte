@@ -542,7 +542,6 @@
 	{projectPath}
 	isProcessing={selectedIsProcessing}
 	status={lifecycle.loadingStatus}
-	agentId={selectedAgentId}
 	spinnerSelectionKey={selectedChatId}
 	statusBar={{ projectPath: true, gitBranch: true, commit: true, visible: statusBarVisible }}
 	{gitSummary}

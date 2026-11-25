@@ -40,7 +40,6 @@
 		type ComposerEnterAction,
 	} from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
-	import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
 	import { attachProcessingPulse } from '$lib/chat/sessions/processing-pulse.js';
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
@@ -64,18 +63,15 @@
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
-	import { SnippetExpansionController, snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
-	import { ApiError } from '$lib/api/client.js';
+	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { ChatSnippetInsertionController } from '$lib/chat/composer/chat-snippet-insertion-controller.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import { activeComposerModel } from './active-composer-model.svelte';
-	import { snippetTemplateUsesArguments } from '$shared/snippets';
+	import { snippetTemplateUsesArguments, type SnippetArgumentsInput } from '$shared/snippets';
 	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
-	import {
-		matchesSelectableSnippetExpansion,
-		type SelectableSnippet,
-	} from '$lib/snippets/selectable-snippet.js';
+	import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 	import ResendCandidateChips from './ResendCandidateChips.svelte';
@@ -495,104 +491,58 @@
 		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
 	}
 
+	const snippetInsertion = new ChatSnippetInsertionController({
+		refreshSnippets: () => snippets.refreshIfLoaded(),
+		refreshPreambles: () => preambles.refreshIfLoaded(),
+		reportError: message => notifications.error(message),
+		settle: settleComposerAfterSnippet,
+	});
+
+	function runSnippet(
+		shortName: string,
+		argumentsInput: SnippetArgumentsInput,
+		insertion?: { snippet: SelectableSnippet; selection: { start: number; end: number };
+			trigger: { start: number; end: number } | null },
+	): Promise<SnippetInsertionResult> {
+		const sourceExecutionKey = executionKey;
+		const sourceText = composerState.inputText;
+		ui.closeSlashMenu();
+		ui.closeFileMenu();
+		composerState.isDragActive = false;
+		return snippetInsertion.execute({
+			expand: () => snippetExpansion.runPrepared(shortName, async (signal) => {
+				const operation = await projectState.resolveSnippetContext(signal);
+				return { request: { shortName, arguments: argumentsInput, context: operation.context }, prepared: operation };
+			}),
+			isCurrent: ({ prepared, response }) => projectState.matchesSnippetContext(prepared, response)
+				&& (insertion !== undefined || conversationInput)
+				&& executionKey === sourceExecutionKey && composerState.inputText === sourceText,
+			apply: (text) => {
+				updateDraft(text);
+				if (!insertion) ui.closeSlashMenu();
+			},
+			insertion: insertion ? { ...insertion, source: sourceText } : undefined,
+		});
+	}
+
 	async function insertSnippet(
 		snippet: SelectableSnippet,
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
 		if (promptTransformPending || !textarea) return 'cancelled';
-		const sourceExecutionKey = executionKey;
-		ui.closeSlashMenu();
-		ui.closeFileMenu();
-		composerState.isDragActive = false;
-		const sourceText = composerState.inputText;
-		const start = range?.start ?? textarea.selectionStart;
-		const end = range?.end ?? textarea.selectionEnd;
-		try {
-			const result = await snippetExpansion.runPrepared(snippet.shortName, async (signal) => {
-				const operation = await projectState.resolveSnippetContext(signal);
-				return {
-					request: {
-						shortName: snippet.shortName,
-						arguments: { type: 'value', value: argumentsText },
-						context: operation.context,
-					},
-					prepared: operation,
-				};
-			});
-			if (result.kind !== 'expanded') return 'cancelled';
-			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
-				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
-				else void preambles.refreshIfLoaded();
-				notifications.error(m.snippets_changed_before_expansion());
-				await settleComposerAfterSnippet();
-				return 'cancelled';
-			}
-			if (
-				executionKey !== sourceExecutionKey ||
-				!projectState.matchesSnippetContext(result.prepared, result.response) ||
-				composerState.inputText !== sourceText
-			)
-				return 'cancelled';
-			const replacement = range
-				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
-				: {
-						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
-						caret: start + result.response.expandedText.length,
-					};
-			updateDraft(replacement.text);
-			await settleComposerAfterSnippet(replacement.caret);
-			return 'inserted';
-		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) {
-				void snippets.refreshIfLoaded();
-				void preambles.refreshIfLoaded();
-			}
-			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await settleComposerAfterSnippet();
-			return 'failed';
-		}
+		return runSnippet(snippet.shortName, { type: 'value', value: argumentsText }, {
+			snippet,
+			trigger: range,
+			selection: { start: textarea.selectionStart, end: textarea.selectionEnd },
+		});
 	}
 
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
 		if (!conversationInput) return;
-		const sourceExecutionKey = executionKey;
-		const sourceText = composerState.inputText;
-		ui.closeSlashMenu();
-		ui.closeFileMenu();
-		composerState.isDragActive = false;
-		try {
-			const result = await snippetExpansion.runPrepared(command.shortName, async (signal) => {
-				const operation = await projectState.resolveSnippetContext(signal);
-				return {
-					request: {
-						shortName: command.shortName,
-						arguments: command.arguments,
-						context: operation.context,
-					},
-					prepared: operation,
-				};
-			});
-			if (result.kind !== 'expanded') return;
-			if (
-				!conversationInput || executionKey !== sourceExecutionKey ||
-				!projectState.matchesSnippetContext(result.prepared, result.response) ||
-				composerState.inputText !== sourceText
-			)
-				return;
-			updateDraft(result.response.expandedText);
-			ui.closeSlashMenu();
-			await settleComposerAfterSnippet(result.response.expandedText.length);
-		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) {
-				void snippets.refreshIfLoaded();
-				void preambles.refreshIfLoaded();
-			}
-			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await settleComposerAfterSnippet();
-		}
+		await runSnippet(command.shortName, command.arguments);
 	}
 
 	function editSnippets(): void {

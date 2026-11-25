@@ -15,6 +15,7 @@
 	} from '$lib/files/images/file-image-cache.svelte.js';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import * as m from '$lib/paraglide/messages.js';
+	import { observeMarkdownImage } from './markdown-image-visibility';
 
 	let {
 		href,
@@ -109,7 +110,7 @@
 		held = { attempt: current, lease: acquired };
 		let active = true;
 		let nearby = true;
-		let observer: IntersectionObserver | undefined;
+		let stopObserving: (() => void) | undefined;
 
 		function load(): void {
 			if (!active) return;
@@ -146,22 +147,18 @@
 			// Scroll areas enable overflow in sibling mount effects.
 			void tick().then(() => {
 				if (!active) return;
-				observer = new IntersectionObserver(
-					(entries) => {
-						if (!active) return;
-						nearby = entries.some((entry) => entry.isIntersecting);
-						if (nearby) load();
-						else release();
-					},
-					{ root: imageScrollRoot(target), rootMargin: '400px' },
-				);
-				observer.observe(target);
+				stopObserving = observeMarkdownImage(target, (intersecting) => {
+					if (!active) return;
+					nearby = intersecting;
+					if (nearby) load();
+					else release();
+				});
 			});
 		}
 		return () => {
 			active = false;
 			target.removeEventListener('focusout', releaseAfterBlur);
-			observer?.disconnect();
+			stopObserving?.();
 			release();
 		};
 	});
@@ -217,28 +214,22 @@
 		else lease?.reportDisplayError(url);
 	}
 
-	function imageScrollRoot(target: HTMLElement): HTMLElement | null {
-		for (let parent = target.parentElement; parent; parent = parent.parentElement) {
-			const style = getComputedStyle(parent);
-			if (/(auto|scroll|overlay)/.test(`${style.overflowX} ${style.overflowY}`)) return parent;
-		}
-		return null;
-	}
-
 	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
 		event.stopPropagation();
 	}
 </script>
 
 {#snippet thumbnail(current: typeof attempt, url: string)}
+	{@const cached = lease?.image}
 	<img
 		loading={requestedRetry === current ? 'eager' : 'lazy'}
 		src={url}
 		alt={text}
 		{title}
 		decoding="async"
-		width={lease?.image?.width}
-		height={lease?.image?.height}
+		width={cached?.width}
+		height={cached?.height}
+		style:contain-intrinsic-size={cached ? `${cached.width}px ${cached.height}px` : undefined}
 		referrerpolicy="no-referrer"
 		style:display={externalRetryPending ? 'none' : undefined}
 		onload={() => {
@@ -358,6 +349,11 @@
 		max-height: var(--inline-image-max-height);
 		object-fit: contain;
 		margin: 0;
+	}
+
+	/* Uses the decoded cache dimensions before a remounted blob image has intrinsic size. */
+	img[width][height] {
+		contain: size;
 	}
 
 	.placeholder {

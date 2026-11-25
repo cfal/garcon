@@ -379,8 +379,7 @@ describe('ChatToolEventRenderer', () => {
 			mode: 'input',
 		});
 
-		expect(screen.getByText('Pattern')).toBeTruthy();
-		expect(screen.getByText('border-dotted')).toBeTruthy();
+		expect(screen.getByText('Pattern: border-dotted')).toBeTruthy();
 		expect(screen.queryByLabelText('Jump to results')).toBeNull();
 	});
 

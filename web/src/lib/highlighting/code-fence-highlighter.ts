@@ -1,7 +1,7 @@
 import { highlightCode } from '@lezer/highlight';
 
 import { codeTagHighlighter } from './codemirror-code-highlighter';
-import { CodeHighlightCache } from './code-highlight-cache';
+import { codeFenceHighlightCache as highlightCache, MAX_HIGHLIGHT_CHARS } from './code-highlight-cache';
 import {
 	loadCodeFenceLanguage,
 	normalizeCodeFenceLanguage,
@@ -12,10 +12,8 @@ import {
 	type CodeHighlightSegment,
 } from './code-highlight-types';
 
-const MAX_HIGHLIGHT_CHARS = 200_000;
 const MAX_HIGHLIGHT_LINES = 5_000;
 export const MAX_HIGHLIGHT_SEGMENTS = 2_000;
-const highlightCache = new CodeHighlightCache();
 const segmentLimit = Symbol('code-highlight-segment-limit');
 
 function appendBoundedSegment(segments: CodeHighlightSegment[], text: string, classes: string | null): void {
@@ -32,10 +30,6 @@ function exceedsHighlightLineLimit(text: string): boolean {
 		}
 	}
 	return false;
-}
-
-function shouldSkipHighlighting(text: string): boolean {
-	return text.length > MAX_HIGHLIGHT_CHARS || exceedsHighlightLineLimit(text);
 }
 
 function diffLineClass(line: string): string | null {
@@ -65,13 +59,14 @@ export async function highlightCodeFence(
 	signal?: AbortSignal,
 ): Promise<CodeHighlightSegment[]> {
 	if (!text) return [];
-	if (signal?.aborted || shouldSkipHighlighting(text)) return plainCodeSegments(text);
+	if (signal?.aborted || text.length > MAX_HIGHLIGHT_CHARS) return plainCodeSegments(text);
 
 	const language = normalizeCodeFenceLanguage(rawLanguage);
 	if (!language || language === 'plaintext') return plainCodeSegments(text);
 	const key = `${language}\0${text}`;
 	const cached = highlightCache.get(key);
 	if (cached) return cached;
+	if (exceedsHighlightLineLimit(text)) return plainCodeSegments(text);
 	let result: CodeHighlightSegment[];
 	try {
 		if (language === 'diff') result = highlightDiff(text);

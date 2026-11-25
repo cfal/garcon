@@ -2,7 +2,7 @@ import { ensureSyntaxTree } from '@codemirror/language';
 import { Compartment, EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 
-import { loadLanguageExtension } from '$lib/highlighting/codemirror-language-registry.js';
+import { loadCodeMirrorLanguageForFile } from '$lib/highlighting/codemirror-language-registry.js';
 
 async function loadIntoState(
 	filePath: string,
@@ -14,7 +14,7 @@ async function loadIntoState(
 		doc,
 		extensions: [languageCompartment.of([])],
 	});
-	const extensions = await loadLanguageExtension({ filePath, language });
+	const { extensions } = (await loadCodeMirrorLanguageForFile({ filePath, language })) ?? { extensions: [] };
 	const transaction = editorState.update({
 		effects: languageCompartment.reconfigure(extensions),
 	});
@@ -23,7 +23,7 @@ async function loadIntoState(
 	return transaction.state;
 }
 
-describe('loadLanguageExtension', () => {
+describe('loadCodeMirrorLanguageForFile', () => {
 	it('loads a .svelte language extension that CodeMirror can reconfigure', async () => {
 		const editorState = await loadIntoState(
 			'Counter.svelte',

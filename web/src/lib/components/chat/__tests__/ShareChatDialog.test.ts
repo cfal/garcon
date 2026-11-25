@@ -43,9 +43,38 @@ describe('ShareChatDialog', () => {
 			expect(clipboard.copyToClipboard).toHaveBeenCalledWith(
 				expectedUrl,
 				document.querySelector('[role="dialog"]'),
+				expect.any(Function),
 			);
 		});
 		expect(screen.getByRole('button', { name: 'Copied!' })).toBeTruthy();
+	});
+
+	it('ignores an earlier share completion after switching chats', async () => {
+		const first = Promise.withResolvers<Awaited<ReturnType<typeof sharesApi.shareChat>>>();
+		vi.mocked(sharesApi.shareChat).mockReturnValueOnce(first.promise);
+		const { rerender } = render(ShareChatDialog, { chatId: 'first', onClose: vi.fn() });
+		expect(sharesApi.shareChat).toHaveBeenCalledWith('first');
+		await rerender({ chatId: 'second' });
+		const currentUrl = `${window.location.origin}/shared/share-token`;
+		await screen.findByText(currentUrl);
+		first.resolve({ success: true, shareToken: 'old', shareUrl: '/shared/old' });
+		await first.promise;
+		await waitFor(() => expect(screen.getByText(currentUrl)).toBeTruthy());
+		expect(screen.queryByText(`${window.location.origin}/shared/old`)).toBeNull();
+	});
+
+	it('ignores a rejected request from before closing and reopening the same chat', async () => {
+		const first = Promise.withResolvers<Awaited<ReturnType<typeof sharesApi.shareChat>>>();
+		vi.mocked(sharesApi.shareChat).mockReturnValueOnce(first.promise);
+		const { rerender } = render(ShareChatDialog, { chatId: 'chat-1', onClose: vi.fn() });
+		await rerender({ chatId: null });
+		await rerender({ chatId: 'chat-1' });
+		const currentUrl = `${window.location.origin}/shared/share-token`;
+		await screen.findByText(currentUrl);
+		first.reject(new Error('Old request failed'));
+		await first.promise.catch(() => undefined);
+		await waitFor(() => expect(screen.getByText(currentUrl)).toBeTruthy());
+		expect(screen.queryByText('Failed to create share link')).toBeNull();
 	});
 
 	it('does not show success when the clipboard helper fails', async () => {

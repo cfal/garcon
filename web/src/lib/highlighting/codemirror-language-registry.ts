@@ -15,7 +15,7 @@ export interface LoadedCodeMirrorLanguage {
 	extensions: Extension[];
 }
 
-export type LoadLanguageExtensionInput =
+type EditorLanguageInput =
 	| string
 	| {
 			filePath: string;
@@ -85,13 +85,6 @@ async function loadDescription(
 	}
 }
 
-export function canHighlightCodeFenceLanguage(rawLanguage: string | null | undefined): boolean {
-	const normalized = normalizeCodeFenceLanguage(rawLanguage);
-	if (isPlaintextCodeFenceLanguage(normalized)) return false;
-	if (normalized === 'diff') return true;
-	return Boolean(matchLanguageName(normalized));
-}
-
 export async function loadCodeFenceLanguage(
 	rawLanguage: string | null | undefined,
 ): Promise<LoadedCodeMirrorLanguage | null> {
@@ -99,15 +92,8 @@ export async function loadCodeFenceLanguage(
 	return description ? loadDescription(description) : null;
 }
 
-export async function loadLanguageExtension(
-	input: LoadLanguageExtensionInput,
-): Promise<Extension[]> {
-	const loaded = await loadCodeMirrorLanguageForFile(input);
-	return loaded?.extensions ?? [];
-}
-
 export async function loadCodeMirrorLanguageForFile(
-	input: LoadLanguageExtensionInput,
+	input: EditorLanguageInput,
 ): Promise<LoadedCodeMirrorLanguage | null> {
 	const filePath = typeof input === 'string' ? input : input.filePath;
 	const explicitLanguage = typeof input === 'string' ? null : input.language;

@@ -295,12 +295,6 @@ function projectCommandOutputs(items: ConversationFeedRenderItem[]): Conversatio
 	return items;
 }
 
-export function buildConversationFeedRenderItems(
-	rows: ChatDisplayRow[],
-): ConversationFeedRenderItem[] {
-	return buildConversationFeedRenderModel(rows).items;
-}
-
 export function visiblePendingPermissionRequests(
 	rows: ChatDisplayRow[],
 	pendingPermissionRequests: readonly PendingPermissionRequest[],

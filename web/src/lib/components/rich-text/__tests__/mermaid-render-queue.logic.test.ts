@@ -40,7 +40,7 @@ describe('Mermaid render admission', () => {
 		expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
 	});
 
-	it('does not cache orphaned active work or remove its replacement', async () => {
+	it('lets a new consumer join running work after the previous consumer cancels', async () => {
 		const active = Promise.withResolvers<string>();
 		const render = vi
 			.fn<RenderDiagram>(async () => '<svg>new</svg>')
@@ -54,9 +54,9 @@ describe('Mermaid render admission', () => {
 		expect(render).toHaveBeenCalledOnce();
 		active.resolve('<svg>old</svg>');
 		await cancelled;
-		await expect(next).resolves.toBe('<svg>new</svg>');
-		await expect(queue.render('same', 'standard-light')).resolves.toBe('<svg>new</svg>');
-		expect(render).toHaveBeenCalledTimes(2);
+		await expect(next).resolves.toBe('<svg>old</svg>');
+		await expect(queue.render('same', 'standard-light')).resolves.toBe('<svg>old</svg>');
+		expect(render).toHaveBeenCalledOnce();
 	});
 
 	it('serializes a large live document and removes its cancelled queued revisions', async () => {

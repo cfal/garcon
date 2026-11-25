@@ -42,12 +42,12 @@ function feedMutation(feedStructureChanged: boolean): ConversationTranscriptOver
 
 class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverlayView {
 	#resendFrontier: { transcriptViewId: string; lastOrdinal: number } | null = null;
-	#notices = $state<OverlayNotice[]>([]);
+	#notices = $state.raw<OverlayNotice[]>([]);
 	#noticeRevision = $state(0);
-	#optimisticInputs = $state<OptimisticUserInput[]>([]);
+	#optimisticInputs = $state.raw<OptimisticUserInput[]>([]);
 	#optimisticAfterOrdinals = $state.raw<ReadonlyMap<string, number>>(new Map());
-	#resendCandidates = $state<ResendCandidate[]>([]);
-	#excludedResendOrdinals = $state<number[]>([]);
+	#resendCandidates = $state.raw<ResendCandidate[]>([]);
+	#excludedResendOrdinals = $state.raw<number[]>([]);
 
 	get notices(): readonly (LocalNoticeRow & { readonly revision: number })[] {
 		return this.#notices;
@@ -69,10 +69,11 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		return this.#resendCandidates;
 	}
 
-	get includedResendCandidates(): readonly ResendCandidate[] {
+	readonly includedResendCandidates: readonly ResendCandidate[] = $derived.by(() => {
+		if (this.#excludedResendOrdinals.length === 0) return this.#resendCandidates;
 		const excluded = new Set(this.#excludedResendOrdinals);
 		return this.#resendCandidates.filter((candidate) => !excluded.has(candidate.ordinal));
-	}
+	});
 
 	get excludedResendOrdinals(): readonly number[] {
 		return this.#excludedResendOrdinals;
@@ -287,14 +288,16 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	}
 
 	#installResendCandidates(candidates: readonly ResendCandidate[]): void {
+		if (candidates.length === 0 && this.#resendCandidates.length === 0) return;
 		this.#resendCandidates = candidates.map((candidate) => ({
 			...candidate,
 			attachmentNames: [...candidate.attachmentNames],
 		}));
 		const available = new Set(candidates.map((candidate) => candidate.ordinal));
-		this.#excludedResendOrdinals = this.#excludedResendOrdinals.filter((ordinal) =>
-			available.has(ordinal),
-		);
+		if (this.#excludedResendOrdinals.length > 0) {
+			const retained = this.#excludedResendOrdinals.filter((ordinal) => available.has(ordinal));
+			if (retained.length !== this.#excludedResendOrdinals.length) this.#excludedResendOrdinals = retained;
+		}
 	}
 
 	resetForTranscriptReplacement(): ConversationTranscriptOverlayMutation {

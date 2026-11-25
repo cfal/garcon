@@ -6,7 +6,7 @@ import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsibl
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
-import { UserMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
+import { UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 vi.mock('$lib/api/shares', () => ({
@@ -84,6 +84,31 @@ describe('SharedChatPage', () => {
 		expect(container.querySelector('[data-slot="shared-user-message"]')).toBe(bubble);
 		expect(row?.classList.contains('justify-start')).toBe(true);
 		expect(row?.classList.contains('justify-end')).toBe(false);
+	});
+
+	it('collapses thinking on the first click and renders only images as images', async () => {
+		const snapshot = response([], 0, 2);
+		const at = '2026-01-01T00:00:00.000Z';
+		snapshot.snapshot.messages = [
+			new ThinkingMessage(at, 'Synthetic thought'),
+			new UserMessage(at, 'Synthetic prompt', [
+				{ name: 'example.png', data: 'data:image/png;base64,AAAA' },
+				{ name: 'example.pdf', data: 'data:application/pdf;base64,AAAA', mimeType: 'application/pdf' },
+			]),
+		];
+		snapshot.page.end = 2;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(snapshot);
+		render(SharedChatPageTestHost);
+		const thinking = await screen.findByRole('button', { name: 'Thinking' });
+		expect(thinking.getAttribute('aria-expanded')).toBe('true');
+		await fireEvent.click(thinking);
+		expect(thinking.getAttribute('aria-expanded')).toBe('false');
+		expect(screen.queryByText('Synthetic thought')).toBeNull();
+		await fireEvent.click(thinking);
+		expect(thinking.getAttribute('aria-expanded')).toBe('true');
+		expect(screen.getByRole('img', { name: 'example.png' })).toBeTruthy();
+		expect(screen.queryByRole('img', { name: 'example.pdf' })).toBeNull();
+		expect(screen.getByText('example.pdf')).toBeTruthy();
 	});
 
 	it('retains literal source, Markdown stdout, fenced stderr and command outcomes', async () => {

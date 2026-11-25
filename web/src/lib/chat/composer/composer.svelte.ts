@@ -112,13 +112,14 @@ export class ComposerState {
 
 	/** Adds supported attachment files, deduplicating by File identity. */
 	addImages(files: File[], support?: ChatAttachmentSupport): void {
-		const seen = new Set(this.images);
+		const images = this.images;
+		const seen = new Set(images);
 		const newFiles = files.filter((file) => {
 			if (seen.has(file) || !isSupportedChatAttachment(file, support)) return false;
 			seen.add(file);
 			return true;
 		});
-		this.images = [...this.images, ...newFiles];
+		if (newFiles.length > 0) this.images = [...images, ...newFiles];
 	}
 
 	/** Removes an image at the given index. */

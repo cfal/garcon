@@ -8,7 +8,7 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Link from '@lucide/svelte/icons/link';
 	import { shareChat, revokeShare } from '$lib/api/shares.js';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { ChatClipboardFeedback } from './chat-clipboard-feedback.svelte.js';
 
 	interface ShareChatDialogProps {
 		chatId: string | null;
@@ -21,82 +21,67 @@
 	let isLoading = $state(false);
 	let shareUrl = $state<string | null>(null);
 	let error = $state<string | null>(null);
-	let copied = $state(false);
 	let isRevoking = $state(false);
 	let showRevokeConfirm = $state(false);
-	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-	let copyGeneration = 0;
-
-	function clearCopyResetTimer(): void {
-		if (copyResetTimer) clearTimeout(copyResetTimer);
-		copyResetTimer = null;
-	}
+	const clipboard = new ChatClipboardFeedback();
+	let requestGeneration = 0;
 
 	// Triggers share creation when chatId changes.
 	$effect(() => {
-		if (!chatId) {
-			copyGeneration += 1;
-			clearCopyResetTimer();
-			shareUrl = null;
-			error = null;
-			copied = false;
-			isRevoking = false;
-			showRevokeConfirm = false;
-			return;
-		}
-		createOrUpdateShare(chatId);
+		const id = chatId;
+		const generation = ++requestGeneration;
+		shareUrl = null;
+		error = null;
+		isRevoking = false;
+		showRevokeConfirm = false;
+		isLoading = id !== null;
+		if (id) void createOrUpdateShare(id, generation);
 		return () => {
-			copyGeneration += 1;
-			clearCopyResetTimer();
+			requestGeneration += 1;
+			clipboard.reset();
 		};
 	});
 
-	// Always calls shareChat which creates or updates the snapshot with
-	// the latest messages, ensuring the shared link is never stale.
-	async function createOrUpdateShare(id: string) {
-		isLoading = true;
-		error = null;
+	function isCurrent(id: string, generation: number): boolean {
+		return chatId === id && generation === requestGeneration;
+	}
+
+	async function createOrUpdateShare(id: string, generation: number) {
 		try {
 			const result = await shareChat(id);
+			if (!isCurrent(id, generation)) return;
 			if (result.success) {
 				shareUrl = window.location.origin + result.shareUrl;
 			} else {
 				error = m.share_dialog_error();
 			}
 		} catch {
-			error = m.share_dialog_error();
+			if (isCurrent(id, generation)) error = m.share_dialog_error();
 		} finally {
-			isLoading = false;
+			if (isCurrent(id, generation)) isLoading = false;
 		}
 	}
 
-	async function handleCopyLink(event: MouseEvent) {
-		if (!shareUrl) return;
-		const generation = ++copyGeneration;
+	function handleCopyLink(event: MouseEvent): Promise<void> {
 		const container = (event.currentTarget as HTMLElement)?.closest('[role="dialog"]') ?? undefined;
-		const didCopy = await copyToClipboard(shareUrl, container);
-		if (!didCopy || generation !== copyGeneration) return;
-
-		copied = true;
-		clearCopyResetTimer();
-		copyResetTimer = setTimeout(() => {
-			copied = false;
-			copyResetTimer = null;
-		}, 2000);
+		return clipboard.copy(shareUrl, container);
 	}
 
 	async function handleRevoke() {
-		if (!chatId) return;
+		const id = chatId;
+		if (!id) return;
+		const generation = requestGeneration;
 		isRevoking = true;
 		try {
-			await revokeShare(chatId);
+			await revokeShare(id);
+			if (!isCurrent(id, generation)) return;
 			shareUrl = null;
 			showRevokeConfirm = false;
 			onClose();
 		} catch {
-			error = 'Failed to revoke share';
+			if (isCurrent(id, generation)) error = 'Failed to revoke share';
 		} finally {
-			isRevoking = false;
+			if (isCurrent(id, generation)) isRevoking = false;
 		}
 	}
 
@@ -162,8 +147,8 @@
 						</Button>
 					</div>
 				{/if}
-				<Button onclick={handleCopyLink} variant={copied ? 'outline' : 'default'}>
-					{#if copied}
+				<Button onclick={handleCopyLink} variant={clipboard.copied ? 'outline' : 'default'}>
+					{#if clipboard.copied}
 						<Check class="w-4 h-4" />
 						{m.share_dialog_link_copied()}
 					{:else}

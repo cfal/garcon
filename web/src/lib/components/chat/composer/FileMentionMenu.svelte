@@ -37,7 +37,7 @@
 	const transientLayers = getTransientLayers();
 	const layerId = allocateTransientLayerId('file-mention');
 
-	let allFiles = $state<FileEntry[]>([]);
+	let allFiles = $state.raw<FileEntry[]>([]);
 	let selectedIndex = $state(0);
 	let listElement: HTMLUListElement | undefined = $state();
 	let isLoading = $state(false);
@@ -92,9 +92,10 @@
 		return value.replace(/\\/g, '/');
 	}
 
+	const normalizedProject = $derived(normalizeSlashes(projectPath).replace(/\/+$/, ''));
+
 	function mentionPathFor(file: FileEntry): string {
 		if (file.relativePath) return normalizeSlashes(file.relativePath);
-		const normalizedProject = normalizeSlashes(projectPath).replace(/\/+$/, '');
 		const normalizedPath = normalizeSlashes(file.path);
 		if (normalizedProject && normalizedPath.startsWith(`${normalizedProject}/`)) {
 			return normalizedPath.slice(normalizedProject.length + 1);

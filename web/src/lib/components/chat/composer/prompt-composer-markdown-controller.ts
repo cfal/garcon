@@ -14,6 +14,11 @@ import type {
 } from './composer-markdown-parser.js';
 import { loadComposerMarkdownEditor } from './composer-markdown-editor-loader.js';
 
+function reportMarkdownFailure(error: unknown): null {
+	console.error('Failed to load or process composer Markdown', error);
+	return null;
+}
+
 /** An `@` file mention being typed in the formatted editor. */
 export interface ComposerMarkdownMention {
 	query: string;
@@ -167,7 +172,7 @@ export class PromptComposerMarkdownController {
 		this.options.onChange(text);
 		this.options.ui.formattedPastePending = true;
 		const parsed = isComposerMarkdownSized(text)
-			? await parseComposerMarkdownInWorker({ source: text, caret }, abort.signal).catch(() => null)
+			? await parseComposerMarkdownInWorker({ source: text, caret }, abort.signal).catch(reportMarkdownFailure)
 			: null;
 		if (this.#workerAbort === abort) {
 			this.#workerAbort = null;
@@ -210,9 +215,7 @@ export class PromptComposerMarkdownController {
 		this.options.ui.formattedPastePending = true;
 		const chatId = this.options.chatId;
 		const generation = this.options.interactionGeneration;
-		const text = await serializeComposerMarkdownPasteInWorker(request, abort.signal).catch(
-			() => null,
-		);
+		const text = await serializeComposerMarkdownPasteInWorker(request, abort.signal).catch(reportMarkdownFailure);
 		if (this.#workerAbort === abort) {
 			this.#workerAbort = null;
 			this.options.ui.formattedPastePending = false;
@@ -320,8 +323,8 @@ export class PromptComposerMarkdownController {
 				: parseComposerMarkdownInWorker(
 						{ source, ...(caret !== undefined ? { caret } : {}) },
 						abort.signal,
-					).catch(() => null),
-			loadComposerMarkdownEditor().catch(() => null),
+					).catch(reportMarkdownFailure),
+			loadComposerMarkdownEditor().catch(reportMarkdownFailure),
 		]);
 		if (this.#workerAbort === abort) {
 			this.#workerAbort = null;

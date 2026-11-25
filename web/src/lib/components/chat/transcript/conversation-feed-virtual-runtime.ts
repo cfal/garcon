@@ -133,7 +133,7 @@ export class ConversationMountedVirtualItems {
 
 	transcriptKeys(
 		configuredKeys: readonly string[],
-		eligibleKeys: ReadonlySet<string>,
+		eligibleKeys: Pick<ReadonlySet<string>, 'has'>,
 	): ReadonlySet<string> {
 		const keys = new Set<string>();
 		for (const key of this.#keysByIndex(configuredKeys).values()) {
@@ -221,7 +221,7 @@ export function captureConversationVirtualAnchor(input: {
 	snapshot: VirtualListSnapshot;
 	position: VirtualViewportPosition | null;
 	keys: readonly string[];
-	transcriptKeys: ReadonlySet<string>;
+	transcriptKeys: Pick<ReadonlySet<string>, 'has'>;
 	preferTranscript: boolean;
 }): ConversationVirtualAnchor | null {
 	const paintedOffset = input.position?.paintedOffset ?? 0;
@@ -264,7 +264,7 @@ export function conversationAnchorFallbackKeys(keys: readonly string[], index: n
 	return fallbacks;
 }
 
-export function conversationTargetAlignmentDelta(
+function conversationTargetAlignmentDelta(
 	viewport: HTMLDivElement,
 	node: HTMLElement,
 	align: 'center' | 'start' | 'end',
@@ -276,7 +276,7 @@ export function conversationTargetAlignmentDelta(
 	return nodeRect.top + nodeRect.height / 2 - (viewportRect.top + viewportRect.height / 2);
 }
 
-export function findConversationTargetNode(
+function findConversationTargetNode(
 	root: HTMLDivElement | null,
 	rowId: string,
 ): HTMLElement | null {
@@ -291,7 +291,7 @@ export function findConversationTargetNode(
 	return null;
 }
 
-export function nextConversationAnimationFrame(): Promise<void> {
+function nextConversationAnimationFrame(): Promise<void> {
 	return new Promise((resolve) => {
 		if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
 		else queueMicrotask(resolve);

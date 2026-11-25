@@ -108,7 +108,7 @@ describe('ChatActionDialogs', () => {
 			within(projectPathField as HTMLElement).getByRole('button', { name: 'Copy to clipboard' }),
 		);
 		await waitFor(() =>
-			expect(copyToClipboard).toHaveBeenCalledWith('/workspace/project-one', expect.anything()),
+			expect(copyToClipboard).toHaveBeenCalledWith('/workspace/project-one', expect.anything(), expect.any(Function)),
 		);
 	});
 });
