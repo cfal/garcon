@@ -1,3 +1,5 @@
+import { acpContentText, asObject } from './event-converter.js';
+
 // Agents such as Antigravity report some failures as a marked message chunk and
 // then end the turn normally. The chunk counts as a failure only if nothing
 // follows it before the turn ends; any further output means the chunk was
@@ -16,6 +18,11 @@ export const ACP_NEW_OUTPUT_UPDATES: ReadonlySet<string> = new Set([
   'tool_call',
 ]);
 
+function isEmptyText(content: unknown): boolean {
+  if (Array.isArray(content)) return content.every(isEmptyText);
+  return content === '' || (asObject(content).type === 'text' && acpContentText(content) === '');
+}
+
 // The update type that new-output checks see: a tool_call_update reports on an
 // earlier call, except when it is the first frame of a call.
 export function acpOutputUpdateType(
@@ -23,6 +30,8 @@ export function acpOutputUpdateType(
   isKnownCall: (toolCallId: string) => boolean,
 ): string | undefined {
   const updateType = typeof update.sessionUpdate === 'string' ? update.sessionUpdate : undefined;
+  if ((updateType === 'agent_message' || updateType === 'agent_message_chunk' || updateType === 'agent_thought_chunk')
+    && isEmptyText(update.content)) return undefined;
   if (updateType !== 'tool_call_update') return updateType;
   const toolCallId = typeof update.toolCallId === 'string' ? update.toolCallId : '';
   return !toolCallId || isKnownCall(toolCallId) ? updateType : 'tool_call';

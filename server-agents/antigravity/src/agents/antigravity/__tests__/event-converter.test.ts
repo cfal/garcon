@@ -343,6 +343,64 @@ describe('AntigravityAcpEventConverter', () => {
     ]);
   });
 
+  it('publishes leading thoughts only when visible answer text starts, without losing Markdown indentation', () => {
+    const converter = new AntigravityAcpEventConverter();
+    const chunk = (sessionUpdate: string, text: string) => plain(converter.fromSessionUpdate(
+      update({ sessionUpdate, content: { type: 'text', text } }), context,
+    ));
+    converter.beginTurn(SESSION);
+    expect(chunk('agent_thought_chunk', '    Check')).toEqual([]);
+    expect(chunk('agent_message_chunk', '')).toEqual([]);
+    expect(chunk('agent_thought_chunk', 'ing')).toEqual([]);
+    expect(chunk('agent_message_chunk', '    ')).toEqual([]);
+    expect(chunk('agent_thought_chunk', ' both.')).toEqual([]);
+    expect(chunk('agent_message', 'first();')).toEqual([{ type: 'thinking', content: '    Checking both.' }]);
+    expect(chunk('agent_thought_chunk', 'One more.')).toEqual([]);
+    expect(chunk('agent_message_chunk', '\n    second();')).toEqual([]);
+    const toolRows = converter.fromSessionUpdate(toolCall('read', 'read_file', 'read', { Path: '/work/a' }), context);
+    expect(plain(toolRows.slice(0, -1))).toEqual([
+      { type: 'thinking', content: 'One more.' },
+      { type: 'assistant-message', content: '    first();\n    second();' },
+    ]);
+    expect(toolRows.at(-1)?.type).toBe('read-tool-use');
+    expect(chunk('agent_thought_chunk', 'Next segment.')).toEqual([]);
+    expect(chunk('agent_message_chunk', 'Done.\n')).toEqual([{ type: 'thinking', content: 'Next segment.' }]);
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: 'Done.\n' }]);
+  });
+
+  it('omits a segment containing only whitespace', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    for (const sessionUpdate of ['agent_message_chunk', 'agent_thought_chunk']) {
+      expect(converter.fromSessionUpdate(update({ sessionUpdate, content: { type: 'text', text: '\t \n' } }), context)).toEqual([]);
+    }
+    expect(converter.endTurn(SESSION, context)).toEqual([]);
+  });
+
+  it('does not turn an executor error into a successful reply on empty thought or answer chunks', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    for (const [sessionUpdate, text] of [
+      ['agent_message_chunk', '\n⚠ agent executor error: failed'],
+      ['agent_thought_chunk', ''],
+      ['agent_message_chunk', ''],
+    ]) {
+      converter.fromSessionUpdate(update({ sessionUpdate, content: { type: 'text', text } }), context);
+    }
+    expect(converter.takeTurnFailure(SESSION)).toBe('Antigravity agent executor error: failed');
+    expect(converter.endTurn(SESSION, context)).toEqual([]);
+  });
+
+  it('treats a non-text ACP content block as output after a quoted marker', () => {
+    const converter = new AntigravityAcpEventConverter();
+    converter.beginTurn(SESSION);
+    const text = 'Quoted:\n⚠ agent executor error: example';
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }), context);
+    converter.fromSessionUpdate(update({ sessionUpdate: 'agent_message_chunk', content: { type: 'image', mimeType: 'image/png', data: 'AA==' } }), context);
+    expect(converter.takeTurnFailure(SESSION)).toBeNull();
+    expect(plain(converter.endTurn(SESSION, context))).toEqual([{ type: 'assistant-message', content: text }]);
+  });
+
   it('publishes one result when a terminal update repeats', () => {
     const converter = new AntigravityAcpEventConverter();
     converter.beginTurn(SESSION);
