@@ -136,6 +136,53 @@ it('waits for the exact renderer viewport, supersedes bottom restore, and loads 
 	expect(getChatMessages).toHaveBeenCalledOnce();
 });
 
+it('does not replay a user-cancelled seek on a presentation attached before viewport lookup', async () => {
+	const f = fixture();
+	f.attach();
+	const started = held<void>();
+	const selection = held<'cancelled'>();
+	const second = {
+		...f.viewport,
+		scrollToTarget: vi.fn<ConversationViewportPort['scrollToTarget']>()
+			.mockImplementationOnce(() => { started.release(); return selection.promise; })
+			.mockResolvedValue('completed'),
+	};
+	const jump = vi.spyOn(f.panel.scroll, 'jumpToMessageRow');
+	const restore = f.panel.restore({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1000, viewportOffset: -8 });
+	expect(jump).toHaveBeenCalledOnce();
+	f.panel.attachPresentation({
+		getScrollContainer: () => null, getViewport: () => second, getQueueContainer: () => undefined,
+		captureRestoreTarget: () => null, closeTransients: () => {}, prepareForHide: () => {},
+	});
+	await started.promise;
+	f.panel.scroll.noteUserScrollIntent('earlier');
+	selection.release('cancelled');
+	await Promise.all(jump.mock.results.map(call => call.value));
+	await restore;
+	await tick();
+	expect(f.viewport.scrollToTarget).not.toHaveBeenCalled();
+	expect(second.scrollToTarget).toHaveBeenCalledOnce();
+});
+
+it('resumes an interrupted restore when the same presentation is immediately shown again', async () => {
+	const f = fixture();
+	f.attach();
+	const started = held<void>();
+	const selection = held<'cancelled'>();
+	f.viewport.scrollToTarget.mockImplementationOnce(() => { started.release(); return selection.promise; });
+	const restore = f.panel.restore({ kind: 'row', transcriptViewId: 'view-1', ordinal: 1000, viewportOffset: -8 });
+	await started.promise;
+	f.panel.prepareForHide();
+	f.registry.reconcile([{
+		surfaceId: 'chat-view:window-one', windowId: 'window-one', presentation: 'window-one', chatId, snapshotAdmission: 'admitted',
+	}]);
+	expect(f.registry.panel('chat-view:window-one')).toBe(f.panel);
+	selection.release('cancelled');
+	await restore;
+	await tick();
+	expect(f.viewport.scrollToTarget).toHaveBeenCalledTimes(2);
+});
+
 it('retains reload identity if the view changes while the target page is held', async () => {
 	const f = fixture();
 	f.attach();

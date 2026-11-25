@@ -1699,6 +1699,7 @@ describe('ConversationPanelRegistry', () => {
 							rowId: `${incoming.target.transcriptViewId}:1`,
 						},
 						{ viewportOffset: incoming.target.viewportOffset },
+						expect.any(AbortSignal),
 					),
 				);
 				if (retain) {
@@ -1769,6 +1770,7 @@ describe('ConversationPanelRegistry', () => {
 				expect(jump).toHaveBeenCalledWith(
 					{ chatId: incoming, transcriptViewId: 'view-1', rowId: 'view-1:1' },
 					{ viewportOffset },
+					expect.any(AbortSignal),
 				),
 			);
 		}
@@ -1994,6 +1996,7 @@ describe('ConversationPanelRegistry', () => {
 				expect(jump).toHaveBeenCalledWith(
 					{ chatId, transcriptViewId: 'view-1', rowId: 'view-1:1' },
 					{ viewportOffset },
+					expect.any(AbortSignal),
 				),
 			);
 			registry.destroy();
@@ -2037,6 +2040,7 @@ describe('ConversationPanelRegistry', () => {
 				rowId: 'view-1:1',
 			},
 			{ viewportOffset: -17 },
+			expect.any(AbortSignal),
 		);
 		registry.destroy();
 		cache.flush();
@@ -2080,6 +2084,7 @@ describe('ConversationPanelRegistry', () => {
 		expect(jump).toHaveBeenCalledWith(
 			{ chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1' },
 			{ viewportOffset: -17 },
+			expect.any(AbortSignal),
 		);
 		registry.destroy();
 		cache.flush();
@@ -2267,6 +2272,7 @@ describe('ConversationPanelRegistry', () => {
 				rowId: 'view-1:1',
 			},
 			{ viewportOffset: -3 },
+			expect.any(AbortSignal),
 		);
 		cache.flush();
 	});
@@ -2284,7 +2290,7 @@ describe('ConversationPanelRegistry', () => {
 		});
 		expect(jump).toHaveBeenCalledWith({
 			chatId: 'chat-1', transcriptViewId: 'view-1', rowId: 'view-1:1',
-		}, { viewportOffset: 9, presentation: 'group-summary' });
+		}, { viewportOffset: 9, presentation: 'group-summary' }, expect.any(AbortSignal));
 		registry.destroy();
 		cache.flush();
 	});
@@ -2314,6 +2320,7 @@ describe('ConversationPanelRegistry', () => {
 				rowId: 'view-1:1',
 			},
 			{ viewportOffset: -3 },
+			expect.any(AbortSignal),
 		);
 		cache.flush();
 	});
