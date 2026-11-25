@@ -5,7 +5,7 @@ Preserves escaped source while loading or when rendering fails.
 -->
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { renderMath } from '$lib/components/rich-text/katex-loader';
+	import { readCachedMath, renderMath } from '$lib/components/rich-text/katex-loader';
 
 	interface Props {
 		text?: string;
@@ -15,34 +15,32 @@ Preserves escaped source while loading or when rendering fails.
 
 	let { text = '', raw = '', displayMode = false }: Props = $props();
 
-	let renderedHtml = $state('');
-	let renderFailed = $state(false);
-	let requestVersion = 0;
+	const expression = $derived({ text, displayMode });
+	const cached = $derived(readCachedMath(expression.text, expression.displayMode));
+	let result = $state.raw<{ expression: typeof expression; html: string }>();
+	const renderedHtml = $derived(cached ?? (result?.expression === expression ? result.html : ''));
+	const renderFailed = $derived(!cached && result?.expression === expression && !result.html);
 
 	const fallbackSource = $derived(raw || (displayMode ? `\\[${text}\\]` : `\\(${text}\\)`));
 	const renderStatus = $derived(renderedHtml ? 'rendered' : renderFailed ? 'failed' : 'loading');
 
 	$effect(() => {
-		const request = ++requestVersion;
-		const currentText = text;
-		const currentDisplayMode = displayMode;
+		const current = expression;
+		result = undefined;
+		if (cached !== undefined) return;
+		let active = true;
 
-		renderedHtml = '';
-		renderFailed = false;
-
-		void renderMath(currentText, currentDisplayMode).then(
+		void renderMath(current.text, current.displayMode).then(
 			(html) => {
-				if (request !== requestVersion) return;
-				renderedHtml = html;
+				if (active) result = { expression: current, html };
 			},
 			() => {
-				if (request !== requestVersion) return;
-				renderFailed = true;
+				if (active) result = { expression: current, html: '' };
 			},
 		);
 
 		return () => {
-			if (request === requestVersion) requestVersion += 1;
+			active = false;
 		};
 	});
 </script>

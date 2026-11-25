@@ -247,9 +247,8 @@ const THEME_CONFIGS: Record<MermaidThemeId, MermaidConfig> = {
 let loadPromise: Promise<Mermaid> | null = null;
 let initializedTheme: MermaidThemeId | null = null;
 let renderCounter = 0;
-const renders = new MermaidRenderQueue(async (source, themeId, signal) => {
+const renders = new MermaidRenderQueue(async (source, themeId) => {
 	const mermaid = await loadMermaid();
-	signal.throwIfAborted();
 	if (initializedTheme !== themeId) {
 		mermaid.initialize(THEME_CONFIGS[themeId]);
 		initializedTheme = themeId;
@@ -259,7 +258,10 @@ const renders = new MermaidRenderQueue(async (source, themeId, signal) => {
 });
 
 async function loadMermaid(): Promise<Mermaid> {
-	loadPromise ??= import('mermaid').then(({ default: mermaid }) => mermaid);
+	loadPromise ??= import('mermaid').then(({ default: mermaid }) => mermaid).catch((error: unknown) => {
+		loadPromise = null;
+		throw error;
+	});
 	return loadPromise;
 }
 
