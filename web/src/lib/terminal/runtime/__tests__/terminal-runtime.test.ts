@@ -281,12 +281,40 @@ describe('TerminalRuntime', () => {
 	it('accepts a full replay tail followed by live output while parsing is deferred', async () => {
 		const fixture = await outputFixture();
 		try {
+			const hosts = fixture.registry.hosts;
+			const ordered = fixture.registry.orderedSessions;
+			const session = fixture.registry.sessions[fixture.terminalId];
 			fixture.emit(1, 'x'.repeat(1024 * 1024));
 			fixture.emit(2, 'live output');
-			expect(fixture.registry.sessions[fixture.terminalId].lastReceivedSequence).toBe(2);
+			expect(session.lastReceivedSequence).toBe(2);
+			expect(fixture.registry.hosts).toBe(hosts);
+			expect(fixture.registry.orderedSessions).toBe(ordered);
 			expect(fixture.sent.filter((message) => message.type === 'terminal-detach')).toHaveLength(0);
 			expect(fakes.terminals[0].write).toHaveBeenCalledTimes(2);
 		} finally {
+			fixture.registry.destroy();
+		}
+	});
+
+	it('skips UTF-8 sizing for small input without rejecting valid large ASCII or Unicode input', async () => {
+		const fixture = await outputFixture();
+		const encode = vi.spyOn(TextEncoder.prototype, 'encode');
+		try {
+			const send = fakes.terminals[0].onDataHandler!;
+			const ascii = 'a'.repeat(64 * 1024);
+			const unicode = '\u00e9'.repeat(32 * 1024);
+			send('a');
+			expect(encode).not.toHaveBeenCalled();
+			send(ascii);
+			send(unicode);
+			expect(encode).toHaveBeenCalledTimes(2);
+			send(unicode + '\u00e9');
+			send(ascii + 'a');
+			expect(encode).toHaveBeenCalledTimes(3);
+			const input = fixture.sent.filter((message) => message.type === 'terminal-input');
+			expect(input.map((message) => message.data)).toEqual(['a', ascii, unicode]);
+		} finally {
+			encode.mockRestore();
 			fixture.registry.destroy();
 		}
 	});
@@ -374,18 +402,46 @@ describe('TerminalRuntime', () => {
 
 	it('waits for the font before opening the renderer', async () => {
 		const font = deferred<typeof TERMINAL_FONT_FAMILY>();
-		const runtime = createRuntime(vi.fn(), vi.fn(), { load: () => font.promise });
+		const resize = vi.fn();
+		const runtime = createRuntime(vi.fn(), resize, { load: () => font.promise });
 		const host = measurableHost();
 		const attachment = runtime.attach(host);
 
 		expect(fakes.terminals[0].element).toBeUndefined();
 		expect(host.children).toHaveLength(0);
+		runtime.fitIfMeasurable();
+		runtime.applyTheme({ foreground: '#ffffff' });
+		expect(fakes.fitAddons[0].fit).not.toHaveBeenCalled();
+		expect(fakes.terminals[0].refresh).not.toHaveBeenCalled();
+		expect(resize).not.toHaveBeenCalled();
 
 		font.resolve(TERMINAL_FONT_FAMILY);
 		await attachment.ready;
 
 		expect(fakes.terminals[0].element?.parentElement).toBe(host);
 		expect(fakes.terminals[0].options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
+		expect(fakes.terminals[0].options.theme).toEqual({ foreground: '#ffffff' });
+		runtime.fitIfMeasurable();
+		expect(resize).toHaveBeenCalledOnce();
+		runtime.dispose();
+	});
+
+	it('cancels pending focus synchronization on dispose', async () => {
+		const runtime = createRuntime();
+		await attach(runtime, measurableHost());
+		const frame = 123;
+		const request = vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(frame);
+		const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame');
+		try {
+			fakes.terminals[0].textarea?.dispatchEvent(new Event('blur'));
+			expect(request).toHaveBeenCalledOnce();
+			runtime.dispose();
+			expect(cancel).toHaveBeenCalledWith(frame);
+		} finally {
+			request.mockRestore();
+			cancel.mockRestore();
+			runtime.dispose();
+		}
 	});
 
 	it('attaches with the latest font when preference changes during the initial load', async () => {

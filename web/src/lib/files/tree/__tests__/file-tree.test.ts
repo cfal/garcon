@@ -124,7 +124,9 @@ describe('FileTreeStore', () => {
 		await tick();
 		store.filterInput = 'child';
 		expect(store.filteredRows.map((row) => row.entry.name)).toContain('child.ts');
+		const warmCache = store.childrenCache;
 		store.toggleDirectory(parent.path);
+		expect(store.childrenCache).toBe(warmCache);
 		for (let index = 0; index <= FILE_TREE_COLD_DIRECTORY_LIMIT; index += 1) {
 			await store.fetchChildren(`/workspace/project/cold-${index}`);
 		}
@@ -669,6 +671,7 @@ describe('FileTreeStore', () => {
 			response: response('/workspace/project', [entry('b.ts', 'file'), entry('a.ts', 'file')]),
 		};
 		const sortEntries = vi.spyOn(store, 'sortEntries');
+		expect(store.filteredRows).toBe(store.materializedRows);
 
 		expect(store.filteredRows.map((row) => row.entry.name)).toEqual(['a.ts', 'b.ts']);
 		const callsAfterMaterialization = sortEntries.mock.calls.length;

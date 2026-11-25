@@ -7,8 +7,8 @@ import {
 	type FileDraftRepository,
 	type FileRecentLocationV1,
 } from '$lib/files/persistence/file-draft-repository.js';
-export const FILE_NAVIGATION_LIMIT = 200;
-export const FILE_NAVIGATION_BYTE_LIMIT = 256 * 1024;
+const FILE_NAVIGATION_LIMIT = 200;
+const FILE_NAVIGATION_BYTE_LIMIT = 256 * 1024;
 
 export interface FileLocation {
 	executorId?: string | null;
