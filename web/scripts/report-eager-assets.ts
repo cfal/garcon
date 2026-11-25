@@ -74,7 +74,7 @@ if (process.argv.includes('--check')) {
 	}
 	const workspace = collectEagerAssets([workspaceEntry.file], [], manifest);
 	const workspaceJs = reportAssets([...workspace.files].filter((file) => file.endsWith('.js')), keysByFile, manifest);
-	assertLazyRendererAssets(workspaceJs);
+	assertLazyRendererAssets(workspaceJs, 'workspace');
 	assertEagerAssetBudget(sumBytes(eagerJs), sumBytes(eagerCss));
 }
 const worker = readFileSync(path.join(buildRoot, 'service-worker.js'), 'utf8');

@@ -24,7 +24,6 @@ type CommandMenuWorkspacePort = Pick<
 >;
 
 const mocks = vi.hoisted(() => ({
-	fuseReady: undefined as Promise<void> | undefined,
 	workspace: {
 		terminalCreationExecutorId: 'local',
 		isMobile: false as boolean,
@@ -46,11 +45,6 @@ const mocks = vi.hoisted(() => ({
 		register: () => () => undefined,
 	},
 }));
-
-vi.mock('fuse.js', async (load) => {
-	await mocks.fuseReady;
-	return load<typeof import('fuse.js')>();
-});
 
 vi.mock('$lib/context', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/context')>()),
@@ -137,49 +131,36 @@ function createCatalog(count: number): ChatSessionsStore {
 	return sessions;
 }
 
-it('keeps the current query stable and uses late fuzzy matching on the next edit', async () => {
-	const gate = Promise.withResolvers<void>();
-	mocks.fuseReady = gate.promise;
-	const candidates = ['Open', 'Document', 'Opeen'].map(label => ({
-		id: label, label, description: label === 'Document' ? 'Details '.repeat(30) + 'open' : '',
-		category: 'File' as const, isEnabled: () => true, run: vi.fn(),
-	}));
-	vi.spyOn(commandRegistry, 'paletteCandidates').mockReturnValue(candidates);
-	const invoke = vi.spyOn(commandRegistry, 'invoke').mockResolvedValue(true);
+it('runs Settings rather than a similarly named recent chat on first and subsequent opens', async () => {
+	const sessions = createCatalog(1);
+	sessions.patchChat('catalog-0', { title: 'Open Settings Notes' });
+	const openChat = vi.fn(async () => {});
+	const unregister = commandRegistry.registerChatNavigation({
+		get recentChats() { return sessions.recentChats; },
+		hasChat: (id) => sessions.hasChat(id),
+		open: openChat,
+	});
 	try {
 		const { component } = render(CommandMenu);
-		component.toggle();
-		const input = await screen.findByRole('combobox');
-		await fireEvent.input(input, { target: { value: 'open' } });
-		await fireEvent.keyDown(input, { key: 'ArrowDown' });
-		expect(screen.getByRole('option', { selected: true }).textContent).toContain('Document');
-		const initialOptions = screen.getAllByRole('option');
-		await fireEvent.pointerDown(initialOptions[0]);
-		gate.resolve();
-		await import('fuse.js');
-		await vi.dynamicImportSettled();
-		const highlighted = screen.getByRole('option', { selected: true });
-		expect(input.getAttribute('aria-activedescendant')).toBe(highlighted.id);
-		expect(highlighted).toBe(initialOptions[1]);
-		expect(screen.getAllByRole('option')).toEqual(initialOptions);
-		await fireEvent.pointerUp(initialOptions[0]);
-		await fireEvent.input(input, { target: { value: 'Open' } });
-		expect(screen.queryByRole('option', { name: /Document/ })).toBeNull();
-		expect(screen.getByRole('option', { name: /Opeen/ })).toBeTruthy();
-		await fireEvent.keyDown(input, { key: 'ArrowDown' });
-		await fireEvent.keyDown(input, { key: 'Enter' });
-		expect(invoke).toHaveBeenCalledWith(candidates[2], expect.anything());
+		for (let opening = 1; opening <= 2; opening++) {
+			component.toggle();
+			const input = await screen.findByRole('combobox');
+			await fireEvent.input(input, { target: { value: 'open settings' } });
+			expect(screen.getByRole('option', { selected: true }).id).toMatch(/-command-open-settings$/);
+			await fireEvent.keyDown(input, { key: 'Enter' });
+			expect(mocks.appShell.openSettings).toHaveBeenCalledTimes(opening);
+			expect(openChat).not.toHaveBeenCalled();
+			expect(screen.queryByRole('dialog')).toBeNull();
+		}
 	} finally {
-		gate.resolve();
-		mocks.fuseReady = undefined;
+		unregister();
 	}
 });
 
-it('loads fuzzy matching after opening the palette', async () => {
+it('matches a typo on the first search', async () => {
 	const { component } = render(CommandMenu);
 	component.toggle();
 	const input = await screen.findByRole('combobox');
-	await vi.dynamicImportSettled();
 	await fireEvent.input(input, { target: { value: 'settngs' } });
 	expect(await screen.findByRole('option', { name: /settings/i })).toBeTruthy();
 });

@@ -12,10 +12,13 @@ import {
 } from './command-output.js';
 import {
   asAllowedPrompts, asAskUserQuestions, asChatImages, asCodexSubagentInputItems,
-  asCursorPlanPhases, asCursorPlanTodos,
   asOptionalBoolean, asOptionalChanges, asOptionalNumber, asOptionalString, asOptionalStringArray,
-  asRecord, asStringArray, coerceTodoItems, parseChatMessageMetadata, str,
+  asRecord, asStringArray, parseChatMessageMetadata, str,
 } from './chat-message-coercion.js';
+import {
+  asCursorPlanPhases, asCursorPlanTodos, coercePlanSteps, coerceTodoItems,
+  type CursorPlanPhase, type CursorPlanTodo, type PlanStep, type TodoItem,
+} from './chat-plan.js';
 import {
   coerceDurableCliBodyDisclosure,
   coerceDurableCliPresentation,
@@ -34,7 +37,8 @@ import {
 } from './transcript-notice-details.js';
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
-export { coerceTodoItems } from './chat-message-coercion.js';
+export { coerceTodoItems } from './chat-plan.js';
+export type { CursorPlanPhase, CursorPlanTodo, CursorPlanTodoStatus, PlanStep, TodoItem, TodoStatus } from './chat-plan.js';
 
 export interface ChatImage {
   data: string;
@@ -61,15 +65,6 @@ export interface ChatMessageMetadata {
   clientMessageId?: string;
   upstreamRequestId?: string;
   turnId?: string;
-}
-
-// Canonical shape for a single todo/plan item. All provider-specific
-// formats are normalized to this at the converter boundary.
-export type TodoStatus = 'pending' | 'in_progress' | 'completed';
-
-export interface TodoItem {
-  content: string;
-  status: TodoStatus;
 }
 
 export class UserMessage {
@@ -272,6 +267,45 @@ export class TodoReadToolUseMessage {
   ) {}
 }
 
+export type BackgroundTaskAction = 'list' | 'status' | 'stop' | 'send_input';
+
+export class BackgroundTaskToolUseMessage {
+  readonly type = 'background-task-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public action: BackgroundTaskAction,
+    public taskId?: string,
+    public input?: string,
+  ) {}
+
+  static fromFields(timestamp: string, toolId: string, action: unknown, taskId?: unknown, input?: unknown) {
+    if (action !== 'list' && action !== 'status' && action !== 'stop' && action !== 'send_input') return null;
+    if (taskId !== undefined && typeof taskId !== 'string') return null;
+    if (input !== undefined && typeof input !== 'string') return null;
+    if (action !== 'list' && !taskId) return null;
+    if (action === 'send_input' && input === undefined) return null;
+    return new BackgroundTaskToolUseMessage(timestamp, toolId, action, taskId, input);
+  }
+}
+
+export class AgentMessageToolUseMessage {
+  readonly type = 'agent-message-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public recipient: string,
+    public message: string,
+  ) {}
+
+  static fromFields(timestamp: string, toolId: string, recipient: unknown, message: unknown) {
+    if (typeof recipient !== 'string' || !recipient || typeof message !== 'string') return null;
+    return new AgentMessageToolUseMessage(timestamp, toolId, recipient, message);
+  }
+}
+
 export class TaskToolUseMessage {
   readonly type = 'task-tool-use' as const;
 
@@ -379,7 +413,7 @@ export class UpdatePlanToolUseMessage {
   constructor(
     public timestamp: string,
     public toolId: string,
-    public todos?: TodoItem[],
+    public todos?: PlanStep[],
   ) {}
 }
 
@@ -440,19 +474,6 @@ export class AskUserQuestionToolUseMessage {
     public title: string | undefined,
     public questions: AskUserQuestionPrompt[],
   ) {}
-}
-
-export type CursorPlanTodoStatus = TodoStatus | 'cancelled';
-
-export interface CursorPlanTodo {
-  id?: string;
-  content: string;
-  status: CursorPlanTodoStatus;
-}
-
-export interface CursorPlanPhase {
-  name: string;
-  todos: CursorPlanTodo[];
 }
 
 export class CursorCreatePlanToolUseMessage {
@@ -785,6 +806,8 @@ export type ToolUseChatMessage =
   | TodoWriteToolUseMessage
   | TodoReadToolUseMessage
   | TaskToolUseMessage
+  | BackgroundTaskToolUseMessage
+  | AgentMessageToolUseMessage
   | CodexSubagentToolUseMessage
   | UpdatePlanToolUseMessage
   | WriteStdinToolUseMessage
@@ -982,6 +1005,12 @@ const TOOL_USE_MESSAGE_PARSERS = {
   'todo-read-tool-use': (data) =>
     new TodoReadToolUseMessage(str(data.timestamp), str(data.toolId)),
 
+  'background-task-tool-use': (data) =>
+    BackgroundTaskToolUseMessage.fromFields(str(data.timestamp), str(data.toolId), data.action, data.taskId, data.input),
+
+  'agent-message-tool-use': (data) =>
+    AgentMessageToolUseMessage.fromFields(str(data.timestamp), str(data.toolId), data.recipient, data.message),
+
   'task-tool-use': (data) =>
     new TaskToolUseMessage(
       str(data.timestamp), str(data.toolId),
@@ -1003,7 +1032,7 @@ const TOOL_USE_MESSAGE_PARSERS = {
   'update-plan-tool-use': (data) =>
     new UpdatePlanToolUseMessage(
       str(data.timestamp), str(data.toolId),
-      coerceTodoItems(data.todos)),
+      coercePlanSteps(data.todos)),
 
   'write-stdin-tool-use': (data) =>
     new WriteStdinToolUseMessage(

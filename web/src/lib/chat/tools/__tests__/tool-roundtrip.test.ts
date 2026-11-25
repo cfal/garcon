@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
 	BashToolUseMessage,
+	BackgroundTaskToolUseMessage,
+	AgentMessageToolUseMessage,
 	ExecToolUseMessage,
 	WaitToolUseMessage,
 	ReadToolUseMessage,
@@ -56,6 +58,30 @@ function roundTrip<T>(message: T): T {
 }
 
 describe('tool-use serialization round-trip', () => {
+	it('round-trips the agent recipient and literal message without inferring a missing destination', () => {
+		const msg = new AgentMessageToolUseMessage(TS, 'send', 'agent-2', 'Text\nwith two lines.');
+		expect(roundTrip(msg)).toEqual(msg);
+		expect(parseChatMessage({ ...msg, recipient: null })).toBeNull();
+	});
+
+	it('preserves skipped and failed plan steps and empty snapshots without widening todo statuses', () => {
+		const plan = new UpdatePlanToolUseMessage(TS, 'plan', [
+			{ content: 'First', status: 'skipped' }, { content: 'Second', status: 'failed' },
+		]);
+		expect(roundTrip(plan)).toEqual(plan);
+		expect(roundTrip(new UpdatePlanToolUseMessage(TS, 'plan', [])).todos).toEqual([]);
+		expect(parseChatMessage({ ...plan, type: 'todo-write-tool-use' })).toMatchObject({
+			todos: [{ status: 'pending' }, { status: 'pending' }],
+		});
+	});
+
+	it('preserves task targets and literal input and rejects unrecognized actions', () => {
+		const msg = new BackgroundTaskToolUseMessage(TS, 'call', 'send_input', 'job-id', '\n');
+		expect(roundTrip(msg)).toEqual(msg);
+		expect(roundTrip(new BackgroundTaskToolUseMessage(TS, 'list', 'list')).taskId).toBeUndefined();
+		expect(parseChatMessage({ ...msg, action: 'invented' })).toBeNull();
+	});
+
 	it('BashToolUseMessage preserves command and description', () => {
 		const msg = new BashToolUseMessage(TS, 'id-1', 'ls -la', 'List files');
 		const parsed = roundTrip(msg);

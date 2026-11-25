@@ -162,7 +162,7 @@ Antigravity is not a default generation agent (`generation: null`, like Cursor),
 
 ## Tool Normalization
 
-Tool calls carry the raw tool `name`, `kind`, `rawInput`, and on completion `rawOutput`, `content` (text or diffs), and `status`.
+Tool updates are correlated by call ID. A terminal update can carry just a status, without output text.
 
 For `run_command`, ACP `completed` means the invocation finished, not that the command succeeded. A nonzero `rawOutput.exit_code` marks the tool result as an error; the enclosing agent turn may still finish normally.
 
@@ -176,9 +176,18 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 | `read_url_content` | `web-fetch-tool-use` (`Url`) |
 | `search_web` | `web-search-tool-use` (`query`) |
 | `invoke_subagent` | `task-tool-use` (`Role`/`TypeName`, `Prompt`, `Model`) |
+| `manage_task` | `background-task-tool-use`: list tasks, check status, request stop (`kill`), or send input to a task |
+| `update_steps` (also identified by the native title `Run update_steps`) | `update-plan-tool-use`: step titles and statuses; `done` becomes `completed`, while `skipped` and `failed` remain distinct |
+| `send_message` | `agent-message-tool-use`: recipient and literal message body |
 | MCP calls (`rawInput.server` + `rawInput.tool`) | `mcp-tool-use` |
-| Any other named agy tool, such as `ask_question`, `manage_task`, `run_workflow`, or `command_status` | `external-tool-use` with namespace `antigravity` |
-| A call without a tool name | `unknown-tool-use` |
+| Any other named agy tool, such as `ask_question` or `run_workflow` | `external-tool-use` with namespace `antigravity` |
+| A call without an identifiable tool | `unknown-tool-use` |
+
+A background task row describes an operation, not the state of the task. For example, a successful `kill` call is not proof that the process exited. When ACP supplies no output, Garcon does not reconstruct it from native history. Previously stored rows retain their original representation.
+
+ACP can split a call's name, arguments, and result across frames. Garcon correlates them by call ID and settles the result with the terminal status. An unresolved call can wait across buffered text and other incomplete calls. It publishes with the available evidence before a later tool row or result, at turn end, or at the pending-call limit. An MCP envelope takes precedence over a native tool label; if its arguments are missing, the call can still accept them on a later frame. Published rows are not revised.
+
+An interactive permission releases calls older than its target, or all waiting calls if the target has not sent a tool frame. An approval for an already published call leaves newer calls alone. Automatic approvals do not force publication. A permission decision or stderr diagnostic does not split a streamed answer.
 
 `ask_question` is not interactive over ACP without elicitation support. The CLI prints the question as assistant text and ends the turn, so the user answers in the next message.
 
@@ -189,6 +198,7 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 - **Web tests** cover executor-scoped auth diagnostics, submitting a sign-in code, catalog refresh after Settings closes, and selecting Default or a discovered model in New Chat.
 - **Scripted-model tier** (`integration-tests/tests/server/antigravity-scripted-model.test.ts`) runs the real pinned `agy` behind `FakeGeminiModel`, the Gemini sibling of `FakeClaudeModel` and `FakeCodexModel`, in all three execution lanes with an isolated `HOME`. agy honors `GOOGLE_GEMINI_BASE_URL` with the `gemini-api-key` auth method and streams `POST /v1beta/models/<model>:streamGenerateContent?alt=sse`. Requests without tool declarations are auxiliary (title generation, web-search grounding) and get a canned reply outside the script. The suite covers catalog discovery, command approval and denial, file edits in accept-edits mode, and model switching on resume. It also covers Stop, upstream API errors, resume after a server restart, and the refused project path update.
   - agy keeps a model-supplied `functionCall.id` as the ACP `toolCallId`, so tool IDs are deterministic.
+  - Task listing, checking an absent task, and messaging an absent recipient verify use/result pairing, including empty successes and failures. The pinned Gemini API-key fixture does not advertise `update_steps`; synthetic ACP frames exercise checklist normalization and sparse updates.
   - With no discovered models, the suite starts a chat with the catalog's Default and checks the actual Gemini model and thinking budget. While a turn is held, a queued image must arrive only in the next turn.
   - A nonzero command exit fails the tool, not the turn. A rejected model request fails that turn, not the next one. A disposable title query must not execute a requested command or publish its tool or reply to the chat. Stop must abort the held model request and retain the same agy process for the follow-up.
   - Scripted calls must satisfy agy's tool schema; for example, `run_command` requires `toolSummary` and `WaitMsBeforeAsync`. Otherwise the CLI rejects them without emitting a tool call. agy's own rules also auto-approve some commands, such as `touch`.

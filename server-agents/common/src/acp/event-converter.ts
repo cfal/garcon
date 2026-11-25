@@ -21,6 +21,10 @@ export interface AcpBlockingRequestToolUse {
   responseForCancellation(reason: 'cancelled' | 'session-complete' | 'aborted'): Record<string, unknown>;
 }
 
+export type AcpRuntimeBoundary =
+  | { kind: 'stderr' }
+  | { kind: 'permission-request' | 'permission-settlement'; toolCallId: string };
+
 export interface AcpEventConverter {
   beginTurn?(sessionId: string): void;
   fromSessionUpdate(
@@ -35,6 +39,8 @@ export interface AcpEventConverter {
     request: AcpCustomRequest,
     context: AcpSessionUpdateContext,
   ): AcpBlockingRequestToolUse | null;
+  // Publishes earlier pending rows without settling the turn or the call awaiting approval.
+  flushPending?(context: AcpSessionUpdateContext, boundary: AcpRuntimeBoundary): ChatMessage[];
   endTurn?(sessionId: string, context: AcpSessionUpdateContext): ChatMessage[];
   // Returns and clears a failure the agent reported in-band before ending the turn normally.
   takeTurnFailure?(sessionId: string): string | null;
@@ -46,7 +52,7 @@ export interface AcpEventConverter {
 export const ACP_TERMINAL_TOOL_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'errored', 'rejected', 'cancelled']);
 
 // Bounds a converter's per-session tool collections; the oldest entry goes first.
-const MAX_TOOL_ENTRIES_PER_SESSION = 512;
+export const MAX_TOOL_ENTRIES_PER_SESSION = 512;
 
 export function evictOldestToolEntry(entries: Set<string> | Map<string, unknown>): void {
   if (entries.size <= MAX_TOOL_ENTRIES_PER_SESSION) return;
