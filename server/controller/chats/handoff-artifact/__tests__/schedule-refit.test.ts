@@ -41,6 +41,8 @@ test('redacts a data URL before quoting its prompt, without consuming a literal 
 test.each([
   ['data:text/plain,PUBLIC)SYNTHETIC_PAYLOAD', '[data URL omitted from export]'],
   ['Review data:text/plain,PUBLIC)SYNTHETIC_PAYLOAD next', 'Review [data URL omitted from export] next'],
+  ['Read data:text/plain;name=report%20notes.txt,SYNTHETIC_BODY then continue', 'Read [data URL omitted from export] then continue'],
+  ['Attached (see data:text/plain,body). Continue.', 'Attached (see [data URL omitted from export]). Continue.'],
   ['See [report](data:text/plain,PUBLIC)SYNTHETIC_PAYLOAD).', 'See [report]([data URL omitted from export]).'],
 ])('redacts the complete data URL token in %s', (prompt, redacted) => {
   const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });

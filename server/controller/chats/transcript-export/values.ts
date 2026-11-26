@@ -27,7 +27,7 @@ const utf8Encoder = new TextEncoder();
 const DATA_URL_OMISSION = '[data URL omitted from export]';
 const IMAGE_BODY_OMISSION = '[image body omitted from export]';
 const standaloneDataUrl = /^data:[^\s,]*,\S*$/i;
-const embeddedDataUrl = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:(?:[A-Za-z0-9][\w.+-]*\/[\w.+-]+)?(?:;[\w.+=-]+)*,[^\s"'<>]*/gi;
+const embeddedDataUrl = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:[^\s,"'<>]*,[^\s"'<>]*/gi;
 
 export function textSafe(value: string): string {
   return value.toWellFormed().replace(
@@ -236,9 +236,20 @@ function sanitizeStructuredValue(value: unknown): unknown {
 export function redactDataUrl(value: string): string {
   const trimmed = value.trim();
   if (standaloneDataUrl.test(trimmed)) return value.replace(trimmed, DATA_URL_OMISSION);
+  let cursor = 0;
+  let depth = 0;
   return value.replace(embeddedDataUrl, (url, offset: number) => {
-    const closing = value[offset - 1] === '(' ? /\)[.,;:!?]*$/.exec(url)?.[0] : '';
-    return DATA_URL_OMISSION + (closing ?? '');
+    for (; cursor < offset; cursor++) {
+      if (value[cursor] === '(') depth++;
+      else if (value[cursor] === ')' && depth) depth--;
+    }
+    cursor = offset + url.length;
+    if (!depth) return DATA_URL_OMISSION;
+    let end = url.length;
+    while (end && '.,;:!?'.includes(url[end - 1])) end--;
+    let start = end;
+    while (depth && url[start - 1] === ')') { start--; depth--; }
+    return DATA_URL_OMISSION + (start < end ? url.slice(start) : '');
   });
 }
 
