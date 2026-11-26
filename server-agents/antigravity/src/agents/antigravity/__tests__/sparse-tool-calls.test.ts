@@ -230,11 +230,27 @@ test('distinguishes absent, malformed and corrected schedule arguments across sp
     expect(s.patch('late-' + i, { rawInput, status: 'failed' })[0]).toMatchObject(expected);
     s.start('unnamed-' + i, { rawInput });
     expect(s.patch('unnamed-' + i, { name: 'schedule', status: 'failed' })[0]).toMatchObject(expected);
+    s.start('empty-' + i, { name: 'schedule', rawInput });
+    expect(s.patch('empty-' + i, { rawInput: {}, status: 'failed' })[0]).toMatchObject(expected);
   }
   s.start('corrected', { name: 'schedule', rawInput: 'bad' });
   expect(s.patch('corrected', { rawInput: timer, status: 'completed' })[0]).toMatchObject({
     type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 60, prompt: 'Check' },
   });
+});
+
+test('malformed schedule evidence does not replace ordinary tool arguments or an MCP address', () => {
+  const s = session();
+  expect(s.start('read', { name: 'read_file', rawInput: null, args: { Path: '/fixture/readme' } })[0])
+    .toMatchObject({ type: 'read-tool-use', filePath: '/fixture/readme' });
+  s.start('late-name', { rawInput: { Path: '/fixture/late' } });
+  s.patch('late-name', { rawInput: 'invalid' });
+  expect(s.patch('late-name', { name: 'read_file', status: 'completed' })[0])
+    .toMatchObject({ type: 'read-tool-use', filePath: '/fixture/late' });
+  s.start('mcp', { name: 'schedule', rawInput: { server: 'fixture' } });
+  s.patch('mcp', { rawInput: ['invalid'] });
+  expect(s.patch('mcp', { rawInput: { tool: 'operation', arguments: { value: 1 } }, status: 'completed' })[0])
+    .toMatchObject({ type: 'mcp-tool-use', server: 'fixture', tool: 'operation', input: { value: 1 } });
 });
 
 test('keeps unknown options and conflicting aliases from late frames in the raw schedule fallback', () => {

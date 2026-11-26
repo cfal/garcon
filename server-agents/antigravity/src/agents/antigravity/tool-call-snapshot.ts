@@ -176,22 +176,23 @@ function acceptsPartialInput(name: string | null, input: Record<string, unknown>
   return isAgentWork(name) || name === 'call_mcp_tool' || !!(asString(input.server) || asString(input.tool));
 }
 
-function mergeInput(previous: TrackedCall | undefined, call: AntigravityToolCall, name: string | null) {
-  const next = call.rawInput;
-  if (next === undefined) return previous?.rawInput;
-  if (!isRecord(next)) return !name || name === 'schedule' ? next : previous?.rawInput;
-  if (!previous || !isRecord(previous.rawInput)) return next;
-  if (!Object.keys(next).length) return previous.rawInput;
-  if (!previous.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.rawInput)) {
-    return { ...previous.rawInput, ...next };
-  }
-  return next;
+function mergeInput(previous: unknown, next: unknown, partial: boolean): unknown {
+  if (next === undefined) return previous;
+  if (!isRecord(next) || previous === undefined) return next;
+  if (!Object.keys(next).length) return previous;
+  return partial && isRecord(previous) ? { ...previous, ...next } : next;
 }
 
 export function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
   const name = call.name || previous?.name || null;
-  const rawInput = mergeInput(previous, call, name);
-  const input = asObject(rawInput);
+  const partial = !previous?.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.input);
+  const input = asObject(mergeInput(previous?.input, call.input, partial));
+  // The native schedule fallback needs the malformed argument itself. Other tools,
+  // including a late MCP identity, still resolve against the last object arguments.
+  let rawInput: unknown = input;
+  if ((!name || name === 'schedule') && (previous?.input !== previous?.rawInput || call.input !== call.rawInput)) {
+    rawInput = mergeInput(previous?.rawInput, call.rawInput, partial);
+  }
   // ACP patches rawOutput and content independently. A repeated snapshot does not
   // make its text newer. When both change together, rawOutput takes precedence.
   const rawOutput = update?.rawOutput ?? previous?.rawOutput;
@@ -203,6 +204,7 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
     kind: call.kind || previous?.kind || null,
     isMcp: call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool)),
     planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
+    input,
     rawInput,
     rawOutput,
     content,
@@ -211,7 +213,7 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
 }
 
 export function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean {
-  const input = asObject(call.rawInput);
+  const input = call.input;
   if (!Object.keys(input).length) return true;
   if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(input);
   // Schedule options and the other half of an MCP address can arrive on a later frame.

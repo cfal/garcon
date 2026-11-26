@@ -33,6 +33,7 @@ export interface AntigravityToolCall {
   readonly planTitle: 'matched' | 'excluded' | null;
   readonly isMcp: boolean;
   readonly kind: string | null;
+  readonly input: Record<string, unknown>;
   readonly rawInput: unknown;
 }
 
@@ -112,6 +113,7 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
     planTitle,
     isMcp,
     kind: asString(raw.kind) ?? null,
+    input: asObject(raw.rawInput ?? raw.args),
     rawInput: raw.rawInput === undefined ? raw.args : raw.rawInput,
   };
 }
@@ -120,8 +122,8 @@ export function convertAntigravityToolUse(
   timestamp: string,
   call: AntigravityToolCall,
 ): ToolUseChatMessage {
-  const { toolCallId: id, rawInput } = call;
-  const input = call.name === 'schedule' && rawInput !== undefined && !isRecord(rawInput) ? { raw: rawInput } : asObject(rawInput);
+  const { toolCallId: id } = call;
+  let input = call.input;
   const mcpServer = asString(input.server);
   const mcpTool = asString(input.tool);
   if (mcpServer && mcpTool) {
@@ -206,6 +208,8 @@ export function convertAntigravityToolUse(
       return new WebSearchToolUseMessage(timestamp, id, query);
     }
     case 'schedule': {
+      const raw = call.rawInput;
+      input = raw === undefined || isRecord(raw) ? asObject(raw) : { raw };
       const args = scheduleArguments(input);
       if (!args) break;
       const { delaySeconds } = args;
