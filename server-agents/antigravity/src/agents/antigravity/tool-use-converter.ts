@@ -21,6 +21,7 @@ import {
   type ToolUseChatMessage,
   type PlanStep,
 } from '@garcon/common/chat-types';
+import { isRecord } from '@garcon/common/json';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
 
 export const ANTIGRAVITY_TOOL_NAMESPACE = 'antigravity';
@@ -32,7 +33,7 @@ export interface AntigravityToolCall {
   readonly planTitle: 'matched' | 'excluded' | null;
   readonly isMcp: boolean;
   readonly kind: string | null;
-  readonly input: Record<string, unknown>;
+  readonly rawInput: unknown;
 }
 
 // Tool arguments arrive in PascalCase from 1.5 and snake_case from older builds
@@ -111,7 +112,7 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
     planTitle,
     isMcp,
     kind: asString(raw.kind) ?? null,
-    input: asObject(raw.rawInput ?? raw.args),
+    rawInput: raw.rawInput === undefined ? raw.args : raw.rawInput,
   };
 }
 
@@ -119,7 +120,8 @@ export function convertAntigravityToolUse(
   timestamp: string,
   call: AntigravityToolCall,
 ): ToolUseChatMessage {
-  const { toolCallId: id, input } = call;
+  const { toolCallId: id, rawInput } = call;
+  const input = call.name === 'schedule' && rawInput !== undefined && !isRecord(rawInput) ? { raw: rawInput } : asObject(rawInput);
   const mcpServer = asString(input.server);
   const mcpTool = asString(input.tool);
   if (mcpServer && mcpTool) {

@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { ToolResultMessage, type ToolUseChatMessage } from '@garcon/common/chat-types';
+import { isRecord } from '@garcon/common/json';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
 import {
   antigravityMcpArguments,
@@ -143,17 +144,21 @@ function acceptsPartialInput(name: string | null, input: Record<string, unknown>
 }
 
 function mergeInput(previous: TrackedCall | undefined, call: AntigravityToolCall, name: string | null) {
-  if (!previous) return call.input;
-  if (!Object.keys(call.input).length) return previous.input;
-  if (!previous.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.input)) {
-    return { ...previous.input, ...call.input };
+  const next = call.rawInput;
+  if (next === undefined) return previous?.rawInput;
+  if (!isRecord(next)) return !name || name === 'schedule' ? next : previous?.rawInput;
+  if (!previous || !isRecord(previous.rawInput)) return next;
+  if (!Object.keys(next).length) return previous.rawInput;
+  if (!previous.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.rawInput)) {
+    return { ...previous.rawInput, ...next };
   }
-  return call.input;
+  return next;
 }
 
 export function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
   const name = call.name || previous?.name || null;
-  const input = mergeInput(previous, call, name);
+  const rawInput = mergeInput(previous, call, name);
+  const input = asObject(rawInput);
   // ACP patches rawOutput and content independently. A repeated snapshot does not
   // make its text newer. When both change together, rawOutput takes precedence.
   const rawOutput = update?.rawOutput ?? previous?.rawOutput;
@@ -165,7 +170,7 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
     kind: call.kind || previous?.kind || null,
     isMcp: call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool)),
     planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
-    input,
+    rawInput,
     rawOutput,
     content,
     contentIsNewer: prefersContent(previous, rawOutput, content),
@@ -173,9 +178,10 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
 }
 
 export function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean {
-  if (!Object.keys(call.input).length) return true;
-  if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(call.input);
+  const input = asObject(call.rawInput);
+  if (!Object.keys(input).length) return true;
+  if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(input);
   // Schedule options and the other half of an MCP address can arrive on a later frame.
-  if (call.isMcp || !call.name || call.name === 'schedule' || asString(call.input.server) || asString(call.input.tool)) return true;
-  return row.type === 'external-tool-use' && acceptsPartialInput(call.name, call.input);
+  if (call.isMcp || !call.name || call.name === 'schedule' || asString(input.server) || asString(input.tool)) return true;
+  return row.type === 'external-tool-use' && acceptsPartialInput(call.name, input);
 }

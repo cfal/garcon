@@ -171,6 +171,23 @@ test('retains explicitly supplied timer defaults and daemon flags accepted by ag
   }
 });
 
+test('distinguishes absent, malformed and corrected schedule arguments across sparse frames', () => {
+  const s = session();
+  const timer = { DurationSeconds: 60, Prompt: 'Check' };
+  for (const [i, rawInput] of [['bad'], 'bad', 0, false, null].entries()) {
+    const expected = { type: 'external-tool-use', name: 'schedule', input: { raw: rawInput } };
+    expect(s.start('direct-' + i, { name: 'schedule', rawInput, status: 'failed' })[0]).toMatchObject(expected);
+    s.start('late-' + i, { name: 'schedule', rawInput: timer });
+    expect(s.patch('late-' + i, { rawInput, status: 'failed' })[0]).toMatchObject(expected);
+    s.start('unnamed-' + i, { rawInput });
+    expect(s.patch('unnamed-' + i, { name: 'schedule', status: 'failed' })[0]).toMatchObject(expected);
+  }
+  s.start('corrected', { name: 'schedule', rawInput: 'bad' });
+  expect(s.patch('corrected', { rawInput: timer, status: 'completed' })[0]).toMatchObject({
+    type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 60, prompt: 'Check' },
+  });
+});
+
 test('keeps unknown options and conflicting aliases from late frames in the raw schedule fallback', () => {
   const timer = { DurationSeconds: 30, Prompt: 'Check' };
   for (const patch of [{ FutureOption: 'fixture' }, { duration_seconds: 60 }]) {
