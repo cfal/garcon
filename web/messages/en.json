@@ -723,7 +723,6 @@
 	"chat_tool_oracle_title": "Oracle: {task}",
 	"chat_tool_parameters": "Parameters",
 	"chat_tool_pattern": "Pattern: {pattern}",
-	"chat_tool_plan_updated": "Plan updated",
 	"chat_tool_project_files": "project files",
 	"chat_tool_reading_list": "reading list",
 	"chat_tool_rendering": "rendering",
