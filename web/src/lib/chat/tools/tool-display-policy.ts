@@ -4,7 +4,7 @@
 
 import type { ToolPayload, ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import type { ToolUseChatMessage } from '$shared/chat-types';
-import { isRecord } from '$shared/json';
+import { isEmptyToolResult } from '$shared/tool-result-content';
 import { reportedResultProps } from '$lib/chat/tools/tool-display-presenters.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -36,17 +36,6 @@ function hasEmptyRequiredInput(tool: ToolUseChatMessage | undefined): boolean {
 	}
 }
 
-function isEmptyResult(content: unknown): boolean {
-	if (content == null) return true;
-	if (!isRecord(content)) return false;
-	return Object.entries(content).every(([key, value]) => {
-		if (key === 'raw') return typeof value === 'string' && !/\S/.test(value);
-		if ((key !== 'items' && key !== 'content') || !Array.isArray(value)) return false;
-		return value.every(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string'
-			&& !/\S/.test(block.text) && Object.keys(block).length === 2);
-	});
-}
-
 export function resolveToolResultDisplayRule(
 	rule: ToolDisplayRule,
 	toolResult: ToolPayload | null | undefined,
@@ -60,7 +49,7 @@ export function resolveToolResultDisplayRule(
 			? { ...FAILED_RESULT_RULE, title: `${m.chat_message_error()}: ${status}` }
 			: FAILED_RESULT_RULE;
 	}
-	if (rule.result?.mode === 'collapsible' && isEmptyResult(toolResult.content)) return undefined;
+	if (rule.result?.mode === 'collapsible' && isEmptyToolResult(toolResult.content)) return undefined;
 	return rule.result;
 }
 

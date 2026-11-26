@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { isCleanCommandSuccess } from '@garcon/common/command-output';
+import { isEmptyToolResult } from '@garcon/common/tool-result-content';
 import type { ChatSearchSnippetRole } from '@garcon/common/chat-search';
 import type { SearchMessageRowInput } from './rows.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from './schema.js';
@@ -197,6 +198,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'agent-switch':
       return joinTool(message.fromAgentId, message.toAgentId, message.fromModel, message.toModel);
     case 'tool-result':
+      if (!message.isError && isEmptyToolResult(message.content, { maxChars: MAX_TOOL_RESULT_CHARS, maxBlocks: MAX_RECURSIVE_NODES })) return '';
       return boundedToolResult(message.content, budget);
     case 'permission-request':
       return messageText(message.requestedTool, budget);

@@ -3,6 +3,16 @@ import { ToolResultMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
 import { decodeLedgerRow, encodeLedgerDraft } from '../../../ledger/codec.js';
 
+test('empty successful result envelopes have no search target', () => {
+  for (const content of [{ items: [] }, { content: [{ type: 'text', text: ' \t\n' }] }]) {
+    expect(projectSearchMessage(new ToolResultMessage('', 'call', content, false))).toBeNull();
+    expect(projectSearchMessage(new ToolResultMessage('', 'call', content, true))).not.toBeNull();
+  }
+  for (const content of [{ items: [], count: 0 }, { content: [{ type: 'text', text: 'Done' }] }]) {
+    expect(projectSearchMessage(new ToolResultMessage('', 'call', content, false))).not.toBeNull();
+  }
+});
+
 test.each([
   { reason: 'Operation refused' },
   { details: 'metadata '.repeat(500), output: 'Operation refused' },
