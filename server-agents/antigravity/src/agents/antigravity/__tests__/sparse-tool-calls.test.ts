@@ -197,6 +197,43 @@ test('references terminal output echoed by one or all cached text blocks', () =>
   }
 });
 
+test('keeps a terminal report at its unique run of whole cached blocks', () => {
+  const s = session();
+  const saved = { type: 'content', content: { type: 'text', text: 'Saved', annotations: { priority: 1 } } };
+  const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  const detail = textBlock('Job details');
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' },
+    content: [textBlock('Preparing'), saved, image, detail, textBlock('Waiting')] });
+  const result = s.patch('timer', { status: 'completed', rawOutput: { output: 'Saved\nJob details', id: 'job' } }).at(-1);
+  if (result?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(result.content).toEqual({ items: [saved, image, detail], rawOutput: { id: 'job' } });
+  expect(result.primaryTextItems).toEqual([0, 2]);
+});
+
+test('falls back to cached text when terminal fields are explicitly blank', () => {
+  const timer = { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' } };
+  for (const content of [[], [textBlock(' \t')]]) {
+    const s = session();
+    s.start('blocks', { ...timer, content: [textBlock('Only report')] });
+    expect(s.patch('blocks', { status: 'completed', content }).at(-1)).toMatchObject({ content: { raw: 'Only report' } });
+    s.start('raw', { ...timer, rawOutput: { output: 'Only report', attempts: 1 } });
+    expect(s.patch('raw', { status: 'failed', content, rawOutput: { output: ' ', id: 'job' } }).at(-1))
+      .toMatchObject({ content: { status: 'failed', rawOutput: { output: 'Only report', attempts: 1, id: 'job' } } });
+  }
+});
+
+test('terminal text replaces progress without erasing cached attachments or independent metadata', () => {
+  const s = session();
+  const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  const saved = textBlock('Done');
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' },
+    content: [textBlock('Preparing'), image], rawOutput: { output: 'Checking', attempts: 1 } });
+  const row = s.patch('timer', { status: 'completed', content: [saved], rawOutput: { id: 'job' } }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content).toEqual({ items: [image, saved], rawOutput: { attempts: 1, id: 'job' } });
+  expect(row.primaryTextItems).toEqual([1]);
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [

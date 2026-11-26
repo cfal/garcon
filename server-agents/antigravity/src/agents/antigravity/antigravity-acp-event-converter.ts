@@ -164,7 +164,8 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     const status = asString(update.status) ?? '';
     const terminal = ACP_TERMINAL_TOOL_STATUSES.has(status);
     const pending = session.deferred.get(toolCallId);
-    const call = mergeCall(pending?.call ?? session.calls.get(toolCallId) ?? session.permissions.get(toolCallId), parsed, update);
+    const previous = pending?.call ?? session.calls.get(toolCallId) ?? session.permissions.get(toolCallId);
+    const call = mergeCall(previous, parsed, update);
     session.permissions.delete(toolCallId);
     const messages: ChatMessage[] = [];
     if (!hasPublishedCall(session, toolCallId)) {
@@ -186,7 +187,7 @@ export class AntigravityAcpEventConverter implements AcpEventConverter {
     messages.push(...this.#emitDeferred(session, timestamp), ...this.#flush(session, timestamp));
     this.#remember(session.completedToolIds, toolCallId);
     session.calls.delete(toolCallId);
-    messages.push(toolCallResult(timestamp, call, update, status));
+    messages.push(toolCallResult(timestamp, call, update, status, previous));
     return messages;
   }
 
