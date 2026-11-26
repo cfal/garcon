@@ -257,6 +257,10 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
       return joinTool(message.action, message.taskId, message.input);
     case 'agent-message-tool-use':
       return joinTool(message.recipient, message.message);
+    case 'antigravity-enter-plan-mode-tool-use':
+      return joinTool(message.reason);
+    case 'antigravity-exit-plan-mode-tool-use':
+      return joinTool(message.plan);
     case 'codex-subagent-tool-use':
       return joinTool(message.action, boundedUnknownForJoin(message.details, budget));
     case 'write-stdin-tool-use':

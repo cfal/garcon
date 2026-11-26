@@ -22,6 +22,18 @@ function session() {
   };
 }
 
+test('reports native plan activity with late arguments, but does not reinterpret MCP tools', () => {
+  const s = session();
+  expect(s.start('enter', { name: 'enter_plan_mode', rawInput: { reason: 'Check layout' } }))
+    .toMatchObject([{ type: 'antigravity-enter-plan-mode-tool-use', reason: 'Check layout' }]);
+  expect(s.start('exit', { name: 'exit_plan_mode', rawInput: { hint: true } })).toEqual([]);
+  expect(s.patch('exit', { rawInput: { Plan: '    example\n' }, status: 'completed' })).toMatchObject([
+    { type: 'antigravity-exit-plan-mode-tool-use', plan: '    example\n' }, { type: 'tool-result', content: {}, isError: false },
+  ]);
+  expect(s.start('mcp', { name: 'exit_plan_mode', _meta: { is_mcp_tool_call: true },
+    rawInput: { plan: 'Example' }, status: 'completed' })[0]).toMatchObject({ type: 'external-tool-use' });
+});
+
 test('uses late identity and partial arguments without duplicating either tool row', () => {
   const s = session();
   expect(s.start('task', { rawInput: { Action: 'status', TaskId: 'job' } })).toEqual([]);

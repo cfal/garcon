@@ -15,7 +15,8 @@ export interface TrackedCall extends AntigravityToolCall {
 }
 
 function isAgentWork(name: string | null): boolean {
-  return name === 'manage_task' || name === 'update_steps' || name === 'send_message';
+  return name === 'manage_task' || name === 'update_steps' || name === 'send_message'
+    || name === 'enter_plan_mode' || name === 'exit_plan_mode';
 }
 
 function rawOutputText(raw: unknown): string {

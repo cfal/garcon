@@ -63,6 +63,8 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'update-plan-tool-use': 'UpdatePlan',
 	'write-stdin-tool-use': 'WriteStdin',
 	'enter-plan-mode-tool-use': 'EnterPlanMode',
+	'antigravity-enter-plan-mode-tool-use': 'Plan mode',
+	'antigravity-exit-plan-mode-tool-use': 'Plan mode',
 	'exit-plan-mode-tool-use': 'ExitPlanMode',
 	'ask-user-question-tool-use': 'Question',
 	'cursor-create-plan-tool-use': 'Plan',
@@ -562,6 +564,21 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 	},
 
 	'exit-plan-mode-tool-use': EXIT_PLAN_MODE_RULE,
+
+	'antigravity-enter-plan-mode-tool-use': {
+		input: {
+			mode: 'collapsible', title: 'Enter plan mode', contentKind: 'text',
+			getContentProps: ({ reason }) => ({ content: reason }),
+		},
+		result: REPORTED_RESULT_RULE,
+	},
+	'antigravity-exit-plan-mode-tool-use': {
+		input: {
+			mode: 'collapsible', title: () => m.chat_tool_implementation_plan(), defaultOpen: true,
+			contentKind: 'markdown', getContentProps: ({ plan }) => ({ content: plan }),
+		},
+		result: REPORTED_RESULT_RULE,
+	},
 
 	'ask-user-question-tool-use': {
 		input: {

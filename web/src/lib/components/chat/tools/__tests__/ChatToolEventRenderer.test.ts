@@ -4,6 +4,8 @@ import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import type { ConversationDisclosureStatePort } from '../../transcript/ConversationFeedItemState.svelte.js';
 import {
 	AgentMessageToolUseMessage,
+	AntigravityEnterPlanModeToolUseMessage,
+	AntigravityExitPlanModeToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
@@ -35,6 +37,18 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('expands the reason for an Antigravity plan and renders the exit plan as Markdown', async () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new AntigravityEnterPlanModeToolUseMessage('', 'enter', 'Check layout'), mode: 'input',
+		});
+		expect(screen.queryByText('Check layout')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /Enter plan mode/i }));
+		expect(screen.getByText('Check layout')).toBeTruthy();
+		render(ChatToolEventRenderer, {
+			toolMessage: new AntigravityExitPlanModeToolUseMessage('', 'exit', '## Layout changes'), mode: 'input',
+		});
+		expect(await screen.findByRole('heading', { name: 'Layout changes' })).toBeTruthy();
+	});
 	it('shows a stop request and target without a blank disclosure for an empty success', () => {
 		const toolMessage = new BackgroundTaskToolUseMessage('', 'stop', 'stop', 'job-1');
 		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });

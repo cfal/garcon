@@ -17,7 +17,9 @@ import {
 } from './chat-message-coercion.js';
 import {
   asCursorPlanPhases, asCursorPlanTodos, coercePlanSteps, coerceTodoItems,
-  type CursorPlanPhase, type CursorPlanTodo, type PlanStep, type TodoItem,
+  AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage,
+  EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage, UpdatePlanToolUseMessage,
+  type CursorPlanPhase, type CursorPlanTodo, type TodoItem,
 } from './chat-plan.js';
 import {
   coerceDurableCliBodyDisclosure,
@@ -37,7 +39,8 @@ import {
 } from './transcript-notice-details.js';
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
-export { coerceTodoItems } from './chat-plan.js';
+export { AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage,
+  EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage, UpdatePlanToolUseMessage, coerceTodoItems } from './chat-plan.js';
 export type { CursorPlanPhase, CursorPlanTodo, CursorPlanTodoStatus, PlanStep, TodoItem, TodoStatus } from './chat-plan.js';
 
 export interface ChatImage {
@@ -407,16 +410,6 @@ export class CodexSubagentToolUseMessage {
   ) {}
 }
 
-export class UpdatePlanToolUseMessage {
-  readonly type = 'update-plan-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-    public todos?: PlanStep[],
-  ) {}
-}
-
 export class WriteStdinToolUseMessage {
   readonly type = 'write-stdin-tool-use' as const;
 
@@ -424,26 +417,6 @@ export class WriteStdinToolUseMessage {
     public timestamp: string,
     public toolId: string,
     public input: Record<string, unknown>,
-  ) {}
-}
-
-export class EnterPlanModeToolUseMessage {
-  readonly type = 'enter-plan-mode-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-  ) {}
-}
-
-export class ExitPlanModeToolUseMessage {
-  readonly type = 'exit-plan-mode-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-    public plan: string,
-    public allowedPrompts?: Array<{ tool: string; prompt: string }>,
   ) {}
 }
 
@@ -812,6 +785,8 @@ export type ToolUseChatMessage =
   | UpdatePlanToolUseMessage
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
+  | AntigravityEnterPlanModeToolUseMessage
+  | AntigravityExitPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
   | AskUserQuestionToolUseMessage
   | CursorCreatePlanToolUseMessage
@@ -1040,6 +1015,11 @@ const TOOL_USE_MESSAGE_PARSERS = {
 
   'enter-plan-mode-tool-use': (data) =>
     new EnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId)),
+
+  'antigravity-enter-plan-mode-tool-use': (data) => typeof data.reason === 'string'
+    ? new AntigravityEnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId), data.reason) : null,
+  'antigravity-exit-plan-mode-tool-use': (data) => typeof data.plan === 'string'
+    ? new AntigravityExitPlanModeToolUseMessage(str(data.timestamp), str(data.toolId), data.plan) : null,
 
   'exit-plan-mode-tool-use': (data) => {
     const plan = asOptionalString(data.plan);

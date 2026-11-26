@@ -136,6 +136,10 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
       return { role: 'Tool Call', content: `Write to running process\n${stringifyStructured(message.input)}` };
     case 'enter-plan-mode-tool-use':
       return { role: 'Plan Mode', content: 'Entered plan mode.' };
+    case 'antigravity-enter-plan-mode-tool-use':
+      return { role: 'Plan Mode', content: `Enter plan mode\n${message.reason}` };
+    case 'antigravity-exit-plan-mode-tool-use':
+      return { role: 'Plan Mode', content: `Implementation plan\n${message.plan}` };
     case 'exit-plan-mode-tool-use':
       return { role: 'Plan Mode', content: `Exited plan mode\n${message.plan}` };
     case 'amp-finder-tool-use':

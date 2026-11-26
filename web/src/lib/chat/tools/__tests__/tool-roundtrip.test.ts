@@ -3,6 +3,8 @@ import {
 	BashToolUseMessage,
 	BackgroundTaskToolUseMessage,
 	AgentMessageToolUseMessage,
+	AntigravityEnterPlanModeToolUseMessage,
+	AntigravityExitPlanModeToolUseMessage,
 	ExecToolUseMessage,
 	WaitToolUseMessage,
 	ReadToolUseMessage,
@@ -58,6 +60,14 @@ function roundTrip<T>(message: T): T {
 }
 
 describe('tool-use serialization round-trip', () => {
+	it('round-trips informational plans without coercing missing or malformed text', () => {
+		const enter = new AntigravityEnterPlanModeToolUseMessage(TS, 'enter', 'Inspect layout');
+		const exit = new AntigravityExitPlanModeToolUseMessage(TS, 'exit', '    example\n');
+		expect(roundTrip(enter)).toEqual(enter);
+		expect(roundTrip(exit)).toEqual(exit);
+		expect(parseChatMessage({ ...enter, reason: 1 })).toBeNull();
+		expect(parseChatMessage({ ...exit, plan: undefined })).toBeNull();
+	});
 	it('round-trips the agent recipient and literal message without inferring a missing destination', () => {
 		const msg = new AgentMessageToolUseMessage(TS, 'send', 'agent-2', 'Text\nwith two lines.');
 		expect(roundTrip(msg)).toEqual(msg);

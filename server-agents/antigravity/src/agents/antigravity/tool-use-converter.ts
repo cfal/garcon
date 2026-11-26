@@ -1,5 +1,7 @@
 import {
   AgentMessageToolUseMessage,
+  AntigravityEnterPlanModeToolUseMessage,
+  AntigravityExitPlanModeToolUseMessage,
   BashToolUseMessage,
   BackgroundTaskToolUseMessage,
   EditToolUseMessage,
@@ -178,6 +180,16 @@ export function convertAntigravityToolUse(
       const query = stringField(input, 'query', 'Query');
       if (query === undefined) break;
       return new WebSearchToolUseMessage(timestamp, id, query);
+    }
+    case 'enter_plan_mode': {
+      const reason = stringField(input, 'Reason', 'reason');
+      if (reason !== undefined) return new AntigravityEnterPlanModeToolUseMessage(timestamp, id, reason);
+      break;
+    }
+    case 'exit_plan_mode': {
+      const plan = stringField(input, 'Plan', 'plan');
+      if (plan !== undefined) return new AntigravityExitPlanModeToolUseMessage(timestamp, id, plan);
+      break;
     }
     case 'update_steps': {
       const steps = antigravityPlanSteps(input.steps);

@@ -179,6 +179,7 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 | `manage_task` | `background-task-tool-use`: list tasks, check status, request stop (`kill`), or send input to a task |
 | `update_steps` (also identified by the native title `Run update_steps`) | `update-plan-tool-use`: step titles and statuses; `done` becomes `completed`, while `skipped` and `failed` remain distinct |
 | `send_message` | `agent-message-tool-use`: recipient and literal message body |
+| `enter_plan_mode`, `exit_plan_mode` | Informational Antigravity rows: the reason for entering and the Markdown plan on exit. Neither changes Garcon's permission mode nor asks for approval. |
 | MCP calls (`rawInput.server` + `rawInput.tool`) | `mcp-tool-use` |
 | Any other named agy tool, such as `ask_question` or `run_workflow` | `external-tool-use` with namespace `antigravity` |
 | A call without an identifiable tool | `unknown-tool-use` |

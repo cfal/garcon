@@ -140,6 +140,8 @@ export const HIDEABLE_TOOL_GROUPS = [
 			'codex-subagent-tool-use',
 			'update-plan-tool-use',
 			'enter-plan-mode-tool-use',
+			'antigravity-enter-plan-mode-tool-use',
+			'antigravity-exit-plan-mode-tool-use',
 			'cursor-create-plan-tool-use',
 			'amp-task-list-tool-use',
 			'amp-handoff-tool-use',
