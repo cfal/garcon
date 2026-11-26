@@ -19,13 +19,19 @@ const PROSPECTIVE_CHAT_ID = '1787471053739200';
 const MISSING_CHAT_ID = '1787471053739201';
 
 describe('scheduled snippet expansion', () => {
-  it('returns a typed validation failure for ambiguous replacement boundaries', async () => {
+  it('returns a typed validation failure for ambiguous replacement boundaries and oversized scheduled expansions', async () => {
     const { service } = await serviceFixture();
     await service.create({ expectedRevision: 0, snippet: { shortName: 'review',
       template: '{{arguments}}{{current_date}}', defaultArguments: 'report\\' } });
     await expect(service.expand({ shortName: 'review', arguments: { type: 'default' }, context: {
       type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo' },
     } })).rejects.toMatchObject({ code: 'SNIPPET_VALIDATION_FAILED', status: 422 });
+
+    await service.update({ expectedRevision: 1, id: 'snippet-a', snippet: { shortName: 'review',
+      template: '{{arguments}}{{arguments}}{{arguments}}', defaultArguments: 'x'.repeat(32_000) } });
+    await expect(service.expand({ shortName: 'review', arguments: { type: 'default' }, context: {
+      type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo' },
+    } })).rejects.toMatchObject({ code: 'SNIPPET_EXPANSION_TOO_LONG', status: 422 });
   });
   it('resolves Local and remote paths without creating a prospective chat', async () => {
     const { service, chatLookups } = await serviceFixture();

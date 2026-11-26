@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Preamble } from '$shared/preambles';
+import { PREAMBLE_COMBINED_MAX_LENGTH, type Preamble } from '$shared/preambles';
 import {
 	SNIPPET_ARGUMENTS_MAX_LENGTH,
 	SNIPPET_EXPANDED_MAX_LENGTH,
@@ -134,13 +134,11 @@ describe('findFreshSelectableSnippetByShortName', () => {
 			revision: 3,
 			snippets: [makeSnippet({ shortName: 'probe', template: 'Old probe' })],
 		});
-		const preamblesStore = new SnippetsStore();
 		const liveStores = {
 			wsConnected: true,
 			snippets: snippetsStore,
 			preambles: { hasLoaded: true, hasFreshSnapshot: true, preambles: [] },
 		};
-		expect(preamblesStore.hasLoaded).toBe(false);
 
 		const refreshing = snippetsStore.refresh();
 		expect(findFreshSelectableSnippetByShortName('probe', liveStores)).toBeNull();
@@ -305,6 +303,40 @@ describe('tryExpandSelectableSnippetLocally (immediate mode)', () => {
 			expandedText: 'Chat 1787471053739199: API\ncontracts',
 		});
 		expect(getChatId).toHaveBeenCalledTimes(1);
+
+		expect(
+			tryExpandSelectableSnippetLocally(
+				snippetToSelectable(makeSnippet({ template: 'Review {{arguments}}', defaultArguments: 'saved default' })),
+				{ type: 'value', value: '' },
+				{ kind: 'immediate', getChatId },
+			),
+		).toEqual({
+			kind: 'expanded',
+			expandedText: 'Review ',
+		});
+
+		expect(
+			tryExpandSelectableSnippetLocally(
+				snippetToSelectable(makeSnippet({ template: 'Review [{{arguments}}]', defaultArguments: 'saved default' })),
+				{ type: 'value', value: '  ' },
+				{ kind: 'immediate', getChatId },
+			),
+		).toEqual({
+			kind: 'expanded',
+			expandedText: 'Review [  ]',
+		});
+
+		expect(
+			tryExpandSelectableSnippetLocally(
+				snippetToSelectable(makeSnippet({ template: 'Echo {{arguments}}' })),
+				{ type: 'value', value: '{{project_path}} {{current_date}} {{chat_id}}' },
+				{ kind: 'immediate', getChatId },
+			),
+		).toEqual({
+			kind: 'expanded',
+			expandedText: 'Echo {{project_path}} {{current_date}} {{chat_id}}',
+		});
+		expect(getChatId).toHaveBeenCalledTimes(1);
 	});
 
 	it('falls back to the server for active project_path or date tokens in snippets', () => {
@@ -352,20 +384,39 @@ describe('tryExpandSelectableSnippetLocally (immediate mode)', () => {
 			).toEqual({ kind: 'fallback' });
 		}
 		expect(getChatId).toHaveBeenCalledTimes(1);
-	});
 
-	it('enforces argument and expanded output bounds locally', () => {
-		const getChatId = vi.fn(() => '1787471053739199');
 		expect(
 			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet()),
-				{ type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
+				preambleToSelectable(
+					makePreamble({ content: 'Escaped \\{{current_date}} / \\{{current_date_local}}' }),
+				)!,
+				{ type: 'default' },
 				{ kind: 'immediate', getChatId },
 			),
 		).toEqual({
-			kind: 'error',
-			message: SNIPPET_VALIDATION_ERROR_MESSAGE,
+			kind: 'expanded',
+			expandedText: 'Escaped {{current_date}} / {{current_date_local}}',
 		});
+		expect(getChatId).toHaveBeenCalledTimes(1);
+	});
+
+	it('enforces argument and expanded output bounds locally for snippets and preambles', () => {
+		const getChatId = vi.fn(() => '1787471053739199');
+		const preamble = preambleToSelectable(makePreamble({ content: 'Static context' }))!;
+		for (const item of [snippetToSelectable(makeSnippet()), preamble]) {
+			for (const mode of [{ kind: 'immediate', getChatId }, { kind: 'scheduled' }] as const) {
+				expect(
+					tryExpandSelectableSnippetLocally(
+						item,
+						{ type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
+						mode,
+					),
+				).toEqual({
+					kind: 'error',
+					message: SNIPPET_VALIDATION_ERROR_MESSAGE,
+				});
+			}
+		}
 
 		expect(
 			tryExpandSelectableSnippetLocally(
@@ -382,17 +433,31 @@ describe('tryExpandSelectableSnippetLocally (immediate mode)', () => {
 			kind: 'error',
 			message: `Expanded snippet exceeds ${SNIPPET_EXPANDED_MAX_LENGTH} characters`,
 		});
+
+		const overflowingPreamble = preambleToSelectable(
+			makePreamble({ content: '{{chat_id}}'.repeat(3_000) }),
+		)!;
+		expect(
+			tryExpandSelectableSnippetLocally(
+				overflowingPreamble,
+				{ type: 'default' },
+				{ kind: 'immediate', getChatId: () => 'x'.repeat(30) },
+			),
+		).toEqual({
+			kind: 'error',
+			message: `Expanded template exceeds ${PREAMBLE_COMBINED_MAX_LENGTH} characters`,
+		});
 	});
 });
 
 describe('tryExpandSelectableSnippetLocally (scheduled mode)', () => {
-	it('defers chat_id and date tokens while escaping token-shaped arguments', () => {
+	it('defers chat_id and date tokens while escaping token-shaped arguments and unescaping project_path', () => {
 		expect(
 			tryExpandSelectableSnippetLocally(
 				snippetToSelectable(
 					makeSnippet({
 						template:
-							'Review {{arguments}} for {{chat_id}} on {{current_date}} / {{current_date_local}} (\\{{current_date}})',
+							'Review {{arguments}} for {{chat_id}} on {{current_date}} / {{current_date_local}} (\\{{current_date}}, \\{{project_path}})',
 					}),
 				),
 				{ type: 'value', value: '{{chat_id}} and \\{{current_date}}' },
@@ -401,7 +466,7 @@ describe('tryExpandSelectableSnippetLocally (scheduled mode)', () => {
 		).toEqual({
 			kind: 'expanded',
 			expandedText:
-				'Review \\{{chat_id}} and \\\\{{current_date}} for {{chat_id}} on {{current_date}} / {{current_date_local}} (\\{{current_date}})',
+				'Review \\{{chat_id}} and \\\\{{current_date}} for {{chat_id}} on {{current_date}} / {{current_date_local}} (\\{{current_date}}, {{project_path}})',
 		});
 	});
 
@@ -416,7 +481,7 @@ describe('tryExpandSelectableSnippetLocally (scheduled mode)', () => {
 		).toEqual({ kind: 'expanded', expandedText: content });
 	});
 
-	it('falls back only for active project_path and rejects ambiguous deferred token boundaries locally', () => {
+	it('falls back only for active project_path and enforces boundaries and output bounds locally', () => {
 		expect(
 			tryExpandSelectableSnippetLocally(
 				snippetToSelectable(makeSnippet({ template: 'In {{project_path}} on {{current_date}}' })),
@@ -435,6 +500,17 @@ describe('tryExpandSelectableSnippetLocally (scheduled mode)', () => {
 			kind: 'error',
 			message:
 				'Scheduled snippet replacements must not create or escape adjacent template variables. Add a separator.',
+		});
+
+		expect(
+			tryExpandSelectableSnippetLocally(
+				snippetToSelectable(makeSnippet({ template: '{{arguments}}{{arguments}}' })),
+				{ type: 'value', value: '{{chat_id}}'.repeat(2_909) },
+				{ kind: 'scheduled' },
+			),
+		).toEqual({
+			kind: 'error',
+			message: `Expanded snippet exceeds ${SNIPPET_EXPANDED_MAX_LENGTH} characters`,
 		});
 	});
 });

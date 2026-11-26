@@ -60,12 +60,23 @@ const response = {
 function fixture(
 	options: {
 		inspectCatalogItem?: (item: SelectableSnippet) => CatalogSelectableSnippetState;
+		context?: {
+			type: 'scheduled-prompt';
+			target: { type: 'chat'; chatId: string } | { type: 'new-chat'; projectPath: string; executorId?: string | null };
+		} | null;
 	} = {},
 ) {
 	const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
 	const onInsert = vi.fn(async (_text: string, _caret: number) => {});
 	const onPendingChange = vi.fn();
 	const onSourceChanged = vi.fn();
+	const context =
+		options.context === undefined
+			? {
+					type: 'scheduled-prompt' as const,
+					target: { type: 'new-chat' as const, projectPath: '/repo' },
+				}
+			: options.context;
 	const controller = new ScheduledPromptSnippets({
 		get prompt() {
 			return input.prompt;
@@ -74,10 +85,7 @@ function fixture(
 			return input.key;
 		},
 		get context() {
-			return {
-				type: 'scheduled-prompt' as const,
-				target: { type: 'new-chat' as const, projectPath: '/repo' },
-			};
+			return context;
 		},
 		inspectCatalogItem: options.inspectCatalogItem ?? (() => 'unavailable'),
 		onInsert,
@@ -268,5 +276,94 @@ describe('scheduled prompt snippets', () => {
 			'source' in changed ? [['snippet'], ['preamble']] : [['snippet']],
 		);
 		expect(onInsert).not.toHaveBeenCalled();
+	});
+
+	it('cancels immediately when context is null without inspecting catalog or calling server', async () => {
+		const inspectCatalogItem = vi.fn(() => 'matched' as const);
+		const { controller, onInsert } = fixture({ context: null, inspectCatalogItem });
+		expect(await controller.insert(localItem, 'API')).toBe('cancelled');
+		expect(inspectCatalogItem).not.toHaveBeenCalled();
+		expect(expand).not.toHaveBeenCalled();
+		expect(onInsert).not.toHaveBeenCalled();
+	});
+
+	it('expands escaped project_path locally and cancels changed preambles locally', async () => {
+		const escapedPathSnippet = snippetToSelectable({
+			id: 'escaped',
+			shortName: 'escaped',
+			template: 'Keep \\{{project_path}} literal with {{arguments}}',
+			defaultArguments: '',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		});
+		const matchedFixture = fixture({ inspectCatalogItem: () => 'matched' });
+		matchedFixture.controller.open(7, 15);
+		expect(await matchedFixture.controller.insert(escapedPathSnippet, 'args')).toBe('inserted');
+		expect(expand).not.toHaveBeenCalled();
+		expect(matchedFixture.onInsert).toHaveBeenCalledWith(
+			'Before Keep {{project_path}} literal with args after',
+			'Before Keep {{project_path}} literal with args'.length,
+		);
+
+		const changedPreambleFixture = fixture({ inspectCatalogItem: () => 'changed' });
+		changedPreambleFixture.controller.open(7, 15);
+		expect(await changedPreambleFixture.controller.insert(preambleItem, '')).toBe('cancelled');
+		expect(expand).not.toHaveBeenCalled();
+		expect(changedPreambleFixture.controller.error).toContain('changed');
+	});
+
+	it('discards new-chat server responses whose resolved projectPath or executorId mismatches the target', async () => {
+		const remoteExecutorId = '11111111-1111-4111-8111-111111111111';
+		const pathMismatch = fixture();
+		expand.mockResolvedValueOnce({ ...response, contextProjectPath: '/other-repo' });
+		expect(await pathMismatch.controller.insert(item, 'API')).toBe('cancelled');
+		expect(pathMismatch.onInsert).not.toHaveBeenCalled();
+
+		const executorMismatch = fixture({
+			context: {
+				type: 'scheduled-prompt',
+				target: { type: 'new-chat', projectPath: '/repo', executorId: remoteExecutorId },
+			},
+		});
+		expand.mockResolvedValueOnce({ ...response, contextExecutorId: 'local' });
+		expect(await executorMismatch.controller.insert(item, 'API')).toBe('cancelled');
+		expect(executorMismatch.onInsert).not.toHaveBeenCalled();
+	});
+
+	it('inserts server fallback results for existing-chat targets', async () => {
+		const existingChatFixture = fixture({
+			context: {
+				type: 'scheduled-prompt',
+				target: { type: 'chat', chatId: '1787471053739199' },
+			},
+		});
+		existingChatFixture.controller.open(7, 15);
+		expect(await existingChatFixture.controller.insert(item, 'API')).toBe('inserted');
+		expect(expand).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: { type: 'value', value: 'API' },
+				context: {
+					type: 'scheduled-prompt',
+					target: { type: 'chat', chatId: '1787471053739199' },
+				},
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+		expect(existingChatFixture.onInsert).toHaveBeenCalledOnce();
+	});
+
+	it('returns cancelled without exposing error when server fails after interactionKey changes', async () => {
+		const { input, controller } = fixture();
+		const server = Promise.withResolvers<typeof response>();
+		expand.mockReturnValueOnce(server.promise);
+
+		const inserting = controller.insert(item, 'API');
+		await vi.waitFor(() => expect(expand).toHaveBeenCalledOnce());
+		input.key = 'chat:changed';
+		server.reject(new Error('late server failure'));
+
+		expect(await inserting).toBe('cancelled');
+		expect(controller.error).toBeNull();
 	});
 });

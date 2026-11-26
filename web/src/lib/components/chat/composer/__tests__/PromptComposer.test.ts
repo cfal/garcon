@@ -2407,6 +2407,29 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
+	it('reports local slash expansion overflow without calling the server or submitting', async () => {
+		const onsubmit = vi.fn();
+		const { component } = render(PromptComposerTestHost, {
+			selectedChatId: 'chat-local-slash-overflow',
+			selectedStatus: 'running',
+			snippetTemplate: '{{arguments}}{{arguments}}{{arguments}}',
+			snippetDefaultArguments: 'x'.repeat(30_000),
+			preloadSnippets: true,
+			wsPhase: 'connected',
+			onsubmit,
+		});
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+		await fireEvent.input(textarea, { target: { value: '/s review' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+		await screen.findByText(/Expanded snippet exceeds 64000 characters/);
+		expect(textarea.value).toBe('/s review');
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(component.getProjectResolutionRequestCount()).toBe(0);
+	});
+
 	it('honors the configured trigger without interrupting IME composition', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-custom-snippet-trigger',
