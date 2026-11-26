@@ -1,17 +1,17 @@
 import { ToolResultMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
-import { isPlainTextPart, toolResultTextPart } from '@garcon/common/tool-result-content';
+import { plainToolResultTextPart, toolResultTextPart } from '@garcon/common/tool-result-content';
 import type { TrackedCall } from './tool-call-snapshot.js';
 
 type Block = Record<string, unknown>;
 type Body = ToolResultMessage['content'];
 
 function plainAcpText(block: Block): boolean {
-  return block.type === 'content' && Object.keys(block).length === 2 && isPlainTextPart(block.content);
+  return block.type === 'content' && plainToolResultTextPart(block) !== null;
 }
 
 function plainText(block: Block): boolean {
-  return plainAcpText(block) || isPlainTextPart(block);
+  return plainToolResultTextPart(block) !== null;
 }
 
 function blockText(block: Block): string {

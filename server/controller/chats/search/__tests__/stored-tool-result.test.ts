@@ -14,11 +14,13 @@ function storedResult(message: ToolResultMessage): ToolResultMessage {
 }
 
 test('empty successful result envelopes have no search target', () => {
-  for (const content of [{ items: [] }, { content: [{ type: 'text', text: ' \t\n' }] }]) {
+  const wrapped = { type: 'content', content: { type: 'text', text: ' ' } };
+  for (const content of [{ items: [] }, { content: [{ type: 'text', text: ' \t\n' }] }, { items: [wrapped] }]) {
     expect(projectSearchMessage(new ToolResultMessage('', 'call', content, false))).toBeNull();
     expect(projectSearchMessage(new ToolResultMessage('', 'call', content, true))).not.toBeNull();
   }
-  for (const content of [{ items: [], count: 0 }, { content: [{ type: 'text', text: 'Done' }] }]) {
+  for (const content of [{ items: [], count: 0 }, { content: [{ type: 'text', text: 'Done' }] },
+    { items: [{ ...wrapped, annotations: {} }] }, { items: [{ ...wrapped, content: { ...wrapped.content, annotations: {} } }] }]) {
     expect(projectSearchMessage(new ToolResultMessage('', 'call', content, false))).not.toBeNull();
   }
 });

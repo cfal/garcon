@@ -6,13 +6,14 @@ import { BashToolUseMessage, EditToolUseMessage, ExecToolUseMessage, ReadToolUse
 describe('shouldRenderToolResult', () => {
 	it('hides empty success envelopes but keeps failures, attachments and explicit structured values', () => {
 		const rule: ToolDisplayRule = { input: { mode: 'inline' }, result: { mode: 'collapsible' } };
-		for (const content of [{}, { raw: ' \n' }, { items: [] }, { content: [{ type: 'text', text: '\t' }] }]) {
+		const wrapped = { type: 'content', content: { type: 'text', text: '\t' } };
+		for (const content of [{}, { raw: ' \n' }, { items: [] }, { content: [wrapped.content] }, { items: [wrapped] }]) {
 			expect(shouldRenderToolResult(rule, { content })).toBe(false);
 			expect(shouldRenderToolResult(rule, { content, isError: true })).toBe(true);
 		}
 		for (const content of [{ raw: '0' }, { count: 0 }, { rawOutput: 0 }, { rawOutput: false },
 			{ items: [{ type: 'image' }] }, { content: [{ type: 'text', text: '', annotations: {} }] },
-			{ content: [], structuredContent: { count: 0 } }]) {
+			{ items: [{ ...wrapped, annotations: {} }] }, { content: [], structuredContent: { count: 0 } }]) {
 			expect(shouldRenderToolResult(rule, { content })).toBe(true);
 		}
 	});

@@ -10,6 +10,15 @@ export function isPlainTextPart(part: unknown): part is ToolTextPart {
   return true;
 }
 
+export function plainToolResultTextPart(block: unknown): ToolTextPart | null {
+  if (isPlainTextPart(block)) return block;
+  if (!isRecord(block) || block.type !== 'content' || !isPlainTextPart(block.content)) return null;
+  for (const key in block) {
+    if (Object.hasOwn(block, key) && key !== 'type' && key !== 'content') return null;
+  }
+  return block.content;
+}
+
 // Search inspects only its indexed prefix; the transcript inspects the full body.
 export function isEmptyToolResult(content: unknown, limits?: { maxChars: number; maxBlocks: number }): boolean {
   if (content == null) return true;
@@ -27,8 +36,9 @@ export function isEmptyToolResult(content: unknown, limits?: { maxChars: number;
     if (!Array.isArray(items)) return false;
     for (const block of items) {
       if (blocks-- <= 0) break;
-      if (!isPlainTextPart(block)) return false;
-      const prefix = block.text.slice(0, chars);
+      const part = plainToolResultTextPart(block);
+      if (!part) return false;
+      const prefix = part.text.slice(0, chars);
       if (/\S/.test(prefix)) return false;
       chars -= prefix.length;
     }
