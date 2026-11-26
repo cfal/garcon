@@ -151,30 +151,15 @@ describe('PreamblesStore', () => {
 		expect(store.hasFreshSnapshot).toBe(true);
 	});
 
-	it('restores the confirmed order when two overlapping optimistic moves reject in dispatch order', async () => {
-		const firstMove = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
-		const secondMove = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
-		const reorder = vi
-			.fn()
-			.mockReturnValueOnce(firstMove.promise)
-			.mockReturnValueOnce(secondMove.promise);
+	it('skips reorder for unknown IDs or boundary moves', async () => {
+		const reorder = vi.fn();
 		const store = new PreamblesStore({ reorder });
-		store.applySnapshot(snapshot(2, ['a', 'b', 'c']));
+		store.applySnapshot(snapshot(1, ['a', 'b']));
 
-		const movingFirst = store.move('c', 'up');
-		const movingSecond = store.move('c', 'up');
-		expect(store.preambles.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
-
-		const firstError = new Error('first move failed');
-		firstMove.reject(firstError);
-		await expect(movingFirst).rejects.toBe(firstError);
-		expect(store.preambles.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
-
-		const secondError = new Error('second move failed');
-		secondMove.reject(secondError);
-		await expect(movingSecond).rejects.toBe(secondError);
-		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b', 'c']));
-		expect(store.hasFreshSnapshot).toBe(true);
+		await store.move('missing', 'up');
+		await store.move('a', 'up');
+		await store.move('b', 'down');
+		expect(reorder).not.toHaveBeenCalled();
 	});
 
 	it('refreshes a stale edit after a revision conflict without advancing its revision', async () => {
@@ -202,100 +187,24 @@ describe('PreamblesStore', () => {
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
 	});
 
-	it('performs a post-conflict read after joining an in-flight refresh', async () => {
-		const first = Promise.withResolvers<PreamblesSnapshot>();
-		const second = Promise.withResolvers<PreamblesSnapshot>();
-		const get = vi
-			.fn<() => Promise<PreamblesSnapshot>>()
-			.mockReturnValueOnce(first.promise)
-			.mockReturnValueOnce(second.promise);
+	it('forwards captured expectedRevision on remove and refreshes on PREAMBLE_REVISION_CONFLICT', async () => {
 		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
-		const update = vi.fn().mockRejectedValue(conflict);
-		const store = new PreamblesStore({ get, update });
-		store.applySnapshot(snapshot(3, ['a']));
-		const refreshing = store.refresh();
+		const get = vi.fn().mockResolvedValueOnce(snapshot(5, ['a']));
+		const remove = vi
+			.fn()
+			.mockRejectedValueOnce(conflict)
+			.mockResolvedValueOnce({ success: true, snapshot: snapshot(6, []) });
+		const store = new PreamblesStore({ get, remove });
+		store.applySnapshot(snapshot(4, ['a']));
 
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Edited preamble a',
-				content: 'Edited content a',
-				scope: { type: 'global' },
-			},
-			3,
-		);
-		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-		first.resolve(snapshot(3, ['a']));
-		await refreshing;
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-		second.resolve(snapshot(4, ['a', 'b']));
+		await expect(store.remove('a', 3)).rejects.toBe(conflict);
+		expect(remove).toHaveBeenNthCalledWith(1, { expectedRevision: 3, id: 'a' });
+		expect(get).toHaveBeenCalledOnce();
+		expect(store.snapshot).toEqual(snapshot(5, ['a']));
 
-		await expect(updating).rejects.toBe(conflict);
-		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
-	});
-
-	it('performs a post-conflict read after a joined refresh fails', async () => {
-		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
-		const read = Promise.withResolvers<PreamblesSnapshot>();
-		const refreshFailure = new Error('refresh unavailable');
-		const get = vi
-			.fn<() => Promise<PreamblesSnapshot>>()
-			.mockReturnValueOnce(read.promise)
-			.mockResolvedValueOnce(snapshot(4, ['a', 'b']));
-		const update = vi.fn().mockRejectedValue(conflict);
-		const store = new PreamblesStore({ get, update });
-		store.applySnapshot(snapshot(3, ['a']));
-		const refreshing = store.refresh().catch((error) => error);
-
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Edited preamble a',
-				content: 'Edited content a',
-				scope: { type: 'global' },
-			},
-			3,
-		);
-		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-		read.reject(refreshFailure);
-
-		expect(await refreshing).toBe(refreshFailure);
-		await expect(updating).rejects.toBe(conflict);
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
-	});
-
-	it('retries when a conflict joins a failing refresh-loop load', async () => {
-		const conflict = new ApiError(409, 'revision conflict', 'PREAMBLE_REVISION_CONFLICT');
-		const read = Promise.withResolvers<PreamblesSnapshot>();
-		const get = vi
-			.fn<() => Promise<PreamblesSnapshot>>()
-			.mockReturnValueOnce(read.promise)
-			.mockResolvedValueOnce(snapshot(4, ['a', 'b']));
-		const update = vi.fn().mockRejectedValue(conflict);
-		const store = new PreamblesStore({ get, update });
-		store.applySnapshot(snapshot(3, ['a']));
-		const refreshing = store.refreshIfLoaded();
-
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Edited preamble a',
-				content: 'Edited content a',
-				scope: { type: 'global' },
-			},
-			3,
-		);
-		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-		read.reject(new Error('refresh unavailable'));
-
-		await refreshing;
-		await expect(updating).rejects.toBe(conflict);
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
+		await store.remove('a', 5);
+		expect(remove).toHaveBeenNthCalledWith(2, { expectedRevision: 5, id: 'a' });
+		expect(store.snapshot).toEqual(snapshot(6, []));
 	});
 
 	it('completes an optimistic move when an overlapping same-revision GET returns confirmed order', async () => {

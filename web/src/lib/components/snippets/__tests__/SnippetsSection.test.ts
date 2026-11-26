@@ -392,4 +392,55 @@ describe('SnippetsSection', () => {
 		expect(remove).toHaveBeenNthCalledWith(2, { expectedRevision: 6, id: initial.id });
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
 	});
+
+	it('keeps the draft editable and preserves captured revision after a non-revision name conflict', async () => {
+		const initial = makeSnippet();
+		const saved = makeSnippet({ shortName: 'renamed_review' });
+		let store!: SnippetsStore;
+		const get = vi
+			.fn<() => Promise<SnippetsSnapshot>>()
+			.mockResolvedValueOnce({ revision: 3, snippets: [initial] });
+		const update = vi
+			.fn()
+			.mockRejectedValueOnce(new ApiError(409, 'name conflict', SNIPPET_ERROR_CODES.nameConflict))
+			.mockResolvedValueOnce({ success: true, snapshot: { revision: 5, snippets: [saved] } });
+		render(SnippetsSectionTestHost, {
+			deps: { get, update },
+			onStore: (value) => {
+				store = value;
+			},
+		});
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Edit review' }));
+		// Catalog advances in the background before the edit attempt; non-revision 409 must not adopt revision 4.
+		store.applySnapshot({ revision: 4, snippets: [initial] });
+		const shortNameInput = screen.getByRole('textbox', { name: 'Short name' }) as HTMLInputElement;
+		await fireEvent.input(shortNameInput, { target: { value: 'audit' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(await screen.findByText(/name conflict/)).toBeTruthy();
+		expect(get).toHaveBeenCalledOnce();
+		await fireEvent.input(shortNameInput, { target: { value: 'renamed_review' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(update).toHaveBeenNthCalledWith(1, {
+			expectedRevision: 3,
+			id: initial.id,
+			snippet: {
+				shortName: 'audit',
+				template: 'Original {{arguments}}',
+				defaultArguments: 'diff',
+			},
+		});
+		expect(update).toHaveBeenNthCalledWith(2, {
+			expectedRevision: 3,
+			id: initial.id,
+			snippet: {
+				shortName: 'renamed_review',
+				template: 'Original {{arguments}}',
+				defaultArguments: 'diff',
+			},
+		});
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+	});
 });
