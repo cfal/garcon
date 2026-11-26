@@ -191,8 +191,8 @@ export function convertAntigravityToolUse(
       const maxIterations = field(input, 'MaxIterations', 'max_iterations');
       const exactTiming = field(input, 'ExactTiming', 'exact_timing');
       if (typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0
-        && expression === undefined && daemon === undefined && maxIterations === undefined && exactTiming === undefined) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', delaySeconds, prompt, timerCondition });
+        && expression === undefined && maxIterations === undefined) {
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', delaySeconds, prompt, timerCondition, daemon, exactTiming });
         if (row) return row;
       }
       if (expression !== undefined && delaySeconds === undefined && timerCondition === undefined) {

@@ -78,6 +78,15 @@ test('retains the original arguments when a native schedule cannot be represente
   }
 });
 
+test('retains explicitly supplied timer defaults and daemon flags accepted by agy', () => {
+  const s = session();
+  for (const daemon of [true, false]) {
+    const rawInput = { DurationSeconds: 1, Prompt: 'Check', IsDaemon: daemon, TimerCondition: '', ExactTiming: false };
+    expect(s.start(String(daemon), { name: 'schedule', rawInput, status: 'completed' })[0])
+      .toMatchObject({ type: 'schedule-tool-use', request: { daemon, timerCondition: '', exactTiming: false } });
+  }
+});
+
 test('uses late identity and partial arguments without duplicating either tool row', () => {
   const s = session();
   expect(s.start('task', { rawInput: { Action: 'status', TaskId: 'job' } })).toEqual([]);

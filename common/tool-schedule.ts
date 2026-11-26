@@ -2,7 +2,7 @@ import { isRecord } from './json.js';
 
 // Describes a provider tool request, not a controller-owned scheduled prompt.
 export type ToolScheduleRequest =
-  | { action: 'wakeup'; delaySeconds: number; prompt: string; timerCondition?: string; reason?: string; noop?: boolean }
+  | { action: 'wakeup'; delaySeconds: number; prompt: string; timerCondition?: string; daemon?: boolean; exactTiming?: false; reason?: string; noop?: boolean }
   | { action: 'cron'; expression: string; prompt: string; recurring?: boolean; durable?: boolean; daemon?: boolean; maxIterations?: number; exactTiming?: boolean }
   | { action: 'list' }
   | { action: 'delete'; jobId: string }
@@ -12,13 +12,16 @@ export function parseToolScheduleRequest(value: unknown): ToolScheduleRequest | 
   if (!isRecord(value)) return null;
   switch (value.action) {
     case 'wakeup': {
-      const { delaySeconds, prompt, timerCondition, reason, noop } = value;
+      const { delaySeconds, prompt, timerCondition, daemon, exactTiming, reason, noop } = value;
       if (typeof delaySeconds !== 'number' || !Number.isFinite(delaySeconds) || typeof prompt !== 'string'
-        || (timerCondition !== undefined && (typeof timerCondition !== 'string' || !timerCondition.trim()))
+        || (timerCondition !== undefined && (typeof timerCondition !== 'string' || (timerCondition !== '' && !timerCondition.trim())))
+        || (daemon !== undefined && typeof daemon !== 'boolean') || (exactTiming !== undefined && exactTiming !== false)
         || (reason !== undefined && typeof reason !== 'string')
         || (noop !== undefined && typeof noop !== 'boolean')) return null;
       const request: ToolScheduleRequest = { action: 'wakeup', delaySeconds, prompt };
       if (timerCondition !== undefined) request.timerCondition = timerCondition;
+      if (daemon !== undefined) request.daemon = daemon;
+      if (exactTiming !== undefined) request.exactTiming = exactTiming;
       if (reason !== undefined) request.reason = reason;
       if (noop !== undefined) request.noop = noop;
       return request;
@@ -65,23 +68,28 @@ export function toolScheduleTitle(request: ToolScheduleRequest): string {
   }
 }
 
-export function toolScheduleDetails(request: ToolScheduleRequest): string {
-  if (request.action !== 'wakeup' && request.action !== 'cron') return '';
+export function toolScheduleOptions(request: Extract<ToolScheduleRequest, { action: 'wakeup' | 'cron' }>): string[] {
   const lines: string[] = [];
   if (request.action === 'wakeup') {
-    if (request.timerCondition === 'never') lines.push('Incoming messages do not cancel this timer.');
+    if (request.timerCondition === '') lines.push('Timer condition: default');
+    else if (request.timerCondition === 'never') lines.push('Incoming messages do not cancel this timer.');
     else if (request.timerCondition === 'any') lines.push('Cancel on any incoming message.');
     else if (request.timerCondition !== undefined) lines.push(`Cancel on message from: ${request.timerCondition}`);
     if (request.reason !== undefined) lines.push(`Reason: ${request.reason}`);
     if (request.noop !== undefined) lines.push(`No changes reported: ${request.noop}`);
+    if (request.daemon !== undefined) lines.push(`Daemon requested: ${request.daemon}`);
   } else {
     if (request.maxIterations !== undefined) lines.push(`Maximum iterations: ${request.maxIterations}`);
     if (request.daemon !== undefined) lines.push(`Continue after task ends: ${request.daemon}`);
     if (request.durable !== undefined) lines.push(`Persistence requested: ${request.durable}`);
-    if (request.exactTiming !== undefined) lines.push(`Exact timing: ${request.exactTiming}`);
   }
-  lines.push(`Prompt: ${request.prompt}`);
-  return lines.join('\n');
+  if (request.exactTiming !== undefined) lines.push(`Exact timing: ${request.exactTiming}`);
+  return lines;
+}
+
+export function toolScheduleDetails(request: ToolScheduleRequest): string {
+  if (request.action !== 'wakeup' && request.action !== 'cron') return '';
+  return [...toolScheduleOptions(request), `Prompt: ${request.prompt}`].join('\n');
 }
 
 export function describeToolSchedule(request: ToolScheduleRequest): string {

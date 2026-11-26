@@ -64,6 +64,7 @@ describe('tool-use serialization round-trip', () => {
 	it('round-trips native schedule requests and rejects incomplete or unknown actions', () => {
 		for (const row of [
 			new ScheduleToolUseMessage(TS, 'timer', { action: 'wakeup', delaySeconds: 120, prompt: 'Check', timerCondition: 'any' }),
+			new ScheduleToolUseMessage(TS, 'timer-options', { action: 'wakeup', delaySeconds: 1, prompt: 'Check', timerCondition: '', daemon: true, exactTiming: false }),
 			new ScheduleToolUseMessage(TS, 'cron', { action: 'cron', expression: '0 9 * * *', prompt: 'Check', recurring: false, durable: false }),
 			new ScheduleToolUseMessage(TS, 'limited', { action: 'cron', expression: '0 9 * * *', prompt: 'Check', maxIterations: 1, exactTiming: false }),
 			new ScheduleToolUseMessage(TS, 'delete', { action: 'delete', jobId: 'job' }),
