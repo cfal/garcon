@@ -184,31 +184,35 @@ WebSocket and API writes waited for acknowledgements that a direct connection
 to Bun never waits for. Content comparison cannot see latency; suite outcomes
 can.
 
-## ADR-010: A relay changes when a slow WebSocket client is dropped
+## ADR-010: The relay enforces the browser socket budget
 
-Status: open (2026-11-26)
+Status: accepted (2026-11-26)
 
 Context: The original drops a browser socket when more than
 `GARCON_WS_BACKPRESSURE_LIMIT` bytes are queued in Bun for it. In
 `websocket-backpressure.test.ts` (`direct replies drop a slow browser`), a
 paused client sends 64 large pings. Connected directly, the original
-terminates it after 42 to 47 of them. Behind the front door, every ping is
-accepted, the client resumes reading, receives all 16.8 MB of replies, and is
-never dropped: the original passes 5 of 5 runs and the front door 0 of 5. The
-relay hop adds kernel buffering between the original and the client, so the
-original's queue stays under its budget until the client starts reading
-again. Clamping the relay's receive buffer from the original, and its send
-buffer to the client (256 KB and 1 MB), did not change the outcome.
+terminates it after 42 to 47 of them. Behind a plain relay, every ping was
+accepted, the client resumed reading, received all 16.8 MB of replies, and was
+never dropped: the original passed 5 of 5 runs and the front door 0 of 5. The
+relay hop absorbs the backlog in kernel buffers, so the original's queue never
+exceeds its budget. Clamping those buffers did not change the outcome.
 
-The investigation fixed two relay defects with unit tests: a client that kept
-sending could hold a connection open after the original ended it, and both
-directions shared one lock. Once a drop happens, it reaches the client within
-20 ms of the client reading again.
+Decision: The relay applies the original's budget where the client's socket
+is. For the browser socket (`<base path>/ws`) it reads the original's replies
+eagerly, as Bun does for a direct client, and when more than the budget waits
+for the browser it resets the connection, as Bun's `terminate()` does. The
+original then sees the connection close and runs its usual disconnect
+handling. Executor links keep plain backpressure, because the original does
+not drop them at that budget either. This was chosen over accepting later
+slow-client detection, because it keeps the original's guarantee and adds no
+latency: the original is never blocked by a slow browser.
 
-Decision: Pending. Options are to accept that the front door delays slow-client
-detection by the buffering of one loopback hop, which leaves memory bounded by
-kernel buffers, or to move browser WebSocket delivery and its budget into Rust,
-so the budget is applied where the client's socket is.
+Consequences: The backpressure suite passes 5 of 5 under both controllers.
+Memory per browser socket in the front door is bounded by the budget plus one
+read chunk. The budget moves to Rust with the WebSocket unit when browser
+delivery is ported.
 
-Consequences: Until decided, this test is the one known end-to-end difference
-between the controllers on this machine.
+The investigation also fixed two relay defects with unit tests: a client that
+kept sending could hold a connection open after the original ended it, and both
+directions shared one lock.

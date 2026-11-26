@@ -6,6 +6,7 @@ mod compression;
 mod config;
 mod original;
 mod proxy;
+mod relay;
 mod shadow;
 mod static_assets;
 
@@ -24,7 +25,7 @@ use tokio::signal::unix::{SignalKind, signal};
 
 use crate::compression::NativeResponse;
 use crate::config::{FrontDoorConfig, LaunchMode, ProcessEnvironment};
-use crate::proxy::{FallbackLog, Proxy, ResponseBody, full_body};
+use crate::proxy::{BrowserSocket, FallbackLog, Proxy, ResponseBody, full_body};
 use crate::shadow::Shadow;
 
 struct FrontDoor {
@@ -162,7 +163,15 @@ async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
         None => None,
     };
     let front_door = Arc::new(FrontDoor {
-        proxy: Proxy::new(original.origin.clone(), config.trust_proxy, fallback_log),
+        proxy: Proxy::new(
+            original.origin.clone(),
+            config.trust_proxy,
+            fallback_log,
+            BrowserSocket {
+                path: format!("{}/ws", config.base_path),
+                budget: config.ws_backpressure_limit,
+            },
+        ),
         config,
         static_assets_native,
         shadow,

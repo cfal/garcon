@@ -100,7 +100,8 @@ export function controllerLaunch(repoRoot: string, value = process.env.GARCON_TE
   if (value === 'original') return { command: [process.execPath, 'server/main.ts'], environment: {} };
   if (value !== 'front-door') throw new Error(`Unknown controller: ${value}`);
   return {
-    command: [join(repoRoot, 'rust/target/release/garcon-server')],
+    // GARCON_TEST_FRONT_DOOR_BINARY selects a build other than the local release build.
+    command: [process.env.GARCON_TEST_FRONT_DOOR_BINARY ?? join(repoRoot, 'rust/target/release/garcon-server')],
     environment: {
       GARCON_RS_BUN: process.execPath,
       ...Object.fromEntries(Object.entries(process.env)

@@ -13,6 +13,7 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 ruzstd = "0.8"
+socket2 = "0.6"
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -20,6 +21,5 @@ libc = "0.2"
 
 
 [dev-dependencies]
-socket2 = "0.6"
 tempfile = "3"
 tower-service = "0.3"

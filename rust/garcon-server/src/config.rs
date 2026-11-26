@@ -17,6 +17,8 @@ pub struct FrontDoorConfig {
     pub web_build_dir: PathBuf,
     pub original_root: PathBuf,
     pub trust_proxy: bool,
+    /// Bytes that may wait for a browser socket before it is dropped.
+    pub ws_backpressure_limit: usize,
     /// Arguments forwarded to the original, without the owned flags.
     pub original_args: Vec<String>,
 }
@@ -113,6 +115,18 @@ pub fn parse_base_path(value: &str) -> Option<String> {
         .then(|| normalized.to_string())
 }
 
+/// Mirrors `envInt`: a non-negative integer, or the fallback when unset.
+fn parse_int(value: Option<String>, fallback: usize) -> Option<usize> {
+    let Some(raw) = value else {
+        return Some(fallback);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || !trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    trimmed.parse().ok()
+}
+
 /// Mirrors `envBool`.
 fn parse_bool(value: Option<String>, fallback: bool) -> Option<bool> {
     let Some(raw) = value else {
@@ -193,6 +207,10 @@ fn front_door_config(args: &[String], environment: &dyn Environment) -> Option<F
         web_build_dir,
         original_root,
         trust_proxy: parse_bool(environment.var("GARCON_TRUST_PROXY"), false)?,
+        ws_backpressure_limit: parse_int(
+            environment.var("GARCON_WS_BACKPRESSURE_LIMIT"),
+            2 * 1024 * 1024,
+        )?,
         original_args: without_owned_flags(args),
     })
 }
@@ -264,6 +282,7 @@ mod tests {
         assert_eq!(config.bind_address, "0.0.0.0");
         assert_eq!(config.original_args, args(&["--config-dir", "/c"]));
         assert_eq!(config.web_build_dir, PathBuf::from("/repo/web/build"));
+        assert_eq!(config.ws_backpressure_limit, 2 * 1024 * 1024);
     }
 
     #[test]
@@ -279,6 +298,10 @@ mod tests {
         );
         assert_eq!(
             config(&[], &[("GARCON_HTTP_COMPRESSION", "maybe")]),
+            LaunchMode::Original
+        );
+        assert_eq!(
+            config(&[], &[("GARCON_WS_BACKPRESSURE_LIMIT", "-1")]),
             LaunchMode::Original
         );
         assert_eq!(
