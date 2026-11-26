@@ -55,35 +55,47 @@ fn parse_ready_line(line: &str) -> Option<ReadyLine<'_>> {
     })
 }
 
+/// Returns the readiness line rewritten to announce `public_url`, signalling
+/// `ready` with the original's origin, or `None` for any other line.
+fn rewrite_ready_line(line: &[u8], public_url: &str, ready: &ReadySignal) -> Option<Vec<u8>> {
+    let mut pending = ready.lock().expect("ready signal lock");
+    pending.as_ref()?;
+    let text = std::str::from_utf8(line).ok()?;
+    let parsed = parse_ready_line(text.strip_suffix('\n').unwrap_or(text))?;
+    let _ = pending.take()?.send(parsed.origin.to_string());
+    Some(format!("{}{public_url}{}\n", parsed.prefix, parsed.suffix).into_bytes())
+}
+
 /// Relays one output stream line by line. The readiness line is rewritten to
 /// announce the front door's URL instead of the original's loopback port, so
 /// tools that wait for it connect to the front door.
+///
+/// Lines are relayed as bytes, and the stream is drained even after the sink
+/// fails: the original blocks on a full pipe, so a non-UTF-8 log line or a
+/// closed terminal must not stop the relay.
 async fn relay_lines<R, W>(stream: R, mut sink: W, public_url: String, ready: ReadySignal)
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut lines = BufReader::new(stream).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let pending = ready.lock().expect("ready signal lock").take();
-        let output = match (pending, parse_ready_line(&line)) {
-            (Some(sender), Some(parsed)) => {
-                let _ = sender.send(parsed.origin.to_string());
-                format!("{}{public_url}{}", parsed.prefix, parsed.suffix)
-            }
-            (pending, _) => {
-                *ready.lock().expect("ready signal lock") = pending;
-                line
-            }
-        };
-        if sink
-            .write_all(format!("{output}\n").as_bytes())
-            .await
-            .is_err()
-        {
-            break;
+    let mut reader = BufReader::new(stream);
+    let mut line = Vec::new();
+    let mut sink_open = true;
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
         }
-        let _ = sink.flush().await;
+        if !sink_open {
+            continue;
+        }
+        if !line.ends_with(b"\n") {
+            line.push(b'\n');
+        }
+        let output = rewrite_ready_line(&line, &public_url, &ready);
+        let written = sink.write_all(output.as_deref().unwrap_or(&line)).await;
+        sink_open = written.is_ok() && sink.flush().await.is_ok();
     }
 }
 
@@ -122,15 +134,19 @@ pub async fn start(
             });
         }
     }
+    // Both settings are flags, not environment variables, so the original's
+    // terminal and provider children, including a nested Garcon, do not
+    // inherit them.
+    //
     // The front door replaces the forwarded client address headers (see
     // proxy.rs), so the original may trust them; otherwise every client would
     // share the front door's loopback address in the login rate limiter.
     if !trust_proxy {
-        command.env("GARCON_TRUST_PROXY", "1");
+        command.arg("--trust-proxy");
     }
     // CLI discovery must reach the front door, whose address survives a restart
     // of the original; the original's own port is ephemeral.
-    command.env("GARCON_RUNTIME_ORIGIN", runtime_origin);
+    command.args(["--runtime-origin", runtime_origin]);
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
@@ -213,5 +229,49 @@ mod tests {
             String::from_utf8(output).unwrap(),
             "boot\n[INFO] Started at http://0.0.0.0:8080/base\nStarted at http://x:1\n"
         );
+    }
+
+    #[tokio::test]
+    async fn relays_lines_that_are_not_utf8() {
+        let input = b"bad \xff byte\nStarted at http://127.0.0.1:4321\ntail";
+        let mut output = Vec::new();
+        let (sender, receiver) = oneshot::channel();
+        relay_lines(
+            &input[..],
+            &mut output,
+            "http://0.0.0.0:8080".to_string(),
+            Arc::new(Mutex::new(Some(sender))),
+        )
+        .await;
+        assert_eq!(receiver.await.unwrap(), "http://127.0.0.1:4321");
+        assert_eq!(
+            output,
+            b"bad \xff byte\nStarted at http://0.0.0.0:8080\ntail\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn keeps_draining_after_the_sink_closes() {
+        let (mut original, stream) = tokio::io::duplex(64);
+        let (sink, closed) = tokio::io::duplex(64);
+        drop(closed);
+        let relay = tokio::spawn(relay_lines(
+            stream,
+            sink,
+            "http://0.0.0.0:8080".to_string(),
+            Arc::new(Mutex::new(None)),
+        ));
+        // Far more than the pipe holds, so the writes complete only while the
+        // relay keeps reading.
+        let writes = async {
+            for _ in 0..1024 {
+                original.write_all(b"log line\n").await.unwrap();
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), writes)
+            .await
+            .expect("the relay keeps reading after its sink closes");
+        drop(original);
+        relay.await.unwrap();
     }
 }

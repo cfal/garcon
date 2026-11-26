@@ -20,6 +20,7 @@ const CLI_VALUE_FLAGS = {
   '--project-base-dir': '<directory>',
   '--public-url': '<url>',
   '--base-path': '<path>',
+  '--runtime-origin': '<origin>',
 } as const;
 
 type CliValueFlag = keyof typeof CLI_VALUE_FLAGS;
@@ -149,22 +150,26 @@ function parseServerConfig(): ServerConfig {
     httpIdleTimeoutSeconds: envInt('HTTP_IDLE_TIMEOUT_SECONDS', 60 * 2),
     maxSessions: envInt('MAX_SESSIONS', 50),
     authDisabled: parseAuthDisabled(),
-    trustProxyEnabled: envBool('TRUST_PROXY', false),
+    trustProxyEnabled: process.argv.includes('--trust-proxy') || envBool('TRUST_PROXY', false),
     httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
-    runtimeOrigin: parseRuntimeOrigin(envValue('GARCON_RUNTIME_ORIGIN')),
+    runtimeOrigin: parseRuntimeOrigin(cliValue('--runtime-origin')),
     webBuildDir: path.resolve(envValue('GARCON_WEB_BUILD_DIR') ?? path.join(serverRoot, 'web', 'build')),
     rollbackCarryOverMigration: process.argv.includes('--rollback-carryover-migration'),
   };
 }
 
 // A front door that owns the public listener publishes its own origin for CLI
-// discovery instead of this process's loopback listener.
+// discovery instead of this process's loopback listener. It is a flag rather
+// than an environment variable so terminal and provider children, including a
+// nested Garcon, do not inherit it.
 function parseRuntimeOrigin(value: string | null): string | null {
   if (value === null) return null;
   let url: URL;
-  try { url = new URL(value); } catch { throw new Error(`Invalid GARCON_RUNTIME_ORIGIN value: ${value}`); }
-  if (url.protocol !== 'http:' || url.origin !== value.replace(/\/$/, '')) {
-    throw new Error(`Invalid GARCON_RUNTIME_ORIGIN value: ${value}. Must be an http origin such as http://127.0.0.1:8080.`);
+  try { url = new URL(value); } catch { throw new Error(`Invalid --runtime-origin value: ${value}`); }
+  // Compares structure rather than text: URL normalization drops a default
+  // port and lowercases the host, so `http://127.0.0.1:80` is a valid origin.
+  if (url.protocol !== 'http:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error(`Invalid --runtime-origin value: ${value}. Must be an http origin such as http://127.0.0.1:8080.`);
   }
   return url.origin;
 }

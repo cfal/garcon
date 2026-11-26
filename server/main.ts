@@ -14,6 +14,8 @@ Options:
   --bind-address <host-or-ip>    Bind hostname/address for Bun server.
   --public-url <url>             Public HTTP(S) base URL for executor onboarding.
   --base-path <path>             Mount the webapp and API beneath this path (default: /).
+  --trust-proxy                  Trust X-Forwarded-For and X-Real-IP for client addresses.
+  --runtime-origin <origin>      Origin published for CLI discovery when a front door owns the listener.
   --disable-auth                 Disable all HTTP/WebSocket authentication checks.
   --config-dir <directory>       Override Garcon config directory.
   --workspace-dir <directory>    Use an explicit workspace directory path.
@@ -42,7 +44,6 @@ Environment Variables:
   GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
   GARCON_HTTP_COMPRESSION          Enable streamed HTTP response compression. Default: true
   GARCON_WEB_BUILD_DIR             Serve the web app from this directory. Default: <install>/web/build
-  GARCON_RUNTIME_ORIGIN            Origin published for CLI discovery when a front door owns the listener.
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
 Notes:

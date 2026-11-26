@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 /// Flags the front door owns. They are removed from the arguments forwarded to
 /// the original, which instead listens on an ephemeral loopback port.
-const OWNED_FLAGS: [&str; 2] = ["--port", "--bind-address"];
+const OWNED_FLAGS: [&str; 3] = ["--port", "--bind-address", "--runtime-origin"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontDoorConfig {
@@ -206,7 +206,8 @@ fn front_door_config(args: &[String], environment: &dyn Environment) -> Option<F
         http_compression: parse_bool(environment.var("GARCON_HTTP_COMPRESSION"), true)?,
         web_build_dir,
         original_root,
-        trust_proxy: parse_bool(environment.var("GARCON_TRUST_PROXY"), false)?,
+        trust_proxy: args.iter().any(|argument| argument == "--trust-proxy")
+            || parse_bool(environment.var("GARCON_TRUST_PROXY"), false)?,
         ws_backpressure_limit: parse_int(
             environment.var("GARCON_WS_BACKPRESSURE_LIMIT"),
             2 * 1024 * 1024,
@@ -262,6 +263,22 @@ mod tests {
             &args(values),
             &FakeEnvironment(environment.iter().copied().collect()),
         )
+    }
+
+    #[test]
+    fn owns_the_runtime_origin_and_honors_a_trust_proxy_flag() {
+        let LaunchMode::FrontDoor(trusted) = config(
+            &["--runtime-origin", "http://elsewhere:1", "--trust-proxy"],
+            &[],
+        ) else {
+            panic!("expected front door");
+        };
+        assert!(trusted.trust_proxy);
+        assert_eq!(trusted.original_args, args(&["--trust-proxy"]));
+        let LaunchMode::FrontDoor(untrusted) = config(&[], &[]) else {
+            panic!("expected front door");
+        };
+        assert!(!untrusted.trust_proxy);
     }
 
     #[test]

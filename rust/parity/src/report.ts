@@ -22,6 +22,15 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
     return { scenario, missingGolden: true, cases: [] };
   }
   const byName = new Map(runs.map((run) => [run.name, run]));
+  const recorded = new Set(golden.cases.map((expected) => expected.name));
+  // A step added without recording again would otherwise never be checked.
+  const unrecorded = runs.filter((run) => !recorded.has(run.name)).map((run): CaseResult => ({
+    scenario,
+    name: run.name,
+    difference: { path: '$', kind: 'extra', expected: '(not recorded)', actual: 'a generated case; run bun run parity:record' },
+    native: run.fallbacks.length === 0,
+    fallbacks: run.fallbacks,
+  }));
   const cases = golden.cases.map((expected): CaseResult => {
     const run = byName.get(expected.name);
     if (!run) {
@@ -41,7 +50,7 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
       fallbacks: run.fallbacks,
     };
   });
-  return { scenario, missingGolden: false, cases };
+  return { scenario, missingGolden: false, cases: [...cases, ...unrecorded] };
 }
 
 // The difference signature groups failures that differ the same way, so one

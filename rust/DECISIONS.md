@@ -21,10 +21,11 @@ fallback (rust-anything's "lift").
 
 Consequences: The application keeps working at every step, and the fallback
 rate measures progress. Until the lift, Garcon runs two processes. The original
-still publishes `runtime.json` with its own loopback URL, so `garcon-cli`
-discovery reaches the original directly; that remains correct because the
-original still owns every CLI route. Executor CLI forwarding is unaffected
-because it does not use HTTP.
+still writes `runtime.json`, but publishes the front door's origin in it
+(`--runtime-origin`): advertising its own ephemeral loopback port broke
+`garcon-cli` restart detection in the end-to-end suite, because the port
+changes on every restart. Executor CLI forwarding is unaffected because it does
+not use HTTP.
 
 ## ADR-002: Record and replay from the outside
 
@@ -129,10 +130,14 @@ every client would share the proxy's loopback address unless the original
 trusts forwarded headers, and trusting them unconditionally would let clients
 choose their own key.
 
-Decision: Unless `GARCON_TRUST_PROXY` is set, the front door replaces
-`X-Forwarded-For` with the connection's address, removes `X-Real-IP`, and
-starts the original with `GARCON_TRUST_PROXY=1`. With `GARCON_TRUST_PROXY` set,
-an upstream proxy's headers pass through unchanged.
+Decision: Unless `--trust-proxy` or `GARCON_TRUST_PROXY` is set, the front
+door replaces `X-Forwarded-For` with the connection's address, removes
+`X-Real-IP`, and starts the original with `--trust-proxy`. With either set, an
+upstream proxy's headers pass through unchanged. The front door passes this,
+and `--runtime-origin`, as flags rather than environment variables: the
+original's terminal and provider children inherit its environment, so a Garcon
+started from a Garcon terminal would otherwise trust forwarded headers from any
+client.
 
 Consequences: Rate limiting behaves as it does without the front door, and the
 `spoofed-forwarded-for` case in `api-session` guards it. The original's

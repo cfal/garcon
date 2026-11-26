@@ -110,6 +110,12 @@ fn bad_gateway() -> Response<ResponseBody> {
     response
 }
 
+fn bad_request() -> Response<ResponseBody> {
+    let mut response = Response::new(full_body(Bytes::from_static(b"Bad Request")));
+    *response.status_mut() = StatusCode::BAD_REQUEST;
+    response
+}
+
 /// A connector to the original with Nagle's algorithm disabled, so proxying
 /// adds no write coalescing delay that a direct connection would not have.
 pub fn no_delay_connector() -> HttpConnector {
@@ -153,14 +159,17 @@ impl Proxy {
         headers.insert(X_FORWARDED_FOR, peer);
     }
 
-    fn target_uri(&self, uri: &Uri) -> Uri {
+    /// Returns `None` for request targets that are not paths, such as the
+    /// asterisk form of `OPTIONS *`, which cannot be appended to the origin.
+    fn target_uri(&self, uri: &Uri) -> Option<Uri> {
         let path = uri
             .path_and_query()
             .map(|value| value.as_str())
             .unwrap_or("/");
-        format!("{}{path}", self.origin)
-            .parse()
-            .expect("origin and request path form a valid URI")
+        if !path.starts_with('/') {
+            return None;
+        }
+        format!("{}{path}", self.origin).parse().ok()
     }
 
     pub async fn forward(
@@ -175,7 +184,10 @@ impl Proxy {
         if is_upgrade(request.headers()) {
             return self.forward_upgrade(request).await;
         }
-        *request.uri_mut() = self.target_uri(request.uri());
+        let Some(target) = self.target_uri(request.uri()) else {
+            return bad_request();
+        };
+        *request.uri_mut() = target;
         remove_hop_by_hop(request.headers_mut());
         match self.client.request(request).await {
             Ok(response) => {
@@ -295,6 +307,16 @@ mod tests {
         assert!(is_upgrade(&headers));
         headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
         assert!(!is_upgrade(&headers));
+    }
+
+    #[test]
+    fn targets_only_path_requests() {
+        let proxy = proxy(false);
+        assert_eq!(
+            proxy.target_uri(&Uri::from_static("/api?x=1")).unwrap(),
+            "http://127.0.0.1:1/api?x=1"
+        );
+        assert!(proxy.target_uri(&Uri::from_static("*")).is_none());
     }
 
     #[test]

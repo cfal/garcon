@@ -150,6 +150,9 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
       NO_COLOR: '1',
       TZ: 'UTC',
       LANG: 'C.UTF-8',
+      // The front door starts the original with the Bun that runs the
+      // harness, as the original build does, unless a setting overrides it.
+      GARCON_RS_BUN: process.execPath,
       // Front-door settings such as unit kill switches pass through.
       ...frontDoorEnvironment(),
       GARCON_RS_FALLBACK_LOG: fallbackLogPath,

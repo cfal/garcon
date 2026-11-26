@@ -121,9 +121,14 @@ async fn accept(listener: &TcpListener) -> std::io::Result<(TcpStream, SocketAdd
     Ok((stream, peer))
 }
 
+/// Pause after a failed accept. Errors such as running out of file descriptors
+/// persist until connections close, so retrying at once would spin.
+const ACCEPT_ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_millis(100);
+
 async fn accept_loop(listener: TcpListener, front_door: Arc<FrontDoor>) {
     loop {
         let Ok((stream, peer)) = accept(&listener).await else {
+            tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
             continue;
         };
         let front_door = front_door.clone();
@@ -150,6 +155,11 @@ fn exit_code(status: std::process::ExitStatus) -> ExitCode {
 }
 
 async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
+    // Installed before the original starts, so a stop request during its
+    // startup waits for it and then shuts it down gracefully instead of
+    // killing the front door and, through its death signal, the original.
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
     let listener = TcpListener::bind((config.bind_address.as_str(), config.port)).await?;
     let port = listener.local_addr()?.port();
     let public_url = config::listening_server_url(&config.bind_address, port);
@@ -188,8 +198,6 @@ async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
     });
     let server = tokio::spawn(accept_loop(listener, front_door));
 
-    let mut terminate = signal(SignalKind::terminate())?;
-    let mut interrupt = signal(SignalKind::interrupt())?;
     let status = tokio::select! {
         status = original.child.wait() => status?,
         _ = terminate.recv() => original::stop(&mut original.child).await?,

@@ -5,8 +5,10 @@
 //! of CPU per request. Built assets are content-addressed and change only when
 //! the build changes, so the front door keeps each file and each encoding it
 //! has produced, keyed by path, size, and modification time. A rebuilt file has
-//! a new version and replaces its entry. Memory is bounded by `budget`; files
-//! that do not fit are served uncached.
+//! a new version and replaces its entry. Memory is bounded by `budget`: the
+//! least recently used entries make room for new ones, so files of an earlier
+//! build that are no longer requested do not hold the budget, and files larger
+//! than the whole budget are served uncached.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -39,6 +41,7 @@ struct Entry {
     version: FileVersion,
     contents: Bytes,
     encodings: Vec<(Encoding, Bytes)>,
+    last_used: u64,
 }
 
 impl Entry {
@@ -56,11 +59,64 @@ impl Entry {
 struct Entries {
     by_path: HashMap<PathBuf, Entry>,
     used: usize,
+    /// Advances on every hit and insertion to order entries by recency.
+    clock: u64,
+}
+
+impl Entries {
+    fn tick(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+
+    /// Returns the current version's entry, marking it used.
+    fn current(&mut self, version: &FileVersion) -> Option<&mut Entry> {
+        let now = self.tick();
+        let entry = self
+            .by_path
+            .get_mut(&version.path)
+            .filter(|entry| entry.version == *version)?;
+        entry.last_used = now;
+        Some(entry)
+    }
+
+    /// Evicts least recently used entries other than `keep` until `needed`
+    /// more bytes fit in `budget`. Returns whether they fit.
+    fn make_room(&mut self, needed: usize, budget: usize, keep: &PathBuf) -> bool {
+        while self.used + needed > budget {
+            let Some(oldest) = self
+                .by_path
+                .iter()
+                .filter(|(path, _)| *path != keep)
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(path, _)| path.clone())
+            else {
+                return false;
+            };
+            if let Some(evicted) = self.by_path.remove(&oldest) {
+                self.used -= evicted.size();
+            }
+        }
+        true
+    }
 }
 
 pub struct AssetCache {
     entries: Mutex<Entries>,
     budget: usize,
+}
+
+/// Compresses `body` without holding up other tasks on this runtime worker:
+/// large application chunks take tens of milliseconds, which would otherwise
+/// delay every connection, WebSocket relays included, scheduled on it.
+fn compress_off_runtime(encoding: Encoding, body: &Bytes) -> std::io::Result<Bytes> {
+    let multi_thread = tokio::runtime::Handle::try_current()
+        .is_ok_and(|handle| handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread);
+    if multi_thread {
+        tokio::task::block_in_place(|| encoding.compress(body))
+    } else {
+        encoding.compress(body)
+    }
 }
 
 impl AssetCache {
@@ -72,12 +128,8 @@ impl AssetCache {
     }
 
     pub fn contents(&self, version: &FileVersion) -> Option<Bytes> {
-        let entries = self.entries.lock().expect("asset cache lock");
-        entries
-            .by_path
-            .get(&version.path)
-            .filter(|entry| entry.version == *version)
-            .map(|entry| entry.contents.clone())
+        let mut entries = self.entries.lock().expect("asset cache lock");
+        entries.current(version).map(|entry| entry.contents.clone())
     }
 
     pub fn store_contents(&self, version: &FileVersion, contents: &Bytes) {
@@ -85,16 +137,18 @@ impl AssetCache {
         if let Some(stale) = entries.by_path.remove(&version.path) {
             entries.used -= stale.size();
         }
-        if entries.used + contents.len() > self.budget {
+        if !entries.make_room(contents.len(), self.budget, &version.path) {
             return;
         }
         entries.used += contents.len();
+        let last_used = entries.tick();
         entries.by_path.insert(
             version.path.clone(),
             Entry {
                 version: version.clone(),
                 contents: contents.clone(),
                 encodings: Vec::new(),
+                last_used,
             },
         );
     }
@@ -108,37 +162,33 @@ impl AssetCache {
         body: &Bytes,
     ) -> std::io::Result<Bytes> {
         let Some(version) = version else {
-            return encoding.compress(body);
+            return compress_off_runtime(encoding, body);
         };
         {
-            let entries = self.entries.lock().expect("asset cache lock");
-            if let Some(entry) = entries
-                .by_path
-                .get(&version.path)
-                .filter(|entry| entry.version == *version)
-                && let Some((_, encoded)) = entry
+            let mut entries = self.entries.lock().expect("asset cache lock");
+            if let Some((_, encoded)) = entries.current(version).and_then(|entry| {
+                entry
                     .encodings
                     .iter()
                     .find(|(cached, _)| *cached == encoding)
-            {
+            }) {
                 return Ok(encoded.clone());
             }
         }
         // Compresses outside the lock so other requests are not held up.
-        let encoded = encoding.compress(body)?;
+        let encoded = compress_off_runtime(encoding, body)?;
         let mut entries = self.entries.lock().expect("asset cache lock");
-        let Entries { by_path, used } = &mut *entries;
-        if *used + encoded.len() <= self.budget
-            && let Some(entry) = by_path
-                .get_mut(&version.path)
-                .filter(|entry| entry.version == *version)
-            && !entry
+        let cacheable = entries.current(version).is_some_and(|entry| {
+            !entry
                 .encodings
                 .iter()
                 .any(|(cached, _)| *cached == encoding)
-        {
-            *used += encoded.len();
-            entry.encodings.push((encoding, encoded.clone()));
+        });
+        if cacheable && entries.make_room(encoded.len(), self.budget, &version.path) {
+            entries.used += encoded.len();
+            if let Some(entry) = entries.by_path.get_mut(&version.path) {
+                entry.encodings.push((encoding, encoded.clone()));
+            }
         }
         Ok(encoded)
     }
@@ -190,6 +240,24 @@ mod tests {
             "the second request reuses the cached encoding"
         );
         assert_eq!(cache.entries.lock().unwrap().used, body.len() + first.len());
+    }
+
+    #[test]
+    fn evicts_the_least_recently_used_file_to_cache_a_new_one() {
+        let file = |name: &str| FileVersion {
+            path: PathBuf::from(name),
+            len: 4,
+            modified: None,
+        };
+        let cache = AssetCache::new(8);
+        cache.store_contents(&file("/old-build.js"), &Bytes::from_static(b"old!"));
+        cache.store_contents(&file("/kept.js"), &Bytes::from_static(b"kept"));
+        assert!(cache.contents(&file("/kept.js")).is_some());
+        cache.store_contents(&file("/new-build.js"), &Bytes::from_static(b"new!"));
+        assert_eq!(cache.contents(&file("/old-build.js")), None);
+        assert!(cache.contents(&file("/kept.js")).is_some());
+        assert!(cache.contents(&file("/new-build.js")).is_some());
+        assert_eq!(cache.entries.lock().unwrap().used, 8);
     }
 
     #[test]
