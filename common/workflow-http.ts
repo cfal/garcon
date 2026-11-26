@@ -11,5 +11,6 @@ export const workflowPaths = {
   addItem: `${base}/runs/add-item`,
   addStep: `${base}/runs/add-step`,
   retry: `${base}/runs/retry`,
+  stop: `${base}/runs/stop`,
   archive: `${base}/runs/archive`,
 } as const;

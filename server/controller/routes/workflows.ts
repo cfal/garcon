@@ -10,12 +10,12 @@ import type { HttpRouteContext, RouteHandler, RouteMap } from '../lib/http-route
 import type { WorkflowEngine, WorkflowSettingsResolver } from '../workflows/engine.js';
 import {
   mergeExecutionContext, normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizePublish, normalizeRetry,
-  normalizeStart, normalizeTest, workflowIdentifier,
+  normalizeStart, normalizeStop, normalizeTest, workflowIdentifier,
 } from '../workflows/requests.js';
 
 export type WorkflowHttpService = Pick<WorkflowEngine,
   'publish' | 'listDefinitions' | 'getRevision' | 'testWorkflowDraft' | 'startRun' | 'getRun' |
-  'listRuns' | 'listActiveChats' | 'addItem' | 'addStep' | 'decide' | 'retry' | 'archiveRun' | 'replayStartRun' | 'replayTestWorkflowDraft'>;
+  'listRuns' | 'listActiveChats' | 'addItem' | 'addStep' | 'decide' | 'retry' | 'stopRun' | 'archiveRun' | 'replayStartRun' | 'replayTestWorkflowDraft'>;
 
 const bodyLimit = 2 * 1024 * 1024;
 const workflowHeaders = { 'Cache-Control': 'no-store' };
@@ -164,6 +164,7 @@ export function createWorkflowRoutes(runtime: { readonly service: WorkflowHttpSe
       return Response.json(service.getRun(run.id));
     }) },
     [workflowPaths.retry]: { POST: changeRun(normalizeRetry, (service, request, who) => service.retry(request, who)) },
+    [workflowPaths.stop]: { POST: changeRun(normalizeStop, (service, request, who) => service.stopRun(request, who)) },
     [workflowPaths.archive]: { POST: changeRun(normalizeArchive, (service, request, who) => service.archiveRun(request, who)) },
   };
 }

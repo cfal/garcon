@@ -64,6 +64,25 @@ test.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
       const rejected = await settled(notStarted);
       expect(rejected).toMatchObject({ status: 'failed', attempts: [{ chatId: null, reason: expect.stringContaining('synthetic-missing-shell') }] });
       expect(await readFile(sideEffect, 'utf8')).toBe('ran\n');
+
+      const sleeping = launch('sleep 30');
+      let runningId = '';
+      for (let n = 0; n < 500; n++) {
+        const instance = engine.getRun(sleeping).steps[0]?.instances[0];
+        if (instance?.status === 'running' && instance.attempts[0]?.chatId) {
+          runningId = instance.id;
+          break;
+        }
+        await Bun.sleep(5);
+      }
+      expect(runningId).not.toBe('');
+      engine.stopRun({ runId: sleeping, instanceId: runningId, operationId: 'stop-sleep' }, actor);
+      const stopped = await settled(sleeping);
+      expect(stopped).toMatchObject({
+        status: 'unknown',
+        attempts: [{ status: 'unknown', reason: expect.stringContaining('Stop was requested') }],
+      });
+      expect(engine.archiveRun({ runId: sleeping, operationId: 'archive-stopped' }, actor).status).toBe('archived');
     } finally {
       fault.mockRestore();
       engine.close();

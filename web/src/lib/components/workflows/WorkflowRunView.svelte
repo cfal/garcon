@@ -5,6 +5,7 @@
 	import List from '@lucide/svelte/icons/list';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Square from '@lucide/svelte/icons/square';
 	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -15,6 +16,7 @@
 		decideWorkflow,
 		getWorkflowRun,
 		retryWorkflowStep,
+		stopWorkflowRun,
 	} from '$lib/api/workflows';
 	import * as m from '$lib/paraglide/messages.js';
 	import { lazyRenderer } from '$lib/utils/lazy-renderer';
@@ -30,6 +32,7 @@
 		WORKFLOW_INSTANCE_STATUSES,
 		manualWorkflowEdges,
 		matchingWorkflowInstances,
+		workflowRunCanStop,
 		workflowRunFinished,
 		workflowRunHasLiveAttempt,
 	} from '$lib/workflows/run/workflow-run-projection';
@@ -67,6 +70,7 @@
 	let amendment = $state<
 		{ kind: 'step'; evidence?: string } | { kind: 'item'; stepId: string } | null
 	>(null);
+	let stopOpen = $state(false);
 	let archiveOpen = $state(false);
 	const selected = $derived(run?.steps.find(({ step }) => stepId === step.id));
 	const instances = $derived(matchingWorkflowInstances(selected?.instances ?? [], query, status));
@@ -81,6 +85,7 @@
 	const disabled = $derived(
 		controller.mutating || controller.actionUnconfirmed || run?.status === 'archived',
 	);
+	const canStop = $derived(Boolean(run && workflowRunCanStop(run)));
 	const canArchive = $derived(run && run.status !== 'archived' && !workflowRunHasLiveAttempt(run));
 	const nodes = $derived(
 		run?.steps.map(({ step, instances, waitingReason }) => ({
@@ -154,6 +159,18 @@
 		void controller.mutate(() => retryWorkflowStep(request));
 	}
 
+	function stopStep(instanceId: string) {
+		const request = { runId, instanceId, operationId: createRandomId() };
+		void controller.mutate(() => stopWorkflowRun(request));
+	}
+
+	async function stopRun() {
+		if (!canStop || disabled) return;
+		stopOpen = false;
+		const request = { runId, operationId: createRandomId() };
+		if (await controller.mutate(() => stopWorkflowRun(request))) amendment = null;
+	}
+
 	async function retryAction() {
 		if (await controller.retryUnconfirmed()) amendment = null;
 	}
@@ -199,6 +216,11 @@
 				{#if run && !workflowRunFinished(run)}
 					<Button size="sm" variant="outline" {disabled} onclick={() => addStep()}
 						><Plus class="size-4" /> {m.workflow_studio_add_step()}</Button
+					>
+				{/if}
+				{#if canStop}
+					<Button size="sm" variant="outline" {disabled} onclick={() => (stopOpen = true)}
+						><Square class="size-4" /> {m.workflow_studio_stop_run()}</Button
 					>
 				{/if}
 				{#if canArchive}
@@ -406,6 +428,7 @@
 							{onOpenChat}
 							onDecide={decide}
 							onRetry={retry}
+							onStop={stopStep}
 							onAddFromEvidence={addStep}
 							onAddItem={() => {
 								if (!selected) return;
@@ -420,6 +443,28 @@
 		</WorkflowSplitView>
 	{/if}
 </section>
+
+{#if stopOpen}
+	<Dialog.Root
+		open
+		onOpenChange={(open) => {
+			if (!open) stopOpen = false;
+		}}
+	>
+		<Dialog.Content>
+			<Dialog.Header>
+				<Dialog.Title>{m.workflow_studio_stop_run()}</Dialog.Title>
+				<Dialog.Description>{m.workflow_studio_stop_confirm()}</Dialog.Description>
+			</Dialog.Header>
+			<div class="flex flex-wrap justify-end gap-2">
+				<Button variant="ghost" onclick={() => (stopOpen = false)}>{m.common_cancel()}</Button>
+				<Button variant="destructive" disabled={!canStop || disabled} onclick={stopRun}
+					>{m.workflow_studio_stop_run()}</Button
+				>
+			</div>
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}
 
 {#if archiveOpen}
 	<Dialog.Root

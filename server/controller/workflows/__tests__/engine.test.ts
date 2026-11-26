@@ -944,3 +944,47 @@ steps:
   });
   expect(service.getRun(id).signals.map(signal => signal.ref.stepId)).toEqual(['local']);
 });
+
+test('cooperative stop signals only stopSignal on running attempts, blocks pending intakes on run stop, and prevents retrying stopped decisions', async () => {
+  const { service, runner } = workspace()(new ControlledRunner());
+  const source = `version: 1
+name: Cooperative stop
+steps:
+  - { id: first, kind: command, command: sleep 30 }
+  - { id: downstream, kind: command, on: { kind: once, signal: first.turn_completed }, command: echo done }
+  - { id: check, kind: decision, prompt: Proceed?, choices: { ok: OK } }
+`;
+  publish(service, source, 'stop-def');
+  const { id } = service.startRun({ definitionId: 'stop-def', inputs: {}, executionContext: LOCAL });
+  await service.start();
+  const first = await runner.next('first');
+  expect(first.callbacks.signal.aborted).toBe(false);
+  expect(first.callbacks.stopSignal?.aborted).toBe(false);
+
+  service.stopRun({ runId: id, instanceId: first.request.instanceId, operationId: 'stop-first' }, ACTOR);
+  expect(first.callbacks.signal.aborted).toBe(false);
+  expect(first.callbacks.stopSignal?.aborted).toBe(true);
+  first.finish({ kind: 'failed', reason: 'Stopped by user.' });
+  await until(() => step(service, id, 'first').instances[0]?.status === 'failed');
+
+  // Step stop keeps downstream intake open for retry.
+  service.retry({ runId: id, instanceId: first.request.instanceId, operationId: 'retry-first' }, ACTOR);
+  const retried = await runner.next('first', 1);
+  service.stopRun({ runId: id, operationId: 'stop-whole-run' }, ACTOR);
+  service.stopRun({ runId: id, operationId: 'stop-whole-run' }, ACTOR);
+  expect(retried.callbacks.stopSignal?.aborted).toBe(true);
+  retried.finish(success('late finish'));
+  await until(() => service.getRun(id).status === 'attention');
+
+  const after = service.getRun(id);
+  expect(step(service, id, 'downstream').instances).toEqual([]);
+  expect(step(service, id, 'downstream')).toMatchObject({
+    intake: 'closed',
+    waitingReason: 'Stopped by Example Reader.',
+  });
+  const decision = step(service, id, 'check').instances[0]!;
+  expect(decision.status).toBe('blocked');
+  expect(() => service.retry({ runId: id, instanceId: decision.id, operationId: 'retry-decision' }, ACTOR))
+    .toThrow('cannot be retried');
+  expect(after.status).toBe('attention');
+});

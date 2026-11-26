@@ -4,7 +4,7 @@ import { isExecutorId } from '../../../common/executors.js';
 import { isRecord, stableJsonStringify, type JsonObject, type JsonValue } from '../../../common/json.js';
 import type {
   WorkflowActor, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowArchiveRequest, WorkflowDecisionRequest, WorkflowExecutionContext,
-  WorkflowLocation, WorkflowPageRequest, WorkflowPublishRequest, WorkflowRetryRequest, WorkflowStartRequest, WorkflowTestRequest,
+  WorkflowLocation, WorkflowPageRequest, WorkflowPublishRequest, WorkflowRetryRequest, WorkflowStartRequest, WorkflowStopRequest, WorkflowTestRequest,
 } from '../../../common/workflow-runs.js';
 import { workflowInvalid, workflowLimit } from './errors.js';
 import { WORKFLOW_LIMITS } from './limits.js';
@@ -145,6 +145,14 @@ export function normalizeAddStep(value: unknown): WorkflowAddStepRequest {
 export function normalizeRetry(value: unknown): WorkflowRetryRequest {
   const body = record(value, 'Workflow retry', [...operationKeys, 'instanceId']);
   return { ...operation(body), instanceId: workflowIdentifier(body.instanceId, 'Instance id') };
+}
+
+export function normalizeStop(value: unknown): WorkflowStopRequest {
+  const body = record(value, 'Workflow stop', [...operationKeys, 'instanceId']);
+  return {
+    ...operation(body),
+    ...(body.instanceId !== undefined && { instanceId: workflowIdentifier(body.instanceId, 'Instance id') }),
+  };
 }
 
 export function normalizeArchive(value: unknown): WorkflowArchiveRequest {

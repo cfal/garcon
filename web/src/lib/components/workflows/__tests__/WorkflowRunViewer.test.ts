@@ -23,6 +23,7 @@ vi.mock('$lib/api/workflows', () => ({
 	archiveWorkflowRun: vi.fn(),
 	decideWorkflow: vi.fn(),
 	retryWorkflowStep: vi.fn(),
+	stopWorkflowRun: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -220,5 +221,63 @@ describe('Workflow run viewer', () => {
 		expect(screen.queryByRole('button', { name: 'Approve report' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Add step' })).toBeNull();
 		expect(screen.getByRole('button', { name: /Review report/ })).toBeTruthy();
+	});
+
+	it('requests cooperative step stop and confirms whole-run stop before invoking the stop API', async () => {
+		const live = workflowRun();
+		const research = {
+			...live.steps[0]!,
+			instances: [
+				{
+					id: 'research-live',
+					key: null,
+					status: 'running' as const,
+					trigger: { kind: 'root' as const },
+					bindings: null,
+					prompt: 'Research.',
+					reason: null,
+					attempts: [
+						{
+							id: 'attempt-live',
+							number: 1,
+							status: 'running' as const,
+							chatId: '1780000000000009',
+							chatAvailable: true,
+							turnId: 'turn-live',
+							startedAt: live.createdAt,
+							finishedAt: null,
+							reason: null,
+						},
+					],
+				},
+			],
+		};
+		const running = { ...live, status: 'running' as const, steps: [research, ...live.steps.slice(1)] };
+		vi.mocked(api.getWorkflowRun).mockResolvedValue(running);
+		vi.mocked(api.stopWorkflowRun).mockResolvedValue(live);
+		render(WorkflowRunViewer, { runId: 'run-a', onOpenChat: vi.fn() });
+
+		await fireEvent.click(await screen.findByRole('button', { name: /^research\b/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Stop step' }));
+		await waitFor(() =>
+			expect(api.stopWorkflowRun).toHaveBeenCalledWith({
+				runId: 'run-a',
+				instanceId: 'research-live',
+				operationId: expect.any(String),
+			}),
+		);
+
+		vi.mocked(api.getWorkflowRun).mockResolvedValue(running);
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Stop run' }));
+		const dialog = screen.getByRole('dialog', { name: 'Stop run' });
+		expect(api.stopWorkflowRun).toHaveBeenCalledTimes(1);
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Stop run' }));
+		await waitFor(() =>
+			expect(api.stopWorkflowRun).toHaveBeenLastCalledWith({
+				runId: 'run-a',
+				operationId: expect.any(String),
+			}),
+		);
 	});
 });

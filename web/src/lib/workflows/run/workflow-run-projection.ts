@@ -28,6 +28,17 @@ export function workflowRunHasLiveAttempt(run: WorkflowRunDetail): boolean {
 	);
 }
 
+export function workflowInstanceCanStop(status: WorkflowInstanceStatus): boolean {
+	return status === 'running' || status === 'ready' || status === 'waiting-executor';
+}
+
+export function workflowRunCanStop(run: WorkflowRunDetail): boolean {
+	return (
+		!workflowRunFinished(run) &&
+		(workflowRunHasLiveAttempt(run) || run.status === 'running' || run.status === 'waiting')
+	);
+}
+
 export function matchingWorkflowInstances(
 	instances: readonly WorkflowStepInstance[],
 	query: string,

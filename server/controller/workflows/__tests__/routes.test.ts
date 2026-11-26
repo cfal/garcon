@@ -184,3 +184,16 @@ test('human decisions allow disabled-auth browser sessions but reject local capa
   })).status).toBe(403);
   expect(service.listRuns().items).toHaveLength(1);
 });
+
+test('workflow stop endpoint cancels pending runs idempotently and rejects conflicting operation reuse', async () => {
+  const { post, publish } = fixture();
+  await publish(null);
+  const run = await (await post(workflowPaths.runs, { definitionId: 'review', inputs: {} })).json() as WorkflowRunDetail;
+  const instanceId = run.steps[0]!.instances[0]!.id;
+  const stopPayload = { runId: run.id, operationId: 'stop-op' };
+  const stopped = await post(workflowPaths.stop, stopPayload);
+  expect(stopped.status).toBe(200);
+  expect((await stopped.json() as WorkflowRunDetail)).toMatchObject({ status: 'attention', steps: [{ instances: [{ id: instanceId, status: 'blocked' }] }] });
+  expect((await post(workflowPaths.stop, stopPayload)).status).toBe(200);
+  expect((await post(workflowPaths.stop, { ...stopPayload, instanceId })).status).toBe(409);
+});

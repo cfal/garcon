@@ -8,7 +8,11 @@
 		type WorkflowRunStep,
 		type WorkflowStepInstance,
 	} from '$shared/workflow-runs';
-	import { stepEvidence, workflowRunFinished } from '$lib/workflows/run/workflow-run-projection';
+	import {
+		stepEvidence,
+		workflowInstanceCanStop,
+		workflowRunFinished,
+	} from '$lib/workflows/run/workflow-run-projection';
 	import * as m from '$lib/paraglide/messages.js';
 	import { workflowStatusLabel, workflowStepKindLabel } from './workflow-labels';
 
@@ -20,6 +24,7 @@
 		onOpenChat,
 		onDecide,
 		onRetry,
+		onStop,
 		onAddItem,
 		onAddFromEvidence,
 	}: {
@@ -30,6 +35,7 @@
 		onOpenChat: (id: string) => void;
 		onDecide: (instanceId: string, choice: string) => void;
 		onRetry: (instanceId: string) => void;
+		onStop: (instanceId: string) => void;
 		onAddItem: () => void;
 		onAddFromEvidence: (id: string) => void;
 	} = $props();
@@ -111,9 +117,13 @@
 						>
 					{/each}
 				</div>
-			{:else if instance.status === 'failed' && instance.attempts.length < WORKFLOW_ATTEMPT_LIMIT && canAmend}
+			{:else if instance.status === 'failed' && step.step.kind !== 'decision' && instance.attempts.length < WORKFLOW_ATTEMPT_LIMIT && canAmend}
 				<Button variant="outline" size="sm" {disabled} onclick={() => onRetry(instance.id)}
 					>{m.workflow_studio_retry_step()}</Button
+				>
+			{:else if workflowInstanceCanStop(instance.status) && canAmend}
+				<Button variant="outline" size="sm" {disabled} onclick={() => onStop(instance.id)}
+					>{m.workflow_studio_stop_step()}</Button
 				>
 			{:else if instance.status === 'unknown'}
 				<p class="wrap-anywhere text-sm text-status-warning-foreground">

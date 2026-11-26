@@ -2,7 +2,9 @@ import mime from 'mime-types';
 import { win32 } from 'node:path';
 import type { ExecutionFilesService } from '@garcon/server-agent-interface';
 import { createEmptyAgentSettings } from '../../../common/agent-settings.js';
-import type { AutomationSignal, AutomationSignalDecision, AutomationStartInput, AutomationResult } from '../../../common/automation.js';
+import type {
+  AutomationResult, AutomationSignal, AutomationSignalDecision, AutomationStartInput, AutomationStopResult,
+} from '../../../common/automation.js';
 import type { JsonValue } from '../../../common/json.js';
 import type { WorkflowLocation } from '../../../common/workflow-runs.js';
 import type { WorkflowAttachment } from '../../../common/workflow-definition.js';
@@ -36,9 +38,19 @@ function emit(event: AutomationSignal, request: Extract<WorkflowAttemptRequest, 
   return { kind: 'accepted' };
 }
 
-function terminal(result: AutomationResult, command: boolean): WorkflowAttemptResult {
+function terminal(result: AutomationResult, command: boolean, stopped = false): WorkflowAttemptResult {
   if (result.kind === 'unavailable') return { kind: 'unknown', reason: result.reason };
-  if (result.kind === 'interrupted') return { kind: result.termination === 'requested' ? 'unknown' : 'failed', reason: 'The managed turn was interrupted.' };
+  if (result.kind === 'interrupted') {
+    if (result.termination === 'requested') {
+      return {
+        kind: 'unknown',
+        reason: stopped
+          ? 'Stop was requested; inspect the chat before starting replacement work.'
+          : 'The managed turn was interrupted.',
+      };
+    }
+    return { kind: 'failed', reason: stopped ? 'Stopped by user.' : 'The managed turn was interrupted.' };
+  }
   if (result.kind === 'failed') {
     const exit = result.commandOutcome;
     const unsuccessfulExit = exit && exit.outcome !== 'unknown'
@@ -84,6 +96,9 @@ export function createWorkflowRunner(automation: AutomationExecutionPort, files:
   return {
     async run(request, callbacks) {
       const { executorId, projectPath } = request.location;
+      const prepSignal = callbacks.stopSignal
+        ? AbortSignal.any([callbacks.signal, callbacks.stopSignal])
+        : callbacks.signal;
       let input: AutomationStartInput;
       try {
         if (request.kind === 'agent') {
@@ -93,7 +108,7 @@ export function createWorkflowRunner(automation: AutomationExecutionPort, files:
             throw new ValidationDomainError('Workflow agent execution settings are incomplete.');
           }
           input = { agentId, model, permissionMode, thinkingMode, agentSettings, apiProviderId, modelEndpointId, modelProtocol, providerRevision, orderedPreambleIds,
-            tags: tags ? [...tags] : undefined, images: await attachments(files, request.location, request.settings.attachments, callbacks.signal),
+            tags: tags ? [...tags] : undefined, images: await attachments(files, request.location, request.settings.attachments, prepSignal),
             projectPath, executorId, clientRequestId: request.attemptId, command: request.prompt, title: request.stepId };
         } else {
           input = { agentId: 'shell', model: request.shell ?? 'sh', permissionMode: 'default', thinkingMode: 'none',
@@ -101,20 +116,37 @@ export function createWorkflowRunner(automation: AutomationExecutionPort, files:
             orderedPreambleIds: [], command: request.command, title: request.stepId };
         }
       } catch (error) {
+        callbacks.signal.throwIfAborted();
+        if (callbacks.stopSignal?.aborted) return { kind: 'failed', reason: 'Stopped before execution started.' };
         return { kind: isDomainError(error) && offline(error.code) ? 'unavailable' : 'failed', reason: error instanceof Error ? error.message : 'Could not prepare workflow input.' };
       }
       callbacks.signal.throwIfAborted();
+      if (callbacks.stopSignal?.aborted) return { kind: 'failed', reason: 'Stopped before execution started.' };
       const prepared = await automation.prepare(input, request.kind === 'agent' && Object.keys(request.signals).length
         ? { onSignal: event => emit(event, request, callbacks) } : {});
       if (prepared.kind !== 'prepared') return { kind: offline(prepared.code) ? 'unavailable' : 'failed', reason: prepared.message };
       const { turn } = prepared;
+      let stopRequested = false;
+      let stopOperation: Promise<AutomationStopResult> | null = null;
+      const onStop = () => {
+        stopRequested = true;
+        stopOperation ??= turn.cancel().catch(() => ({ kind: 'unknown', reason: 'Stop request failed.' }));
+      };
       try {
         try {
           callbacks.signal.throwIfAborted();
+          if (callbacks.stopSignal?.aborted) {
+            await turn.cancel();
+            return { kind: 'failed', reason: 'Stopped before execution started.' };
+          }
           callbacks.attachChat(turn.key.chatId, turn.key.turnId);
         } catch (error) {
           await turn.cancel();
           throw error;
+        }
+        if (callbacks.stopSignal) {
+          if (callbacks.stopSignal.aborted) onStop();
+          else callbacks.stopSignal.addEventListener('abort', onStop, { once: true });
         }
         const started = await turn.start();
         switch (started.kind) {
@@ -125,12 +157,19 @@ export function createWorkflowRunner(automation: AutomationExecutionPort, files:
               callbacks.confirmChat();
               return { kind: 'unknown', reason: started.code };
             }
-            return { kind: offline(started.code) ? 'unavailable' : 'failed', reason: started.code };
+            return {
+              kind: offline(started.code) ? 'unavailable' : 'failed',
+              reason: stopRequested && started.code === 'AUTOMATION_START_CANCELED'
+                ? 'Stopped before execution started.'
+                : started.code,
+            };
           case 'published':
             callbacks.confirmChat();
-            return terminal(await automation.waitForTerminal(turn.key, callbacks.signal), request.kind === 'command');
+            return terminal(await automation.waitForTerminal(turn.key, callbacks.signal), request.kind === 'command', stopRequested);
         }
       } finally {
+        callbacks.stopSignal?.removeEventListener('abort', onStop);
+        if (!callbacks.signal.aborted && stopOperation) await stopOperation;
         turn.release();
       }
     },

@@ -75,6 +75,10 @@ export interface WorkflowRetryRequest extends WorkflowMutationRequest {
   readonly instanceId: string;
 }
 
+export interface WorkflowStopRequest extends WorkflowMutationRequest {
+  readonly instanceId?: string;
+}
+
 export type WorkflowArchiveRequest = WorkflowMutationRequest;
 
 export interface WorkflowDefinitionSummary {

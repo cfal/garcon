@@ -27,7 +27,7 @@ import {
 } from './records.js';
 import {
   normalizeActor, normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizePublish, normalizeRetry,
-  mergeExecutionContext, normalizeStart, normalizeTest, requestHash, workflowIdentifier, workflowJson,
+  mergeExecutionContext, normalizeStart, normalizeStop, normalizeTest, requestHash, workflowIdentifier, workflowJson,
 } from './requests.js';
 import type { WorkflowAttemptRequest, WorkflowAttemptResult, WorkflowEmitRequest, WorkflowRunner } from './runner.js';
 import type { WorkflowStore } from './store.js';
@@ -85,10 +85,17 @@ function finishAttempt(db: Database, row: CurrentAttempt, status: Exclude<Attemp
   }
 }
 
+type RunningAttempt = {
+  readonly runId: string;
+  readonly instanceId: string;
+  readonly shutdown: AbortController;
+  readonly stop: AbortController;
+};
+
 export class WorkflowEngine {
   readonly #store: WorkflowStore;
   readonly #maxConcurrent: number;
-  readonly #running = new Map<string, AbortController>();
+  readonly #running = new Map<string, RunningAttempt>();
   readonly #readyExecutors = new Map<string, number>();
   #availabilityGeneration = 0;
   #scheduled: ReturnType<typeof setImmediate> | null = null;
@@ -127,7 +134,7 @@ export class WorkflowEngine {
     this.#ready = false;
     if (this.#scheduled) clearImmediate(this.#scheduled);
     this.#scheduled = null;
-    for (const attempt of this.#running.values()) attempt.abort();
+    for (const entry of this.#running.values()) entry.shutdown.abort();
   }
 
   wakeExecutor(executorId: string): void {
@@ -400,6 +407,9 @@ export class WorkflowEngine {
       if (priorOperation(db, runId, operationId, hash)) return;
       requireUnarchivedRun(db, runId);
       const instance = requireInstance(db, runId, instanceId);
+      if (requireStep(db, runId, instance.step_id).kind === 'decision') {
+        throw workflowConflict('A decision step cannot be retried.');
+      }
       if (instance.status !== 'failed') throw workflowConflict('Only a definitively failed attempt can be retried.');
       if (instance.attempt_count >= WORKFLOW_LIMITS.attemptsPerInstance) throw workflowLimit('This instance has reached its attempt limit.');
       db.query("UPDATE workflow_instances SET status = 'ready', reason = NULL WHERE id = ?").run(instanceId);
@@ -408,6 +418,62 @@ export class WorkflowEngine {
     });
     this.#wake();
     return { instanceId };
+  }
+
+  stopRun(raw: unknown, caller: WorkflowActor): void {
+    const request = normalizeStop(raw);
+    const actor = normalizeActor(caller);
+    const { runId, instanceId, operationId } = request;
+    const hash = requestHash('stop', request, actor);
+    const result = this.#store.write(db => {
+      if (priorOperation(db, runId, operationId, hash)) return { attemptIds: [] as string[], changed: false };
+      const run = requireUnarchivedRun(db, runId);
+      const now = this.#now();
+      const attemptIds: string[] = [];
+      let changed = false;
+      const requestedReason = `Stop requested by ${actor.name}.`;
+      const stoppedBeforeReason = `Stopped before execution by ${actor.name}.`;
+      const stoppedReason = `Stopped by ${actor.name}.`;
+      if (instanceId !== undefined) {
+        const instance = requireInstance(db, runId, instanceId);
+        if (instance.status === 'running') {
+          const live = db.query<{ id: string }, [string]>("SELECT id FROM workflow_attempts WHERE instance_id = ? AND status = 'running' LIMIT 1").get(instanceId);
+          if (live) {
+            attemptIds.push(live.id);
+            db.query('UPDATE workflow_instances SET reason = ? WHERE id = ?').run(requestedReason, instanceId);
+            changed = true;
+          }
+        } else if (instance.status === 'ready' || instance.status === 'waiting-executor') {
+          db.query("UPDATE workflow_instances SET status = 'failed', reason = ? WHERE id = ?").run(stoppedBeforeReason, instanceId);
+          changed = true;
+        }
+      } else if (run.status !== 'succeeded') {
+        const live = db.query<{ id: string; instance_id: string }, [string]>(`
+          SELECT a.id, i.id AS instance_id FROM workflow_attempts a
+          JOIN workflow_instances i ON i.id = a.instance_id
+          WHERE i.run_id = ? AND i.status = 'running' AND a.status = 'running'
+        `).all(runId);
+        for (const row of live) {
+          attemptIds.push(row.id);
+          db.query('UPDATE workflow_instances SET reason = ? WHERE id = ?').run(requestedReason, row.instance_id);
+          changed = true;
+        }
+        const pending = db.query("UPDATE workflow_instances SET status = 'failed', reason = ? WHERE run_id = ? AND status IN ('ready', 'waiting-executor')")
+          .run(stoppedBeforeReason, runId).changes;
+        const decisions = db.query("UPDATE workflow_instances SET status = 'blocked', reason = ? WHERE run_id = ? AND status = 'awaiting-decision'")
+          .run(stoppedReason, runId).changes;
+        const blockedIntake = db.query("UPDATE workflow_run_steps SET intake = 'blocked', reason = ? WHERE run_id = ? AND intake = 'open'")
+          .run(stoppedReason, runId).changes;
+        if (pending > 0 || decisions > 0 || blockedIntake > 0) changed = true;
+      }
+      if (changed) new WorkflowGraph(db, runId, now).reconcile();
+      // Stopping remains available even when the run has reached its normal operation limit.
+      db.query('INSERT INTO workflow_operations (run_id, id, request_hash, result_id) VALUES (?, ?, ?, ?)')
+        .run(runId, operationId, hash, instanceId ?? runId);
+      return { attemptIds, changed };
+    });
+    for (const attemptId of result.attemptIds) this.#running.get(attemptId)?.stop.abort();
+    if (result.changed) this.#wake();
   }
 
   handleChatRemoved(chatId: string): void {
@@ -429,7 +495,7 @@ export class WorkflowEngine {
       return attempt;
     });
     if (!removed) return;
-    this.#running.get(removed.id)?.abort();
+    this.#running.get(removed.id)?.shutdown.abort();
     this.#wake();
   }
 
@@ -514,22 +580,28 @@ export class WorkflowEngine {
   }
 
   #dispatch(attempt: WorkflowAttemptRequest): void {
-    const cancellation = new AbortController();
-    const { attemptId, location: { executorId } } = attempt;
+    const shutdown = new AbortController();
+    const stop = new AbortController();
+    const { attemptId, runId, instanceId, location: { executorId } } = attempt;
     const readiness = this.#readyExecutors.get(executorId);
-    this.#running.set(attemptId, cancellation);
+    this.#running.set(attemptId, { runId, instanceId, shutdown, stop });
     void Promise.resolve().then(async () => {
       if (this.#stopped) return;
       let result: WorkflowAttemptResult | null;
-      try {
-        result = await this.options.runner.run(attempt, {
-          signal: cancellation.signal,
-          attachChat: (chatId, turnId) => this.#attachChat(attemptId, chatId, turnId),
-          confirmChat: () => this.#confirmChat(attemptId),
-          emit: request => this.#emit(attemptId, request),
-        });
-      } catch {
-        result = null;
+      if (stop.signal.aborted) {
+        result = { kind: 'failed', reason: 'Stopped before execution started.' };
+      } else {
+        try {
+          result = await this.options.runner.run(attempt, {
+            signal: shutdown.signal,
+            stopSignal: stop.signal,
+            attachChat: (chatId, turnId) => this.#attachChat(attemptId, chatId, turnId),
+            confirmChat: () => this.#confirmChat(attemptId),
+            emit: request => this.#emit(attemptId, request),
+          });
+        } catch {
+          result = null;
+        }
       }
       if (this.#closed) return;
       if (result?.kind === 'unavailable' && readiness === this.#readyExecutors.get(executorId)) this.#readyExecutors.delete(executorId);

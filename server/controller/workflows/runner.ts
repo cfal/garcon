@@ -25,6 +25,8 @@ export interface WorkflowEmitRequest {
 
 export interface WorkflowAttemptCallbacks {
   readonly signal: AbortSignal;
+  // Cooperative per-run or per-attempt cancellation separate from controller shutdown.
+  readonly stopSignal?: AbortSignal;
   // Reserves the exact chat and turn before submission can have any side effect.
   attachChat(chatId: string, turnId: string): void;
   // Records positive confirmation that this attempt's reserved chat was published.
