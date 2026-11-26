@@ -264,6 +264,18 @@ test('terminal text replaces progress without erasing cached attachments or inde
   expect(row.primaryTextItems).toEqual([1]);
 });
 
+test.each(['Saved', ' '])('keeps cached images when terminal text carries annotations (%j)', text => {
+  const s = session();
+  const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  const cached = textBlock('Cached report');
+  const annotated = { ...textBlock(text), annotations: { priority: 1 } };
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content: [cached, image] });
+  const row = s.patch('timer', { status: 'completed', content: [annotated] }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content.items).toEqual(text.trim() ? [image, annotated] : [cached, image, annotated]);
+  expect(row.primaryTextItems).toEqual(text.trim() ? [1] : undefined);
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [

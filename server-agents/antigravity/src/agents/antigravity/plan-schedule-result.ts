@@ -74,15 +74,17 @@ function cachedBlocksForText(blocks: readonly Block[], output: string): Block[] 
 function reportBlocks(cached: readonly Block[], terminal: readonly Block[], terminalText: string, output: string): readonly Block[] {
   const terminalHasExtras = terminal.some(block => !plainText(block));
   if (terminalText) {
-    if (terminalHasExtras || cached.every(plainText)) return terminal;
+    if (cached.every(plainText) || terminal.some(block => !toolResultTextPart(block))) return terminal;
+    if (terminalHasExtras) return [...cached.filter(block => !toolResultTextPart(block)), ...terminal];
     const retained = cachedBlocksForText(cached, terminalText);
     if (joinedText(retained) === joinedText(terminal)) return retained;
     return [...cachedBlocksForText(cached, ''), ...terminal];
   }
   const retained = output ? cachedBlocksForText(cached, output) : cached;
   if (!terminalHasExtras) return retained.length ? retained : terminal;
-  // A terminal attachment list is ordered by the provider; only absent text falls back.
-  return [...retained.filter(block => blockText(block).trim()), ...terminal];
+  // Only a supplied attachment list supersedes cached attachments, not annotations on text.
+  const replacesAttachments = terminal.some(block => !toolResultTextPart(block));
+  return [...retained.filter(block => blockText(block).trim() || (!replacesAttachments && !toolResultTextPart(block))), ...terminal];
 }
 
 function rawText(raw: unknown): string {
