@@ -53,7 +53,7 @@
 		return null;
 	});
 	const headerTitle = $derived.by(() => {
-		if (pane === 'executor') return 'Executor';
+		if (pane === 'executor') return m.executors_label();
 		if (pane === 'menu') return selector.selectionLabel;
 		if (pane === 'recent') return m.model_selector_recent_models();
 		if (pane === 'agent') return m.model_selector_agent();

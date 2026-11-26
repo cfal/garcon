@@ -7,8 +7,17 @@ import {
 	CHAT_TRANSCRIPT_INDEX_KEY,
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX,
 } from '$lib/utils/local-storage-cache-recovery';
+import {
+	COMPLETION_SOUND_DATABASE_NAME,
+	COMPLETION_SOUND_STORE_NAME,
+} from '$lib/notifications/completion-sound-storage.js';
 import { CREDENTIAL_PENDING_KEY } from './session.js';
 import { CANVAS_RECOVERY_STORAGE_PREFIX } from '$lib/chat-canvas/canvas-recovery-storage.js';
+import {
+	TICKET_DRAFT_STORAGE_PREFIX,
+	TICKET_PREFERENCES_STORAGE_KEY,
+} from '$lib/tickets/ticket-storage.js';
+import { TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX } from '$lib/workspace/terminal-client-storage.js';
 import {
 	readBrowserLogoutEpoch,
 	canClearBrowserData,
@@ -27,8 +36,9 @@ const TAB_EPOCH_KEY = 'garcon.tab-logout-epoch';
 const tabKeys = new Set<string>(Object.values(SESSION_STORAGE_KEYS));
 const localKeys = new Set<string>([
 	...Object.values(LOCAL_STORAGE_KEYS),
+	'pref_model_catalog_v3', // Delete retired account data without hydrating it.
 	CREDENTIAL_PENDING_KEY,
-	'garcon-tickets-preferences-v1',
+	TICKET_PREFERENCES_STORAGE_KEY,
 	CHAT_TRANSCRIPT_INDEX_KEY,
 ]);
 
@@ -44,7 +54,7 @@ export function clearTabPrivateData(): boolean {
 			sessionStorage,
 			(key) =>
 				tabKeys.has(key) ||
-				key.startsWith('garcon-ticket-draft-v1:') ||
+				key.startsWith(TICKET_DRAFT_STORAGE_PREFIX) ||
 				key.startsWith(CANVAS_RECOVERY_STORAGE_PREFIX),
 		);
 		sessionStorage.setItem(TAB_EPOCH_KEY, readBrowserLogoutEpoch() ?? '');
@@ -135,7 +145,7 @@ export async function clearBrowserPrivateData(logout: BrowserLogout): Promise<bo
 				localKeys.has(key) ||
 				key.startsWith(LOCAL_STORAGE_PREFIXES.chatDraft) ||
 				key.startsWith(CHAT_TRANSCRIPT_SNAPSHOT_PREFIX) ||
-				key.startsWith('garcon_terminal_client_identity_claim_v1:'),
+				key.startsWith(TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX),
 		);
 	} catch {
 		cleared = false;
@@ -152,8 +162,8 @@ export async function clearBrowserPrivateData(logout: BrowserLogout): Promise<bo
 			logout,
 		);
 		const mediaCleared = await clearDatabaseData(
-			'garcon-local-media',
-			['completion-sounds'],
+			COMPLETION_SOUND_DATABASE_NAME,
+			[COMPLETION_SOUND_STORE_NAME],
 			logout,
 		);
 		return filesCleared && mediaCleared && cleared;

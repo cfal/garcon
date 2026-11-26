@@ -135,10 +135,7 @@ describe('GitDiffDocumentController', () => {
 					publish = partial;
 					return held.promise;
 				}
-				return bodyResponse(
-					'doc',
-					paths.map((file) => file.path),
-				);
+				return bodyResponse('doc', paths);
 			},
 		);
 		try {
@@ -178,7 +175,7 @@ describe('GitDiffDocumentController', () => {
 			expect(controller.loadingBodies.has('a.ts')).toBe(true);
 			held.resolve(bodyResponse('doc', ['a.ts', 'b.ts']));
 			await vi.waitFor(() => expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded'));
-			expect(loadBodies.mock.calls.map(([, paths]) => paths.map((file) => file.path))).toEqual([
+			expect(loadBodies.mock.calls.map(([, paths]) => paths)).toEqual([
 				['a.ts', 'b.ts'],
 				['a.ts'],
 			]);
@@ -202,10 +199,7 @@ describe('GitDiffDocumentController', () => {
 						prefetchSignal = signal;
 						return held.promise;
 					}
-					return bodyResponse(
-						'doc',
-						paths.map((file) => file.path),
-					);
+					return bodyResponse('doc', paths);
 				},
 			);
 			try {
@@ -264,10 +258,7 @@ describe('GitDiffDocumentController', () => {
 					commentSource: testCommentSource(),
 					loadBodies: async (_snapshot, paths, purpose, _signal, partial) => {
 						if (purpose === 'visible')
-							return bodyResponse(
-								'doc',
-								paths.map((file) => file.path),
-							);
+							return bodyResponse('doc', paths);
 						publish = partial;
 						return held.promise;
 					},
@@ -297,10 +288,7 @@ describe('GitDiffDocumentController', () => {
 		};
 		const loadBodies: GitDiffDocumentBodyLoader = async (_snapshot, paths, purpose, signal) => {
 			if (purpose === 'visible')
-				return bodyResponse(
-					'doc',
-					paths.map((file) => file.path),
-				);
+				return bodyResponse('doc', paths);
 			signals.push(signal);
 			return held.promise;
 		};
@@ -344,10 +332,7 @@ describe('GitDiffDocumentController', () => {
 					onError: vi.fn(),
 					loadBodies: async (_snapshot, paths, purpose, _signal, partial) => {
 						if (purpose === 'visible')
-							return bodyResponse(
-								'doc',
-								paths.map((file) => file.path),
-							);
+							return bodyResponse('doc', paths);
 						publish = partial;
 						return held.promise;
 					},
@@ -382,13 +367,10 @@ describe('GitDiffDocumentController', () => {
 			patchIndex: null,
 			limitReason: 'file-too-many-bytes',
 		};
-		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) => ({
-			...bodyResponse(
-				'doc',
-				requested.map(({ path }) => path),
-			),
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: string[]) => ({
+			...bodyResponse('doc', requested),
 			files: Object.fromEntries(
-				requested.map(({ path }) => [path, path === 'large.ts' ? oversized : body(path)]),
+				requested.map((path) => [path, path === 'large.ts' ? oversized : body(path)]),
 			),
 		}));
 		try {
@@ -412,7 +394,7 @@ describe('GitDiffDocumentController', () => {
 			expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded');
 			expect(controller.fileBodies['large.ts']?.limitReason).toBe('file-too-many-bytes');
 			expect(
-				loadBodies.mock.calls.map(([, requested]) => requested.map(({ path }) => path)),
+				loadBodies.mock.calls.map(([, requested]) => requested),
 			).toEqual([['large.ts'], ['a.ts', 'b.ts']]);
 			expect(controller.aggregateLimit).toBeNull();
 		} finally {
@@ -427,11 +409,8 @@ describe('GitDiffDocumentController', () => {
 			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
 		});
 		const controller = new GitDiffDocumentController(syntax);
-		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
-			bodyResponse(
-				'doc',
-				requested.map(({ path }) => path),
-			),
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: string[]) =>
+			bodyResponse('doc', requested),
 		);
 
 		controller.open(
@@ -462,11 +441,8 @@ describe('GitDiffDocumentController', () => {
 			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
 		});
 		const controller = new GitDiffDocumentController(syntax);
-		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
-			bodyResponse(
-				'doc',
-				requested.map(({ path }) => path),
-			),
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: string[]) =>
+			bodyResponse('doc', requested),
 		);
 		controller.open(
 			{
@@ -510,11 +486,8 @@ describe('GitDiffDocumentController', () => {
 			loadHighlighter: async () => ({ highlightGitDiffFile: highlighter }),
 		});
 		const controller = new GitDiffDocumentController(syntax);
-		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
-			bodyResponse(
-				'doc',
-				requested.map(({ path }) => path),
-			),
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: string[]) =>
+			bodyResponse('doc', requested),
 		);
 		const snapshot = {
 			project: '/project',
@@ -568,11 +541,8 @@ describe('GitDiffDocumentController', () => {
 
 	it('reconciles retained viewport demand when the matching document becomes ready', async () => {
 		const controller = new GitDiffDocumentController();
-		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
-			bodyResponse(
-				'doc',
-				requested.map(({ path }) => path),
-			),
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: string[]) =>
+			bodyResponse('doc', requested),
 		);
 		controller.handleBodyDemand({
 			kind: 'viewport',
@@ -598,7 +568,7 @@ describe('GitDiffDocumentController', () => {
 		);
 
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledOnce());
-		expect(loadBodies.mock.calls[0]?.[1]).toEqual([{ path: 'visible.ts' }]);
+		expect(loadBodies.mock.calls[0]?.[1]).toEqual(['visible.ts']);
 		expect(controller.getDemandDebugSnapshot()).toMatchObject({
 			documentId: 'doc',
 			demandedPaths: ['visible.ts'],
@@ -720,7 +690,7 @@ describe('GitDiffDocumentController', () => {
 		await vi.waitFor(() => expect(controller.fileBodies['visible.ts']?.bodyState).toBe('loaded'));
 
 		visible.resolve(bodyResponse('doc', ['initial.ts']));
-		await vi.waitFor(() => expect(controller.aggregateLimit).not.toBeNull());
+		await vi.waitFor(() => expect(controller.aggregateLimit?.message).toMatch(/^Stopped loading after \d+ rendered rows\.$/));
 		expect(controller.fileBodies['visible.ts']?.bodyState).toBe('loaded');
 		expect(controller.fileBodies['initial.ts']?.bodyState).toBe('too-large');
 	});
@@ -730,14 +700,11 @@ describe('GitDiffDocumentController', () => {
 		const prefetch = deferred<ReturnType<typeof bodyResponse>>();
 		const constrainedLimits = { ...limits, maxLoadedRows: 6 };
 		const loadBodies = vi.fn(
-			(_snapshot: unknown, requested: Array<{ path: string }>, purpose: string) =>
+			(_snapshot: unknown, requested: string[], purpose: string) =>
 				purpose === 'prefetch'
 					? prefetch.promise
 					: Promise.resolve(
-							bodyResponse(
-								'doc',
-								requested.map(({ path }) => path),
-							),
+							bodyResponse('doc', requested),
 						),
 		);
 		controller.open(
@@ -790,10 +757,7 @@ describe('GitDiffDocumentController', () => {
 					contextLines: 5,
 					diffMode: 'unified',
 					loadBodies: async (_snapshot, requested) =>
-						bodyResponse(
-							'doc',
-							requested.map(({ path }) => path),
-						),
+						bodyResponse('doc', requested),
 					onError: vi.fn(),
 					commentSource: testCommentSource(),
 				},
@@ -815,11 +779,8 @@ describe('GitDiffDocumentController', () => {
 
 	it('recycles a previously visible body after viewport demand moves away', async () => {
 		const controller = new GitDiffDocumentController();
-		const loadBodies = vi.fn(async (_snapshot: unknown, requested: Array<{ path: string }>) =>
-			bodyResponse(
-				'doc',
-				requested.map(({ path }) => path),
-			),
+		const loadBodies = vi.fn(async (_snapshot: unknown, requested: string[]) =>
+			bodyResponse('doc', requested),
 		);
 		controller.open(
 			{
@@ -862,12 +823,9 @@ describe('GitDiffDocumentController', () => {
 	it('starts a selected lazy body after the initial body batch settles', async () => {
 		const controller = new GitDiffDocumentController();
 		const initial = deferred<ReturnType<typeof bodyResponse>>();
-		const loadBodies = vi.fn(async (_snapshot, files: Array<{ path: string }>) => {
+		const loadBodies = vi.fn(async (_snapshot, files: string[]) => {
 			if (loadBodies.mock.calls.length === 1) return initial.promise;
-			return bodyResponse(
-				'doc',
-				files.map(({ path }) => path),
-			);
+			return bodyResponse('doc', files);
 		});
 		controller.open(
 			{
@@ -891,16 +849,16 @@ describe('GitDiffDocumentController', () => {
 		initial.resolve(bodyResponse('doc', ['initial.ts']));
 
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledTimes(2));
-		expect(loadBodies.mock.calls[1]?.[1]).toEqual([{ path: 'selected.ts' }]);
+		expect(loadBodies.mock.calls[1]?.[1]).toEqual(['selected.ts']);
 	});
 
 	it('loads a file at the summary limit without rescanning the summary list', async () => {
 		const controller = new GitDiffDocumentController();
 		const files = Array.from({ length: 10_000 }, (_, index) => file(`file-${index}.ts`));
-		const loadBodies = vi.fn(async (_snapshot, requested: Array<{ path: string }>) => ({
+		const loadBodies = vi.fn(async (_snapshot, requested: string[]) => ({
 			status: 'ready' as const,
 			documentId: 'doc',
-			files: Object.fromEntries(requested.map(({ path }) => [path, body(path)])),
+			files: Object.fromEntries(requested.map((path) => [path, body(path)])),
 			errors: {},
 			deferredFiles: [],
 		}));
@@ -924,7 +882,7 @@ describe('GitDiffDocumentController', () => {
 		controller.focusFile('file-9999.ts');
 
 		await vi.waitFor(() => expect(loadBodies).toHaveBeenCalledOnce());
-		expect(loadBodies.mock.calls[0]?.[1]).toEqual([{ path: 'file-9999.ts' }]);
+		expect(loadBodies.mock.calls[0]?.[1]).toEqual(['file-9999.ts']);
 	});
 
 	it('preserves an in-progress draft when the same target is activated again', () => {
@@ -1035,10 +993,10 @@ describe('GitDiffDocumentController', () => {
 
 	it('recycles speculative loading before enforcing the aggregate limit', async () => {
 		const controller = new GitDiffDocumentController();
-		const loadBodies = vi.fn(async (_snapshot, requested: Array<{ path: string }>) => ({
+		const loadBodies = vi.fn(async (_snapshot, requested: string[]) => ({
 			status: 'ready' as const,
 			documentId: 'doc',
-			files: Object.fromEntries(requested.map(({ path }) => [path, body(path)])),
+			files: Object.fromEntries(requested.map((path) => [path, body(path)])),
 			errors: {},
 			deferredFiles: [],
 		}));
@@ -1073,8 +1031,7 @@ describe('GitDiffDocumentController', () => {
 
 	it('continues server-deferred bodies without imposing a collection limit', async () => {
 		const controller = new GitDiffDocumentController();
-		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (_snapshot, requested) => {
-			const paths = requested.map(({ path }) => path);
+		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (_snapshot, paths) => {
 			if (paths.length === 1) return bodyResponse('doc', paths);
 			return { ...bodyResponse('doc', paths.slice(0, 1)), deferredFiles: paths.slice(1) };
 		});
@@ -1105,7 +1062,7 @@ describe('GitDiffDocumentController', () => {
 			expect(controller.fileBodies['a.ts']?.bodyState).toBe('loaded');
 			expect(controller.fileBodies['b.ts']?.bodyState).toBe('loaded');
 			expect(controller.aggregateLimit).toBeNull();
-			expect(loadBodies.mock.calls.map(([, paths]) => paths.map(({ path }) => path))).toEqual([
+			expect(loadBodies.mock.calls.map(([, paths]) => paths)).toEqual([
 				['a.ts'],
 				['b.ts', 'c.ts'],
 				['c.ts'],
@@ -1119,12 +1076,9 @@ describe('GitDiffDocumentController', () => {
 		const controller = new GitDiffDocumentController();
 		const visible = deferred<ReturnType<typeof bodyResponse>>();
 		const loadBodies = vi.fn(
-			async (_snapshot, requested: Array<{ path: string }>, purpose: string) => {
+			async (_snapshot, requested: string[], purpose: string) => {
 				if (purpose === 'visible') return visible.promise;
-				return bodyResponse(
-					'doc',
-					requested.map(({ path }) => path),
-				);
+				return bodyResponse('doc', requested);
 			},
 		);
 
@@ -1155,11 +1109,11 @@ describe('GitDiffDocumentController', () => {
 
 	it('renders explicit limits for files left unloaded after the aggregate budget is reached', async () => {
 		const controller = new GitDiffDocumentController();
-		const loadBodies = vi.fn(async (_snapshot, requested: Array<{ path: string }>) => ({
+		const loadBodies = vi.fn(async (_snapshot, requested: string[]) => ({
 			status: 'ready' as const,
 			documentId: 'doc',
 			files: Object.fromEntries(
-				requested.map(({ path }) => [
+				requested.map((path) => [
 					path,
 					path === 'b.ts' ? { ...body(path), renderedRowCount: 12 } : body(path),
 				]),
@@ -1324,7 +1278,7 @@ describe('GitDiffDocumentController', () => {
 			status: 'ready',
 			documentId: snapshot.documentId,
 			files: Object.fromEntries(
-				files.map(({ path }) => [path, path === large.path ? large : body(path)]),
+				files.map((path) => [path, path === large.path ? large : body(path)]),
 			),
 			errors: {},
 			deferredFiles: [],
@@ -1350,7 +1304,7 @@ describe('GitDiffDocumentController', () => {
 				await vi.waitFor(() => expect(controller.fileBodies[path]?.bodyState).toBe('loaded'));
 				expect(controller.aggregateLimit).toBeNull();
 			}
-			expect(loadBodies.mock.calls.map(([, files]) => files.map(({ path }) => path))).toEqual([
+			expect(loadBodies.mock.calls.map(([, files]) => files)).toEqual([
 				['a.ts'],
 				['b.ts'],
 				[large.path],
@@ -1365,7 +1319,7 @@ describe('GitDiffDocumentController', () => {
 		const controller = new GitDiffDocumentController();
 		const paths = ['a.ts', 'b.ts'];
 		const loadBodies = vi.fn<GitDiffDocumentBodyLoader>(async (_snapshot, requested) =>
-			bodyResponse('doc', requested.map(({ path }) => path)),
+			bodyResponse('doc', requested),
 		);
 		const open = (maxLoadedRows: number) => controller.open({
 			project: '/project', documentId: 'doc', files: paths.map(file),
@@ -1394,10 +1348,10 @@ describe('GitDiffDocumentController', () => {
 		const controller = new GitDiffDocumentController();
 		const boundedLimits = { ...limits, maxLoadedPatchBytes: gitReviewBodyBytes(body('a.ts')) };
 		const loadBodies = vi.fn(
-			async (snapshot: { documentId: string }, files: Array<{ path: string }>) => ({
+			async (snapshot: { documentId: string }, files: string[]) => ({
 				status: 'ready' as const,
 				documentId: snapshot.documentId,
-				files: Object.fromEntries(files.map(({ path }) => [path, body(path)])),
+				files: Object.fromEntries(files.map((path) => [path, body(path)])),
 				errors: {},
 				deferredFiles: [],
 			}),
@@ -1433,11 +1387,11 @@ describe('GitDiffDocumentController', () => {
 	it('bounds zero-byte limited bodies by cache entry count', async () => {
 		const controller = new GitDiffDocumentController();
 		const loadBodies = vi.fn(
-			async (snapshot: { documentId: string }, files: Array<{ path: string }>) => ({
+			async (snapshot: { documentId: string }, files: string[]) => ({
 				status: 'ready' as const,
 				documentId: snapshot.documentId,
 				files: Object.fromEntries(
-					files.map(({ path }) => [
+					files.map((path) => [
 						path,
 						{
 							...body(path),

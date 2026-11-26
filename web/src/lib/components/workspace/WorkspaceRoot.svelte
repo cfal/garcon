@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
+	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import { presentComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
 	import { onDestroy, untrack } from 'svelte';
 	import ChatSurface from '$lib/components/chat/ChatSurface.svelte';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
@@ -178,7 +179,7 @@
 	let renamingTerminalId = $state<string | null>(null);
 	let conversationPanelActions = $state<ConversationPanelActions | null>(null);
 	let composerInsetPx = $state(0);
-	let composerNotice = $state.raw<ComposerAvailabilityNoticePresentation | null>(null);
+	const agentState = new AgentState();
 	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
@@ -395,6 +396,20 @@
 			composerPanel?.chatId === composerPlacement.surface.chatId,
 		),
 	);
+	const composerNotice = $derived(
+		presentComposerAvailabilityNotice({
+			get chat() { return sessions.selectedChat; },
+			get visible() {
+				return composerBound &&
+					resolveChatSurfacePresentation(sessions.selectedChat, sessions.isLoadingChats) === 'conversation';
+			},
+			agent: agentState,
+			executors,
+			catalog: modelCatalog,
+			projects: projectResolution,
+			onChooseProjectFolder: chooseComposerProjectFolder,
+		}),
+	);
 	const liveLayerRectStyle = $derived(
 		composerPlacement?.rect ? rectStyle(composerPlacement.rect) : 'inset: 0;',
 	);
@@ -493,6 +508,11 @@
 	const surfaceCatalog = createWorkspaceSurfaceCatalog((chat) =>
 		chatActions.requestProjectPath(chat),
 	);
+
+	function chooseComposerProjectFolder(chatId: string): void {
+		const chat = sessions.byId[chatId];
+		if (chat) chatActions.requestProjectPath(chat);
+	}
 
 	function rectStyle(rect: WorkspaceWindowRect): string {
 		return `left: ${rect.left * 100}%; top: ${rect.top * 100}%; width: ${rect.width * 100}%; height: ${rect.height * 100}%;`;
@@ -611,7 +631,7 @@
 				labelFor={surfaceCatalog.label}
 				panelActions={conversationPanelActions}
 				{composerInsetPx}
-				composerNotice={composerBound ? composerNotice : null}
+				{composerNotice}
 				{subagentToolbar}
 				{titlebarMetrics}
 				{surfaceMenuItems}
@@ -661,7 +681,7 @@
 						isVisible={true}
 						actions={conversationPanelActions}
 						composerInsetPx={composerBound ? composerInsetPx : 0}
-						composerNotice={composerBound ? composerNotice : null}
+						{composerNotice}
 						reserveMobileToolbar={true}
 					/>
 				{/key}
@@ -693,7 +713,9 @@
 			onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
 			onRegisterPanelActions={(actions) => (conversationPanelActions = actions)}
 			onComposerHeightChange={(height) => (composerInsetPx = height)}
-			onComposerNoticeChange={(notice) => (composerNotice = notice)}
+			availabilityNotice={composerNotice?.notice ?? null}
+			onChooseProjectFolder={chooseComposerProjectFolder}
+			{agentState}
 			{subagentToolbar}
 			{chatActions}
 			transcriptCache={chatTranscriptCache}

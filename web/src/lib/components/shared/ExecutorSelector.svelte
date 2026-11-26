@@ -54,7 +54,7 @@
 	const executorLabel = $derived.by(() => {
 		if (!inComposer || selectedExecutor) return executors.label(executorId);
 		if (!executors.hasSnapshot) return m.executors_remote();
-		return `${executors.label(executorId)}: ${executorId}`;
+		return m.executors_label_with_id({ label: executors.label(executorId), id: executorId });
 	});
 	const executorTitle = $derived(inComposer || selectedExecutor ? executorLabel : executorId);
 	const triggerClass = $derived(cn(
@@ -80,7 +80,7 @@
 
 	function unavailableLabel(executor: ExecutorsStore['executors'][number]): string {
 		if (!executors.isReady(executor.id)) return executorStatus(executor);
-		return service === 'files' ? 'Files unavailable' : 'Git unavailable';
+		return service === 'files' ? m.workspace_files_unavailable() : m.workspace_git_unavailable();
 	}
 </script>
 

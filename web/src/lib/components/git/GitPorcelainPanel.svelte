@@ -34,13 +34,13 @@
 	let confirmationKey = $derived(JSON.stringify([loadKey, porcelain.confirmationScope]));
 	let title = $derived(
 		porcelain.inspectorView === 'conflicts'
-			? 'Conflicts'
+			? m.git_conflicts_title()
 			: porcelain.inspectorView === 'stash'
-				? 'Stash'
+				? m.git_stash_title()
 				: porcelain.inspectorView === 'history'
-					? 'History'
+					? m.git_panel_history()
 					: porcelain.inspectorView === 'graph'
-						? 'Graph'
+						? m.git_panel_graph()
 						: '',
 	);
 	let activeConfirmation = $derived(
@@ -49,9 +49,11 @@
 	let confirmationLabel = $derived.by(() => {
 		if (!activeConfirmation) return '';
 		if (activeConfirmation.type === 'accept-conflict') {
-			return `Accept ${activeConfirmation.side} for ${activeConfirmation.filePath}? This replaces the working conflict content with that side and stages the file.`;
+			return activeConfirmation.side === 'ours'
+				? m.git_conflicts_confirm_ours({ path: activeConfirmation.filePath })
+				: m.git_conflicts_confirm_theirs({ path: activeConfirmation.filePath });
 		}
-		return `Drop ${activeConfirmation.stash.ref}? This removes the stash entry and cannot be undone from this panel.`;
+		return m.git_stash_confirm_drop({ ref: activeConfirmation.stash.ref });
 	});
 	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 
@@ -233,7 +235,7 @@
 									<pre
 										class="max-h-24 overflow-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">{detail
 											.working.content ??
-											'Working content exceeds the conflict preview limit.'}</pre>
+											m.git_conflicts_working_preview_limited()}</pre>
 								</div>
 							{/if}
 						</div>
@@ -324,8 +326,7 @@
 							</div>
 							<div>
 								<div class="mb-1 text-muted-foreground">
-									{m.git_history_blame()}
-									{porcelain.blameTruncated ? '(truncated)' : ''}
+									{porcelain.blameTruncated ? m.git_history_blame_truncated() : m.git_history_blame()}
 								</div>
 								<div class="space-y-1">
 									{#each porcelain.blameLines as line (line.line)}

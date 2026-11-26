@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages.js';
 import type { Ticket, TicketCommentView, TicketDetail } from '$shared/tickets';
 import type { TicketsApi } from '$lib/api/tickets.js';
 import { TicketDraftState, type TicketDraftConfirmation } from './ticket-draft-state.svelte.js';
@@ -76,7 +77,7 @@ export class TicketDraftStore {
 			this.warning = null;
 		} catch {
 			this.warning =
-				'Draft recovery is unavailable. Keep this tab open and copy unsaved text before leaving.';
+				m.tickets_draft_recovery_keep_tab();
 		}
 	}
 
@@ -122,7 +123,7 @@ export class TicketDraftStore {
 			TICKET_RECOVERY_CAPACITY
 		) {
 			this.warning =
-				'Ticket draft recovery is full. Copy or discard a retained draft before opening another editor.';
+				m.tickets_draft_recovery_open_full();
 			return null;
 		}
 		return this.#add(
@@ -168,7 +169,7 @@ export class TicketDraftStore {
 			this.deps.recovery.discard(this.partition, entry.key);
 			this.reloadRecovery();
 		} catch {
-			this.warning = 'Could not remove this recovery entry. Its text has been retained.';
+			this.warning = m.tickets_draft_recovery_remove_failed();
 		}
 	}
 
@@ -188,7 +189,7 @@ export class TicketDraftStore {
 			this.deps.recovery.discard(partition, entry.key);
 			this.oldEntries = this.oldEntries.filter((item) => item.entry.key !== entry.key);
 		} catch {
-			this.warning = 'Could not remove this recovery entry. Its text has been retained.';
+			this.warning = m.tickets_draft_recovery_remove_failed();
 		}
 	}
 

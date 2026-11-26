@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/error-message.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import Input from '$lib/components/ui/input/input.svelte';
@@ -47,7 +48,7 @@
 	function validate(): string | null {
 		if (!queryValue.trim()) return m.sidebar_saved_searches_query_required();
 		if (!showAsSidebarPillValue && !showInSidebarMenuValue && !showInSearchDialogValue) {
-			return 'At least one visibility option is required';
+			return m.sidebar_saved_searches_visibility_required();
 		}
 		return null;
 	}
@@ -73,7 +74,7 @@
 				editorState?.searchId,
 			);
 		} catch (err) {
-			validationError = err instanceof Error ? err.message : String(err);
+			validationError = errorMessage(err);
 		} finally {
 			isSaving = false;
 		}

@@ -96,7 +96,7 @@ export class TerminalAttachmentStream {
 			(data.length * 3 > MAX_TERMINAL_INPUT_BYTES &&
 				inputEncoder.encode(data).byteLength > MAX_TERMINAL_INPUT_BYTES)
 		) {
-			session.runtimeError = 'Terminal input exceeds 64 KiB.';
+			session.runtimeError = m.terminal_input_byte_limit({ limit: MAX_TERMINAL_INPUT_BYTES / 1024 });
 			return;
 		}
 		this.options.transport.send({
@@ -412,6 +412,6 @@ export class TerminalAttachmentStream {
 		this.#attachmentIds.delete(terminalId);
 		this.#outputFragments.delete(terminalId);
 		session.attachmentState = 'unavailable';
-		session.runtimeError = 'Terminal output interrupted. Reattach to resume.';
+		session.runtimeError = m.terminal_output_interrupted();
 	}
 }

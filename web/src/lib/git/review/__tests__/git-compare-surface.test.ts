@@ -17,6 +17,7 @@ import {
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitTargetCandidates: vi.fn(),
+	getGitReviewDocumentFileBodies: vi.fn(),
 	getGitRefs: vi.fn().mockResolvedValue({ refs: [] }),
 	gitCheckoutRef: vi.fn().mockResolvedValue({ success: true }),
 	gitCreateBranch: vi.fn().mockResolvedValue({ success: true }),
@@ -27,7 +28,6 @@ const api = vi.mocked(await import('$lib/api/git.js'));
 vi.mock('$lib/api/git-comparison.js', () => ({
 	getGitComparisonSnapshot: vi.fn(),
 	getGitComparisonFreshness: vi.fn(),
-	getGitComparisonFileBodies: vi.fn(),
 }));
 
 function comparisonSnapshot(fromRevision: string): GitComparisonSnapshotReady {

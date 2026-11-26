@@ -16,7 +16,6 @@ function createModelCatalogStore() {
 }
 
 const STORAGE_KEY = LOCAL_STORAGE_KEYS.modelCatalog;
-const LEGACY_STORAGE_KEY = LOCAL_STORAGE_KEYS.modelCatalogLegacy;
 
 function mockResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
 	return {
@@ -372,14 +371,13 @@ describe('ModelCatalogStore', () => {
 		});
 	});
 
-	it('discards the previous catalog schema and validates it against the server', async () => {
+	it('ignores the retired catalog and validates against the server', async () => {
+		const retiredKey = 'pref_model_catalog_v3';
 		localStorage.setItem(
-			LEGACY_STORAGE_KEY,
+			retiredKey,
 			JSON.stringify({
 				agentModels: { sample: [{ value: 'old-model', label: 'Old Model' }] },
-				agentMetadata: {
-					sample: agentEntry('sample', { defaultModel: 'old-model' }),
-				},
+				agentMetadata: { sample: agentEntry('sample', { defaultModel: 'old-model' }) },
 				apiProviderCatalog: [],
 				lastFetchedAt: 0,
 			}),
@@ -396,12 +394,13 @@ describe('ModelCatalogStore', () => {
 				{ etag: 'W/"catalog:new"' },
 			),
 		);
+		using read = vi.spyOn(localStorage, 'getItem');
 
 		const store = createModelCatalogStore();
 		expect(store.getDefaultModel('sample')).toBe('');
-
 		await store.refreshIfStale();
 
+		expect(read).not.toHaveBeenCalledWith(retiredKey);
 		expect(clientApi.apiFetch).toHaveBeenCalledWith('/api/v1/models', { cache: 'no-store' });
 		expect(store.getDefaultModel('sample')).toBe('new-model');
 		expect(store.etag).toBe('W/"catalog:new"');

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import ChatSummary from '../../chat/ChatSummary.svelte';
 	import { cn } from '$lib/utils/cn';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
@@ -30,10 +31,10 @@
 	let firstTranscriptSnippet = $derived(transcriptMatch?.snippets[0] ?? null);
 
 	function roleLabel(role: ChatSearchSnippetRole): string {
-		if (role === 'user') return 'User';
-		if (role === 'assistant') return 'Assistant';
-		if (role === 'tool') return 'Tool';
-		return 'System';
+		if (role === 'user') return m.sidebar_search_role_user();
+		if (role === 'assistant') return m.sidebar_search_role_assistant();
+		if (role === 'tool') return m.sidebar_search_role_tool();
+		return m.sidebar_search_role_system();
 	}
 </script>
 

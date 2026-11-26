@@ -8,9 +8,6 @@ import {
 	type GitProjectTarget,
 	type GitReviewDocumentRef,
 } from './git-client.js';
-import type { GitReviewDocumentIndexedFileBodiesResponse } from './git.js';
-import { getGitReviewDocumentFileBodies } from './git.js';
-import type { GitReviewBodyFetchOptions } from './git-review-documents.js';
 import {
 	finishGitReviewPerformanceSpan,
 	registerGitReviewDocument,
@@ -61,13 +58,6 @@ export type GitComparisonFreshnessNotFound = Wire.GitComparisonFreshnessNotFound
 
 export type GitComparisonFreshnessResponse = Wire.GitComparisonFreshnessResponse;
 
-export type GitComparisonFileRequest = Wire.GitComparisonFileRequest;
-
-export type GitComparisonBodyTarget =
-	{ kind: 'revision'; hash: string } | { kind: 'working-tree'; fingerprint: string };
-
-export type GitComparisonFileBodiesResponse = GitReviewDocumentIndexedFileBodiesResponse;
-
 export async function getGitComparisonSnapshot(
 	target: GitProjectTarget,
 	from: GitComparisonFromEndpoint,
@@ -104,28 +94,5 @@ export async function getGitComparisonFreshness(
 		'/api/v1/git/comparisons/freshness',
 		{ ...gitProjectFields(target), from, to },
 		options,
-	);
-}
-
-export async function getGitComparisonFileBodies(
-	target: GitProjectTarget,
-	document: GitReviewDocumentRef,
-	effectiveFromHash: string,
-	to: GitComparisonBodyTarget,
-	files: GitComparisonFileRequest[],
-	options?: GitReviewBodyFetchOptions & {
-		context?: number;
-		purpose?: import('./git.js').GitReviewBodyPurpose;
-	},
-): Promise<GitComparisonFileBodiesResponse> {
-	const { context: _context = 5, purpose = 'prefetch', ...fetchOptions } = options ?? {};
-	void effectiveFromHash;
-	void to;
-	return getGitReviewDocumentFileBodies(
-		target,
-		document,
-		files.map((file) => file.path),
-		purpose,
-		fetchOptions,
 	);
 }

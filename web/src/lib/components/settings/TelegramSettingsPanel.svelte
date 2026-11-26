@@ -130,7 +130,7 @@
 				<div class="flex flex-wrap gap-2">
 					{#if !telegram.recipientLinked && !telegram.linkUrl}
 						<Button type="button" variant="outline" size="sm" disabled={busy} onclick={() => void telegram.createLink()}>
-							{telegram.recipientResult?.ok === false ? m.common_retry() : 'Create link'}
+							{telegram.recipientResult?.ok === false ? m.common_retry() : m.settings_telegram_create_link()}
 						</Button>
 					{:else if !telegram.recipientLinked}
 						<Button

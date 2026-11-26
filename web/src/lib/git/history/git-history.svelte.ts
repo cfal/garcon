@@ -1,7 +1,8 @@
+import { errorMessage } from '$lib/utils/error-message.js';
 import type { GitProjectTarget } from '$lib/api/git-client.js';
 import { sameGitProject } from '$lib/git/targets/git-target.js';
 import {
-	getGitCommitFileBodies,
+	getGitReviewDocumentFileBodies,
 	getGitCommitSnapshot,
 	getGitHistoryCommits,
 	type GitCommitFileBody,
@@ -199,7 +200,7 @@ export class GitHistoryController {
 					return;
 				}
 				this.listError = m.git_history_load_commits_failed({
-					detail: error instanceof Error ? error.message : String(error),
+					detail: errorMessage(error),
 				});
 				this.commits = [];
 				this.nextOffset = null;
@@ -261,7 +262,7 @@ export class GitHistoryController {
 					return;
 				}
 				this.listError = m.git_history_load_more_commits_failed({
-					detail: error instanceof Error ? error.message : String(error),
+					detail: errorMessage(error),
 				});
 			})
 			.finally(() => {
@@ -416,10 +417,7 @@ export class GitHistoryController {
 							: 'the empty tree',
 					},
 					loadBodies: (_snapshot, files, purpose, signal, publish) =>
-						getGitCommitFileBodies(project, result.document, result.commit.hash, files, {
-							parent: result.selectedParent,
-							context: this.contextLines,
-							purpose,
+						getGitReviewDocumentFileBodies(project, result.document, files, purpose, {
 							signal,
 							onIndexedBodies: publish,
 						}),
@@ -439,7 +437,7 @@ export class GitHistoryController {
 			.catch((error) => {
 				if (isAbortError(error) || !this.isCurrentGuard(guard, controller.signal)) return;
 				this.commitError = m.git_history_load_commit_failed({
-					detail: error instanceof Error ? error.message : String(error),
+					detail: errorMessage(error),
 				});
 				this.commitSnapshot = null;
 			})

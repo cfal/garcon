@@ -1,4 +1,5 @@
 import { getExecutors } from '$lib/api/executors.js';
+import * as m from '$lib/paraglide/messages.js';
 import {
 	effectiveExecutorId,
 	parseExecutors,
@@ -8,7 +9,9 @@ import {
 const localFallback: readonly ExecutorSnapshot[] = [
 	{
 		id: 'local',
-		label: 'Local',
+		get label() {
+			return m.executors_local();
+		},
 		kind: 'local',
 		enabled: true,
 		allowControllerCli: true, allowExecutorManagement: true,
@@ -52,7 +55,11 @@ export class ExecutorsStore {
 	}
 
 	label(id?: string | null): string {
-		return this.get(id)?.label ?? (effectiveExecutorId(id) === 'local' ? 'Local' : this.hasSnapshot ? 'Unavailable executor' : effectiveExecutorId(id));
+		const executorId = effectiveExecutorId(id);
+		const label = this.get(executorId)?.label;
+		if (label !== undefined) return label;
+		if (executorId === 'local') return m.executors_local();
+		return this.hasSnapshot ? m.executors_unavailable_label() : executorId;
 	}
 
 	isReady(id?: string | null): boolean {
@@ -144,8 +151,10 @@ export class ExecutorsStore {
 }
 
 export function executorStatus(executor: ExecutorSnapshot): string {
-	if (!executor.enabled) return 'Disabled';
-	if (executor.availability === 'ready') return 'Ready';
-	if (executor.availability === 'reconnecting') return 'Reconnecting';
-	return executor.direction === 'executor-connects' ? 'Waiting for connection' : 'Offline';
+	if (!executor.enabled) return m.executors_status_disabled();
+	if (executor.availability === 'ready') return m.executors_status_ready();
+	if (executor.availability === 'reconnecting') return m.executors_status_reconnecting();
+	return executor.direction === 'executor-connects'
+		? m.executors_status_waiting()
+		: m.executors_status_offline();
 }

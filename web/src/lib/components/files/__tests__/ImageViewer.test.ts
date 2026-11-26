@@ -171,8 +171,8 @@ describe('ImageViewer', () => {
 
 		const image = screen.getByRole('img');
 		const viewport = image.closest('.overflow-auto') as HTMLDivElement;
-		viewport.getBoundingClientRect = () => new DOMRect(0, 0, 500, 400);
-		image.getBoundingClientRect = () => new DOMRect(100, 100, 200, 100);
+		viewport.getBoundingClientRect = vi.fn(() => new DOMRect(0, 0, 500, 400));
+		image.getBoundingClientRect = vi.fn(() => new DOMRect(100, 100, 200, 100));
 		viewport.scrollLeft = 0;
 		viewport.scrollTop = 0;
 
@@ -189,6 +189,8 @@ describe('ImageViewer', () => {
 		}
 
 		expect(session.image.scale).toBeCloseTo(Math.exp(0.4));
+		expect(viewport.getBoundingClientRect).toHaveBeenCalledOnce();
+		expect(image.getBoundingClientRect).toHaveBeenCalledOnce();
 
 		image.getBoundingClientRect = () => new DOMRect(80, 80, 400, 200);
 		flushFrame();

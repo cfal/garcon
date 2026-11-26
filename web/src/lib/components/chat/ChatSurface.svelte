@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
+	import type { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import type { ComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
 	import { untrack } from 'svelte';
 	import {
 		getChatSessions,
@@ -47,7 +48,9 @@
 		onRegisterAppendToDraft,
 		onRegisterPanelActions,
 		onComposerHeightChange,
-		onComposerNoticeChange,
+		availabilityNotice,
+		onChooseProjectFolder,
+		agentState,
 		subagentToolbar,
 		chatActions = noopChatActions,
 		transcriptCache: providedTranscriptCache,
@@ -61,7 +64,9 @@
 		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
 		onComposerHeightChange?: (height: number) => void;
-		onComposerNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
+		availabilityNotice?: ComposerAvailabilityNotice | null;
+		onChooseProjectFolder?: (chatId: string) => void;
+		agentState: AgentState;
 		subagentToolbar: SubagentToolbarState;
 		chatActions?: WorkspaceChatActions;
 		transcriptCache?: ChatTranscriptCache;
@@ -196,14 +201,12 @@
 			{onRegisterReload}
 			{onRegisterPanelActions}
 			{onComposerHeightChange}
-			{onComposerNoticeChange}
+			{availabilityNotice}
+			{onChooseProjectFolder}
+			{agentState}
 			{transcriptCache}
 			{reserveMobileToolbar}
 			isVisible={conversationWorkspacePresented}
-			onChooseProjectFolder={(chatId) => {
-				const chat = sessions.byId[chatId];
-				if (chat) chatActions.requestProjectPath(chat);
-			}}
 		/>
 	</div>
 </div>

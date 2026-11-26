@@ -30,10 +30,6 @@ export {
 	type GitRefSortKey,
 } from '$shared/git-refs';
 import {
-	getGitReviewDocumentFileBodies,
-	type GitReviewBodyFetchOptions,
-	type GitReviewBodyPurpose,
-	type GitReviewDocumentIndexedFileBodiesResponse,
 	type GitReviewFileBody,
 	type GitReviewDocumentSummary,
 } from './git-review-documents.js';
@@ -162,7 +158,6 @@ export type GitCommitSnapshotNotFound = Wire.GitCommitSnapshotNotFound;
 
 export type GitCommitSnapshotResponse = GitCommitSnapshotReady | GitCommitSnapshotNotFound;
 
-export type GitDiffFileRequest = Wire.GitDiffFileRequest;
 
 export interface ConfirmAction {
 	type: 'discard' | 'delete' | 'commit' | 'pull' | 'push';
@@ -324,32 +319,6 @@ export async function getGitCommitSnapshot(
 	}
 }
 
-export async function getGitCommitFileBodies(
-	target: GitProjectTarget,
-	document: GitReviewDocumentRef,
-	commit: string,
-	files: GitDiffFileRequest[],
-	options?: GitReviewBodyFetchOptions & {
-		parent?: string | null;
-		context?: number;
-		purpose?: GitReviewBodyPurpose;
-	},
-): Promise<GitReviewDocumentIndexedFileBodiesResponse> {
-	const {
-		parent: _parent = null,
-		context: _context = 5,
-		purpose = 'prefetch',
-		...fetchOptions
-	} = options ?? {};
-	return getGitReviewDocumentFileBodies(
-		target,
-		document,
-		files.map((file) => file.path),
-		purpose,
-		fetchOptions,
-	);
-}
-
 export async function generateCommitMessage(
 	target: GitProjectTarget,
 	files: string[],
@@ -490,20 +459,6 @@ export async function getGitQuickSummary(
 		{ ...gitProjectFields(target) },
 		options,
 	);
-}
-
-export async function getGitReviewFileBodies(
-	target: GitProjectTarget,
-	document: GitReviewDocumentRef,
-	files: string[],
-	tab: GitDiffTab,
-	context = 5,
-	options?: GitReviewBodyFetchOptions & { purpose?: GitReviewBodyPurpose },
-): Promise<GitReviewDocumentIndexedFileBodiesResponse> {
-	void tab;
-	void context;
-	const { purpose = 'prefetch', ...fetchOptions } = options ?? {};
-	return getGitReviewDocumentFileBodies(target, document, files, purpose, fetchOptions);
 }
 
 export async function getGitConflicts(

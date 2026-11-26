@@ -26,18 +26,6 @@ export function normalizeSidebarGroupingFields(value: unknown): SidebarGroupingS
 	return result;
 }
 
-/** Converts stored presets once; runtime grouping has no preset-specific branches. */
-export function migrateSidebarGrouping(value: unknown): SidebarGroupingSelection[] {
-	const presets: Record<string, SidebarGroupingField[]> = {
-		project: ['executor', 'project'],
-		activity: ['executor', 'activity'],
-		status: ['executor', 'status'],
-		'project-and-activity': ['executor', 'activity', 'project'],
-	};
-	const fields = typeof value === 'string' && Object.hasOwn(presets, value) ? presets[value] : [];
-	return normalizeSidebarGroupingFields(fields.map((field) => ({ field, enabled: true })));
-}
-
 export function enabledSidebarGroupingFields(
 	selections: readonly SidebarGroupingSelection[],
 ): SidebarGroupingField[] {

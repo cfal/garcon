@@ -1,3 +1,4 @@
+import { TICKET_PREFERENCES_STORAGE_KEY } from '../ticket-storage.js';
 import { parseTicketListQuery } from '$shared/ticket-query';
 import type { TicketListQuery } from '$shared/tickets';
 import type { TicketLayout } from './ticket-collection.js';
@@ -12,11 +13,10 @@ export interface TicketPreferencesPort {
 	read(): TicketPreferences;
 	write(preferences: TicketPreferences): void;
 }
-const key = 'garcon-tickets-preferences-v1';
 export const browserTicketPreferences: TicketPreferencesPort = {
 	read() {
 		try {
-			const raw = JSON.parse(globalThis.localStorage.getItem(key) ?? 'null');
+			const raw = JSON.parse(globalThis.localStorage.getItem(TICKET_PREFERENCES_STORAGE_KEY) ?? 'null');
 			if (raw?.version !== 1 || (raw.layout !== 'list' && raw.layout !== 'board'))
 				return { layout: 'list', query: {} };
 			const {
@@ -33,7 +33,10 @@ export const browserTicketPreferences: TicketPreferencesPort = {
 	write(preferences) {
 		if (!canPersistBrowserData()) return;
 		try {
-			globalThis.localStorage.setItem(key, JSON.stringify({ version: 1, ...preferences }));
+			globalThis.localStorage.setItem(
+				TICKET_PREFERENCES_STORAGE_KEY,
+				JSON.stringify({ version: 1, ...preferences }),
+			);
 		} catch {
 			/* Preferences are optional; drafts have a separate recovery owner. */
 		}
