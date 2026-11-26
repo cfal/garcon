@@ -6,7 +6,7 @@ import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsibl
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
-import { AgentSwitchMessage, BackgroundTaskToolUseMessage, UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage, ScheduleToolUseMessage, ToolResultMessage } from '$shared/chat-types';
+import { AgentSwitchMessage, BackgroundTaskToolUseMessage, UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage, PermissionExpiredMessage, ScheduleToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 vi.mock('$lib/api/shares', () => ({
@@ -109,6 +109,28 @@ describe('SharedChatPage', () => {
 		expect(details).toHaveLength(1);
 		await fireEvent.click(details[0]);
 		expect(screen.getByText('Earlier schedule result')).toBeTruthy();
+	});
+
+	it('anchors to visible content when an empty permission row precedes a newly paired result', async () => {
+		const newest = response(['', '', ''], 1, 4);
+		newest.snapshot.messages = [
+			new PermissionExpiredMessage('', 'fixture-permission'),
+			new ToolResultMessage('', 'cron', { raw: 'Created' }, false),
+			new UserMessage('', 'Visible message'),
+		];
+		const older = response([''], 0, 4);
+		older.snapshot.messages = [new ScheduleToolUseMessage('', 'cron', { action: 'list' })];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(newest).mockResolvedValueOnce(older);
+		const { container } = render(SharedChatPageTestHost);
+		const visible = (await screen.findByText('Visible message')).closest('.chat-message')!;
+		const empty = container.querySelector('.chat-message')!;
+		expect(empty).not.toBe(visible);
+		const revealed = () => document.getElementById('shared-result-2') !== null;
+		vi.spyOn(empty, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, revealed() ? 90 : 60, 200, 0));
+		vi.spyOn(visible, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, revealed() ? 180 : 80, 200, 40));
+		vi.spyOn(window, 'scrollY', 'get').mockReturnValue(200);
+		await fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+		await waitFor(() => expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 300, behavior: 'instant' }));
 	});
 
 	it('aligns shared user messages from the local preference without remounting', async () => {

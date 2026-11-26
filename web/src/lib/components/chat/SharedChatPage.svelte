@@ -96,9 +96,13 @@
 			if (rows[mid].getBoundingClientRect().bottom <= top) low = mid + 1;
 			else high = mid;
 		}
-		const first = rows.item(low);
-		const row = first?.matches('.chat-message') ? first : first?.nextElementSibling;
-		return row && row.getBoundingClientRect().top < window.innerHeight ? row : null;
+		for (let i = low; i < rows.length; i++) {
+			const row = rows[i];
+			const rect = row.getBoundingClientRect();
+			if (rect.top >= window.innerHeight) break;
+			if (rect.height > 0 && row.matches('.chat-message')) return row;
+		}
+		return null;
 	}
 
 	function parseMessages(rawMessages: unknown[], startIndex: number): SharedMessageEntry[] {
