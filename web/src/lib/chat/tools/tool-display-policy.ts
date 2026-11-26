@@ -4,6 +4,7 @@
 
 import type { ToolPayload, ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import type { ToolUseChatMessage } from '$shared/chat-types';
+import { isRecord } from '$shared/json';
 import { isEmptyToolResult } from '$shared/tool-result-content';
 import { reportedResultProps } from '$lib/chat/tools/tool-display-presenters.js';
 import * as m from '$lib/paraglide/messages.js';
@@ -49,7 +50,9 @@ export function resolveToolResultDisplayRule(
 			? { ...FAILED_RESULT_RULE, title: `${m.chat_message_error()}: ${status}` }
 			: FAILED_RESULT_RULE;
 	}
-	if (rule.result?.mode === 'collapsible' && isEmptyToolResult(toolResult.content)) return undefined;
+	const content = toolResult.content;
+	if (rule.result?.contentKind === 'todoList' && isRecord(content) && Array.isArray(content.items) && content.items.length === 0) return rule.result;
+	if (rule.result?.mode === 'collapsible' && isEmptyToolResult(content)) return undefined;
 	return rule.result;
 }
 

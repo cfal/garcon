@@ -24,6 +24,7 @@ import {
 	PiToolSearchToolUseMessage,
 	ReadToolUseMessage,
 	ScheduleToolUseMessage,
+	TodoReadToolUseMessage,
 	UnknownToolUseMessage,
 	UpdatePlanToolUseMessage,
 	WebFetchToolUseMessage,
@@ -124,11 +125,18 @@ describe('ChatToolEventRenderer', () => {
 	it.each([
 		new ExternalToolUseMessage('', 'old', 'custom', {}),
 		new UpdatePlanToolUseMessage('', 'plan', []),
+		new TodoReadToolUseMessage('', 'ack'),
 	])('omits the result disclosure for an empty successful $type', (toolMessage) => {
 		const { container } = render(ChatToolEventRenderer, {
 			toolMessage, mode: 'result', toolResult: { content: {}, isError: false },
 		});
 		expect(container.childElementCount).toBe(0);
+	});
+
+	it('renders a reported empty TodoRead list as a result', () => {
+		render(ChatToolEventRenderer, { toolMessage: new TodoReadToolUseMessage('', 'list'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { items: [] } } });
+		expect(screen.getByText('No items')).toBeTruthy();
 	});
 
 	it('prefers the primary failure diagnostic over supplementary progress blocks', () => {
