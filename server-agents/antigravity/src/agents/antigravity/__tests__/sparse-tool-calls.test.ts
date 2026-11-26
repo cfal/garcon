@@ -44,6 +44,11 @@ test('uses a late MCP address instead of publishing a provisional plan', () => {
   expect(rows.map(row => row.type)).toEqual(['mcp-tool-use', 'tool-result']);
 });
 
+test.each(['enter_plan_mode', 'exit_plan_mode'])('keeps rejected raw arguments on a native %s fallback', name => {
+  const row = session().start('plan', { name, rawInput: ['malformed'], status: 'failed' })[0];
+  expect(row).toMatchObject({ type: 'external-tool-use', name, input: { raw: ['malformed'] } });
+});
+
 test('pairs delayed and cron schedule requests with provider results, not Garcon jobs', () => {
   const s = session();
   expect(s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 120, TimerCondition: 'sender' } })).toEqual([]);
@@ -264,6 +269,68 @@ test('a textless terminal frame preserves the search priority of the latest cach
     if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
     expect(projectSearchMessage(row)?.body).toContain(diagnostic);
   }
+});
+
+test('a replacement image keeps the exact cached report within the relay budget', () => {
+  const s = session();
+  const large = 'x'.repeat(9 * 1024 * 1024);
+  const content = [textBlock('Status'), textBlock('   '), textBlock(large)];
+  const image = { type: 'image', data: 'AA==' };
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' },
+    content: [...content, image], rawOutput: { output: 'Status\n   \n' + large } });
+  const replacement = { ...image, data: 'AQ==' };
+  const row = s.patch('timer', { status: 'completed', content: [replacement] }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content).toEqual({ items: [...content, replacement] });
+  expect(row.primaryTextItems).toEqual([0, 2]);
+  expect(Buffer.byteLength(JSON.stringify(row))).toBeLessThan(large.length + 1024);
+});
+
+test('indexes diagnostics by changed narrative rather than echo segmentation, metadata or blank blocks', () => {
+  const progress = 'Checking '.repeat(600);
+  const diagnostic = 'Operation refused';
+  const multi = [textBlock(diagnostic), textBlock('Quota exhausted')];
+  const old = { output: progress, attempts: 1 };
+  for (const [name, before, middle, terminal] of [
+    ['split echo', { rawOutput: { output: diagnostic + '\nQuota exhausted' } }, { content: [textBlock(progress), ...multi] }, {}],
+    ['new diagnostic', { rawOutput: old, content: [textBlock(progress)] }, {}, { content: [textBlock(diagnostic), textBlock(progress)] }],
+    ['ambiguous echo', { rawOutput: old, content: [textBlock(progress)] }, { content: [textBlock(progress), textBlock(diagnostic), textBlock(progress)] }, {}],
+    ['changed metadata', { rawOutput: old }, { content: [textBlock(diagnostic)] }, { rawOutput: { ...old, attempts: 2 }, status: 'in_progress' }],
+    ['added blank', { content: [textBlock(progress)] }, { rawOutput: { output: diagnostic } }, { content: [textBlock(progress), textBlock(' ')], status: 'in_progress' }],
+  ] as const) {
+    const s = session();
+    s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, ...before });
+    s.patch('timer', middle);
+    const rows = s.patch('timer', { status: 'failed', ...terminal });
+    const row = rows.at(-1) ?? s.patch('timer', { status: 'failed' }).at(-1);
+    if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+    expect(projectSearchMessage(row)?.body, name).toContain(diagnostic);
+  }
+});
+
+test('retains both cached texts when terminal metadata occupies the output field', () => {
+  for (const rawOutput of [{ output: null, id: 'job' }, ['job']]) {
+    const s = session();
+    s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, rawOutput: 'Earlier output' });
+    const content = [textBlock('New report')];
+    s.patch('timer', { content });
+    const row = s.patch('timer', { status: 'failed', rawOutput }).at(-1);
+    if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+    expect(row.content).toEqual({ status: 'failed', raw: 'Earlier output', rawOutput, items: content });
+    expect(projectSearchMessage(row)?.body).toStartWith('New report');
+  }
+});
+
+test('aligns flat and wrapped report text and overlays matching empty annotations once', () => {
+  const s = session();
+  const first = { ...textBlock('First'), priority: 1 };
+  const gap = { ...textBlock(''), annotations: { audience: ['user'] } };
+  const image = { type: 'image', data: 'AA==' };
+  const last = textBlock('Last');
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content: [first, image, gap, last] });
+  const row = s.patch('timer', { status: 'completed', content: [first.content, gap, last.content] }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content).toEqual({ items: [first, image, gap, last] });
 });
 
 test('does not associate independent output with an ambiguous annotated echo', () => {

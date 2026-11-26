@@ -119,6 +119,10 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
   };
 }
 
+export function reportsPlanOrSchedule(name: string | null): boolean {
+  return name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
+}
+
 export function convertAntigravityToolUse(
   timestamp: string,
   call: AntigravityToolCall,
@@ -131,6 +135,9 @@ export function convertAntigravityToolUse(
     return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, antigravityMcpArguments(input) ?? {});
   }
   const name = antigravityToolName(call);
+  if (!call.isMcp && reportsPlanOrSchedule(name) && call.rawInput !== undefined) {
+    input = isRecord(call.rawInput) ? call.rawInput : { raw: call.rawInput };
+  }
   switch (call.isMcp && name !== 'call_mcp_tool' ? null : name) {
     case 'run_command': {
       const command = stringField(input, 'CommandLine', 'command_line', 'commandLine', 'command');
@@ -209,8 +216,6 @@ export function convertAntigravityToolUse(
       return new WebSearchToolUseMessage(timestamp, id, query);
     }
     case 'schedule': {
-      const raw = call.rawInput;
-      input = raw === undefined || isRecord(raw) ? asObject(raw) : { raw };
       const args = scheduleArguments(input);
       if (!args) break;
       const { delaySeconds } = args;

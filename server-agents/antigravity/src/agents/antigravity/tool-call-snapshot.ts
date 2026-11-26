@@ -3,11 +3,12 @@ import { ToolResultMessage, type ToolUseChatMessage } from '@garcon/common/chat-
 import { isRecord } from '@garcon/common/json';
 import { toolResultTextPart } from '@garcon/common/tool-result-content';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
-import { planOrScheduleResult, planReportText } from './plan-schedule-result.js';
+import { planOrScheduleResult, prefersReportContent } from './plan-schedule-result.js';
 import {
   antigravityMcpArguments,
   antigravityToolName,
   antigravityToolResultText,
+  reportsPlanOrSchedule,
   type AntigravityToolCall,
 } from './tool-use-converter.js';
 
@@ -16,10 +17,6 @@ export interface TrackedCall extends AntigravityToolCall {
   readonly content?: readonly Record<string, unknown>[];
   readonly contentIsNewer: boolean;
   readonly reportContentIsNewer: boolean;
-}
-
-function reportsPlanOrSchedule(name: string | null): boolean {
-  return name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
 }
 
 function isAgentWork(name: string | null): boolean {
@@ -51,8 +48,8 @@ function withoutOutputEchoes(blocks: readonly Record<string, unknown>[], output:
   });
 }
 
-function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, content: TrackedCall['content'], readText: typeof joinBlockText, wasNewer = false): boolean {
-  if (rawOutput === previous?.rawOutput && content === previous?.content) return wasNewer;
+function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, content: TrackedCall['content']): boolean {
+  if (rawOutput === previous?.rawOutput && content === previous?.content) return previous?.contentIsNewer ?? false;
   const output = rawOutputText(rawOutput);
   const outputChanged = output !== rawOutputText(previous?.rawOutput);
   if (content && content !== previous?.content) {
@@ -63,11 +60,11 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
     // A newly echoed output confirms it alongside the other text on the frame.
     // Once confirmed, only a change to independent text can supersede it.
     if (hasOutputText && after.length < content.length && before.length === oldBlocks.length) return false;
-    if (readText(before) !== readText(after)) return !(outputChanged && hasOutputText);
+    if (joinBlockText(before) !== joinBlockText(after)) return !(outputChanged && hasOutputText);
   }
   const rawChanged = outputChanged || (rawOutput !== previous?.rawOutput &&
     isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
-  return !rawChanged && wasNewer;
+  return !rawChanged && !!previous?.contentIsNewer;
 }
 
 function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['content'] {
@@ -124,10 +121,10 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
   const hasArguments = Object.keys(call.input).length > 0;
   const input = !hasArguments ? previous?.input ?? call.input
     : previous && partial ? { ...previous.input, ...call.input } : call.input;
-  // The native schedule fallback needs the malformed argument itself. Other tools,
+  // Native report fallbacks need the malformed argument itself. Other tools,
   // including a late MCP identity, still resolve against the last object arguments.
   let rawInput: unknown = input;
-  if (!hasArguments && (!name || name === 'schedule')) {
+  if (!hasArguments && (!name || reportsPlanOrSchedule(name))) {
     if (call.rawInput !== undefined && !isRecord(call.rawInput)) rawInput = call.rawInput;
     else if (previous) rawInput = previous.rawInput;
   }
@@ -147,9 +144,8 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
     rawInput,
     rawOutput,
     content,
-    contentIsNewer: prefersContent(previous, rawOutput, content, joinBlockText, previous?.contentIsNewer),
-    reportContentIsNewer: !isMcp && (!name || reportsPlanOrSchedule(name))
-      && prefersContent(previous, rawOutput, content, planReportText, previous?.reportContentIsNewer),
+    contentIsNewer: prefersContent(previous, rawOutput, content),
+    reportContentIsNewer: !isMcp && (!name || reportsPlanOrSchedule(name)) && prefersReportContent(previous, rawOutput, content),
   };
 }
 
