@@ -208,16 +208,11 @@ export function convertAntigravityToolUse(
     case 'schedule': {
       const args = scheduleArguments(input);
       if (!args) break;
-      const { delaySeconds, expression } = args;
+      const { delaySeconds } = args;
       // Agy treats the inactive mode's zero/empty fields as unset. The row retains explicit defaults.
-      if (typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', ...args });
-        if (row) return row;
-      }
-      if (expression !== undefined) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', ...args });
-        if (row) return row;
-      }
+      const action = typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0 ? 'wakeup' : 'cron';
+      const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action, ...args });
+      if (row) return row;
       break;
     }
     case 'enter_plan_mode': {
