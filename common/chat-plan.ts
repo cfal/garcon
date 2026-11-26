@@ -12,47 +12,6 @@ export interface PlanStep {
   status: TodoStatus | 'skipped' | 'failed';
 }
 
-export class UpdatePlanToolUseMessage {
-  readonly type = 'update-plan-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-    public todos?: PlanStep[],
-  ) {}
-}
-
-export class EnterPlanModeToolUseMessage {
-  readonly type = 'enter-plan-mode-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-  ) {}
-}
-
-// Antigravity reports its own planning activity; these calls do not request a Garcon mode change.
-export class AntigravityEnterPlanModeToolUseMessage {
-  readonly type = 'antigravity-enter-plan-mode-tool-use' as const;
-  constructor(public timestamp: string, public toolId: string, public reason: string) {}
-}
-
-export class AntigravityExitPlanModeToolUseMessage {
-  readonly type = 'antigravity-exit-plan-mode-tool-use' as const;
-  constructor(public timestamp: string, public toolId: string, public plan: string) {}
-}
-
-export class ExitPlanModeToolUseMessage {
-  readonly type = 'exit-plan-mode-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-    public plan: string,
-    public allowedPrompts?: Array<{ tool: string; prompt: string }>,
-  ) {}
-}
-
 export type CursorPlanTodoStatus = TodoStatus | 'cancelled';
 
 export interface CursorPlanTodo {

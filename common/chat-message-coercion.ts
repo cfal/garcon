@@ -1,11 +1,39 @@
-import type {
-  AskUserQuestionOption,
-  AskUserQuestionPrompt,
-  ChatImage,
-  ChatMessageMetadata,
-  CodexSubagentInputItem,
-} from './chat-types.js';
-import { parseAsyncQuestionReply } from './async-user-questions.js';
+import type { CodexSubagentInputItem } from './chat-types.js';
+import { parseAsyncQuestionReply, type AsyncQuestionReply } from './async-user-questions.js';
+
+export interface ChatImage {
+  data: string;
+  name: string;
+  mimeType?: string;
+}
+
+export interface ChatMessageMetadata {
+  questionReply?: AsyncQuestionReply;
+  contentMode?: 'literal';
+  contentFormat?: 'plain' | 'markdown';
+  clientRequestId?: string;
+  clientMessageId?: string;
+  upstreamRequestId?: string;
+  turnId?: string;
+}
+
+export interface AskUserQuestionOption {
+  id: string;
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+export interface AskUserQuestionPrompt {
+  id: string;
+  prompt: string;
+  options: AskUserQuestionOption[];
+  header?: string;
+  allowMultiple?: boolean;
+  allowFreeText?: boolean;
+  allowNotes?: boolean;
+  isSecret?: boolean;
+}
 
 export function asCodexSubagentInputItems(v: unknown): CodexSubagentInputItem[] | undefined {
   if (!Array.isArray(v)) return undefined;

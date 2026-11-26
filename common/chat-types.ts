@@ -4,7 +4,7 @@
 
 import { isRecord } from './json.js';
 import { parseToolScheduleRequest, type ToolScheduleRequest } from './tool-schedule.js';
-import { parseAsyncQuestionSet, type AsyncQuestionSet, type AsyncQuestionReply } from './async-user-questions.js';
+import { parseAsyncQuestionSet, type AsyncQuestionSet } from './async-user-questions.js';
 import { normalizeAskUserQuestionDecisionResponse, type AskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 import {
   commandOutcomeText, isCommandOutputData,
@@ -15,12 +15,11 @@ import {
   asAllowedPrompts, asAskUserQuestions, asChatImages, asCodexSubagentInputItems,
   asOptionalBoolean, asOptionalChanges, asOptionalNumber, asOptionalString, asOptionalStringArray,
   asRecord, asStringArray, parseChatMessageMetadata, str,
+  type AskUserQuestionPrompt, type ChatImage, type ChatMessageMetadata,
 } from './chat-message-coercion.js';
 import {
   asCursorPlanPhases, asCursorPlanTodos, coercePlanSteps, coerceTodoItems,
-  AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage,
-  EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage, UpdatePlanToolUseMessage,
-  type CursorPlanPhase, type CursorPlanTodo, type TodoItem,
+  type CursorPlanPhase, type CursorPlanTodo, type PlanStep, type TodoItem,
 } from './chat-plan.js';
 import {
   coerceDurableCliBodyDisclosure,
@@ -40,15 +39,9 @@ import {
 } from './transcript-notice-details.js';
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
-export { AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage,
-  EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage, UpdatePlanToolUseMessage, coerceTodoItems } from './chat-plan.js';
+export { coerceTodoItems } from './chat-plan.js';
+export type { AskUserQuestionOption, AskUserQuestionPrompt, ChatImage, ChatMessageMetadata } from './chat-message-coercion.js';
 export type { CursorPlanPhase, CursorPlanTodo, CursorPlanTodoStatus, PlanStep, TodoItem, TodoStatus } from './chat-plan.js';
-
-export interface ChatImage {
-  data: string;
-  name: string;
-  mimeType?: string;
-}
 
 export { CHAT_STOP_OUTCOMES, isAbortAcknowledged, isStopSatisfied } from './chat-stop.js';
 export type { ChatStopIntent, ChatStopOutcome } from './chat-stop.js';
@@ -59,16 +52,6 @@ export type ChatProcessingPhase = typeof CHAT_PROCESSING_PHASES[number];
 export interface ChatProcessingEntry {
   chatId: string;
   phase: ChatProcessingPhase;
-}
-
-export interface ChatMessageMetadata {
-  questionReply?: AsyncQuestionReply;
-  contentMode?: 'literal';
-  contentFormat?: 'plain' | 'markdown';
-  clientRequestId?: string;
-  clientMessageId?: string;
-  upstreamRequestId?: string;
-  turnId?: string;
 }
 
 export class UserMessage {
@@ -431,22 +414,45 @@ export class ScheduleToolUseMessage {
   }
 }
 
-export interface AskUserQuestionOption {
-  id: string;
-  label: string;
-  description?: string;
-  preview?: string;
+export class UpdatePlanToolUseMessage {
+  readonly type = 'update-plan-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public todos?: PlanStep[],
+  ) {}
 }
 
-export interface AskUserQuestionPrompt {
-  id: string;
-  prompt: string;
-  options: AskUserQuestionOption[];
-  header?: string;
-  allowMultiple?: boolean;
-  allowFreeText?: boolean;
-  allowNotes?: boolean;
-  isSecret?: boolean;
+export class EnterPlanModeToolUseMessage {
+  readonly type = 'enter-plan-mode-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+  ) {}
+}
+
+// Antigravity reports its own planning activity; these calls do not request a Garcon mode change.
+export class AntigravityEnterPlanModeToolUseMessage {
+  readonly type = 'antigravity-enter-plan-mode-tool-use' as const;
+  constructor(public timestamp: string, public toolId: string, public reason: string) {}
+}
+
+export class AntigravityExitPlanModeToolUseMessage {
+  readonly type = 'antigravity-exit-plan-mode-tool-use' as const;
+  constructor(public timestamp: string, public toolId: string, public plan: string) {}
+}
+
+export class ExitPlanModeToolUseMessage {
+  readonly type = 'exit-plan-mode-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public plan: string,
+    public allowedPrompts?: Array<{ tool: string; prompt: string }>,
+  ) {}
 }
 
 export class AskUserQuestionToolUseMessage {
