@@ -192,7 +192,7 @@ function parametersToolRule(label: string): ToolDisplayRule {
 			mode: 'collapsible',
 			defaultOpen: false,
 			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result?.content), format: 'plain' }),
+			getContentProps: completeReportProps,
 		},
 	};
 }
@@ -685,10 +685,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
+			getContentProps: completeReportProps,
 		},
 	},
 

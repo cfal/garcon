@@ -139,6 +139,18 @@ describe('ChatToolEventRenderer', () => {
 		const shown = screen.getByText(/Operation refused/).textContent!;
 		expect(JSON.parse(shown)).toMatchObject({ items, rawOutput: { attempts: 1 } });
 	});
+
+	it.each([
+		[new ExternalToolUseMessage('', 'raw', 'schedule', { future: true }, 'antigravity'),
+			{ raw: 'Terminal diagnostic', rawOutput: { attempts: 1 } }, 'Terminal diagnostic', '"attempts": 1'],
+		[new UnknownToolUseMessage('', 'raw', 'ScheduleWakeup', { stop: true, reason: 'Complete' }),
+			{ raw: 'Stopped', toolUseResult: { cancelledWakeups: 0 } }, 'Stopped', '"cancelledWakeups": 0'],
+		[new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			{ raw: 'Listed', status: 'partial' }, 'Listed', '"status": "partial"'],
+	] as const)('keeps companion fields in the visible report for $0.type', (toolMessage, content, text, detail) => {
+		render(ChatToolEventRenderer, { toolMessage, mode: 'result', autoExpandTools: true, toolResult: { content } });
+		expect(screen.getByText(new RegExp(text)).textContent).toContain(detail);
+	});
 	it('shows a stop request and target without a blank disclosure for an empty success', () => {
 		const toolMessage = new BackgroundTaskToolUseMessage('', 'stop', 'stop', 'job-1');
 		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });

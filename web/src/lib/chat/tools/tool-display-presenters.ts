@@ -112,7 +112,7 @@ export function reportedResultProps(result: ToolPayload) {
 }
 
 function completeReportBody(body: ToolPayload): string {
-	const fields = Object.keys(body).filter(key => key !== 'status');
+	const fields = Object.keys(body);
 	// Plain-text shortcuts are safe only if they account for every field in the report.
 	if (fields.length === 0 || (fields.length === 1 && ['raw', 'rawOutput', 'items'].includes(fields[0]))) return reportedResultBody(body);
 	return JSON.stringify(body, null, 2);
