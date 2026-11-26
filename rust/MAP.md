@@ -41,6 +41,24 @@ permissions, executor links, PTYs, Files and Git, and restart behavior. Each
 needs a scenario before its unit can be ported; the integration fixtures under
 `integration-tests/support` already provide the fake providers to drive them.
 
+## End-to-end verification
+
+Last run 2026-11-26 on the final front door, following ADR-009: every suite
+runs under both controllers and outcomes are compared test by test
+(`rust/parity/compare-junit.ts`). A test that differs is rerun serially on
+both before it counts.
+
+| Suite | Tests | Identical outcomes | Shadowed native responses |
+| --- | ---: | ---: | ---: |
+| Server integration (265 files, scripted providers) | 1,148 | 1,148 | n/a |
+| Chromium (158 files) | 450 | 450 | 76,093, all matching |
+
+Tests that fail under both controllers on the verification machine (missing
+`zip`, `cursor-agent`, or timing in remote-executor suites) count as agreement
+but not as evidence. Leaked `opencode serve` processes from interrupted runs
+loaded the machine into timeouts under both controllers; stop orphans between
+runs.
+
 ## Open questions
 
 - Whether provider integrations are ported or kept as TypeScript processes
