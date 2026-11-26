@@ -37,3 +37,11 @@ test('redacts a data URL before quoting its prompt, without consuming a literal 
   expect(JSON.parse(entry.body!.slice(header.length))).toBe('[data URL omitted from export]" and continue');
   expect(createCarryoverTranscript([message], 0)?.prefix).toContain(JSON.stringify(prompt));
 });
+
+test('a closing parenthesis in a standalone data URL is payload, not a prose delimiter', () => {
+  const prompt = 'data:text/plain,PUBLIC)SYNTHETIC_PAYLOAD';
+  const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
+  const fold = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message }]);
+  expect(fold.entries[0].body).toEndWith('Prompt: "[data URL omitted from export]"');
+  expect(createCarryoverTranscript([message], 0)?.prefix).toContain(prompt);
+});

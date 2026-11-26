@@ -26,6 +26,7 @@ const xmlIllegalCharacters = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\ufff
 const utf8Encoder = new TextEncoder();
 const DATA_URL_OMISSION = '[data URL omitted from export]';
 const IMAGE_BODY_OMISSION = '[image body omitted from export]';
+const standaloneDataUrl = /^data:[^\s,]*,\S*$/i;
 const embeddedDataUrl = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:(?:[A-Za-z0-9][\w.+-]*\/[\w.+-]+)?(?:;[\w.+=-]+)*,[^\s"'<>)]*/gi;
 
 export function textSafe(value: string): string {
@@ -219,34 +220,22 @@ function sanitizeStructuredValue(value: unknown): unknown {
   if (typeof value === 'string') return redactDataUrl(value);
   if (Array.isArray(value)) return value.map(sanitizeStructuredValue);
   if (!isRecord(value)) return value;
-  const imageSource = isRecord(value.source) ? value.source : null;
-  if (
-    value.type === 'image'
-    && imageSource?.type === 'base64'
-    && typeof imageSource.data === 'string'
-  ) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [
-        key,
-        key === 'source'
-          ? Object.fromEntries(
-            Object.entries(imageSource).map(([sourceKey, sourceValue]) => [
-              sourceKey,
-              sourceKey === 'data'
-                ? IMAGE_BODY_OMISSION
-                : sanitizeStructuredValue(sourceValue),
-            ]),
-          )
-          : sanitizeStructuredValue(child),
-      ]),
-    );
-  }
   return Object.fromEntries(
-    Object.entries(value).map(([key, child]) => [key, sanitizeStructuredValue(child)]),
+    Object.entries(value).map(([key, child]) => {
+      if (value.type === 'image') {
+        if (key === 'data' && typeof child === 'string' && typeof value.mimeType === 'string') return [key, IMAGE_BODY_OMISSION];
+        if (key === 'source' && isRecord(child) && child.type === 'base64' && typeof child.data === 'string') {
+          return [key, sanitizeStructuredValue({ ...child, data: IMAGE_BODY_OMISSION })];
+        }
+      }
+      return [key, sanitizeStructuredValue(child)];
+    }),
   );
 }
 
 export function redactDataUrl(value: string): string {
+  const trimmed = value.trim();
+  if (standaloneDataUrl.test(trimmed)) return value.replace(trimmed, DATA_URL_OMISSION);
   return value.replace(embeddedDataUrl, DATA_URL_OMISSION);
 }
 
