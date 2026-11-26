@@ -491,6 +491,10 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible', contentKind: 'text',
 			title: ({ request }) => toolScheduleTitle(request as ToolScheduleRequest),
+			inlineWhen: ({ request }) => {
+				const { action } = request as ToolScheduleRequest;
+				return action !== 'cron' && action !== 'wakeup';
+			},
 			getContentProps: ({ request }) => ({ content: toolScheduleDetails(request as ToolScheduleRequest) }),
 		},
 		result: REPORTED_RESULT_RULE,
@@ -579,6 +583,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 	'antigravity-enter-plan-mode-tool-use': {
 		input: {
 			mode: 'collapsible', title: 'Enter plan mode', contentKind: 'text',
+			inlineWhen: ({ reason }) => reason === '',
 			getContentProps: ({ reason }) => ({ content: reason }),
 		},
 		result: REPORTED_RESULT_RULE,

@@ -100,7 +100,7 @@
 
 	let shouldRenderCollapsedAsInline = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return false;
-		if (mode === 'input' && displayConfig.contentKind === 'text' && contentProps.content === '') return true;
+		if (mode === 'input' && config.input.inlineWhen?.(parsedData)) return true;
 		if (displayConfig.contentKind !== 'diff') return false;
 		if (!contentProps.diffUnavailable) return false;
 		const files = (contentProps.files as string[] | undefined) || [];

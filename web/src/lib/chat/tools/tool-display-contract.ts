@@ -37,6 +37,7 @@ export interface ToolInputDisplayRule {
 		border?: string;
 	};
 	title?: string | ((input: ToolPayload) => string);
+	inlineWhen?: (input: ToolPayload) => boolean;
 	defaultOpen?: boolean;
 	contentKind?: ToolContentKind;
 	getContentProps?: (

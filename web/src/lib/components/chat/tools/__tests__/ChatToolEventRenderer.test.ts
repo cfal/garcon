@@ -38,6 +38,16 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('does not serialize a closed tool input until the reader opens it', async () => {
+		const toJSON = vi.fn(() => ({ example: 1 }));
+		render(ChatToolEventRenderer, {
+			toolMessage: new ExternalToolUseMessage('', 'call', 'example', { toJSON }), mode: 'input',
+		});
+		expect(toJSON).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button'));
+		expect(toJSON).toHaveBeenCalled();
+	});
+
 	it('keeps the wakeup prompt and cancellation condition behind a readable title', async () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new ScheduleToolUseMessage('', 'timer', {
