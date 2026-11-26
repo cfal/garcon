@@ -112,7 +112,7 @@
 
 	const auth = getAuth();
 	const localSettings = getLocalSettings();
-	const terminalIdentity = new TerminalClientIdentity();
+	let terminalIdentity = $state.raw(new TerminalClientIdentity());
 	const fileImages = new FileImageCache({
 		budgetBytes: localSettings.imageCacheSizeMiB * 1024 * 1024,
 		owner: null,
@@ -162,7 +162,7 @@
 		modelCatalog,
 		navigation,
 		notifications,
-		terminalIdentity,
+		get terminalIdentity() { return terminalIdentity; },
 		ws,
 		chatBoardInvalidations,
 		ticketsInvalidations,
@@ -268,7 +268,9 @@
 	// internal $state fields (which would cause an infinite reconnect loop).
 	let fileRecoveryInitialized = false;
 	$effect(() => {
-		if (auth.isAuthenticated) {
+		if (!visible) {
+			untrack(() => ws.pause('workspace-inactive'));
+		} else if (auth.isAuthenticated) {
 			const token = auth.token;
 			const authDisabled = auth.authDisabled;
 			if (!fileRecoveryInitialized) {
@@ -282,7 +284,7 @@
 				}
 			}
 			untrack(() => ws.connect(token, authDisabled));
-		} else untrack(() => ws.pauseForAuth());
+		} else untrack(() => ws.pause('missing-auth'));
 	});
 
 	let presentationOwnerKey: string | null = null;
@@ -303,10 +305,13 @@
 	let terminalsInitialized = false;
 	$effect(() => {
 		const authenticated = auth.isAuthenticated;
+		const identity = terminalIdentity;
 		let current = true;
 		untrack(() => {
-			void terminalIdentity.ready.then(async () => {
-				if (!current) return;
+			// An early terminal create can request attachment before initialization.
+			if (!identity.established) terminals.authChanged(false);
+			void identity.ready.then(async (clientId) => {
+				if (!current || clientId === null || !identity.established) return;
 				if (!authenticated) {
 					terminals.authChanged(false);
 					return;
@@ -325,7 +330,7 @@
 	});
 
 	const browserNotifications = new BrowserNotificationService({
-		enabled: () => localSettings.browserNotifications,
+		enabled: () => visible && ws.isConnected && localSettings.browserNotifications,
 		openChat: gotoChat,
 		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
 	});
@@ -345,7 +350,10 @@
 	onMount(() => {
 		browserNotifications.start();
 		return ws.onConnectionChange((connected) => {
-			if (!connected) browserNotificationsRouter.clearPermissions();
+			if (connected) {
+				void remoteSettings.refreshLatest().catch((error: unknown) =>
+					console.warn('Failed to refresh remote settings on connection:', error));
+			} else browserNotificationsRouter.releasePermissions();
 		});
 	});
 	onMount(() =>
@@ -422,11 +430,21 @@
 
 	function handlePageHide() {
 		readReceiptOutbox.flushNow();
+		terminals.authChanged(false);
+		terminalIdentity.destroy();
+	}
+
+	function handlePageShow(event: PageTransitionEvent) {
+		if (event.persisted) terminalIdentity = new TerminalClientIdentity();
 	}
 
 	onMount(() => {
 		window.addEventListener('pagehide', handlePageHide);
-		return () => window.removeEventListener('pagehide', handlePageHide);
+		window.addEventListener('pageshow', handlePageShow);
+		return () => {
+			window.removeEventListener('pagehide', handlePageHide);
+			window.removeEventListener('pageshow', handlePageShow);
+		};
 	});
 
 	// Preload remote settings after authentication so root-global values

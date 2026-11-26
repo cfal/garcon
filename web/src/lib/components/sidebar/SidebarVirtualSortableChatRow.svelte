@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import type { SidebarRowActions } from './sidebar-row-actions.js';
+	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import {
 		draggable,
 		dropTargetForElements,
 	} from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
-	import type { DropTargetRecord, Input } from '@atlaskit/pragmatic-drag-and-drop/types';
 	import { combine } from '@atlaskit/pragmatic-drag-and-drop/utils/combine';
 	import { attachClosestEdge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge/attach-closest-edge';
 	import SidebarChatItem from './SidebarChatItem.svelte';
@@ -22,12 +22,11 @@
 		type SidebarVirtualChatRow,
 	} from '../../sidebar/display/sidebar-virtual-chat-list';
 	import type { SidebarDisplayOptions } from '../../sidebar/display/sidebar-display-options';
-	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarVirtualSortableChatRowProps {
+		actions: SidebarRowActions;
 		onToggleBranch?: (key: string) => void;
 		row: SidebarVirtualChatRow;
 		index: number;
@@ -45,32 +44,15 @@
 		isDragging?: boolean;
 		onDragStart: (row: SidebarVirtualChatRow) => void;
 		onDragSourceUnmount: (chatId: string) => void;
-		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chat: ChatSessionRecord) => void;
-		onStartRenameChat: (chat: ChatSessionRecord) => void;
-		onTogglePinned: (chatId: string) => void;
-		onToggleArchive: (chatId: string) => void;
-		isArchiveMutationPending?: boolean;
-		onShowDetails: (chat: ChatSessionRecord) => void;
-		onForkChat: (sourceChatId: string) => void;
-		onShareChat: (chat: ChatSessionRecord) => void;
-		onTagClick?: (tag: string) => void;
-		onManageTags?: (chat: ChatSessionRecord) => void;
-		onEnterMultiSelect?: (chatId: string) => void;
-		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		onMoveUp?: () => void;
-		onMoveDown?: () => void;
+		onMoveAdjacent: (row: SidebarVirtualChatRow, offset: -1 | 1) => void;
 		moveBoundaryLabels?: { first: string; last: string };
-		onMoveToTop?: () => void;
-		onMoveToBottom?: () => void;
+		onMoveToBoundary: (row: SidebarVirtualChatRow, boundary: 'start' | 'end') => void;
 		onSortChatOrder?: (sortKey: ChatOrderSortKey) => void;
-		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
-		onDragUpdate: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
-		onDropOnRow: (sourceData: unknown, dropTargets: DropTargetRecord[], input: Input) => void;
 	}
 
 	let {
+		actions,
 		onToggleBranch,
 		row,
 		index,
@@ -86,32 +68,21 @@
 		isDragging = false,
 		onDragStart,
 		onDragSourceUnmount,
-		onChatSelect,
-		onDeleteChat,
-		onStartRenameChat,
-		onTogglePinned,
-		onToggleArchive,
-		isArchiveMutationPending = false,
-		onShowDetails,
-		onForkChat,
-		onShareChat,
-		onTagClick,
-		onManageTags,
-		onEnterMultiSelect,
-		onMultiSelectToggle,
-		onMoveUp,
-		onMoveDown,
+		onMoveAdjacent,
 		moveBoundaryLabels,
-		onMoveToTop,
-		onMoveToBottom,
+		onMoveToBoundary,
 		onSortChatOrder,
-		onOpenInNewWindow,
 		newWindowEdges,
-		onDragUpdate,
-		onDropOnRow,
 	}: SidebarVirtualSortableChatRowProps = $props();
 
 	let rowEl = $state<HTMLElement | null>(null);
+	const reorderIndex = $derived(reorderEnabled ? row.reorderScopeIds.indexOf(row.chat.id) : -1);
+	const canMoveEarlier = $derived(reorderIndex > 0);
+	const canMoveLater = $derived(reorderIndex >= 0 && reorderIndex < row.reorderScopeIds.length - 1);
+	const moveUp = () => onMoveAdjacent(row, -1);
+	const moveDown = () => onMoveAdjacent(row, 1);
+	const moveToTop = () => onMoveToBoundary(row, 'start');
+	const moveToBottom = () => onMoveToBoundary(row, 'end');
 	let isActiveChat = $derived(
 		!isMultiSelectMode &&
 			(selectedChatId === row.chat.id ||
@@ -120,15 +91,20 @@
 				)),
 	);
 
-	onMount(() => {
+	$effect(() => {
 		if (!rowEl) return;
-		const mountedChatId = row.chat.id;
-		const cleanupDragAndDrop = combine(
+		const mountedChatId = untrack(() => row.chat.id);
+		return () => untrack(() => onDragSourceUnmount(mountedChatId));
+	});
+
+	$effect(() => {
+		const element = rowEl;
+		if (isMobile || !element) return;
+		return combine(
 			draggable({
-				element: rowEl,
+				element,
 				canDrag: ({ input }) =>
 					dragEnabled &&
-					!isMobile &&
 					!document
 						.elementFromPoint(input.clientX, input.clientY)
 						?.closest('[data-sidebar-touch-drag-ignore]'),
@@ -144,7 +120,7 @@
 				onDragStart: () => onDragStart(row),
 			}),
 			dropTargetForElements({
-				element: rowEl,
+				element,
 				canDrop: ({ source }) => {
 					if (!reorderEnabled || !isSidebarChatDragData(source.data)) return false;
 					const target = getSidebarChatDropTargetData({
@@ -169,22 +145,9 @@
 					),
 				getDropEffect: () => 'move',
 				getIsSticky: () => true,
-				onDrag: ({ source, location }) => {
-					onDragUpdate(source.data, location.current.dropTargets, location.current.input);
-				},
-				onDropTargetChange: ({ source, location }) => {
-					onDragUpdate(source.data, location.current.dropTargets, location.current.input);
-				},
-				onDrop: ({ source, location }) => {
-					onDropOnRow(source.data, location.current.dropTargets, location.current.input);
-				},
 			}),
 		);
 
-		return () => {
-			cleanupDragAndDrop();
-			onDragSourceUnmount(mountedChatId);
-		};
 	});
 </script>
 
@@ -239,26 +202,16 @@
 					{isMultiSelected}
 					enableNativeDrag={false}
 					enableRecenterOnRequest={false}
-					{onChatSelect}
-					{onDeleteChat}
-					{onStartRenameChat}
-					{onTogglePinned}
-					{onToggleArchive}
-					{isArchiveMutationPending}
-					{onShowDetails}
-					{onForkChat}
-					{onShareChat}
-					{onTagClick}
-					{onManageTags}
-					{onEnterMultiSelect}
-					{onMultiSelectToggle}
-					{onMoveUp}
-					{onMoveDown}
+					{...actions}
+					isArchiveMutationPending={actions.isArchiveMutationPending?.(row.chat.id)}
+					onEnterMultiSelect={row.contextOnly ? undefined : actions.onEnterMultiSelect}
+					onMultiSelectToggle={row.contextOnly ? undefined : actions.onMultiSelectToggle}
+					onMoveUp={canMoveEarlier ? moveUp : undefined}
+					onMoveDown={canMoveLater ? moveDown : undefined}
 					{moveBoundaryLabels}
-					{onMoveToTop}
-					{onMoveToBottom}
+					onMoveToTop={canMoveEarlier ? moveToTop : undefined}
+					onMoveToBottom={canMoveLater ? moveToBottom : undefined}
 					{onSortChatOrder}
-					{onOpenInNewWindow}
 					{newWindowEdges}
 				/>
 				{#snippet failed()}

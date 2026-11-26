@@ -18,34 +18,24 @@ export type WindowTabPresentation =
 
 export const DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH = 64;
 export const DEFAULT_WINDOW_TAB_ICON_WIDTH = 28;
-export const WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH = 24;
-
-export interface WindowTabCapacityInput {
-	containerWidth: number;
-	actionsWidth: number;
-	auxiliaryWidth: number;
-	gap: number;
-	railChromeWidth: number;
+export function sameVisibleTabs(left: readonly string[], right: readonly string[]): boolean {
+	return (
+		left === right ||
+		(left.length === right.length && left.every((id, index) => id === right[index]))
+	);
 }
 
-export interface WindowTabCapacity {
-	railWidth: number;
-	contentWidth: number;
-}
-
-export function resolveWindowTabCapacity({
-	containerWidth,
-	actionsWidth,
-	auxiliaryWidth,
-	gap,
-	railChromeWidth,
-}: WindowTabCapacityInput): WindowTabCapacity {
-	const railWidth = Math.max(0, containerWidth - actionsWidth - auxiliaryWidth - gap);
-
-	return {
-		railWidth,
-		contentWidth: Math.max(0, railWidth - railChromeWidth),
-	};
+export function sameTabPresentation(
+	left: WindowTabPresentation | null,
+	right: WindowTabPresentation,
+): boolean {
+	return (
+		left !== null &&
+		left.labelMode === right.labelMode &&
+		(left.labelMode !== 'active-title' ||
+			(right.labelMode === 'active-title' && left.activeTitleId === right.activeTitleId)) &&
+		sameVisibleTabs(left.visibleIds, right.visibleIds)
+	);
 }
 
 export function resolveWindowTabPresentation(input: WindowTabLayoutInput): WindowTabPresentation {

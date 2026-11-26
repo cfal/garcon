@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { SidebarRowActions } from './sidebar-row-actions.js';
 	import type { NewChatProjectTarget } from '$lib/chat/new-chat/new-chat-seed';
 	import { untrack } from 'svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
@@ -7,18 +8,17 @@
 	import { shouldShowSidebarBackToTop } from './sidebar-back-to-top';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { SidebarChatListProjection } from '../../sidebar/display/sidebar-row-model';
-	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 	import {
 		DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		type SidebarDisplayOptions,
 	} from '../../sidebar/display/sidebar-display-options';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
-	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 
 	interface SidebarContentProps {
+		actions: SidebarRowActions;
 		reorder: SidebarOrderController;
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
@@ -32,25 +32,12 @@
 		displayOptions?: SidebarDisplayOptions;
 		onToggleProjectCollapsed?: (projectKey: string) => void;
 		onNewProjectChat?: (project: NewChatProjectTarget) => void;
-		onEnterMultiSelect?: (chatId: string) => void;
-		onMultiSelectToggle?: (chatId: string, shiftKey: boolean) => void;
-		onChatSelect: (chatId: string) => void;
-		onDeleteChat: (chat: ChatSessionRecord) => void;
-		onStartRenameChat: (chat: ChatSessionRecord) => void;
-		onShowDetails: (chat: ChatSessionRecord) => void;
-		onForkChat: (sourceChatId: string) => void;
-		onShareChat: (chat: ChatSessionRecord) => void;
-		onTagClick?: (tag: string) => void;
-		onManageTags?: (chat: ChatSessionRecord) => void;
-		onOpenInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
-		onTogglePinned: (chatId: string) => void;
-		onToggleArchive: (chatId: string) => void;
-		isArchiveMutationPending?: (chatId: string) => boolean;
 		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 	}
 
 	let {
+		actions,
 		reorder,
 		projection,
 		selectedChatId,
@@ -64,21 +51,7 @@
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
 		onToggleProjectCollapsed,
 		onNewProjectChat,
-		onEnterMultiSelect,
-		onMultiSelectToggle,
-		onChatSelect,
-		onDeleteChat,
-		onStartRenameChat,
-		onShowDetails,
-		onForkChat,
-		onShareChat,
-		onTagClick,
-		onManageTags,
-		onOpenInNewWindow,
 		newWindowEdges,
-		onTogglePinned,
-		onToggleArchive,
-		isArchiveMutationPending = () => false,
 		onSortChatOrder,
 	}: SidebarContentProps = $props();
 
@@ -172,21 +145,8 @@
 		{displayOptions}
 		{onToggleProjectCollapsed}
 		{onNewProjectChat}
-		{onEnterMultiSelect}
-		{onMultiSelectToggle}
-		{onChatSelect}
-		{onDeleteChat}
-		{onStartRenameChat}
-		{onShowDetails}
-		{onForkChat}
-		{onShareChat}
-		{onTagClick}
-		{onManageTags}
-		{onOpenInNewWindow}
+		{actions}
 		{newWindowEdges}
-		{onTogglePinned}
-		{onToggleArchive}
-		{isArchiveMutationPending}
 		{reorder}
 		{onSortChatOrder}
 	/>

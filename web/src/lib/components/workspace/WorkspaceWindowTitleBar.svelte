@@ -44,8 +44,9 @@
 	const snapshot = $derived(workspace.layout.snapshot);
 	const fullscreen = $derived(snapshot.fullscreenWindowId === workspaceWindow.id);
 	const showActiveTreatment = $derived(isCurrent && !fullscreen);
+	const visibleIds = $derived(new Set(visibleSurfaceIds));
 	const hiddenSurfaceIds = $derived(
-		workspaceWindow.tabs.order.filter((surfaceId) => !visibleSurfaceIds.includes(surfaceId)),
+		workspaceWindow.tabs.order.filter((surfaceId) => !visibleIds.has(surfaceId)),
 	);
 	const closeDisabled = $derived(workspace.isWindowCloseBlocked(workspaceWindow.id));
 	const ownsFinalChatView = $derived(

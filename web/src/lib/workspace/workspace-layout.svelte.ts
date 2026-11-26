@@ -891,7 +891,6 @@ export class WorkspaceLayoutStore implements WorkspaceLayoutReader, WorkspaceLay
 
 	publish(expectedRevision: number, next: WorkspaceLayoutSnapshot): boolean {
 		if (expectedRevision !== this.#revision) return false;
-		assertWorkspaceLayoutInvariants(next);
 		this.#snapshot = import.meta.env.DEV ? deepFreeze(next) : next;
 		this.#revision += 1;
 		return true;

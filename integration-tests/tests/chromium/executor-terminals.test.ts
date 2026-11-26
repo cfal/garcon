@@ -2,12 +2,125 @@ import { expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
+import type { Page } from 'playwright';
 import { parseTerminalStreamServerMessage, type TerminalCreateResponse, type TerminalListResponse, type TerminalStreamServerMessage } from '../../../common/terminal.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction } from '../../support/chromium-workspace.js';
 
 type TerminalReconnectScope = typeof globalThis & { __terminalSocket?: WebSocket };
 type TerminalDrainScope = TerminalReconnectScope & { __releaseTerminalTimers?: () => number };
+
+function terminalFrames(page: Page): TerminalStreamServerMessage[] {
+  const frames: TerminalStreamServerMessage[] = [];
+  page.on('websocket', socket => socket.on('framereceived', frame => {
+    const message = parseTerminalStreamServerMessage(JSON.parse(String(frame.payload)));
+    if (message) frames.push(message);
+  }));
+  return frames;
+}
+
+test('a terminal created during the initial tab claim attaches once the identity is ready', async () => {
+  await withChromiumFixture('terminal-initial-tab-claim', async ({ page, integration, assertNoBrowserErrors }) => {
+    await page.addInitScript(() => {
+      const claim = Promise.withResolvers<void>();
+      window.addEventListener('release-terminal-claim', () => claim.resolve(), { once: true });
+      let claiming = false;
+      window.BroadcastChannel = new Proxy(window.BroadcastChannel, {
+        construct(target, args) {
+          if (args[0] === 'garcon-terminal-client-identity-v1') claiming = true;
+          return Reflect.construct(target, args);
+        },
+      });
+      // Holds only the initial identity timer, leaving the real terminal and UI running.
+      window.setTimeout = new Proxy(window.setTimeout, {
+        apply(schedule, receiver, args) {
+          if (!claiming || args[1] !== 200) return Reflect.apply(schedule, receiver, args);
+          window.setTimeout = schedule;
+          return Reflect.apply(schedule, receiver, [() => void claim.promise.then(args[0]), 0]);
+        },
+      });
+    });
+    const frames = terminalFrames(page);
+    const attached = () => frames.filter(message => message.type === 'terminal-attached');
+    await page.goto(integration.garcon.baseUrl);
+    await clickWorkspaceWindowAddAction(page, 'New Terminal');
+    await browserExpect(page.locator('.xterm')).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBeNull();
+    expect(attached()).toHaveLength(0);
+    await page.evaluate(() => window.dispatchEvent(new Event('release-terminal-claim')));
+    await browserExpect.poll(attached).toHaveLength(1);
+    assertNoBrowserErrors();
+  });
+}, 60_000);
+
+test('a restored page reclaims its terminal identity before reconnecting', async () => {
+  await withChromiumFixture('terminal-page-restore', async ({ page, integration }) => {
+    const frames = terminalFrames(page);
+    const attached = () => frames.filter(message => message.type === 'terminal-attached').map(message => message.terminal.terminalId);
+    await page.goto(integration.garcon.baseUrl);
+    await clickWorkspaceWindowAddAction(page, 'New Terminal');
+    await browserExpect.poll(attached).toHaveLength(1);
+    const owner = await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'));
+    expect(owner).toBeTruthy();
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await browserExpect.poll(attached).toHaveLength(2);
+    expect(attached()[1]).toBe(attached()[0]);
+    expect(await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBe(owner);
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    const opened = page.waitForEvent('popup');
+    await page.evaluate(() => { window.open('about:blank', '_blank'); });
+    const peer = await opened;
+    try {
+      const peerFrames = terminalFrames(peer);
+      await peer.goto(integration.garcon.baseUrl);
+      await browserExpect.poll(() => peerFrames.some(message => message.type === 'terminal-attached'
+        && message.terminal.terminalId === attached()[0])).toBe(true);
+      expect(await peer.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBe(owner);
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+      await browserExpect.poll(() => frames.some(message =>
+        message.type === 'terminal-error' && message.code === 'terminal-takeover-required')).toBe(true);
+      const restoredId = await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'));
+      expect(restoredId).toBeTruthy();
+      expect(restoredId).not.toBe(owner);
+      expect(attached()).toHaveLength(2);
+    } finally { await peer.close(); }
+  });
+}, 60_000);
+
+test('a duplicated tab cannot reclaim a terminal from a tab using storage coordination', async () => {
+  await withChromiumFixture('terminal-mixed-tab-ownership', async ({ page, integration, assertNoBrowserErrors }) => {
+    await page.addInitScript(() => {
+      globalThis.BroadcastChannel = new Proxy(globalThis.BroadcastChannel, {
+        construct(Target, args: ConstructorParameters<typeof BroadcastChannel>) {
+          if (args[0] === 'garcon-terminal-client-identity-v1') throw new DOMException('Unavailable', 'NotSupportedError');
+          return new Target(...args);
+        },
+      });
+    });
+    const ownerFrames = terminalFrames(page);
+    await page.goto(integration.garcon.baseUrl);
+    await clickWorkspaceWindowAddAction(page, 'New Terminal');
+    await browserExpect.poll(() => ownerFrames.some(message => message.type === 'terminal-attached')).toBe(true);
+    const ownerId = await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'));
+    expect(ownerId).toBeTruthy();
+
+    const opened = page.waitForEvent('popup');
+    await page.evaluate(() => { window.open('about:blank', '_blank'); });
+    const copy = await opened;
+    try {
+      expect(await copy.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBe(ownerId);
+      const peerFrames = terminalFrames(copy);
+      await copy.goto(integration.garcon.baseUrl);
+      await browserExpect.poll(() => peerFrames.some(message =>
+        message.type === 'terminal-error' && message.code === 'terminal-takeover-required',
+      )).toBe(true);
+      expect(await copy.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).not.toBe(ownerId);
+      expect(peerFrames.some(message => message.type === 'terminal-attached')).toBe(false);
+    } finally { await copy.close(); }
+    assertNoBrowserErrors();
+  });
+}, 60_000);
 
 test('a saturated renderer drains and automatically replays real PTY output', async () => {
   await withChromiumFixture('terminal-renderer-backpressure', async ({ page, integration, assertNoBrowserErrors }, markPhase) => {

@@ -403,7 +403,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		},
 	);
 
-	it('keeps an opened tab menu across dismissal and releases it when the tab leaves the strip', async () => {
+	it('recreates a tab menu after dismissal and releases it when its tab leaves the strip', async () => {
 		runtime.surfaces[fileSurface.id] = fileSurface;
 		const initialNodes = document.body.childNodes.length;
 		using resolve = vi.spyOn(tabActions, 'resolveWorkspaceWindowTabActions');
@@ -421,7 +421,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect((await screen.findByRole('menu')).dataset.workspaceWindowTabContextMenu).toBe(
 			fileSurface.id,
 		);
-		expect(resolve).toHaveBeenCalledTimes(1);
+		expect(resolve).toHaveBeenCalledTimes(2);
 		await rerender({ workspaceWindow: workspaceWindow([chatSurface.id, gitSurface.id]) });
 		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 		expect(document.body.childNodes).toHaveLength(initialNodes + 1);

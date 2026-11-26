@@ -47,7 +47,7 @@ export function calculateFitScale({
 	return clampZoomScale(fitScale, minScale, maxScale);
 }
 
-export function centerOfRect(rect: RectLike): ZoomPoint {
+function centerOfRect(rect: RectLike): ZoomPoint {
 	return {
 		x: rect.left + rect.width / 2,
 		y: rect.top + rect.height / 2,

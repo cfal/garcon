@@ -6,7 +6,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Month options are fixed elapsed durations so classification does not vary by
 // calendar position or local timezone.
-export const SIDEBAR_INACTIVITY_DURATION_MS: Record<SidebarInactivityDuration, number> = {
+const SIDEBAR_INACTIVITY_DURATION_MS: Record<SidebarInactivityDuration, number> = {
 	'2-days': 2 * DAY_MS,
 	'3-days': 3 * DAY_MS,
 	'4-days': 4 * DAY_MS,

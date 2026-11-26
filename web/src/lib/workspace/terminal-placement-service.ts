@@ -10,7 +10,7 @@ import {
 	type WorkspaceLayoutReader,
 	type WorkspaceLayoutSnapshot,
 } from './surface-types.js';
-import { collectWindowNodes, windowNodeById } from './window-tree.js';
+import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
 import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import type { WorkspaceCommit } from './workspace-commit.js';
 import type { WorkspaceMutationPlan } from './workspace-transition-arbiter.js';
@@ -72,57 +72,104 @@ export class TerminalPlacementService {
 
 	constructor(private readonly deps: TerminalPlacementServiceDeps) {}
 
-	async create(windowId: WorkspaceWindowId, requestKey?: string, executorId?: string): Promise<string> {
-		const target = this.#windowCreationTarget(windowId, executorId);
+	create(windowId: WorkspaceWindowId, requestKey?: string, executorId?: string): Promise<string> {
+		return this.#createAndPlace({ kind: 'tab', windowId }, requestKey, executorId);
+	}
+
+	createInNewWindow(
+		anchorWindowId: WorkspaceWindowId,
+		requestKey?: string,
+		executorId?: string,
+	): Promise<string> {
+		if (this.deps.isMobile())
+			return this.create(this.deps.defaultWindowId(), requestKey, executorId);
+		return this.#createAndPlace(
+			{ kind: 'split', windowId: anchorWindowId },
+			requestKey,
+			executorId,
+		);
+	}
+
+	async #createAndPlace(
+		placement: { kind: 'tab' | 'split'; windowId: WorkspaceWindowId },
+		requestKey?: string,
+		executorId?: string,
+	): Promise<string> {
+		const target = this.#windowCreationTarget(placement.windowId, executorId);
 		this.deps.cancelWorkspaceDrag();
+		if (
+			placement.kind === 'split' &&
+			(!requestKey || !this.#hasPendingCreate(this.#createKey(requestKey, executorId, target)))
+		) {
+			const snapshot = this.deps.layout.snapshot;
+			const anchor = this.#resolveWindowId(snapshot, placement.windowId);
+			if (!requireWorkspaceNewWindowEdge(this.deps.resolveSplitAdmission, snapshot, anchor))
+				throw new Error('The target window is no longer available');
+		}
 		const terminalId = requestKey
 			? await this.#retryCreate(requestKey, executorId, target)
 			: await this.#createWithRequestId(createRandomId(), executorId, target);
 		const surfaceId = terminalSurfaceId(terminalId);
+		const split =
+			placement.kind === 'split'
+				? {
+						newWindowId: `window-${createRandomId()}` as WorkspaceWindowId,
+						partitionId: `partition-${createRandomId()}` as WorkspacePartitionId,
+					}
+				: null;
 		let current = false;
 		try {
 			current = await this.deps.commit(
 				(latest) => {
 					this.#assertRetainedTerminal(terminalId);
-					const destinationWindowId = this.#resolveWindowId(latest, windowId);
-					if (latest.surfaces[surfaceId]) {
-						const existingWindowId = this.#windowOf(latest, surfaceId);
-						const mutations: WorkspaceLayoutMutation[] = [
-							existingWindowId === destinationWindowId
-								? { type: 'activate-window-tab', windowId: destinationWindowId, surfaceId }
-								: { type: 'move-tab', surfaceId, destinationWindowId },
-						];
-						if (this.deps.isMobile()) {
-							mutations.push({
-								type: 'set-mobile-presentation',
-								activeId: surfaceId,
-								returnStack: latest.mobileReturnStack,
-							});
-						}
-						return mutations;
-					}
+					const windowId = this.#resolveWindowId(latest, placement.windowId);
 					const mutations: WorkspaceLayoutMutation[] = [];
+					const exists = Boolean(latest.surfaces[surfaceId]);
 					if (
+						(split || !exists) &&
 						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
 						!this.deps.reservations.has(TERMINAL_LAUNCHER_ID)
 					) {
 						mutations.push({ type: 'remove-surface', surfaceId: TERMINAL_LAUNCHER_ID });
 					}
-					mutations.push(
-						{
-							type: 'register-surface',
+					const mobile = this.deps.isMobile();
+					if (exists) {
+						const from = windowIdOfSurface(latest.desktopRoot, surfaceId);
+						mutations.push(
+							from === windowId
+								? { type: 'activate-window-tab', windowId, surfaceId }
+								: { type: 'move-tab', surfaceId, destinationWindowId: windowId },
+						);
+					} else if (split && !mobile) {
+						const edge = requireWorkspaceNewWindowEdge(
+							this.deps.resolveSplitAdmission,
+							latest,
+							windowId,
+						);
+						if (!edge) return [];
+						mutations.push({
+							type: 'register-surface-in-new-window',
 							surface: { id: surfaceId, type: 'terminal', terminalId },
-							windowId: destinationWindowId,
-						},
-						{ type: 'activate-window-tab', windowId: destinationWindowId, surfaceId },
-					);
-					if (this.deps.isMobile()) {
+							targetWindowId: windowId,
+							edge,
+							...split,
+						});
+					} else {
+						mutations.push(
+							{
+								type: 'register-surface',
+								surface: { id: surfaceId, type: 'terminal', terminalId },
+								windowId,
+							},
+							{ type: 'activate-window-tab', windowId, surfaceId },
+						);
+					}
+					if (mobile)
 						mutations.push({
 							type: 'set-mobile-presentation',
 							activeId: surfaceId,
 							returnStack: latest.mobileReturnStack,
 						});
-					}
 					return mutations;
 				},
 				{ requiredPublication: true },
@@ -133,107 +180,7 @@ export class TerminalPlacementService {
 		} catch (error) {
 			await this.#rollbackUnplaced(terminalId, error);
 		}
-		if (!current || !this.deps.layout.surface(surfaceId)) return terminalId;
-		this.deps.present(surfaceId);
-		return terminalId;
-	}
-
-	// Creates a terminal in a new window adjacent to the anchor window.
-	async createInNewWindow(
-		anchorWindowId: WorkspaceWindowId,
-		requestKey?: string,
-		executorId?: string,
-	): Promise<string> {
-		if (this.deps.isMobile()) return this.create(this.deps.defaultWindowId(), requestKey, executorId);
-		const target = this.#windowCreationTarget(anchorWindowId, executorId);
-		this.deps.cancelWorkspaceDrag();
-		if (!requestKey || !this.#hasPendingCreate(this.#createKey(requestKey, executorId, target))) {
-			const snapshot = this.deps.layout.snapshot;
-			const currentAnchorWindowId = this.#resolveWindowId(snapshot, anchorWindowId);
-			const edge = requireWorkspaceNewWindowEdge(
-				this.deps.resolveSplitAdmission,
-				snapshot,
-				currentAnchorWindowId,
-			);
-			if (!edge) throw new Error('The target window is no longer available');
-		}
-		const terminalId = requestKey
-			? await this.#retryCreate(requestKey, executorId, target)
-			: await this.#createWithRequestId(createRandomId(), executorId, target);
-		const surfaceId = terminalSurfaceId(terminalId);
-		const newWindowId = `window-${createRandomId()}` as WorkspaceWindowId;
-		const partitionId = `partition-${createRandomId()}` as WorkspacePartitionId;
-		let current = false;
-		try {
-			current = await this.deps.commit(
-				(latest) => {
-					this.#assertRetainedTerminal(terminalId);
-					const currentAnchorWindowId = this.#resolveWindowId(latest, anchorWindowId);
-					const mutations: WorkspaceLayoutMutation[] = [];
-					if (
-						latest.surfaces[TERMINAL_LAUNCHER_ID]?.type === 'terminal-launcher' &&
-						!this.deps.reservations.has(TERMINAL_LAUNCHER_ID)
-					) {
-						mutations.push({ type: 'remove-surface', surfaceId: TERMINAL_LAUNCHER_ID });
-					}
-					if (latest.surfaces[surfaceId]) {
-						const existingWindowId = this.#windowOf(latest, surfaceId);
-						mutations.push(
-							existingWindowId === currentAnchorWindowId
-								? { type: 'activate-window-tab', windowId: currentAnchorWindowId, surfaceId }
-								: { type: 'move-tab', surfaceId, destinationWindowId: currentAnchorWindowId },
-						);
-						if (this.deps.isMobile()) {
-							mutations.push({
-								type: 'set-mobile-presentation',
-								activeId: surfaceId,
-								returnStack: latest.mobileReturnStack,
-							});
-						}
-						return mutations;
-					}
-					if (this.deps.isMobile()) {
-						mutations.push(
-							{
-								type: 'register-surface',
-								surface: { id: surfaceId, type: 'terminal', terminalId },
-								windowId: currentAnchorWindowId,
-							},
-							{ type: 'activate-window-tab', windowId: currentAnchorWindowId, surfaceId },
-							{
-								type: 'set-mobile-presentation',
-								activeId: surfaceId,
-								returnStack: latest.mobileReturnStack,
-							},
-						);
-						return mutations;
-					}
-					const edge = requireWorkspaceNewWindowEdge(
-						this.deps.resolveSplitAdmission,
-						latest,
-						currentAnchorWindowId,
-					);
-					if (!edge) return [];
-					mutations.push({
-						type: 'register-surface-in-new-window',
-						surface: { id: surfaceId, type: 'terminal', terminalId },
-						targetWindowId: currentAnchorWindowId,
-						edge,
-						newWindowId,
-						partitionId,
-					});
-					return mutations;
-				},
-				{ requiredPublication: true },
-			);
-			if (!this.#placementResolved(terminalId)) {
-				throw new Error(`Terminal surface was not placed: ${surfaceId}`);
-			}
-		} catch (error) {
-			await this.#rollbackUnplaced(terminalId, error);
-		}
-		if (!current || !this.deps.layout.surface(surfaceId)) return terminalId;
-		this.deps.present(surfaceId);
+		if (current && this.deps.layout.surface(surfaceId)) this.deps.present(surfaceId);
 		return terminalId;
 	}
 
@@ -247,7 +194,9 @@ export class TerminalPlacementService {
 		const target: TerminalCreationTarget = {
 			executorId: executorId ?? sourceExecutor,
 			projectPath:
-				source && (!executorId || executorId === sourceExecutor) ? source.initialWorkingDirectory : null,
+				source && (!executorId || executorId === sourceExecutor)
+					? source.initialWorkingDirectory
+					: null,
 		};
 		const currentSurfaceId = terminalSurfaceId(currentTerminalId);
 		const currentSurface = this.deps.layout.surface(currentSurfaceId);
@@ -471,7 +420,8 @@ export class TerminalPlacementService {
 			return;
 		}
 		let terminal = this.deps.terminals.orderedSessions.at(-1);
-		const executorId = this.creationExecutorId(preferredWindowId) ?? this.deps.currentProjectExecutorId();
+		const executorId =
+			this.creationExecutorId(preferredWindowId) ?? this.deps.currentProjectExecutorId();
 		if (!terminal && this.deps.terminals.executorInventories[executorId]?.status !== 'ready') {
 			await this.deps.terminals.list(executorId);
 			terminal = this.deps.terminals.orderedSessions.at(-1);
@@ -509,7 +459,8 @@ export class TerminalPlacementService {
 			}
 			for (const terminalId of this.#terminalTerminateRequestIds.keys()) {
 				if (
-					(!options.executorId || this.deps.terminals.executorIdFor(terminalId) === options.executorId) &&
+					(!options.executorId ||
+						this.deps.terminals.executorIdFor(terminalId) === options.executorId) &&
 					!live.has(terminalId)
 				)
 					this.#terminalTerminateRequestIds.delete(terminalId);
@@ -623,13 +574,6 @@ export class TerminalPlacementService {
 		}
 	}
 
-	#windowOf(snapshot: WorkspaceLayoutSnapshot, surfaceId: string): WorkspaceWindowId | null {
-		for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
-			if (workspaceWindow.tabs.order.includes(surfaceId)) return workspaceWindow.id;
-		}
-		return null;
-	}
-
 	#resolveWindowId(
 		snapshot: WorkspaceLayoutSnapshot,
 		preferredWindowId: WorkspaceWindowId,
@@ -679,7 +623,9 @@ export class TerminalPlacementService {
 		return {
 			executorId: executorId ?? sourceExecutor,
 			projectPath:
-				source && (!executorId || executorId === sourceExecutor) ? source.initialWorkingDirectory : null,
+				source && (!executorId || executorId === sourceExecutor)
+					? source.initialWorkingDirectory
+					: null,
 		};
 	}
 

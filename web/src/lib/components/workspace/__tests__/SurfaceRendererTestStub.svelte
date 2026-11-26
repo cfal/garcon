@@ -12,11 +12,13 @@
 		onClose,
 		closeDisabled = false,
 		onAppendToChatDraft,
+		onChooseProjectFolder,
 		frameBridge,
 	}: {
 		onClose?: () => void;
 		closeDisabled?: boolean;
 		onAppendToChatDraft?: ChatDraftAppend;
+		onChooseProjectFolder?: () => void;
 		frameBridge: SurfaceFrameBridge;
 	} = $props();
 
@@ -31,6 +33,9 @@
 </script>
 
 <div data-testid="surface-renderer-stub">Surface renderer</div>
+{#if onChooseProjectFolder}
+	<button type="button" onclick={onChooseProjectFolder}>Choose chat folder</button>
+{/if}
 {#if onClose}
 	<button type="button" onclick={onClose} disabled={closeDisabled}>Close file</button>
 {/if}

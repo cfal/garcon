@@ -2,6 +2,11 @@ import type { Attachment } from 'svelte/attachments';
 
 export const WORKSPACE_SCROLL_REGION_SELECTOR = '[data-workspace-scroll-region]';
 const WORKSPACE_HALF_PAGE_SCROLL_EVENT = 'workspace-half-page-scroll';
+let registrationRevision = 0;
+
+export function workspaceScrollRegionRevision(): number {
+	return registrationRevision;
+}
 
 export type WorkspaceScrollRegionRole = 'primary' | 'contextual';
 export type WorkspaceHalfPageDirection = 'earlier' | 'later';
@@ -21,9 +26,11 @@ function registerWorkspaceScrollRegion(
 ): () => void {
 	const previousRole = element.getAttribute('data-workspace-scroll-region');
 	element.setAttribute('data-workspace-scroll-region', role);
+	registrationRevision++;
 	return () => {
 		if (previousRole === null) element.removeAttribute('data-workspace-scroll-region');
 		else element.setAttribute('data-workspace-scroll-region', previousRole);
+		registrationRevision++;
 	};
 }
 
@@ -71,9 +78,7 @@ export function closestWorkspaceScrollRegion(target: EventTarget | null): HTMLEl
 		: null;
 }
 
-export function workspaceScrollRegionRole(
-	element: HTMLElement,
-): WorkspaceScrollRegionRole | null {
+export function workspaceScrollRegionRole(element: HTMLElement): WorkspaceScrollRegionRole | null {
 	const role = element.dataset.workspaceScrollRegion;
 	return role === 'primary' || role === 'contextual' ? role : null;
 }

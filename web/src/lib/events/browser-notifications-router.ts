@@ -5,7 +5,6 @@ import type {
 	ChatTranscriptReplacedMessage,
 	ChatTransientFeedMutationMessage,
 } from '$shared/ws-events';
-import type { TransientFeedRow } from '$shared/chat-transient-feed';
 import type { BrowserNotificationDeliveryPort } from '$lib/notifications/browser-notifications.js';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -15,11 +14,11 @@ export class BrowserNotificationsRouter {
 	readonly #seen = new Map<string, string>();
 	readonly #permissions = new Map<
 		string,
-		{ chatId: string; row: TransientFeedRow; announced: boolean }
+		{ chatId: string; runId: string; question: boolean; announced: boolean }
 	>();
 	constructor(
 		private readonly ws: WsPushEvents,
-		private readonly delivery: Pick<BrowserNotificationDeliveryPort, 'show' | 'close'>,
+		private readonly delivery: Pick<BrowserNotificationDeliveryPort, 'show' | 'close' | 'closeOwned'>,
 		private readonly deps: {
 			enabled(): boolean;
 			isFocused(): boolean;
@@ -66,7 +65,8 @@ export class BrowserNotificationsRouter {
 				const key = prefix + mutation.row.permissionOccurrenceId;
 				this.#permissions.set(key, {
 					chatId: message.chatId,
-					row: mutation.row,
+					runId: mutation.row.runId,
+					question: mutation.row.message.requestedTool.type === 'ask-user-question-tool-use',
 					announced: this.#permissions.get(key)?.announced ?? false,
 				});
 				this.#queuePermissionFlush();
@@ -75,7 +75,7 @@ export class BrowserNotificationsRouter {
 				this.#closePermission(prefix + mutation.permissionOccurrenceId);
 			if (mutation.kind === 'clear-run') {
 				for (const [key, entry] of this.#permissions)
-					if (entry.chatId === message.chatId && entry.row.runId === mutation.runId)
+					if (key.startsWith(prefix) && entry.runId === mutation.runId)
 						this.#closePermission(key);
 			}
 		} else if (
@@ -102,13 +102,15 @@ export class BrowserNotificationsRouter {
 	}
 
 	#announcePermissions(): void {
-		while (this.#permissions.size > 256)
-			this.#closePermission(this.#permissions.keys().next().value!);
+		while (this.#permissions.size > 256) {
+			const key = this.#permissions.keys().next().value!;
+			this.#permissions.delete(key);
+			this.delivery.closeOwned(key);
+		}
 		for (const [key, entry] of this.#permissions) {
 			if (entry.announced) continue;
 			entry.announced = true;
-			const { chatId, row } = entry;
-			const question = row.message.requestedTool.type === 'ask-user-question-tool-use';
+			const { chatId, question } = entry;
 			this.#notify(
 				key,
 				chatId,
@@ -118,11 +120,16 @@ export class BrowserNotificationsRouter {
 	}
 
 	#closePermission(key: string): void {
-		if (this.#permissions.delete(key)) this.delivery.close(key);
+		this.#permissions.delete(key);
+		this.delivery.close(key);
 	}
 
-	clearPermissions(): void {
-		for (const key of this.#permissions.keys()) this.#closePermission(key);
+	releasePermissions(): void {
+		// Retains bounded identifiers for authoritative resolution after reconnect.
+		for (const [key, entry] of this.#permissions) {
+			entry.announced = true;
+			this.delivery.closeOwned(key);
+		}
 	}
 
 	#notify(key: string, chatId: string, title: string): void {
@@ -136,7 +143,8 @@ export class BrowserNotificationsRouter {
 	destroy(): void {
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
-		this.clearPermissions();
+		this.releasePermissions();
+		this.#permissions.clear();
 		this.#seen.clear();
 	}
 }

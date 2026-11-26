@@ -8,7 +8,8 @@ interface FittingTagPrefixInput {
 	readonly maxRows: number;
 }
 
-type ResizeListener = (entry: ResizeObserverEntry) => void;
+type ResizeMeasurement = () => (() => void) | undefined;
+type ResizeListener = (entry: ResizeObserverEntry) => ResizeMeasurement;
 
 const resizeListeners = new Map<Element, Set<ResizeListener>>();
 let sharedResizeObserver: ResizeObserver | null = null;
@@ -20,9 +21,14 @@ export function observeChatAgentTagsSize(element: Element, listener: ResizeListe
 		listeners = new Set();
 		resizeListeners.set(element, listeners);
 		sharedResizeObserver ??= new ResizeObserver((entries) => {
+			const measurements = new Set<ResizeMeasurement>();
 			for (const entry of entries) {
-				for (const callback of resizeListeners.get(entry.target) ?? []) callback(entry);
+				for (const callback of resizeListeners.get(entry.target) ?? []) {
+					measurements.add(callback(entry));
+				}
 			}
+			const updates = Array.from(measurements, (measure) => measure());
+			for (const update of updates) update?.();
 		});
 		sharedResizeObserver.observe(element);
 	}
@@ -41,7 +47,12 @@ export function observeChatAgentTagsSize(element: Element, listener: ResizeListe
 	};
 }
 
-function fitsRows(widths: readonly number[], availableWidth: number, gap: number, maxRows: number): boolean {
+function fitsRows(
+	widths: readonly number[],
+	availableWidth: number,
+	gap: number,
+	maxRows: number,
+): boolean {
 	let rows = 1;
 	let rowWidth = 0;
 	for (const measuredWidth of widths) {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalClientIdentity } from '../terminal-client-identity.svelte.js';
+import { TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX } from '../terminal-client-storage.js';
 import { SESSION_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 
@@ -10,7 +11,6 @@ vi.mock('$lib/utils/random-id.js', () => ({
 const mockCreateRandomId = vi.mocked(createRandomId);
 
 const CLAIM_WINDOW_MS = 200;
-const FALLBACK_STORAGE_PREFIX = 'garcon_terminal_client_identity_claim_v1:';
 
 class FakeBroadcastChannel {
 	static instances = new Set<FakeBroadcastChannel>();
@@ -107,7 +107,7 @@ describe('TerminalClientIdentity', () => {
 		vi.stubGlobal('BroadcastChannel', undefined);
 		sessionStorage.setItem(SESSION_STORAGE_KEYS.terminalClientId, 'shared-client');
 		localStorage.setItem(
-			`${FALLBACK_STORAGE_PREFIX}other:probe:1`,
+			`${TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX}other:probe:1`,
 			JSON.stringify({
 				type: 'probe',
 				candidateId: 'shared-client',
@@ -128,6 +128,46 @@ describe('TerminalClientIdentity', () => {
 
 		expect(identity.clientId).toBe(uuid(3));
 		expect(identity.clientId).not.toBe('shared-client');
+	});
+
+	it('does not scan or write storage claims for a fresh channel identity', () => {
+		const scan = vi.spyOn(localStorage, 'key');
+		localStorage.setItem('unrelated', 'value');
+		mockCreateRandomId.mockReturnValue(uuid(5));
+		create();
+		expect(localStorage.length).toBe(1);
+		expect(scan).not.toHaveBeenCalled();
+	});
+
+	it.each([false, true])('protects a copied ID across transports (owner has channel: %s)', (channelOwner) => {
+		let sequence = 0;
+		mockCreateRandomId.mockImplementation(() => uuid(++sequence));
+		function deliverClaim(type: string, documentId: string): void {
+			for (let i = 0; i < localStorage.length; i++) {
+				const key = localStorage.key(i);
+				if (!key?.startsWith(TERMINAL_CLIENT_CLAIM_STORAGE_PREFIX)) continue;
+				const value = localStorage.getItem(key)!;
+				const record = JSON.parse(value);
+				if (record.type === type && record.senderDocumentId === documentId) {
+					window.dispatchEvent(new StorageEvent('storage', { key, newValue: value }));
+					return;
+				}
+			}
+			throw new Error(`Missing storage claim: ${type}`);
+		}
+		vi.stubGlobal('BroadcastChannel', channelOwner ? FakeBroadcastChannel : undefined);
+		const owner = create();
+		vi.advanceTimersByTime(CLAIM_WINDOW_MS + 1);
+		const saved = owner.clientId;
+		expect(saved).not.toBeNull();
+		vi.stubGlobal('BroadcastChannel', channelOwner ? undefined : FakeBroadcastChannel);
+		const contender = create();
+		deliverClaim('probe', contender.documentId);
+		deliverClaim('occupied', owner.documentId);
+		vi.advanceTimersByTime(CLAIM_WINDOW_MS * 2);
+		expect(owner.clientId).toBe(saved);
+		expect(contender.established).toBe(true);
+		expect(contender.clientId).not.toBe(saved);
 	});
 
 	it('uses storage coordination when BroadcastChannel construction is rejected', () => {
@@ -159,5 +199,23 @@ describe('TerminalClientIdentity', () => {
 		vi.advanceTimersByTime(CLAIM_WINDOW_MS);
 
 		expect(replacement.clientId).toBe(retained);
+	});
+
+	it('settles readiness as cancelled when destroyed before establishing a claim', async () => {
+		mockCreateRandomId.mockReturnValue(uuid(1));
+		const identity = create();
+		const initialize = vi.fn();
+		const continuation = identity.ready.then((clientId) => {
+			if (clientId !== null) initialize(clientId);
+		});
+
+		identity.destroy();
+		await continuation;
+		await expect(identity.ready).resolves.toBeNull();
+		vi.advanceTimersByTime(CLAIM_WINDOW_MS);
+
+		expect(initialize).not.toHaveBeenCalled();
+		expect(identity.established).toBe(false);
+		expect(sessionStorage.getItem(SESSION_STORAGE_KEYS.terminalClientId)).toBeNull();
 	});
 });

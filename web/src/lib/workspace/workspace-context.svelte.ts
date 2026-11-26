@@ -36,7 +36,7 @@ export class WorkspaceContextStore {
 		>,
 	) {}
 
-	get current(): WorkspaceContext | null {
+	readonly current = $derived.by<WorkspaceContext | null>(() => {
 		const chat = this.sessions.selectedChat;
 		if (!chat) return null;
 		return {
@@ -45,14 +45,14 @@ export class WorkspaceContextStore {
 			chatId: chat.id,
 			projectPath: chat.projectPath,
 		};
-	}
+	});
 
-	get currentProject(): AvailableWorkspaceProject | null {
+	readonly currentProject = $derived.by<AvailableWorkspaceProject | null>(() => {
 		const project = this.projectState;
 		return project.kind === 'available' ? project.project : null;
-	}
+	});
 
-	get projectState(): WorkspaceProjectState {
+	readonly projectState = $derived.by<WorkspaceProjectState>(() => {
 		const current = this.current;
 		if (
 			current &&
@@ -67,7 +67,7 @@ export class WorkspaceContextStore {
 				message: 'Git is unavailable on this executor.',
 			};
 		}
-		const project = this.#resolvedProjectState();
+		const project = this.#resolvedProjectState;
 		return project.kind === 'available'
 			? {
 					...project,
@@ -77,9 +77,9 @@ export class WorkspaceContextStore {
 					},
 				}
 			: project;
-	}
+	});
 
-	get filesProjectState(): WorkspaceProjectState {
+	readonly filesProjectState = $derived.by<WorkspaceProjectState>(() => {
 		const current = this.current;
 		if (
 			current &&
@@ -94,10 +94,10 @@ export class WorkspaceContextStore {
 				message: 'Files are unavailable on this executor.',
 			};
 		}
-		return this.#resolvedProjectState();
-	}
+		return this.#resolvedProjectState;
+	});
 
-	#resolvedProjectState(): WorkspaceProjectState {
+	#resolvedProjectState = $derived.by<WorkspaceProjectState>(() => {
 		const current = this.current;
 		const target = this.currentTarget;
 		if (!current || !target) return { kind: 'absent' };
@@ -116,9 +116,9 @@ export class WorkspaceContextStore {
 			case 'resolving':
 				return { kind: resolution.kind, context: current };
 		}
-	}
+	});
 
-	get currentTarget(): ProjectTarget | null {
+	readonly currentTarget = $derived.by<ProjectTarget | null>(() => {
 		const chat = this.sessions.selectedChat;
 		if (!chat) return null;
 		return chat.status === 'draft'
@@ -133,15 +133,15 @@ export class WorkspaceContextStore {
 					chatId: chat.id,
 					projectPath: chat.projectPath,
 				};
-	}
+	});
 
-	get canUpdateProjectPath(): boolean {
+	readonly canUpdateProjectPath = $derived.by(() => {
 		const chat = this.sessions.selectedChat;
 		return chat
 			? chat.status === 'draft' ||
 					this.modelCatalog.forExecutor(chat.executorId).supportsUpdateProjectPath(chat.agentId)
 			: false;
-	}
+	});
 }
 
 export function createWorkspaceContextStore(

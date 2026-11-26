@@ -52,6 +52,7 @@
 		frameBridge,
 		surfaceStyle,
 		onAppendToChatDraft,
+		onChooseProjectFolder,
 	}: {
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
@@ -71,6 +72,7 @@
 		frameBridge(surfaceId: string): SurfaceFrameBridge;
 		surfaceStyle: string;
 		onAppendToChatDraft: ChatDraftAppend;
+		onChooseProjectFolder?: () => void;
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
@@ -83,7 +85,8 @@
 	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
 	const activeChatIsLive = $derived(isCurrent && activeSurface?.type === 'chat');
 	const activeSurfaceIsCommandOwner = $derived(
-		isVisible && workspace.focusOwner.kind !== 'chat-list' &&
+		isVisible &&
+			workspace.focusOwner.kind !== 'chat-list' &&
 			workspace.focusOwner.surfaceId === activeSurface?.id,
 	);
 	const activeChat = $derived(
@@ -95,7 +98,8 @@
 		activeSurface?.type === 'chat' ? conversationPanels.panel(activeSurface.id) : null,
 	);
 	const retainedInThisWindow = $derived(
-		retainFullscreenChats && activePanel !== null &&
+		retainFullscreenChats &&
+			activePanel !== null &&
 			conversationPanels.retainedWindowId(activePanel.surfaceId) === workspaceWindow.id,
 	);
 	const composerPanel = $derived(conversationPanels.composerPanel);
@@ -104,7 +108,9 @@
 			activeSurface.chatId !== null &&
 			conversationPanels.isComposerTarget(activeSurface.id, activeSurface.chatId),
 	);
-	const activeChatOwnsComposer = $derived(isVisible && activePanel !== null && activePanel === composerPanel);
+	const activeChatOwnsComposer = $derived(
+		isVisible && activePanel !== null && activePanel === composerPanel,
+	);
 	const activeChatPresentation = $derived(
 		resolveChatSurfacePresentation(activeChat, sessions.isLoadingChats),
 	);
@@ -382,6 +388,7 @@
 						visible={item.visible}
 						style={surfaceStyle}
 						{onAppendToChatDraft}
+						{onChooseProjectFolder}
 						frameBridge={frameBridge(surface.id)}
 					/>
 				{/key}

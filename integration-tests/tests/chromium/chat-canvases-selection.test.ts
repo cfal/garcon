@@ -3,6 +3,28 @@ import type { ChatCanvas } from '../../../common/chat-canvas.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { clickWorkspaceWindowAddAction, collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
+test('Space selects the focused canvas node and Shift+Space extends the selection', async () => {
+  await withChromiumFixture('canvas-space-selection', async ({ page, integration }) => {
+    const content: ChatCanvas['content'] = {
+      title: 'Keyboard selection',
+      nodes: ['a', 'b'].map((id, index) => ({
+        id, type: 'box', title: id, position: { x: index * 400, y: 0 },
+      })),
+      connections: [],
+    };
+    await integration.client.post('/api/v1/chat-canvases', { id: 'diagram', content });
+    await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+    await collapseCanonicalFilesWindow(page);
+    await clickWorkspaceWindowAddAction(page, 'Open Canvas');
+    const node = (id: string) => page.locator(`.svelte-flow__node[data-id="${id}"]`);
+    await node('a').press('Space');
+    await page.locator('.svelte-flow__node.selected[data-id="a"]').waitFor();
+    await node('b').press('Shift+Space');
+    await page.locator('.svelte-flow__node.selected[data-id="b"]').waitFor();
+    expect(await page.locator('.svelte-flow__node.selected').count()).toBe(2);
+  });
+}, 90_000);
+
 test('commits a grouped selection drag as one ordered, undoable edit', async () => {
   await withChromiumFixture('canvas-selection-drag', async (fixture) => {
     const { page, integration } = fixture;

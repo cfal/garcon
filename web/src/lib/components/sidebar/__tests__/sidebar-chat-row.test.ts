@@ -44,7 +44,20 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 	};
 }
 
+async function openDesktopMenu(): Promise<void> {
+	await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+}
+
 describe('shared sidebar chat row', () => {
+	it('focuses the first action on keyboard entry without a previous hover', async () => {
+		render(SidebarChatItemHost, { session: createChat() });
+		const trigger = screen.getByRole('button', { name: 'Chat actions' });
+		trigger.focus();
+		expect(screen.queryByRole('menu')).toBeNull();
+		await fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+		await waitFor(() => expect(document.activeElement).toBe(screen.getAllByRole('menuitem')[0]));
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBe(trigger);
+	});
 	it.each(['single-line', 'compact', 'detailed'] as const)(
 		'shows an executor pill before the agent only with multiple executors in %s layout',
 		async (chatItemLayout) => {
@@ -151,6 +164,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('ops')).toBeTruthy();
 		expect(screen.getByText('prod')).toBeTruthy();
 		expect(screen.getByRole('button', { name: '+1' })).toBeTruthy();
+		expect(screen.queryByRole('menu')).toBeNull();
 		const desktopMenuTrigger = document.querySelector<HTMLElement>(
 			'[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]',
 		);
@@ -257,7 +271,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('prod')).toBeTruthy();
 	});
 
-	it('renders single-line rows with an inline timestamp badge and no metadata rows', () => {
+	it('renders single-line rows with an inline timestamp badge and no metadata rows', async () => {
 		render(SidebarChatItemHost, {
 			session: createChat({ isUnread: false }),
 			isPinned: true,
@@ -300,6 +314,7 @@ describe('shared sidebar chat row', () => {
 		const rowButton = title.closest('button');
 		expect(rowButton?.className).not.toContain('pr-9');
 		expect(rowButton?.className).toContain('py-[2px]');
+		await fireEvent.focus(rowButton!);
 		const menuAnchor = document.querySelector<HTMLElement>('.sidebar-item-menu-anchor');
 		expect(menuAnchor?.className).toContain('top-1/2');
 		expect(menuAnchor?.className).toContain('-translate-y-1/2');
@@ -418,20 +433,27 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('Claude')).toBeTruthy();
 	});
 
-	it('renders the mobile chat row without also rendering the desktop row', () => {
+	it('opens mobile chat actions from the visible button without a desktop trigger', async () => {
+		const onTogglePinned = vi.fn();
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			isMobile: true,
+			onTogglePinned,
 		});
 
 		expect(document.querySelectorAll('[data-slot="sidebar-chat-summary"]')).toHaveLength(1);
-		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
+		const trigger = screen.getByRole('button', { name: 'Chat actions' });
 		expect(
 			document.querySelector('[data-slot="sidebar-chat-summary"]')?.parentElement?.className,
 		).not.toContain('pr-8');
 		expect(
 			document.querySelector('[data-slot="dropdown-menu-trigger"][aria-label="Chat actions"]'),
 		).toBeNull();
+		await fireEvent.click(trigger);
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Pin' }));
+		expect(onTogglePinned).toHaveBeenCalledWith('chat-1');
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		expect(screen.getByRole('button', { name: 'Chat actions' })).toBe(trigger);
 	});
 
 	it('orders sidebar-only menu actions before row actions', async () => {
@@ -449,7 +471,7 @@ describe('shared sidebar chat row', () => {
 			onManageTags: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 
 		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
 		const menuParts = Array.from(
@@ -504,7 +526,7 @@ describe('shared sidebar chat row', () => {
 		});
 		const view = render(SidebarChatItemHost, { session: createChat(), onToggleArchive });
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Archive' }));
 
 		expect(onToggleArchive).toHaveBeenCalledExactlyOnceWith('chat-1');
@@ -521,7 +543,7 @@ describe('shared sidebar chat row', () => {
 			onToggleArchive,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 		const pin = await screen.findByRole('menuitem', { name: 'Pin' });
 		const archive = screen.getByRole('menuitem', { name: 'Archive' });
 		expect(pin.hasAttribute('data-disabled')).toBe(true);
@@ -543,7 +565,7 @@ describe('shared sidebar chat row', () => {
 			onSortChatOrder,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 		const reorderSubmenu = screen.getByRole('menuitem', { name: 'Reorder all chats' });
 		reorderSubmenu.focus();
 		await fireEvent.keyDown(reorderSubmenu, { key: 'ArrowRight' });
@@ -558,7 +580,7 @@ describe('shared sidebar chat row', () => {
 			onSortChatOrder: vi.fn(),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 
 		expect(screen.getByRole('menuitem', { name: 'Reorder all chats' })).toBeTruthy();
 		expect(screen.queryByRole('menuitem', { name: 'Move to top' })).toBeNull();
@@ -572,7 +594,7 @@ describe('shared sidebar chat row', () => {
 			onOpenInNewWindow,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 		const openSubmenu = screen.getByRole('menuitem', { name: 'Open in new window' });
 		openSubmenu.focus();
 		await fireEvent.keyDown(openSubmenu, { key: 'ArrowRight' });
@@ -589,7 +611,7 @@ describe('shared sidebar chat row', () => {
 			newWindowEdges: deniedWorkspaceSplits('resource-ceiling'),
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 		const openItem = screen.getByRole('menuitem', { name: 'Open in new window' });
 		expect(openItem.getAttribute('aria-disabled')).toBe('true');
 		expect(openItem.getAttribute('title')).toBe(
@@ -607,7 +629,7 @@ describe('shared sidebar chat row', () => {
 			hasChatPlacement: true,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 		const showItem = screen.getByRole('menuitem', { name: 'Show existing chat' });
 		expect(showItem.getAttribute('aria-disabled')).not.toBe('true');
 		expect(screen.queryByRole('menuitem', { name: 'Open in new window' })).toBeNull();
@@ -627,7 +649,7 @@ describe('shared sidebar chat row', () => {
 			},
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 		const openSubmenu = screen.getByRole('menuitem', { name: 'Open in new window' });
 		expect(openSubmenu.getAttribute('aria-disabled')).not.toBe('true');
 		openSubmenu.focus();
@@ -649,7 +671,7 @@ describe('shared sidebar chat row', () => {
 			onForkChat,
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+		await openDesktopMenu();
 
 		const forkItem = await screen.findByRole('menuitem', { name: 'Fork' });
 		expect(forkItem.hasAttribute('data-disabled')).toBe(true);

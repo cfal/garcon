@@ -14,7 +14,7 @@ interface WorkspaceRootStateOptions {
 
 export class WorkspaceRootState {
 	retainedSingletonPresentationKeys = $state.raw<ReadonlySet<string>>(new Set());
-	partitionRatioPreviews = $state<Readonly<Record<string, number>>>({});
+	partitionRatioPreviews = $state.raw<Readonly<Record<string, number>>>({});
 	readonly #frameBridges = new Map<string, SurfaceFrameBridge>();
 
 	constructor(private readonly options: WorkspaceRootStateOptions) {}

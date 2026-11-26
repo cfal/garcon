@@ -18,7 +18,8 @@
 	import { cn } from '$lib/utils/cn';
 	import {
 		DEFAULT_WINDOW_TAB_MINIMUM_LABELED_WIDTH,
-		resolveWindowTabCapacity,
+		sameTabPresentation,
+		sameVisibleTabs,
 		resolveWindowTabPresentation,
 		type WindowTabLabelMode,
 		type WindowTabPresentation,
@@ -79,6 +80,8 @@
 	let tabViewport: HTMLDivElement | null = $state(null);
 	let measurementRail: HTMLDivElement | null = $state(null);
 	let tabPresentation = $state.raw<WindowTabPresentation | null>(null);
+	let lastMeasure: WorkspaceWindowTabMeasure | null | undefined;
+	let lastVisibleIds: readonly string[] | undefined;
 	let closeFocusReturnTarget: HTMLElement | null = null;
 	let singleTabMenuOpen = $state(false);
 	let singleTabMenuShouldRestoreTabFocus = true;
@@ -127,7 +130,10 @@
 	});
 
 	$effect(() => {
-		onVisibleChange?.(displayedSurfaceIds);
+		const ids = displayedSurfaceIds;
+		if (lastVisibleIds && sameVisibleTabs(lastVisibleIds, ids)) return;
+		lastVisibleIds = ids;
+		untrack(() => onVisibleChange?.(ids));
 	});
 
 	$effect(() => {
@@ -216,30 +222,29 @@
 		const measuredGap = Number.parseFloat(getComputedStyle(measurementRail).columnGap);
 		const tabGap = Number.isFinite(measuredGap) ? measuredGap : 2;
 		const hasCompleteMeasurements = tabs.order.every((surfaceId) => widths.has(surfaceId));
-		onMeasureChange?.(
-			hasCompleteMeasurements
-				? {
-							naturalWidth: tabs.order.reduce(
-							(sum, surfaceId, index) =>
-								sum + (widths.get(surfaceId) ?? 0) + (index > 0 ? tabGap : 0),
-							0,
-						),
-						viewportWidth,
-					}
-				: null,
-		);
-		const capacity = resolveWindowTabCapacity({
-			containerWidth: viewportWidth,
-			actionsWidth: 0,
-			auxiliaryWidth: 0,
-			gap: 0,
-			railChromeWidth: 0,
-		});
-		tabPresentation = resolveWindowTabPresentation({
+		const measure = hasCompleteMeasurements
+			? {
+					naturalWidth: tabs.order.reduce(
+						(sum, surfaceId, index) =>
+							sum + (widths.get(surfaceId) ?? 0) + (index > 0 ? tabGap : 0),
+						0,
+					),
+					viewportWidth,
+				}
+			: null;
+		if (
+			lastMeasure === undefined ||
+			measure?.naturalWidth !== lastMeasure?.naturalWidth ||
+			measure?.viewportWidth !== lastMeasure?.viewportWidth
+		) {
+			lastMeasure = measure;
+			onMeasureChange?.(measure);
+		}
+		const nextPresentation = resolveWindowTabPresentation({
 			order: tabs.order,
 			activeId: tabs.activeId,
 			activeTitleId: surfaceKind(tabs.activeId) === 'chat' ? tabs.activeId : null,
-			availableWidth: capacity.contentWidth,
+			availableWidth: viewportWidth,
 			widths,
 			gap: tabGap,
 			iconWidth: titlebarMetrics.controlSizePx,
@@ -251,6 +256,7 @@
 				),
 			),
 		});
+		if (!sameTabPresentation(tabPresentation, nextPresentation)) tabPresentation = nextPresentation;
 	}
 
 	function notifyFailure(error: unknown): void {
@@ -421,7 +427,10 @@
 		// A command that opens a dialog keeps focus instead of returning it to the tab.
 		queueMicrotask(() => {
 			const activeElement = document.activeElement;
-			if (activeElement instanceof Element && activeElement.closest('[data-slot="dialog-content"]')) {
+			if (
+				activeElement instanceof Element &&
+				activeElement.closest('[data-slot="dialog-content"]')
+			) {
 				return;
 			}
 			focusSelectedTab();

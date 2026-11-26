@@ -23,7 +23,6 @@
 		getNotifications,
 		getSidebarSearch,
 		setTicketSourceNavigation,
-		getFileSessions,
 		getGitBranchActions,
 		getGitQuickSummary,
 		getExecutors,
@@ -31,7 +30,6 @@
 		getModelCatalog,
 		getLocalSettings,
 		getProjectResolution,
-		getSurfaceFrames,
 		getTerminalRegistry,
 		getWorkspaceCoordinator,
 		getWorkspaceHostGeometry,
@@ -83,15 +81,14 @@
 		ChatDraftAppendResult,
 	} from '$lib/chat/composer/chat-draft-append.js';
 	import FileDialogHost from '$lib/components/files/FileDialogHost.svelte';
-	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
+	import WorkspaceConversationHost from './WorkspaceConversationHost.svelte';
+	import { createWorkspaceSurfaceCatalog } from './workspace-surface-catalog.svelte.js';
 	import {
 		renderedPortablePresentations,
 		visibleChatPresentations,
 		fullscreenHiddenChatPresentations,
 		visiblePortablePresentations,
-		type VisibleChatPresentation,
 	} from '$lib/workspace/visible-presentations.js';
-	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { projectTargetKey, type ProjectTarget } from '$shared/project-resolution';
 
@@ -117,8 +114,6 @@
 	const gitBranchActions = getGitBranchActions();
 	const gitQuickSummary = getGitQuickSummary();
 	const executors = getExecutors();
-	const fileSessions = getFileSessions();
-	const surfaceFrames = getSurfaceFrames();
 	const processingReconciler = getChatProcessingReconciler();
 	const subagentToolbar = new SubagentToolbarState();
 	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
@@ -161,7 +156,7 @@
 	const searchNavigation = new SearchResultNavigationController({
 		navigation: transcriptNavigation,
 		notifications: getNotifications(),
-		discardStaleResult: (target) => sidebarSearch.discardStaleTranscriptResult(target),
+		discardStaleResult: (target) => sidebarSearch.transcript.discardStaleTranscriptResult(target),
 	});
 	$effect(() =>
 		onRegisterSearchNavigation?.({
@@ -178,9 +173,6 @@
 	});
 	const unregisterChatSurfaceTransfers =
 		workspace.registerChatSurfaceTransferPort(conversationPanels);
-	conversationUi.mountExecutionControlPruning({
-		getActiveChatIds: () => new Set(Object.keys(sessions.byId)),
-	});
 	let openUserMessageNavigator = $state<UserMessageNavigatorCommand | null>(null);
 	let chatDraftAppend: ChatDraftAppend | null = null;
 	let renamingTerminalId = $state<string | null>(null);
@@ -196,34 +188,36 @@
 	const presentedCurrentWindowId = $derived(projectedWindowId ?? currentWindowId);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
 	const visibleChatPlacements = $derived(
-		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').map(observePanelAdmission),
+		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop'),
+	);
+	// The primitive signature stays stable when chat records change without changing admission.
+	const visibleChatAdmissions = $derived(
+		visibleChatPlacements
+			.map(({ chatId }) => {
+				const chat = sessions.byId[chatId] ?? null;
+				if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation')
+					return '-';
+				return chat?.status === 'draft' ? 'd' : 'a';
+			})
+			.join(''),
 	);
 	const chatPresentations = $derived(
-		visibleChatPlacements.flatMap(({ placement, admission }) =>
-			admission === null ? [] : [{ ...placement, snapshotAdmission: admission }],
-		),
+		visibleChatPlacements.flatMap((placement, index): ConversationPanelDescriptor[] => {
+			const admission = visibleChatAdmissions[index];
+			return admission === '-'
+				? []
+				: [{ ...placement, snapshotAdmission: admission === 'd' ? 'deferred' : 'admitted' }];
+		}),
 	);
 	const fullscreenHiddenChats = $derived(
-		fullscreenHiddenChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop')
-			.filter(item => resolveChatSurfacePresentation(sessions.byId[item.chatId] ?? null, sessions.isLoadingChats) === 'conversation'),
+		fullscreenHiddenChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').filter(
+			(item) =>
+				resolveChatSurfacePresentation(
+					sessions.byId[item.chatId] ?? null,
+					sessions.isLoadingChats,
+				) === 'conversation',
+		),
 	);
-
-	// A visible placement depends on catalog admission, not the entire chat record.
-	function observePanelAdmission(placement: VisibleChatPresentation) {
-		const admission = $derived.by<ConversationPanelDescriptor['snapshotAdmission'] | null>(() => {
-			const chat = sessions.byId[placement.chatId] ?? null;
-			if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
-				return null;
-			}
-			return chat?.status === 'draft' ? 'deferred' : 'admitted';
-		});
-		return {
-			placement,
-			get admission() {
-				return admission;
-			},
-		};
-	}
 
 	const existingChatSurfaceIds = $derived.by(
 		() =>
@@ -253,7 +247,7 @@
 		});
 	});
 	const visibleProjectTargetsKey = $derived.by(() =>
-		visibleProjectTargets()
+		visibleProjectTargets
 			.map((target) => projectResolution.lifecycleKey(target))
 			.sort()
 			.join('\u0000'),
@@ -261,7 +255,7 @@
 
 	$effect(() => {
 		if (!visibleProjectTargetsKey) return;
-		const targets = untrack(visibleProjectTargets);
+		const targets = untrack(() => visibleProjectTargets);
 		const leases = untrack(() => targets.map((target) => projectResolution.retain(target)));
 		return () => {
 			for (const lease of leases) lease.release();
@@ -270,7 +264,7 @@
 
 	$effect(() => {
 		if (!composerStatusBarNeedsGit(localSettings) || !visibleProjectTargetsKey) return;
-		const targets = untrack(visibleProjectTargets);
+		const targets = untrack(() => visibleProjectTargets);
 		const leases = untrack(() =>
 			targets.map((target) => {
 				const lease = projectResolution.retain(target);
@@ -283,7 +277,7 @@
 		};
 	});
 
-	function visibleProjectTargets(): ProjectTarget[] {
+	const visibleProjectTargets = $derived.by(() => {
 		return [
 			...new Map(
 				chatPresentations.flatMap(({ chatId }) => {
@@ -294,7 +288,7 @@
 				}),
 			).values(),
 		];
-	}
+	});
 
 	function targetForChat(chat: {
 		id: string;
@@ -458,6 +452,7 @@
 			conversationLifecycles.prune(activeChatIds);
 			conversationTranscriptOverlays.prune(activeChatIds);
 			asyncQuestions.prune(activeChatIds);
+			conversationUi.pruneExecutionControls(activeChatIds);
 		});
 	});
 
@@ -495,40 +490,9 @@
 		rootState.destroy();
 	});
 
-	function label(surfaceId: string): string {
-		const surface = snapshot.surfaces[surfaceId];
-		if (!surface) return m.workspace_surface_view();
-		if (surface.type === 'chat') {
-			return surface.chatId
-				? sessions.byId[surface.chatId]?.title || m.chat_window_untitled()
-				: m.workspace_surface_chat();
-		}
-		if (surface.type === 'terminal') {
-			const metadata = terminals.sessions[surface.terminalId]?.metadata;
-			return metadata ? terminals.displayName(metadata) : m.workspace_surface_terminal();
-		}
-		if (surface.type === 'file') {
-			const session = fileSessions.get(surface.fileSessionId);
-			return session
-				? `${session.fileName}${session.dirty ? ' *' : ''}`
-				: m.workspace_surface_file();
-		}
-		if (surface.type === 'terminal-launcher') return m.workspace_surface_terminal();
-		const labels = {
-			git: m.workspace_surface_git(),
-			'git-history': m.workspace_surface_git_history(),
-			'git-compare': m.workspace_surface_git_compare(),
-			'pull-requests': m.workspace_surface_pull_requests_short(),
-			files: m.workspace_surface_files(),
-			commit: m.workspace_surface_commit(),
-			'chat-map': m.workspace_surface_chat_map(),
-			'chat-canvas': m.workspace_surface_chat_canvas(),
-			'chat-board': m.workspace_surface_chat_board(),
-			tickets: m.tickets_title(),
-			usage: m.workspace_surface_usage(),
-		};
-		return labels[surface.kind];
-	}
+	const surfaceCatalog = createWorkspaceSurfaceCatalog((chat) =>
+		chatActions.requestProjectPath(chat),
+	);
 
 	function rectStyle(rect: WorkspaceWindowRect): string {
 		return `left: ${rect.left * 100}%; top: ${rect.top * 100}%; width: ${rect.width * 100}%; height: ${rect.height * 100}%;`;
@@ -613,11 +577,7 @@
 				{visible}
 				style={PORTABLE_SURFACE_STYLE}
 				onAppendToChatDraft={appendToChatDraft}
-				onChooseProjectFolder={modelCatalog
-					.forExecutor(sessions.selectedChat?.executorId)
-					.supportsUpdateProjectPath(sessions.selectedChat?.agentId ?? '') && sessions.selectedChat
-					? () => chatActions.requestProjectPath(sessions.selectedChat!)
-					: undefined}
+				onChooseProjectFolder={surfaceCatalog.onChooseProjectFolder}
 				frameBridge={rootState.frameBridge(surface.id)}
 			/>
 		{/key}
@@ -648,7 +608,7 @@
 				hasRightSeparator={hasRightSeparator(renderedRect)}
 				presentations={renderedPresentations}
 				style={rectStyle(renderedRect)}
-				labelFor={label}
+				labelFor={surfaceCatalog.label}
 				panelActions={conversationPanelActions}
 				{composerInsetPx}
 				composerNotice={composerBound ? composerNotice : null}
@@ -658,6 +618,7 @@
 				frameBridge={(surfaceId) => rootState.frameBridge(surfaceId)}
 				surfaceStyle={PORTABLE_SURFACE_STYLE}
 				onAppendToChatDraft={appendToChatDraft}
+				onChooseProjectFolder={surfaceCatalog.onChooseProjectFolder}
 			/>
 		{/each}
 		{#if !projectedWindowId}
@@ -712,56 +673,32 @@
 		</div>
 	{/if}
 
-	<div
-		class="pointer-events-none absolute z-30 overflow-hidden"
-		class:invisible={!liveChatLayerVisible}
+	<WorkspaceConversationHost
+		surfaceId={composerPlacement?.surface.id}
+		fallbackSurfaceId={fallbackChatSurfaceId}
+		host={composerBound && composerPlacement ? (composerPlacement.windowId ?? 'mobile') : null}
+		visible={liveChatLayerVisible}
 		style={liveLayerRectStyle}
-		aria-hidden={!liveChatLayerVisible}
-		inert={!liveChatLayerVisible}
+		topPx={composerPlacement && !isMobile ? titlebarMetrics.heightPx : undefined}
+		leftSeparator={composerHasLeftSeparator}
+		rightSeparator={composerHasRightSeparator}
 	>
-		<div
-			class={cn(
-				'pointer-events-none absolute overflow-visible',
-				composerPlacement && !isMobile ? 'inset-x-0 bottom-0' : 'inset-0',
-				composerHasLeftSeparator && 'any-pointer-coarse:ml-3',
-				composerHasRightSeparator && 'any-pointer-coarse:mr-3',
-			)}
-			style:top={composerPlacement && !isMobile ? `${titlebarMetrics.heightPx}px` : undefined}
-			data-workspace-live-chat-body
-			data-workspace-live-chat-body-top-px={composerPlacement && !isMobile
-				? titlebarMetrics.heightPx
-				: undefined}
-			data-workspace-surface-id={composerPlacement?.surface.id}
-			onpointerdowncapture={() => {
-				if (composerPlacement) workspace.noteSurfaceFocus(composerPlacement.surface.id);
-			}}
-			onfocusincapture={() => {
-				if (composerPlacement) workspace.noteSurfaceFocus(composerPlacement.surface.id);
-			}}
-			use:surfaceFrame={{
-				registry: surfaceFrames,
-				surfaceId: composerPlacement?.surface.id ?? fallbackChatSurfaceId,
-				host: composerBound && composerPlacement ? (composerPlacement.windowId ?? 'mobile') : null,
-				version: 0,
-			}}
-		>
-			<ChatSurface
-				{isMobile}
-				isVisible={composerBound}
-				isInteractive={liveChatLayerVisible && workspace.isChatInteractive}
-				{onRegisterReload}
-				onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
-					(openUserMessageNavigator = command)}
-				onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
-				onRegisterPanelActions={(actions) => (conversationPanelActions = actions)}
-				onComposerHeightChange={(height) => (composerInsetPx = height)}
-				onComposerNoticeChange={(notice) => (composerNotice = notice)}
-				{subagentToolbar}
-				{chatActions}
-				transcriptCache={chatTranscriptCache}
-			/>
-		</div>
-	</div>
+		<ChatSurface
+			{isMobile}
+			isVisible={composerBound}
+			isInteractive={liveChatLayerVisible && workspace.isChatInteractive}
+			{onRegisterReload}
+			onRegisterUserMessageNavigator={(command: UserMessageNavigatorRegistration) =>
+				(openUserMessageNavigator = command)}
+			onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
+			onRegisterPanelActions={(actions) => (conversationPanelActions = actions)}
+			onComposerHeightChange={(height) => (composerInsetPx = height)}
+			onComposerNoticeChange={(notice) => (composerNotice = notice)}
+			{subagentToolbar}
+			{chatActions}
+			transcriptCache={chatTranscriptCache}
+		/>
+	</WorkspaceConversationHost>
 
 	{#if isMobile}
 		{#each renderedMobilePresentations as item (`${item.presentation}:${item.surfaceId}`)}
@@ -787,7 +724,11 @@
 
 {#if gitBranchActions.showNewBranchModal}
 	<NewBranchModal
-		contextKey={JSON.stringify([gitBranchActions.executorId, gitBranchActions.newBranchEffectiveProjectKey, gitBranchActions.newBranchSurfaceId])}
+		contextKey={JSON.stringify([
+			gitBranchActions.executorId,
+			gitBranchActions.newBranchEffectiveProjectKey,
+			gitBranchActions.newBranchSurfaceId,
+		])}
 		currentBranch={gitBranchActions.newBranchCurrentBranch || 'HEAD'}
 		newBranchName={gitBranchActions.newBranchName}
 		refOptions={gitBranchActions.newBranchRefs}

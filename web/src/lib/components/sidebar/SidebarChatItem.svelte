@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
@@ -122,9 +121,11 @@
 	let isProcessing = $derived(session.isProcessing);
 	let chatName = $derived(session.title || m.sidebar_chats_new_chat());
 	const branchDescriptionId = $props.id();
-	const branchActivity = $derived(branch && branch.activity > chatActivityTimeMs(session)
-		? m.sidebar_branch_activity({ time: new Date(branch.activity).toLocaleString() })
-		: undefined);
+	const branchActivity = $derived(
+		branch && branch.activity > chatActivityTimeMs(session)
+			? m.sidebar_branch_activity({ time: new Date(branch.activity).toLocaleString() })
+			: undefined,
+	);
 	let isSelected = $derived(selectedChatId === session.id);
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
@@ -166,9 +167,15 @@
 	let rightClickPos = $state<{ x: number; y: number } | null>(null);
 	let isAtCursor = $derived(rightClickPos !== null);
 
-	// Resets cursor anchor when the menu closes so the 3-dots button reappears.
-	$effect(() => {
-		if (!menuOpen) rightClickPos = null;
+	let retainMenuContent = $state(false);
+	let menuTrigger = $state<HTMLButtonElement | null>(null);
+	let menuFocusReturnTarget: HTMLButtonElement | null = null;
+	const menuTriggerClass = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground';
+
+	// Keeps the desktop portal owner until Bits completes its exit.
+	$effect.pre(() => {
+		if (isMobile || isMultiSelectMode) retainMenuContent = false;
+		else if (menuOpen) retainMenuContent = true;
 	});
 
 	// Positions the dropdown anchor at the cursor for desktop right-click.
@@ -177,6 +184,7 @@
 		e.preventDefault();
 		if (!itemEl) return;
 		const rect = itemEl.getBoundingClientRect();
+		menuFocusReturnTarget = null;
 		rightClickPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
 		menuOpen = true;
 	}
@@ -188,6 +196,7 @@
 		const target = e.currentTarget as HTMLElement;
 		const itemRect = itemEl.getBoundingClientRect();
 		const btnRect = target.getBoundingClientRect();
+		menuFocusReturnTarget = null;
 		rightClickPos = {
 			x: btnRect.left - itemRect.left,
 			y: btnRect.bottom - itemRect.top,
@@ -243,15 +252,15 @@
 	}
 
 	// Scroll-to-selected on explicit chat navigation requests.
-	onMount(() =>
-		appShell.onSidebarRecenterRequested(() => {
-			if (!enableRecenterOnRequest) return;
+	$effect(() => {
+		if (!enableRecenterOnRequest) return;
+		return appShell.onSidebarRecenterRequested(() => {
 			if (!isSelected || !itemEl) return;
 			requestAnimationFrame(() => {
 				if (itemEl) scrollIntoViewport(itemEl);
 			});
-		}),
-	);
+		});
+	});
 </script>
 
 {#snippet stateBadge()}
@@ -428,12 +437,20 @@
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>
-			<DropdownMenu bind:open={menuOpen}>
+			<DropdownMenu
+				bind:open={menuOpen}
+				onOpenChange={(open) => {
+					if (open) menuFocusReturnTarget = !isMobile && !isAtCursor ? menuTrigger : null;
+					else rightClickPos = null;
+				}}
+				onOpenChangeComplete={(open) => {
+					if (!open && !menuOpen) retainMenuContent = false;
+				}}
+			>
 				<DropdownMenuTrigger
+					bind:ref={menuTrigger}
 					data-sidebar-touch-drag-ignore
-					class={isAtCursor
-						? 'block w-px h-px opacity-0 pointer-events-none'
-						: 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border/70 bg-background text-muted-foreground transition-colors hover:bg-background hover:text-foreground'}
+					class={isAtCursor ? 'block w-px h-px opacity-0 pointer-events-none' : menuTriggerClass}
 					aria-label={m.sidebar_chat_more_actions()}
 					tabindex={isAtCursor ? -1 : 0}
 				>
@@ -441,36 +458,41 @@
 						<EllipsisVertical class="h-3.5 w-3.5" />
 					{/if}
 				</DropdownMenuTrigger>
-				<DropdownMenuContent align={isAtCursor ? 'start' : 'end'}>
-					<SidebarChatMenu
-						delegatedChatsCollapsed={branch?.isCollapsed}
-						{onToggleDelegatedChats}
-						{session}
-						{isPinned}
-						{isArchived}
-						{canFork}
-						{canForkNow}
-						{onEnterMultiSelect}
-						{onMoveUp}
-						{onMoveDown}
-						{moveBoundaryLabels}
-						{onMoveToTop}
-						{onMoveToBottom}
-						{onSortChatOrder}
-						{onOpenInNewWindow}
-						{newWindowEdges}
-						{hasChatPlacement}
-						{onTogglePinned}
-						{onToggleArchive}
-						{isArchiveMutationPending}
-						onRename={requestRename}
-						onDetails={requestDetails}
-						onShare={() => onShareChat(session)}
-						onManageTags={onManageTags ? () => onManageTags(session) : undefined}
-						onFork={() => onForkChat(session.id)}
-						onDelete={requestDelete}
-					/>
-				</DropdownMenuContent>
+				{#if isMobile || menuOpen || retainMenuContent}
+					<DropdownMenuContent
+						align={isAtCursor ? 'start' : 'end'}
+						getFocusReturnTarget={() => menuFocusReturnTarget}
+					>
+						<SidebarChatMenu
+							delegatedChatsCollapsed={branch?.isCollapsed}
+							{onToggleDelegatedChats}
+							{session}
+							{isPinned}
+							{isArchived}
+							{canFork}
+							{canForkNow}
+							{onEnterMultiSelect}
+							{onMoveUp}
+							{onMoveDown}
+							{moveBoundaryLabels}
+							{onMoveToTop}
+							{onMoveToBottom}
+							{onSortChatOrder}
+							{onOpenInNewWindow}
+							{newWindowEdges}
+							{hasChatPlacement}
+							{onTogglePinned}
+							{onToggleArchive}
+							{isArchiveMutationPending}
+							onRename={requestRename}
+							onDetails={requestDetails}
+							onShare={() => onShareChat(session)}
+							onManageTags={onManageTags ? () => onManageTags(session) : undefined}
+							onFork={() => onForkChat(session.id)}
+							onDelete={requestDelete}
+						/>
+					</DropdownMenuContent>
+				{/if}
 			</DropdownMenu>
 		</div>
 	{/if}

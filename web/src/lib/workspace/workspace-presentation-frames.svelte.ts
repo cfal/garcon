@@ -12,8 +12,8 @@ interface WorkspacePresentationFramesDeps {
 }
 
 export class WorkspacePresentationFrames {
-	versions = $state<Record<string, number>>({});
-	errors = $state<Record<string, string>>({});
+	versions = $state.raw<Record<string, number>>({});
+	errors = $state.raw<Record<string, string>>({});
 	#presentationGeneration = 0;
 
 	constructor(private readonly deps: WorkspacePresentationFramesDeps) {}
@@ -103,15 +103,17 @@ export class WorkspacePresentationFrames {
 	}
 
 	clearError(surfaceId: string): void {
+		if (!Object.hasOwn(this.errors, surfaceId)) return;
 		const { [surfaceId]: _removed, ...remaining } = this.errors;
 		this.errors = remaining;
 	}
 
 	release(surfaceId: string): void {
 		this.deps.frames?.release(surfaceId);
+		this.clearError(surfaceId);
+		if (!Object.hasOwn(this.versions, surfaceId)) return;
 		const { [surfaceId]: _removed, ...remaining } = this.versions;
 		this.versions = remaining;
-		this.clearError(surfaceId);
 	}
 
 	async settle(expectation: FrameExpectation): Promise<void> {

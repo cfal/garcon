@@ -2,9 +2,11 @@ import { computeMobileViewportMetrics, type MobileViewportMetrics } from './mobi
 
 export function bindMobileViewport(
 	onMetrics: (metrics: MobileViewportMetrics) => void,
+	mode: 'layout-or-overlay' | 'overlay-only' = 'layout-or-overlay',
 ): (() => void) | undefined {
 	if (typeof window === 'undefined' || !window.visualViewport) return;
 	const viewport = window.visualViewport;
+	const overlayOnly = mode === 'overlay-only';
 	let frameId: number | null = null;
 	let previousAppHeight: number | null = null;
 	let baselineAppHeight: number | null = null;
@@ -20,6 +22,7 @@ export function bindMobileViewport(
 		const metrics = computeMobileViewportMetrics({
 			visualViewportHeight: viewport.height,
 			visualViewportOffsetTop: viewport.offsetTop,
+			visualViewportScale: overlayOnly ? viewport.scale : undefined,
 			windowInnerHeight: window.innerHeight,
 			baselineAppHeight,
 			previousAppHeight,
@@ -27,7 +30,7 @@ export function bindMobileViewport(
 		previousAppHeight = metrics.appHeight;
 		onMetrics(metrics);
 		if (!metrics.keyboardVisible) {
-			baselineAppHeight = metrics.appHeight;
+			if (!overlayOnly) baselineAppHeight = metrics.appHeight;
 			// Leaves safe-area geometry to CSS unless the keyboard occludes the viewport.
 			clearViewportOverrides();
 			return;
