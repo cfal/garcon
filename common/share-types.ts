@@ -15,6 +15,8 @@ export interface SharedChatSnapshot {
   projectPath: string;
   sharedAt: string;
   origin?: SharedChatOrigin;
+  // Number of public messages before the current binding, when a share spans that boundary.
+  frozenMessageCount?: number;
   messages: unknown[];
 }
 
@@ -35,7 +37,7 @@ export interface ShareStatusResponse {
 // transcript origin stay on the controller.
 export type PublicSharedChatSnapshot = Pick<
   SharedChatSnapshot,
-  'shareToken' | 'title' | 'agentId' | 'model' | 'sharedAt' | 'messages'
+  'shareToken' | 'title' | 'agentId' | 'model' | 'sharedAt' | 'messages' | 'frozenMessageCount'
 >;
 
 export interface GetSharedChatResponse {

@@ -58,10 +58,11 @@
 	type SharedViewError = 'not-found' | 'load-failed';
 
 	let messages = $state.raw<SharedMessageEntry[]>([]);
+	let frozenMessageCount = $state(0);
 	const renderedMessages = $derived.by(() => {
 		const output = projectCommandOutput(messages.map(entry => entry.message));
 		const pairs = new ConversationToolPairing().append(messages.map(({ index, message }) =>
-			({ kind: 'message', id: String(index), ordinal: index + 1, message })));
+			({ kind: 'message', id: String(index), ordinal: index + 1, message })), frozenMessageCount ? frozenMessageCount + 1 : undefined);
 		return messages.flatMap<RenderedEntry>((entry, index) => {
 			const message = output.get(index) ?? entry.message;
 			if (message.type === 'command-result' && commandResultPresentation(message.result) === 'hidden') return [];
@@ -134,6 +135,7 @@
 			title = snapshot.title;
 			agentId = snapshot.agentId;
 			sharedAt = snapshot.sharedAt;
+			frozenMessageCount = snapshot.frozenMessageCount ?? 0;
 			messages = parseMessages(snapshot.messages ?? [], resp.page.start);
 			totalMessages = resp.page.totalMessages;
 			nextBefore = resp.page.nextBefore;
@@ -165,6 +167,7 @@
 				title = snapshot.title;
 				agentId = snapshot.agentId;
 				sharedAt = snapshot.sharedAt;
+				frozenMessageCount = snapshot.frozenMessageCount ?? 0;
 				messages = olderMessages;
 				totalMessages = resp.page.totalMessages;
 				nextBefore = resp.page.nextBefore;

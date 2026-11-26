@@ -133,7 +133,7 @@ export class ConversationToolPairing {
 	#toolResultByUseRowId = new Map<string, ToolResultMessage>();
 	#toolResultRowIdByUseRowId = new Map<string, string>();
 
-	append(rows: ChatDisplayRow[]): ConversationToolPairs {
+	append(rows: ChatDisplayRow[], bindingStartOrdinal?: number): ConversationToolPairs {
 		const pendingByToolId = this.#pendingByToolId;
 		const pendingPermissionWrappersByToolId = this.#pendingPermissionWrappersByToolId;
 		let toolResultByUseRowId = this.#toolResultByUseRowId;
@@ -143,10 +143,12 @@ export class ConversationToolPairing {
 		for (const row of rows) {
 			if (row.kind !== 'message') continue;
 			const message = row.message;
-			if (message.type === 'agent-switch') {
+			const startsBinding = bindingStartOrdinal !== undefined && row.ordinal !== undefined && row.ordinal >= bindingStartOrdinal;
+			if (startsBinding || message.type === 'agent-switch') {
 				pendingByToolId.clear();
 				pendingPermissionWrappersByToolId.clear();
-				continue;
+				if (startsBinding) bindingStartOrdinal = undefined;
+				if (message.type === 'agent-switch') continue;
 			}
 			if (
 				message instanceof PermissionRequestMessage &&

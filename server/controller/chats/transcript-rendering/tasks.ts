@@ -1,7 +1,8 @@
 import { readFileSync } from 'fs';
 import { parseStoredJson } from '../../../common/stored-json.js';
 import { decodeClonedStoredRows } from '../../ledger/codec.js';
-import { ledgerRowsToMessages } from '../../ledger/presentation.js';
+import { ledgerRowToMessage } from '../../ledger/presentation.js';
+import type { ChatMessage } from '../../../../common/chat-types.js';
 import { renderSharedChatText } from '../shares/transcript.ts';
 import { withholdExecutionContext } from '../shares/public-messages.ts';
 import {
@@ -30,7 +31,7 @@ export type ShareSnapshotFormat = 'document' | 'lines';
 // the stored snapshot file itself, so the controller neither decodes nor clones it.
 export type TranscriptRenderingTask =
   | ({ readonly kind: 'render-transcript-export' } & TranscriptExportDocumentRequest)
-  | { readonly kind: 'render-share-snapshot'; readonly header: Omit<ShareSnapshotHeader, 'messageCount'> }
+  | { readonly kind: 'render-share-snapshot'; readonly header: Omit<ShareSnapshotHeader, 'messageCount'>; readonly contentStartOrdinal?: number }
   | {
     readonly kind: 'upgrade-share-snapshot';
     readonly shareToken: string;
@@ -60,9 +61,17 @@ const TASK_HANDLERS: TaskHandlers = {
   'render-transcript-export': ({ kind: _kind, ...request }, items) => encoder.encode(
     JSON.stringify(buildTranscriptExportResponse(request, decodeClonedStoredRows(items))),
   ),
-  'render-share-snapshot': ({ header }, items) => {
-    const messages = ledgerRowsToMessages(decodeClonedStoredRows(items));
-    return renderShareSnapshot({ ...header, messageCount: messages.length }, messages);
+  'render-share-snapshot': ({ header, contentStartOrdinal = 1 }, items) => {
+    const messages: ChatMessage[] = [];
+    let frozen = 0;
+    for (const row of decodeClonedStoredRows(items)) {
+      const message = ledgerRowToMessage(row);
+      if (!message) continue;
+      messages.push(message);
+      if (row.ordinal < contentStartOrdinal) frozen++;
+    }
+    return renderShareSnapshot({ ...header, messageCount: messages.length,
+      ...(frozen && frozen < messages.length ? { frozenMessageCount: frozen } : {}) }, messages);
   },
   'upgrade-share-snapshot': ({ shareToken, format, snapshotPath }, items) => {
     if (items.length !== 0) throw new Error('Transcript rendering received unexpected share snapshot items');

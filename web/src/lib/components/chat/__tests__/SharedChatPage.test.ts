@@ -128,6 +128,21 @@ describe('SharedChatPage', () => {
 		expect(document.getElementById('shared-result-1')).toBeNull();
 	});
 
+	it('never attributes a current result to a pending frozen schedule across pages', async () => {
+		const newest = response(['', ''], 1, 3);
+		newest.snapshot.frozenMessageCount = 1;
+		newest.snapshot.messages = [new BackgroundTaskToolUseMessage('', 'reused', 'list'),
+			new ToolResultMessage('', 'reused', { raw: 'Current task list' }, false)];
+		const older = response([''], 0, 3);
+		older.snapshot.frozenMessageCount = 1;
+		older.snapshot.messages = [new ScheduleToolUseMessage('', 'reused', { action: 'list' })];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(newest).mockResolvedValueOnce(older);
+		render(SharedChatPageTestHost);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Load earlier messages' }));
+		await screen.findByText('List scheduled jobs');
+		expect(document.getElementById('shared-result-2')).toBeNull();
+	});
+
 	it('anchors to visible content when an empty permission row precedes a newly paired result', async () => {
 		const newest = response(['', '', ''], 1, 4);
 		newest.snapshot.messages = [

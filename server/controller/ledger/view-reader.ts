@@ -248,7 +248,8 @@ export class TranscriptViewReader {
         const view = await this.#adoption.ensure(chatId, captureSignal);
         captureSignal.throwIfAborted();
         const watermark = this.#ledger.highWatermark(chatId);
-        if (watermark.viewId !== view.viewId) {
+        const current = this.#ledger.existingCurrentView(chatId);
+        if (watermark.viewId !== view.viewId || current?.viewId !== view.viewId) {
           throw new DomainError(
             'SOURCE_REVISION_CHANGED',
             'Transcript view changed while capturing the snapshot',
@@ -259,6 +260,7 @@ export class TranscriptViewReader {
         return this.#ledger.withStoredRowsThrough(chatId, watermark, (rows) => work({
           transcriptViewId: view.viewId,
           lastOrdinal: watermark.ordinal,
+          contentStartOrdinal: current.contentStartOrdinal,
           rows,
         }), captureSignal);
       });
@@ -271,6 +273,7 @@ export class TranscriptViewReader {
 export interface StoredTranscriptSnapshot {
   readonly transcriptViewId: TranscriptViewId;
   readonly lastOrdinal: number;
+  readonly contentStartOrdinal: number;
   readonly rows: readonly StoredLedgerRow[];
 }
 

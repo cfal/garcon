@@ -20,6 +20,7 @@ export interface TranscriptRendering {
     input: {
       readonly header: Omit<ShareSnapshotHeader, 'messageCount'>;
       readonly rows: readonly StoredLedgerRow[];
+      readonly contentStartOrdinal?: number;
     },
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot>;
@@ -50,13 +51,14 @@ export class TranscriptRenderingWorker implements TranscriptRendering {
   }
 
   renderShareSnapshot(
-    { header, rows }: {
+    { header, rows, contentStartOrdinal }: {
       readonly header: Omit<ShareSnapshotHeader, 'messageCount'>;
       readonly rows: readonly StoredLedgerRow[];
+      readonly contentStartOrdinal?: number;
     },
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot> {
-    return this.#worker.run({ kind: 'render-share-snapshot', header }, rows, signal);
+    return this.#worker.run({ kind: 'render-share-snapshot', header, contentStartOrdinal }, rows, signal);
   }
 
   upgradeShareSnapshot(

@@ -239,8 +239,8 @@ function sharedChatPageResponse(
   shared: SharedChatMessages,
   page: SharedChatMessagePage,
 ): Response {
-  const { shareToken, title, agentId, model, sharedAt } = shared.header;
-  const snapshot: Omit<PublicSharedChatSnapshot, 'messages'> = { shareToken, title, agentId, model, sharedAt };
+  const { shareToken, title, agentId, model, sharedAt, frozenMessageCount } = shared.header;
+  const snapshot: Omit<PublicSharedChatSnapshot, 'messages'> = { shareToken, title, agentId, model, sharedAt, frozenMessageCount };
   const snapshotFields = JSON.stringify(snapshot).slice(0, -1);
   const messages = shared.messages.join(',');
   return new Response(
@@ -298,6 +298,7 @@ export default function createShareRoutes(
           model: session.model as string,
           projectPath: session.projectPath as string,
           sharedAt: new Date().toISOString(),
+          contentStartOrdinal: capture.contentStartOrdinal,
           origin: {
             transcriptViewId: capture.transcriptViewId,
             lastOrdinal: capture.lastOrdinal,

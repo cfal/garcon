@@ -520,11 +520,13 @@ describe('TranscriptViewReader', () => {
         rows: [{ message: new AssistantMessage(TS, 'answer') }],
       });
 
+      ledger.advanceContentStart('chat-1', viewId, 3);
       const snapshot = await reader.withStoredSnapshot('chat-1', captured);
 
       expect(snapshot).toMatchObject({
         transcriptViewId: viewId,
         lastOrdinal: 3,
+        contentStartOrdinal: 3,
       });
       expect(ledgerRowsToMessages(snapshot.rows.map(decodeStoredLedgerRow)).map((message) => message.content))
         .toEqual(['prompt', 'answer']);

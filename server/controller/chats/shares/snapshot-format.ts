@@ -6,7 +6,7 @@ import { isRecord } from '../../../../common/json.js';
 export const SHARE_ARTIFACT_REVISION = 2;
 
 // Everything a share snapshot records except its messages.
-export type ShareIndexEntry = Omit<SharedChatSnapshot, 'messages' | 'origin'>;
+export type ShareIndexEntry = Omit<SharedChatSnapshot, 'messages' | 'origin' | 'frozenMessageCount'>;
 export type ShareSnapshotHeader = Omit<SharedChatSnapshot, 'messages'> & {
   readonly messageCount: number;
 };
@@ -72,7 +72,9 @@ function normalizeShareHeader(token: string, value: unknown): ShareSnapshotHeade
   const messageCount = value.messageCount;
   if (typeof messageCount !== 'number' || !Number.isSafeInteger(messageCount) || messageCount < 0) return null;
   const origin = normalizeOrigin(value.origin);
-  return { ...entry, ...(origin ? { origin } : {}), messageCount };
+  const count = value.frozenMessageCount;
+  if (count !== undefined && (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1 || count >= messageCount)) return null;
+  return { ...entry, ...(origin ? { origin } : {}), messageCount, ...(count !== undefined ? { frozenMessageCount: count } : {}) };
 }
 
 function normalizeOrigin(value: unknown): SharedChatOrigin | undefined {
