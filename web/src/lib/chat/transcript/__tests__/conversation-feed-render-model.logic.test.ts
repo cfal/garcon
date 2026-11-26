@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	AgentSwitchMessage,
 	AssistantMessage,
 	AskUserQuestionToolUseMessage,
 	PermissionRequestMessage,
@@ -13,7 +14,7 @@ import {
 	type ChatMessage,
 } from '$shared/chat-types';
 import { ConversationFeedRenderModelController } from '../conversation-feed-render-model.js';
-import { buildConversationFeedRenderModel } from '../conversation-feed-items.js';
+import { buildConversationFeedRenderModel, conversationFeedItemLayout } from '../conversation-feed-items.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 
 const TS = '2026-08-03T00:00:00.000Z';
@@ -54,6 +55,25 @@ describe('ConversationFeedRenderModelController', () => {
 				expect(actual.model.items[itemIndex]).toBe(item);
 			}
 		}
+	});
+
+	it('does not attach an outstanding question wrapper to a new binding on a tail append or rebuild', () => {
+		const previous = new AskUserQuestionToolUseMessage(TS, 'q', undefined, []);
+		const question = new AskUserQuestionToolUseMessage(TS, 'q', undefined, []);
+		const entries = [
+			row(1, new PermissionRequestMessage(TS, 'old-permission', previous)),
+			row(2, new AgentSwitchMessage(TS, 'claude', 'claude', undefined, undefined, 'local', 'remote')),
+			row(3, question),
+			row(4, new ToolResultMessage(TS, 'q', { raw: 'answer' }, false)),
+		];
+		const controller = new ConversationFeedRenderModelController();
+		controller.reconcile('surface', entries.slice(0, 1));
+		const { model, change } = controller.reconcileDetailed('surface', entries);
+		expect(change.kind).toBe('tail-appended');
+		expect(model).toEqual(buildConversationFeedRenderModel(entries));
+		expect(model.items[3]).toMatchObject({ pairedToolUse: question });
+		expect(model.items[3]).not.toHaveProperty('permissionWrapperRowId', entries[0].id);
+		expect(conversationFeedItemLayout(model.items[3])).toBe('permission');
 	});
 
 	it.each([false, true])('refreshes delivery state when an append is %s', (append) => {
