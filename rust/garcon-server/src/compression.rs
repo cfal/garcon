@@ -4,12 +4,12 @@
 //! `Range` header are never served natively (see ADR-005), so the original's
 //! byte-range handling has no counterpart here.
 
-use std::io::Write;
+use std::io::{Read, Write};
 
 use bytes::Bytes;
 use hyper::header::{
-    ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, ETAG,
-    HeaderMap, HeaderValue, VARY,
+    ACCEPT_ENCODING, AsHeaderName, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE,
+    ETAG, HeaderMap, HeaderValue, VARY,
 };
 use hyper::{Method, StatusCode};
 
@@ -50,12 +50,15 @@ impl Encoding {
         }
     }
 
-    pub fn compress(self, input: &[u8]) -> std::io::Result<Bytes> {
-        self.compress_to_vec(input).map(Bytes::from)
+    /// The encoding a `Content-Encoding` value names, if it is one of ours.
+    pub fn from_token(token: &str) -> Option<Self> {
+        ENCODING_PREFERENCE
+            .into_iter()
+            .find(|encoding| token.eq_ignore_ascii_case(encoding.token()))
     }
 
-    fn compress_to_vec(self, input: &[u8]) -> std::io::Result<Vec<u8>> {
-        match self {
+    pub fn compress(self, input: &[u8]) -> std::io::Result<Bytes> {
+        let compressed = match self {
             Encoding::Gzip => {
                 let mut encoder =
                     flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -73,7 +76,23 @@ impl Encoding {
                 input,
                 ruzstd::encoding::CompressionLevel::Fastest,
             )),
-        }
+        };
+        compressed.map(Bytes::from)
+    }
+
+    pub fn decode(self, input: &[u8]) -> std::io::Result<Vec<u8>> {
+        let mut decoded = Vec::new();
+        match self {
+            Encoding::Gzip => flate2::read::GzDecoder::new(input).read_to_end(&mut decoded)?,
+            Encoding::Deflate => flate2::read::ZlibDecoder::new(input).read_to_end(&mut decoded)?,
+            Encoding::Zstd => {
+                let mut source = input;
+                ruzstd::decoding::StreamingDecoder::new(&mut source)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?
+                    .read_to_end(&mut decoded)?
+            }
+        };
+        Ok(decoded)
     }
 }
 
@@ -82,6 +101,20 @@ pub struct NativeResponse {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: Bytes,
+}
+
+impl NativeResponse {
+    /// Sets the headers the response is sent with: an uncompressed body
+    /// declares its length for every method, so HEAD carries the length of
+    /// the GET representation, as Bun sends it.
+    pub fn framed(mut self) -> Self {
+        if !self.headers.contains_key(CONTENT_ENCODING)
+            && !self.headers.contains_key(CONTENT_LENGTH)
+        {
+            self.headers.insert(CONTENT_LENGTH, self.body.len().into());
+        }
+        self
+    }
 }
 
 /// JavaScript `Number()` over the characters the original's regex admits,
@@ -105,7 +138,9 @@ fn quality_param(param: &str) -> Option<&str> {
 
 pub fn negotiate_encoding(accept_encoding: Option<&str>) -> Option<Encoding> {
     let header = accept_encoding.filter(|value| !value.is_empty())?;
-    let mut explicit: Vec<(String, f64)> = Vec::new();
+    // Qualities by preference index; a later mention of a token replaces an
+    // earlier one, as the original's map does.
+    let mut explicit: [Option<f64>; ENCODING_PREFERENCE.len()] = [None; ENCODING_PREFERENCE.len()];
     let mut wildcard: Option<f64> = None;
     for part in header
         .split(',')
@@ -113,57 +148,50 @@ pub fn negotiate_encoding(accept_encoding: Option<&str>) -> Option<Encoding> {
         .filter(|part| !part.is_empty())
     {
         let mut pieces = part.split(';').map(str::trim);
-        let encoding = pieces.next().unwrap_or_default().to_ascii_lowercase();
-        if encoding.is_empty() {
-            continue;
-        }
-        let mut quality = 1.0;
-        for param in pieces {
-            if let Some(value) = quality_param(param) {
-                quality = parse_quality(value);
-            }
-        }
-        if encoding == "*" {
+        let token = pieces.next().unwrap_or_default();
+        let quality = pieces
+            .filter_map(quality_param)
+            .next_back()
+            .map_or(1.0, parse_quality);
+        if token == "*" {
             wildcard = Some(quality);
-        } else if let Some(entry) = explicit.iter_mut().find(|(name, _)| *name == encoding) {
-            entry.1 = quality;
-        } else {
-            explicit.push((encoding, quality));
+        } else if let Some(index) = ENCODING_PREFERENCE
+            .iter()
+            .position(|encoding| token.eq_ignore_ascii_case(encoding.token()))
+        {
+            explicit[index] = Some(quality);
         }
     }
-    let mut candidates: Vec<(Encoding, f64, usize)> = ENCODING_PREFERENCE
-        .iter()
-        .enumerate()
-        .filter_map(|(rank, encoding)| {
-            let quality = explicit
-                .iter()
-                .find(|(name, _)| name == encoding.token())
-                .map(|(_, quality)| *quality)
-                .or(wildcard)?;
-            (quality > 0.0).then_some((*encoding, quality, rank))
-        })
-        .collect();
-    candidates.sort_by(|left, right| right.1.total_cmp(&left.1).then(left.2.cmp(&right.2)));
-    candidates.first().map(|(encoding, _, _)| *encoding)
+    // The highest quality wins; ties keep the earlier preference.
+    let mut best: Option<(Encoding, f64)> = None;
+    for (index, encoding) in ENCODING_PREFERENCE.into_iter().enumerate() {
+        let Some(quality) = explicit[index]
+            .or(wildcard)
+            .filter(|quality| *quality > 0.0)
+        else {
+            continue;
+        };
+        if best.is_none_or(|(_, best_quality)| quality > best_quality) {
+            best = Some((encoding, quality));
+        }
+    }
+    best.map(|(encoding, _)| encoding)
 }
 
 fn is_compressible(content_type: Option<&str>) -> bool {
     let Some(content_type) = content_type else {
         return true;
     };
-    let mime = content_type
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    if mime.is_empty() || COMPRESSIBLE_MIME_EXCEPTIONS.contains(&mime.as_str()) {
+    let mime = content_type.split(';').next().unwrap_or_default().trim();
+    let is = |candidate: &str| mime.eq_ignore_ascii_case(candidate);
+    if mime.is_empty() || COMPRESSIBLE_MIME_EXCEPTIONS.into_iter().any(is) {
         return true;
     }
-    !SKIP_MIME_TYPES.contains(&mime.as_str())
-        && !SKIP_MIME_PREFIXES
-            .iter()
-            .any(|prefix| mime.starts_with(prefix))
+    !SKIP_MIME_TYPES.into_iter().any(is)
+        && !SKIP_MIME_PREFIXES.into_iter().any(|prefix| {
+            mime.get(..prefix.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+        })
 }
 
 fn has_no_transform(cache_control: Option<&str>) -> bool {
@@ -174,7 +202,8 @@ fn has_no_transform(cache_control: Option<&str>) -> bool {
     })
 }
 
-fn header(headers: &HeaderMap, name: hyper::header::HeaderName) -> Option<&str> {
+/// A header value as text, or `None` when absent or not visible ASCII.
+pub fn header<K: AsHeaderName>(headers: &HeaderMap, name: K) -> Option<&str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 

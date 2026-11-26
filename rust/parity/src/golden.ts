@@ -4,7 +4,7 @@ import type { Scenario } from './scenario.js';
 import { mergeRecordings, wildcardPaths, type Json } from './wildcard.js';
 import type { CaseRun } from './runner.js';
 
-export const GOLDEN_DIRECTORY = 'rust/parity/golden';
+const GOLDEN_DIRECTORY = 'rust/parity/golden';
 
 export interface GoldenCase {
   name: string;

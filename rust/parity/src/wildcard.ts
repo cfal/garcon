@@ -7,7 +7,7 @@ export const WILDCARD = '[..]';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
-export type DifferenceKind = 'value' | 'type' | 'missing' | 'extra' | 'length';
+type DifferenceKind = 'value' | 'type' | 'missing' | 'extra' | 'length';
 
 export interface Difference {
   path: string;
@@ -16,7 +16,7 @@ export interface Difference {
   actual: string;
 }
 
-function isObject(value: Json | undefined): value is { [key: string]: Json } {
+export function isObject(value: Json | undefined): value is { [key: string]: Json } {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -51,11 +51,16 @@ function wordBoundary(text: string, index: number): number {
 export function mergeStrings(left: string, right: string): string {
   if (left === right) return left;
   const prefix = wordBoundary(left, commonPrefixLength(left, right));
-  const leftRest = [...left.slice(prefix)].reverse().join('');
-  const rightRest = [...right.slice(prefix)].reverse().join('');
-  const suffix = wordBoundary(leftRest, commonPrefixLength(leftRest, rightRest));
-  const keptSuffix = [...leftRest.slice(0, suffix)].reverse().join('');
-  return `${left.slice(0, prefix)}${WILDCARD}${keptSuffix}`;
+  // The shared suffix, after the prefix, shrunk forward to a word boundary.
+  const limit = Math.min(left.length, right.length) - prefix;
+  let suffix = 0;
+  while (suffix < limit && left[left.length - 1 - suffix] === right[right.length - 1 - suffix]) suffix += 1;
+  let suffixStart = left.length - suffix;
+  while (suffixStart > prefix && suffixStart < left.length
+    && WORD_CHARACTER.test(left[suffixStart - 1]) && WORD_CHARACTER.test(left[suffixStart])) {
+    suffixStart += 1;
+  }
+  return `${left.slice(0, prefix)}${WILDCARD}${left.slice(suffixStart)}`;
 }
 
 // Merges two recordings of the same case into one expectation, turning every

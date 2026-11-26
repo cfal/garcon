@@ -72,21 +72,23 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    // Atomic because the relay future must be Send; both halves run on one task.
     let waiting = AtomicUsize::new(0);
     let (chunks, mut queue) = mpsc::unbounded_channel::<Bytes>();
     let reader = async {
+        // One buffer is reused; each read is split off and queued, and the
+        // allocation is reclaimed once the writer has sent earlier chunks.
+        let mut buffer = BytesMut::new();
         loop {
-            let mut chunk = BytesMut::with_capacity(READ_CHUNK);
-            match upstream.read_buf(&mut chunk).await {
+            buffer.reserve(READ_CHUNK);
+            match upstream.read_buf(&mut buffer).await {
                 Ok(0) | Err(_) => break,
                 Ok(read) => {
-                    let queued = waiting.fetch_add(read, Ordering::Relaxed) + read;
-                    if queued > budget {
+                    if waiting.fetch_add(read, Ordering::Relaxed) + read > budget {
                         return RelayEnd::ClientDropped;
                     }
-                    if chunks.send(chunk.freeze()).is_err() {
-                        break;
-                    }
+                    // The receiver lives until this function returns.
+                    let _ = chunks.send(buffer.split().freeze());
                 }
             }
         }
@@ -104,15 +106,15 @@ where
     };
     tokio::pin!(reader, writer);
     tokio::select! {
-        end = &mut reader => match end {
-            RelayEnd::ClientDropped => RelayEnd::ClientDropped,
-            RelayEnd::Closed => {
-                writer.await;
-                RelayEnd::Closed
+        end = &mut reader => {
+            if end == RelayEnd::ClientDropped {
+                return end;
             }
-        },
-        () = &mut writer => RelayEnd::Closed,
+            writer.await;
+        }
+        () = &mut writer => {}
     }
+    RelayEnd::Closed
 }
 
 /// Relays bytes in both directions until the original ends the connection,
@@ -164,10 +166,12 @@ fn into_tcp(upgraded: Upgraded) -> Result<(TcpStream, Bytes), Upgraded> {
 /// socket halves.
 pub async fn relay_upgraded(client: Upgraded, upstream: Upgraded, slow_client: SlowClient) {
     // Both connections are TCP connections this proxy created, so a failed
-    // downcast is a programming error; dropping them closes both sides.
+    // downcast is a programming error. It is reported, since the client has
+    // already been told the upgrade succeeded; dropping both closes them.
     let (Ok((client, client_buffered)), Ok((upstream, upstream_buffered))) =
         (into_tcp(client), into_tcp(upstream))
     else {
+        eprintln!("garcon-server: an upgraded connection is not TCP; closing it");
         return;
     };
     let (client_read, mut client_write) = client.into_split();
@@ -192,25 +196,26 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
 
-    fn split<T: AsyncRead + AsyncWrite>(
-        io: T,
-    ) -> (tokio::io::ReadHalf<T>, tokio::io::WriteHalf<T>) {
-        tokio::io::split(io)
+    fn spawn_relay<T>(
+        client: T,
+        upstream: T,
+        slow_client: SlowClient,
+    ) -> tokio::task::JoinHandle<RelayEnd>
+    where
+        T: AsyncRead + AsyncWrite + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let ((mut cr, mut cw), (mut ur, mut uw)) =
+                (tokio::io::split(client), tokio::io::split(upstream));
+            relay((&mut cr, &mut cw), (&mut ur, &mut uw), slow_client).await
+        })
     }
 
     #[tokio::test]
     async fn the_original_closing_ends_the_relay_while_the_client_is_still_sending() {
         let (client, mut browser) = tokio::io::duplex(1024);
         let (upstream, mut original) = tokio::io::duplex(1024);
-        let relay = tokio::spawn(async move {
-            let ((mut cr, mut cw), (mut ur, mut uw)) = (split(client), split(upstream));
-            relay(
-                (&mut cr, &mut cw),
-                (&mut ur, &mut uw),
-                SlowClient::Backpressure,
-            )
-            .await
-        });
+        let relay = spawn_relay(client, upstream, SlowClient::Backpressure);
         // The browser queues more than the relay can deliver, and the original
         // stops reading and ends its side, as it does when it drops a client.
         let sending = tokio::spawn(async move {
@@ -237,15 +242,7 @@ mod tests {
     async fn a_client_that_closes_first_still_receives_the_original_reply() {
         let (client, mut browser) = tokio::io::duplex(1024);
         let (upstream, mut original) = tokio::io::duplex(1024);
-        let relay = tokio::spawn(async move {
-            let ((mut cr, mut cw), (mut ur, mut uw)) = (split(client), split(upstream));
-            relay(
-                (&mut cr, &mut cw),
-                (&mut ur, &mut uw),
-                SlowClient::Drop { budget: 1 << 20 },
-            )
-            .await
-        });
+        let relay = spawn_relay(client, upstream, SlowClient::Drop { budget: 1 << 20 });
         browser.write_all(b"request").await.unwrap();
         browser.shutdown().await.unwrap();
         let mut received = Vec::new();
@@ -263,15 +260,7 @@ mod tests {
     async fn drops_a_client_that_stops_reading_once_its_budget_is_exceeded() {
         let (client, _browser_not_reading) = tokio::io::duplex(1024);
         let (upstream, mut original) = tokio::io::duplex(64 * 1024);
-        let relay = tokio::spawn(async move {
-            let ((mut cr, mut cw), (mut ur, mut uw)) = (split(client), split(upstream));
-            relay(
-                (&mut cr, &mut cw),
-                (&mut ur, &mut uw),
-                SlowClient::Drop { budget: 256 * 1024 },
-            )
-            .await
-        });
+        let relay = spawn_relay(client, upstream, SlowClient::Drop { budget: 256 * 1024 });
         let replies = tokio::spawn(async move {
             let chunk = vec![7u8; 32 * 1024];
             let mut sent = 0;
@@ -297,15 +286,7 @@ mod tests {
     async fn keeps_a_reading_client_regardless_of_volume() {
         let (client, mut browser) = tokio::io::duplex(64 * 1024);
         let (upstream, mut original) = tokio::io::duplex(64 * 1024);
-        let relay = tokio::spawn(async move {
-            let ((mut cr, mut cw), (mut ur, mut uw)) = (split(client), split(upstream));
-            relay(
-                (&mut cr, &mut cw),
-                (&mut ur, &mut uw),
-                SlowClient::Drop { budget: 256 * 1024 },
-            )
-            .await
-        });
+        let relay = spawn_relay(client, upstream, SlowClient::Drop { budget: 256 * 1024 });
         let reading = tokio::spawn(async move {
             let mut received = Vec::new();
             browser.read_to_end(&mut received).await.unwrap();

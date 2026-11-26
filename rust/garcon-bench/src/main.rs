@@ -20,8 +20,14 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
+#[derive(Clone, Copy)]
+enum Mode {
+    Http,
+    WebSocket,
+}
+
 struct Options {
-    mode: String,
+    mode: Mode,
     url: String,
     headers: Vec<(HeaderName, HeaderValue)>,
     protocols: Vec<String>,
@@ -39,7 +45,11 @@ struct WorkerResult {
 
 fn parse_options() -> Result<Options, String> {
     let mut args = std::env::args().skip(1);
-    let mode = args.next().ok_or("missing mode: http or ws")?;
+    let mode = match args.next().as_deref() {
+        Some("http") => Mode::Http,
+        Some("ws") => Mode::WebSocket,
+        _ => return Err("the mode must be http or ws".to_string()),
+    };
     let url = args.next().ok_or("missing url")?;
     let mut options = Options {
         mode,
@@ -117,21 +127,15 @@ async fn http_worker(options: &Options, measure_from: Instant, end: Instant) -> 
             Err(_) => None,
         };
         let elapsed = sent.elapsed().as_micros() as u64;
-        if sent < measure_from {
-            if outcome.is_none() {
-                break;
-            }
-            continue;
-        }
-        match outcome {
-            Some(bytes) => {
-                result.latencies.push(elapsed);
-                result.bytes += bytes;
-            }
-            None => {
-                result.errors += 1;
-                break;
-            }
+        let measured = sent >= measure_from;
+        // A failed request ends the worker; only failures after warm-up count.
+        let Some(bytes) = outcome else {
+            result.errors += u64::from(measured);
+            break;
+        };
+        if measured {
+            result.latencies.push(elapsed);
+            result.bytes += bytes;
         }
     }
     result
@@ -210,9 +214,9 @@ async fn main() {
         .map(|worker| {
             let options = options.clone();
             tokio::spawn(async move {
-                match options.mode.as_str() {
-                    "ws" => ws_worker(&options, worker, measure_from, end).await,
-                    _ => http_worker(&options, measure_from, end).await,
+                match options.mode {
+                    Mode::WebSocket => ws_worker(&options, worker, measure_from, end).await,
+                    Mode::Http => http_worker(&options, measure_from, end).await,
                 }
             })
         })
@@ -227,15 +231,14 @@ async fn main() {
             let _ = histogram.record(latency.max(1));
         }
     }
-    let measured = options.seconds;
     println!(
         "{}",
         serde_json::json!({
             "requests": histogram.len(),
             "errors": errors,
-            "seconds": measured,
-            "requestsPerSecond": histogram.len() as f64 / measured,
-            "megabytesPerSecond": bytes as f64 / measured / 1e6,
+            "seconds": options.seconds,
+            "requestsPerSecond": histogram.len() as f64 / options.seconds,
+            "megabytesPerSecond": bytes as f64 / options.seconds / 1e6,
             "p50Micros": histogram.value_at_quantile(0.5),
             "p90Micros": histogram.value_at_quantile(0.9),
             "p99Micros": histogram.value_at_quantile(0.99),

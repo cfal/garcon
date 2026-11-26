@@ -1,9 +1,10 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 import { gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib';
 import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 import type { StartedServer } from './environment.js';
 import type { HttpStep, RequestAuth, ScenarioStep, WebSocketStep } from './scenario.js';
-import type { Json } from './wildcard.js';
+import { isObject, type Json } from './wildcard.js';
 
 // Response headers that are part of the contract. Per-response headers such as
 // Date are left out. Content-Length is compared only for uncompressed bodies,
@@ -79,7 +80,7 @@ function tokenFor(server: StartedServer, auth: RequestAuth): string | null {
 }
 
 // Expands `{{name}}` placeholders in request paths and bodies.
-export function expandPlaceholders(text: string, server: StartedServer): string {
+function expandPlaceholders(text: string, server: StartedServer): string {
   const values: Record<string, string> = {
     username: server.credentials.username,
     password: server.credentials.password,
@@ -106,9 +107,7 @@ function textOrBytes(bytes: Uint8Array, contentType: string): CapturedBody {
     if (contentType.includes('json')) {
       try {
         return { kind: 'json', value: JSON.parse(text) as Json };
-      } catch {
-        return { kind: 'text', value: text };
-      }
+      } catch { /* Malformed JSON is recorded as text. */ }
     }
     return { kind: 'text', value: text };
   }
@@ -180,46 +179,33 @@ function parseFrame(data: unknown): Json {
 // Repeats a refused upgrade as a raw HTTP/1.1 request to record the status and
 // body the WebSocket client does not expose. A refused upgrade has no side
 // effects, so sending it twice is safe.
-async function captureRefusal(url: string, protocols: string[]): Promise<CapturedSocket['refusal']> {
-  const target = new URL(url);
-  const lines = [
-    `GET ${target.pathname}${target.search} HTTP/1.1`,
-    `Host: ${target.host}`,
-    'Connection: Upgrade',
-    'Upgrade: websocket',
-    'Sec-WebSocket-Version: 13',
-    'Sec-WebSocket-Key: cGFyaXR5LWhhcm5lc3Mta2V5',
-    ...(protocols.length > 0 ? [`Sec-WebSocket-Protocol: ${protocols.join(', ')}`] : []),
-    '',
-    '',
-  ];
-  let received = '';
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, 5_000);
-    void Bun.connect({
-      hostname: target.hostname,
-      port: Number(target.port),
-      socket: {
-        open(socket) { socket.write(lines.join('\r\n')); },
-        data(socket, chunk) {
-          received += new TextDecoder().decode(chunk);
-          const headerEnd = received.indexOf('\r\n\r\n');
-          const length = /\r\ncontent-length:\s*(\d+)/i.exec(received)?.[1];
-          if (headerEnd >= 0 && length !== undefined && received.length >= headerEnd + 4 + Number(length)) {
-            clearTimeout(timer);
-            socket.end();
-            resolve();
-          }
-        },
-        close() { clearTimeout(timer); resolve(); },
-        error(_socket, error) { clearTimeout(timer); reject(error); },
+function captureRefusal(url: string, protocols: string[]): Promise<CapturedSocket['refusal']> {
+  return new Promise((resolve, reject) => {
+    const outgoing = httpRequest(url.replace(/^ws/, 'http'), {
+      headers: {
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': 'cGFyaXR5LWhhcm5lc3Mta2V5',
+        ...(protocols.length > 0 ? { 'Sec-WebSocket-Protocol': protocols.join(', ') } : {}),
       },
-    }).catch(reject);
+      timeout: 5_000,
+    });
+    outgoing.on('response', async (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      for await (const chunk of response) body += chunk;
+      resolve({ status: response.statusCode ?? 0, contentType: response.headers['content-type'] ?? null, body });
+    });
+    // An upgrade that succeeds on the second attempt is recorded as such.
+    outgoing.on('upgrade', (response, socket) => {
+      socket.destroy();
+      resolve({ status: response.statusCode ?? 101, contentType: null, body: '' });
+    });
+    outgoing.on('timeout', () => outgoing.destroy(new Error('The refused upgrade did not complete')));
+    outgoing.on('error', reject);
+    outgoing.end();
   });
-  const [head, ...rest] = received.split('\r\n\r\n');
-  const [statusLine, ...headerLines] = head.split('\r\n');
-  const contentType = headerLines.find((line) => /^content-type:/i.test(line))?.replace(/^content-type:\s*/i, '') ?? null;
-  return { status: Number(statusLine.split(' ')[1] ?? 0), contentType, body: rest.join('\r\n\r\n') };
 }
 
 async function captureWebSocket(server: StartedServer, step: WebSocketStep): Promise<CapturedSocket> {
@@ -230,8 +216,7 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
   const socket = new WebSocket(url, protocols);
   const frames: Json[] = [];
   const requestIds = new Set((step.send ?? []).flatMap((message) =>
-    message && typeof message === 'object' && !Array.isArray(message) && typeof message.clientRequestId === 'string'
-      ? [message.clientRequestId] : []));
+    isObject(message) && typeof message.clientRequestId === 'string' ? [message.clientRequestId] : []));
   let opened = false;
   let close: CapturedSocket['close'] = null;
   const quietMs = step.quietMs ?? DEFAULT_QUIET_MS;
@@ -240,6 +225,7 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
     let quietTimer: Timer | undefined;
     const finish = () => {
       clearTimeout(quietTimer);
+      clearTimeout(deadline);
       resolve();
     };
     const armQuietTimer = () => {
@@ -254,11 +240,10 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
     };
     socket.onmessage = (event) => {
       const frame = parseFrame(event.data);
-      const requestId = frame && typeof frame === 'object' && !Array.isArray(frame) ? frame.clientRequestId : undefined;
+      const requestId = isObject(frame) ? frame.clientRequestId : undefined;
       if (typeof requestId !== 'string' || !requestIds.has(requestId)) return;
       frames.push(frame);
       if (step.frames !== undefined && frames.length >= step.frames) {
-        clearTimeout(deadline);
         finish();
       } else {
         armQuietTimer();
@@ -266,7 +251,6 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
     };
     socket.onclose = (event) => {
       close = { code: event.code, reason: event.reason };
-      clearTimeout(deadline);
       finish();
     };
   });

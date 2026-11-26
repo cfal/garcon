@@ -2,7 +2,6 @@
 //! listens on an ephemeral loopback port and owns all state; the front door
 //! relays its logs and mirrors its lifetime.
 
-use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -10,23 +9,25 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 
+use crate::config::OriginalCommand;
+
 const READY_MARKER: &str = "Started at ";
 
 type ReadySignal = Arc<Mutex<Option<oneshot::Sender<String>>>>;
 
-/// The command that starts the original. `GARCON_RS_BUN` overrides the Bun
-/// executable found on `PATH`.
-fn original_command(root: &Path) -> Command {
-    let bun = std::env::var("GARCON_RS_BUN").unwrap_or_else(|_| "bun".to_string());
-    let mut command = Command::new(bun);
-    command.arg(root.join("server").join("main.ts"));
+fn original_command(original: &OriginalCommand) -> Command {
+    let mut command = Command::new(&original.bun);
+    command.arg(original.root.join("server").join("main.ts"));
     command
 }
 
 /// Runs the original in the foreground with inherited stdio, for modes the
 /// front door does not serve.
-pub async fn run_in_foreground(root: &Path, args: &[String]) -> std::io::Result<ExitStatus> {
-    original_command(root).args(args).status().await
+pub async fn run_in_foreground(
+    original: &OriginalCommand,
+    args: &[String],
+) -> std::io::Result<ExitStatus> {
+    original_command(original).args(args).status().await
 }
 
 pub struct OriginalServer {
@@ -100,13 +101,12 @@ where
 }
 
 pub async fn start(
-    root: &Path,
+    original: &OriginalCommand,
     args: &[String],
-    trust_proxy: bool,
     public_url: String,
     runtime_origin: &str,
 ) -> std::io::Result<OriginalServer> {
-    let mut command = original_command(root);
+    let mut command = original_command(original);
     command
         .args(args)
         .args(["--port", "0", "--bind-address", "127.0.0.1"])
@@ -138,12 +138,11 @@ pub async fn start(
     // terminal and provider children, including a nested Garcon, do not
     // inherit them.
     //
-    // The front door replaces the forwarded client address headers (see
-    // proxy.rs), so the original may trust them; otherwise every client would
-    // share the front door's loopback address in the login rate limiter.
-    if !trust_proxy {
-        command.arg("--trust-proxy");
-    }
+    // The front door replaces the forwarded client address headers, or passes
+    // a trusted proxy's through (see proxy.rs), so the original always trusts
+    // them; otherwise every client would share the front door's loopback
+    // address in the login rate limiter. A repeated flag is harmless.
+    command.arg("--trust-proxy");
     // CLI discovery must reach the front door, whose address survives a restart
     // of the original; the original's own port is ephemeral.
     command.args(["--runtime-origin", runtime_origin]);
@@ -173,7 +172,6 @@ pub async fn start(
 /// Asks the original to shut down gracefully, so it flushes delayed writes and
 /// releases its workspace lease, then waits for it.
 pub async fn stop(child: &mut Child) -> std::io::Result<ExitStatus> {
-    #[cfg(unix)]
     if let Some(pid) = child.id() {
         // SAFETY: `kill` has no memory-safety preconditions; the pid belongs
         // to a child this process has not yet reaped.
@@ -181,8 +179,6 @@ pub async fn stop(child: &mut Child) -> std::io::Result<ExitStatus> {
             libc::kill(pid as libc::pid_t, libc::SIGTERM);
         }
     }
-    #[cfg(not(unix))]
-    child.start_kill()?;
     child.wait().await
 }
 

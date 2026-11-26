@@ -3,7 +3,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isRecord } from '../../common/json.js';
 
-export async function prepareFixtureAuth(configDir: string): Promise<{ username: string; password: string }> {
+// A fixed `username` keeps responses that echo it comparable across runs.
+export async function prepareFixtureAuth(
+  configDir: string,
+  username = 'integration',
+): Promise<{ username: string; password: string }> {
   await mkdir(configDir, { recursive: true });
   const authPath = join(configDir, 'auth.json');
   const stored: unknown = await readFile(authPath, 'utf8').then(
@@ -11,7 +15,7 @@ export async function prepareFixtureAuth(configDir: string): Promise<{ username:
     error => { if (error.code === 'ENOENT') return {}; throw error; },
   );
   if (!isRecord(stored)) throw new Error('Invalid fixture authentication state');
-  const credentials = { username: 'integration', password: randomBytes(32).toString('hex') };
+  const credentials = { username, password: randomBytes(32).toString('hex') };
   await writeFile(authPath, JSON.stringify({
     username: credentials.username,
 	ownerKey: typeof stored.ownerKey === 'string' ? stored.ownerKey : credentials.username,

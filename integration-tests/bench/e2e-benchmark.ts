@@ -66,10 +66,9 @@ async function pageLoad(fixture: ChromiumFixture, chatId: string): Promise<Sampl
     };
     const cold = await load(() => page.goto(url, { waitUntil: 'load' }));
     const warm = await load(() => page.reload({ waitUntil: 'load' }));
-    return {
-      ...Object.fromEntries(Object.entries(cold).map(([name, value]) => [`cold load: ${name}`, value])),
-      ...Object.fromEntries(Object.entries(warm).map(([name, value]) => [`warm reload: ${name}`, value])),
-    };
+    const prefixed = (label: string, sample: Sample) =>
+      Object.fromEntries(Object.entries(sample).map(([name, value]) => [`${label}: ${name}`, value]));
+    return { ...prefixed('cold load', cold), ...prefixed('warm reload', warm) };
   } finally {
     await context.close();
   }
@@ -79,11 +78,14 @@ function withController<T>(controller: Controller, run: (fixture: ChromiumFixtur
   // The fixture reads the controller selection when it starts the server.
   process.env.GARCON_TEST_CONTROLLER = controller;
   delete process.env.GARCON_RS_SHADOW_LOG;
-  return withChromiumFixture(`e2e-benchmark-${controller}`, async (fixture) => run(fixture));
+  return withChromiumFixture(`e2e-benchmark-${controller}`, run);
 }
 
-const median = (values: number[]) => [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)]!;
-const percentile90 = (values: number[]) => [...values].sort((left, right) => left - right)[Math.min(values.length - 1, Math.floor(values.length * 0.9))]!;
+// The median and 90th percentile of the samples.
+function summary(values: number[]): { median: number; p90: number } {
+  const sorted = [...values].sort((left, right) => left - right);
+  return { median: sorted[Math.floor(sorted.length / 2)]!, p90: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))]! };
+}
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -115,12 +117,13 @@ const lines = [
   `| --- | ---: | ---: | ---: | ---: | ---: |`,
 ];
 for (const metric of metrics) {
-  const original = samples.original.map((sample) => sample[metric]!);
-  const frontDoor = samples['front-door'].map((sample) => sample[metric]!);
+  const original = summary(samples.original.map((sample) => sample[metric]!));
+  const frontDoor = summary(samples['front-door'].map((sample) => sample[metric]!));
   const isCount = metric.endsWith('requests');
   const show = (value: number) => (isCount ? String(Math.round(value)) : `${value.toFixed(1)} ms`);
-  const change = isCount ? '' : `${median(frontDoor) >= median(original) ? '+' : ''}${(median(frontDoor) - median(original)).toFixed(1)} ms`;
-  lines.push(`| ${metric} | ${show(median(original))} | ${show(median(frontDoor))} | ${change} | ${show(percentile90(original))} | ${show(percentile90(frontDoor))} |`);
+  const delta = frontDoor.median - original.median;
+  const change = isCount ? '' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} ms`;
+  lines.push(`| ${metric} | ${show(original.median)} | ${show(frontDoor.median)} | ${change} | ${show(original.p90)} | ${show(frontDoor.p90)} |`);
 }
 const report = [
   '# End-to-end benchmarks',

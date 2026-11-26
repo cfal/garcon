@@ -27,7 +27,7 @@ interface Scenario {
   name: string;
   description: string;
   mode: 'http' | 'ws';
-  path: (server: StartedServer) => string;
+  path: string;
   args: (server: StartedServer) => string[];
   concurrency: number;
 }
@@ -72,9 +72,12 @@ function assets(): { large: string; largeBytes: number; small: string; smallByte
 
 function scenarios(asset: ReturnType<typeof assets>): Scenario[] {
   const http = (name: string, description: string, path: string, headers: string[], concurrency: number, auth = false): Scenario => ({
-    name, description, mode: 'http', concurrency,
-    path: () => path,
+    name, description, mode: 'http', concurrency, path,
     args: (server) => [...headers, ...(auth ? [`Authorization: Bearer ${server.token}`] : [])].flatMap((header) => ['--header', header]),
+  });
+  const ws = (name: string, concurrency: number): Scenario => ({
+    name, description: 'ws-ping round trip on the browser socket (relayed)', mode: 'ws', concurrency, path: '/ws',
+    args: (server) => webSocketProtocolsForAuth(server.token).flatMap((protocol) => ['--protocol', protocol]),
   });
   const large = `${Math.round(asset.largeBytes / 1024)} KiB`;
   const small = `${Math.round(asset.smallBytes / 1024)} KiB`;
@@ -87,41 +90,45 @@ function scenarios(asset: ReturnType<typeof assets>): Scenario[] {
     http('auth status, 1 client', 'GET /api/v1/auth/status (proxied to the original)', '/api/v1/auth/status', [], 1),
     http('auth status, 16 clients', 'GET /api/v1/auth/status (proxied to the original)', '/api/v1/auth/status', [], 16),
     http('chat list, 16 clients', 'Authenticated GET /api/v1/chats (proxied)', '/api/v1/chats', ['Accept-Encoding: gzip'], 16, true),
-    {
-      name: 'WebSocket ping, 1 client', description: 'ws-ping round trip on the browser socket (relayed)', mode: 'ws', concurrency: 1,
-      path: () => '/ws', args: (server) => webSocketProtocolsForAuth(server.token).flatMap((protocol) => ['--protocol', protocol]),
-    },
-    {
-      name: 'WebSocket ping, 16 clients', description: 'ws-ping round trip on the browser socket (relayed)', mode: 'ws', concurrency: 16,
-      path: () => '/ws', args: (server) => webSocketProtocolsForAuth(server.token).flatMap((protocol) => ['--protocol', protocol]),
-    },
+    ws('WebSocket ping, 1 client', 1),
+    ws('WebSocket ping, 16 clients', 16),
   ];
 }
 
-// Sums user and system CPU time, in microseconds, of a process and its
-// descendants.
-function treeCpu(rootPid: number): { total: number; root: number } {
-  const children = new Map<number, number[]>();
-  const times = new Map<number, number>();
+interface ProcessTable {
+  // User and system CPU time in microseconds, by pid.
+  cpu: Map<number, number>;
+  children: Map<number, number[]>;
+}
+
+function processTable(): ProcessTable {
+  const table: ProcessTable = { cpu: new Map(), children: new Map() };
   for (const entry of readdirSync('/proc')) {
     if (!/^\d+$/.test(entry)) continue;
     try {
       const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
       const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
       const pid = Number(entry);
-      const parent = Number(fields[1]);
-      times.set(pid, (Number(fields[11]) + Number(fields[12])) * (1_000_000 / CLOCK_TICKS_PER_SECOND));
-      children.set(parent, [...(children.get(parent) ?? []), pid]);
+      table.cpu.set(pid, (Number(fields[11]) + Number(fields[12])) * (1_000_000 / CLOCK_TICKS_PER_SECOND));
+      const siblings = table.children.get(Number(fields[1])) ?? [];
+      siblings.push(pid);
+      table.children.set(Number(fields[1]), siblings);
     } catch { /* The process exited while it was being read. */ }
   }
+  return table;
+}
+
+// CPU time of a process and its descendants, and of the process alone.
+function treeCpu(rootPid: number): { total: number; root: number } {
+  const { cpu, children } = processTable();
   let total = 0;
   const pending = [rootPid];
   while (pending.length > 0) {
     const pid = pending.pop()!;
-    total += times.get(pid) ?? 0;
+    total += cpu.get(pid) ?? 0;
     pending.push(...(children.get(pid) ?? []));
   }
-  return { total, root: times.get(rootPid) ?? 0 };
+  return { total, root: cpu.get(rootPid) ?? 0 };
 }
 
 function residentMegabytes(pid: number): number {
@@ -130,19 +137,12 @@ function residentMegabytes(pid: number): number {
 }
 
 function originalChild(pid: number): number | null {
-  for (const entry of readdirSync('/proc')) {
-    if (!/^\d+$/.test(entry)) continue;
-    try {
-      const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
-      if (Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]) === pid) return Number(entry);
-    } catch { /* exited */ }
-  }
-  return null;
+  return processTable().children.get(pid)?.[0] ?? null;
 }
 
 async function measure(server: StartedServer, configuration: Configuration, scenario: Scenario, seconds: number, warmup: number): Promise<Measurement> {
   const scheme = scenario.mode === 'ws' ? server.baseUrl.replace(/^http/, 'ws') : server.baseUrl;
-  const child = Bun.spawn([benchBinary, scenario.mode, `${scheme}${scenario.path(server)}`, ...scenario.args(server),
+  const child = Bun.spawn([benchBinary, scenario.mode, `${scheme}${scenario.path}`, ...scenario.args(server),
     '--concurrency', String(scenario.concurrency), '--seconds', String(seconds), '--warmup', String(warmup)], { stdout: 'pipe', stderr: 'pipe' });
   await Bun.sleep(warmup * 1000);
   const before = treeCpu(server.pid);
@@ -162,6 +162,12 @@ async function measure(server: StartedServer, configuration: Configuration, scen
     cpuMicrosPerRequest: result.requests > 0 ? total / result.requests : 0,
     frontDoorCpuShare: isFrontDoor && total > 0 ? (after.root - before.root) / total : null,
   };
+}
+
+function append<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const values = map.get(key) ?? [];
+  values.push(value);
+  map.set(key, values);
 }
 
 const median = (values: number[]) => [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)]!;
@@ -202,7 +208,7 @@ const startup = new Map<string, number[]>();
 for (let round = 0; round < repetitions; round++) {
   for (const configuration of configurations) {
     const server = await startServer(repoRoot, configuration.build, { webBuildDir, environment: configuration.environment });
-    startup.set(configuration.name, [...(startup.get(configuration.name) ?? []), server.startupMs]);
+    append(startup, configuration.name, server.startupMs);
     await server.stop();
   }
 }
@@ -221,7 +227,7 @@ for (const scenario of plan) {
       const configuration = configurations[(round + offset) % configurations.length]!;
       const key = `${scenario.name}|${configuration.name}`;
       const measurement = await measure(servers.get(configuration.name)!, configuration, scenario, seconds, warmup);
-      results.set(key, [...(results.get(key) ?? []), measurement]);
+      append(results, key, measurement);
       console.log(`${scenario.name} / ${configuration.name}: ${format(measurement.requestsPerSecond)} req/s, p50 ${measurement.p50Micros} us`);
     }
   }

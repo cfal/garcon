@@ -1,7 +1,9 @@
-import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { Deferred, withTimeout } from '../../../integration-tests/support/deferred.js';
+import { fixtureAuthToken, prepareFixtureAuth } from '../../../integration-tests/support/fixture-auth.js';
+import { frontDoorEnvironment, isolatedEnvironment, pumpLines } from '../../../integration-tests/support/garcon-process.js';
 
 const READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 60_000;
@@ -75,20 +77,6 @@ async function createDirectories(): Promise<ParityDirectories> {
   return dirs;
 }
 
-// Seeds credentials the same way the integration fixture does, with a fixed
-// username so recorded responses that echo it stay comparable.
-async function seedAuthentication(configDir: string): Promise<ParityCredentials> {
-  const credentials = { username: 'parity', password: randomBytes(24).toString('hex') };
-  await writeFile(join(configDir, 'auth.json'), JSON.stringify({
-    username: credentials.username,
-    ownerKey: credentials.username,
-    credentialRevision: 1,
-    passwordHash: await Bun.password.hash(credentials.password, { algorithm: 'bcrypt', cost: 4 }),
-    jwtSecret: randomBytes(32).toString('hex'),
-  }), { mode: 0o600 });
-  return credentials;
-}
-
 async function seedFiles(dirs: ParityDirectories, files: Record<string, string>): Promise<void> {
   for (const [relativePath, contents] of Object.entries(files)) {
     const [root, ...rest] = relativePath.split('/');
@@ -103,28 +91,10 @@ async function seedFiles(dirs: ParityDirectories, files: Record<string, string>)
   }
 }
 
-async function login(baseUrl: string, credentials: ParityCredentials): Promise<string> {
-  const response = await fetch(`${baseUrl}/api/v1/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(credentials),
-    signal: AbortSignal.timeout(10_000),
-  });
-  const body = await response.json() as { token?: unknown };
-  if (!response.ok || typeof body.token !== 'string') {
-    throw new Error(`Parity login failed with status ${response.status}`);
-  }
-  return body.token;
-}
-
-function frontDoorEnvironment(): Record<string, string> {
-  return Object.fromEntries(Object.entries(process.env)
-    .filter((entry): entry is [string, string] => entry[0].startsWith('GARCON_RS_') && entry[1] !== undefined));
-}
-
 export async function startServer(repoRoot: string, build: ServerBuild, options: ServerOptions = {}): Promise<StartedServer> {
   const dirs = await createDirectories();
-  const credentials = await seedAuthentication(dirs.configDir);
+  // A fixed username keeps recorded responses that echo it comparable.
+  const credentials = await prepareFixtureAuth(dirs.configDir, 'parity');
   await seedFiles(dirs, options.files ?? {});
   const fallbackLogPath = join(dirs.root, 'fallback.log');
   await writeFile(fallbackLogPath, '');
@@ -141,43 +111,31 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
   const child = Bun.spawn({
     cmd: [...build.command, ...args],
     cwd: repoRoot,
-    env: {
-      HOME: dirs.homeDir,
-      TMPDIR: join(dirs.homeDir, 'tmp'),
-      XDG_CONFIG_HOME: join(dirs.homeDir, '.config'),
-      XDG_DATA_HOME: join(dirs.homeDir, '.local/share'),
+    // A fixed time zone and locale keep recordings comparable across machines.
+    env: isolatedEnvironment(dirs.homeDir, {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
-      NO_COLOR: '1',
       TZ: 'UTC',
       LANG: 'C.UTF-8',
-      // The front door starts the original with the Bun that runs the
-      // harness, as the original build does, unless a setting overrides it.
-      GARCON_RS_BUN: process.execPath,
-      // Front-door settings such as unit kill switches pass through.
       ...frontDoorEnvironment(),
       GARCON_RS_FALLBACK_LOG: fallbackLogPath,
       GARCON_WEB_BUILD_DIR: options.webBuildDir ?? join(repoRoot, WEB_BUILD_FIXTURE),
       ...options.environment,
-    },
+    }),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   });
 
   let output = '';
-  const ready = Promise.withResolvers<string>();
-  const pump = async (stream: ReadableStream<Uint8Array>) => {
-    const decoder = new TextDecoder();
-    for await (const chunk of stream) {
-      output += decoder.decode(chunk, { stream: true });
-      const match = READY_PATTERN.exec(output);
-      if (match) ready.resolve(match[1].replace(/\/$/, ''));
-    }
+  const ready = new Deferred<string>();
+  const onLine = (line: string) => {
+    const match = READY_PATTERN.exec(line);
+    if (match) ready.resolve(match[1].replace(/\/$/, ''));
   };
-  void pump(child.stdout);
-  void pump(child.stderr);
+  const onText = (text: string) => { output += text; };
+  void pumpLines(child.stdout, 'stdout', onText, onLine);
+  void pumpLines(child.stderr, 'stderr', onText, onLine);
   void child.exited.then((code) => ready.reject(new Error(`${build.label} exited with code ${code} before it was ready\n${output}`)));
-  const timer = setTimeout(() => ready.reject(new Error(`${build.label} did not start within ${STARTUP_TIMEOUT_MS} ms\n${output}`)), STARTUP_TIMEOUT_MS);
 
   const stop = async () => {
     child.kill('SIGTERM');
@@ -188,15 +146,15 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
   };
 
   try {
-    const baseUrl = await ready.promise;
+    const baseUrl = await withTimeout(ready.promise, STARTUP_TIMEOUT_MS,
+      () => `${build.label} did not start within ${STARTUP_TIMEOUT_MS} ms\n${output}`);
     const startupMs = performance.now() - spawnedAt;
-    clearTimeout(timer);
     const url = new URL(baseUrl);
     return {
       origin: url.origin,
       baseUrl,
       port: url.port,
-      token: await login(baseUrl, credentials),
+      token: await fixtureAuthToken(baseUrl, credentials),
       credentials,
       dirs,
       fallbackLogPath,
@@ -206,7 +164,6 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
       stop,
     };
   } catch (error) {
-    clearTimeout(timer);
     await stop();
     throw error;
   }

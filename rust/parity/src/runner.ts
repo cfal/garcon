@@ -13,9 +13,12 @@ export interface CaseRun {
   fallbacks: string[];
 }
 
-async function fallbackLines(path: string): Promise<string[]> {
-  const text = await readFile(path, 'utf8').catch(() => '');
-  return text.split('\n').filter(Boolean);
+// Reads the fallback lines appended since `offset`, returning them and the
+// new offset, so each step reads only what it added.
+async function fallbacksSince(path: string, offset: number): Promise<{ lines: string[]; offset: number }> {
+  const bytes = await readFile(path).catch(() => Buffer.alloc(0));
+  const added = bytes.subarray(offset).toString('utf8');
+  return { lines: added.split('\n').filter(Boolean), offset: bytes.length };
 }
 
 // Starts a fresh server for the scenario and runs its steps and traps in order.
@@ -24,7 +27,7 @@ export async function runScenario(repoRoot: string, build: ServerBuild, scenario
   const server = await startServer(repoRoot, build, scenario.server);
   try {
     const runs: CaseRun[] = [];
-    let seenFallbacks = (await fallbackLines(server.fallbackLogPath)).length;
+    let offset = (await fallbacksSince(server.fallbackLogPath, 0)).offset;
     for (const step of expandTraps(scenario)) {
       let capture: Json;
       try {
@@ -32,9 +35,9 @@ export async function runScenario(repoRoot: string, build: ServerBuild, scenario
       } catch (error) {
         capture = { error: error instanceof Error ? error.message : String(error) };
       }
-      const lines = await fallbackLines(server.fallbackLogPath);
-      runs.push({ name: step.name, capture, fallbacks: lines.slice(seenFallbacks) });
-      seenFallbacks = lines.length;
+      const added = await fallbacksSince(server.fallbackLogPath, offset);
+      runs.push({ name: step.name, capture, fallbacks: added.lines });
+      offset = added.offset;
     }
     return runs;
   } catch (error) {

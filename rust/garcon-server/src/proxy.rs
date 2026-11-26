@@ -2,35 +2,35 @@
 //! WebSocket upgrades for browser sockets and executor links, whose upgraded
 //! byte streams are relayed by `relay.rs`.
 
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::net::SocketAddr;
-use std::path::Path;
-use std::sync::Mutex;
-
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::Incoming;
-use hyper::header::{CONNECTION, HeaderMap, HeaderName, HeaderValue, UPGRADE};
+use hyper::header::{
+    CONNECTION, HeaderMap, HeaderName, HeaderValue, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TE,
+    TRAILER, TRANSFER_ENCODING, UPGRADE,
+};
+use hyper::http::uri::{Authority, Scheme};
 use hyper::{Request, Response, StatusCode, Uri};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 
+use crate::line_log::LineLog;
 use crate::relay::{self, SlowClient};
 
 pub type ResponseBody = BoxBody<Bytes, hyper::Error>;
 
-const HOP_BY_HOP: [&str; 8] = [
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "proxy-connection",
-    "te",
-    "trailer",
-    "transfer-encoding",
+const HOP_BY_HOP: [HeaderName; 9] = [
+    CONNECTION,
+    HeaderName::from_static("keep-alive"),
+    PROXY_AUTHENTICATE,
+    PROXY_AUTHORIZATION,
+    HeaderName::from_static("proxy-connection"),
+    TE,
+    TRAILER,
+    TRANSFER_ENCODING,
+    UPGRADE,
 ];
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 const X_REAL_IP: HeaderName = HeaderName::from_static("x-real-ip");
@@ -43,32 +43,6 @@ fn empty_body() -> ResponseBody {
     Empty::new().map_err(|never| match never {}).boxed()
 }
 
-/// Appends one line per request handed to the original, in the format the
-/// parity harness reads (`GARCON_RS_FALLBACK_LOG`).
-pub struct FallbackLog(Mutex<File>);
-
-impl FallbackLog {
-    pub fn open(path: &Path) -> std::io::Result<Self> {
-        Ok(Self(Mutex::new(
-            OpenOptions::new().create(true).append(true).open(path)?,
-        )))
-    }
-
-    fn record(&self, method: &hyper::Method, path: &str) {
-        let mut file = self.0.lock().expect("fallback log lock");
-        let _ = writeln!(file, "{method} {path}");
-    }
-}
-
-pub struct Proxy {
-    client: Client<HttpConnector, Incoming>,
-    origin: String,
-    authority: String,
-    trust_proxy: bool,
-    fallback_log: Option<FallbackLog>,
-    browser_socket: BrowserSocket,
-}
-
 /// The browser WebSocket and the slow-client budget the original applies to
 /// it (`GARCON_WS_BACKPRESSURE_LIMIT`), enforced by the relay (ADR-010).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,42 +51,66 @@ pub struct BrowserSocket {
     pub budget: usize,
 }
 
-fn remove_hop_by_hop(headers: &mut HeaderMap) {
-    let listed: Vec<HeaderName> = headers
+pub struct Proxy {
+    client: Client<HttpConnector, Incoming>,
+    authority: Authority,
+    trust_proxy: bool,
+    fallback_log: Option<LineLog>,
+    browser_socket: BrowserSocket,
+}
+
+/// The tokens of the `Connection` header, which name hop-by-hop headers and
+/// signal upgrades.
+fn connection_tokens(headers: &HeaderMap) -> impl Iterator<Item = &str> {
+    headers
         .get_all(CONNECTION)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(','))
-        .filter_map(|name| HeaderName::from_bytes(name.trim().as_bytes()).ok())
+        .map(str::trim)
+}
+
+/// Removes the headers that describe one connection rather than the message.
+pub fn remove_hop_by_hop(headers: &mut HeaderMap) {
+    let listed: Vec<HeaderName> = connection_tokens(headers)
+        .filter_map(|name| HeaderName::from_bytes(name.as_bytes()).ok())
         .collect();
-    for name in listed {
+    for name in listed.into_iter().chain(HOP_BY_HOP) {
         headers.remove(name);
     }
-    for name in HOP_BY_HOP {
-        headers.remove(name);
-    }
-    headers.remove(UPGRADE);
 }
 
 fn is_upgrade(headers: &HeaderMap) -> bool {
     headers.contains_key(UPGRADE)
-        && headers
-            .get_all(CONNECTION)
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .flat_map(|value| value.split(','))
-            .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+        && connection_tokens(headers).any(|token| token.eq_ignore_ascii_case("upgrade"))
 }
 
-fn bad_gateway() -> Response<ResponseBody> {
-    let mut response = Response::new(full_body(Bytes::from_static(b"Bad Gateway")));
-    *response.status_mut() = StatusCode::BAD_GATEWAY;
-    response
+/// The request's path and query on the original. Returns `None` for targets
+/// that are not paths, such as the asterisk form of `OPTIONS *`.
+pub fn target_uri(authority: &Authority, uri: &Uri) -> Option<Uri> {
+    let path_and_query = uri
+        .path_and_query()
+        .filter(|value| value.as_str().starts_with('/'))?;
+    Uri::builder()
+        .scheme(Scheme::HTTP)
+        .authority(authority.clone())
+        .path_and_query(path_and_query.clone())
+        .build()
+        .ok()
 }
 
-fn bad_request() -> Response<ResponseBody> {
-    let mut response = Response::new(full_body(Bytes::from_static(b"Bad Request")));
-    *response.status_mut() = StatusCode::BAD_REQUEST;
+/// The original's authority from its origin, such as `http://127.0.0.1:4100`.
+pub fn origin_authority(origin: &str) -> std::io::Result<Authority> {
+    origin.trim_start_matches("http://").parse().map_err(|_| {
+        std::io::Error::other(format!(
+            "the original announced an invalid origin: {origin}"
+        ))
+    })
+}
+
+fn plain(status: StatusCode, text: &'static str) -> Response<ResponseBody> {
+    let mut response = Response::new(full_body(Bytes::from_static(text.as_bytes())));
+    *response.status_mut() = status;
     response
 }
 
@@ -124,18 +122,20 @@ pub fn no_delay_connector() -> HttpConnector {
     connector
 }
 
+/// The value for `X-Forwarded-For` that names a client connection.
+pub fn forwarded_for(peer: std::net::SocketAddr) -> HeaderValue {
+    HeaderValue::from_str(&peer.ip().to_string()).expect("an IP address is a valid header value")
+}
+
 impl Proxy {
     pub fn new(
-        origin: String,
+        authority: Authority,
         trust_proxy: bool,
-        fallback_log: Option<FallbackLog>,
+        fallback_log: Option<LineLog>,
         browser_socket: BrowserSocket,
     ) -> Self {
-        let authority = origin.trim_start_matches("http://").to_string();
-        let client = Client::builder(TokioExecutor::new()).build(no_delay_connector());
         Self {
-            client,
-            origin,
+            client: Client::builder(TokioExecutor::new()).build(no_delay_connector()),
             authority,
             trust_proxy,
             fallback_log,
@@ -145,47 +145,33 @@ impl Proxy {
 
     /// Replaces client-supplied forwarding headers with the connection's
     /// address. When the front door itself runs behind a trusted proxy
-    /// (`GARCON_TRUST_PROXY`), that proxy's headers pass through instead.
-    fn set_forwarded_for(&self, headers: &mut HeaderMap, peer: SocketAddr) {
-        let peer = HeaderValue::from_str(&peer.ip().to_string())
-            .expect("an IP address is a valid header value");
+    /// (`--trust-proxy`), that proxy's headers pass through instead.
+    fn set_forwarded_for(&self, headers: &mut HeaderMap, peer: &HeaderValue) {
         if self.trust_proxy {
             if !headers.contains_key(&X_FORWARDED_FOR) && !headers.contains_key(&X_REAL_IP) {
-                headers.insert(X_FORWARDED_FOR, peer);
+                headers.insert(X_FORWARDED_FOR, peer.clone());
             }
             return;
         }
         headers.remove(X_REAL_IP);
-        headers.insert(X_FORWARDED_FOR, peer);
+        headers.insert(X_FORWARDED_FOR, peer.clone());
     }
 
-    /// Returns `None` for request targets that are not paths, such as the
-    /// asterisk form of `OPTIONS *`, which cannot be appended to the origin.
-    fn target_uri(&self, uri: &Uri) -> Option<Uri> {
-        let path = uri
-            .path_and_query()
-            .map(|value| value.as_str())
-            .unwrap_or("/");
-        if !path.starts_with('/') {
-            return None;
-        }
-        format!("{}{path}", self.origin).parse().ok()
-    }
-
+    /// `peer` is the client connection's `X-Forwarded-For` value.
     pub async fn forward(
         &self,
         mut request: Request<Incoming>,
-        peer: SocketAddr,
+        peer: &HeaderValue,
     ) -> Response<ResponseBody> {
         if let Some(log) = &self.fallback_log {
-            log.record(request.method(), request.uri().path());
+            log.record(&format!("{} {}", request.method(), request.uri().path()));
         }
         self.set_forwarded_for(request.headers_mut(), peer);
         if is_upgrade(request.headers()) {
             return self.forward_upgrade(request).await;
         }
-        let Some(target) = self.target_uri(request.uri()) else {
-            return bad_request();
+        let Some(target) = target_uri(&self.authority, request.uri()) else {
+            return plain(StatusCode::BAD_REQUEST, "Bad Request");
         };
         *request.uri_mut() = target;
         remove_hop_by_hop(request.headers_mut());
@@ -195,7 +181,7 @@ impl Proxy {
                 remove_hop_by_hop(&mut parts.headers);
                 Response::from_parts(parts, body.boxed())
             }
-            Err(_) => bad_gateway(),
+            Err(_) => plain(StatusCode::BAD_GATEWAY, "Bad Gateway"),
         }
     }
 
@@ -203,21 +189,8 @@ impl Proxy {
     /// original switches protocols, relays bytes in both directions until
     /// either side closes.
     async fn forward_upgrade(&self, mut request: Request<Incoming>) -> Response<ResponseBody> {
+        let bad_gateway = || plain(StatusCode::BAD_GATEWAY, "Bad Gateway");
         let client_upgrade = hyper::upgrade::on(&mut request);
-        let mut upstream_request = Request::builder()
-            .method(request.method())
-            .uri(
-                request
-                    .uri()
-                    .path_and_query()
-                    .map(|value| value.as_str())
-                    .unwrap_or("/"),
-            )
-            .version(request.version())
-            .body(Empty::<Bytes>::new())
-            .expect("an upgrade request copies a valid request line");
-        *upstream_request.headers_mut() = request.headers().clone();
-
         let slow_client = if request.uri().path() == self.browser_socket.path {
             SlowClient::Drop {
                 budget: self.browser_socket.budget,
@@ -225,7 +198,19 @@ impl Proxy {
         } else {
             SlowClient::Backpressure
         };
-        let Ok(stream) = relay::connect_upstream(&self.authority).await else {
+        let path = request
+            .uri()
+            .path_and_query()
+            .map_or("/", |value| value.as_str());
+        let mut upstream_request = Request::builder()
+            .method(request.method())
+            .uri(path)
+            .version(request.version())
+            .body(Empty::<Bytes>::new())
+            .expect("an upgrade request copies a valid request line");
+        *upstream_request.headers_mut() = std::mem::take(request.headers_mut());
+
+        let Ok(stream) = relay::connect_upstream(self.authority.as_str()).await else {
             return bad_gateway();
         };
         let Ok((mut sender, connection)) =
@@ -264,7 +249,7 @@ mod tests {
             budget: 1 << 20,
         };
         Proxy::new(
-            "http://127.0.0.1:1".to_string(),
+            origin_authority("http://127.0.0.1:1").unwrap(),
             trust_proxy,
             None,
             browser_socket,
@@ -311,27 +296,27 @@ mod tests {
 
     #[test]
     fn targets_only_path_requests() {
-        let proxy = proxy(false);
+        let authority = origin_authority("http://127.0.0.1:1").unwrap();
         assert_eq!(
-            proxy.target_uri(&Uri::from_static("/api?x=1")).unwrap(),
+            target_uri(&authority, &Uri::from_static("/api?x=1")).unwrap(),
             "http://127.0.0.1:1/api?x=1"
         );
-        assert!(proxy.target_uri(&Uri::from_static("*")).is_none());
+        assert!(target_uri(&authority, &Uri::from_static("*")).is_none());
     }
 
     #[test]
     fn replaces_untrusted_forwarding_headers() {
-        let peer: SocketAddr = "203.0.113.7:5000".parse().unwrap();
+        let peer = forwarded_for("203.0.113.7:5000".parse().unwrap());
         let mut headers = HeaderMap::new();
         headers.insert(X_FORWARDED_FOR, HeaderValue::from_static("198.51.100.1"));
         headers.insert(X_REAL_IP, HeaderValue::from_static("198.51.100.1"));
-        proxy(false).set_forwarded_for(&mut headers, peer);
+        proxy(false).set_forwarded_for(&mut headers, &peer);
         assert_eq!(headers.get(X_FORWARDED_FOR).unwrap(), "203.0.113.7");
         assert!(!headers.contains_key(X_REAL_IP));
 
         let mut trusted = HeaderMap::new();
         trusted.insert(X_FORWARDED_FOR, HeaderValue::from_static("198.51.100.1"));
-        proxy(true).set_forwarded_for(&mut trusted, peer);
+        proxy(true).set_forwarded_for(&mut trusted, &peer);
         assert_eq!(trusted.get(X_FORWARDED_FOR).unwrap(), "198.51.100.1");
     }
 }

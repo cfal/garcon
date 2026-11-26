@@ -1,16 +1,14 @@
 //! Native serving of the SPA's static assets: the `/_app/*`, `/icons/*`, and
 //! `/service-worker.js` routes of `server/controller/routes/static.ts`.
 //!
-//! Only canonical requests are claimed. Paths with dot or empty segments,
-//! percent escapes, a trailing slash, or an extension outside the table below
-//! go to the original, whose router and `path.resolve` semantics define their
-//! behavior (ADR-004), and so do requests with a `Range` header, whose framing
-//! depends on Bun's stream handling (ADR-005).
+//! The front door offers this unit only canonical requests without a `Range`
+//! header (`native.rs`, ADR-004, ADR-005). Of those it claims the routes above
+//! for extensions in the table below; other extensions go to the original.
 
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
-use hyper::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue, RANGE};
+use hyper::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue};
 use hyper::{Method, StatusCode};
 
 use crate::asset_cache::{AssetCache, FileVersion};
@@ -53,39 +51,25 @@ pub struct AssetRequest<'a> {
     content_type: &'static str,
 }
 
-fn is_canonical_segment(segment: &str) -> bool {
-    !matches!(segment, "" | "." | "..")
-        && segment
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:@".contains(&byte))
-}
-
 fn content_type_for(pathname: &str) -> Option<&'static str> {
     let file_name = pathname.rsplit('/').next()?;
     let (_, extension) = file_name.rsplit_once('.')?;
-    let extension = extension.to_ascii_lowercase();
     CONTENT_TYPES
         .iter()
-        .find(|(candidate, _)| *candidate == extension)
+        .find(|(candidate, _)| extension.eq_ignore_ascii_case(candidate))
         .map(|(_, content_type)| *content_type)
 }
 
-/// Returns the asset request when this unit serves `pathname`, which is the
+/// Returns the asset request when this unit serves `pathname`, a canonical
 /// request path with the base path already removed.
-pub fn claim<'a>(
-    method: &Method,
-    headers: &HeaderMap,
-    pathname: &'a str,
-) -> Option<AssetRequest<'a>> {
-    if method != Method::GET && method != Method::HEAD || headers.contains_key(RANGE) {
+pub fn claim<'a>(method: &Method, pathname: &'a str) -> Option<AssetRequest<'a>> {
+    if method != Method::GET && method != Method::HEAD {
         return None;
     }
     let routed = pathname == SERVICE_WORKER
-        || STATIC_PREFIXES.iter().any(|prefix| {
-            pathname
-                .strip_prefix(prefix)
-                .is_some_and(|rest| rest.split('/').all(is_canonical_segment))
-        });
+        || STATIC_PREFIXES
+            .iter()
+            .any(|prefix| pathname.len() > prefix.len() && pathname.starts_with(prefix));
     if !routed {
         return None;
     }
@@ -148,18 +132,26 @@ pub fn not_found() -> NativeResponse {
 
 /// Mirrors `resolveStaticFilePath`: the file must be inside the build both
 /// lexically and after resolving symlinks.
+///
+/// The three lookups run in one blocking task rather than three round trips
+/// to the blocking pool.
 async fn resolve(build_dir: &Path, pathname: &str) -> Option<(PathBuf, std::fs::Metadata)> {
+    let build_dir = build_dir.to_path_buf();
     let candidate = build_dir.join(pathname.trim_start_matches('/'));
-    let real_build = tokio::fs::canonicalize(build_dir).await.ok()?;
-    let real_candidate = tokio::fs::canonicalize(&candidate).await.ok()?;
-    if !real_candidate.starts_with(&real_build) {
-        return None;
-    }
-    tokio::fs::metadata(&real_candidate)
-        .await
-        .ok()
-        .filter(|metadata| metadata.is_file())
-        .map(|metadata| (real_candidate, metadata))
+    tokio::task::spawn_blocking(move || {
+        let real_build = std::fs::canonicalize(&build_dir).ok()?;
+        let real_candidate = std::fs::canonicalize(&candidate).ok()?;
+        if !real_candidate.starts_with(&real_build) {
+            return None;
+        }
+        let metadata = std::fs::metadata(&real_candidate)
+            .ok()
+            .filter(|metadata| metadata.is_file())?;
+        Some((real_candidate, metadata))
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Serves the asset, from `cache` when this version of the file is cached.
@@ -204,31 +196,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claims_only_canonical_asset_paths() {
-        let headers = HeaderMap::new();
-        let claimed = |path| claim(&Method::GET, &headers, path).is_some();
+    fn claims_its_routes_for_known_extensions() {
+        let claimed = |path| claim(&Method::GET, path).is_some();
         assert!(claimed("/_app/immutable/entry/start.js"));
         assert!(claimed("/_app/version.json"));
         assert!(claimed("/icons/icon.SVG"));
         assert!(claimed("/service-worker.js"));
-        assert!(claim(&Method::HEAD, &headers, "/icons/icon.svg").is_some());
-        assert!(claim(&Method::POST, &headers, "/icons/icon.svg").is_none());
-        let mut ranged = HeaderMap::new();
-        ranged.insert(RANGE, HeaderValue::from_static("bytes=0-9"));
-        assert!(claim(&Method::GET, &ranged, "/icons/icon.svg").is_none());
+        assert!(claim(&Method::HEAD, "/icons/icon.svg").is_some());
+        assert!(claim(&Method::POST, "/icons/icon.svg").is_none());
         for fallback in [
             "/_app/",
             "/_app",
-            "/_app/immutable/entry/start.js/",
-            "/_app//start.js",
-            "/_app/./start.js",
-            "/_app/../auth.json",
-            "/_app/%2e%2e%2fauth.json",
-            "/_app/unicode-%C3%BC.txt",
             "/_app/immutable/assets/no-extension",
             "/_app/immutable/assets/file.bin",
             "/index.html",
-            "/service-worker.js/",
         ] {
             assert!(!claimed(fallback), "{fallback} should fall back");
         }
@@ -268,7 +249,7 @@ mod tests {
             build.join("_app/leak.json"),
         )
         .unwrap();
-        let request = claim(&Method::GET, &HeaderMap::new(), "/_app/leak.json").unwrap();
+        let request = claim(&Method::GET, "/_app/leak.json").unwrap();
         assert_eq!(
             serve(&build, &request, &AssetCache::new(1 << 20))
                 .await

@@ -21,44 +21,32 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
   if (!golden) {
     return { scenario, missingGolden: true, cases: [] };
   }
+  const result = (name: string, difference: Difference | null, run?: CaseRun): CaseResult => ({
+    scenario,
+    name,
+    difference,
+    native: run !== undefined && run.fallbacks.length === 0,
+    fallbacks: run?.fallbacks ?? [],
+  });
   const byName = new Map(runs.map((run) => [run.name, run]));
   const recorded = new Set(golden.cases.map((expected) => expected.name));
-  // A step added without recording again would otherwise never be checked.
-  const unrecorded = runs.filter((run) => !recorded.has(run.name)).map((run): CaseResult => ({
-    scenario,
-    name: run.name,
-    difference: { path: '$', kind: 'extra', expected: '(not recorded)', actual: 'a generated case; run bun run parity:record' },
-    native: run.fallbacks.length === 0,
-    fallbacks: run.fallbacks,
-  }));
-  const cases = golden.cases.map((expected): CaseResult => {
+  const cases = golden.cases.map((expected) => {
     const run = byName.get(expected.name);
-    if (!run) {
-      return {
-        scenario,
-        name: expected.name,
-        difference: { path: '$', kind: 'missing', expected: 'a recorded case', actual: '(case no longer generated)' },
-        native: false,
-        fallbacks: [],
-      };
-    }
-    return {
-      scenario,
-      name: expected.name,
-      difference: firstDifference(expected.expected, run.capture),
-      native: run.fallbacks.length === 0,
-      fallbacks: run.fallbacks,
-    };
+    return run
+      ? result(expected.name, firstDifference(expected.expected, run.capture), run)
+      : result(expected.name, { path: '$', kind: 'missing', expected: 'a recorded case', actual: '(case no longer generated)' });
   });
+  // A step added without recording again would otherwise never be checked.
+  const unrecorded = runs.filter((run) => !recorded.has(run.name)).map((run) =>
+    result(run.name, { path: '$', kind: 'extra', expected: '(not recorded)', actual: 'a generated case; run bun run parity:record' }, run));
   return { scenario, missingGolden: false, cases: [...cases, ...unrecorded] };
 }
 
-// The difference signature groups failures that differ the same way, so one
-// port bug that breaks forty cases is one row in the report.
-function signature(result: CaseResult): string {
+// Failures that differ the same way share one field and kind, so one port bug
+// that breaks forty cases is one row in the report.
+function differenceGroup(result: CaseResult): { field: string; kind: string } {
   const difference = result.difference!;
-  const field = difference.path.replace(/\[\d+\]/g, '[]');
-  return `${field}|${difference.kind}`;
+  return { field: difference.path.replace(/\[\d+\]/g, '[]'), kind: difference.kind };
 }
 
 function shortId(text: string): string {
@@ -87,14 +75,18 @@ export function renderReport(label: string, results: ScenarioResult[], measuresF
   if (missing.length > 0) lines.push('', `Never recorded: ${missing.join(', ')}`);
 
   if (failing.length > 0) {
-    const groups = new Map<string, CaseResult[]>();
+    const groups = new Map<string, { field: string; kind: string; cases: CaseResult[] }>();
     for (const result of failing) {
-      const key = signature(result);
-      groups.set(key, [...(groups.get(key) ?? []), result]);
+      const { field, kind } = differenceGroup(result);
+      const key = `${field}|${kind}`;
+      const group = groups.get(key) ?? { field, kind, cases: [] };
+      group.cases.push(result);
+      groups.set(key, group);
     }
     lines.push('', '## Distinct differences', '', '| id | count | field | kind | first case |', '| --- | ---: | --- | --- | --- |');
-    for (const [key, group] of [...groups.entries()].sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))) {
-      const [field, kind] = key.split('|');
+    const ordered = [...groups.entries()].sort((left, right) =>
+      right[1].cases.length - left[1].cases.length || left[0].localeCompare(right[0]));
+    for (const [key, { field, kind, cases: group }] of ordered) {
       lines.push(`| ${shortId(key)} | ${group.length} | \`${cell(field)}\` | ${kind} | ${cell(`${group[0].scenario}/${group[0].name}`)} |`);
     }
   }

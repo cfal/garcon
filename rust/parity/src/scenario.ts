@@ -49,7 +49,7 @@ export interface Scenario {
   traps?: boolean;
 }
 
-export const SCENARIO_DIRECTORY = 'rust/parity/scenarios';
+const SCENARIO_DIRECTORY = 'rust/parity/scenarios';
 
 function assertScenario(value: unknown, file: string): asserts value is Scenario {
   const scenario = value as Partial<Scenario>;

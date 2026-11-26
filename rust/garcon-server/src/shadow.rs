@@ -10,23 +10,22 @@
 //! Only natively served requests are shadowed; the units serve idempotent
 //! reads, so sending them twice has no effect on the original.
 
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::path::Path;
-use std::sync::Mutex;
-
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
-use hyper::header::{CONTENT_ENCODING, CONTENT_LENGTH, HeaderMap};
+use hyper::header::{CONTENT_ENCODING, HeaderMap};
+use hyper::http::uri::Authority;
 use hyper::{Method, Request, Uri};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 
-use crate::compression::NativeResponse;
+use crate::compression::{Encoding, NativeResponse, header};
+use crate::line_log::LineLog;
+use crate::proxy::{no_delay_connector, remove_hop_by_hop, target_uri};
 
-/// Headers compared between the two responses. `Content-Length` is compared
-/// separately, and only for bodies that are not compressed.
+/// Headers compared between the two responses, as sent. `Content-Length` is
+/// also compared when the body is not compressed, since compressed lengths
+/// depend on the encoder.
 const COMPARED_HEADERS: [&str; 10] = [
     "accept-ranges",
     "cache-control",
@@ -40,12 +39,10 @@ const COMPARED_HEADERS: [&str; 10] = [
     "vary",
 ];
 
-const FORWARDED_HEADERS_TO_DROP: [&str; 3] = ["connection", "keep-alive", "upgrade"];
-
 pub struct Shadow {
     client: Client<HttpConnector, Empty<Bytes>>,
-    origin: String,
-    log: Mutex<File>,
+    authority: Authority,
+    log: LineLog,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,29 +51,82 @@ pub struct Divergence {
     pub detail: String,
 }
 
-fn decode(body: &[u8], encoding: Option<&str>) -> Result<Vec<u8>, String> {
-    let mut decoded = Vec::new();
-    let result = match encoding {
-        Some("gzip") => flate2::read::GzDecoder::new(body).read_to_end(&mut decoded),
-        Some("deflate") => flate2::read::ZlibDecoder::new(body).read_to_end(&mut decoded),
-        Some("zstd") => {
-            let mut source = body;
-            ruzstd::decoding::StreamingDecoder::new(&mut source)
-                .map_err(|error| std::io::Error::other(error.to_string()))
-                .and_then(|mut decoder| decoder.read_to_end(&mut decoded))
+fn diverge(field: impl Into<String>, detail: String) -> Divergence {
+    Divergence {
+        field: field.into(),
+        detail,
+    }
+}
+
+fn decoded_body(side: &str, headers: &HeaderMap, body: &[u8]) -> Result<Vec<u8>, Divergence> {
+    match header(headers, CONTENT_ENCODING).and_then(Encoding::from_token) {
+        Some(encoding) => encoding.decode(body).map_err(|error| {
+            diverge(
+                "body",
+                format!("{side} undecodable {encoding:?} body: {error}"),
+            )
+        }),
+        None => Ok(body.to_vec()),
+    }
+}
+
+fn first_divergence(
+    method: &Method,
+    native: &NativeResponse,
+    original_status: u16,
+    original_headers: &HeaderMap,
+    original_body: &[u8],
+) -> Result<(), Divergence> {
+    if native.status.as_u16() != original_status {
+        return Err(diverge(
+            "status",
+            format!(
+                "native={} original={original_status}",
+                native.status.as_u16()
+            ),
+        ));
+    }
+    let uncompressed = !native.headers.contains_key(CONTENT_ENCODING);
+    let compared = COMPARED_HEADERS
+        .into_iter()
+        .chain(uncompressed.then_some("content-length"));
+    for name in compared {
+        let (left, right) = (
+            header(&native.headers, name),
+            header(original_headers, name),
+        );
+        if left != right {
+            return Err(diverge(
+                format!("header:{name}"),
+                format!("native={left:?} original={right:?}"),
+            ));
         }
-        _ => return Ok(body.to_vec()),
-    };
-    result
-        .map(|_| decoded)
-        .map_err(|error| format!("undecodable {encoding:?} body: {error}"))
+    }
+    if method == Method::HEAD {
+        return Ok(());
+    }
+    let native_body = decoded_body("native", &native.headers, &native.body)?;
+    let original_body = decoded_body("original", original_headers, original_body)?;
+    if native_body == original_body {
+        return Ok(());
+    }
+    let offset = native_body
+        .iter()
+        .zip(&original_body)
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| native_body.len().min(original_body.len()));
+    Err(diverge(
+        "body",
+        format!(
+            "first-difference={offset} native-length={} original-length={}",
+            native_body.len(),
+            original_body.len()
+        ),
+    ))
 }
 
-fn header_text<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    headers.get(name).and_then(|value| value.to_str().ok())
-}
-
-/// Compares a native response with the original's answer to the same request.
+/// Compares a native response, framed as it is sent, with the original's
+/// answer to the same request.
 pub fn compare(
     method: &Method,
     native: &NativeResponse,
@@ -84,101 +134,23 @@ pub fn compare(
     original_headers: &HeaderMap,
     original_body: &[u8],
 ) -> Option<Divergence> {
-    if native.status.as_u16() != original_status {
-        return Some(Divergence {
-            field: "status".to_string(),
-            detail: format!(
-                "native={} original={original_status}",
-                native.status.as_u16()
-            ),
-        });
-    }
-    for name in COMPARED_HEADERS {
-        let (left, right) = (
-            header_text(&native.headers, name),
-            header_text(original_headers, name),
-        );
-        if left != right {
-            return Some(Divergence {
-                field: format!("header:{name}"),
-                detail: format!("native={left:?} original={right:?}"),
-            });
-        }
-    }
-    if !native.headers.contains_key(CONTENT_ENCODING) {
-        let (left, right) = (
-            header_text(&native.headers, CONTENT_LENGTH.as_str()),
-            header_text(original_headers, CONTENT_LENGTH.as_str()),
-        );
-        // Without the header, a native response is sent with its body length:
-        // hyper frames GET bodies by length and `into_response` sets it for HEAD.
-        let left = left
-            .map(str::to_string)
-            .or_else(|| Some(native.body.len().to_string()));
-        if left.as_deref() != right {
-            return Some(Divergence {
-                field: "header:content-length".to_string(),
-                detail: format!("native={left:?} original={right:?}"),
-            });
-        }
-    }
-    if method == Method::HEAD {
-        return None;
-    }
-    let native_body = match decode(
-        &native.body,
-        header_text(&native.headers, "content-encoding"),
-    ) {
-        Ok(body) => body,
-        Err(error) => {
-            return Some(Divergence {
-                field: "body".to_string(),
-                detail: format!("native {error}"),
-            });
-        }
-    };
-    let original_body = match decode(
+    first_divergence(
+        method,
+        native,
+        original_status,
+        original_headers,
         original_body,
-        header_text(original_headers, "content-encoding"),
-    ) {
-        Ok(body) => body,
-        Err(error) => {
-            return Some(Divergence {
-                field: "body".to_string(),
-                detail: format!("original {error}"),
-            });
-        }
-    };
-    if native_body == original_body {
-        return None;
-    }
-    let offset = native_body
-        .iter()
-        .zip(&original_body)
-        .position(|(left, right)| left != right)
-        .unwrap_or_else(|| native_body.len().min(original_body.len()));
-    Some(Divergence {
-        field: "body".to_string(),
-        detail: format!(
-            "first-difference={offset} native-length={} original-length={}",
-            native_body.len(),
-            original_body.len()
-        ),
-    })
+    )
+    .err()
 }
 
 impl Shadow {
-    pub fn open(path: &Path, origin: String) -> std::io::Result<Self> {
+    pub fn open(path: &std::path::Path, authority: Authority) -> std::io::Result<Self> {
         Ok(Self {
-            client: Client::builder(TokioExecutor::new()).build(crate::proxy::no_delay_connector()),
-            origin,
-            log: Mutex::new(OpenOptions::new().create(true).append(true).open(path)?),
+            client: Client::builder(TokioExecutor::new()).build(no_delay_connector()),
+            authority,
+            log: LineLog::open(path)?,
         })
-    }
-
-    fn record(&self, line: &str) {
-        let mut log = self.log.lock().expect("shadow log lock");
-        let _ = writeln!(log, "{line}");
     }
 
     /// Sends the request to the original and records whether its answer
@@ -190,55 +162,43 @@ impl Shadow {
         headers: &HeaderMap,
         native: &NativeResponse,
     ) {
-        let target = format!(
-            "{}{}",
-            self.origin,
-            uri.path_and_query()
-                .map(|value| value.as_str())
-                .unwrap_or("/")
-        );
-        let mut request = Request::new(Empty::new());
-        *request.method_mut() = method.clone();
-        *request.uri_mut() = match target.parse() {
-            Ok(uri) => uri,
-            Err(_) => {
-                return self.record(&format!(
-                    "error\t{method}\t{}\tunparseable target",
-                    uri.path()
-                ));
-            }
-        };
-        *request.headers_mut() = headers.clone();
-        for name in FORWARDED_HEADERS_TO_DROP {
-            request.headers_mut().remove(name);
+        let outcome = async {
+            let target =
+                target_uri(&self.authority, uri).ok_or("unparseable target".to_string())?;
+            let mut request = Request::new(Empty::new());
+            *request.method_mut() = method.clone();
+            *request.uri_mut() = target;
+            *request.headers_mut() = headers.clone();
+            remove_hop_by_hop(request.headers_mut());
+            let response = self
+                .client
+                .request(request)
+                .await
+                .map_err(|error| error.to_string())?;
+            let (parts, body) = response.into_parts();
+            let body = body
+                .collect()
+                .await
+                .map_err(|error| error.to_string())?
+                .to_bytes();
+            Ok::<_, String>(compare(
+                method,
+                native,
+                parts.status.as_u16(),
+                &parts.headers,
+                &body,
+            ))
         }
-        let outcome = match self.client.request(request).await {
-            Ok(response) => {
-                let (parts, body) = response.into_parts();
-                match body.collect().await {
-                    Ok(collected) => compare(
-                        method,
-                        native,
-                        parts.status.as_u16(),
-                        &parts.headers,
-                        &collected.to_bytes(),
-                    ),
-                    Err(error) => {
-                        return self.record(&format!("error\t{method}\t{}\t{error}", uri.path()));
-                    }
-                }
-            }
-            Err(error) => return self.record(&format!("error\t{method}\t{}\t{error}", uri.path())),
-        };
-        match outcome {
-            None => self.record(&format!("match\t{method}\t{}", uri.path())),
-            Some(divergence) => self.record(&format!(
-                "diverge\t{method}\t{}\t{}\t{}",
-                uri.path(),
-                divergence.field,
-                divergence.detail
-            )),
-        }
+        .await;
+        let path = uri.path();
+        self.log.record(&match outcome {
+            Ok(None) => format!("match\t{method}\t{path}"),
+            Ok(Some(divergence)) => format!(
+                "diverge\t{method}\t{path}\t{}\t{}",
+                divergence.field, divergence.detail
+            ),
+            Err(error) => format!("error\t{method}\t{path}\t{error}"),
+        });
     }
 }
 
@@ -246,7 +206,8 @@ impl Shadow {
 mod tests {
     use super::*;
     use hyper::StatusCode;
-    use hyper::header::{CONTENT_TYPE, HeaderValue};
+    use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderValue};
+    use std::io::Write;
 
     fn native(body: &'static [u8], encoding: Option<&'static str>) -> NativeResponse {
         let mut headers = HeaderMap::new();
@@ -259,6 +220,7 @@ mod tests {
             headers,
             body: Bytes::from_static(body),
         }
+        .framed()
     }
 
     fn original_headers(length: &'static str) -> HeaderMap {

@@ -45,6 +45,13 @@ struct Entry {
 }
 
 impl Entry {
+    fn encoded(&self, encoding: Encoding) -> Option<&Bytes> {
+        self.encodings
+            .iter()
+            .find(|(cached, _)| *cached == encoding)
+            .map(|(_, body)| body)
+    }
+
     fn size(&self) -> usize {
         self.contents.len()
             + self
@@ -109,7 +116,8 @@ pub struct AssetCache {
 /// Compresses `body` without holding up other tasks on this runtime worker:
 /// large application chunks take tens of milliseconds, which would otherwise
 /// delay every connection, WebSocket relays included, scheduled on it.
-fn compress_off_runtime(encoding: Encoding, body: &Bytes) -> std::io::Result<Bytes> {
+/// Compresses without stalling the async workers on the multi-threaded runtime.
+pub fn compress_off_runtime(encoding: Encoding, body: &Bytes) -> std::io::Result<Bytes> {
     let multi_thread = tokio::runtime::Handle::try_current()
         .is_ok_and(|handle| handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread);
     if multi_thread {
@@ -157,33 +165,25 @@ impl AssetCache {
     /// cached file version is requested in that encoding.
     pub fn encode(
         &self,
-        version: Option<&FileVersion>,
+        version: &FileVersion,
         encoding: Encoding,
         body: &Bytes,
     ) -> std::io::Result<Bytes> {
-        let Some(version) = version else {
-            return compress_off_runtime(encoding, body);
-        };
+        if let Some(encoded) = self
+            .entries
+            .lock()
+            .expect("asset cache lock")
+            .current(version)
+            .and_then(|entry| entry.encoded(encoding).cloned())
         {
-            let mut entries = self.entries.lock().expect("asset cache lock");
-            if let Some((_, encoded)) = entries.current(version).and_then(|entry| {
-                entry
-                    .encodings
-                    .iter()
-                    .find(|(cached, _)| *cached == encoding)
-            }) {
-                return Ok(encoded.clone());
-            }
+            return Ok(encoded);
         }
         // Compresses outside the lock so other requests are not held up.
         let encoded = compress_off_runtime(encoding, body)?;
         let mut entries = self.entries.lock().expect("asset cache lock");
-        let cacheable = entries.current(version).is_some_and(|entry| {
-            !entry
-                .encodings
-                .iter()
-                .any(|(cached, _)| *cached == encoding)
-        });
+        let cacheable = entries
+            .current(version)
+            .is_some_and(|entry| entry.encoded(encoding).is_none());
         if cacheable && entries.make_room(encoded.len(), self.budget, &version.path) {
             entries.used += encoded.len();
             if let Some(entry) = entries.by_path.get_mut(&version.path) {
@@ -229,10 +229,10 @@ mod tests {
         let body = Bytes::from(vec![b'a'; 10_000]);
         cache.store_contents(&version(10_000), &body);
         let first = cache
-            .encode(Some(&version(10_000)), Encoding::Gzip, &body)
+            .encode(&version(10_000), Encoding::Gzip, &body)
             .unwrap();
         let second = cache
-            .encode(Some(&version(10_000)), Encoding::Gzip, &body)
+            .encode(&version(10_000), Encoding::Gzip, &body)
             .unwrap();
         assert_eq!(
             first.as_ptr(),
@@ -266,11 +266,7 @@ mod tests {
         cache.store_contents(&version(5), &Bytes::from_static(b"large"));
         assert_eq!(cache.contents(&version(5)), None);
         let encoded = cache
-            .encode(
-                Some(&version(5)),
-                Encoding::Gzip,
-                &Bytes::from_static(b"large"),
-            )
+            .encode(&version(5), Encoding::Gzip, &Bytes::from_static(b"large"))
             .unwrap();
         assert!(!encoded.is_empty());
         assert_eq!(cache.entries.lock().unwrap().used, 0);

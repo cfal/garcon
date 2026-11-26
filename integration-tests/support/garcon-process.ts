@@ -89,24 +89,30 @@ export async function pumpLines(
   }
 }
 
+// The environment a test harness gives the Rust front door: the Bun that runs
+// the tests starts the original behind it, and front-door settings
+// (GARCON_RS_*), such as the shadow log and unit kill switches, pass through.
+// Empty values are unset, as the front door treats them.
+export function frontDoorEnvironment(): Record<string, string> {
+  return {
+    GARCON_RS_BUN: process.execPath,
+    ...Object.fromEntries(Object.entries(process.env)
+      .filter((entry): entry is [string, string] => entry[0].startsWith('GARCON_RS_') && Boolean(entry[1]))),
+  };
+}
+
 // GARCON_TEST_CONTROLLER=front-door starts the controller behind the Rust front
 // door (rust/README.md) so every suite also verifies it; the default starts the
-// TypeScript controller directly. Front-door settings (GARCON_RS_*), such as the
-// shadow log and unit kill switches, pass through to it.
-export function controllerLaunch(repoRoot: string, value = process.env.GARCON_TEST_CONTROLLER ?? 'original'): {
-  command: string[];
-  environment: Record<string, string>;
-} {
-  if (value === 'original') return { command: [process.execPath, 'server/main.ts'], environment: {} };
-  if (value !== 'front-door') throw new Error(`Unknown controller: ${value}`);
+// TypeScript controller directly.
+function controllerLaunch(repoRoot: string): { command: string[]; environment: Record<string, string>; fronted: boolean } {
+  const controller = process.env.GARCON_TEST_CONTROLLER ?? 'original';
+  if (controller === 'original') return { command: [process.execPath, 'server/main.ts'], environment: {}, fronted: false };
+  if (controller !== 'front-door') throw new Error(`Unknown controller: ${controller}`);
   return {
     // GARCON_TEST_FRONT_DOOR_BINARY selects a build other than the local release build.
     command: [process.env.GARCON_TEST_FRONT_DOOR_BINARY ?? join(repoRoot, 'rust/target/release/garcon-server')],
-    environment: {
-      GARCON_RS_BUN: process.execPath,
-      ...Object.fromEntries(Object.entries(process.env)
-        .filter((entry): entry is [string, string] => entry[0].startsWith('GARCON_RS_') && Boolean(entry[1]))),
-    },
+    environment: frontDoorEnvironment(),
+    fronted: true,
   };
 }
 
@@ -128,7 +134,7 @@ export class GarconProcess {
   readonly #stderrPump: Promise<void>;
   #baseUrl = '';
   #authToken: string | null = null;
-  #controllerPid: number | null = null;
+  #controllerPid = 0;
   #credentials: { username: string; password: string } | null = null;
   #expectedExit = false;
   #unexpectedExit: string | null = null;
@@ -206,7 +212,11 @@ export class GarconProcess {
       );
       if (credentials) instance.#authToken = await fixtureAuthToken(instance.#baseUrl, credentials);
       instance.#credentials = credentials;
-      instance.#controllerPid = await publishedControllerPid(options.configDir);
+      // Behind the front door the spawned process is not the controller, so
+      // its pid must come from the descriptor the controller publishes.
+      const published = await publishedControllerPid(options.configDir);
+      if (published === null && launch.fronted) throw new Error(`The controller behind the front door published no runtime descriptor.\n${instance.describeLogs()}`);
+      instance.#controllerPid = published ?? child.pid;
       return instance;
     } catch (error) {
       await instance.#terminateAfterStartupFailure();
@@ -228,7 +238,7 @@ export class GarconProcess {
   // the front door it is the front door's child; lifecycle signals still go to
   // the spawned process, whose exit ends the controller.
   get pid(): number | null {
-    return this.#exitCode === null ? this.#controllerPid ?? this.#child.pid : null;
+    return this.#exitCode === null ? this.#controllerPid : null;
   }
 
   get logs(): readonly string[] {

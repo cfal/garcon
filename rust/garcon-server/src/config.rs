@@ -15,12 +15,42 @@ pub struct FrontDoorConfig {
     pub base_path: String,
     pub http_compression: bool,
     pub web_build_dir: PathBuf,
-    pub original_root: PathBuf,
+    pub original: OriginalCommand,
     pub trust_proxy: bool,
     /// Bytes that may wait for a browser socket before it is dropped.
     pub ws_backpressure_limit: usize,
     /// Arguments forwarded to the original, without the owned flags.
     pub original_args: Vec<String>,
+    /// `GARCON_RS_FALLBACK_LOG`: one line per request handed to the original.
+    pub fallback_log: Option<PathBuf>,
+    /// `GARCON_RS_SHADOW_LOG`: compares every native response with the original's.
+    pub shadow_log: Option<PathBuf>,
+    /// `GARCON_RS_UNIT_STATIC_ASSETS=original` sends the unit's routes back to
+    /// the original without a rebuild.
+    pub static_assets_native: bool,
+}
+
+/// How to start the TypeScript original.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginalCommand {
+    /// The checkout containing `server/main.ts` (`GARCON_RS_ORIGINAL_ROOT`,
+    /// default: the working directory).
+    pub root: PathBuf,
+    /// The Bun executable (`GARCON_RS_BUN`, default: `bun` on `PATH`).
+    pub bun: String,
+}
+
+impl OriginalCommand {
+    pub fn from_environment(environment: &dyn Environment) -> Self {
+        let root = environment.var("GARCON_RS_ORIGINAL_ROOT").map_or_else(
+            || environment.current_dir(),
+            |root| environment.current_dir().join(root),
+        );
+        let bun = environment
+            .var("GARCON_RS_BUN")
+            .unwrap_or_else(|| "bun".to_string());
+        Self { root, bun }
+    }
 }
 
 /// How the process should run for the given arguments.
@@ -30,7 +60,7 @@ pub enum LaunchMode {
     /// Help, executor mode, one-shot maintenance flags, and configuration the
     /// front door cannot parse run the original directly, so its output and
     /// exit status are exactly the original's.
-    Original,
+    Original(OriginalCommand),
 }
 
 pub trait Environment {
@@ -83,14 +113,12 @@ fn without_owned_flags(args: &[String]) -> Vec<String> {
             skip_next = false;
             continue;
         }
-        if OWNED_FLAGS.contains(&argument.as_str()) {
-            skip_next = true;
-            continue;
-        }
-        if OWNED_FLAGS
-            .iter()
-            .any(|flag| argument.starts_with(&format!("{flag}=")))
-        {
+        let name = argument
+            .split_once('=')
+            .map_or(argument.as_str(), |(name, _)| name);
+        if OWNED_FLAGS.contains(&name) {
+            // `--flag value` also owns the next argument; `--flag=value` does not.
+            skip_next = name == argument;
             continue;
         }
         forwarded.push(argument.clone());
@@ -115,18 +143,6 @@ pub fn parse_base_path(value: &str) -> Option<String> {
         .then(|| normalized.to_string())
 }
 
-/// Mirrors `envInt`: a non-negative integer, or the fallback when unset.
-fn parse_int(value: Option<String>, fallback: usize) -> Option<usize> {
-    let Some(raw) = value else {
-        return Some(fallback);
-    };
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || !trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    trimmed.parse().ok()
-}
-
 /// Mirrors `envBool`.
 fn parse_bool(value: Option<String>, fallback: bool) -> Option<bool> {
     let Some(raw) = value else {
@@ -139,7 +155,9 @@ fn parse_bool(value: Option<String>, fallback: bool) -> Option<bool> {
     }
 }
 
-fn parse_port(value: &str) -> Option<u16> {
+/// Mirrors `envInt` and `parsePort`: digits only, after trimming, within the
+/// target type's range.
+fn parse_unsigned<T: std::str::FromStr>(value: &str) -> Option<T> {
     let trimmed = value.trim();
     if trimmed.is_empty() || !trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -155,22 +173,19 @@ pub fn launch_mode(args: &[String], environment: &dyn Environment) -> LaunchMode
                 "--help" | "-h" | "--rollback-carryover-migration"
             )
         });
-    if passthrough {
-        return LaunchMode::Original;
+    if !passthrough && let Some(config) = front_door_config(args, environment) {
+        return LaunchMode::FrontDoor(Box::new(config));
     }
-    match front_door_config(args, environment) {
-        Some(config) => LaunchMode::FrontDoor(Box::new(config)),
-        None => LaunchMode::Original,
-    }
+    LaunchMode::Original(OriginalCommand::from_environment(environment))
 }
 
 fn front_door_config(args: &[String], environment: &dyn Environment) -> Option<FrontDoorConfig> {
-    let port = match cli_value(args, "--port").ok()? {
-        Some(value) => parse_port(&value)?,
-        None => match environment.var("GARCON_PORT") {
-            Some(value) => parse_port(&value)?,
-            None => 8080,
-        },
+    let port = match cli_value(args, "--port")
+        .ok()?
+        .or_else(|| environment.var("GARCON_PORT"))
+    {
+        Some(value) => parse_unsigned(&value)?,
+        None => 8080,
     };
     let bind_address = cli_value(args, "--bind-address")
         .ok()?
@@ -186,33 +201,29 @@ fn front_door_config(args: &[String], environment: &dyn Environment) -> Option<F
             .or_else(|| environment.var("GARCON_BASE_PATH"))
             .unwrap_or_default(),
     )?;
-    let original_root = environment
-        .var("GARCON_RS_ORIGINAL_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| environment.current_dir());
-    let original_root = if original_root.is_absolute() {
-        original_root
-    } else {
-        environment.current_dir().join(original_root)
-    };
+    let original = OriginalCommand::from_environment(environment);
     let web_build_dir = environment
         .var("GARCON_WEB_BUILD_DIR")
         .map(|value| environment.current_dir().join(value))
-        .unwrap_or_else(|| original_root.join("web").join("build"));
+        .unwrap_or_else(|| original.root.join("web").join("build"));
     Some(FrontDoorConfig {
         port,
         bind_address,
         base_path,
         http_compression: parse_bool(environment.var("GARCON_HTTP_COMPRESSION"), true)?,
         web_build_dir,
-        original_root,
+        original,
         trust_proxy: args.iter().any(|argument| argument == "--trust-proxy")
             || parse_bool(environment.var("GARCON_TRUST_PROXY"), false)?,
-        ws_backpressure_limit: parse_int(
-            environment.var("GARCON_WS_BACKPRESSURE_LIMIT"),
-            2 * 1024 * 1024,
-        )?,
+        ws_backpressure_limit: match environment.var("GARCON_WS_BACKPRESSURE_LIMIT") {
+            Some(value) => parse_unsigned(&value)?,
+            None => 2 * 1024 * 1024,
+        },
         original_args: without_owned_flags(args),
+        fallback_log: environment.var("GARCON_RS_FALLBACK_LOG").map(PathBuf::from),
+        shadow_log: environment.var("GARCON_RS_SHADOW_LOG").map(PathBuf::from),
+        static_assets_native: environment.var("GARCON_RS_UNIT_STATIC_ASSETS").as_deref()
+            != Some("original"),
     })
 }
 
@@ -266,6 +277,35 @@ mod tests {
     }
 
     #[test]
+    fn reads_front_door_settings_with_empty_values_unset() {
+        let LaunchMode::FrontDoor(config) = config(
+            &[],
+            &[
+                ("GARCON_RS_SHADOW_LOG", ""),
+                ("GARCON_RS_FALLBACK_LOG", "/tmp/fallback.log"),
+                ("GARCON_RS_UNIT_STATIC_ASSETS", "original"),
+                ("GARCON_RS_ORIGINAL_ROOT", "checkout"),
+                ("GARCON_RS_BUN", "/opt/bun"),
+            ],
+        ) else {
+            panic!("expected front door");
+        };
+        assert_eq!(config.shadow_log, None);
+        assert_eq!(
+            config.fallback_log,
+            Some(PathBuf::from("/tmp/fallback.log"))
+        );
+        assert!(!config.static_assets_native);
+        assert_eq!(
+            config.original,
+            OriginalCommand {
+                root: PathBuf::from("/repo/checkout"),
+                bun: "/opt/bun".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn owns_the_runtime_origin_and_honors_a_trust_proxy_flag() {
         let LaunchMode::FrontDoor(trusted) = config(
             &["--runtime-origin", "http://elsewhere:1", "--trust-proxy"],
@@ -304,28 +344,31 @@ mod tests {
 
     #[test]
     fn unparseable_configuration_runs_the_original() {
-        assert_eq!(config(&["--port", "70000"], &[]), LaunchMode::Original);
-        assert_eq!(
+        assert!(matches!(
+            config(&["--port", "70000"], &[]),
+            LaunchMode::Original(_)
+        ));
+        assert!(matches!(
             config(&["--port", "1", "--port", "2"], &[]),
-            LaunchMode::Original
-        );
-        assert_eq!(
+            LaunchMode::Original(_)
+        ));
+        assert!(matches!(
             config(&["--base-path", "/a/../b"], &[]),
-            LaunchMode::Original
-        );
-        assert_eq!(
+            LaunchMode::Original(_)
+        ));
+        assert!(matches!(
             config(&[], &[("GARCON_HTTP_COMPRESSION", "maybe")]),
-            LaunchMode::Original
-        );
-        assert_eq!(
+            LaunchMode::Original(_)
+        ));
+        assert!(matches!(
             config(&[], &[("GARCON_WS_BACKPRESSURE_LIMIT", "-1")]),
-            LaunchMode::Original
-        );
-        assert_eq!(
+            LaunchMode::Original(_)
+        ));
+        assert!(matches!(
             config(&["executor", "--port", "1"], &[]),
-            LaunchMode::Original
-        );
-        assert_eq!(config(&["-h"], &[]), LaunchMode::Original);
+            LaunchMode::Original(_)
+        ));
+        assert!(matches!(config(&["-h"], &[]), LaunchMode::Original(_)));
     }
 
     #[test]
