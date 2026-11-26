@@ -313,6 +313,8 @@
 		const identity = terminalIdentity;
 		let current = true;
 		untrack(() => {
+			// An early terminal create can request attachment before initialization.
+			if (!identity.established) terminals.authChanged(false);
 			void identity.ready.then(async (clientId) => {
 				if (!current || clientId === null || !identity.established) return;
 				if (!authenticated) {

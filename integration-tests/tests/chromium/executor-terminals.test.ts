@@ -19,6 +19,40 @@ function terminalFrames(page: Page): TerminalStreamServerMessage[] {
   return frames;
 }
 
+test('a terminal created during the initial tab claim attaches once the identity is ready', async () => {
+  await withChromiumFixture('terminal-initial-tab-claim', async ({ page, integration, assertNoBrowserErrors }) => {
+    await page.addInitScript(() => {
+      const claim = Promise.withResolvers<void>();
+      window.addEventListener('release-terminal-claim', () => claim.resolve(), { once: true });
+      let claiming = false;
+      window.BroadcastChannel = new Proxy(window.BroadcastChannel, {
+        construct(target, args) {
+          if (args[0] === 'garcon-terminal-client-identity-v1') claiming = true;
+          return Reflect.construct(target, args);
+        },
+      });
+      // Holds only the initial identity timer, leaving the real terminal and UI running.
+      window.setTimeout = new Proxy(window.setTimeout, {
+        apply(schedule, receiver, args) {
+          if (!claiming || args[1] !== 200) return Reflect.apply(schedule, receiver, args);
+          window.setTimeout = schedule;
+          return Reflect.apply(schedule, receiver, [() => void claim.promise.then(args[0]), 0]);
+        },
+      });
+    });
+    const frames = terminalFrames(page);
+    const attached = () => frames.filter(message => message.type === 'terminal-attached');
+    await page.goto(integration.garcon.baseUrl);
+    await clickWorkspaceWindowAddAction(page, 'New Terminal');
+    await browserExpect(page.locator('.xterm')).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem('terminal_client_id_v1'))).toBeNull();
+    expect(attached()).toHaveLength(0);
+    await page.evaluate(() => window.dispatchEvent(new Event('release-terminal-claim')));
+    await browserExpect.poll(attached).toHaveLength(1);
+    assertNoBrowserErrors();
+  });
+}, 60_000);
+
 test('a restored page reclaims its terminal identity before reconnecting', async () => {
   await withChromiumFixture('terminal-page-restore', async ({ page, integration }) => {
     const frames = terminalFrames(page);
