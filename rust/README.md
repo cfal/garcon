@@ -70,9 +70,12 @@ What is compared, per case:
 - HTTP: status, the contract headers listed in `parity/src/capture.ts`
   (`Content-Length` only for uncompressed bodies), and the decoded body: JSON
   structurally, text exactly, binary by SHA-256.
-- WebSocket: whether the upgrade succeeded, the negotiated subprotocol, every
-  frame received, the close code, and for a refused upgrade the raw HTTP status
-  and body, which WebSocket clients do not expose.
+- WebSocket: whether the upgrade succeeded, the negotiated subprotocol, the
+  replies to the step's own requests (matched by `clientRequestId`), the close
+  code, and for a refused upgrade the raw HTTP status and body, which WebSocket
+  clients do not expose. Unsolicited broadcasts are not recorded, because their
+  timing is outside the step's control; they need scenarios with a
+  deterministic trigger.
 - Values that belong to one server start (temporary paths, port, session
   token) become placeholders such as `{{projectDir}}`. Timestamps, UUIDs, and
   JWTs become `{{timestamp}}`, `{{uuid}}`, and `{{jwt}}`, so their presence and

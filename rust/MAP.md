@@ -36,7 +36,7 @@ before starting it and marks it done with its replay result.
 | auth-logout | 4 | Session revocation over HTTP and WebSocket |
 | websocket-session | 32 | Subprotocol negotiation, ping, reconnect state, request errors, refused upgrades |
 
-Not yet recorded: chat lifecycle with the scripted providers, queueing and
+Not yet recorded: server-initiated WebSocket broadcasts, chat lifecycle with the scripted providers, queueing and
 permissions, executor links, PTYs, Files and Git, and restart behavior. Each
 needs a scenario before its unit can be ported; the integration fixtures under
 `integration-tests/support` already provide the fake providers to drive them.

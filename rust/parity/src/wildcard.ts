@@ -118,7 +118,12 @@ export function firstDifference(expected: Json | undefined, actual: Json | undef
   if (Array.isArray(expected)) {
     const actualArray = actual as Json[];
     if (expected.length !== actualArray.length) {
-      return { path, kind: 'length', expected: String(expected.length), actual: String(actualArray.length) };
+      return {
+        path,
+        kind: 'length',
+        expected: `${expected.length} items`,
+        actual: `${actualArray.length} items: ${describe(actualArray)}`,
+      };
     }
     for (let index = 0; index < expected.length; index += 1) {
       const difference = firstDifference(expected[index], actualArray[index], childPath(path, index));

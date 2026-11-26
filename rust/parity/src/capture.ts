@@ -229,6 +229,9 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
   const url = requestUrl(server, step).replace(/^http/, 'ws');
   const socket = new WebSocket(url, protocols);
   const frames: Json[] = [];
+  const requestIds = new Set((step.send ?? []).flatMap((message) =>
+    message && typeof message === 'object' && !Array.isArray(message) && typeof message.clientRequestId === 'string'
+      ? [message.clientRequestId] : []));
   let opened = false;
   let close: CapturedSocket['close'] = null;
   const quietMs = step.quietMs ?? DEFAULT_QUIET_MS;
@@ -250,7 +253,10 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
       armQuietTimer();
     };
     socket.onmessage = (event) => {
-      frames.push(parseFrame(event.data));
+      const frame = parseFrame(event.data);
+      const requestId = frame && typeof frame === 'object' && !Array.isArray(frame) ? frame.clientRequestId : undefined;
+      if (typeof requestId !== 'string' || !requestIds.has(requestId)) return;
+      frames.push(frame);
       if (step.frames !== undefined && frames.length >= step.frames) {
         clearTimeout(deadline);
         finish();

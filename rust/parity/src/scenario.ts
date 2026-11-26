@@ -23,8 +23,10 @@ export interface WebSocketStep {
   auth?: RequestAuth;
   protocols?: string[];
   send?: Json[];
-  // Frames are collected until `frames` arrive, the socket closes, or the
-  // socket stays quiet for `quietMs` after the last frame.
+  // Replies are the frames that carry a `clientRequestId` the step sent.
+  // They are collected until `frames` arrive, the socket closes, or the
+  // socket stays quiet for `quietMs`. Unsolicited broadcasts are not
+  // recorded, since their timing is not controlled by the step.
   frames?: number;
   quietMs?: number;
 }
