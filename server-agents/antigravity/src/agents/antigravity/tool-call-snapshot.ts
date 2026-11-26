@@ -64,7 +64,7 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
   return !rawChanged && !!previous?.contentIsNewer;
 }
 
-function agentWorkResult(call: TrackedCall, status: string, terminalContent: unknown): ToolResultMessage['content'] {
+function agentWorkResult(call: TrackedCall, status: string, terminal: Record<string, unknown>): ToolResultMessage['content'] {
   const output = rawOutputText(call.rawOutput);
   const blocks = withoutOutputEchoes(call.content ?? [], output);
   const blockText = joinBlockText(blocks);
@@ -72,13 +72,15 @@ function agentWorkResult(call: TrackedCall, status: string, terminalContent: unk
   const trimmedBlocks = blockText.trim();
   const distinct = trimmedOutput !== '' && trimmedBlocks !== '' && trimmedOutput !== trimmedBlocks;
   const structured = isStructuredOutput(call.rawOutput);
+  const name = antigravityToolName(call);
+  // A terminal block can repeat an earlier diagnostic. Only output text on that frame outranks it.
+  const terminalDiagnostic = status !== 'completed' && trimmedBlocks && Array.isArray(terminal.content)
+    && (name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode')
+    && !rawOutputText(terminal.rawOutput).trim();
   let primary: 'output' | 'metadata' | 'content' = 'content';
-  if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
-  else if (structured && !trimmedOutput && !call.contentIsNewer) {
-    // Report terminal diagnostics even if the same block arrived earlier; do not promote cached progress.
-    const name = antigravityToolName(call);
-    const reportsPlanOrSchedule = name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
-    if (!(reportsPlanOrSchedule && status !== 'completed' && Array.isArray(terminalContent) && trimmedBlocks)) primary = 'metadata';
+  if (!terminalDiagnostic) {
+    if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
+    else if (structured && !trimmedOutput && !call.contentIsNewer) primary = 'metadata';
   }
 
   const result: ToolResultMessage['content'] = status === 'completed' ? {} : { status };
@@ -96,7 +98,7 @@ function agentWorkResult(call: TrackedCall, status: string, terminalContent: unk
 export function toolCallResult(timestamp: string, call: TrackedCall, terminal: Record<string, unknown>, status: string): ToolResultMessage {
   const name = call.isMcp ? null : antigravityToolName(call);
   if (isAgentWork(name)) {
-    return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status, terminal.content), status !== 'completed');
+    return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status, terminal), status !== 'completed');
   }
 
   // Other tools report text from the terminal frame, but a command's exit code can arrive earlier.

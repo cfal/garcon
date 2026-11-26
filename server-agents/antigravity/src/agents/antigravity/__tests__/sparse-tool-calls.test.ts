@@ -78,6 +78,11 @@ test('shows a repeated terminal schedule diagnostic alongside metadata without p
   expect(s.patch('cached', { status: 'failed', rawOutput }).at(-1)).toEqual(expect.objectContaining({
     content: { status: 'failed', items: content, rawOutput }, isError: true,
   }));
+  const progress = { output: 'Preparing schedule', attempts: 1 };
+  s.start('earlier-output', { ...timer, rawOutput: progress });
+  expect(s.patch('earlier-output', { status: 'failed', content }).at(-1)).toEqual(expect.objectContaining({
+    content: { status: 'failed', raw: 'Could not save this schedule', rawOutput: progress }, isError: true,
+  }));
 });
 
 test('retains the original arguments when a native schedule cannot be represented', () => {
