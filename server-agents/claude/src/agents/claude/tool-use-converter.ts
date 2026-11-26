@@ -28,6 +28,7 @@ import {
   type ToolUseChatMessage,
 } from '@garcon/common/chat-types';
 import { normalizeTodoItems } from '@garcon/server-agent-common/shared/normalize-util';
+import { isRecord } from '@garcon/common/json';
 
 function asObject(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -119,6 +120,47 @@ function canonicalize(raw: unknown): string {
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
+function cronBoolean(value: unknown): unknown {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
+}
+
+function claudeScheduleToolUse(ts: string, id: string, rawName: string,
+  key: 'schedulewakeup' | 'croncreate' | 'cronlist' | 'crondelete', rawInput: unknown): ToolUseChatMessage {
+  const input = rawInput === undefined ? {} : rawInput;
+  if (!isRecord(input)) return new UnknownToolUseMessage(ts, id, rawName, { raw: input });
+  const hasOnly = (...fields: string[]) => Object.keys(input).every(field => fields.includes(field));
+  let row: ScheduleToolUseMessage | null = null;
+  switch (key) {
+    case 'schedulewakeup': {
+      if (!hasOnly('stop', 'delaySeconds', 'prompt', 'reason', 'noop')) break;
+      if (input.stop === true) return new ScheduleToolUseMessage(ts, id, { action: 'stop-loop' });
+      if ((input.stop !== undefined && input.stop !== false) || typeof input.reason !== 'string') break;
+      // Claude accepts signed decimal strings and reports the clamped delay in the result.
+      let delaySeconds = input.delaySeconds;
+      if (typeof delaySeconds === 'string' && /^[-+]?\d+(\.\d+)?$/.test(delaySeconds.trim())) delaySeconds = Number(delaySeconds);
+      row = ScheduleToolUseMessage.fromRequest(ts, id, {
+        action: 'wakeup', delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop,
+      });
+      break;
+    }
+    case 'croncreate':
+      if (hasOnly('cron', 'prompt', 'recurring', 'durable')) {
+        row = ScheduleToolUseMessage.fromRequest(ts, id, { action: 'cron', expression: input.cron, prompt: input.prompt,
+          recurring: input.recurring === undefined ? true : cronBoolean(input.recurring), durable: cronBoolean(input.durable) });
+      }
+      break;
+    case 'cronlist':
+      if (hasOnly()) return new ScheduleToolUseMessage(ts, id, { action: 'list' });
+      break;
+    case 'crondelete':
+      if (hasOnly('id')) row = ScheduleToolUseMessage.fromRequest(ts, id, { action: 'delete', jobId: input.id });
+      break;
+  }
+  return row ?? new UnknownToolUseMessage(ts, id, rawName, input);
+}
+
 /**
  * Converts a Claude CLI tool_use part to a concrete ToolUseMessage.
  * Returns UnknownToolUseMessage for unrecognized or malformed payloads.
@@ -131,30 +173,11 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
   const key = canonicalize(rawName);
 
   switch (key) {
-    case 'schedulewakeup': {
-      if (input.stop === true) return new ScheduleToolUseMessage(ts, toolId, { action: 'stop-loop' });
-      if (input.stop !== undefined && input.stop !== false) break;
-      const row = ScheduleToolUseMessage.fromRequest(ts, toolId, {
-        action: 'wakeup', delaySeconds: input.delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop,
-      });
-      if (row) return row;
-      break;
-    }
-    case 'croncreate': {
-      const row = ScheduleToolUseMessage.fromRequest(ts, toolId, {
-        action: 'cron', expression: input.cron, prompt: input.prompt,
-        recurring: input.recurring === undefined ? true : input.recurring, durable: input.durable,
-      });
-      if (row) return row;
-      break;
-    }
+    case 'schedulewakeup':
+    case 'croncreate':
     case 'cronlist':
-      return new ScheduleToolUseMessage(ts, toolId, { action: 'list' });
-    case 'crondelete': {
-      const row = ScheduleToolUseMessage.fromRequest(ts, toolId, { action: 'delete', jobId: input.id });
-      if (row) return row;
-      break;
-    }
+    case 'crondelete':
+      return claudeScheduleToolUse(ts, toolId, rawName, key, rawPart.input);
     case 'toolsearch':
       return new ClaudeToolSearchToolUseMessage(ts, toolId, asString(input.query) ?? '', asNumber(input.max_results));
 
