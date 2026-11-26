@@ -222,6 +222,15 @@ test('falls back to cached text when terminal fields are explicitly blank', () =
   }
 });
 
+test('keeps flat content in item form without declaring whitespace as primary text', () => {
+  const timer = { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' } };
+  const content = [{ type: 'text', text: ' \n' }, { type: 'text', text: 'Saved' }];
+  const row = session().start('flat', { ...timer, status: 'completed', content }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content).toEqual({ items: content });
+  expect(row.primaryTextItems).toEqual([1]);
+});
+
 test('terminal text replaces progress without erasing cached attachments or independent metadata', () => {
   const s = session();
   const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };

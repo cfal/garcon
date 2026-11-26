@@ -6,9 +6,12 @@ import type { TrackedCall } from './tool-call-snapshot.js';
 type Block = Record<string, unknown>;
 type Body = ToolResultMessage['content'];
 
+function plainAcpText(block: Block): boolean {
+  return block.type === 'content' && Object.keys(block).length === 2 && isPlainTextPart(block.content);
+}
+
 function plainText(block: Block): boolean {
-  return isPlainTextPart(block) ||
-    (block.type === 'content' && Object.keys(block).length === 2 && isPlainTextPart(block.content));
+  return plainAcpText(block) || isPlainTextPart(block);
 }
 
 function blockText(block: Block): string {
@@ -113,7 +116,7 @@ export function planOrScheduleResult(
   const text = joinedText(blocks);
   const body: Body = status === 'completed' ? {} : { status };
   let primary: number[] = [];
-  if (blocks.some(block => !plainText(block))) {
+  if (blocks.some(block => !plainAcpText(block))) {
     body.items = blocks;
     storeOutput(body, echoes.length || (frameText && !frameOutput) ? undefined : raw, fields, true);
     if (frameText && !frameOutput) primary = blocks.flatMap((block, i) => blockText(block).trim() ? [i] : []);
