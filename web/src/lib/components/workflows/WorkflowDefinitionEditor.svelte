@@ -541,7 +541,11 @@
 							>
 								<label class="min-w-0 flex-1 space-y-1 text-sm">
 									<span>{m.workflow_studio_definition_name()}</span>
-									<input class="workflow-field" bind:value={definitionName} maxlength="256" />
+									<input
+										class="workflow-field text-base"
+										bind:value={definitionName}
+										maxlength="256"
+									/>
 								</label>
 								<Button
 									type="submit"
