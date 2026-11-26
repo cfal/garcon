@@ -518,13 +518,15 @@ function refitMessageElement(
   cost: (text: string) => number,
 ): string {
   if (isToolUseMessage(message)) {
-    const detail = toolSummary(message);
+    const { text, prefixBeforeLiteral } = projectToolUseSummary(message);
+    const name = toolName(message);
     return fitElementWithinCost(
       '    <assistant><tool-use>',
-      detail ? `${toolName(message)}: ${detail}` : toolName(message),
+      text ? `${name}: ${text}` : name,
       '</tool-use></assistant>',
       maximumCost,
       cost,
+      prefixBeforeLiteral === undefined ? undefined : `${name}: ${prefixBeforeLiteral}`,
     );
   }
   switch (message.type) {
@@ -602,13 +604,14 @@ function fitElementWithinCost(
   close: string,
   maximumCost: number,
   cost: (text: string) => number,
+  refitPrefix = content,
 ): string {
   const escaped = escapeXml(content);
   const full = `${open}${escaped}${close}`;
   if (cost(full) <= maximumCost) return full;
   const suffix = '...';
   if (cost(`${open}${suffix}${close}`) > maximumCost) return '';
-  const codePoints = Array.from(content);
+  const codePoints = Array.from(refitPrefix);
   let low = 0;
   let high = codePoints.length;
   while (low < high) {
@@ -661,6 +664,8 @@ function toolName(message: ToolUseChatMessage): string {
 export interface ProjectedToolUseSummary {
   readonly text: string;
   readonly abridged: boolean;
+  // A tighter document budget may omit the literal, but must never cut its escaping.
+  readonly prefixBeforeLiteral?: string;
 }
 
 export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToolUseSummary {
@@ -695,10 +700,10 @@ function summarizeSchedule(request: ToolScheduleRequest): ProjectedToolUseSummar
   let text = prefix + ' "';
   for (const char of request.prompt) {
     const escaped = JSON.stringify(char).slice(1, -1);
-    if (text.length + escaped.length + 1 > TOOL_SUMMARY_MAX_CHARS) return { text: text + '"...', abridged: true };
+    if (text.length + escaped.length + 1 > TOOL_SUMMARY_MAX_CHARS) return { text: text + '"...', abridged: true, prefixBeforeLiteral: prefix };
     text += escaped;
   }
-  return { text: text + '"', abridged: false };
+  return { text: text + '"', abridged: false, prefixBeforeLiteral: prefix };
 }
 
 function toolSummary(message: ToolUseChatMessage): string {

@@ -1,0 +1,28 @@
+import { expect, test } from 'bun:test';
+import { ScheduleToolUseMessage, UserMessage } from '../../../../../common/chat-types.js';
+import { createCarryoverTranscript } from '../../../../../common/transcript-seed.js';
+import { foldHandoffArtifactEntries } from '../projection.js';
+import { renderFittedHandoffArtifact } from '../xml.js';
+
+const timer = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 120, prompt: 'a\n'.repeat(100) });
+
+test('omits the quoted prompt as a unit when the final artifact budget cannot hold it', () => {
+  const sourceFold = foldHandoffArtifactEntries([
+    { kind: 'message', ordinal: 1, category: 'conversation', message: new UserMessage('', 'Synthetic request. '.repeat(220)) },
+    { kind: 'message', ordinal: 2, category: 'tool-calls', message: timer },
+  ]);
+  const input = { chat: { id: '1795690000000000', agentId: 'claude', model: 'synthetic', title: 'x'.repeat(3081) },
+    sourceFold, lastOrdinal: 2, transcriptViewId: 'synthetic-view' };
+  const small = renderFittedHandoffArtifact({ ...input, contextWindowTokens: 1024 });
+  expect(small?.abridgedEntryCount).toBe(1);
+  expect(small?.document).toContain('<text>Request wakeup in 2 minutes Prompt:...</text>');
+  const large = renderFittedHandoffArtifact({ ...input, contextWindowTokens: 8192 });
+  expect(large?.document).toMatch(/Prompt: "a\\n.*"\.\.\.<\/text>/);
+});
+
+test('applies the same literal boundary to the final carryover fit', () => {
+  const full = createCarryoverTranscript([timer], 0)!.prefix;
+  expect(full).toContain('Prompt: "a\\n');
+  const fitted = createCarryoverTranscript([timer], full.length - 50)!.prefix;
+  expect(fitted).toContain('Request wakeup in 2 minutes Prompt:...</tool-use>');
+});

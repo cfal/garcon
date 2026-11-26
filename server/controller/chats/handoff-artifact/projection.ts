@@ -169,6 +169,7 @@ function projectEntry(
       tag: 'tool-call',
       attributes: [{ name: 'type', value: message.type }],
       body: body.text || null,
+      ...(summary.prefixBeforeLiteral === undefined ? {} : { prefixBeforeLiteral: artifactBody(summary.prefixBeforeLiteral).text }),
       abridged: summary.abridged || body.abridged,
     });
   }
@@ -274,14 +275,8 @@ function projectEntry(
   }
 }
 
-function sourceEntry(input: {
-  readonly ordinal: number;
-  readonly level: number;
-  readonly turn: number;
-  readonly tag: HandoffArtifactSourceEntry['tag'];
+function sourceEntry(input: Omit<HandoffArtifactSourceEntry, 'attributes'> & {
   readonly attributes?: readonly HandoffArtifactAttribute[];
-  readonly body: string | null;
-  readonly abridged: boolean;
 }): HandoffArtifactSourceEntry {
   return { ...input, attributes: input.attributes ?? [] };
 }
@@ -323,7 +318,7 @@ function refitHandoffArtifactEntry(
   if (source.body === null) return '';
   const suffix = '...';
   if (cost(renderHandoffArtifactEntry(source, suffix, true)) > maximumCost) return '';
-  const codePoints = Array.from(source.body);
+  const codePoints = Array.from(source.prefixBeforeLiteral ?? source.body);
   let low = 0;
   let high = codePoints.length;
   while (low < high) {

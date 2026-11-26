@@ -33,7 +33,7 @@ test('bounded handoffs quote literal prompts and truncate only at a complete esc
     { action: 'wakeup', delaySeconds: 1, prompt }));
   const prompt = '  x  y\n    "later"\t';
   const prefix = 'Request wakeup in 1 second Prompt: ';
-  expect(summary(prompt)).toEqual({ text: prefix + JSON.stringify(prompt), abridged: false });
+  expect(summary(prompt)).toMatchObject({ text: prefix + JSON.stringify(prompt), abridged: false });
   const truncated = summary(prompt.repeat(100));
   expect(truncated.abridged).toBe(true);
   expect(truncated.text.endsWith('"...')).toBe(true);
