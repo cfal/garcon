@@ -98,7 +98,8 @@
 
 	$effect(() => {
 		if (open) {
-			void Promise.all([snippets.ensureLoaded(), preambles.ensureLoaded()]).catch(() => undefined);
+			void snippets.loadInBackground();
+			void preambles.loadInBackground();
 		}
 	});
 
@@ -107,7 +108,8 @@
 	});
 
 	function retryLoad(): void {
-		void Promise.all([snippets.refresh(), preambles.refresh()]).catch(() => undefined);
+		void snippets.refreshInBackground();
+		void preambles.refreshInBackground();
 	}
 
 	function handleOpenChange(nextOpen: boolean): void {

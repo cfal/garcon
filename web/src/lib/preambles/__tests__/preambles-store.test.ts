@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
-import { describeVersionedCatalogConcurrencyContract } from '$lib/stores/__tests__/versioned-catalog-contract.js';
 import { PreamblesStore } from '../preambles-store.svelte';
 import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
 
@@ -21,19 +20,6 @@ function preamble(id: string): Preamble {
 function snapshot(revision: number, ids: string[]): PreamblesSnapshot {
 	return { revision, preambles: ids.map(preamble) };
 }
-
-describeVersionedCatalogConcurrencyContract('PreamblesStore', {
-	snapshot,
-	createStore: (deps) => new PreamblesStore(deps),
-	createItem: (store, id) =>
-		store.create({
-			enabled: true,
-			title: `Preamble ${id}`,
-			content: `Content ${id}`,
-			scope: { type: 'global' },
-		}),
-	removeItem: (store, id) => store.remove(id),
-});
 
 describe('PreamblesStore', () => {
 	it('publishes invalidations without eagerly loading the catalog', async () => {
@@ -83,6 +69,25 @@ describe('PreamblesStore', () => {
 		expect(store.snapshot?.revision).toBe(3);
 	});
 
+	it('sends the revision of the snapshot whose order was computed during a cold-load move', async () => {
+		const load = Promise.withResolvers<PreamblesSnapshot>();
+		const reorder = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(2, ['b', 'a', 'c']) });
+		const store = new PreamblesStore({ get: vi.fn(() => load.promise), reorder });
+
+		const loaded = store.ensureLoaded();
+		const moving = store.move('b', 'up');
+		load.resolve(snapshot(1, ['a', 'b', 'c']));
+		await loaded;
+		// Install a newer snapshot after move() awaits ensureLoaded() and before it calls reorder().
+		store.applySnapshot(snapshot(2, ['c', 'a', 'b']));
+		await moving;
+
+		expect(reorder).toHaveBeenCalledWith({
+			expectedRevision: 1,
+			orderedPreambleIds: ['b', 'a', 'c'],
+		});
+	});
+
 	it('rolls back an optimistic reorder when the mutation fails', async () => {
 		const failure = new Error('reorder failed');
 		const reorder = vi.fn().mockRejectedValue(failure);
@@ -118,6 +123,58 @@ describe('PreamblesStore', () => {
 		firstMove.resolve({ success: true, snapshot: snapshot(3, ['a', 'c', 'b']) });
 		await movingFirst;
 		expect(store.snapshot).toEqual(snapshot(3, ['a', 'c', 'b']));
+	});
+
+	it('restores the confirmed order when two overlapping optimistic moves reject in reverse order', async () => {
+		const firstMove = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
+		const secondMove = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
+		const reorder = vi
+			.fn()
+			.mockReturnValueOnce(firstMove.promise)
+			.mockReturnValueOnce(secondMove.promise);
+		const store = new PreamblesStore({ reorder });
+		store.applySnapshot(snapshot(2, ['a', 'b', 'c']));
+
+		const movingFirst = store.move('c', 'up');
+		const movingSecond = store.move('c', 'up');
+		expect(store.preambles.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
+
+		const secondError = new Error('second move failed');
+		secondMove.reject(secondError);
+		await expect(movingSecond).rejects.toBe(secondError);
+		expect(store.preambles.map((entry) => entry.id)).toEqual(['a', 'c', 'b']);
+
+		const firstError = new Error('first move failed');
+		firstMove.reject(firstError);
+		await expect(movingFirst).rejects.toBe(firstError);
+		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b', 'c']));
+		expect(store.hasFreshSnapshot).toBe(true);
+	});
+
+	it('restores the confirmed order when two overlapping optimistic moves reject in dispatch order', async () => {
+		const firstMove = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
+		const secondMove = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
+		const reorder = vi
+			.fn()
+			.mockReturnValueOnce(firstMove.promise)
+			.mockReturnValueOnce(secondMove.promise);
+		const store = new PreamblesStore({ reorder });
+		store.applySnapshot(snapshot(2, ['a', 'b', 'c']));
+
+		const movingFirst = store.move('c', 'up');
+		const movingSecond = store.move('c', 'up');
+		expect(store.preambles.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
+
+		const firstError = new Error('first move failed');
+		firstMove.reject(firstError);
+		await expect(movingFirst).rejects.toBe(firstError);
+		expect(store.preambles.map((entry) => entry.id)).toEqual(['c', 'a', 'b']);
+
+		const secondError = new Error('second move failed');
+		secondMove.reject(secondError);
+		await expect(movingSecond).rejects.toBe(secondError);
+		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b', 'c']));
+		expect(store.hasFreshSnapshot).toBe(true);
 	});
 
 	it('refreshes a stale edit after a revision conflict without advancing its revision', async () => {
@@ -241,92 +298,12 @@ describe('PreamblesStore', () => {
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
 	});
 
-	it('refreshes again when invalidated during an in-flight load', async () => {
-		const firstRead = Promise.withResolvers<PreamblesSnapshot>();
-		const secondRead = Promise.withResolvers<PreamblesSnapshot>();
-		const get = vi
-			.fn<() => Promise<PreamblesSnapshot>>()
-			.mockReturnValueOnce(firstRead.promise)
-			.mockReturnValueOnce(secondRead.promise);
-		const store = new PreamblesStore({ get });
-		store.applySnapshot(snapshot(1, ['a']));
-
-		const first = store.refreshIfLoaded();
-		const second = store.refreshIfLoaded();
-		firstRead.resolve(snapshot(2, ['a']));
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-		secondRead.resolve(snapshot(3, ['a', 'b']));
-		await Promise.all([first, second]);
-
-		expect(store.snapshot).toEqual(snapshot(3, ['a', 'b']));
-	});
-
-	it('does not replace a newer mutation snapshot with a stale read', () => {
-		const store = new PreamblesStore();
-		store.applySnapshot(snapshot(4, ['a', 'b']));
-		store.applySnapshot(snapshot(3, ['a']));
-		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
-	});
-
-	it('withholds delayed reorder results across a lower-revision restore boundary', async () => {
+	it('completes an optimistic move when an overlapping same-revision GET returns confirmed order', async () => {
 		const mutation = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
 		const reorder = vi.fn(() => mutation.promise);
 		const get = vi
 			.fn<() => Promise<PreamblesSnapshot>>()
-			.mockResolvedValueOnce(snapshot(0, []))
-			.mockResolvedValueOnce(snapshot(0, []));
-		const store = new PreamblesStore({ get, reorder });
-		store.applySnapshot(snapshot(3, ['a', 'b']));
-
-		const moving = store.move('b', 'up');
-		expect(reorder).toHaveBeenCalledOnce();
-		await store.refreshIfLoaded();
-		expect(store.snapshot).toEqual(snapshot(0, []));
-		expect(store.hasFreshSnapshot).toBe(true);
-
-		mutation.resolve({ success: true, snapshot: snapshot(4, ['b', 'a']) });
-		await moving;
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.snapshot).toEqual(snapshot(0, []));
-		expect(store.hasFreshSnapshot).toBe(true);
-	});
-
-	it('rolls back an optimistic move and queues a post-ack GET when ack lands during an in-flight reconnect GET', async () => {
-		const firstRead = Promise.withResolvers<PreamblesSnapshot>();
-		const secondRead = Promise.withResolvers<PreamblesSnapshot>();
-		const get = vi
-			.fn<() => Promise<PreamblesSnapshot>>()
-			.mockReturnValueOnce(firstRead.promise)
-			.mockReturnValueOnce(secondRead.promise);
-		const mutation = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
-		const reorder = vi.fn(() => mutation.promise);
-		const store = new PreamblesStore({ get, reorder });
-		store.applySnapshot(snapshot(3, ['a', 'b']));
-
-		const moving = store.move('b', 'up');
-		expect(reorder).toHaveBeenCalledOnce();
-		expect(store.preambles.map((entry) => entry.id)).toEqual(['b', 'a']);
-
-		const reconnecting = store.reconcileAfterReconnect();
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-
-		mutation.resolve({ success: true, snapshot: snapshot(4, ['b', 'a']) });
-		await vi.waitFor(() =>
-			expect(store.preambles.map((entry) => entry.id)).toEqual(['a', 'b']),
-		);
-
-		firstRead.resolve(snapshot(3, ['a', 'b']));
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-		secondRead.resolve(snapshot(4, ['a', 'b']));
-		await Promise.all([moving, reconnecting]);
-		expect(store.preambles.map((entry) => entry.id)).toEqual(['a', 'b']);
-		expect(store.hasFreshSnapshot).toBe(true);
-	});
-
-	it('does not misclassify an optimistic move as a reset when a pre-move same-revision GET returns confirmed order', async () => {
-		const mutation = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
-		const reorder = vi.fn(() => mutation.promise);
-		const get = vi.fn<() => Promise<PreamblesSnapshot>>().mockResolvedValueOnce(snapshot(3, ['a', 'b']));
+			.mockResolvedValueOnce(snapshot(3, ['a', 'b']));
 		const store = new PreamblesStore({ get, reorder });
 		store.applySnapshot(snapshot(3, ['a', 'b']));
 

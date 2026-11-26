@@ -5,25 +5,9 @@ import {
 } from '$lib/stores/versioned-catalog-store.svelte.js';
 import {
 	SNIPPET_ERROR_CODES,
-	type Snippet,
 	type SnippetDefinitionInput,
 	type SnippetsSnapshot,
 } from '$shared/snippets';
-
-function snippetsDiffer(left: readonly Snippet[], right: readonly Snippet[]): boolean {
-	if (left.length !== right.length) return true;
-	return left.some((a, index) => {
-		const b = right[index]!;
-		return (
-			a.id !== b.id ||
-			a.shortName !== b.shortName ||
-			a.template !== b.template ||
-			a.defaultArguments !== b.defaultArguments ||
-			a.createdAt !== b.createdAt ||
-			a.updatedAt !== b.updatedAt
-		);
-	});
-}
 
 export type SnippetsStatus = VersionedCatalogStatus;
 
@@ -42,7 +26,6 @@ export class SnippetsStore {
 			load: () => (this.deps.get ?? getSnippets)(),
 			loadErrorMessage: 'Failed to load snippets',
 			revisionConflictCode: SNIPPET_ERROR_CODES.revisionConflict,
-			entriesDiffer: (left, right) => snippetsDiffer(left.snippets, right.snippets),
 		});
 	}
 
@@ -90,10 +73,6 @@ export class SnippetsStore {
 		return this.#catalog.refreshInBackground();
 	}
 
-	reconcileAfterReconnect(): Promise<void> {
-		return this.#catalog.reconcileAfterReconnect();
-	}
-
 	refreshIfLoaded(): Promise<void> {
 		return this.#catalog.refreshIfLoaded();
 	}
@@ -105,18 +84,18 @@ export class SnippetsStore {
 		);
 	}
 
-	update(id: string, definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
+	update(
+		id: string,
+		definition: SnippetDefinitionInput,
+		expectedRevision: number,
+	): Promise<SnippetsSnapshot> {
 		const update = this.deps.update ?? updateSnippet;
-		return this.#catalog.mutate((current) =>
-			update({ expectedRevision: current.revision, id, snippet: definition }),
-		);
+		return this.#catalog.mutate(() => update({ expectedRevision, id, snippet: definition }));
 	}
 
-	remove(id: string): Promise<SnippetsSnapshot> {
+	remove(id: string, expectedRevision: number): Promise<SnippetsSnapshot> {
 		const remove = this.deps.remove ?? removeSnippet;
-		return this.#catalog.mutate((current) =>
-			remove({ expectedRevision: current.revision, id }),
-		);
+		return this.#catalog.mutate(() => remove({ expectedRevision, id }));
 	}
 
 	applySnapshot(nextSnapshot: SnippetsSnapshot): SnippetsSnapshot {

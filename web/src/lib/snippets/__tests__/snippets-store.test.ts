@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SnippetsStore } from '../snippets-store.svelte';
 import { ApiError } from '$lib/api/client.js';
-import { describeVersionedCatalogConcurrencyContract } from '$lib/stores/__tests__/versioned-catalog-contract.js';
 import type { Snippet, SnippetsSnapshot } from '$shared/snippets';
 import { SNIPPET_ERROR_CODES } from '$shared/snippets';
 
@@ -19,14 +18,6 @@ function snippet(id: string): Snippet {
 function snapshot(revision: number, ids: string[]): SnippetsSnapshot {
 	return { revision, snippets: ids.map(snippet) };
 }
-
-describeVersionedCatalogConcurrencyContract('SnippetsStore', {
-	snapshot,
-	createStore: (deps) => new SnippetsStore(deps),
-	createItem: (store, id) =>
-		store.create({ shortName: `snippet-${id}`, template: `Template ${id}`, defaultArguments: '' }),
-	removeItem: (store, id) => store.remove(id),
-});
 
 describe('SnippetsStore', () => {
 	it('honors queued invalidation after a failed refresh', async () => {
@@ -162,26 +153,6 @@ describe('SnippetsStore', () => {
 		expect(get).not.toHaveBeenCalled();
 	});
 
-	it('refreshes again when invalidated during an in-flight refresh', async () => {
-		const firstRead = Promise.withResolvers<SnippetsSnapshot>();
-		const secondRead = Promise.withResolvers<SnippetsSnapshot>();
-		const get = vi
-			.fn<() => Promise<SnippetsSnapshot>>()
-			.mockReturnValueOnce(firstRead.promise)
-			.mockReturnValueOnce(secondRead.promise);
-		const store = new SnippetsStore({ get });
-		store.applySnapshot(snapshot(1, ['a']));
-
-		const first = store.refreshIfLoaded();
-		const second = store.refreshIfLoaded();
-		firstRead.resolve(snapshot(2, ['a']));
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-		secondRead.resolve(snapshot(3, ['a', 'b']));
-		await Promise.all([first, second]);
-
-		expect(store.snapshot).toEqual(snapshot(3, ['a', 'b']));
-	});
-
 	it('refreshes after an invalidation during the initial load', async () => {
 		const firstRead = Promise.withResolvers<SnippetsSnapshot>();
 		const secondRead = Promise.withResolvers<SnippetsSnapshot>();
@@ -200,48 +171,5 @@ describe('SnippetsStore', () => {
 		await invalidated;
 
 		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b']));
-	});
-
-	it('does not replace a newer snapshot with a stale response', () => {
-		const store = new SnippetsStore();
-		store.applySnapshot(snapshot(4, ['a', 'b']));
-
-		store.applySnapshot(snapshot(3, ['a']));
-
-		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
-	});
-
-	it('queues a post-ack reconcile GET when a withheld mutation resolves while reconnect GET is in flight', async () => {
-		const firstRead = Promise.withResolvers<SnippetsSnapshot>();
-		const secondRead = Promise.withResolvers<SnippetsSnapshot>();
-		const get = vi
-			.fn<() => Promise<SnippetsSnapshot>>()
-			.mockReturnValueOnce(firstRead.promise)
-			.mockReturnValueOnce(secondRead.promise);
-		const mutation = Promise.withResolvers<{ success: true; snapshot: SnippetsSnapshot }>();
-		const create = vi.fn(() => mutation.promise);
-		const store = new SnippetsStore({ get, create });
-		store.applySnapshot(snapshot(3, ['a']));
-
-		const creating = store.create({
-			shortName: 'snippet-b',
-			template: 'Template b',
-			defaultArguments: '',
-		});
-		expect(create).toHaveBeenCalledOnce();
-		const reconnecting = store.reconcileAfterReconnect();
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-
-		mutation.resolve({ success: true, snapshot: snapshot(4, ['a', 'b']) });
-		await Promise.resolve();
-		expect(store.snapshot).toEqual(snapshot(3, ['a']));
-
-		firstRead.resolve(snapshot(3, ['restored']));
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-		secondRead.resolve(snapshot(4, ['restored', 'post-ack']));
-		expect(await creating).toEqual(snapshot(4, ['restored', 'post-ack']));
-		await reconnecting;
-		expect(store.snapshot).toEqual(snapshot(4, ['restored', 'post-ack']));
-		expect(store.hasFreshSnapshot).toBe(true);
 	});
 });

@@ -1,22 +1,21 @@
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 
-export interface ReconnectReconcilableCatalog {
-	reconcileAfterReconnect(): Promise<void>;
+export interface RefreshableCatalog {
+	refreshIfLoaded(): Promise<void>;
 }
 
-// Reconciles loaded catalogs on every WebSocket connected transition, ignoring
-// same-socket status updates and independent of wall-clock timestamp resolution.
+// Refreshes loaded catalogs whenever the WebSocket connection becomes connected.
 export function bindCatalogReconnect(
 	ws: Pick<PrimaryWsConnectionPort, 'isConnected' | 'onConnectionChange'>,
-	catalogs: readonly ReconnectReconcilableCatalog[],
+	catalogs: readonly RefreshableCatalog[],
 ): () => void {
-	const reconcile = (): void => {
+	const refreshAll = (): void => {
 		for (const catalog of catalogs) {
-			void catalog.reconcileAfterReconnect();
+			void catalog.refreshIfLoaded();
 		}
 	};
-	if (ws.isConnected) reconcile();
+	if (ws.isConnected) refreshAll();
 	return ws.onConnectionChange((connected) => {
-		if (connected) reconcile();
+		if (connected) refreshAll();
 	});
 }
