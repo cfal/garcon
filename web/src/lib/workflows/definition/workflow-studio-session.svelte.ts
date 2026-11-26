@@ -43,6 +43,7 @@ class WorkflowStudioSession {
 		null,
 	);
 	busy = $state(false);
+	pendingEdits = $state(false);
 	error = $state<string | null>(null);
 	notice = $state<string | null>(null);
 	pendingLaunch = $state.raw<Launch | null>(null);
@@ -62,7 +63,9 @@ class WorkflowStudioSession {
 	get needsExitGuard(): boolean {
 		const draft = this.current?.draft;
 		return (
-			this.locked || Boolean(draft?.dirty || draft?.file?.busy || draft?.file?.reconcileRequired)
+			this.locked ||
+			this.pendingEdits ||
+			Boolean(draft?.dirty || draft?.file?.busy || draft?.file?.reconcileRequired)
 		);
 	}
 
@@ -155,7 +158,7 @@ class WorkflowStudioSession {
 
 	openRevisionInEditor(revision: WorkflowRevision, context: WorkflowLaunchContext | null): void {
 		const id = ++this.#nextRequestId;
-		if (!this.locked && !this.current?.draft.dirty) {
+		if (!this.locked && !this.pendingEdits && !this.current?.draft.dirty) {
 			this.replace(new WorkflowDraftState(revision.source, { definition: revision }), context);
 		}
 		this.navigationRequest = { id, kind: 'editor', revision, context };
@@ -172,6 +175,7 @@ class WorkflowStudioSession {
 	clear(): void {
 		this.current?.draft.file?.dispose();
 		this.current = null;
+		this.pendingEdits = false;
 		this.startedRun = null;
 		this.notice = this.error = null;
 	}

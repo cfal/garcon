@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		WORKFLOW_DEFINITION_LIMITS,
@@ -25,6 +27,7 @@
 		context,
 		narrow,
 		editing,
+		onPendingChange,
 		onEdit,
 		onDuplicate,
 		onInsert,
@@ -36,6 +39,7 @@
 		context: WorkflowLaunchContext | null;
 		narrow: boolean;
 		editing: boolean;
+		onPendingChange?: (pending: boolean) => void;
 		onEdit: (fields: Readonly<Record<string, JsonValue | undefined>>) => boolean;
 		onDuplicate: () => void;
 		onInsert: () => void;
@@ -59,25 +63,41 @@
 	const authoredConcurrency = $derived(step.on?.kind === 'each' ? step.on.maxConcurrency : 1);
 	const authoredGroups = $derived(JSON.stringify(step.on?.kind === 'all' ? step.on.steps : []));
 	const authoredBindings = $derived(JSON.stringify(step.bindings ?? {}));
+	const initialBindings = $derived.by(() => {
+		const parsed = JSON.parse(authoredBindings) as Record<
+			string,
+			Parameters<typeof workflowBindingSource>[0]
+		>;
+		return Object.entries(parsed).map(([entryName, binding]) => ({
+			id: `binding:${entryName}`,
+			name: entryName,
+			source: workflowBindingSource(binding),
+		}));
+	});
 	let name = $derived(authoredName);
 	let instruction = $derived(authoredInstruction);
 	let mode = $derived(authoredMode);
 	let reference = $derived(authoredReference);
 	let concurrency = $derived<number | undefined>(authoredConcurrency);
 	let groups = $derived(JSON.parse(authoredGroups) as string[]);
-	let bindings = $derived.by(() => {
-		const parsed = JSON.parse(authoredBindings) as Record<
-			string,
-			Parameters<typeof workflowBindingSource>[0]
-		>;
-		return Object.entries(parsed).map(([name, binding]) => ({
-			id: `binding:${name}`,
-			name,
-			source: workflowBindingSource(binding),
-		}));
-	});
+	let bindings = $derived(initialBindings.map((entry) => ({ ...entry })));
 	let showSettings = $state(false);
 	let branchSignal = $state('');
+	let settingsRef = $state<{
+		flushPending(): 'clean' | 'applied' | 'blocked';
+		discardPending(): void;
+	}>();
+	let choicesRef = $state<{
+		flushPending(): 'clean' | 'applied' | 'blocked';
+		discardPending(): void;
+	}>();
+	let signalsRef = $state<{
+		flushPending(): 'clean' | 'applied' | 'blocked';
+		discardPending(): void;
+	}>();
+	let settingsDirty = $state(false);
+	let choicesDirty = $state(false);
+	let signalsDirty = $state(false);
 	const available = $derived(
 		workflowSignals(
 			definition.steps.filter((entry) => entry.id !== step.id && entry.on?.kind !== 'each'),
@@ -125,18 +145,39 @@
 					bindings.length),
 	);
 
-	function applyFields(fields: Readonly<Record<string, JsonValue | undefined>>) {
+	const bindingsDirty = $derived(
+		bindings.length !== initialBindings.length ||
+			bindings.some(
+				(entry, idx) =>
+					entry.name !== initialBindings[idx]?.name || entry.source !== initialBindings[idx]?.source,
+			),
+	);
+	const ownDirty = $derived(
+		editing &&
+			(name !== authoredName ||
+				instruction !== authoredInstruction ||
+				mode !== authoredMode ||
+				reference !== authoredReference ||
+				(mode === 'signal' && concurrency !== authoredConcurrency) ||
+				JSON.stringify(groups) !== authoredGroups ||
+				bindingsDirty),
+	);
+
+	$effect(() => {
+		onPendingChange?.(editing && (ownDirty || settingsDirty || choicesDirty || signalsDirty));
+	});
+
+	function applyFields(fields: Readonly<Record<string, JsonValue | undefined>>): boolean {
 		if (!editing || index < 0) return false;
 		return onEdit(fields);
 	}
 
-	function applyStep(event: SubmitEvent) {
-		event.preventDefault();
-		if (!editing || !complete) return;
+	function commitStepFields(): boolean {
+		if (!editing || !complete) return false;
 		let on: JsonValue | undefined;
 		if (mode === 'join') on = { kind: 'all', close: reference, steps: groups };
 		else if (mode === 'signal' && signal) on = workflowSignalSubscription(signal, concurrency ?? 1);
-		applyFields({
+		return applyFields({
 			name: name.trim() || undefined,
 			[step.kind === 'command' ? 'command' : 'prompt']: instruction,
 			on,
@@ -145,6 +186,46 @@
 				: undefined,
 		});
 	}
+
+	function applyStep(event: SubmitEvent) {
+		event.preventDefault();
+		commitStepFields();
+	}
+
+	export function flushPending(): 'clean' | 'applied' | 'blocked' {
+		if (!editing || index < 0) return 'clean';
+		let applied = false;
+		for (const child of [settingsRef, choicesRef, signalsRef]) {
+			if (!child) continue;
+			const outcome = child.flushPending();
+			if (outcome === 'blocked') return 'blocked';
+			if (outcome === 'applied') applied = true;
+		}
+		if (ownDirty) {
+			if (!complete || !commitStepFields()) return 'blocked';
+			applied = true;
+		}
+		return applied ? 'applied' : 'clean';
+	}
+
+	export function discardPending(): void {
+		settingsRef?.discardPending();
+		choicesRef?.discardPending();
+		signalsRef?.discardPending();
+		showSettings = false;
+		settingsDirty = false;
+		choicesDirty = false;
+		signalsDirty = false;
+		name = authoredName;
+		instruction = authoredInstruction;
+		mode = authoredMode;
+		reference = authoredReference;
+		concurrency = authoredConcurrency;
+		groups = JSON.parse(authoredGroups) as string[];
+		bindings = initialBindings.map((entry) => ({ ...entry }));
+	}
+
+	onDestroy(() => onPendingChange?.(false));
 </script>
 
 {#if editing}
@@ -258,10 +339,10 @@
 					</select>
 					<Button
 						size="sm"
-						variant="ghost"
+						variant="outline"
 						class="justify-self-start"
 						onclick={() => (bindings = bindings.filter((_, current) => current !== index))}
-						>{m.workflow_studio_remove_binding()}</Button
+						><Trash2 class="size-4" /> {m.workflow_studio_remove_binding()}</Button
 					>
 				</div>
 			{/each}
@@ -322,20 +403,38 @@
 			size="sm"
 			variant="outline"
 			aria-expanded={showSettings}
-			onclick={() => (showSettings = !showSettings)}>{m.workflow_studio_step_settings()}</Button
+			onclick={() => {
+				if (showSettings && settingsRef?.flushPending() === 'blocked') return;
+				showSettings = !showSettings;
+			}}>{m.workflow_studio_step_settings()}</Button
 		>
 		{#if showSettings}
-			<WorkflowStepSettings {step} {context} {narrow} disabled={!editing} onApply={applyFields} />
+			<WorkflowStepSettings
+				bind:this={settingsRef}
+				{step}
+				{context}
+				{narrow}
+				disabled={!editing}
+				onDirtyChange={(dirty) => (settingsDirty = dirty)}
+				onApply={applyFields}
+			/>
 		{/if}
 	{/if}
 {:else}
 	<pre class="whitespace-pre-wrap wrap-anywhere bg-muted p-2 text-sm">{instruction}</pre>
 {/if}
 {#if editing && step.kind === 'decision'}
-	<WorkflowChoicesEditor choices={step.choices} onChange={(choices) => applyFields({ choices })} />
+	<WorkflowChoicesEditor
+		bind:this={choicesRef}
+		choices={step.choices}
+		onPendingChange={(dirty) => (choicesDirty = dirty)}
+		onChange={(choices) => applyFields({ choices })}
+	/>
 {:else if editing && step.kind === 'agent'}
 	<WorkflowSignalsEditor
+		bind:this={signalsRef}
 		signals={step.signals ?? {}}
+		onPendingChange={(dirty) => (signalsDirty = dirty)}
 		onChange={(signals) => applyFields({ signals })}
 	/>
 {:else if step.kind === 'decision'}

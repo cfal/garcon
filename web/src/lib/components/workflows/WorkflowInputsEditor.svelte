@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		WORKFLOW_VALUE_TYPES,
@@ -13,9 +14,11 @@
 
 	let {
 		inputs,
+		onPendingChange,
 		onChange,
 	}: {
 		inputs: Readonly<Record<string, WorkflowInput>>;
+		onPendingChange?: (pending: boolean) => void;
 		onChange: (name: string, input: JsonValue | undefined) => boolean;
 	} = $props();
 
@@ -26,6 +29,22 @@
 	let hasDefault = $state(false);
 	let defaultValue = $state('');
 	let problem = $state<string | null>(null);
+
+	$effect(() => {
+		onPendingChange?.(active !== undefined);
+	});
+
+	export function flushPending(): 'clean' | 'applied' | 'blocked' {
+		if (active === undefined) return 'clean';
+		return tryApply() ? 'applied' : 'blocked';
+	}
+
+	export function discardPending(): void {
+		active = undefined;
+		problem = null;
+	}
+
+	onDestroy(() => onPendingChange?.(false));
 	const entries = $derived(
 		Object.entries(inputs).map(([id, input]) => ({
 			id,
@@ -44,13 +63,12 @@
 		active = key;
 	}
 
-	function apply(event: SubmitEvent) {
-		event.preventDefault();
+	function tryApply(): boolean {
 		const key = active ?? name.trim();
 		problem = null;
-		if (active === null && !isNewWorkflowField(key, inputs)) {
+		if (!key || (active === null && !isNewWorkflowField(key, inputs))) {
 			problem = m.workflow_studio_unique_key();
-			return;
+			return false;
 		}
 		const value = { type: valueType, ...(description.trim() ? { description } : {}) };
 		const decoded = hasDefault
@@ -58,10 +76,16 @@
 			: null;
 		if (decoded && Object.hasOwn(decoded.errors, key)) {
 			problem = m.workflow_studio_bad_default();
-			return;
+			return false;
 		}
-		if (onChange(key, decoded ? { ...value, default: decoded.inputs[key] } : value))
-			active = undefined;
+		if (!onChange(key, decoded ? { ...value, default: decoded.inputs[key] } : value)) return false;
+		active = undefined;
+		return true;
+	}
+
+	function apply(event: SubmitEvent) {
+		event.preventDefault();
+		tryApply();
 	}
 </script>
 

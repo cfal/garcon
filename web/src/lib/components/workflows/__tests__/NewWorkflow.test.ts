@@ -676,4 +676,92 @@ steps:
 		);
 		expect(await screen.findByText('No published workflow definitions.')).toBeTruthy();
 	});
+
+	it('auto-applies valid buffered edits on step switch, view switch, and Publish, and removes bindings inline', async () => {
+		const source = `version: 1
+name: Guarded flow
+inputs:
+  topic: {type: string}
+steps:
+  - {id: first, kind: command, command: echo hi, bindings: {topic: inputs.topic}}
+  - {id: second, kind: decision, prompt: Ready?, choices: {yes: Yes, no: No}}
+`;
+		const draft = new WorkflowDraftState(source, { baseline: source });
+		const published = {
+			...workflowRevision(),
+			source: source.replace('Guarded flow', 'Updated flow'),
+		};
+		vi.mocked(api.publishWorkflowDefinition).mockResolvedValue(published);
+
+		render(WorkflowDefinitionEditor, {
+			props: {
+				draft,
+				context: null,
+				busy: false,
+				onPublish: () => void api.publishWorkflowDefinition({
+					definitionId: draft.definitionId,
+					expectedRevision: null,
+					source: draft.source,
+				}),
+				onTest: vi.fn(),
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: /first Command/i }));
+		expect(screen.getByLabelText<HTMLInputElement>('Binding name').value).toBe('topic');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove binding' }));
+		await fireEvent.input(screen.getByLabelText('Command'), { target: { value: 'echo updated' } });
+		await fireEvent.input(screen.getByLabelText('Definition name'), {
+			target: { value: 'Updated flow' },
+		});
+
+		// Switching steps auto-applies buffered command, binding removal, and definition name.
+		await fireEvent.click(screen.getByRole('button', { name: /second Human decision/i }));
+		expect(draft.result.definition).toMatchObject({
+			name: 'Updated flow',
+			steps: [
+				{ id: 'first', command: 'echo updated' },
+				{ id: 'second' },
+			],
+		});
+		expect(draft.result.definition?.steps[0]?.bindings).toBeUndefined();
+
+		// Switching views and publishing both flush buffered prompt edits before leaving.
+		await fireEvent.input(screen.getByLabelText('Prompt'), { target: { value: 'Updated decision?' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+		expect(draft.result.definition?.steps[1]).toMatchObject({ prompt: 'Updated decision?' });
+
+		await fireEvent.input(screen.getByLabelText('Prompt'), { target: { value: 'Final decision?' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+		expect(api.publishWorkflowDefinition).toHaveBeenCalledWith({
+			definitionId: draft.definitionId,
+			expectedRevision: null,
+			source: expect.stringContaining('Final decision?'),
+		});
+	});
+
+	it('prompts before discarding incomplete buffered edits and arms beforeunload while buffered', async () => {
+		render(NewWorkflowTestHost, { onRunStarted: vi.fn(), open: true });
+		await fireEvent.click(screen.getByRole('button', { name: 'Definition editor' }));
+
+		// Make an unapplied edit without submitting Apply step.
+		await fireEvent.click(screen.getByRole('button', { name: /review Human decision/i }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Add choice' }));
+		const canUnload = () => window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+		expect(canUnload()).toBe(false);
+
+		// Incomplete open sub-form blocks switching to New run with the Unapplied edits dialog.
+		await fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+		const guard = screen.getByRole('dialog', { name: 'Unapplied edits' });
+		await fireEvent.click(within(guard).getByRole('button', { name: 'Stay and fix' }));
+		expect(screen.queryByRole('dialog', { name: 'Unapplied edits' })).toBeNull();
+		expect(screen.getByLabelText('Choice ID')).toBeTruthy();
+
+		// Complete or discard: verify Discard edits clears buffered state and switches to New run.
+		await fireEvent.click(screen.getByRole('button', { name: 'New run' }));
+		const secondGuard = screen.getByRole('dialog', { name: 'Unapplied edits' });
+		await fireEvent.click(within(secondGuard).getByRole('button', { name: 'Discard edits' }));
+		expect(screen.getByLabelText('Definition')).toBeTruthy();
+		expect(canUnload()).toBe(true);
+	});
 });

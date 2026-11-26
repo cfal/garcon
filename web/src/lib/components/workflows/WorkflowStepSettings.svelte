@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
@@ -36,6 +36,7 @@
 		narrow,
 		disabled,
 		requireExecutor = false,
+		onDirtyChange,
 		onApply,
 	}: {
 		step: WorkflowAgentStep | WorkflowCommandStep;
@@ -43,7 +44,8 @@
 		narrow: boolean;
 		disabled: boolean;
 		requireExecutor?: boolean;
-		onApply: (fields: Readonly<Record<string, JsonValue | undefined>>) => void;
+		onDirtyChange?: (dirty: boolean) => void;
+		onApply: (fields: Readonly<Record<string, JsonValue | undefined>>) => boolean | void;
 	} = $props();
 
 	const id = $props.id();
@@ -65,6 +67,25 @@
 	);
 	let loaded = $state(false);
 	let tagsOpen = $state(false);
+	let userEdited = $state(false);
+	let initialPath = $state('');
+
+	$effect(() => {
+		onDirtyChange?.(userEdited || (loaded && form.nonblankPath !== initialPath));
+	});
+
+	export function flushPending(): 'clean' | 'applied' | 'blocked' {
+		if (!userEdited && (!loaded || form.nonblankPath === initialPath)) return 'clean';
+		if (!eligible) return 'blocked';
+		return apply() === false ? 'blocked' : 'applied';
+	}
+
+	export function discardPending(): void {
+		userEdited = false;
+		form.projectPath = initialPath;
+	}
+
+	onDestroy(() => onDirtyChange?.(false));
 
 	function agentChoices(executorId: string): readonly SessionAgentId[] {
 		const catalog = rootCatalog.forExecutor(executorId);
@@ -190,6 +211,7 @@
 				if (original.orderedPreambleIds !== undefined)
 					form.preambles.setExplicit([...original.orderedPreambleIds]);
 			}
+			initialPath = form.nonblankPath;
 			loaded = true;
 		})();
 		return () => {
@@ -209,44 +231,64 @@
 
 	function selectModel(next: ModelSelectorChange) {
 		if ((next.executorId ?? form.executorId) !== form.executorId) return;
+		userEdited = true;
 		form.selectAgent(next.agentId);
 		form.selectModel(next.modelValue, next);
 	}
 
-	function apply() {
-		if (!eligible) return;
+	function apply(): boolean {
+		if (!eligible) return false;
 		const location = {
 			executorId: inheritExecutor ? undefined : form.executorId,
 			projectPath: overridePath ? form.nonblankPath : undefined,
 		};
 		if (step.kind === 'command') {
-			onApply({ ...location, shell: shell || undefined });
-			return;
+			const ok = onApply({ ...location, shell: shell || undefined }) !== false;
+			if (ok) {
+				userEdited = false;
+				initialPath = form.nonblankPath;
+			}
+			return ok;
 		}
 		const selected = form.resolvedModelSelection;
-		if (!selected) return;
+		if (!selected) return false;
 		const envelope = form.agentSettings;
-		onApply({
-			...location,
-			agentId: form.agentId,
-			model: selected.model,
-			apiProviderId: selected.apiProviderId,
-			modelEndpointId: selected.modelEndpointId,
-			permissionMode: form.permissionMode,
-			thinkingMode: form.thinkingMode,
-			agentSettings: {
-				ownerId: envelope.ownerId,
-				schemaVersion: envelope.schemaVersion,
-				values: envelope.values,
-			},
-			orderedPreambleIds: form.preambles.creationFields.orderedPreambleIds,
-			attachments: filePaths.length ? filePaths.map((path) => ({ path })) : undefined,
-			tags: form.chatTags.length ? [...form.chatTags] : undefined,
-		});
+		const ok =
+			onApply({
+				...location,
+				agentId: form.agentId,
+				model: selected.model,
+				apiProviderId: selected.apiProviderId,
+				modelEndpointId: selected.modelEndpointId,
+				permissionMode: form.permissionMode,
+				thinkingMode: form.thinkingMode,
+				agentSettings: {
+					ownerId: envelope.ownerId,
+					schemaVersion: envelope.schemaVersion,
+					values: envelope.values,
+				},
+				orderedPreambleIds: form.preambles.creationFields.orderedPreambleIds,
+				attachments: filePaths.length ? filePaths.map((path) => ({ path })) : undefined,
+				tags: form.chatTags.length ? [...form.chatTags] : undefined,
+			}) !== false;
+		if (ok) {
+			userEdited = false;
+			initialPath = form.nonblankPath;
+		}
+		return ok;
 	}
 </script>
 
-<fieldset class="space-y-3 border-t border-border pt-3" disabled={disabled || !loaded}>
+<fieldset
+	class="space-y-3 border-t border-border pt-3"
+	disabled={disabled || !loaded}
+	oninput={() => {
+		if (loaded) userEdited = true;
+	}}
+	onchange={() => {
+		if (loaded) userEdited = true;
+	}}
+>
 	<legend class="text-sm font-semibold">{m.workflow_studio_step_settings()}</legend>
 	{#if !requireExecutor}
 		<label class="flex items-center gap-2 text-sm">
@@ -277,6 +319,7 @@
 			service="agents"
 			disabled={inheritExecutor || !loaded}
 			onSelect={(executorId) => {
+				userEdited = true;
 				form.selectExecutor(executorId);
 				form.projectPath = context?.executorId === executorId ? context.cwd : '';
 				shell = '';
@@ -302,7 +345,10 @@
 					currentPath: form.nonblankPath || form.browseStartPath || form.projectBasePath,
 					basePath: form.projectBasePath,
 					isMobile: narrow,
-					onSelect: (path) => form.selectProjectPath(path),
+					onSelect: (path) => {
+						userEdited = true;
+						form.selectProjectPath(path);
+					},
 					onClose: () => (form.showBrowser = false),
 					button: {
 						label: m.workflow_studio_browse_folder(),
@@ -387,7 +433,10 @@
 							descriptors: form.agentSettingDescriptors,
 							envelope: form.agentSettings,
 							defaults: catalog.getDefaultAgentSettings(form.agentId),
-							onChange: (setting, value) => form.setAgentSetting(setting, value),
+							onChange: (setting, value) => {
+								userEdited = true;
+								form.setAgentSetting(setting, value);
+							},
 						}}
 						placement="inline"
 						align="start"
@@ -408,15 +457,25 @@
 			tags={form.chatTags}
 			{knownTags}
 			open={tagsOpen}
-			onAdd={(tag) => form.addTag(tag)}
-			onRemove={(tag) => form.removeTag(tag)}
+			onAdd={(tag) => {
+				const added = form.addTag(tag);
+				if (added) userEdited = true;
+				return added;
+			}}
+			onRemove={(tag) => {
+				userEdited = true;
+				form.removeTag(tag);
+			}}
 			onClose={() => (tagsOpen = false)}
 		/>
 		<NewChatPreambleControls
 			selection={form.preambles}
 			nonblankPath={form.nonblankPath}
 			validationStatus={form.validationStatus}
-			onClear={() => form.preambles.setExplicit([])}
+			onClear={() => {
+				userEdited = true;
+				form.preambles.setExplicit([]);
+			}}
 		/>
 		{#if attachmentSupported || filePaths.length}
 			<label class="block space-y-1 text-sm">

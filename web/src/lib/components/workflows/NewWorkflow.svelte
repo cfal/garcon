@@ -66,6 +66,11 @@
 	let testSource = $state('');
 	let chooser = $state<SourceMode | null>(null);
 	let replace = $state.raw<(() => void) | null>(null);
+	let unappliedGuard = $state.raw<(() => void) | null>(null);
+	let editorRef = $state<{
+		flushPending(): 'clean' | 'applied' | 'blocked';
+		discardPending(): void;
+	}>();
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
 	let loadError = $state<string | null>(null);
@@ -92,7 +97,11 @@
 		untrack(() => {
 			session.consumeNavigationRequest(req.id);
 			if (req.kind === 'editor') {
-				if (session.current?.draft.source === req.revision.source && !session.current.draft.dirty) {
+				if (
+					session.current?.draft.source === req.revision.source &&
+					!session.current.draft.dirty &&
+					!session.pendingEdits
+				) {
 					page = 'editor';
 					return;
 				}
@@ -278,10 +287,20 @@
 		return new WorkflowDraftState(source, { baseline: source });
 	}
 
+	function runEditorTransition(action: () => void) {
+		if (page === 'editor' && editorRef?.flushPending() === 'blocked') {
+			unappliedGuard = action;
+			return;
+		}
+		action();
+	}
+
 	function changeDraft(action: () => void) {
 		if (locked || draft?.file?.busy) return;
-		if (draft?.dirty) replace = action;
-		else action();
+		runEditorTransition(() => {
+			if (draft?.dirty) replace = action;
+			else action();
+		});
 	}
 
 	function openEditor() {
@@ -325,7 +344,8 @@
 					variant={page === 'launch' ? 'secondary' : 'ghost'}
 					aria-pressed={page === 'launch'}
 					disabled={locked}
-					onclick={() => (page = 'launch')}>{m.workflow_studio_new_run()}</Button
+					onclick={() => runEditorTransition(() => (page = 'launch'))}
+					>{m.workflow_studio_new_run()}</Button
 				>
 				<Button
 					size="sm"
@@ -411,9 +431,11 @@
 	{#if page === 'editor' && draft}
 		{#key draft}
 			<WorkflowDefinitionEditor
+				bind:this={editorRef}
 				{draft}
 				context={draftContext}
 				busy={locked}
+				onPendingChange={(pending) => (session.pendingEdits = pending)}
 				onPublish={() => draft && void session.publish(draft)}
 				onTest={() => {
 					if (!draft?.result.definition || locked) return;
@@ -671,6 +693,35 @@
 						replace = null;
 						action?.();
 					}}>{m.workflow_studio_continue()}</Button
+				>
+			</div>
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}
+{#if unappliedGuard}
+	<Dialog.Root
+		open
+		onOpenChange={(open) => {
+			if (!open) unappliedGuard = null;
+		}}
+	>
+		<Dialog.Content>
+			<Dialog.Header>
+				<Dialog.Title>{m.workflow_studio_unapplied_edits()}</Dialog.Title>
+				<Dialog.Description>{m.workflow_studio_unapplied_warning()}</Dialog.Description>
+			</Dialog.Header>
+			<div class="flex flex-wrap justify-end gap-2">
+				<Button variant="ghost" onclick={() => (unappliedGuard = null)}
+					>{m.workflow_studio_stay_fix()}</Button
+				>
+				<Button
+					variant="destructive"
+					onclick={() => {
+						editorRef?.discardPending();
+						const action = unappliedGuard;
+						unappliedGuard = null;
+						action?.();
+					}}>{m.workflow_studio_discard_edits()}</Button
 				>
 			</div>
 		</Dialog.Content>

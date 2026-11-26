@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import CodeXml from '@lucide/svelte/icons/code-xml';
 	import List from '@lucide/svelte/icons/list';
@@ -10,6 +10,7 @@
 	import Undo2 from '@lucide/svelte/icons/undo-2';
 	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import { Button } from '$lib/components/ui/button';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import FileConflictComparison from '$lib/components/files/FileConflictComparison.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { isRecord, type JsonValue } from '$shared/json';
@@ -42,12 +43,14 @@
 		draft,
 		context,
 		busy,
+		onPendingChange,
 		onPublish,
 		onTest,
 	}: {
 		draft: WorkflowDraftState;
 		context: WorkflowLaunchContext | null;
 		busy: boolean;
+		onPendingChange?: (pending: boolean) => void;
 		onPublish: () => void;
 		onTest: () => void;
 	} = $props();
@@ -82,6 +85,64 @@
 	const canAdd = $derived(editable && steps.length < WORKFLOW_DEFINITION_LIMITS.steps);
 	const authoredName = $derived(current?.name ?? '');
 	let definitionName = $derived(authoredName);
+	type PendingFlush = 'clean' | 'applied' | 'blocked';
+	type PendingControl = {
+		flushPending(): PendingFlush;
+		discardPending(): void;
+	};
+	let inputsRef = $state<PendingControl>();
+	let stepRef = $state<PendingControl>();
+	let pendingInputs = $state(false);
+	let pendingStep = $state(false);
+	let unappliedGuard = $state.raw<(() => void) | null>(null);
+	const nameDirty = $derived(editable && Boolean(current) && definitionName !== authoredName);
+	const hasPendingEdits = $derived(nameDirty || pendingInputs || pendingStep);
+
+	$effect(() => {
+		onPendingChange?.(hasPendingEdits);
+	});
+
+	onDestroy(() => {
+		onPendingChange?.(false);
+	});
+
+	export function flushPending(): PendingFlush {
+		if (!editable || !current) return 'clean';
+		let applied = false;
+		if (nameDirty) {
+			const trimmed = definitionName.trim();
+			if (!trimmed) return 'blocked';
+			if (trimmed !== current.name) {
+				if (!draft.edit([{ kind: 'upsert', path: ['name'], value: trimmed }])) return 'blocked';
+				applied = true;
+			} else {
+				definitionName = authoredName;
+			}
+		}
+		for (const child of [inputsRef, stepRef]) {
+			if (!child) continue;
+			const outcome = child.flushPending();
+			if (outcome === 'blocked') return 'blocked';
+			if (outcome === 'applied') applied = true;
+		}
+		return applied ? 'applied' : 'clean';
+	}
+
+	export function discardPending(): void {
+		definitionName = authoredName;
+		inputsRef?.discardPending();
+		stepRef?.discardPending();
+		pendingInputs = false;
+		pendingStep = false;
+	}
+
+	function runGuarded(action: () => void): void {
+		if (flushPending() === 'blocked') {
+			unappliedGuard = action;
+			return;
+		}
+		action();
+	}
 
 	function editInput(name: string, value: JsonValue | undefined): boolean {
 		if (!current || !editable) return false;
@@ -95,9 +156,16 @@
 	}
 
 	function select(id: string) {
-		selected = id;
-		detailOpen = true;
-		void tick().then(() => focusWorkflowDetail(heading));
+		if (id === selected) {
+			detailOpen = true;
+			void tick().then(() => focusWorkflowDetail(heading));
+			return;
+		}
+		runGuarded(() => {
+			selected = id;
+			detailOpen = true;
+			void tick().then(() => focusWorkflowDetail(heading));
+		});
 	}
 
 	function back() {
@@ -218,10 +286,13 @@
 				</p>
 			</div>
 			<div class="flex flex-wrap gap-1">
-				<Button size="sm" variant="outline" disabled={!current || busy} onclick={onTest}
-					>{m.workflow_studio_test_run()}</Button
+				<Button
+					size="sm"
+					variant="outline"
+					disabled={!current || busy}
+					onclick={() => runGuarded(onTest)}>{m.workflow_studio_test_run()}</Button
 				>
-				<Button size="sm" disabled={!current || busy} onclick={onPublish}
+				<Button size="sm" disabled={!current || busy} onclick={() => runGuarded(onPublish)}
 					>{draft.file && draft.revision === null
 						? m.workflow_studio_publish_new_definition()
 						: m.workflow_studio_publish()}</Button
@@ -234,22 +305,25 @@
 				size="sm"
 				variant={view === 'outline' ? 'secondary' : 'ghost'}
 				aria-pressed={view === 'outline'}
-				onclick={() => (view = 'outline')}
-				><List class="size-4" /> {m.workflow_studio_outline()}</Button
+				onclick={() => {
+					if (view !== 'outline') runGuarded(() => (view = 'outline'));
+				}}><List class="size-4" /> {m.workflow_studio_outline()}</Button
 			>
 			<Button
 				size="sm"
 				variant={view === 'graph' ? 'secondary' : 'ghost'}
 				aria-pressed={view === 'graph'}
-				onclick={() => (view = 'graph')}
-				><WorkflowIcon class="size-4" /> {m.workflow_studio_graph()}</Button
+				onclick={() => {
+					if (view !== 'graph') runGuarded(() => (view = 'graph'));
+				}}><WorkflowIcon class="size-4" /> {m.workflow_studio_graph()}</Button
 			>
 			<Button
 				size="sm"
 				variant={view === 'source' ? 'secondary' : 'ghost'}
 				aria-pressed={view === 'source'}
-				onclick={() => (view = 'source')}
-				><CodeXml class="size-4" /> {m.workflow_studio_source()}</Button
+				onclick={() => {
+					if (view !== 'source') runGuarded(() => (view = 'source'));
+				}}><CodeXml class="size-4" /> {m.workflow_studio_source()}</Button
 			>
 			<Button
 				size="icon-sm"
@@ -281,10 +355,17 @@
 					variant={editing ? 'secondary' : 'outline'}
 					aria-pressed={editing}
 					disabled={Boolean(file?.comparison)}
-					onclick={() => (editing = !editing)}>{m.workflow_studio_edit_graph()}</Button
+					onclick={() => {
+						if (editing) runGuarded(() => (editing = false));
+						else editing = true;
+					}}>{m.workflow_studio_edit_graph()}</Button
 				>
 				{#if editing}
-					<Button size="sm" variant="outline" disabled={!canAdd} onclick={() => (picker = {})}
+					<Button
+						size="sm"
+						variant="outline"
+						disabled={!canAdd}
+						onclick={() => runGuarded(() => (picker = {}))}
 						><Plus class="size-4" /> {m.workflow_studio_add_step()}</Button
 					>
 				{/if}
@@ -300,15 +381,18 @@
 						size="sm"
 						variant="outline"
 						disabled={file.busy || Boolean(file.comparison)}
-						onclick={() => void file.compare(() => draft.source)}
+						onclick={() => runGuarded(() => void file.compare(() => draft.source))}
 						>{m.workflow_studio_compare_disk()}</Button
 					>
 				{:else}
 					<Button
 						size="sm"
 						variant="outline"
-						disabled={file.busy || !draft.dirty}
-						onclick={() => void file.save(draft.source)}
+						disabled={file.busy || (!draft.dirty && !hasPendingEdits)}
+						onclick={() =>
+							runGuarded(() => {
+								if (draft.dirty) void file.save(draft.source);
+							})}
 						><Save class="size-4" /> {m.workflow_studio_save_file()}</Button
 					>
 				{/if}
@@ -453,7 +537,12 @@
 									>{m.workflow_studio_apply_name()}</Button
 								>
 							</form>
-							<WorkflowInputsEditor inputs={current.inputs} onChange={editInput} />
+							<WorkflowInputsEditor
+								bind:this={inputsRef}
+								inputs={current.inputs}
+								onPendingChange={(pending) => (pendingInputs = pending)}
+								onChange={editInput}
+							/>
 						</div>
 					{/if}
 					<WorkflowStepList {steps} {edges} {selected} onSelect={select} />
@@ -485,20 +574,24 @@
 						</p>
 						{#key active.id}
 							<WorkflowStepInspector
+								bind:this={stepRef}
 								step={active}
 								{definition}
 								{context}
 								narrow={width < 688}
 								editing={editable}
+								onPendingChange={(pending) => (pendingStep = pending)}
 								onEdit={(fields) => editStep(active.id, fields)}
-								onDuplicate={() => duplicate(active)}
-								onInsert={() => {
-									if (canAdd) picker = { after: active.id };
-								}}
+								onDuplicate={() => runGuarded(() => duplicate(active))}
+								onInsert={() =>
+									runGuarded(() => {
+										if (canAdd) picker = { after: active.id };
+									})}
 								onRemove={() => remove(active.id)}
-								onBranch={(signal) => {
-									if (canAdd) picker = { signal, after: active.id };
-								}}
+								onBranch={(signal) =>
+									runGuarded(() => {
+										if (canAdd) picker = { signal, after: active.id };
+									})}
 							/>
 						{/key}
 					{:else}
@@ -528,4 +621,33 @@
 		}.workflow.yaml`}
 		onClose={() => (sharing = false)}
 	/>
+{/if}
+{#if unappliedGuard}
+	<Dialog.Root
+		open
+		onOpenChange={(open) => {
+			if (!open) unappliedGuard = null;
+		}}
+	>
+		<Dialog.Content>
+			<Dialog.Header>
+				<Dialog.Title>{m.workflow_studio_unapplied_edits()}</Dialog.Title>
+				<Dialog.Description>{m.workflow_studio_unapplied_warning()}</Dialog.Description>
+			</Dialog.Header>
+			<div class="flex flex-wrap justify-end gap-2">
+				<Button variant="ghost" onclick={() => (unappliedGuard = null)}
+					>{m.workflow_studio_stay_fix()}</Button
+				>
+				<Button
+					variant="destructive"
+					onclick={() => {
+						discardPending();
+						const action = unappliedGuard;
+						unappliedGuard = null;
+						action?.();
+					}}>{m.workflow_studio_discard_edits()}</Button
+				>
+			</div>
+		</Dialog.Content>
+	</Dialog.Root>
 {/if}

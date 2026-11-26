@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { Button } from '$lib/components/ui/button';
 	import {
@@ -13,9 +14,11 @@
 
 	let {
 		signals,
+		onPendingChange,
 		onChange,
 	}: {
 		signals: Readonly<Record<string, WorkflowSignalDefinition>>;
+		onPendingChange?: (pending: boolean) => void;
 		onChange: (signals: Readonly<Record<string, WorkflowSignalDefinition>> | undefined) => boolean;
 	} = $props();
 
@@ -32,6 +35,22 @@
 	let repeatKey = $state('');
 	let fields = $state<{ id: string; name: string; type: WorkflowValueType }[]>([]);
 	let problem = $state<string | null>(null);
+
+	$effect(() => {
+		onPendingChange?.(active !== undefined);
+	});
+
+	export function flushPending(): 'clean' | 'applied' | 'blocked' {
+		if (active === undefined) return 'clean';
+		return tryApply() ? 'applied' : 'blocked';
+	}
+
+	export function discardPending(): void {
+		active = undefined;
+		problem = null;
+	}
+
+	onDestroy(() => onPendingChange?.(false));
 	const keyChoices = $derived(fields.filter(({ name, type }) => name.trim() && type === 'string'));
 	const entries = $derived(
 		Object.entries(signals).map(([id, signal]) => ({
@@ -56,34 +75,40 @@
 		active = key;
 	}
 
-	function apply(event: SubmitEvent) {
-		event.preventDefault();
+	function tryApply(): boolean {
 		const key = active ?? name.trim();
 		problem = null;
-		if (active === null && !isNewWorkflowField(key, signals)) {
+		if (!key || (active === null && !isNewWorkflowField(key, signals))) {
 			problem = m.workflow_studio_unique_key();
-			return;
+			return false;
 		}
 		let definition: WorkflowSignalDefinition;
 		if (payload === 'json') {
 			const schema: Record<string, WorkflowValueType> = {};
 			for (const field of fields) {
-				const name = field.name.trim();
-				if (!isNewWorkflowField(name, schema)) {
+				const fieldName = field.name.trim();
+				if (!isNewWorkflowField(fieldName, schema)) {
 					problem = m.workflow_studio_unique_key();
-					return;
+					return false;
 				}
-				schema[name] = field.type;
+				schema[fieldName] = field.type;
 			}
 			if (keyed && (!Object.hasOwn(schema, repeatKey) || schema[repeatKey] !== 'string')) {
 				problem = m.workflow_studio_choose_repeat_key();
-				return;
+				return false;
 			}
 			definition = keyed
 				? { payload, delivery: 'many', key: repeatKey, fields: schema }
 				: { payload, delivery: 'once', ...(fields.length ? { fields: schema } : {}) };
 		} else definition = { payload, delivery: 'once' };
-		if (onChange({ ...signals, [key]: definition })) active = undefined;
+		if (!onChange({ ...signals, [key]: definition })) return false;
+		active = undefined;
+		return true;
+	}
+
+	function apply(event: SubmitEvent) {
+		event.preventDefault();
+		tryApply();
 	}
 
 	function remove(key: string) {

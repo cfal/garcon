@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { isNewWorkflowField } from '$lib/workflows/definition/workflow-named-fields';
 	import * as m from '$lib/paraglide/messages.js';
@@ -6,9 +7,11 @@
 
 	let {
 		choices,
+		onPendingChange,
 		onChange,
 	}: {
 		choices: Readonly<Record<string, string>>;
+		onPendingChange?: (pending: boolean) => void;
 		onChange: (choices: Readonly<Record<string, string>>) => boolean;
 	} = $props();
 
@@ -18,6 +21,22 @@
 	let invalid = $state(false);
 	const entries = $derived(Object.entries(choices).map(([id, summary]) => ({ id, summary })));
 
+	$effect(() => {
+		onPendingChange?.(active !== undefined);
+	});
+
+	export function flushPending(): 'clean' | 'applied' | 'blocked' {
+		if (active === undefined) return 'clean';
+		return tryApply() ? 'applied' : 'blocked';
+	}
+
+	export function discardPending(): void {
+		active = undefined;
+		invalid = false;
+	}
+
+	onDestroy(() => onPendingChange?.(false));
+
 	function edit(id: string | null) {
 		key = id ?? '';
 		label = id ? choices[id] : '';
@@ -25,11 +44,17 @@
 		active = id;
 	}
 
+	function tryApply(): boolean {
+		const id = active ?? key.trim();
+		invalid = !id || (active === null && !isNewWorkflowField(id, choices));
+		if (invalid || !label.trim() || !onChange({ ...choices, [id]: label })) return false;
+		active = undefined;
+		return true;
+	}
+
 	function apply(event: SubmitEvent) {
 		event.preventDefault();
-		const id = active ?? key.trim();
-		invalid = active === null && !isNewWorkflowField(id, choices);
-		if (!invalid && label.trim() && onChange({ ...choices, [id]: label })) active = undefined;
+		tryApply();
 	}
 
 	function remove(key: string) {

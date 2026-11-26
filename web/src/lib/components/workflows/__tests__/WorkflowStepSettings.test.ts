@@ -66,3 +66,43 @@ it('applies the authored agent defaults rather than the recent agent modes when 
 		}),
 	);
 });
+
+it('tracks dirty edits and flushes pending settings on demand', async () => {
+	deps = createExecutorStartupFixture();
+	deps.remoteSettings.applySnapshot(executorStartupSnapshot());
+	local = new LocalSettingsStore();
+	const onApply = vi.fn(() => true);
+	const onDirtyChange = vi.fn();
+	const view = render(WorkflowStepSettings, {
+		props: {
+			step: {
+				id: 'review',
+				kind: 'agent',
+				agentId: 'codex',
+				model: 'local-default',
+				prompt: 'Review',
+			},
+			context: null,
+			narrow: false,
+			disabled: false,
+			onDirtyChange,
+			onApply,
+		},
+	});
+	const apply = screen.getByRole<HTMLButtonElement>('button', { name: 'Apply settings' });
+	await waitFor(() => expect(apply.disabled).toBe(false));
+	expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+	expect(view.component.flushPending()).toBe('clean');
+
+	await fireEvent.change(screen.getByLabelText('Permission mode'), {
+		target: { value: 'acceptEdits' },
+	});
+	expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+	expect(view.component.flushPending()).toBe('applied');
+	expect(onApply).toHaveBeenCalledWith(
+		expect.objectContaining({
+			permissionMode: 'acceptEdits',
+		}),
+	);
+	await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+});
