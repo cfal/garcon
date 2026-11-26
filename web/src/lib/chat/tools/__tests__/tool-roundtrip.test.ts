@@ -72,7 +72,7 @@ describe('tool-use serialization round-trip', () => {
 				maxIterations: 0, delaySeconds: 0, timerCondition: '' }),
 			new ScheduleToolUseMessage(TS, 'delete', { action: 'delete', jobId: 'job' }),
 			new ScheduleToolUseMessage(TS, 'stop', { action: 'stop-loop' }),
-			new ScheduleToolUseMessage(TS, 'list', { action: 'list' }),
+			new ScheduleToolUseMessage(TS, 'list', { action: 'list' }, 'CronList'),
 		]) {
 			expect(roundTrip(row)).toEqual(row);
 		}

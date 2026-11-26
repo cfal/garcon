@@ -406,11 +406,11 @@ export class WriteStdinToolUseMessage {
 
 export class ScheduleToolUseMessage {
   readonly type = 'schedule-tool-use' as const;
-  constructor(public timestamp: string, public toolId: string, public request: ToolScheduleRequest) {}
+  constructor(public timestamp: string, public toolId: string, public request: ToolScheduleRequest, public nativeName?: string) {}
 
-  static fromRequest(timestamp: string, toolId: string, value: unknown) {
+  static fromRequest(timestamp: string, toolId: string, value: unknown, nativeName?: string) {
     const request = parseToolScheduleRequest(value);
-    return request ? new ScheduleToolUseMessage(timestamp, toolId, request) : null;
+    return request ? new ScheduleToolUseMessage(timestamp, toolId, request, nativeName) : null;
   }
 }
 
@@ -1035,7 +1035,7 @@ const TOOL_USE_MESSAGE_PARSERS = {
     new EnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId)),
 
   'schedule-tool-use': (data) =>
-    ScheduleToolUseMessage.fromRequest(str(data.timestamp), str(data.toolId), data.request),
+    ScheduleToolUseMessage.fromRequest(str(data.timestamp), str(data.toolId), data.request, asOptionalString(data.nativeName)),
 
   'antigravity-enter-plan-mode-tool-use': (data) => typeof data.reason === 'string'
     ? new AntigravityEnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId), data.reason) : null,

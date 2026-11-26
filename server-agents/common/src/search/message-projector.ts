@@ -260,11 +260,11 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'agent-message-tool-use':
       return joinTool(message.recipient, message.message);
     case 'schedule-tool-use':
-      return boundedUnknownText({ schedule: message.request }, budget);
+      return boundedUnknownText(['schedule', message.nativeName, message.request], budget);
     case 'antigravity-enter-plan-mode-tool-use':
-      return joinTool(message.reason);
+      return joinTool('enter_plan_mode', message.reason);
     case 'antigravity-exit-plan-mode-tool-use':
-      return joinTool(message.plan);
+      return joinTool('exit_plan_mode', message.plan);
     case 'codex-subagent-tool-use':
       return joinTool(message.action, boundedUnknownForJoin(message.details, budget));
     case 'write-stdin-tool-use':

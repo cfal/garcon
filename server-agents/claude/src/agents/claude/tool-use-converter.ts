@@ -143,25 +143,25 @@ function claudeScheduleToolUse(ts: string, id: string, rawName: string,
           || (input.reason !== undefined && typeof input.reason !== 'string')
           || (input.prompt !== undefined && typeof input.prompt !== 'string')
           || (input.noop !== undefined && typeof input.noop !== 'boolean')) break;
-        return new ScheduleToolUseMessage(ts, id, { action: 'stop-loop' });
+        return new ScheduleToolUseMessage(ts, id, { action: 'stop-loop' }, rawName);
       }
       if ((input.stop !== undefined && input.stop !== false) || typeof input.reason !== 'string') break;
       row = ScheduleToolUseMessage.fromRequest(ts, id, {
         action: 'wakeup', delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop,
-      });
+      }, rawName);
       break;
     }
     case 'croncreate':
       if (hasOnly('cron', 'prompt', 'recurring', 'durable')) {
         row = ScheduleToolUseMessage.fromRequest(ts, id, { action: 'cron', expression: input.cron, prompt: input.prompt,
-          recurring: input.recurring === undefined ? true : cronBoolean(input.recurring), durable: cronBoolean(input.durable) });
+          recurring: input.recurring === undefined ? true : cronBoolean(input.recurring), durable: cronBoolean(input.durable) }, rawName);
       }
       break;
     case 'cronlist':
-      if (hasOnly()) return new ScheduleToolUseMessage(ts, id, { action: 'list' });
+      if (hasOnly()) return new ScheduleToolUseMessage(ts, id, { action: 'list' }, rawName);
       break;
     case 'crondelete':
-      if (hasOnly('id')) row = ScheduleToolUseMessage.fromRequest(ts, id, { action: 'delete', jobId: input.id });
+      if (hasOnly('id')) row = ScheduleToolUseMessage.fromRequest(ts, id, { action: 'delete', jobId: input.id }, rawName);
       break;
   }
   return row ?? new UnknownToolUseMessage(ts, id, rawName, input);
