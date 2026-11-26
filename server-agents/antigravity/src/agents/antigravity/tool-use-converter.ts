@@ -48,6 +48,27 @@ function stringField(input: Record<string, unknown>, ...names: string[]): string
   return asString(field(input, ...names));
 }
 
+const SCHEDULE_KEYS: Readonly<Record<string, string>> = {
+  DurationSeconds: 'delaySeconds', duration_seconds: 'delaySeconds',
+  CronExpression: 'expression', cron_expression: 'expression',
+  Prompt: 'prompt', prompt: 'prompt',
+  TimerCondition: 'timerCondition', timer_condition: 'timerCondition',
+  IsDaemon: 'daemon', is_daemon: 'daemon',
+  MaxIterations: 'maxIterations', max_iterations: 'maxIterations',
+  ExactTiming: 'exactTiming', exact_timing: 'exactTiming',
+};
+
+function scheduleArguments(input: Record<string, unknown>): Record<string, unknown> | null {
+  const args: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!Object.hasOwn(SCHEDULE_KEYS, key)) return null;
+    const name = SCHEDULE_KEYS[key];
+    if (Object.hasOwn(args, name) && args[name] !== value) return null;
+    args[name] = value;
+  }
+  return args;
+}
+
 export function antigravityMcpArguments(input: Record<string, unknown>): Record<string, unknown> | undefined {
   const value = input.arguments ?? input.args ?? input.Arguments;
   return value && typeof value === 'object' && !Array.isArray(value) ? asObject(value) : undefined;
@@ -183,20 +204,16 @@ export function convertAntigravityToolUse(
       return new WebSearchToolUseMessage(timestamp, id, query);
     }
     case 'schedule': {
-      const delaySeconds = field(input, 'DurationSeconds', 'duration_seconds');
-      const expression = field(input, 'CronExpression', 'cron_expression');
-      const prompt = field(input, 'Prompt', 'prompt');
-      const timerCondition = field(input, 'TimerCondition', 'timer_condition');
-      const daemon = field(input, 'IsDaemon', 'is_daemon');
-      const maxIterations = field(input, 'MaxIterations', 'max_iterations');
-      const exactTiming = field(input, 'ExactTiming', 'exact_timing');
+      const args = scheduleArguments(input);
+      if (!args) break;
+      const { delaySeconds, expression } = args;
       // Agy treats the inactive mode's zero/empty fields as unset. The row retains explicit defaults.
       if (typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', delaySeconds, prompt, timerCondition, daemon, exactTiming, expression, maxIterations });
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', ...args });
         if (row) return row;
       }
       if (expression !== undefined) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', expression, prompt, daemon, maxIterations, exactTiming, delaySeconds, timerCondition });
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', ...args });
         if (row) return row;
       }
       break;

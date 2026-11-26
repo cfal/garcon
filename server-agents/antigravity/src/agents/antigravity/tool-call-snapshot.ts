@@ -65,25 +65,36 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
 }
 
 function agentWorkResult(call: TrackedCall, status: string, terminal: Record<string, unknown>): ToolResultMessage['content'] {
-  const output = rawOutputText(call.rawOutput);
-  const blocks = withoutOutputEchoes(call.content ?? [], output);
+  const name = antigravityToolName(call);
+  const reportsPlanOrSchedule = name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
+  const terminalOutput = reportsPlanOrSchedule && rawOutputText(terminal.rawOutput).trim();
+  const terminalBlocks = reportsPlanOrSchedule && !terminalOutput && Array.isArray(terminal.content);
+  const allBlocks = call.content ?? [];
+  let rawOutput = call.rawOutput;
+  let output = rawOutputText(rawOutput);
+  let blocks = withoutOutputEchoes(allBlocks, output);
+  // Deduplicate against the primary source, not against cached output that the terminal frame repeats.
+  if (terminalBlocks && blocks.length !== allBlocks.length && output.trim()) {
+    const { output: _echo, ...metadata } = asObject(rawOutput);
+    rawOutput = metadata;
+    output = '';
+    blocks = allBlocks;
+  }
   const blockText = joinBlockText(blocks);
   const trimmedOutput = output.trim();
   const trimmedBlocks = blockText.trim();
   const distinct = trimmedOutput !== '' && trimmedBlocks !== '' && trimmedOutput !== trimmedBlocks;
-  const structured = isStructuredOutput(call.rawOutput);
-  const name = antigravityToolName(call);
-  const reportsPlanOrSchedule = name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
+  const structured = isStructuredOutput(rawOutput);
   // The terminal frame's text takes precedence even if it repeats an earlier frame.
   let primary: 'output' | 'metadata' | 'content';
-  if (reportsPlanOrSchedule && rawOutputText(terminal.rawOutput).trim()) primary = 'output';
-  else if (reportsPlanOrSchedule && Array.isArray(terminal.content) && trimmedBlocks) primary = 'content';
+  if (terminalOutput) primary = 'output';
+  else if (terminalBlocks && trimmedBlocks) primary = 'content';
   else if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
   else if (structured && !trimmedOutput && !call.contentIsNewer) primary = 'metadata';
   else primary = 'content';
 
   const result: ToolResultMessage['content'] = status === 'completed' ? {} : { status };
-  if (structured || (distinct && primary === 'content')) result.rawOutput = call.rawOutput;
+  if (structured || (distinct && primary === 'content')) result.rawOutput = rawOutput;
 
   // Keeps separate progress and attachments, not a second copy of the primary text.
   const keepBlockText = primary === 'metadata' || (primary === 'output' && distinct);

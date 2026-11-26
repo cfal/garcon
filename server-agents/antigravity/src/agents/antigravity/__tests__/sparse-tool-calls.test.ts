@@ -115,6 +115,19 @@ test('uses explicit completed schedule output before echoed progress and falls b
   }));
 });
 
+test('retains every terminal block when a cached output is echoed alongside other text', () => {
+  for (const rawOutput of [{ output: 'Operation refused' }, { output: 'Operation refused', attempts: 1 }]) {
+    const s = session();
+    const progress = textBlock('Checking limits');
+    s.start('call', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content: [progress] });
+    s.patch('call', { rawOutput });
+    const row = s.patch('call', { status: 'failed', content: [progress, textBlock('Operation refused')] }).at(-1);
+    expect(row).toEqual(expect.objectContaining({ isError: true, content: {
+      raw: 'Checking limits\nOperation refused', status: 'failed', ...('attempts' in rawOutput ? { rawOutput: { attempts: 1 } } : {}),
+    } }));
+  }
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [
@@ -136,6 +149,19 @@ test('retains explicitly supplied timer defaults and daemon flags accepted by ag
     expect(s.start(String(daemon), { name: 'schedule', rawInput, status: 'completed' })[0])
       .toMatchObject({ type: 'schedule-tool-use', request: { daemon, timerCondition: '', exactTiming: false } });
   }
+});
+
+test('keeps unknown options and conflicting aliases from late frames in the raw schedule fallback', () => {
+  const timer = { DurationSeconds: 30, Prompt: 'Check' };
+  for (const patch of [{ FutureOption: 'fixture' }, { duration_seconds: 60 }]) {
+    const s = session();
+    expect(s.start('timer', { name: 'schedule', rawInput: timer })).toEqual([]);
+    expect(s.patch('timer', { rawInput: patch, status: 'failed' })[0]).toMatchObject({
+      type: 'external-tool-use', input: { ...timer, ...patch },
+    });
+  }
+  expect(session().start('echo', { name: 'schedule', rawInput: { ...timer, duration_seconds: 30 }, status: 'completed' })[0])
+    .toMatchObject({ type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 30, prompt: 'Check' } });
 });
 
 test('retains explicit inactive timer fields and an unlimited iteration count on a cron', () => {
