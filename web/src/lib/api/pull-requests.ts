@@ -1,10 +1,9 @@
-import type { ApiFetchOptions } from './client.js';
+import { withDefaultTimeout, type ApiFetchOptions } from './client.js';
 import { ghApiGet } from './gh.js';
 import { gitDocumentKey, gitProjectQuery, type GitProjectTarget } from './git-client.js';
 import type {
 	GhRepositoryIdentity,
 	PullRequestDetail as PullRequestDetailWire,
-	PullRequestListResult,
 } from '$shared/gh';
 import { ghOperationTimeoutMs } from '$shared/git-execution';
 export type {
@@ -26,16 +25,6 @@ export interface PullRequestDetail extends PullRequestDetailWire {
 	documentId: string;
 }
 
-export async function getPullRequests(
-	target: GitProjectTarget,
-	options?: ApiFetchOptions,
-): Promise<PullRequestListResult> {
-	return ghApiGet(target.executorId, `/api/v1/gh/pull-requests?${gitProjectQuery(target)}`, {
-		timeoutMs: ghOperationTimeoutMs('listPullRequests'),
-		...options,
-	});
-}
-
 export async function getPullRequest(
 	target: GitProjectTarget & { repository: GhRepositoryIdentity },
 	number: number,
@@ -48,7 +37,7 @@ export async function getPullRequest(
 	const detail = await ghApiGet<PullRequestDetailWire>(
 		target.executorId,
 		`/api/v1/gh/pull-request?${query}`,
-		{ timeoutMs: ghOperationTimeoutMs('getPullRequest'), ...options },
+		withDefaultTimeout(options, ghOperationTimeoutMs('getPullRequest')),
 	);
 	return {
 		...detail,

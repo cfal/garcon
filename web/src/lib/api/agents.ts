@@ -1,6 +1,6 @@
 // Agent HTTP client. Agents own runtime auth, readiness, and catalog state.
 
-import { apiGet, apiPost } from './client.js';
+import { ApiError, apiGet, apiPost } from './client.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { AgentId } from '$shared/agents';
 import type {
@@ -44,6 +44,9 @@ export async function getAgentAuthStatus(agent: AgentName, executorId?: string, 
 	const result = await apiGet<Record<string, AgentAuthStatus>>(
 		`/api/v1/agents/auth?agent=${encodeURIComponent(agent)}&executorId=${encodeURIComponent(effectiveExecutorId(executorId))}${instanceQuery}`,
 	);
+	if (!result || !Object.hasOwn(result, agent) || !result[agent]) {
+		throw new ApiError(502, 'Agent auth status is missing for the requested agent.', 'AGENT_INVALID_RESULT');
+	}
 	return result[agent];
 }
 

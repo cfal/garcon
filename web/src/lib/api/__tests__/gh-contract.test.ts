@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGhStatus } from '../gh';
-import { getPullRequest, getPullRequests } from '../pull-requests';
+import { getPullRequest } from '../pull-requests';
 import { GH_DETAIL_TIMEOUT_MS } from '$shared/git-execution';
 
 vi.stubGlobal('localStorage', {
@@ -44,9 +44,19 @@ describe('gh API contract', () => {
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/gh/status?executorId=remote-executor');
 	});
 
-	it.each(['list', 'detail'] as const)(
-		'keeps the %s request alive for the full paginated GitHub read budget',
-		async (operation) => {
+	it.each([
+		{ executorId: 'local', instanceId: 'local-instance' },
+		{ executorId: 'remote-executor', instanceId: '' },
+	])('rejects a status response without the requested executor and a serving instance', async (scope) => {
+		fetchMock.mockResolvedValueOnce(Response.json(scope));
+		await expect(getGhStatus('remote-executor')).rejects.toMatchObject({
+			errorCode: 'GIT_INVALID_RESULT',
+		});
+	});
+
+	it(
+		'keeps the pull request detail alive for the full paginated GitHub read budget',
+		async () => {
 			const deadline = new AbortController();
 			const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
 			const target = {
@@ -65,23 +75,20 @@ describe('gh API contract', () => {
 				),
 			);
 
-			if (operation === 'list') await getPullRequests(target);
-			else await getPullRequest(target, 42);
+			await getPullRequest(target, 42, { timeoutMs: undefined });
 
 			expect(timeout).toHaveBeenCalledWith(GH_DETAIL_TIMEOUT_MS);
 			expect(fetchMock.mock.calls[0][1].signal).toBe(deadline.signal);
 			expect(fetchMock.mock.calls[0][0]).toContain('executorId=remote-executor');
-			if (operation === 'detail') {
-				const url = new URL(fetchMock.mock.calls[0][0], 'http://localhost');
-				expect(url.searchParams.get('repositoryHost')).toBe('github.example.com');
-				expect(url.searchParams.get('repositoryName')).toBe('acme/app');
-			}
+			const url = new URL(fetchMock.mock.calls[0][0], 'http://localhost');
+			expect(url.searchParams.get('repositoryHost')).toBe('github.example.com');
+			expect(url.searchParams.get('repositoryName')).toBe('acme/app');
 		},
 	);
 
-	it.each(['list', 'detail'] as const)(
-		'preserves a shorter caller budget and cancellation for %s',
-		async (operation) => {
+	it(
+		'preserves a shorter caller budget and cancellation for pull request detail',
+		async () => {
 			const timeout = vi.spyOn(AbortSignal, 'timeout');
 			const caller = new AbortController();
 			const target = {
@@ -101,8 +108,7 @@ describe('gh API contract', () => {
 			);
 			const options = { timeoutMs: 123, signal: caller.signal };
 
-			if (operation === 'list') await getPullRequests(target, options);
-			else await getPullRequest(target, 42, options);
+			await getPullRequest(target, 42, options);
 
 			expect(timeout).toHaveBeenCalledWith(123);
 			const requestSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;

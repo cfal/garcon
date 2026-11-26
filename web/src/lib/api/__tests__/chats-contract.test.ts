@@ -13,6 +13,7 @@ import {
 	runChat,
 	generateChatTitle,
 	forkRunChat,
+	selfHandoffRunChat,
 	stopChat,
 	interruptAndSendChat,
 	sendPermissionDecision,
@@ -36,6 +37,7 @@ import {
 import type { ChatListResponse } from '$shared/chat-list';
 import type { CommandErrorCode } from '$shared/chat-command-contracts';
 import { CHAT_STOP_OUTCOMES } from '$shared/chat-types';
+import { AGENT_HANDOFF_HTTP_TIMEOUT_MS } from '$shared/handoff-timeouts';
 import { ApiError } from '../client';
 
 vi.stubGlobal('localStorage', {
@@ -463,7 +465,29 @@ describe('chats API contract', () => {
 		});
 	});
 
-	it('uses the extended timeout only for a fenced agent handoff', async () => {
+	it.each([
+		[undefined, AGENT_HANDOFF_HTTP_TIMEOUT_MS],
+		[null, null],
+		[1_234, 1_234],
+	] as const)('uses the self-handoff timeout unless overridden (%s) and supports abort', async (timeoutMs, expected) => {
+		const timeout = vi.spyOn(AbortSignal, 'timeout');
+		const abort = new AbortController();
+		fetchMock.mockResolvedValueOnce(Response.json({ status: 'accepted' }));
+		await selfHandoffRunChat({
+			clientRequestId: 'handoff-request',
+			clientMessageId: 'handoff-message',
+			sourceChatId: 'source-chat',
+			chatId: 'target-chat',
+			command: 'Continue',
+		}, { signal: abort.signal, timeoutMs });
+		if (expected === null) expect(timeout).not.toHaveBeenCalled();
+		else expect(timeout).toHaveBeenCalledWith(expected);
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/chats/handoff-run');
+		abort.abort();
+		expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+	});
+
+	it('uses the extended timeout for a fenced agent handoff', async () => {
 		const timeout = vi.spyOn(AbortSignal, 'timeout');
 		const response = {
 			success: true as const,
@@ -1639,7 +1663,7 @@ describe('chats API contract', () => {
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }),
 		);
 
-		const result = await forkChat({ sourceChatId: '1', chatId: '2', clientRequestId: 'fork-1' });
+		const result = await forkChat({ sourceChatId: '1', chatId: '2', clientRequestId: 'fork-1' }, { timeoutMs: undefined });
 
 		expect(result.success).toBe(true);
 		const [url, opts] = fetchMock.mock.calls[0];

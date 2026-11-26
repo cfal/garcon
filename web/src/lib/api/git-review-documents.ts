@@ -97,7 +97,7 @@ export async function getGitReviewDocumentFileBodies(
 	} finally {
 		if (!bodySpanFinished) finishGitReviewPerformanceSpan(bodySpan);
 	}
-	assertGitResponseScope(response, target);
+	assertGitResponseScope(response, target.executorId);
 	if (response.instanceId !== document.instanceId || response.documentId !== document.documentId) {
 		throw new ApiError(
 			409,

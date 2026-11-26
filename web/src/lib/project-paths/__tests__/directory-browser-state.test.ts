@@ -147,7 +147,7 @@ describe('DirectoryBrowserState following a typed path', () => {
 		vi.mocked(browseDirectory).mockReturnValueOnce(stale.promise);
 		field.replaceServingInstance('instance-2');
 		expect(field.browser.listing.status).toBe('loading');
-		const staleSignal = vi.mocked(browseDirectory).mock.calls.at(-1)?.[1];
+		const staleSignal = vi.mocked(browseDirectory).mock.calls.at(-1)?.[1]?.signal;
 
 		field.switchExecutor('22222222-2222-4222-8222-222222222222', 'worker-1');
 		field.type('/repo');
@@ -155,7 +155,7 @@ describe('DirectoryBrowserState following a typed path', () => {
 		expect(staleSignal?.aborted).toBe(true);
 		expect(vi.mocked(browseDirectory).mock.calls.at(-1)).toEqual([
 			'/repo',
-			expect.any(AbortSignal),
+			{ signal: expect.any(AbortSignal) },
 			'22222222-2222-4222-8222-222222222222',
 		]);
 		stale.resolve([{ name: 'stale', path: '/repo/alpha/stale', type: 'directory' }]);
