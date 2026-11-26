@@ -85,6 +85,24 @@
 	let totalMessages = $state(0);
 	let snapshotVersion = $state<string | null>(null);
 	let thinkingStates = $state<Record<number, boolean>>({});
+	let header: HTMLElement;
+	let feed = $state<HTMLDivElement>();
+
+	function readingAnchor(): Element | null {
+		if (!feed) return null;
+		const rows = feed.children;
+		const top = header.getBoundingClientRect().bottom;
+		let low = 0;
+		let high = rows.length;
+		while (low < high) {
+			const mid = Math.floor((low + high) / 2);
+			if (rows[mid].getBoundingClientRect().bottom <= top) low = mid + 1;
+			else high = mid;
+		}
+		const first = rows.item(low);
+		const row = first?.matches('.chat-message') ? first : first?.nextElementSibling;
+		return row && row.getBoundingClientRect().top < window.innerHeight ? row : null;
+	}
 
 	function parseMessages(rawMessages: unknown[], startIndex: number): SharedMessageEntry[] {
 		return rawMessages
@@ -155,6 +173,8 @@
 			}
 			// Capture the live viewport immediately before prepending. The reader may
 			// scroll while the request is in flight.
+			const anchor = readingAnchor();
+			const anchorTop = anchor?.getBoundingClientRect().top;
 			const previousHeight = document.documentElement.scrollHeight;
 			const previousScrollY = window.scrollY;
 			messages = [...olderMessages, ...messages];
@@ -162,8 +182,11 @@
 			totalMessages = resp.page.totalMessages;
 			snapshotVersion = resp.page.snapshotVersion;
 			await tick();
-			const addedHeight = document.documentElement.scrollHeight - previousHeight;
-			window.scrollTo({ top: previousScrollY + addedHeight, behavior: 'instant' });
+			// Pairing can reveal results below the reader as well as rows above them.
+			const top = anchor?.isConnected && anchorTop !== undefined
+				? window.scrollY + anchor.getBoundingClientRect().top - anchorTop
+				: previousScrollY + document.documentElement.scrollHeight - previousHeight;
+			window.scrollTo({ top, behavior: 'instant' });
 		} catch {
 			olderPageError = true;
 		} finally {
@@ -195,7 +218,7 @@
 </svelte:head>
 
 <div class="shared-chat-page min-h-dvh bg-background text-foreground flex flex-col">
-	<header class={cn(
+	<header bind:this={header} class={cn(
 		'sticky top-0 z-10 border-b border-border',
 		localSettings.overlayBackdropEffects ? 'bg-background/95 backdrop-blur' : 'bg-background',
 	)}>
@@ -266,7 +289,7 @@
 				</div>
 			</div>
 		{:else}
-			<div class="space-y-1" data-chat-feed-content>
+			<div bind:this={feed} class="space-y-1" data-chat-feed-content>
 				{#if nextBefore !== null || olderPageError}
 					<div class="flex items-center gap-2 py-2 text-xs text-muted-foreground">
 						<div class="h-px flex-1 bg-border/70"></div>

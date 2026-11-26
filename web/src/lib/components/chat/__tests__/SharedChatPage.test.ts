@@ -66,20 +66,27 @@ describe('SharedChatPage', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('reveals a schedule result when its matching request loads on an earlier page', async () => {
-		const newest = response(['', '', ''], 1, 4);
+	it('reveals a cross-page schedule result without counting it as growth above the reader', async () => {
+		const newest = response(['', '', '', ''], 1, 5);
 		newest.snapshot.messages = [
+			new UserMessage('', 'Reading here'),
 			new ToolResultMessage('', 'cron', { raw: 'Created', toolUseResult: { id: 'synthetic-job' } }, false),
 			new ScheduleToolUseMessage('', 'cron', { action: 'list' }),
 			new ToolResultMessage('', 'cron', { items: [] }, false),
 		];
-		const older = response([''], 0, 4);
+		const older = response([''], 0, 5);
 		older.snapshot.messages = [new ScheduleToolUseMessage('', 'cron', { action: 'cron', expression: '* * * * *', prompt: 'Check' })];
 		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(newest).mockResolvedValueOnce(older);
 		render(SharedChatPageTestHost);
 		await screen.findByText('List scheduled jobs');
 		expect(screen.queryByRole('button', { name: /Details/ })).toBeNull();
+		const anchor = screen.getByText('Reading here').closest('.chat-message')!;
+		vi.spyOn(anchor, 'getBoundingClientRect').mockImplementation(() =>
+			new DOMRect(0, document.getElementById('shared-result-2') ? 150 : 100, 200, 40));
+		vi.spyOn(window, 'scrollY', 'get').mockReturnValue(200);
+		vi.spyOn(document.documentElement, 'scrollHeight', 'get').mockReturnValueOnce(1000).mockReturnValue(1100);
 		await fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+		await waitFor(() => expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 250, behavior: 'instant' }));
 		await fireEvent.click(await screen.findByRole('button', { name: /Details/ }));
 		expect(screen.getByText(/synthetic-job/).textContent).toContain('Created');
 	});
