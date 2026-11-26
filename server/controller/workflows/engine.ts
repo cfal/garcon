@@ -16,7 +16,7 @@ import { diagnosticErrorCode } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import type { RetainProviderReferences } from '../api-providers/reference-writes.js';
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
-import { captureInputs, captureLocation, captureSettings, validateSignal } from './bindings.js';
+import { captureInputs, captureLocation, captureSettings, validateSignal, wrapCommandWithBindings } from './bindings.js';
 import { workflowConflict, workflowInvalid, workflowNotFound, workflowLimit } from './errors.js';
 import { WorkflowGraph, type CapturedStep } from './graph.js';
 import { WORKFLOW_LIMITS } from './limits.js';
@@ -577,7 +577,10 @@ export class WorkflowEngine {
       db.query("UPDATE workflow_runs SET status = 'running', updated_at = ? WHERE id = ?").run(now, row.run_id);
       const identity = { runId: row.run_id, stepId: row.step_id, instanceId: row.id, attemptId, attemptNumber, location };
       if (step.kind === 'command' && settings.kind === 'command') {
-        return { ...identity, kind: 'command', command: step.command, shell: settings.shell };
+        const command = row.bindings_json === null
+          ? step.command
+          : wrapCommandWithBindings(step.command, settings.shell, JSON.parse(row.bindings_json) as JsonObject);
+        return { ...identity, kind: 'command', command, shell: settings.shell };
       }
       if (step.kind === 'agent' && settings.kind === 'agent' && row.prompt !== null) {
         const { kind: _kind, ...agent } = settings;

@@ -20,6 +20,10 @@ export function isWorkflowName(value: string): boolean {
   return /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/u.test(value);
 }
 
+export function workflowCommandEnvName(name: string): string {
+  return `GARCON_WF_${name.replaceAll('-', '_').toUpperCase()}`;
+}
+
 export type WorkflowInput = { readonly description?: string } & (
   | { readonly type: 'string'; readonly default?: string }
   | { readonly type: 'number'; readonly default?: number }
@@ -99,6 +103,7 @@ export interface WorkflowCommandStep extends WorkflowExecutionStep {
   readonly kind: 'command';
   readonly command: string;
   readonly shell?: string;
+  readonly bindings?: Readonly<Record<string, WorkflowBinding>>;
 }
 
 export interface WorkflowDecisionStep extends WorkflowStepBase {

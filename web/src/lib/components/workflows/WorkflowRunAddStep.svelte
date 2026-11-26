@@ -115,7 +115,7 @@
 			return;
 		}
 		const selected = mode === 'result' ? evidence : undefined;
-		const bindResult = selected?.payload !== undefined && useResult && kind !== 'command';
+		const bindResult = selected?.payload !== undefined && useResult;
 		const on = mode === 'future' && signal ? workflowSignalSubscription(signal) : undefined;
 		const source = JSON.stringify(
 			{
@@ -292,10 +292,12 @@
 					{/each}
 				</select>
 			</label>
-			{#if evidence?.payload !== undefined && kind !== 'command'}
+			{#if evidence?.payload !== undefined}
 				<label class="flex items-center gap-2 text-sm">
 					<input type="checkbox" bind:checked={useResult} />
-					{m.workflow_studio_bind_result()}
+					{kind === 'command'
+						? m.workflow_studio_bind_result_command()
+						: m.workflow_studio_bind_result()}
 				</label>
 			{/if}
 		{/if}

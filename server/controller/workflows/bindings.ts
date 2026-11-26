@@ -1,7 +1,8 @@
 import { isRecord, type JsonObject, type JsonValue } from '../../../common/json.js';
 import { replaceWorkflowPlaceholders } from '../../../common/workflow-definition/prompt.js';
 import {
-  WORKFLOW_TURN_COMPLETED, type WorkflowAgentStep, type WorkflowDefinition, type WorkflowSignalDefinition, type WorkflowStep, type WorkflowValueType,
+  WORKFLOW_TURN_COMPLETED, workflowCommandEnvName, type WorkflowAgentStep, type WorkflowCommandStep,
+  type WorkflowDefinition, type WorkflowSignalDefinition, type WorkflowStep, type WorkflowValueType,
 } from '../../../common/workflow-definition.js';
 import {
   inheritedWorkflowPath, type WorkflowAgentSettings, type WorkflowExecutionContext, type WorkflowLocation, type WorkflowStepSettings,
@@ -108,14 +109,18 @@ function signalInstructions(step: WorkflowAgentStep): string {
   return '\n\n' + lines.join('\n');
 }
 
-export function bindPrompt(
-  step: Exclude<WorkflowStep, { kind: 'command' }>,
+function resolveBindings(
+  step: WorkflowStep,
   inputs: JsonObject,
   signal: JsonValue | undefined,
   all: (stepId: string) => JsonValue,
-): { prompt: string; bindingsJson: string; bytes: number } {
+): {
+  bindings: JsonObject;
+  bindingsJson: string;
+  replacements: Map<string, { text: string; bytes: number }>;
+} {
   let bindingBytes = 2;
-  const bindings: [string, JsonValue][] = [];
+  const entries: [string, JsonValue][] = [];
   const replacements = new Map<string, { text: string; bytes: number }>();
   for (const [name, binding] of Object.entries(step.bindings ?? {})) {
     let value: JsonValue | undefined;
@@ -133,8 +138,66 @@ export function bindPrompt(
     if (bindingBytes > WORKFLOW_LIMITS.promptBytes) throw new WorkflowBindingError('Bindings exceed the size limit.');
     const replacement = typeof value === 'string' ? value : text;
     replacements.set(name, { text: replacement, bytes: Buffer.byteLength(replacement) });
-    bindings.push([name, value]);
+    entries.push([name, value]);
   }
+  const bindings = Object.fromEntries(entries);
+  return { bindings, bindingsJson: JSON.stringify(bindings), replacements };
+}
+
+function quoteCommandEnvAssignment(shell: string | undefined, envName: string, value: string): string {
+  if (shell === 'notes' || shell === 'notes-markdown') {
+    throw workflowInvalid('Command bindings require an executable shell rather than Notes mode.');
+  }
+  if (value.includes('\0') || !value.isWellFormed()) {
+    throw workflowInvalid(`Binding "${envName}" contains characters a shell environment variable cannot carry.`);
+  }
+  if (shell === 'fish') {
+    const quoted = `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+    return `set -gx ${envName} ${quoted}`;
+  }
+  return `export ${envName}='${value.replaceAll("'", "'\\''")}'`;
+}
+
+export function wrapCommandWithBindings(command: string, shell: string | undefined, bindings: JsonObject): string {
+  const entries = Object.entries(bindings);
+  if (!entries.length) return command;
+  const prologue: string[] = [];
+  const seen = new Set<string>();
+  for (const [name, value] of entries) {
+    const envName = workflowCommandEnvName(name);
+    if (seen.has(envName)) throw workflowInvalid(`Command binding "${envName}" collides with another binding.`);
+    seen.add(envName);
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    prologue.push(quoteCommandEnvAssignment(shell, envName, text));
+  }
+  return `${prologue.join('\n')}\n${command}`;
+}
+
+export function bindCommand(
+  step: WorkflowCommandStep,
+  inputs: JsonObject,
+  signal: JsonValue | undefined,
+  all: (stepId: string) => JsonValue,
+): { bindingsJson: string; bytes: number } {
+  const { bindings, bindingsJson } = resolveBindings(step, inputs, signal, all);
+  let wrapped: string;
+  try {
+    wrapped = wrapCommandWithBindings(step.command, step.shell, bindings);
+  } catch (error) {
+    throw new WorkflowBindingError(error instanceof Error ? error.message : 'Invalid command binding value.');
+  }
+  const bytes = Buffer.byteLength(wrapped);
+  if (bytes > WORKFLOW_LIMITS.promptBytes) throw new WorkflowBindingError('Rendered command exceeds the size limit.');
+  return { bindingsJson, bytes: bytes + Buffer.byteLength(bindingsJson) };
+}
+
+export function bindPrompt(
+  step: Exclude<WorkflowStep, { kind: 'command' }>,
+  inputs: JsonObject,
+  signal: JsonValue | undefined,
+  all: (stepId: string) => JsonValue,
+): { prompt: string; bindingsJson: string; bytes: number } {
+  const { bindingsJson, replacements } = resolveBindings(step, inputs, signal, all);
   let promptBytes = Buffer.byteLength(step.prompt);
   const authored = replaceWorkflowPlaceholders(step.prompt, (matched, name) => {
     const replacement = replacements.get(name);
@@ -146,6 +209,5 @@ export function bindPrompt(
   const instructions = step.kind === 'agent' ? signalInstructions(step) : '';
   promptBytes += Buffer.byteLength(instructions);
   if (promptBytes > WORKFLOW_LIMITS.promptBytes) throw new WorkflowBindingError('Rendered prompt exceeds the size limit.');
-  const bindingsJson = JSON.stringify(Object.fromEntries(bindings));
   return { prompt: authored + instructions, bindingsJson, bytes: promptBytes + Buffer.byteLength(bindingsJson) };
 }

@@ -87,6 +87,28 @@ describe('YAML v1 workflow definition', () => {
     expectIssue(`${source}    model: synthetic\n    signals: { false_success: {payload: none} }\n`, 'unknown-field', ['steps', 4, 'signals']);
   });
 
+  test('supports command bindings while rejecting Notes mode and normalized env collisions', () => {
+    const validCommand = `version: 1
+name: Command bindings
+inputs:
+  branch: { type: string }
+steps:
+  - id: run_check
+    kind: command
+    shell: bash
+    bindings: { branch-name: inputs.branch }
+    command: printf '%s' "$GARCON_WF_BRANCH_NAME"
+`;
+    const parsed = validated(validCommand);
+    expect(parsed.steps[0]).toMatchObject({ kind: 'command', bindings: { 'branch-name': { kind: 'input', input: 'branch' } } });
+    expectIssue(validCommand.replace('shell: bash', 'shell: notes'), 'invalid-binding', ['steps', 0, 'shell']);
+    expectIssue(
+      validCommand.replace('bindings: { branch-name: inputs.branch }', 'bindings: { branch-name: inputs.branch, branch_name: inputs.branch }'),
+      'invalid-binding',
+      ['steps', 0, 'bindings', 'branch_name'],
+    );
+  });
+
   test('preserves typed JSON, boolean, and numeric defaults and checks wrong defaults', () => {
     const source = recipe.replace('inputs:\n', `inputs:
   config: { type: json, default: { quoted: [1, true, null, yes] } }

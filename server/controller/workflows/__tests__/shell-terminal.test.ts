@@ -90,6 +90,32 @@ test.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
         attempts: [{ status: 'unknown', reason: expect.stringContaining('Stop was requested') }],
       });
       expect(engine.archiveRun({ runId: sleeping, operationId: 'archive-stopped' }, actor).status).toBe('archived');
+
+      const marker = join(workspace.project, 'injected-marker');
+      const hostileSource = `version: 1
+name: Hostile binding input
+inputs:
+  payload: { type: string }
+steps:
+  - id: echo_safe
+    kind: command
+    shell: sh
+    bindings: { payload: inputs.payload }
+    command: printf '%s' "$GARCON_WF_PAYLOAD"
+`;
+      const hostileDef = parseWorkflowDefinition(hostileSource).definition!;
+      const hostileRunId = engine.testWorkflowDraft({
+        source: hostileSource,
+        inputs: { payload: `'; touch ${JSON.stringify(marker)}; $(id) \`uname\`` },
+        executionContext: { defaultTarget: { executorId: 'local', projectPath: workspace.project } },
+      }, hostileDef).id;
+      const echoed = await settled(hostileRunId);
+      expect(echoed.status).toBe('succeeded');
+      expect(engine.getRun(hostileRunId).signals).toMatchObject([{
+        ref: { stepId: 'echo_safe', signal: 'turn_completed' },
+        payload: `'; touch ${JSON.stringify(marker)}; $(id) \`uname\``,
+      }]);
+      expect(await Bun.file(marker).exists()).toBe(false);
     } finally {
       fault.mockRestore();
       engine.close();

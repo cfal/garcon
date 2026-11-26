@@ -1,7 +1,7 @@
 import { workflowPromptBindingNames } from './prompt.js';
 import type { WorkflowField } from './source.js';
 import {
-  WORKFLOW_DEFINITION_LIMITS, WORKFLOW_TURN_COMPLETED,
+  WORKFLOW_DEFINITION_LIMITS, WORKFLOW_TURN_COMPLETED, workflowCommandEnvName,
   type WorkflowDefinition, type WorkflowSignalDefinition, type WorkflowSignalReference, type WorkflowStep,
 } from './types.js';
 
@@ -135,15 +135,30 @@ function validateStep(
       byId.get(evidence.stepId), 'uses selected evidence from');
   }
 
-  if (step.kind !== 'command') validateBindings(step, field, inputs, triggerSignal, evidence, byId);
+  validateBindings(step, field, inputs, triggerSignal, evidence, byId);
   return dependencies;
 }
 
 function validateBindings(
-  step: Exclude<WorkflowStep, { kind: 'command' }>, field: WorkflowField, inputs: WorkflowDefinition['inputs'],
+  step: WorkflowStep, field: WorkflowField, inputs: WorkflowDefinition['inputs'],
   triggerSignal: WorkflowSignalDefinition | undefined, evidence: WorkflowSignalReference | undefined, byId: ReadonlyMap<string, WorkflowStep>,
 ): void {
   const bindings = step.bindings ?? {};
+  const bindingKeys = Object.keys(bindings);
+  if (step.kind === 'command') {
+    if (bindingKeys.length && (step.shell === 'notes' || step.shell === 'notes-markdown')) {
+      field.at('shell').issue('invalid-binding', 'Command bindings require an executable shell rather than Notes mode.');
+    }
+    const envNames = new Set<string>();
+    for (const name of bindingKeys) {
+      const envName = workflowCommandEnvName(name);
+      if (envNames.has(envName)) {
+        field.at('bindings').at(name).issue('invalid-binding', `Rename this binding; ${envName} collides with another binding on this command step.`);
+      } else {
+        envNames.add(envName);
+      }
+    }
+  }
   for (const [name, binding] of Object.entries(bindings)) {
     const entry = field.at('bindings').at(name);
     if (binding.kind === 'input') {
@@ -165,9 +180,11 @@ function validateBindings(
       entry.issue('invalid-binding', `Use the whole signal or declare the JSON field ${JSON.stringify(binding.field)} on the emitting signal.`);
     }
   }
-  for (const name of workflowPromptBindingNames(step.prompt)) {
-    if (!Object.hasOwn(bindings, name)) {
-      field.at('prompt').issue('invalid-binding', `Add a binding for {{${name}}} or remove the placeholder from the prompt.`);
+  if (step.kind !== 'command') {
+    for (const name of workflowPromptBindingNames(step.prompt)) {
+      if (!Object.hasOwn(bindings, name)) {
+        field.at('prompt').issue('invalid-binding', `Add a binding for {{${name}}} or remove the placeholder from the prompt.`);
+      }
     }
   }
 }

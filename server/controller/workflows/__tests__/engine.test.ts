@@ -8,6 +8,7 @@ import { setImmediate } from 'node:timers/promises';
 import { parseWorkflowDefinition } from '../../../../common/workflow-definition.js';
 import type { WorkflowRunStep } from '../../../../common/workflow-runs.js';
 import { WorkflowEngine, type WorkflowEngineOptions } from '../engine.js';
+import { wrapCommandWithBindings } from '../bindings.js';
 import { WORKFLOW_LIMITS } from '../limits.js';
 import type { WorkflowAttemptCallbacks, WorkflowAttemptRequest, WorkflowAttemptResult, WorkflowRunner } from '../runner.js';
 import { WORKFLOW_SCHEMA } from '../schema.js';
@@ -1024,4 +1025,42 @@ test('upgrades v3 workflow databases to v4 and persists bounded attempt diagnost
   const next = service.testWorkflowDraft({ source, inputs: {}, executionContext: LOCAL }, definition).id;
   await until(() => service.getRun(next).status === 'attention');
   expect(step(service, next, 'cmd').instances[0]?.attempts[0]?.diagnostic).toBe('x'.repeat(1024));
+});
+
+test('wraps command step bindings safely for POSIX and fish shells without interpolating source text', async () => {
+  const hostile = "'; touch pwned; $(uname) `id` $HOME\nline2";
+  const posix = wrapCommandWithBindings('printf %s "$GARCON_WF_TOPIC"', 'sh', { topic: hostile, meta: { ok: true } });
+  expect(posix).toBe([
+    "export GARCON_WF_TOPIC=''\\''; touch pwned; $(uname) `id` $HOME",
+    "line2'",
+    'export GARCON_WF_META=\'{"ok":true}\'',
+    'printf %s "$GARCON_WF_TOPIC"',
+  ].join('\n'));
+  const fish = wrapCommandWithBindings('printf %s $GARCON_WF_PATH', 'fish', { path: "a\\b'c" });
+  expect(fish).toBe("set -gx GARCON_WF_PATH 'a\\\\b\\'c'\nprintf %s $GARCON_WF_PATH");
+  expect(() => wrapCommandWithBindings('pwd', 'notes', { topic: 'ok' })).toThrow('Notes mode');
+  expect(() => wrapCommandWithBindings('pwd', 'sh', { bad: 'nul\0byte' })).toThrow('characters');
+
+  const source = `version: 1
+name: Bound command
+inputs:
+  payload: { type: string }
+steps:
+  - id: echo_env
+    kind: command
+    shell: sh
+    bindings: { payload: inputs.payload }
+    command: printf '%s' "$GARCON_WF_PAYLOAD"
+`;
+  const { service, runner } = workspace()(new ControlledRunner());
+  publish(service, source, 'cmd-bind-def');
+  const runId = service.startRun({ definitionId: 'cmd-bind-def', inputs: { payload: hostile }, executionContext: LOCAL }).id;
+  await service.start();
+  const attempt = await runner.next('echo_env');
+  expect(attempt.request.kind).toBe('command');
+  if (attempt.request.kind === 'command') {
+    expect(attempt.request.command).toContain(`export GARCON_WF_PAYLOAD=`);
+    expect(attempt.request.command.endsWith('\nprintf \'%s\' "$GARCON_WF_PAYLOAD"')).toBe(true);
+  }
+  expect(step(service, runId, 'echo_env').instances[0]?.bindings).toEqual({ payload: hostile });
 });

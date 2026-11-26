@@ -58,10 +58,10 @@ Each step has a unique `id`, a `kind`, and optional display `name` and start con
 | `kind` | Required | Optional fields |
 | --- | --- | --- |
 | `agent` | `prompt` | `bindings`, `signals`, `executorId`, `projectPath`, `agentId`, `model`, `apiProviderId`, `modelEndpointId`, `permissionMode`, `thinkingMode`, `agentSettings`, `orderedPreambleIds`, `attachments`, `tags` |
-| `command` | `command` | `executorId`, `projectPath`, `shell` (defaults to `sh`; choose an executable mode, not Notes) |
+| `command` | `command` | `bindings`, `executorId`, `projectPath`, `shell` (defaults to `sh`; choose an executable mode, not Notes) |
 | `decision` | `prompt`, `choices` | `bindings` |
 
-`choices` maps signal names to button labels. Choosing one emits that name once, without a payload. A decision step needs no executor or folder. A command is literal Shell input, not a binding template, and has no model, preambles, or custom signals.
+`choices` maps signal names to button labels. Choosing one emits that name once, without a payload. A decision step needs no executor or folder. A `command` step keeps literal Shell source (it does not expand `{{placeholders}}`) and exposes declared `bindings` safely via single-quoted `GARCON_WF_<NAME>` environment variables (requires an executable shell, not Notes); it has no model, preambles, or custom signals.
 
 For an agent, `agentSettings` is a mapping with `ownerId`, `schemaVersion`, and `values`. `apiProviderId` and `modelEndpointId` select a configured provider route; `apiProviderId: null` selects native routing without an endpoint. `orderedPreambleIds: []` explicitly uses no preambles; omit it for defaults. Use normalized `tags` such as `[review-needed]`. `attachments` is a list such as `[{ path: ./notes.md }]`: files are read on the step's executor, relative to the step's folder or by absolute path, and must be supported by that agent and model.
 

@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import {
 		WORKFLOW_DEFINITION_LIMITS,
+		workflowCommandEnvName,
 		type WorkflowDefinition,
 		type WorkflowStep,
 	} from '$shared/workflow-definition';
@@ -57,9 +58,7 @@
 	});
 	const authoredConcurrency = $derived(step.on?.kind === 'each' ? step.on.maxConcurrency : 1);
 	const authoredGroups = $derived(JSON.stringify(step.on?.kind === 'all' ? step.on.steps : []));
-	const authoredBindings = $derived(
-		JSON.stringify(step.kind === 'command' ? {} : (step.bindings ?? {})),
-	);
+	const authoredBindings = $derived(JSON.stringify(step.bindings ?? {}));
 	let name = $derived(authoredName);
 	let instruction = $derived(authoredInstruction);
 	let mode = $derived(authoredMode);
@@ -120,7 +119,10 @@
 		Boolean(instruction.trim()) &&
 			(mode === 'root' || (Boolean(signal) && (mode !== 'join' || groups.length > 0))) &&
 			bindings.every(({ name, source }) => name.trim() && source) &&
-			new Set(bindings.map(({ name }) => name.trim())).size === bindings.length,
+			new Set(bindings.map(({ name }) => name.trim())).size === bindings.length &&
+			(step.kind !== 'command' ||
+				new Set(bindings.map(({ name }) => workflowCommandEnvName(name.trim()))).size ===
+					bindings.length),
 	);
 
 	function applyFields(fields: Readonly<Record<string, JsonValue | undefined>>) {
@@ -138,13 +140,9 @@
 			name: name.trim() || undefined,
 			[step.kind === 'command' ? 'command' : 'prompt']: instruction,
 			on,
-			...(step.kind !== 'command'
-				? {
-						bindings: bindings.length
-							? Object.fromEntries(bindings.map(({ name, source }) => [name.trim(), source]))
-							: undefined,
-					}
-				: {}),
+			bindings: bindings.length
+				? Object.fromEntries(bindings.map(({ name, source }) => [name.trim(), source]))
+				: undefined,
 		});
 	}
 </script>
@@ -213,63 +211,69 @@
 				</label>
 			{/if}
 		{/if}
-		{#if step.kind !== 'command'}
-			<fieldset class="space-y-2">
-				<legend class="text-sm">{m.workflow_studio_bindings()}</legend>
-				{#each bindings as binding, index (binding.id)}
-					<div class="grid min-w-0 gap-1">
-						<input
-							class="workflow-field"
-							type="text"
-							required
-							value={binding.name}
-							aria-label={m.workflow_studio_binding_name()}
-							oninput={(event) => {
-								const name = event.currentTarget.value;
-								bindings = bindings.map((entry, current) =>
-									current === index ? { ...entry, name } : entry,
-								);
-							}}
-						/>
-						<select
-							class="workflow-field"
-							required
-							value={binding.source}
-							aria-label={m.workflow_studio_binding_source()}
-							onchange={(event) => {
-								const source = event.currentTarget.value;
-								bindings = bindings.map((entry, current) =>
-									current === index ? { ...entry, source } : entry,
-								);
-							}}
-						>
-							<option value="">{m.workflow_studio_binding_source()}</option>
-							{#if binding.source && !bindingSources.includes(binding.source)}<option
-									value={binding.source}>{binding.source} · {m.common_unavailable()}</option
-								>{/if}
-							{#each bindingSources as source (source)}<option value={source}>{source}</option
-								>{/each}
-						</select>
-						<Button
-							size="sm"
-							variant="ghost"
-							class="justify-self-start"
-							onclick={() => (bindings = bindings.filter((_, current) => current !== index))}
-							>{m.workflow_studio_remove_binding()}</Button
-						>
-					</div>
-				{/each}
-				{#if bindingSources.length}
+		<fieldset class="space-y-2">
+			<legend class="text-sm"
+				>{step.kind === 'command'
+					? m.workflow_studio_command_bindings()
+					: m.workflow_studio_bindings()}</legend
+			>
+			{#each bindings as binding, index (binding.id)}
+				<div class="grid min-w-0 gap-1">
+					<input
+						class="workflow-field"
+						type="text"
+						required
+						value={binding.name}
+						aria-label={m.workflow_studio_binding_name()}
+						oninput={(event) => {
+							const name = event.currentTarget.value;
+							bindings = bindings.map((entry, current) =>
+								current === index ? { ...entry, name } : entry,
+							);
+						}}
+					/>
+					{#if step.kind === 'command' && binding.name.trim()}
+						<p class="font-mono text-xs text-muted-foreground">
+							${workflowCommandEnvName(binding.name.trim())}
+						</p>
+					{/if}
+					<select
+						class="workflow-field"
+						required
+						value={binding.source}
+						aria-label={m.workflow_studio_binding_source()}
+						onchange={(event) => {
+							const source = event.currentTarget.value;
+							bindings = bindings.map((entry, current) =>
+								current === index ? { ...entry, source } : entry,
+							);
+						}}
+					>
+						<option value="">{m.workflow_studio_binding_source()}</option>
+						{#if binding.source && !bindingSources.includes(binding.source)}<option
+								value={binding.source}>{binding.source} · {m.common_unavailable()}</option
+							>{/if}
+						{#each bindingSources as source (source)}<option value={source}>{source}</option
+							>{/each}
+					</select>
 					<Button
 						size="sm"
-						variant="outline"
-						onclick={() =>
-							(bindings = [...bindings, { id: createRandomId(), name: '', source: '' }])}
-						>{m.workflow_studio_add_binding()}</Button
+						variant="ghost"
+						class="justify-self-start"
+						onclick={() => (bindings = bindings.filter((_, current) => current !== index))}
+						>{m.workflow_studio_remove_binding()}</Button
 					>
-				{/if}
-			</fieldset>
-		{/if}
+				</div>
+			{/each}
+			{#if bindingSources.length}
+				<Button
+					size="sm"
+					variant="outline"
+					onclick={() => (bindings = [...bindings, { id: createRandomId(), name: '', source: '' }])}
+					>{m.workflow_studio_add_binding()}</Button
+				>
+			{/if}
+		</fieldset>
 		<Button type="submit" size="sm" disabled={!complete}>{m.workflow_studio_apply_step()}</Button>
 	</form>
 	<div class="flex flex-wrap gap-2 border-t border-border pt-3">

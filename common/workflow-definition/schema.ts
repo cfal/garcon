@@ -46,10 +46,18 @@ export function readWorkflowStep(field: WorkflowField): WorkflowStep | null {
 
   const execution = { ...common, ...parseWorkflowLocation(field) };
   if (kind === 'command') {
-    field.map([...executionKeys, 'command', 'shell']);
+    field.map([...executionKeys, 'command', 'shell', 'bindings']);
     const command = field.at('command').text(WORKFLOW_DEFINITION_LIMITS.promptBytes);
     const shell = field.at('shell').optional((entry) => entry.text(128));
-    return id && command ? { ...execution, id, kind, command, ...(shell === undefined ? {} : { shell }) } : null;
+    const bindings = field.at('bindings').optional(readBindings);
+    return id && command ? {
+      ...execution,
+      id,
+      kind,
+      command,
+      ...(shell === undefined ? {} : { shell }),
+      ...(bindings === undefined ? {} : { bindings }),
+    } : null;
   }
 
   field.map([...executionKeys, ...AGENT_OPTION_FIELDS, 'prompt', 'bindings', 'signals']);

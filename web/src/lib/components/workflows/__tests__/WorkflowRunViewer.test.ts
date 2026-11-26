@@ -282,4 +282,36 @@ describe('Workflow run viewer', () => {
 			}),
 		);
 	});
+
+	it('binds a stored result as $GARCON_WF_RESULT when adding a command step from evidence', async () => {
+		vi.mocked(api.addWorkflowStep).mockResolvedValue(workflowRun());
+		render(WorkflowRunViewer, { runId: 'run-a', onOpenChat: vi.fn() });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Add step' }));
+		const form = screen.getByRole('heading', { name: 'Add step' }).closest('form')!;
+		await fireEvent.change(within(form).getByLabelText('Step type'), {
+			target: { value: 'command' },
+		});
+		await fireEvent.input(within(form).getByLabelText('Step name'), {
+			target: { value: 'Inspect stored finding' },
+		});
+		await fireEvent.input(within(form).getByLabelText('Command'), {
+			target: { value: 'printf %s "$GARCON_WF_RESULT"' },
+		});
+		await fireEvent.change(within(form).getByLabelText('Start condition'), {
+			target: { value: 'result' },
+		});
+		await fireEvent.change(within(form).getByLabelText('Evidence'), {
+			target: { value: 'report-a' },
+		});
+		expect(within(form).getByLabelText('Expose the result as $GARCON_WF_RESULT')).toBeTruthy();
+		vi.mocked(validateStart).mockResolvedValueOnce({ valid: true, isGitRepo: false });
+		await fireEvent.click(within(form).getByRole('button', { name: 'Add step' }));
+		await waitFor(() => expect(api.addWorkflowStep).toHaveBeenCalledOnce());
+		const step = JSON.parse(vi.mocked(api.addWorkflowStep).mock.calls[0][0].source);
+		expect(step).toMatchObject({
+			kind: 'command',
+			command: 'printf %s "$GARCON_WF_RESULT"',
+			bindings: { result: 'signal' },
+		});
+	});
 });

@@ -6,7 +6,7 @@ import type {
   WorkflowInstanceStatus, WorkflowLocation, WorkflowRunStatus, WorkflowSignalSource, WorkflowStepSettings, WorkflowTrigger,
 } from '../../../common/workflow-runs.js';
 import { workflowProducerCanEmit } from '../../../common/workflow-runs.js';
-import { bindPrompt, WorkflowBindingError } from './bindings.js';
+import { bindCommand, bindPrompt, WorkflowBindingError } from './bindings.js';
 import { workflowConflict, workflowLimit } from './errors.js';
 import { WORKFLOW_LIMITS } from './limits.js';
 import { requireRun, runSteps, type RunStepRow, type SignalRow } from './records.js';
@@ -223,18 +223,24 @@ export class WorkflowGraph {
     let reason: string | null = null;
     let prompt: string | null = null;
     let bindings: string | null = null;
-    if (step.kind !== 'command') {
+    if (step.kind !== 'command' || (step.bindings && Object.keys(step.bindings).length > 0)) {
       try {
         const payload = signal?.payload_json == null ? undefined : JSON.parse(signal.payload_json) as JsonValue;
-        const result = bindPrompt(step, this.#inputs, payload, stepId => this.#collectAll(stepId, signal!.sequence));
-        if (this.#bindingBytes + result.bytes > WORKFLOW_LIMITS.bindingBytesPerRun) {
+        const collectAll = (stepId: string) => this.#collectAll(stepId, signal!.sequence);
+        let bytes: number;
+        if (step.kind === 'command') {
+          ({ bindingsJson: bindings, bytes } = bindCommand(step, this.#inputs, payload, collectAll));
+        } else {
+          ({ prompt, bindingsJson: bindings, bytes } = bindPrompt(step, this.#inputs, payload, collectAll));
+        }
+        if (this.#bindingBytes + bytes > WORKFLOW_LIMITS.bindingBytesPerRun) {
           throw new WorkflowBindingError('Run has reached its bound input storage limit.');
         }
-        this.#bindingBytes += result.bytes;
+        this.#bindingBytes += bytes;
         this.db.query('UPDATE workflow_runs SET binding_bytes = ? WHERE id = ?').run(this.#bindingBytes, this.runId);
-        prompt = result.prompt;
-        bindings = result.bindingsJson;
       } catch (error) {
+        prompt = null;
+        bindings = null;
         if (!(error instanceof WorkflowBindingError)) throw error;
         if (onBindingError === 'reject') throw workflowConflict(error.message);
         status = 'blocked';
