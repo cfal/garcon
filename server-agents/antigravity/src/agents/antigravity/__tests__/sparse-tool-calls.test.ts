@@ -65,6 +65,21 @@ test('keeps a schedule open for a cancellation condition or MCP address until pu
   expect(s.end()).toMatchObject([{ type: 'schedule-tool-use', request: { timerCondition: 'sender' } }]);
 });
 
+test('shows a repeated terminal schedule diagnostic alongside metadata without promoting cached progress', () => {
+  const s = session();
+  const content = [textBlock('Could not save this schedule')];
+  const timer = { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content };
+  const rawOutput = { attempts: 1 };
+  s.start('reported', timer);
+  expect(s.patch('reported', { status: 'failed', content, rawOutput }).at(-1)).toEqual(expect.objectContaining({
+    content: { status: 'failed', raw: 'Could not save this schedule', rawOutput }, isError: true,
+  }));
+  s.start('cached', timer);
+  expect(s.patch('cached', { status: 'failed', rawOutput }).at(-1)).toEqual(expect.objectContaining({
+    content: { status: 'failed', items: content, rawOutput }, isError: true,
+  }));
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [
@@ -86,6 +101,14 @@ test('retains explicitly supplied timer defaults and daemon flags accepted by ag
     expect(s.start(String(daemon), { name: 'schedule', rawInput, status: 'completed' })[0])
       .toMatchObject({ type: 'schedule-tool-use', request: { daemon, timerCondition: '', exactTiming: false } });
   }
+});
+
+test('retains explicit inactive timer fields and an unlimited iteration count on a cron', () => {
+  const rawInput = { CronExpression: '0 9 * * *', Prompt: 'Check', DurationSeconds: 0, TimerCondition: '', MaxIterations: 0 };
+  expect(session().start('cron', { name: 'schedule', rawInput, status: 'completed' })[0]).toMatchObject({
+    type: 'schedule-tool-use', request: { action: 'cron', expression: rawInput.CronExpression, prompt: 'Check',
+      delaySeconds: 0, timerCondition: '', maxIterations: 0 },
+  });
 });
 
 test('uses late identity and partial arguments without duplicating either tool row', () => {

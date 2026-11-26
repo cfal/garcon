@@ -59,6 +59,17 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText(/Prompt: Check progress/).textContent).toContain('Cancel on message from: sender');
 	});
 
+	it('shows an unlimited cron request and both parts of its reported failure', () => {
+		const toolMessage = new ScheduleToolUseMessage('', 'cron', {
+			action: 'cron', expression: '0 9 * * *', prompt: 'Check', maxIterations: 0,
+		});
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+		expect(screen.getByText(/Maximum iterations: unlimited/)).toBeTruthy();
+		render(ChatToolEventRenderer, { toolMessage, mode: 'result', autoExpandTools: true,
+			toolResult: { isError: true, content: { status: 'failed', raw: 'Could not save this schedule', rawOutput: { attempts: 1 } } } });
+		expect(screen.getByText(/Could not save this schedule/).textContent).toContain('"attempts": 1');
+	});
+
 	it('shows a stop-loop request without an empty disclosure and keeps actual result metadata', () => {
 		const toolMessage = new ScheduleToolUseMessage('', 'stop', { action: 'stop-loop' });
 		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });

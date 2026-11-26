@@ -64,7 +64,7 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
   return !rawChanged && !!previous?.contentIsNewer;
 }
 
-function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['content'] {
+function agentWorkResult(call: TrackedCall, status: string, terminalContent: unknown): ToolResultMessage['content'] {
   const output = rawOutputText(call.rawOutput);
   const blocks = withoutOutputEchoes(call.content ?? [], output);
   const blockText = joinBlockText(blocks);
@@ -74,7 +74,12 @@ function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['
   const structured = isStructuredOutput(call.rawOutput);
   let primary: 'output' | 'metadata' | 'content' = 'content';
   if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
-  else if (structured && !trimmedOutput && !call.contentIsNewer) primary = 'metadata';
+  else if (structured && !trimmedOutput && !call.contentIsNewer) {
+    // Report terminal diagnostics even if the same block arrived earlier; do not promote cached progress.
+    const name = antigravityToolName(call);
+    const reportsPlanOrSchedule = name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
+    if (!(reportsPlanOrSchedule && status !== 'completed' && Array.isArray(terminalContent) && trimmedBlocks)) primary = 'metadata';
+  }
 
   const result: ToolResultMessage['content'] = status === 'completed' ? {} : { status };
   if (structured || (distinct && primary === 'content')) result.rawOutput = call.rawOutput;
@@ -91,7 +96,7 @@ function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['
 export function toolCallResult(timestamp: string, call: TrackedCall, terminal: Record<string, unknown>, status: string): ToolResultMessage {
   const name = call.isMcp ? null : antigravityToolName(call);
   if (isAgentWork(name)) {
-    return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status), status !== 'completed');
+    return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status, terminal.content), status !== 'completed');
   }
 
   // Other tools report text from the terminal frame, but a command's exit code can arrive earlier.
