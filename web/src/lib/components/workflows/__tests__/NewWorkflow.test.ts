@@ -7,6 +7,8 @@ import type { FileTreeResponse } from '$shared/file-contracts';
 import { parseWorkflowDefinition } from '$shared/workflow-definition';
 import { WorkflowFileState } from '$lib/workflows/definition/workflow-file-state.svelte';
 import { WorkflowDraftState } from '$lib/workflows/definition/workflow-draft-state.svelte';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { workflowRevision, workflowRun } from '$lib/workflows/__tests__/workflow-fixtures';
 import NewWorkflowTestHost from './NewWorkflowTestHost.svelte';
 import WorkflowDefinitionEditor from '../WorkflowDefinitionEditor.svelte';
@@ -763,5 +765,101 @@ steps:
 		await fireEvent.click(within(secondGuard).getByRole('button', { name: 'Discard edits' }));
 		expect(screen.getByLabelText('Definition')).toBeTruthy();
 		expect(canUnload()).toBe(true);
+	});
+
+	it('launches starter templates from empty state and editor picker, and guides Publish into Run now', async () => {
+		vi.mocked(api.listWorkflowDefinitionsPage).mockResolvedValueOnce({ items: [], nextCursor: null });
+		render(NewWorkflowTestHost, { onRunStarted: vi.fn(), open: true });
+		const emptyTemplate = await screen.findByRole('button', { name: 'Agent draft with review gate' });
+		await fireEvent.click(emptyTemplate);
+		expect(screen.getByDisplayValue('Draft and review')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Starter templates' }));
+		const dialog = screen.getByRole('dialog', { name: 'Starter templates' });
+		const useButtons = within(dialog).getAllByRole('button', { name: 'Use template' });
+		await fireEvent.click(useButtons[1]!);
+		expect(screen.getByDisplayValue('Command check and approval')).toBeTruthy();
+
+		const { definition, source } = workflowRun().pinnedRevision;
+		const published = {
+			...workflowRevision(),
+			definitionId: 'published-new',
+			revision: 1,
+			source,
+			definition,
+		};
+		vi.mocked(api.publishWorkflowDefinition).mockResolvedValueOnce(published);
+		vi.mocked(api.listWorkflowDefinitionsPage).mockResolvedValueOnce({
+			items: [
+				{
+					id: 'published-new',
+					revision: 1,
+					name: definition.name,
+					publishedAt: published.publishedAt!,
+					inputs: definition.inputs,
+				},
+			],
+			nextCursor: null,
+		});
+		vi.mocked(api.listWorkflowRevisions).mockResolvedValueOnce({
+			items: [
+				{
+					definitionId: 'published-new',
+					revision: 1,
+					name: definition.name,
+					publishedAt: published.publishedAt!,
+				},
+			],
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+		const runNow = await screen.findByRole('button', { name: 'Run now' });
+		expect(screen.getByText('Published revision 1.')).toBeTruthy();
+		await fireEvent.click(runNow);
+		expect(screen.getByLabelText<HTMLSelectElement>('Definition').value).toBe('published-new:1');
+		expect(screen.getByRole('button', { name: 'Start workflow' })).toBeTruthy();
+	});
+
+	it('seeds executor folder defaults without leaking across executors or overwriting explicit clears', async () => {
+		const snapshot = [
+			{ ...localExecutor, projectBasePath: '/local-base' },
+			{ ...remoteExecutor, projectBasePath: '/remote-base' },
+		];
+		const executors = new ExecutorsStore(async () => snapshot);
+		executors.applySnapshot(snapshot);
+		const { source, definition } = workflowRun().pinnedRevision;
+		vi.mocked(api.getWorkflowRevision).mockResolvedValue({
+			...workflowRevision(),
+			definitionId: 'review-def',
+			revision: 3,
+			source,
+			definition,
+		});
+
+		render(NewWorkflowTestHost, {
+			props: {
+				onRunStarted: vi.fn(),
+				open: true,
+				context: { executorId: remoteExecutor.id, cwd: '/worker/repo' },
+				executors,
+			},
+		});
+		await screen.findByRole('option', { name: 'Review a report · Revision 3' });
+		await fireEvent.change(screen.getByLabelText('Definition'), {
+			target: { value: 'review-def:3' },
+		});
+
+		const remoteFolder = await screen.findByLabelText<HTMLInputElement>('Worker folder');
+		expect(remoteFolder.value).toBe('/worker/repo');
+
+		// Switch launch executor to Local: gets Local's projectBasePath, NOT the remote chat folder.
+		await fireEvent.click(screen.getByRole('button', { name: /Worker/ }));
+		await fireEvent.click(await screen.findByRole('menuitemradio', { name: /Local/ }));
+		const localFolder = await screen.findByLabelText<HTMLInputElement>('Local folder');
+		expect(localFolder.value).toBe('/local-base');
+
+		// Clearing the field manually must persist instead of re-seeding immediately.
+		await fireEvent.input(localFolder, { target: { value: '' } });
+		expect(localFolder.value).toBe('');
 	});
 });

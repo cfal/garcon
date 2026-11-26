@@ -5,6 +5,7 @@
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -28,6 +29,7 @@
 		getWorkflowStudioSession,
 		type StudioLaunchSeed,
 	} from '$lib/workflows/definition/workflow-studio-session.svelte';
+	import { WORKFLOW_STARTER_TEMPLATES } from '$lib/workflows/definition/workflow-templates';
 	import type { WorkflowFileState } from '$lib/workflows/definition/workflow-file-state.svelte';
 	import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region';
@@ -65,6 +67,7 @@
 	let draft = $derived(session.current?.draft ?? null);
 	let testSource = $state('');
 	let chooser = $state<SourceMode | null>(null);
+	let templatePickerOpen = $state(false);
 	let replace = $state.raw<(() => void) | null>(null);
 	let unappliedGuard = $state.raw<(() => void) | null>(null);
 	let editorRef = $state<{
@@ -155,8 +158,28 @@
 				onRunStarted(id);
 				void loadRuns();
 			},
-			published() {
+			published(published) {
 				void loadDefinitions();
+				if (published?.definitionId && published.revision !== null) {
+					const defId = published.definitionId;
+					const revNum = published.revision;
+					revisionRead?.abort();
+					revisionRead = null;
+					loadingRevision = false;
+					revisionError = null;
+					deleteError = null;
+					chosen = `${defId}:${revNum}`;
+					revision = published;
+					revisions = [];
+					launchSeed = null;
+					void listWorkflowRevisions(defId, { signal: lifetime?.signal })
+						.then((listed) => {
+							if (revision?.definitionId === defId && revision.revision === revNum) {
+								revisions = listed.items;
+							}
+						})
+						.catch(() => {});
+				}
 			},
 		});
 		void loadDefinitions();
@@ -385,6 +408,13 @@
 					disabled={locked}
 					onclick={() => changeDraft(() => (chooser = 'paste'))}>{m.workflow_studio_paste()}</Button
 				>
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={locked}
+					onclick={() => (templatePickerOpen = true)}
+					><Sparkles class="size-4" /> {m.workflow_studio_templates()}</Button
+				>
 			</div>
 		{/if}
 	</header>
@@ -421,12 +451,23 @@
 			{/if}
 		</div>
 	{/if}
-	{#if session.notice}<p
+	{#if session.notice}
+		<div
 			role="status"
-			class="shrink-0 border-b border-border px-3 py-2 text-sm text-status-success-foreground"
+			class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-sm text-status-success-foreground"
 		>
-			{session.notice}
-		</p>{/if}
+			<span>{session.notice}</span>
+			{#if session.publishedRevision && page === 'editor'}
+				<Button
+					size="sm"
+					variant="outline"
+					disabled={locked}
+					onclick={() => runEditorTransition(() => (page = 'launch'))}
+					>{m.workflow_studio_run_now()}</Button
+				>
+			{/if}
+		</div>
+	{/if}
 
 	{#if page === 'editor' && draft}
 		{#key draft}
@@ -534,11 +575,33 @@
 						{#if loading || loadingRevision}<p role="status" class="text-sm text-muted-foreground">
 								{m.workflow_studio_loading_definitions()}
 							</p>{/if}
-						{#if !loading && !loadError && !definitions.length}<p
-								class="text-sm text-muted-foreground"
-							>
-								{m.workflow_studio_no_definitions()}
-							</p>{/if}
+						{#if !loading && !loadError && !definitions.length}
+							<div class="space-y-2 rounded-md border border-dashed border-border p-3">
+								<p class="text-sm text-muted-foreground">
+									{m.workflow_studio_no_definitions()}
+								</p>
+								<p class="text-xs text-muted-foreground">
+									{m.workflow_studio_templates_description()}
+								</p>
+								<div class="flex flex-wrap gap-2">
+									{#each WORKFLOW_STARTER_TEMPLATES as template (template.id)}
+										<Button
+											size="sm"
+											variant="outline"
+											disabled={locked}
+											onclick={() =>
+												changeDraft(() =>
+													installDraft(
+														new WorkflowDraftState(template.source, {
+															baseline: template.source,
+														}),
+													),
+												)}>{template.title}</Button
+										>
+									{/each}
+								</div>
+							</div>
+						{/if}
 					</div>
 					{#if revision}
 						{#if revisions.length && revision.definitionId}
@@ -723,6 +786,46 @@
 						action?.();
 					}}>{m.workflow_studio_discard_edits()}</Button
 				>
+			</div>
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}
+{#if templatePickerOpen}
+	<Dialog.Root
+		open
+		onOpenChange={(open) => {
+			if (!open) templatePickerOpen = false;
+		}}
+	>
+		<Dialog.Content>
+			<Dialog.Header>
+				<Dialog.Title>{m.workflow_studio_templates()}</Dialog.Title>
+				<Dialog.Description>{m.workflow_studio_templates_description()}</Dialog.Description>
+			</Dialog.Header>
+			<div class="space-y-2">
+				{#each WORKFLOW_STARTER_TEMPLATES as template (template.id)}
+					<div class="flex items-start justify-between gap-3 rounded-md border border-border p-3">
+						<div class="min-w-0 space-y-1">
+							<p class="text-sm font-medium">{template.title}</p>
+							<p class="wrap-anywhere text-xs text-muted-foreground">{template.summary}</p>
+						</div>
+						<Button
+							size="sm"
+							variant="outline"
+							disabled={locked}
+							onclick={() => {
+								templatePickerOpen = false;
+								changeDraft(() =>
+									installDraft(
+										new WorkflowDraftState(template.source, {
+											baseline: template.source,
+										}),
+									),
+								);
+							}}>{m.workflow_studio_use_template()}</Button
+						>
+					</div>
+				{/each}
 			</div>
 		</Dialog.Content>
 	</Dialog.Root>

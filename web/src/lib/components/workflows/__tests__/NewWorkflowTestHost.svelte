@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { setExecutors } from '$lib/context';
 	import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 	import NewWorkflow from '../NewWorkflow.svelte';
@@ -9,12 +10,14 @@
 		onRunStarted,
 		open = true,
 		context = null,
+		executors = new ExecutorsStore(),
 	}: {
 		onRunStarted: (id: string) => void;
 		open?: boolean;
 		context?: WorkflowLaunchContext | null;
+		executors?: ExecutorsStore;
 	} = $props();
-	setExecutors(new ExecutorsStore());
+	setExecutors(untrack(() => executors));
 	provideWorkflowStudioSession(() => open);
 </script>
 

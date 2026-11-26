@@ -21,7 +21,7 @@ import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locat
 import { WorkflowDraftState } from './workflow-draft-state.svelte';
 
 type Launch = WorkflowStartRequest | WorkflowTestRequest;
-type Observer = { launched(id: string): void; published(): void };
+type Observer = { launched(id: string): void; published(revision?: WorkflowRevision): void };
 
 export type StudioLaunchSeed = {
 	readonly key: string;
@@ -48,6 +48,7 @@ class WorkflowStudioSession {
 	notice = $state<string | null>(null);
 	pendingLaunch = $state.raw<Launch | null>(null);
 	startedRun = $state.raw<{ id: string; name: string } | null>(null);
+	publishedRevision = $state.raw<WorkflowRevision | null>(null);
 	pendingPublish = $state.raw<{
 		request: WorkflowPublishRequest;
 		draft: WorkflowDraftState;
@@ -107,11 +108,13 @@ class WorkflowStudioSession {
 		this.busy = true;
 		this.error = null;
 		this.notice = null;
+		this.publishedRevision = null;
 		try {
 			const result = await publishWorkflowDefinition(request);
 			draft.acceptPublished(result);
+			this.publishedRevision = result;
 			this.notice = m.workflow_studio_published({ revision: result.revision ?? '' });
-			this.#observer?.published();
+			this.#observer?.published(result);
 		} catch (error) {
 			if (isUnconfirmedWorkflowMutation(error)) this.pendingPublish = { request, draft };
 			this.error = this.pendingPublish ? m.workflow_studio_publish_unconfirmed() : failure(error);
@@ -135,8 +138,9 @@ class WorkflowStudioSession {
 				latest.revision > (request.expectedRevision ?? 0)
 			) {
 				draft.acceptPublished(latest);
+				this.publishedRevision = latest;
 				this.notice = m.workflow_studio_published({ revision: latest.revision });
-				this.#observer?.published();
+				this.#observer?.published(latest);
 			} else if (latest.revision !== request.expectedRevision) {
 				this.error = m.workflow_studio_publish_conflict();
 				this.#observer?.published();
@@ -177,6 +181,7 @@ class WorkflowStudioSession {
 		this.current = null;
 		this.pendingEdits = false;
 		this.startedRun = null;
+		this.publishedRevision = null;
 		this.notice = this.error = null;
 	}
 }

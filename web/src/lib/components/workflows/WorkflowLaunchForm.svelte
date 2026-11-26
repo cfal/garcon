@@ -82,6 +82,24 @@
 		definition.steps.some((step) => step.kind !== 'decision' && !step.executorId),
 	);
 	const locked = $derived(disabled || checking);
+
+	$effect(() => {
+		const required = plan.requiredFolders;
+		const fallbackContext = context;
+		const updates: Record<string, string> = {};
+		const current = untrack(() => paths);
+		for (const targetExecutor of required) {
+			if (Object.hasOwn(current, targetExecutor)) continue;
+			const seed =
+				(fallbackContext?.executorId === targetExecutor ? fallbackContext.cwd.trim() : '') ||
+				executors.get(targetExecutor)?.projectBasePath?.trim() ||
+				'';
+			if (seed) updates[targetExecutor] = seed;
+		}
+		if (Object.keys(updates).length) {
+			paths = { ...current, ...updates };
+		}
+	});
 	const errorLabels = {
 		required: m.workflow_studio_required_input,
 		number: m.workflow_studio_number_input,

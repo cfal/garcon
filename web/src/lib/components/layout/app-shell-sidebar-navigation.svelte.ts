@@ -151,10 +151,20 @@ export function createAppShellSidebarNavigation(options: AppShellSidebarNavigati
 		openWorkflowSurface(() => workspace.openWorkflowRun(runId, windowId));
 	}
 
+	function activeLaunchContext() {
+		const focused = workspace.focusedChatId ? sessions.byId[workspace.focusedChatId] : null;
+		const chat = [focused, sessions.selectedChat, ...sessions.orderedChats].find((entry) =>
+			entry?.projectPath.trim(),
+		);
+		return chat
+			? { executorId: effectiveExecutorId(chat.executorId), cwd: chat.projectPath }
+			: null;
+	}
+
 	function openNewWorkflowFromWorkflow(source: WorkflowSurfaceDescriptor): void {
 		if (!isCurrentWorkflowSource(source)) return;
 		const windowId = workspace.windowOf(source.id) ?? workspace.currentWindowId;
-		openWorkflowSurface(() => workspace.openNewWorkflow(null, windowId));
+		openWorkflowSurface(() => workspace.openNewWorkflow(activeLaunchContext(), windowId));
 	}
 
 	async function openWorkflowChat(
@@ -174,12 +184,7 @@ export function createAppShellSidebarNavigation(options: AppShellSidebarNavigati
 	}
 
 	function openNewWorkflow(): void {
-		const focusedChatId = workspace.focusedChatId;
-		const chat = focusedChatId ? sessions.byId[focusedChatId] : sessions.selectedChat;
-		const context = chat?.projectPath.trim()
-			? { executorId: effectiveExecutorId(chat.executorId), cwd: chat.projectPath }
-			: null;
-		openWorkflowSurface(() => workspace.openNewWorkflow(context));
+		openWorkflowSurface(() => workspace.openNewWorkflow(activeLaunchContext()));
 	}
 
 	function openWorkflowSurface(open: () => Promise<void>): void {
