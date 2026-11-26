@@ -35,4 +35,11 @@ test('reflects Claude coercion without guessing at unsupported schedule argument
     expect(convert('CronList', input)).toMatchObject({ type: 'unknown-tool-use', input: { raw: input } });
   }
   expect(convert('CronDelete', { id: '  ' }).type).toBe('unknown-tool-use');
+  for (const field of [{ delaySeconds: 'bad' }, { reason: 7 }, { prompt: false }, { noop: 'false' }]) {
+    const input = { stop: true, ...field };
+    expect(convert('ScheduleWakeup', input)).toMatchObject({ type: 'unknown-tool-use', input });
+  }
+  for (const input of [{ stop: true }, { stop: true, delaySeconds: '120.0' }]) {
+    expect(convert('ScheduleWakeup', input)).toMatchObject({ request: { action: 'stop-loop' } });
+  }
 });

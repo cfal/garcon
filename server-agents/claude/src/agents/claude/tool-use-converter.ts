@@ -135,11 +135,17 @@ function claudeScheduleToolUse(ts: string, id: string, rawName: string,
   switch (key) {
     case 'schedulewakeup': {
       if (!hasOnly('stop', 'delaySeconds', 'prompt', 'reason', 'noop')) break;
-      if (input.stop === true) return new ScheduleToolUseMessage(ts, id, { action: 'stop-loop' });
-      if ((input.stop !== undefined && input.stop !== false) || typeof input.reason !== 'string') break;
       // Claude accepts signed decimal strings and reports the clamped delay in the result.
       let delaySeconds = input.delaySeconds;
       if (typeof delaySeconds === 'string' && /^[-+]?\d+(\.\d+)?$/.test(delaySeconds.trim())) delaySeconds = Number(delaySeconds);
+      if (input.stop === true) {
+        if ((delaySeconds !== undefined && !Number.isFinite(delaySeconds))
+          || (input.reason !== undefined && typeof input.reason !== 'string')
+          || (input.prompt !== undefined && typeof input.prompt !== 'string')
+          || (input.noop !== undefined && typeof input.noop !== 'boolean')) break;
+        return new ScheduleToolUseMessage(ts, id, { action: 'stop-loop' });
+      }
+      if ((input.stop !== undefined && input.stop !== false) || typeof input.reason !== 'string') break;
       row = ScheduleToolUseMessage.fromRequest(ts, id, {
         action: 'wakeup', delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop,
       });
