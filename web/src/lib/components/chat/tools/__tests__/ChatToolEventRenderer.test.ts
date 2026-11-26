@@ -91,6 +91,15 @@ describe('ChatToolEventRenderer', () => {
 		expect(screen.getByText(/cancelledWakeups/).textContent).toBe(JSON.stringify(toolUseResult, null, 2));
 	});
 
+	it('keeps mixed schedule result blocks inspectable alongside the native metadata', () => {
+		const items = [{ type: 'text', text: 'Listed' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }];
+		render(ChatToolEventRenderer, { toolMessage: new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			mode: 'result', autoExpandTools: true, toolResult: { content: { items, toolUseResult: { count: 1 } } } });
+		const body = screen.getByText(/Listed/).textContent;
+		expect(body).toContain(JSON.stringify({ items }, null, 2));
+		expect(body).toContain('"count": 1');
+	});
+
 	it('expands the reason for an Antigravity plan and renders the exit plan as Markdown', async () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new AntigravityEnterPlanModeToolUseMessage('', 'enter', 'Check layout'), mode: 'input',

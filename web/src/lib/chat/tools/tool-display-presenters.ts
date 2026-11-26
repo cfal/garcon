@@ -82,9 +82,8 @@ export function reportedToolResultText(content: unknown): string {
 	const text = typeof raw === 'string' ? raw : '';
 	if (rawOutput === undefined) {
 		if (text) return text;
-		if (Array.isArray(items)) {
-			const lines = items.filter(item => item?.type === 'text' && typeof item.text === 'string').map(item => item.text);
-			const body = lines.join('\n');
+		if (Array.isArray(items) && items.every(item => item?.type === 'text' && typeof item.text === 'string' && Object.keys(item).length === 2)) {
+			const body = items.map(item => item.text).join('\n');
 			if (body) return body;
 		}
 		return extractContentString(content);
