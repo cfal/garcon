@@ -193,6 +193,9 @@ function boundedToolResult(message: ToolResultMessage, budget: ExtractionBudget)
   }
   // Spends the result budget on the diagnostic before supplementary fields.
   const primary = referencedResultText(message, budget);
+  if (!primary && !message.isError && isEmptyToolResult(content, {
+    maxChars: MAX_TOOL_RESULT_CHARS, maxBlocks: MAX_RECURSIVE_NODES,
+  })) return '';
   if (primary && budget.remaining > 0) budget.remaining--;
   const details = boundedUnknownText(content, budget, 0, TOOL_RESULT_FIELDS);
   return [primary, details].filter(Boolean).join(' ');
@@ -216,7 +219,6 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'agent-switch':
       return joinTool(message.fromAgentId, message.toAgentId, message.fromModel, message.toModel);
     case 'tool-result':
-      if (!message.isError && !message.primaryTextItems?.length && isEmptyToolResult(message.content, { maxChars: MAX_TOOL_RESULT_CHARS, maxBlocks: MAX_RECURSIVE_NODES })) return '';
       return boundedToolResult(message, budget);
     case 'permission-request':
       return messageText(message.requestedTool, budget);

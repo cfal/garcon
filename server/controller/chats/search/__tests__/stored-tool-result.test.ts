@@ -23,6 +23,17 @@ test('empty successful result envelopes have no search target', () => {
   }
 });
 
+test('only searchable primary text bypasses the bounded empty-result scan', () => {
+  const blank = { type: 'text', text: ' \t\n' };
+  const items = Array.from({ length: 513 }, () => blank);
+  const project = (last: string) => {
+    const content = { items: [...items, { type: 'text', text: last }] };
+    return projectSearchMessage(storedResult(new ToolResultMessage(at, 'timer', content, false, [items.length])));
+  };
+  expect(project(' ')).toBeNull();
+  expect(project('Operation refused')?.body).toStartWith('Operation refused');
+});
+
 test('indexes referenced output before long progress or attachments without changing stored block order', () => {
   const block = (text: string) => ({ type: 'content', content: { type: 'text', text } });
   for (const [progress, refs] of [['Checking '.repeat(500), [2]], ['Checking', [0, 2]]] as const) {
