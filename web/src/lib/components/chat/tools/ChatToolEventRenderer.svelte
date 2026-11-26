@@ -6,7 +6,7 @@
 		getToolDisplayLabel,
 		getToolDisplayPayload,
 	} from '$lib/chat/tools/tool-display-registry.js';
-	import { resolveDisplayRule, resolveToolResultDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
+	import { resolveDisplayRule, resolveToolResultDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 	import type {
 		ToolInputDisplayRule,
 		ToolResultDisplayRule,
@@ -181,7 +181,6 @@
 			{@const cfg = displayConfig as ToolInputDisplayRule}
 			<ChatToolInlineEvent
 				{toolName}
-				{toolResult}
 				label={inlineLabel}
 				value={inlineValue}
 				secondary={inlineSecondary}
@@ -192,13 +191,13 @@
 				wrapText={cfg.wrapText}
 				language={inlineLanguage}
 				colorScheme={cfg.colorScheme}
-				resultId={mode === 'input' ? resultAnchorId : undefined}
+				resultId={mode === 'input' && toolResult && cfg.action === 'jumpToResult' && shouldRenderToolResult(config, toolResult, toolMessage)
+					? resultAnchorId : undefined}
 			/>
 		{:else if displayConfig.mode === 'collapsible'}
 			{#if shouldRenderCollapsedAsInline}
 				<ChatToolInlineEvent
 					{toolName}
-					{toolResult}
 					label={toolName}
 					value={collapsedInlineFilePath || collapsibleTitle}
 					action={collapsedInlineFilePath && onFileOpen ? 'openFile' : 'none'}

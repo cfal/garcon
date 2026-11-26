@@ -41,20 +41,18 @@ export function resolveToolResultDisplayRule(
 	tool?: ToolUseChatMessage,
 ): ToolResultDisplayRule | undefined {
 	if (!toolResult) return rule.result;
-	const isAgentWork = tool?.type === 'background-task-tool-use' || tool?.type === 'agent-message-tool-use';
-	const isPlan = tool?.type === 'update-plan-tool-use';
-	if (!isAgentWork && !isPlan) {
-		return toolResult.isError === true && hasEmptyRequiredInput(tool) ? FAILED_RESULT_RULE : rule.result;
-	}
 	if (toolResult.isError === true) {
+		if (!rule.result?.reportsStatus) return hasEmptyRequiredInput(tool) ? FAILED_RESULT_RULE : rule.result;
 		const status = (toolResult.content as { status?: unknown } | undefined)?.status;
 		return typeof status === 'string' && status
 			? { ...FAILED_RESULT_RULE, title: `${m.chat_message_error()}: ${status}` }
 			: FAILED_RESULT_RULE;
 	}
-	const hasContent = Object.keys(toolResult.content ?? {}).length > 0;
-	if (isAgentWork && !hasContent) return undefined;
-	if (isPlan && hasContent) return TEXT_RESULT_RULE;
+	if (rule.result?.mode === 'collapsible') {
+		const content = toolResult.content as Record<string, unknown> | undefined;
+		const keys = Object.keys(content ?? {});
+		if (!keys.length || (keys.length === 1 && typeof content?.raw === 'string' && !/\S/.test(content.raw))) return undefined;
+	}
 	return rule.result;
 }
 

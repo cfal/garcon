@@ -18,6 +18,7 @@ import {
 type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
 
 const REPORTED_RESULT_RULE: ToolResultDisplayRule = {
+	reportsStatus: true,
 	mode: 'collapsible',
 	contentKind: 'text',
 	getContentProps: reportedResultProps,
@@ -607,11 +608,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				todos: input.todos,
 			}),
 		},
-		result: {
-			mode: 'collapsible',
-			contentKind: 'successMessage',
-			getMessage: () => m.chat_tool_plan_updated(),
-		},
+		result: REPORTED_RESULT_RULE,
 	},
 
 	...AMP_TOOL_DISPLAY_RULES,

@@ -16,6 +16,7 @@ import {
 	ExecToolUseMessage,
 	WaitToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	ExternalToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
 	PiToolSearchToolUseMessage,
@@ -60,6 +61,16 @@ describe('ChatToolEventRenderer', () => {
 		render(ChatToolEventRenderer, { toolMessage: new UpdatePlanToolUseMessage('', 'plan', []), mode: 'result',
 			autoExpandTools: true, toolResult: { content: { raw: 'Only one change was accepted' }, isError: false } });
 		expect(screen.getByText('Only one change was accepted')).toBeTruthy();
+	});
+
+	it.each([
+		new ExternalToolUseMessage('', 'old', 'custom', {}),
+		new UpdatePlanToolUseMessage('', 'plan', []),
+	])('omits the result disclosure for an empty successful $type', (toolMessage) => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage, mode: 'result', toolResult: { content: {}, isError: false },
+		});
+		expect(container.childElementCount).toBe(0);
 	});
 
 	it('prefers the primary failure diagnostic over supplementary progress blocks', () => {
@@ -678,6 +689,13 @@ describe('ChatToolEventRenderer', () => {
 });
 
 describe('tool result and jump behavior', () => {
+	it('does not offer a jump to a suppressed result', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new WebSearchToolUseMessage('', 'search', 'example'), mode: 'input',
+			toolResult: { content: { raw: '  ' } }, resultAnchorId: 'hidden-result',
+		});
+		expect(screen.queryByLabelText('Jump to results')).toBeNull();
+	});
 	it('renders jump-to-results link for Glob when toolResult is present', () => {
 		const toolResult = {
 			content: { filenames: ['a.ts', 'b.ts'], numFiles: 2 },

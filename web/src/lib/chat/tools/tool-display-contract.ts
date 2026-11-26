@@ -48,6 +48,7 @@ export interface ToolInputDisplayRule {
 
 export interface ToolResultDisplayRule {
 	hidden?: boolean;
+	reportsStatus?: boolean;
 	hideOnSuccess?: boolean;
 	mode?: Extract<ToolDisplayMode, 'inline' | 'collapsible'> | 'special';
 	title?: string | ((result: ToolPayload) => string);
