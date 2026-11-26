@@ -8,7 +8,9 @@ function convert(name: string, input: unknown) {
 test('distinguishes dynamic wakeups and loop stops from cron jobs', () => {
   const wakeup = { delaySeconds: 10, prompt: 'Check', reason: 'Waiting for output', noop: false };
   expect(convert('ScheduleWakeup', wakeup)).toMatchObject({ nativeName: 'ScheduleWakeup', type: 'schedule-tool-use', request: { action: 'wakeup', ...wakeup } });
-  expect(convert('ScheduleWakeup', { stop: true, ...wakeup })).toMatchObject({ nativeName: 'ScheduleWakeup', request: { action: 'stop-loop' } });
+  expect(convert('ScheduleWakeup', { stop: true })).toMatchObject({ type: 'schedule-tool-use', nativeName: 'ScheduleWakeup', request: { action: 'stop-loop' } });
+  const stopWithInputs = { stop: true, ...wakeup };
+  expect(convert('ScheduleWakeup', stopWithInputs)).toMatchObject({ type: 'unknown-tool-use', rawName: 'ScheduleWakeup', input: stopWithInputs });
   expect(convert('CronList', {})).toMatchObject({ nativeName: 'CronList', request: { action: 'list' } });
   expect(convert('CronDelete', { id: 'job' })).toMatchObject({ nativeName: 'CronDelete', request: { action: 'delete', jobId: 'job' } });
   const cron = { cron: '0 9 * * *', prompt: 'Review' };
@@ -39,7 +41,6 @@ test('reflects Claude coercion without guessing at unsupported schedule argument
     const input = { stop: true, ...field };
     expect(convert('ScheduleWakeup', input)).toMatchObject({ type: 'unknown-tool-use', input });
   }
-  for (const input of [{ stop: true }, { stop: true, delaySeconds: '120.0' }]) {
-    expect(convert('ScheduleWakeup', input)).toMatchObject({ request: { action: 'stop-loop' } });
-  }
+  const stopWithDelay = { stop: true, delaySeconds: '120.0' };
+  expect(convert('ScheduleWakeup', stopWithDelay)).toMatchObject({ type: 'unknown-tool-use', input: stopWithDelay });
 });
