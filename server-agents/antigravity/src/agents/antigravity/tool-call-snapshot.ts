@@ -42,11 +42,10 @@ function withoutOutputEchoes(blocks: readonly Record<string, unknown>[], output:
   if (!output || !blocks.length) return blocks;
   const trimmed = output.trim();
   return blocks.filter(block => {
-    const part = block.type === 'content' ? asObject(block.content) : block;
-    if (part.type !== 'text') return true;
-    const text = asString(part.text);
-    if (text === output) return false;
-    return trimmed === '' || text?.trim() !== trimmed;
+    const part = toolResultTextPart(block);
+    if (!part) return true;
+    if (part.text === output) return false;
+    return trimmed === '' || part.text.trim() !== trimmed;
   });
 }
 

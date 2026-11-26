@@ -1,5 +1,19 @@
 import { str } from './chat-message-coercion.js';
-import { toolResultTextPart } from './tool-result-content.js';
+import { isRecord } from './json.js';
+
+export interface ToolTextPart extends Record<string, unknown> {
+  type: 'text';
+  text: string;
+}
+
+export function isTextPart(part: unknown): part is ToolTextPart {
+  return isRecord(part) && part.type === 'text' && typeof part.text === 'string';
+}
+
+export function toolResultTextPart(block: unknown): ToolTextPart | null {
+  const part = isRecord(block) && block.type === 'content' ? block.content : block;
+  return isTextPart(part) ? part : null;
+}
 
 function parsePrimaryTextItems(refs: unknown, items: unknown): number[] | undefined {
   if (!Array.isArray(refs) || !Array.isArray(items) || !refs.length || refs.length > items.length) return undefined;

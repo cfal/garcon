@@ -1,13 +1,6 @@
 import { isRecord } from './json.js';
-
-interface ToolTextPart extends Record<string, unknown> {
-  type: 'text';
-  text: string;
-}
-
-function isTextPart(part: unknown): part is ToolTextPart {
-  return isRecord(part) && part.type === 'text' && typeof part.text === 'string';
-}
+import { isTextPart, type ToolTextPart } from './tool-result-message.js';
+export { toolResultTextPart } from './tool-result-message.js';
 
 export function isPlainTextPart(part: unknown): part is ToolTextPart {
   if (!isTextPart(part)) return false;
@@ -15,11 +8,6 @@ export function isPlainTextPart(part: unknown): part is ToolTextPart {
     if (Object.hasOwn(part, key) && key !== 'type' && key !== 'text') return false;
   }
   return true;
-}
-
-export function toolResultTextPart(block: unknown): ToolTextPart | null {
-  const part = isRecord(block) && block.type === 'content' ? block.content : block;
-  return isTextPart(part) ? part : null;
 }
 
 // Search inspects only its indexed prefix; the transcript inspects the full body.
