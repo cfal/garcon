@@ -12,12 +12,20 @@ test('shares and bounded handoffs distinguish reported plans and schedule reques
   ];
   const shared = renderSharedChatText({ messages, agentId: 'antigravity', model: 'synthetic', chatId: 'chat',
     shareToken: 'share', sharedAt: 'now', title: 'Work', projectPath: '/work' });
-  for (const detail of ['Check layout', '# Layout\n\n    example', 'Request one-time cron: 0 9 * * *\nPrompt: Review\nPersistence requested: false']) {
+  for (const detail of ['Check layout', '# Layout\n\n    example', 'Request one-time cron: 0 9 * * *\nPersistence requested: false\nPrompt: Review']) {
     expect(shared).toContain(detail);
   }
   expect(messages.map(message => projectToolUseSummary(message).text)).toEqual([
-    'Check layout', '# Layout example', 'Request one-time cron: 0 9 * * * Prompt: Review Persistence requested: false',
+    'Check layout', '# Layout example', 'Request one-time cron: 0 9 * * * Persistence requested: false Prompt: Review',
   ]);
+});
+
+test('a long prompt does not displace scheduling options from a bounded handoff', () => {
+  const cron = new ScheduleToolUseMessage('now', 'cron', { action: 'cron', expression: '0 9 * * *',
+    prompt: 'Check '.repeat(100), daemon: true, maxIterations: 1, exactTiming: true });
+  const summary = projectToolUseSummary(cron);
+  expect(summary.abridged).toBe(true);
+  expect(summary.text).toContain('Request cron: 0 9 * * * Maximum iterations: 1 Continue after task ends: true Exact timing: true');
 });
 
 test('handoffs and shares retain task intent, agent destinations, and unsuccessful plan steps', () => {

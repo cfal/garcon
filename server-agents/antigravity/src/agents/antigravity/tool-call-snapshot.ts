@@ -144,6 +144,7 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
 export function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean {
   if (!Object.keys(call.input).length) return true;
   if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(call.input);
-  if (call.isMcp || !call.name) return true;
+  // Schedule options and the other half of an MCP address can arrive on a later frame.
+  if (call.isMcp || !call.name || call.name === 'schedule' || asString(call.input.server) || asString(call.input.tool)) return true;
   return row.type === 'external-tool-use' && acceptsPartialInput(call.name, call.input);
 }

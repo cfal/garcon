@@ -41,14 +41,41 @@ test('pairs delayed and cron schedule requests with provider results, not Garcon
     { type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 120, prompt: '  Check\n', timerCondition: 'sender' } },
     { type: 'tool-result', content: { rawOutput: { id: 'timer-1' } }, isError: false },
   ]);
-  const cron = { cron_expression: '*/5 * * * *', prompt: 'Check', max_iterations: 4, is_daemon: false };
-  expect(s.start('cron', { name: 'schedule', rawInput: cron })).toMatchObject([
-    { type: 'schedule-tool-use', request: { action: 'cron', expression: cron.cron_expression, recurring: true, daemon: false, maxIterations: 4 } },
-  ]);
+  const cron = { cron_expression: '*/5 * * * *', prompt: 'Check', max_iterations: 1, is_daemon: false };
+  expect(s.start('cron', { name: 'schedule', rawInput: cron })).toEqual([]);
+  expect(s.patch('cron', { rawInput: { ExactTiming: true }, status: 'completed' })[0]).toEqual(expect.objectContaining({
+    type: 'schedule-tool-use', request: { action: 'cron', expression: cron.cron_expression, prompt: 'Check',
+      daemon: false, maxIterations: 1, exactTiming: true },
+  }));
   const ambiguous = { ...cron, DurationSeconds: 60 };
   expect(s.start('invalid', { name: 'schedule', rawInput: ambiguous, status: 'failed' })).toMatchObject([
     { type: 'external-tool-use', input: ambiguous }, { type: 'tool-result', isError: true },
   ]);
+});
+
+test('keeps a schedule open for a cancellation condition or MCP address until publication', () => {
+  const s = session();
+  const timer = { DurationSeconds: 120, Prompt: 'Check' };
+  expect(s.start('mcp', { name: 'schedule', rawInput: { ...timer, server: 'server' } })).toEqual([]);
+  expect(s.patch('mcp', { rawInput: { tool: 'operation', arguments: { key: 1 } } })).toMatchObject([
+    { type: 'mcp-tool-use', server: 'server', tool: 'operation' },
+  ]);
+  expect(s.start('timer', { name: 'schedule', rawInput: timer })).toEqual([]);
+  expect(s.patch('timer', { rawInput: { TimerCondition: 'sender' } })).toEqual([]);
+  expect(s.end()).toMatchObject([{ type: 'schedule-tool-use', request: { timerCondition: 'sender' } }]);
+});
+
+test('retains the original arguments when a native schedule cannot be represented', () => {
+  const s = session();
+  for (const [index, rawInput] of [
+    { DurationSeconds: -1 }, { DurationSeconds: 1.5 }, { DurationSeconds: 10, ExactTiming: true },
+    { DurationSeconds: 10, TimerCondition: ' ' }, { CronExpression: '  ' },
+    { CronExpression: '* * * * *', MaxIterations: 0 }, { CronExpression: '* * * * *', TimerCondition: 'any' },
+  ].entries()) {
+    const input = { ...rawInput, Prompt: 'Check' };
+    expect(s.start(String(index), { name: 'schedule', rawInput: input, status: 'failed' })[0])
+      .toMatchObject({ type: 'external-tool-use', input });
+  }
 });
 
 test('uses late identity and partial arguments without duplicating either tool row', () => {

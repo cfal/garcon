@@ -65,6 +65,7 @@ describe('tool-use serialization round-trip', () => {
 		for (const row of [
 			new ScheduleToolUseMessage(TS, 'timer', { action: 'wakeup', delaySeconds: 120, prompt: 'Check', timerCondition: 'any' }),
 			new ScheduleToolUseMessage(TS, 'cron', { action: 'cron', expression: '0 9 * * *', prompt: 'Check', recurring: false, durable: false }),
+			new ScheduleToolUseMessage(TS, 'limited', { action: 'cron', expression: '0 9 * * *', prompt: 'Check', maxIterations: 1, exactTiming: false }),
 			new ScheduleToolUseMessage(TS, 'delete', { action: 'delete', jobId: 'job' }),
 			new ScheduleToolUseMessage(TS, 'stop', { action: 'stop-loop' }),
 			new ScheduleToolUseMessage(TS, 'list', { action: 'list' }),

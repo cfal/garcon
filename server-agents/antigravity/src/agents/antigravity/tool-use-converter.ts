@@ -189,12 +189,14 @@ export function convertAntigravityToolUse(
       const timerCondition = field(input, 'TimerCondition', 'timer_condition');
       const daemon = field(input, 'IsDaemon', 'is_daemon');
       const maxIterations = field(input, 'MaxIterations', 'max_iterations');
-      if (delaySeconds !== undefined && expression === undefined && daemon === undefined && maxIterations === undefined) {
+      const exactTiming = field(input, 'ExactTiming', 'exact_timing');
+      if (typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0
+        && expression === undefined && daemon === undefined && maxIterations === undefined && exactTiming === undefined) {
         const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', delaySeconds, prompt, timerCondition });
         if (row) return row;
       }
       if (expression !== undefined && delaySeconds === undefined && timerCondition === undefined) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', expression, prompt, recurring: true, daemon, maxIterations });
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', expression, prompt, daemon, maxIterations, exactTiming });
         if (row) return row;
       }
       break;
