@@ -1,0 +1,255 @@
+{
+  "name": "api-session",
+  "description": "Authenticated JSON APIs through the front door: auth status and login failures, the login rate limiter, workspace reads and writes, unknown routes, and the CLI controller fence.",
+  "steps": [
+    {
+      "name": "auth-status",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/status",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "auth-user",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user"
+      }
+    },
+    {
+      "name": "login-wrong-password",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "auth": "none",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        }
+      }
+    },
+    {
+      "name": "login-extra-field",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "auth": "none",
+        "json": {
+          "username": "{{username}}",
+          "password": "{{password}}",
+          "remember": true
+        }
+      }
+    },
+    {
+      "name": "login-form-encoded",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "auth": "none",
+        "body": "username=parity",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
+      }
+    },
+    {
+      "name": "login",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "auth": "none",
+        "json": {
+          "username": "{{username}}",
+          "password": "{{password}}"
+        }
+      }
+    },
+    {
+      "name": "register-existing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "auth": "none",
+        "json": {
+          "username": "other",
+          "password": "another-password-123"
+        }
+      }
+    },
+    {
+      "name": "rename-wrong-password",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "wrong-password",
+          "username": "renamed"
+        }
+      }
+    },
+    {
+      "name": "cli-context",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/cli/context"
+      }
+    },
+    {
+      "name": "app-settings",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    },
+    {
+      "name": "executors",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "chats",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats"
+      }
+    },
+    {
+      "name": "snippets-empty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    },
+    {
+      "name": "snippet-create",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 0,
+          "snippet": {
+            "shortName": "parity",
+            "template": "Snippet ü 雪 😀 {{1}}",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "snippets-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    },
+    {
+      "name": "preambles",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "chat-boards",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "folders",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/folders"
+      }
+    },
+    {
+      "name": "saved-searches",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "scheduled-prompts",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/scheduled-prompts"
+      }
+    },
+    {
+      "name": "tickets-counts",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/counts"
+      }
+    },
+    {
+      "name": "chat-details-missing",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/details?chatId=parity-missing-chat"
+      }
+    },
+    {
+      "name": "chat-messages-missing",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/messages?chatId=parity-missing-chat&limit=5"
+      }
+    },
+    {
+      "name": "tickets-filtered",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets?status=open&q=%C3%BC%20parity"
+      }
+    },
+    {
+      "name": "unknown-api",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/does-not-exist"
+      }
+    },
+    {
+      "name": "wrong-method",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/auth/status",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "stale-controller-fence",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats",
+        "headers": {
+          "X-Garcon-Server-Instance": "00000000-0000-4000-8000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "spoofed-forwarded-for",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "auth": "none",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "headers": {
+          "X-Forwarded-For": "198.51.100.23",
+          "X-Real-IP": "198.51.100.23"
+        }
+      }
+    }
+  ],
+  "traps": true
+}

@@ -39,6 +39,16 @@
         "happy-dom": "^21.0.4",
       },
     },
+    "rust/parity": {
+      "name": "@garcon/parity",
+      "version": "0.1.0",
+      "dependencies": {
+        "@garcon/common": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.3",
+      },
+    },
     "server": {
       "name": "@garcon/server",
       "version": "0.1.0",
@@ -523,6 +533,8 @@
     "@garcon/cli": ["@garcon/cli@workspace:cli"],
 
     "@garcon/common": ["@garcon/common@workspace:common"],
+
+    "@garcon/parity": ["@garcon/parity@workspace:rust/parity"],
 
     "@garcon/server": ["@garcon/server@workspace:server"],
 

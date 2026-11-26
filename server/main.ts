@@ -41,6 +41,7 @@ Environment Variables:
   GARCON_WS_MAX_PAYLOAD_LENGTH     WebSocket max payload length (bytes). Default: 16777216
   GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
   GARCON_HTTP_COMPRESSION          Enable streamed HTTP response compression. Default: true
+  GARCON_WEB_BUILD_DIR             Serve the web app from this directory. Default: <install>/web/build
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
 Notes:

@@ -9,6 +9,8 @@ import { defaultUserShell } from '../common/user-shell.js';
 import { parsePublicUrl } from './executors/public-url.js';
 import { parseBasePath } from '@garcon/common/base-path';
 
+const serverRoot = path.resolve(import.meta.dir, '../..');
+
 const CLI_VALUE_FLAGS = {
   '--config-dir': '<directory>',
   '--workspace-dir': '<directory>',
@@ -46,6 +48,7 @@ export interface ServerConfig {
   authDisabled: boolean;
   trustProxyEnabled: boolean;
   httpCompressionEnabled: boolean;
+  webBuildDir: string;
   rollbackCarryOverMigration: boolean;
 }
 
@@ -147,6 +150,7 @@ function parseServerConfig(): ServerConfig {
     authDisabled: parseAuthDisabled(),
     trustProxyEnabled: envBool('TRUST_PROXY', false),
     httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
+    webBuildDir: path.resolve(envValue('GARCON_WEB_BUILD_DIR') ?? path.join(serverRoot, 'web', 'build')),
     rollbackCarryOverMigration: process.argv.includes('--rollback-carryover-migration'),
   };
 }
@@ -275,6 +279,11 @@ export function isTrustProxyEnabled(): boolean {
 
 export function isHttpCompressionEnabled(): boolean {
   return currentConfig().httpCompressionEnabled;
+}
+
+// Directory the SPA is served from when assets are not embedded in the executable.
+export function getWebBuildDir(): string {
+  return currentConfig().webBuildDir;
 }
 
 // Parses an integer from an environment variable, returning the fallback when absent.

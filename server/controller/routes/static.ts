@@ -1,11 +1,10 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import { fileURLToPath } from 'url';
 import { markRouteNoAuth } from '../lib/http-route.js';
 import { jsonError } from '../../common/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { createLogger } from '../../common/log.js';
-import { getBasePath } from '../config.js';
+import { getBasePath, getWebBuildDir } from '../config.js';
 import { renderRuntimeShell } from '../../../common/runtime-shell.js';
 import {
   applyManifestTitle,
@@ -14,10 +13,6 @@ import {
 } from '../app-title.js';
 
 const logger = createLogger('routes:static');
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const serverRoot = path.resolve(__dirname, '../../..');
 
 type NamedBlob = Blob & { name?: unknown };
 type StaticAssetMap = Record<string, Blob>;
@@ -128,14 +123,12 @@ const noauthServePathname: StaticPathHandler = (function() {
   } else {
     logger.info('Static assets source: filesystem');
 
-    // Serves from web/build/ (SvelteKit adapter-static output).
-    const filesystemDistDir = path.join(serverRoot, 'web', 'build') + path.sep;
-
     return async function noauthServePathnameFilesystem(pathname: string): Promise<Response> {
       if (typeof pathname !== 'string' || pathname.length === 0) {
         return notFoundResponse();
       }
-      const fsPath = await resolveStaticFilePath(pathname, filesystemDistDir);
+      // Resolved per request because routes are built before configuration is initialized.
+      const fsPath = await resolveStaticFilePath(pathname, getWebBuildDir());
       if (!fsPath) return notFoundResponse();
       const file = Bun.file(fsPath);
       const exists = await file.exists();

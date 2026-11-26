@@ -3,6 +3,8 @@
 web/build
 native/**
 !native/package.json
+rust/**
+!rust/parity/package.json
 dist
 out
 .idea

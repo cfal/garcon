@@ -1,0 +1,34 @@
+{
+  "name": "auth-logout",
+  "description": "Logout revokes only the session that sent it; later requests with that token fail.",
+  "steps": [
+    {
+      "name": "logout",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout"
+      }
+    },
+    {
+      "name": "user-after-logout",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user"
+      }
+    },
+    {
+      "name": "logout-again",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout"
+      }
+    },
+    {
+      "name": "socket-after-logout",
+      "ws": {
+        "path": "/ws",
+        "quietMs": 600
+      }
+    }
+  ]
+}

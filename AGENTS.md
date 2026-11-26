@@ -8,6 +8,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - `docs/transcript-ledger-v5-design.md` is the governing transcript design; re-read it before changing transcript, ledger, history migration, provider publication, paging, replay, or transcript UX behavior.
 - Before changing execution, executor services, provider configuration, or their UI, read `docs/executor/transport.md`, `docs/file-structure.md`, and the relevant contract under `docs/executor/` or `docs/providers.md`. Current contracts supersede historical executor proposals.
 - Before changing `garcon-cli`, runtime discovery, or HTTP APIs used by the CLI, read `docs/cli.md` and `docs/executor/cli.md`. Executor CLI forwarding is part of the CLI contract, not optional follow-up work.
+- Before changing `rust/` or a controller route the Rust front door serves natively, read `rust/README.md`, `rust/DECISIONS.md`, and `rust/MAP.md`. A native unit is done only when `bun run parity:replay` and `bun run parity:replay:rust` both pass every recorded case and a planted bug in the unit fails the replay; re-record with `bun run parity:record` when the original's recorded behavior changes intentionally.
 - Always git clone dependencies into /tmp to inspect if necessary
 - ALWAYS refer to Svelte 5, either docs or by cloning the repo, to make sure we're following best practices and canonical patterns
 - DO NOT add to tech debt. It is CRITICAL that we keep the architecture clean and rational, even if that means taking longer to fix or refactor what we're working on.

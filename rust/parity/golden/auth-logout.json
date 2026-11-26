@@ -1,0 +1,105 @@
+{
+  "scenario": "auth-logout",
+  "cases": [
+    {
+      "name": "logout",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-logout",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "logout-again",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "socket-after-logout",
+      "expected": {
+        "close": {
+          "code": 1002,
+          "reason": "Expected 101 status code"
+        },
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    }
+  ]
+}

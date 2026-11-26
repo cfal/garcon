@@ -50,6 +50,7 @@ COPY server-agents/factory/package.json server-agents/factory/
 COPY server-agents/opencode/package.json server-agents/opencode/
 COPY server-agents/pi/package.json server-agents/pi/
 COPY server-agents/shell/package.json server-agents/shell/
+COPY rust/parity/package.json rust/parity/
 
 RUN bun install --frozen-lockfile --filter '!garcon-native'
 

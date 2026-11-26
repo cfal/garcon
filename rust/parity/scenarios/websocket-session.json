@@ -1,0 +1,95 @@
+{
+  "name": "websocket-session",
+  "description": "The browser WebSocket through the front door: subprotocol negotiation, initial frames, malformed messages, and authentication failures.",
+  "steps": [
+    {
+      "name": "connect",
+      "ws": {
+        "path": "/ws",
+        "quietMs": 600
+      }
+    },
+    {
+      "name": "ping",
+      "ws": {
+        "path": "/ws",
+        "send": [
+          {
+            "type": "ws-ping",
+            "clientRequestId": "parity-ping",
+            "sentAt": 1700000000000
+          }
+        ],
+        "frames": 1
+      }
+    },
+    {
+      "name": "reconnect-state-query",
+      "ws": {
+        "path": "/ws",
+        "send": [
+          {
+            "type": "reconnect-state-query",
+            "clientRequestId": "parity-reconnect",
+            "controlChatIds": []
+          }
+        ],
+        "frames": 1
+      }
+    },
+    {
+      "name": "subscribe-unknown-chat",
+      "ws": {
+        "path": "/ws",
+        "send": [
+          {
+            "type": "chat-subscribe",
+            "clientRequestId": "parity-subscribe",
+            "chatId": "parity-missing-chat",
+            "afterOrdinal": 0,
+            "transcriptViewId": "parity-view"
+          }
+        ],
+        "quietMs": 800
+      }
+    },
+    {
+      "name": "malformed-message",
+      "ws": {
+        "path": "/ws",
+        "send": [
+          "not-json-but-a-string",
+          {
+            "type": "parity-unknown-message"
+          }
+        ],
+        "quietMs": 800
+      }
+    },
+    {
+      "name": "auth-only-protocol",
+      "ws": {
+        "path": "/ws",
+        "protocols": [
+          "garcon-auth.{{token}}"
+        ],
+        "quietMs": 400
+      }
+    },
+    {
+      "name": "unknown-socket-path",
+      "ws": {
+        "path": "/ws-unknown",
+        "quietMs": 400
+      }
+    },
+    {
+      "name": "executor-link-unknown",
+      "ws": {
+        "path": "/executor/00000000-0000-4000-8000-000000000000",
+        "quietMs": 400
+      }
+    }
+  ],
+  "traps": true
+}
