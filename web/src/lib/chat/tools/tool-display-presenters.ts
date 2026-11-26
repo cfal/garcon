@@ -3,6 +3,7 @@
 
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolPayload } from '$lib/chat/tools/tool-display-contract.js';
+import { isEmptyToolResult } from '$shared/tool-result-content';
 
 interface ReadRangePayload {
 	offset?: unknown;
@@ -73,7 +74,7 @@ export function reportedToolResultText(content: unknown): string {
 	if (!content || typeof content !== 'object') return '';
 	if ('toolUseResult' in content && content.toolUseResult != null) {
 		const { toolUseResult, ...body } = content;
-		const text = reportedToolResultText(body);
+		const text = isEmptyToolResult(body) ? '' : reportedToolResultText(body);
 		const details = JSON.stringify(toolUseResult, null, 2);
 		return text && text !== details ? `${text}\n\n${details}` : details;
 	}

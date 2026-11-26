@@ -82,6 +82,15 @@ describe('ChatToolEventRenderer', () => {
 		});
 		expect(screen.getByText(/Stopped/).textContent).toContain('"cancelledWakeups": 0');
 	});
+	it.each([{ items: [] }, { raw: '  ' }, { items: [{ type: 'text', text: '' }] }])('shows structured schedule metadata without the empty envelope %j', body => {
+		const toolUseResult = { cancelledWakeups: 0 };
+		render(ChatToolEventRenderer, {
+			toolMessage: new ScheduleToolUseMessage('', 'stop', { action: 'stop-loop' }), mode: 'result', autoExpandTools: true,
+			toolResult: { content: { ...body, toolUseResult } },
+		});
+		expect(screen.getByText(/cancelledWakeups/).textContent).toBe(JSON.stringify(toolUseResult, null, 2));
+	});
+
 	it('expands the reason for an Antigravity plan and renders the exit plan as Markdown', async () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new AntigravityEnterPlanModeToolUseMessage('', 'enter', 'Check layout'), mode: 'input',
