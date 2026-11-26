@@ -73,15 +73,14 @@ function agentWorkResult(call: TrackedCall, status: string, terminal: Record<str
   const distinct = trimmedOutput !== '' && trimmedBlocks !== '' && trimmedOutput !== trimmedBlocks;
   const structured = isStructuredOutput(call.rawOutput);
   const name = antigravityToolName(call);
-  // A terminal block can repeat an earlier diagnostic. Only output text on that frame outranks it.
-  const terminalDiagnostic = status !== 'completed' && trimmedBlocks && Array.isArray(terminal.content)
-    && (name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode')
-    && !rawOutputText(terminal.rawOutput).trim();
-  let primary: 'output' | 'metadata' | 'content' = 'content';
-  if (!terminalDiagnostic) {
-    if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
-    else if (structured && !trimmedOutput && !call.contentIsNewer) primary = 'metadata';
-  }
+  const reportsPlanOrSchedule = name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
+  // The terminal frame's text takes precedence even if it repeats an earlier frame.
+  let primary: 'output' | 'metadata' | 'content';
+  if (reportsPlanOrSchedule && rawOutputText(terminal.rawOutput).trim()) primary = 'output';
+  else if (reportsPlanOrSchedule && Array.isArray(terminal.content) && trimmedBlocks) primary = 'content';
+  else if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
+  else if (structured && !trimmedOutput && !call.contentIsNewer) primary = 'metadata';
+  else primary = 'content';
 
   const result: ToolResultMessage['content'] = status === 'completed' ? {} : { status };
   if (structured || (distinct && primary === 'content')) result.rawOutput = call.rawOutput;

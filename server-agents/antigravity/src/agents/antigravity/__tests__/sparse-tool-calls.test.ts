@@ -85,6 +85,36 @@ test('shows a repeated terminal schedule diagnostic alongside metadata without p
   }));
 });
 
+test.each(['schedule', 'enter_plan_mode', 'exit_plan_mode'])('prioritizes explicit terminal output for %s over intervening progress', name => {
+  const s = session();
+  const rawInput = name === 'schedule' ? { DurationSeconds: 1, Prompt: 'Check' }
+    : name === 'enter_plan_mode' ? { Reason: 'Check' } : { Plan: 'Check' };
+  const rawOutput = { output: 'Operation refused' };
+  const content = [textBlock('Checking limits')];
+  s.start('call', { name, rawInput, rawOutput });
+  s.patch('call', { content });
+  expect(s.patch('call', { rawOutput, status: 'failed' }).at(-1)).toEqual(expect.objectContaining({
+    content: { raw: 'Operation refused', items: content, status: 'failed' }, isError: true,
+  }));
+});
+
+test('uses explicit completed schedule output before echoed progress and falls back to terminal blocks before cached data', () => {
+  const s = session();
+  const timer = { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' } };
+  const progress = [textBlock('Preparing')];
+  const rawOutput = { output: 'Timer saved', id: 'job' };
+  s.start('both', { ...timer, rawOutput });
+  s.patch('both', { content: progress });
+  expect(s.patch('both', { rawOutput, content: progress, status: 'completed' }).at(-1)).toEqual(expect.objectContaining({
+    content: { rawOutput, items: progress }, isError: false,
+  }));
+  const content = [textBlock('Timer saved')];
+  s.start('text', { ...timer, content });
+  expect(s.patch('text', { rawOutput: { id: 'job' }, content, status: 'completed' }).at(-1)).toEqual(expect.objectContaining({
+    content: { raw: 'Timer saved', rawOutput: { id: 'job' } }, isError: false,
+  }));
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [
