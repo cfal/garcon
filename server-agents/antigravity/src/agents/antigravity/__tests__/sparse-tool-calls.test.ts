@@ -250,6 +250,12 @@ test('a textless terminal frame preserves the search priority of the latest cach
     [{ rawOutput: { output: progress } }, { content: [textBlock(diagnostic)] }, { rawOutput: { id: 'job' } }],
     [{ rawOutput: { output: progress } }, { content: [{ type: 'image', data: 'AA==' }, textBlock(diagnostic)] }, {}],
     [{ rawOutput: { output: progress } }, { content: [{ type: 'text', text: diagnostic }] }, {}],
+    [{ rawOutput: { details: progress } }, { content: [{ type: 'text', text: diagnostic }] }, {}],
+    [{ rawOutput: { output: progress }, content: [textBlock('Working'), textBlock(progress)] },
+      { content: [textBlock(diagnostic), textBlock(progress)] }, {}],
+    [{ rawOutput: { output: progress } }, { content: [textBlock(diagnostic)] },
+      { rawOutput: { output: progress }, content: [textBlock(diagnostic)] }],
+    [{ name: undefined, rawOutput: { output: progress } }, { content: [{ type: 'text', text: diagnostic }] }, { name: 'schedule' }],
   ] as const) {
     const s = session();
     s.start('timer', { ...timer, ...frames[0] });
@@ -280,6 +286,20 @@ test('retains annotation and image positions for uniquely aligned terminal text'
   const row = s.patch('timer', { status: 'completed', content: [textBlock('Saved'), detail, blank] }).at(-1);
   if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
   expect(row.content.items).toEqual([saved, image, detail, blank]);
+});
+
+test('overlays independent ACP annotations and counts an echoed whitespace block once', () => {
+  const s = session();
+  const first = { ...textBlock('Saved'), annotations: { audience: ['user'], priority: 1 } };
+  const gap = { ...textBlock('   '), priority: 1 };
+  const detail = textBlock('Details');
+  const image = { type: 'image', data: 'AA==' };
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content: [first, gap, detail, image] });
+  const row = s.patch('timer', { status: 'completed', rawOutput: { output: 'Saved\n   \nDetails' },
+    content: [{ ...first, annotations: { lastModified: 'now', priority: 2 } }, textBlock('   '), detail] }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content).toEqual({ items: [{ ...first, annotations: { audience: ['user'], priority: 2, lastModified: 'now' } }, gap, detail, image] });
+  expect(row.primaryTextItems).toEqual([0, 2]);
 });
 
 test.each(['Saved', ' '])('retains superseded annotation metadata with an annotated terminal report (%j)', text => {

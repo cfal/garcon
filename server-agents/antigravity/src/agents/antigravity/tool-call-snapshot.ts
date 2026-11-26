@@ -15,6 +15,7 @@ export interface TrackedCall extends AntigravityToolCall {
   readonly rawOutput?: unknown;
   readonly content?: readonly Record<string, unknown>[];
   readonly contentIsNewer: boolean;
+  readonly reportContentIsNewer: boolean;
 }
 
 function reportsPlanOrSchedule(name: string | null): boolean {
@@ -50,8 +51,8 @@ function withoutOutputEchoes(blocks: readonly Record<string, unknown>[], output:
   });
 }
 
-function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, content: TrackedCall['content'], readText: typeof joinBlockText): boolean {
-  if (rawOutput === previous?.rawOutput && content === previous?.content) return previous?.contentIsNewer ?? false;
+function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, content: TrackedCall['content'], readText: typeof joinBlockText, wasNewer = false): boolean {
+  if (rawOutput === previous?.rawOutput && content === previous?.content) return wasNewer;
   const output = rawOutputText(rawOutput);
   const outputChanged = output !== rawOutputText(previous?.rawOutput);
   if (content && content !== previous?.content) {
@@ -66,7 +67,7 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
   }
   const rawChanged = outputChanged || (rawOutput !== previous?.rawOutput &&
     isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
-  return !rawChanged && !!previous?.contentIsNewer;
+  return !rawChanged && wasNewer;
 }
 
 function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['content'] {
@@ -146,7 +147,9 @@ export function mergeCall(previous: TrackedCall | undefined, call: AntigravityTo
     rawInput,
     rawOutput,
     content,
-    contentIsNewer: prefersContent(previous, rawOutput, content, !isMcp && reportsPlanOrSchedule(name) ? planReportText : joinBlockText),
+    contentIsNewer: prefersContent(previous, rawOutput, content, joinBlockText, previous?.contentIsNewer),
+    reportContentIsNewer: !isMcp && (!name || reportsPlanOrSchedule(name))
+      && prefersContent(previous, rawOutput, content, planReportText, previous?.reportContentIsNewer),
   };
 }
 

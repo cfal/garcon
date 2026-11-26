@@ -72,22 +72,31 @@ function cachedBlocksForText(blocks: readonly Block[], output: string): Block[] 
   });
 }
 
+function overlayBlock(before: Block, after: Block): Block {
+  const merged = { ...before, ...after };
+  if (isRecord(before.annotations) && isRecord(after.annotations)) {
+    merged.annotations = { ...before.annotations, ...after.annotations };
+  }
+  return merged;
+}
+
 // Only aligns one-to-one text blocks. Different segmentation does not establish annotation positions.
 function alignTerminalBlocks(retained: readonly Block[], terminal: readonly Block[]): Block[] | undefined {
   const result: Block[] = [];
   let next = 0;
   for (const block of retained) {
     const before = toolResultTextPart(block);
-    if (!before?.text.trim()) {
+    if (!before?.text) {
       if (!plainText(block)) result.push(block);
       continue;
     }
-    while (next < terminal.length && !blockText(terminal[next]).trim()) result.push(terminal[next++]);
+    const whitespace = !before.text.trim();
+    while (next < terminal.length && (whitespace ? !blockText(terminal[next]) : !blockText(terminal[next]).trim())) result.push(terminal[next++]);
     const reported = terminal[next++];
     const after = toolResultTextPart(reported);
-    if (!after || reported.type !== block.type || after.text.trim() !== before.text.trim()) return undefined;
-    const merged = { ...before, ...after };
-    result.push(block === before ? merged : { ...block, ...reported, content: merged });
+    if (!after || reported.type !== block.type || (whitespace ? after.text !== before.text : after.text.trim() !== before.text.trim())) return undefined;
+    const merged = overlayBlock(before, after);
+    result.push(block === before ? merged : { ...overlayBlock(block, reported), content: merged });
   }
   for (; next < terminal.length; next++) {
     if (blockText(terminal[next]).trim()) return undefined;
@@ -139,6 +148,16 @@ function storeOutput(body: Body, raw: unknown, fields: unknown, alongsideBlocks:
   else body.raw = text;
 }
 
+function primaryBlocks(blocks: readonly Block[], echo?: TextEcho, preferIndependent = false): number[] {
+  const indices = blocks.flatMap((block, i) => blockText(block).trim() ? [i] : []);
+  if (!echo) return indices;
+  if (preferIndependent) {
+    const independent = indices.filter(i => i < echo.first || i > echo.last);
+    if (independent.length) return independent;
+  }
+  return indices.filter(i => i >= echo.first && i <= echo.last);
+}
+
 export function planOrScheduleResult(
   timestamp: string, call: TrackedCall, previous: TrackedCall | undefined, terminal: Record<string, unknown>, status: string,
 ): ToolResultMessage {
@@ -153,18 +172,19 @@ export function planOrScheduleResult(
   const match = findTextEcho(blocks, output);
   const echo = match?.unique ? match : undefined;
   const text = planReportText(blocks);
-  const repeatedOutputWithNewText = frameOutput !== '' && frameText !== '' && !echo
-    && frameOutput === rawText(cachedOutput).trim() && frameText !== planReportText(previous?.content ?? []).trim();
+  const newerCachedText = previous?.reportContentIsNewer ?? false;
+  const repeatedOutputWithNewText = frameOutput !== '' && frameText !== '' && frameOutput === rawText(cachedOutput).trim()
+    && (newerCachedText || (!echo && frameText !== planReportText(previous?.content ?? []).trim()));
   const specificEcho = echo !== undefined && text.trim() !== output;
-  const preferCachedBlocks = !frameText && !frameOutput && previous?.contentIsNewer;
+  const preferCachedBlocks = !frameText && !frameOutput && newerCachedText;
+  const rankCachedText = !frameText && !frameOutput && (output ? preferCachedBlocks && !match : fields !== undefined);
   const body: Body = status === 'completed' ? {} : { status };
   let primary: number[] = [];
   if (specificEcho || repeatedOutputWithNewText || blocks.some(block => !plainAcpText(block))) {
     body.items = blocks;
     storeOutput(body, echo || (frameText && !frameOutput) ? undefined : raw, fields, true);
-    if (echo || (frameText && !frameOutput) || repeatedOutputWithNewText || (preferCachedBlocks && output && !match)) {
-      primary = blocks.flatMap((block, i) =>
-        (!echo || (i >= echo.first && i <= echo.last)) && blockText(block).trim() ? [i] : []);
+    if (echo || (frameText && !frameOutput) || repeatedOutputWithNewText || rankCachedText) {
+      primary = primaryBlocks(blocks, echo, preferCachedBlocks || repeatedOutputWithNewText);
     }
   } else if (frameOutput || (!frameText && output && !preferCachedBlocks)) {
     storeOutput(body, raw, fields, false);
@@ -173,7 +193,10 @@ export function planOrScheduleResult(
     const keepCachedOutput = !frameText && output && !echo;
     storeOutput(body, keepCachedOutput ? raw : undefined, fields, true);
     if (text.trim()) {
-      if (!frameText && !output && fields !== undefined && (!preferCachedBlocks || metadata(terminal.rawOutput) !== undefined)) body.items = blocks;
+      if (!frameText && !output && fields !== undefined && (!preferCachedBlocks || metadata(terminal.rawOutput) !== undefined)) {
+        body.items = blocks;
+        primary = primaryBlocks(blocks);
+      }
       else body.raw = text;
     }
   }
