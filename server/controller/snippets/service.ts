@@ -24,7 +24,6 @@ import { SnippetCatalogCommittedUnknownError, SnippetStore } from './store.js';
 import {
   expandScheduledSnippetTemplate,
   expandSnippetTemplate,
-  SnippetExpansionError,
 } from './template.js';
 import type { PreambleStore } from '../preambles/store.js';
 import type {
@@ -144,7 +143,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       : this.deps.preambles?.getBySnippetShortName(input.shortName) ?? null;
     if (!snippet && !preamble) {
       throw new SnippetDomainError(
-        'SNIPPET_NOT_FOUND',
+        SNIPPET_ERROR_CODES.notFound,
         `Snippet not found: ${input.shortName}`,
         404,
       );
@@ -156,23 +155,16 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     if (snippet) {
       const argumentsText =
         input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
-      try {
-        expandedText = input.context.type === 'scheduled-prompt'
-          ? expandScheduledSnippetTemplate(snippet.template, {
-              arguments: argumentsText,
-              projectPath: resolvedProjectPath,
-            })
-          : expandSnippetTemplate(snippet.template, {
-              arguments: argumentsText,
-              projectPath: resolvedProjectPath,
-              context: runtimeTemplateValues(input.context.chatId, this.#now()),
-            });
-      } catch (error) {
-        if (error instanceof SnippetExpansionError) {
-          throw new SnippetDomainError(error.code, error.message, 422);
-        }
-        throw error;
-      }
+      expandedText = input.context.type === 'scheduled-prompt'
+        ? expandScheduledSnippetTemplate(snippet.template, {
+            arguments: argumentsText,
+            projectPath: resolvedProjectPath,
+          })
+        : expandSnippetTemplate(snippet.template, {
+            arguments: argumentsText,
+            projectPath: resolvedProjectPath,
+            context: runtimeTemplateValues(input.context.chatId, this.#now()),
+          });
     } else {
       expandedText = input.context.type === 'scheduled-prompt'
         ? preamble!.content

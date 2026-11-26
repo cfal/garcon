@@ -1,13 +1,29 @@
 import {
   expandScheduledSnippetTemplate as expandSharedScheduledSnippetTemplate,
-  expandSnippetTemplate,
+  expandSnippetTemplate as expandSharedSnippetTemplate,
   ScheduledSnippetBoundaryError,
   SnippetExpansionError,
   type SnippetTemplateValues,
 } from '../../../common/snippet-template.js';
 import { SnippetDomainError } from './errors.js';
 
-export { expandSnippetTemplate, SnippetExpansionError, type SnippetTemplateValues };
+function mapTemplateError(error: unknown): never {
+  if (error instanceof SnippetExpansionError || error instanceof ScheduledSnippetBoundaryError) {
+    throw new SnippetDomainError(error.code, error.message, 422);
+  }
+  throw error;
+}
+
+export function expandSnippetTemplate(
+  template: string,
+  values: SnippetTemplateValues,
+): string {
+  try {
+    return expandSharedSnippetTemplate(template, values);
+  } catch (error) {
+    mapTemplateError(error);
+  }
+}
 
 export function expandScheduledSnippetTemplate(
   template: string,
@@ -16,9 +32,6 @@ export function expandScheduledSnippetTemplate(
   try {
     return expandSharedScheduledSnippetTemplate(template, values);
   } catch (error) {
-    if (error instanceof ScheduledSnippetBoundaryError) {
-      throw new SnippetDomainError(error.code, error.message, 422);
-    }
-    throw error;
+    mapTemplateError(error);
   }
 }
