@@ -6,7 +6,7 @@ import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsibl
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
-import { UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage, ScheduleToolUseMessage, ToolResultMessage } from '$shared/chat-types';
+import { AgentSwitchMessage, BackgroundTaskToolUseMessage, UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage, ScheduleToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 vi.mock('$lib/api/shares', () => ({
@@ -89,6 +89,26 @@ describe('SharedChatPage', () => {
 		await waitFor(() => expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 250, behavior: 'instant' }));
 		await fireEvent.click(await screen.findByRole('button', { name: /Details/ }));
 		expect(screen.getByText(/synthetic-job/).textContent).toContain('Created');
+	});
+
+	it('does not pair a result from a new binding with an outstanding timer before a handoff', async () => {
+		const page = response([], 0, 6);
+		page.snapshot.messages = [
+			new ScheduleToolUseMessage('', 'done', { action: 'list' }),
+			new ToolResultMessage('', 'done', { raw: 'Earlier schedule result' }, false),
+			new ScheduleToolUseMessage('', 'same', { action: 'wakeup', delaySeconds: 60, prompt: 'Check' }),
+			new AgentSwitchMessage('', 'antigravity', 'antigravity', undefined, undefined, 'local', 'remote'),
+			new BackgroundTaskToolUseMessage('', 'same', 'list'),
+			new ToolResultMessage('', 'same', { raw: 'Unrelated task result' }, false),
+		];
+		page.page.end = 6;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(page);
+		render(SharedChatPageTestHost);
+		await screen.findByText('List scheduled jobs');
+		const details = screen.getAllByRole('button', { name: /Details/ });
+		expect(details).toHaveLength(1);
+		await fireEvent.click(details[0]);
+		expect(screen.getByText('Earlier schedule result')).toBeTruthy();
 	});
 
 	it('aligns shared user messages from the local preference without remounting', async () => {

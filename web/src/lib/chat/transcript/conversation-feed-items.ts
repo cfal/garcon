@@ -144,6 +144,11 @@ export class ConversationToolPairing {
 		for (const row of rows) {
 			if (row.kind !== 'message') continue;
 			const message = row.message;
+			if (message.type === 'agent-switch') {
+				pendingByToolId.clear();
+				pendingPermissionWrappersByToolId.clear();
+				continue;
+			}
 			if (
 				message instanceof PermissionRequestMessage &&
 				message.requestedTool instanceof AskUserQuestionToolUseMessage
