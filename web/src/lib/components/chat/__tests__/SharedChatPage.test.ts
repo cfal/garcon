@@ -6,7 +6,7 @@ import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsibl
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
-import { UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
+import { UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage, ScheduleToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 vi.mock('$lib/api/shares', () => ({
@@ -64,6 +64,24 @@ describe('SharedChatPage', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
+	});
+
+	it('reveals a schedule result when its matching request loads on an earlier page', async () => {
+		const newest = response(['', '', ''], 1, 4);
+		newest.snapshot.messages = [
+			new ToolResultMessage('', 'cron', { raw: 'Created', toolUseResult: { id: 'synthetic-job' } }, false),
+			new ScheduleToolUseMessage('', 'cron', { action: 'list' }),
+			new ToolResultMessage('', 'cron', { items: [] }, false),
+		];
+		const older = response([''], 0, 4);
+		older.snapshot.messages = [new ScheduleToolUseMessage('', 'cron', { action: 'cron', expression: '* * * * *', prompt: 'Check' })];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(newest).mockResolvedValueOnce(older);
+		render(SharedChatPageTestHost);
+		await screen.findByText('List scheduled jobs');
+		expect(screen.queryByRole('button', { name: /Details/ })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+		await fireEvent.click(await screen.findByRole('button', { name: /Details/ }));
+		expect(screen.getByText(/synthetic-job/).textContent).toContain('Created');
 	});
 
 	it('aligns shared user messages from the local preference without remounting', async () => {

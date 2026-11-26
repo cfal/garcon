@@ -5,7 +5,7 @@
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { parseChatMessage } from '$shared/chat-types';
-	import type { ChatMessage } from '$shared/chat-types';
+	import type { ChatMessage, ScheduleToolUseMessage } from '$shared/chat-types';
 	import {
 		UserMessage,
 		AssistantMessage,
@@ -19,6 +19,9 @@
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import MessageRenderFallback from '$lib/components/chat/transcript/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
+	import { ConversationToolPairing } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
+	import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
 	import ChatEventCard from '$lib/components/chat/transcript/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
 	import CommandStatusRow from '$lib/components/chat/transcript/rows/CommandStatusRow.svelte';
@@ -50,17 +53,26 @@
 		index: number;
 		message: ChatMessage;
 	}
+	interface RenderedEntry extends SharedMessageEntry {
+		pairedSchedule?: ScheduleToolUseMessage;
+	}
 
 	type SharedViewError = 'not-found' | 'load-failed';
 
 	let messages = $state.raw<SharedMessageEntry[]>([]);
 	const renderedMessages = $derived.by(() => {
 		const output = projectCommandOutput(messages.map(entry => entry.message));
-		return messages.map((entry, index) => {
-			const message = output.get(index);
-			return message ? { ...entry, message } : entry;
-		}).filter(entry => entry.message.type !== 'command-result'
-			|| commandResultPresentation(entry.message.result) !== 'hidden');
+		const pairs = new ConversationToolPairing().append(messages.map(({ index, message }) =>
+			({ kind: 'message', id: String(index), ordinal: index + 1, message })));
+		return messages.flatMap<RenderedEntry>((entry, index) => {
+			const message = output.get(index) ?? entry.message;
+			if (message.type === 'command-result' && commandResultPresentation(message.result) === 'hidden') return [];
+			if (message.type !== 'tool-result') return [{ ...entry, message }];
+			const tool = pairs.toolUseByResultRowId.get(String(entry.index));
+			if (tool?.type !== 'schedule-tool-use' || !shouldRenderToolResult(TOOL_DISPLAY_REGISTRY[tool.type],
+				{ content: message.content, isError: message.isError }, tool)) return [];
+			return [{ ...entry, pairedSchedule: tool }];
+		});
 	});
 	let title = $state('');
 	let agentId = $state('');
@@ -388,6 +400,9 @@
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
 								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
+							{:else if message.type === 'tool-result' && entry.pairedSchedule}
+								<ChatToolEventRenderer toolMessage={entry.pairedSchedule} mode="result"
+									toolResult={{ content: message.content, isError: message.isError }} resultAnchorId={`shared-result-${entry.index}`} />
 							{:else if message instanceof CliRowMessage}
 								<CliRow {message} />
 							{:else if message instanceof TranscriptNoticeMessage}
