@@ -108,6 +108,7 @@
 	});
 
 	let collapsedInlineFilePath = $derived.by(() => {
+		if (displayConfig?.contentKind !== 'diff') return '';
 		const files = (contentProps.files as string[] | undefined) || [];
 		return files[0] || '';
 	});

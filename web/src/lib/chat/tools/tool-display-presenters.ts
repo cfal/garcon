@@ -108,11 +108,7 @@ function reportedResultBody(content: ToolPayload): string {
 }
 
 export function reportedResultProps(result: ToolPayload) {
-	return { content: reportedToolResultText(result.content), format: 'plain' };
-}
-
-export function reportedToolResultText(content: unknown): string {
-	return formatToolReport(content, reportedResultBody);
+	return { content: formatToolReport(result.content, reportedResultBody), format: 'plain' };
 }
 
 function completeReportBody(body: ToolPayload): string {

@@ -80,6 +80,11 @@ export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem
 	});
 }
 
+export function shouldRenderPairedToolResult(tool: ToolUseChatMessage, result: ToolResultMessage): boolean {
+	const rule = resolveDisplayRule(TOOL_DISPLAY_REGISTRY, tool.type);
+	return shouldRenderToolResult(rule, { content: result.content, isError: result.isError }, tool);
+}
+
 export function conversationFeedItemLayout(
 	item: ConversationFeedRenderItem,
 ): ConversationFeedItemLayout {
@@ -100,13 +105,7 @@ export function conversationFeedItemLayout(
 		if (tool instanceof AskUserQuestionToolUseMessage) {
 			return item.permissionWrapperRowId ? 'hidden' : 'permission';
 		}
-		const rule = resolveDisplayRule(TOOL_DISPLAY_REGISTRY, tool.type);
-		return shouldRenderToolResult(rule, {
-			content: message.content,
-			isError: message.isError,
-		}, tool)
-			? 'standard'
-			: 'hidden';
+		return shouldRenderPairedToolResult(tool, message) ? 'standard' : 'hidden';
 	}
 	if (!isToolUseMessage(message)) return 'standard';
 	if (message.type === 'exit-plan-mode-tool-use') return 'permission';

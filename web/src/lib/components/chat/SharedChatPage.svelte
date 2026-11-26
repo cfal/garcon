@@ -19,9 +19,7 @@
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import MessageRenderFallback from '$lib/components/chat/transcript/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
-	import { ConversationToolPairing } from '$lib/chat/transcript/conversation-feed-items.js';
-	import { shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
-	import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
+	import { ConversationToolPairing, shouldRenderPairedToolResult } from '$lib/chat/transcript/conversation-feed-items.js';
 	import ChatEventCard from '$lib/components/chat/transcript/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
 	import CommandStatusRow from '$lib/components/chat/transcript/rows/CommandStatusRow.svelte';
@@ -69,8 +67,7 @@
 			if (message.type === 'command-result' && commandResultPresentation(message.result) === 'hidden') return [];
 			if (message.type !== 'tool-result') return [{ ...entry, message }];
 			const tool = pairs.toolUseByResultRowId.get(String(entry.index));
-			if (tool?.type !== 'schedule-tool-use' || !shouldRenderToolResult(TOOL_DISPLAY_REGISTRY[tool.type],
-				{ content: message.content, isError: message.isError }, tool)) return [];
+			if (tool?.type !== 'schedule-tool-use' || !shouldRenderPairedToolResult(tool, message)) return [];
 			return [{ ...entry, pairedSchedule: tool }];
 		});
 	});
