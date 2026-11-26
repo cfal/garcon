@@ -297,16 +297,29 @@ test('pending raw paste keeps keyboard focus and respects outside scrolling', as
     const editor = page.getByRole('textbox', { name: 'Formatted message' });
     const source = Array.from({ length: 24 }, (_, index) => `Paragraph ${index}`).join('\n\n');
     const outside = page.getByRole('button', { name: 'New Chat', exact: true });
-    const worker = '**/composer-markdown.worker-*.js';
+    type PasteGate = Window & { releasePasteParse?: () => void };
     for (const scenario of ['mapped', 'unmapped', 'outside']) {
       await selectMessageFormat(page, 'source');
       await textarea.fill(source);
       await selectMessageFormat(page, 'formatted');
       await editor.focus();
       await page.keyboard.press('Control+End');
-      const release = Promise.withResolvers<void>();
-      await context.route(worker, async route => { await release.promise; await route.continue(); });
       const clipboard = scenario === 'unmapped' ? '\n\n- item\n\n' : ' **pasted**';
+      // Holds this parse, not the script download: formatting may already have warmed the worker.
+      await page.evaluate(fragment => {
+        Worker.prototype.postMessage = new Proxy(Worker.prototype.postMessage, {
+          apply(post, worker, args) {
+            const task = args[0];
+            if (task?.type !== 'parse' || !task.request.source.includes(fragment))
+              return Reflect.apply(post, worker, args);
+            Worker.prototype.postMessage = post;
+            (window as PasteGate).releasePasteParse = () => {
+              delete (window as PasteGate).releasePasteParse;
+              Reflect.apply(post, worker, args);
+            };
+          },
+        });
+      }, clipboard.trim());
       await page.evaluate(text => navigator.clipboard.writeText(text), clipboard);
       await page.keyboard.press('Control+V');
       await browserExpect(editor).toHaveAttribute('contenteditable', 'false');
@@ -318,9 +331,12 @@ test('pending raw paste keeps keyboard focus and respects outside scrolling', as
         await page.keyboard.press('Shift');
         await browserExpect(editor).toBeFocused();
       }
-      release.resolve();
+      await page.evaluate(() => {
+        const release = (window as PasteGate).releasePasteParse;
+        if (!release) throw new Error('Expected a pending paste parse');
+        release();
+      });
       await browserExpect(composer.getByRole('button', { name: 'Pasting text...' })).toHaveCount(0);
-      await context.unroute(worker);
       if (scenario === 'outside') {
         await browserExpect(outside).toBeFocused();
         expect(await composer.locator('[data-composer-markdown-editor]').evaluate(element => element.scrollTop)).toBe(0);
