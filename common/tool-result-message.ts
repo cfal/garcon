@@ -19,8 +19,7 @@ function parsePrimaryTextItems(refs: unknown, items: unknown): number[] | undefi
   if (!Array.isArray(refs) || !Array.isArray(items) || !refs.length || refs.length > items.length) return undefined;
   const valid = refs.every((index, i) => {
     if (!Number.isSafeInteger(index) || index < 0 || index >= items.length) return false;
-    if (i > 0 && index <= refs[i - 1]) return false;
-    return toolResultTextPart(items[index]) !== null;
+    return (i === 0 || index > refs[i - 1]) && toolResultTextPart(items[index]) !== null;
   });
   return valid ? refs : undefined;
 }

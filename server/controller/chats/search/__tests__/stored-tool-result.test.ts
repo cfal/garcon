@@ -38,8 +38,13 @@ test('indexes referenced output before long progress or attachments without chan
 });
 
 test('invalid primary text references do not discard the stored result', () => {
-  const message = new ToolResultMessage(at, 'timer', { items: [{ type: 'text', text: 'Report' }] }, true);
-  expect(parseChatMessage({ ...message, primaryTextItems: [9] })).toEqual(message);
+  const items = [{ type: 'text', text: 'First' }, { type: 'text', text: 'Second' }];
+  const message = new ToolResultMessage(at, 'timer', { items }, true);
+  const missingFirst = new Array<number>(2);
+  missingFirst[1] = 1;
+  for (const primaryTextItems of [[9], [1, 1], [1, 0], missingFirst]) {
+    expect(parseChatMessage({ ...message, primaryTextItems })).toEqual(message);
+  }
 });
 
 test.each([
