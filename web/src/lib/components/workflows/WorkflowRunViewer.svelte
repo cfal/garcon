@@ -9,16 +9,18 @@
 		onOpenChat,
 		onOpenEditor,
 		onRunAgain,
+		onRunName,
 		visible = true,
 	}: {
 		runId: string;
 		onOpenChat: (chatId: string) => void;
 		onOpenEditor?: (revision: WorkflowRevision, context: WorkflowLaunchContext | null) => void;
 		onRunAgain?: (run: WorkflowRunDetail) => void;
+		onRunName?: (name: string) => void;
 		visible?: boolean;
 	} = $props();
 </script>
 
 {#key runId}
-	<WorkflowRunView {runId} {onOpenChat} {onOpenEditor} {onRunAgain} {visible} />
+	<WorkflowRunView {runId} {onOpenChat} {onOpenEditor} {onRunAgain} {onRunName} {visible} />
 {/key}

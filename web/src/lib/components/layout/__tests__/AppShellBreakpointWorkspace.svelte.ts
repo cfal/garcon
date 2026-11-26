@@ -57,6 +57,7 @@ export class AppShellBreakpointWorkspace implements Pick<
 > {
 	readonly layout = new WorkspaceLayoutStore(canonicalWorkspaceSnapshot());
 	isMobile = $state(false);
+	lastFocusedSurfaceId = $state<string>(CANONICAL_CHAT_SURFACE_ID);
 	// Mirrors the app-shell drawer state reactively so tests can flip it.
 	sidebarOpen = $state(false);
 	enterCalls = 0;
@@ -127,12 +128,31 @@ export class AppShellBreakpointWorkspace implements Pick<
 		this.layout.publish(this.layout.revision, next);
 	}
 
+	isSurfacePresented(surfaceId: string): boolean {
+		const snapshot = this.layout.snapshot;
+		if (this.isMobile) return snapshot.mobileActiveSurfaceId === surfaceId;
+		return Boolean(
+			windowNodeById(snapshot.desktopRoot, this.currentWindowId)?.tabs.order.includes(surfaceId) &&
+				windowNodeById(snapshot.desktopRoot, this.currentWindowId)?.tabs.activeId === surfaceId,
+		);
+	}
+
+	windowOf(surfaceId: string): WorkspaceWindowId | null {
+		return this.layout.surface(surfaceId) ? this.currentWindowId : null;
+	}
+
 	noteChatListFocus(): void {}
 	async showChatInCurrentWindow(chatId: string): Promise<typeof CANONICAL_CHAT_SURFACE_ID> {
 		const next = reduceWorkspaceLayout(this.layout.snapshot, [
 			{ type: 'set-window-chat', windowId: CANONICAL_WINDOW_ID, chatId },
+			{
+				type: 'activate-window-tab',
+				windowId: CANONICAL_WINDOW_ID,
+				surfaceId: CANONICAL_CHAT_SURFACE_ID,
+			},
 		]);
 		this.layout.publish(this.layout.revision, next);
+		this.lastFocusedSurfaceId = CANONICAL_CHAT_SURFACE_ID;
 		this.showChatCalls += 1;
 		return CANONICAL_CHAT_SURFACE_ID;
 	}
@@ -148,6 +168,16 @@ export class AppShellBreakpointWorkspace implements Pick<
 	}
 	async openWorkflowRun(runId: string): Promise<void> {
 		this.openedWorkflowRuns.push(runId);
+		const surface = { id: 'workflow-run' as const, type: 'workflow-run' as const, runId };
+		const existing = this.layout.surface('workflow-run');
+		const next = reduceWorkspaceLayout(this.layout.snapshot, [
+			existing
+				? { type: 'replace-surface', previousId: 'workflow-run', surface }
+				: { type: 'register-surface', surface, windowId: CANONICAL_WINDOW_ID },
+			{ type: 'activate-window-tab', windowId: CANONICAL_WINDOW_ID, surfaceId: 'workflow-run' },
+		]);
+		this.layout.publish(this.layout.revision, next);
+		this.lastFocusedSurfaceId = 'workflow-run';
 	}
 	openSingletonInNewWindow(kind: PortableSingletonKind): Promise<string> {
 		this.openedSingletons.push(kind);

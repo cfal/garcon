@@ -54,12 +54,14 @@
 		onOpenChat,
 		onOpenEditor,
 		onRunAgain,
+		onRunName,
 		visible,
 	}: {
 		runId: string;
 		onOpenChat: (chatId: string) => void;
 		onOpenEditor?: (revision: WorkflowRevision, context: WorkflowLaunchContext | null) => void;
 		onRunAgain?: (run: WorkflowRunDetail) => void;
+		onRunName?: (name: string) => void;
 		visible: boolean;
 	} = $props();
 
@@ -120,6 +122,9 @@
 
 	$effect(() => {
 		if (visible) return untrack(() => controller.observe());
+	});
+	$effect(() => {
+		if (run?.name) onRunName?.(run.name);
 	});
 	onDestroy(() => controller.dispose());
 

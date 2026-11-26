@@ -319,13 +319,17 @@ describe('Workflow run viewer', () => {
 		const run = workflowRun();
 		const onOpenEditor = vi.fn();
 		const onRunAgain = vi.fn();
+		const onRunName = vi.fn();
 		const { container } = render(WorkflowRunViewer, {
 			runId: 'run-a',
 			onOpenChat: vi.fn(),
 			onOpenEditor,
 			onRunAgain,
+			onRunName,
 		});
 		const stepButton = await screen.findByRole('button', { name: /Verify findings/ });
+		expect(stepButton.textContent).toContain('2 instances');
+		expect(onRunName).toHaveBeenCalledWith(run.name);
 		expect(stepButton.getAttribute('data-workflow-tone')).toBe('error');
 		expect(container.querySelector('.workflow-split')?.getAttribute('data-detail')).toBe('false');
 		await fireEvent.click(stepButton);
@@ -340,5 +344,22 @@ describe('Workflow run viewer', () => {
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Run again' }));
 		expect(onRunAgain).toHaveBeenCalledExactlyOnceWith(run);
+	});
+
+	it('renders singular 1 instance count for single-item keyed steps', async () => {
+		const single = workflowRun();
+		const verify = single.steps[1]!;
+		vi.mocked(api.getWorkflowRun).mockResolvedValue({
+			...single,
+			steps: [
+				single.steps[0]!,
+				{ ...verify, instances: [verify.instances[0]!] },
+				single.steps[2]!,
+			],
+		});
+		render(WorkflowRunViewer, { runId: 'run-a', onOpenChat: vi.fn() });
+		const stepButton = await screen.findByRole('button', { name: /Verify findings/ });
+		expect(stepButton.textContent).toContain('1 instance');
+		expect(stepButton.textContent).not.toContain('1 instances');
 	});
 });

@@ -20,6 +20,7 @@ import * as m from '$lib/paraglide/messages.js';
 import { UserMessage } from '$shared/chat-types';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { localExecutor } from '$lib/executors/__tests__/fixtures.js';
+import * as workflowNavContext from '$lib/workflows/navigation/workflow-navigation-context';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 
@@ -33,6 +34,7 @@ vi.mock('$lib/chat/conversation/async-question-context.js', async (importOrigina
 
 const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
+	isMobile: false,
 	processing: true,
 	reduceMotion: false,
 	composerStatusBarGitProjects: true,
@@ -48,7 +50,7 @@ const runtime = vi.hoisted(() => ({
 
 vi.mock('$lib/context', () => ({
 	getExecutors: () => executors,
-	getAppShell: () => ({ isMobile: false }),
+	getAppShell: () => ({ isMobile: runtime.isMobile }),
 	getChatSessions: () => ({ isChatProcessing: () => runtime.processing }),
 	getConversationUi: () => ({
 		getExecutionControl: () => (runtime.queue ? { queue: runtime.queue } : null),
@@ -237,6 +239,7 @@ describe('ConversationPanel', () => {
 	afterEach(() => {
 		cleanup();
 		runtime.autoScrollToBottom = false;
+		runtime.isMobile = false;
 		runtime.processing = true;
 		runtime.reduceMotion = false;
 		Object.assign(runtime, COMPOSER_STATUS_BAR_DEFAULTS);
@@ -705,5 +708,45 @@ describe('ConversationPanel', () => {
 
 		await rendered.rerender({ ...props, composerNotice: null });
 		expect(queued.closest('.pb-14')).toBeTruthy();
+	});
+
+	it('renders the desktop back-to-workflow-run bar for workflow chats only and navigates back', async () => {
+		const openRunById = vi.fn();
+		vi.spyOn(workflowNavContext, 'getOptionalWorkflowNavigation').mockReturnValue({
+			openRun: vi.fn(),
+			openRunById,
+			openNewWorkflow: vi.fn(),
+			openChat: vi.fn(),
+			runForChat: (id) =>
+				id === 'chat-1' ? { id: 'run-9', name: 'Research run', status: 'running' } : undefined,
+			runName: (runId) => (runId === 'run-9' ? 'Remembered Research Run' : undefined),
+			rememberRunName: vi.fn(),
+		});
+
+		const { panel } = makePanel();
+		const props = {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		};
+		const rendered = render(ConversationPanel, props);
+		expect(rendered.container.querySelector('[data-workflow-return-bar="run-9"]')).toBeTruthy();
+		expect(screen.getByText('Remembered Research Run')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Back to workflow run' }));
+		expect(openRunById).toHaveBeenCalledExactlyOnceWith('run-9', panel.surfaceId);
+
+		// Non-workflow chats hide the bar on desktop as well.
+		await rendered.rerender({ ...props, chat: { ...chat(), id: 'ordinary-chat' } });
+		expect(rendered.container.querySelector('[data-workflow-return-bar]')).toBeNull();
+		rendered.unmount();
+
+		// Mobile layout uses BottomTabBar instead of duplicating the desktop bar.
+		runtime.isMobile = true;
+		const mobile = render(ConversationPanel, props);
+		expect(mobile.container.querySelector('[data-workflow-return-bar]')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Back to workflow run' })).toBeNull();
 	});
 });

@@ -48,6 +48,7 @@
 		<WorkflowRunViewer
 			runId={source.runId}
 			{visible}
+			onRunName={(name) => navigation.rememberRunName(source.runId, name)}
 			onOpenEditor={(revision, context) => {
 				if (destroyed) return;
 				session.openRevisionInEditor(revision, context);

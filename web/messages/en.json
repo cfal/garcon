@@ -3495,7 +3495,16 @@
 	"workflow_studio_inspect_edit": "Inspect rejected edit in Source",
 	"workflow_studio_inspect_unknown": "Outcome unknown. Inspect the latest attempt before taking action.",
 	"workflow_studio_instance": "Instance",
-	"workflow_studio_instance_count": "{count} instances",
+	"workflow_studio_instance_count": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "{count} instance",
+				"countPlural=other": "{count} instances"
+			}
+		}
+	],
 	"workflow_studio_instance_status": "Instance status",
 	"workflow_studio_intake_closed": "Intake closed",
 	"workflow_studio_intake_open": "Intake open",

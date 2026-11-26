@@ -1,4 +1,5 @@
 import { onMount, tick, untrack } from 'svelte';
+import { SvelteMap } from 'svelte/reactivity';
 import {
 	getAppShell,
 	getChatSessions,
@@ -50,6 +51,7 @@ export function createAppShellSidebarNavigation(options: AppShellSidebarNavigati
 		runs: listWorkflowRunsPage,
 		activeChats: listActiveWorkflowChatsPage,
 	});
+	const runNames = new SvelteMap<string, string>();
 	let pageVisible = $state(false);
 	let searchResultNavigation: SearchResultNavigationPort | null = null;
 	let selectionVersion = 0;
@@ -83,10 +85,33 @@ export function createAppShellSidebarNavigation(options: AppShellSidebarNavigati
 		loadMore: (kind) => workflowIndex.loadMore(kind),
 		retry: () => workflowIndex.invalidate(),
 	};
+	function rememberRunName(runId: string, name: string): void {
+		const trimmed = name.trim();
+		if (trimmed && runNames.get(runId) !== trimmed) runNames.set(runId, trimmed);
+	}
+
+	function runName(runId: string): string | undefined {
+		return (
+			runNames.get(runId) ||
+			workflowIndex.runs.find((run) => run.id === runId)?.name ||
+			undefined
+		);
+	}
+
+	function openRunById(runId: string, fromSurfaceId?: string): void {
+		const windowId =
+			(fromSurfaceId ? workspace.windowOf(fromSurfaceId) : null) ?? workspace.currentWindowId;
+		openWorkflowSurface(() => workspace.openWorkflowRun(runId, windowId));
+	}
+
 	setWorkflowNavigation({
 		openRun: openRunFromWorkflow,
+		openRunById,
 		openNewWorkflow: openNewWorkflowFromWorkflow,
 		openChat: (chatId, source) => void openWorkflowChat(chatId, source),
+		runForChat: (chatId) => workflowIndex.runForChat(chatId),
+		runName,
+		rememberRunName,
 	});
 
 	$effect(() => {
@@ -104,7 +129,7 @@ export function createAppShellSidebarNavigation(options: AppShellSidebarNavigati
 	});
 
 	$effect(() => {
-		const chatId = sessions.selectedChatId;
+		const chatId = focusedRun === null ? sessions.selectedChatId : null;
 		untrack(() => workflowIndex.selectChat(chatId));
 	});
 

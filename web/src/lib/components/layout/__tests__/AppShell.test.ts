@@ -373,6 +373,57 @@ describe('AppShell responsive workspace binding', () => {
 		expect(workflows.subscribers.size).toBe(0);
 	});
 
+	it('releases stale failed-attempt sidebar retention when returning to the workflow run viewer', async () => {
+		const run = {
+			id: 'run-stale',
+			name: 'Nightly check',
+			status: 'attention',
+			kind: 'published',
+			definitionId: 'definition',
+			revision: 1,
+			createdAt: '2026-11-21T00:00:00Z',
+			updatedAt: '2026-11-21T00:00:00Z',
+		} satisfies WorkflowRunSummary;
+		installContext([chat('failed-attempt')]);
+		workflows.runs.mockResolvedValue({ items: [run], nextCursor: null });
+		workflows.activeChats.mockResolvedValue({
+			items: [
+				{
+					chatId: 'failed-attempt',
+					runId: run.id,
+					runName: run.name,
+					runStatus: run.status,
+					runUpdatedAt: run.updatedAt,
+					stepId: 'check',
+					instanceId: 'check-1',
+					attemptId: 'attempt-1',
+					status: 'running',
+				},
+			],
+			nextCursor: null,
+		});
+
+		render(AppShell);
+		const childSelector = '[data-workflow-child="failed-attempt"]';
+		await waitFor(() => expect(document.querySelector(childSelector)).toBeTruthy());
+
+		// Select the worker chat while it is live, then it fails/finishes (removed from activeChats).
+		await fireEvent.click(document.querySelector<HTMLButtonElement>(childSelector)!);
+		workflows.activeChats.mockResolvedValue({ items: [], nextCursor: null });
+		workflows.runs.mockResolvedValue({
+			items: [{ ...run, status: 'failed' as unknown as WorkflowRunSummary['status'] }],
+			nextCursor: null,
+		});
+		for (const notify of workflows.subscribers) notify();
+		await waitFor(() => expect(workflows.activeChats).toHaveBeenCalledTimes(2));
+		// Still nested under the run while focused inside that chat.
+		expect(document.querySelector(childSelector)).toBeTruthy();
+
+		// Returning to the workflow run viewer releases the stale retained attempt link.
+		await fireEvent.click(screen.getByRole('button', { name: 'Nightly check' }));
+		await waitFor(() => expect(document.querySelector(childSelector)).toBeNull());
+	});
+
 	it.each([
 		['pageshow', 390, false],
 		['visibilitychange', 390, false],
