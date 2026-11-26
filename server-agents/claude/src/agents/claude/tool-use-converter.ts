@@ -4,6 +4,7 @@
 import {
   BashToolUseMessage,
   BackgroundTaskToolUseMessage,
+  ScheduleToolUseMessage,
   ReadToolUseMessage,
   EditToolUseMessage,
   WriteToolUseMessage,
@@ -130,6 +131,30 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
   const key = canonicalize(rawName);
 
   switch (key) {
+    case 'schedulewakeup': {
+      if (input.stop === true) return new ScheduleToolUseMessage(ts, toolId, { action: 'stop-loop' });
+      if (input.stop !== undefined && input.stop !== false) break;
+      const row = ScheduleToolUseMessage.fromRequest(ts, toolId, {
+        action: 'wakeup', delaySeconds: input.delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop,
+      });
+      if (row) return row;
+      break;
+    }
+    case 'croncreate': {
+      const row = ScheduleToolUseMessage.fromRequest(ts, toolId, {
+        action: 'cron', expression: input.cron, prompt: input.prompt,
+        recurring: input.recurring === undefined ? true : input.recurring, durable: input.durable,
+      });
+      if (row) return row;
+      break;
+    }
+    case 'cronlist':
+      return new ScheduleToolUseMessage(ts, toolId, { action: 'list' });
+    case 'crondelete': {
+      const row = ScheduleToolUseMessage.fromRequest(ts, toolId, { action: 'delete', jobId: input.id });
+      if (row) return row;
+      break;
+    }
     case 'toolsearch':
       return new ClaudeToolSearchToolUseMessage(ts, toolId, asString(input.query) ?? '', asNumber(input.max_results));
 

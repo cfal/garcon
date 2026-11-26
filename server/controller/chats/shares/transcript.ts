@@ -17,6 +17,7 @@ import {
 } from '../../../../common/chat-types.ts';
 import type { CliPresentationStyle } from '../../../../common/cli-presentation.ts';
 import type { SharedChatSnapshot } from '../../../../common/share-types.ts';
+import { describeToolSchedule } from '../../../../common/tool-schedule.ts';
 import {
   isPreambleApplicationNoticeDetail,
   isPreambleSelectionChangedNoticeDetail,
@@ -123,6 +124,8 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
         message.input === undefined ? undefined : `Input: ${JSON.stringify(message.input)}`].filter(Boolean).join('\n') };
     case 'agent-message-tool-use':
       return { role: 'Tool Call', content: `Message to ${message.recipient}\n${message.message}` };
+    case 'schedule-tool-use':
+      return { role: 'Tool Call', content: describeToolSchedule(message.request) };
     case 'task-tool-use': {
       const lines = ['Run subtask'];
       if (message.subagentType) lines.push(`Agent: ${message.subagentType}`);

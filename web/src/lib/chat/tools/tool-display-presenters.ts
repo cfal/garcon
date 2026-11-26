@@ -71,6 +71,12 @@ export function extractContentString(content: unknown): string {
 
 export function reportedToolResultText(content: unknown): string {
 	if (!content || typeof content !== 'object') return '';
+	if ('toolUseResult' in content && content.toolUseResult != null) {
+		const { toolUseResult, ...body } = content;
+		const text = reportedToolResultText(body);
+		const details = JSON.stringify(toolUseResult, null, 2);
+		return text && text !== details ? `${text}\n\n${details}` : details;
+	}
 	const { raw, rawOutput, items } = content as Record<string, unknown>;
 	const text = typeof raw === 'string' ? raw : '';
 	if (rawOutput === undefined) {

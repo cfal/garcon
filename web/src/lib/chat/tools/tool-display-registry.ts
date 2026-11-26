@@ -2,6 +2,7 @@
 // Known provider-specific tools must arrive here as typed messages.
 
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
+import { toolScheduleDetails, toolScheduleTitle, type ToolScheduleRequest } from '$shared/tool-schedule';
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import { AMP_TOOL_DISPLAY_RULES } from './amp-tool-display-rules.js';
@@ -58,6 +59,7 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'todo-read-tool-use': 'TodoRead',
 	'task-tool-use': 'Task',
 	'background-task-tool-use': 'Background task',
+	'schedule-tool-use': 'Schedule',
 	'agent-message-tool-use': 'Agent message',
 	'codex-subagent-tool-use': 'Subagent',
 	'update-plan-tool-use': 'UpdatePlan',
@@ -481,6 +483,15 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			title: ({ recipient }) => `Message to ${recipient}`,
 			contentKind: 'text',
 			getContentProps: ({ message }) => ({ content: message, format: 'plain' }),
+		},
+		result: REPORTED_RESULT_RULE,
+	},
+
+	'schedule-tool-use': {
+		input: {
+			mode: 'collapsible', contentKind: 'text',
+			title: ({ request }) => toolScheduleTitle(request as ToolScheduleRequest),
+			getContentProps: ({ request }) => ({ content: toolScheduleDetails(request as ToolScheduleRequest) }),
 		},
 		result: REPORTED_RESULT_RULE,
 	},

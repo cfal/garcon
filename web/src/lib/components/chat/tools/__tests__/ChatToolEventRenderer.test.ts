@@ -23,6 +23,7 @@ import {
 	GrepToolUseMessage,
 	PiToolSearchToolUseMessage,
 	ReadToolUseMessage,
+	ScheduleToolUseMessage,
 	UnknownToolUseMessage,
 	UpdatePlanToolUseMessage,
 	WebFetchToolUseMessage,
@@ -37,6 +38,28 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('keeps the wakeup prompt and cancellation condition behind a readable title', async () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new ScheduleToolUseMessage('', 'timer', {
+				action: 'wakeup', delaySeconds: 240, prompt: 'Check progress', timerCondition: 'sender',
+			}), mode: 'input',
+		});
+		expect(screen.queryByText(/Check progress/)).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /Request wakeup in 4 minutes/ }));
+		expect(screen.getByText(/Prompt: Check progress/).textContent).toContain('Cancel on message from: sender');
+	});
+
+	it('shows a stop-loop request without an empty disclosure and keeps actual result metadata', () => {
+		const toolMessage = new ScheduleToolUseMessage('', 'stop', { action: 'stop-loop' });
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
+		expect(screen.getByText('Stop loop wakeups')).toBeTruthy();
+		expect(screen.queryByRole('button')).toBeNull();
+		render(ChatToolEventRenderer, {
+			toolMessage, mode: 'result', autoExpandTools: true,
+			toolResult: { content: { raw: 'Stopped', toolUseResult: { cancelledWakeups: 0 } } },
+		});
+		expect(screen.getByText(/Stopped/).textContent).toContain('"cancelledWakeups": 0');
+	});
 	it('expands the reason for an Antigravity plan and renders the exit plan as Markdown', async () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new AntigravityEnterPlanModeToolUseMessage('', 'enter', 'Check layout'), mode: 'input',

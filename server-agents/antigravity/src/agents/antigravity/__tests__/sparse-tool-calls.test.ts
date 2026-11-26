@@ -34,6 +34,23 @@ test('reports native plan activity with late arguments, but does not reinterpret
     rawInput: { plan: 'Example' }, status: 'completed' })[0]).toMatchObject({ type: 'external-tool-use' });
 });
 
+test('pairs delayed and cron schedule requests with provider results, not Garcon jobs', () => {
+  const s = session();
+  expect(s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 120, TimerCondition: 'sender' } })).toEqual([]);
+  expect(s.patch('timer', { rawInput: { Prompt: '  Check\n' }, rawOutput: { id: 'timer-1' }, status: 'completed' })).toMatchObject([
+    { type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 120, prompt: '  Check\n', timerCondition: 'sender' } },
+    { type: 'tool-result', content: { rawOutput: { id: 'timer-1' } }, isError: false },
+  ]);
+  const cron = { cron_expression: '*/5 * * * *', prompt: 'Check', max_iterations: 4, is_daemon: false };
+  expect(s.start('cron', { name: 'schedule', rawInput: cron })).toMatchObject([
+    { type: 'schedule-tool-use', request: { action: 'cron', expression: cron.cron_expression, recurring: true, daemon: false, maxIterations: 4 } },
+  ]);
+  const ambiguous = { ...cron, DurationSeconds: 60 };
+  expect(s.start('invalid', { name: 'schedule', rawInput: ambiguous, status: 'failed' })).toMatchObject([
+    { type: 'external-tool-use', input: ambiguous }, { type: 'tool-result', isError: true },
+  ]);
+});
+
 test('uses late identity and partial arguments without duplicating either tool row', () => {
   const s = session();
   expect(s.start('task', { rawInput: { Action: 'status', TaskId: 'job' } })).toEqual([]);

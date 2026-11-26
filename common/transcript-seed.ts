@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { describeToolSchedule } from './tool-schedule.js';
 import type { ChatMessage, PlanStep, TodoItem, ToolUseChatMessage } from './chat-types.js';
 import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
@@ -715,6 +716,7 @@ function extractLegacyToolDetail(message: ToolUseChatMessage): string {
 
 function extractToolDetail(message: ToolUseChatMessage): string {
   switch (message.type) {
+    case 'schedule-tool-use': return describeToolSchedule(message.request);
     case 'bash-tool-use': return message.description || message.command;
     // Codex expresses shell work as exec rather than bash; without this the
     // busiest tool in a Codex transcript carried only its own name.

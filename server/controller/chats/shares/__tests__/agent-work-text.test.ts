@@ -1,7 +1,24 @@
 import { expect, test } from 'bun:test';
+import { AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage, ScheduleToolUseMessage } from '../../../../../common/chat-types.ts';
 import { AgentMessageToolUseMessage, BackgroundTaskToolUseMessage, UpdatePlanToolUseMessage } from '../../../../../common/chat-types.ts';
 import { projectToolUseSummary } from '../../../../../common/transcript-seed.ts';
 import { renderSharedChatText } from '../transcript.ts';
+
+test('shares and bounded handoffs distinguish reported plans and schedule requests from approvals', () => {
+  const messages = [
+    new AntigravityEnterPlanModeToolUseMessage('now', 'enter', 'Check layout'),
+    new AntigravityExitPlanModeToolUseMessage('now', 'exit', '# Layout\n\n    example'),
+    new ScheduleToolUseMessage('now', 'schedule', { action: 'cron', expression: '0 9 * * *', recurring: false, prompt: 'Review', durable: false }),
+  ];
+  const shared = renderSharedChatText({ messages, agentId: 'antigravity', model: 'synthetic', chatId: 'chat',
+    shareToken: 'share', sharedAt: 'now', title: 'Work', projectPath: '/work' });
+  for (const detail of ['Check layout', '# Layout\n\n    example', 'Request one-time cron: 0 9 * * *\nPrompt: Review\nPersistence requested: false']) {
+    expect(shared).toContain(detail);
+  }
+  expect(messages.map(message => projectToolUseSummary(message).text)).toEqual([
+    'Check layout', '# Layout example', 'Request one-time cron: 0 9 * * * Prompt: Review Persistence requested: false',
+  ]);
+});
 
 test('handoffs and shares retain task intent, agent destinations, and unsuccessful plan steps', () => {
   const task = new BackgroundTaskToolUseMessage('now', 'call', 'stop', 'job');

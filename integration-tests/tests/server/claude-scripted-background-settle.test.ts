@@ -30,6 +30,36 @@ describe('scripted Claude background settlement', () => {
     environment?.dispose();
   });
 
+  test('retains native cron requests and their results on reload', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const { model, serverEnvironment } = environment;
+    const prompt = 'Schedule a synthetic review';
+    const reply = 'Schedule checked';
+    model.scriptTurn([claudeToolUse('toolu_discover_cron', 'ToolSearch', { query: 'select:CronCreate,CronList' })]);
+    model.scriptTurn([claudeToolUse('toolu_create', 'CronCreate', { cron: '0 9 1 1 *', prompt: 'Review fixture', recurring: false })]);
+    model.scriptTurn([claudeToolUse('toolu_list', 'CronList', {})]);
+    model.scriptTurn([claudeText(reply)]);
+    await withIntegrationFixture('claude-scripted-cron', async fixture => {
+      const chatId = fixture.newChatId();
+      const afterIndex = fixture.client.markEvents();
+      const turn = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId, projectPath: fixture.executionDirs.project, command: prompt, permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({ fixture, chatId, turnId: turn.turnId, marker: reply, afterIndex });
+      const live = await fixture.client.getMessages(chatId);
+      const reloaded = await reloadUntilNativeStableAfterPrompt(fixture, chatId, prompt);
+      for (const { messages } of [live, reloaded]) {
+        expect(messagesOfType(messages, 'schedule-tool-use')).toMatchObject([
+          { toolId: 'toolu_create', request: { action: 'cron', expression: '0 9 1 1 *', prompt: 'Review fixture', recurring: false } },
+          { toolId: 'toolu_list', request: { action: 'list' } },
+        ]);
+        const result = messagesOfType(messages, 'tool-result').find(row => row.toolId === 'toolu_create');
+        expect(result).toMatchObject({ isError: false, content: { toolUseResult: { id: expect.any(String), recurring: false } } });
+      }
+      model.assertSettled();
+    }, { serverEnvironment });
+  }, 120_000);
+
   test('keeps a rejected TaskStop paired with its target on live delivery and native reload', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const { model, serverEnvironment } = environment;

@@ -11,6 +11,7 @@ import {
   ListToolUseMessage,
   McpToolUseMessage,
   ReadToolUseMessage,
+  ScheduleToolUseMessage,
   TaskToolUseMessage,
   UnknownToolUseMessage,
   UpdatePlanToolUseMessage,
@@ -180,6 +181,23 @@ export function convertAntigravityToolUse(
       const query = stringField(input, 'query', 'Query');
       if (query === undefined) break;
       return new WebSearchToolUseMessage(timestamp, id, query);
+    }
+    case 'schedule': {
+      const delaySeconds = field(input, 'DurationSeconds', 'duration_seconds');
+      const expression = field(input, 'CronExpression', 'cron_expression');
+      const prompt = field(input, 'Prompt', 'prompt');
+      const timerCondition = field(input, 'TimerCondition', 'timer_condition');
+      const daemon = field(input, 'IsDaemon', 'is_daemon');
+      const maxIterations = field(input, 'MaxIterations', 'max_iterations');
+      if (delaySeconds !== undefined && expression === undefined && daemon === undefined && maxIterations === undefined) {
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', delaySeconds, prompt, timerCondition });
+        if (row) return row;
+      }
+      if (expression !== undefined && delaySeconds === undefined && timerCondition === undefined) {
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', expression, prompt, recurring: true, daemon, maxIterations });
+        if (row) return row;
+      }
+      break;
     }
     case 'enter_plan_mode': {
       const reason = stringField(input, 'Reason', 'reason');

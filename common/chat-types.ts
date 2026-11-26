@@ -3,6 +3,7 @@
 // these shapes, and the frontend renders them directly.
 
 import { isRecord } from './json.js';
+import { parseToolScheduleRequest, type ToolScheduleRequest } from './tool-schedule.js';
 import { parseAsyncQuestionSet, type AsyncQuestionSet, type AsyncQuestionReply } from './async-user-questions.js';
 import { normalizeAskUserQuestionDecisionResponse, type AskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 import {
@@ -420,6 +421,16 @@ export class WriteStdinToolUseMessage {
   ) {}
 }
 
+export class ScheduleToolUseMessage {
+  readonly type = 'schedule-tool-use' as const;
+  constructor(public timestamp: string, public toolId: string, public request: ToolScheduleRequest) {}
+
+  static fromRequest(timestamp: string, toolId: string, value: unknown) {
+    const request = parseToolScheduleRequest(value);
+    return request ? new ScheduleToolUseMessage(timestamp, toolId, request) : null;
+  }
+}
+
 export interface AskUserQuestionOption {
   id: string;
   label: string;
@@ -785,6 +796,7 @@ export type ToolUseChatMessage =
   | UpdatePlanToolUseMessage
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
+  | ScheduleToolUseMessage
   | AntigravityEnterPlanModeToolUseMessage
   | AntigravityExitPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
@@ -1015,6 +1027,9 @@ const TOOL_USE_MESSAGE_PARSERS = {
 
   'enter-plan-mode-tool-use': (data) =>
     new EnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId)),
+
+  'schedule-tool-use': (data) =>
+    ScheduleToolUseMessage.fromRequest(str(data.timestamp), str(data.toolId), data.request),
 
   'antigravity-enter-plan-mode-tool-use': (data) => typeof data.reason === 'string'
     ? new AntigravityEnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId), data.reason) : null,

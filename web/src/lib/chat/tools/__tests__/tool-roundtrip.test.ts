@@ -7,6 +7,7 @@ import {
 	AntigravityExitPlanModeToolUseMessage,
 	ExecToolUseMessage,
 	WaitToolUseMessage,
+	ScheduleToolUseMessage,
 	ReadToolUseMessage,
 	ListToolUseMessage,
 	EditToolUseMessage,
@@ -60,6 +61,20 @@ function roundTrip<T>(message: T): T {
 }
 
 describe('tool-use serialization round-trip', () => {
+	it('round-trips native schedule requests and rejects incomplete or unknown actions', () => {
+		for (const row of [
+			new ScheduleToolUseMessage(TS, 'timer', { action: 'wakeup', delaySeconds: 120, prompt: 'Check', timerCondition: 'any' }),
+			new ScheduleToolUseMessage(TS, 'cron', { action: 'cron', expression: '0 9 * * *', prompt: 'Check', recurring: false, durable: false }),
+			new ScheduleToolUseMessage(TS, 'delete', { action: 'delete', jobId: 'job' }),
+			new ScheduleToolUseMessage(TS, 'stop', { action: 'stop-loop' }),
+			new ScheduleToolUseMessage(TS, 'list', { action: 'list' }),
+		]) {
+			expect(roundTrip(row)).toEqual(row);
+		}
+		for (const request of [{ action: 'delete' }, { action: 'wakeup', delaySeconds: 0 }, { action: 'run' }]) {
+			expect(parseChatMessage({ type: 'schedule-tool-use', timestamp: TS, toolId: 'call', request })).toBeNull();
+		}
+	});
 	it('round-trips informational plans without coercing missing or malformed text', () => {
 		const enter = new AntigravityEnterPlanModeToolUseMessage(TS, 'enter', 'Inspect layout');
 		const exit = new AntigravityExitPlanModeToolUseMessage(TS, 'exit', '    example\n');
