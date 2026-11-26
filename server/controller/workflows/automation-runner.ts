@@ -58,13 +58,17 @@ function terminal(result: AutomationResult, command: boolean, stopped = false): 
     // Shell can publish a failed receipt after losing the result of an already executed command.
     const uncertain = result.certainty === 'unknown'
       || (command && result.certainty !== 'not-started' && !unsuccessfulExit);
-    return { kind: uncertain ? 'unknown' : 'failed', reason: result.detail };
+    return { kind: uncertain ? 'unknown' : 'failed', reason: result.detail, ...(result.commandDiagnostic ? { diagnostic: result.commandDiagnostic } : {}) };
   }
   if (command) {
     const evidence = result.commandOutcome;
     if (!evidence || evidence.outcome === 'unknown') return { kind: 'unknown', reason: 'No exact shell exit was confirmed.' };
     if (evidence.outcome !== 'finished' || evidence.exitCode !== 0 || evidence.signal !== null) {
-      return { kind: 'failed', reason: `Shell did not exit successfully (exit ${evidence.exitCode}, signal ${evidence.signal}).` };
+      return {
+        kind: 'failed',
+        reason: `Shell did not exit successfully (exit ${evidence.exitCode}, signal ${evidence.signal}).`,
+        ...(result.commandDiagnostic ? { diagnostic: result.commandDiagnostic } : {}),
+      };
     }
   }
   return { kind: 'succeeded', output: result.completeText === null ? { kind: 'incomplete' } : { kind: 'complete', text: result.completeText } };

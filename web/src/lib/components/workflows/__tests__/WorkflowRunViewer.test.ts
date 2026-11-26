@@ -53,6 +53,7 @@ describe('Workflow run viewer', () => {
 		await fireEvent.change(instance(), { target: { value: 'verify-b' } });
 		expect(screen.queryByRole('button', { name: 'Retry step' })).toBeNull();
 		expect(screen.getByText('Connection lost')).toBeTruthy();
+		expect(screen.getByText('Stderr detail: command exited with status 7')).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Open chat' }));
 		expect(open).toHaveBeenCalledWith('1780000000000002');
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to steps' }));
@@ -247,6 +248,7 @@ describe('Workflow run viewer', () => {
 							startedAt: live.createdAt,
 							finishedAt: null,
 							reason: null,
+							diagnostic: null,
 						},
 					],
 				},

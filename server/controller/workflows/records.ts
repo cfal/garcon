@@ -75,6 +75,7 @@ export interface AttemptRow {
   started_at: string;
   finished_at: string | null;
   reason: string | null;
+  diagnostic: string | null;
 }
 
 export interface SignalRow {
@@ -205,7 +206,7 @@ function attemptFromRow(row: AttemptRow, hasChat?: (chatId: string) => boolean):
   const chatId = row.chat_confirmed ? row.chat_id : null;
   return { id: row.id, number: row.number, status: row.status, chatId, turnId: row.chat_confirmed ? row.turn_id : null,
     chatAvailable: chatId !== null && row.chat_removed === 0 && (hasChat?.(chatId) ?? true),
-    startedAt: row.started_at, finishedAt: row.finished_at, reason: row.reason };
+    startedAt: row.started_at, finishedAt: row.finished_at, reason: row.reason, diagnostic: row.diagnostic ?? null };
 }
 
 export function runDetail(db: Database, runId: string, hasChat?: (chatId: string) => boolean): WorkflowRunDetail {

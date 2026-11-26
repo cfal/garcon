@@ -66,7 +66,14 @@ function currentAttempt(db: Database, id: string): CurrentAttempt | null {
   `).get(id);
 }
 
-function finishAttempt(db: Database, row: CurrentAttempt, status: Exclude<AttemptRow['status'], 'running'>, reason: string | null, now: string): void {
+function finishAttempt(
+  db: Database,
+  row: CurrentAttempt,
+  status: Exclude<AttemptRow['status'], 'running'>,
+  reason: string | null,
+  now: string,
+  diagnostic: string | null = null,
+): void {
   // Readiness can flap indefinitely. A refusal before chat reservation is a wait, not an execution attempt.
   if (status === 'unavailable' && row.chat_id === null) {
     db.query('DELETE FROM workflow_attempts WHERE id = ?').run(row.id);
@@ -74,7 +81,8 @@ function finishAttempt(db: Database, row: CurrentAttempt, status: Exclude<Attemp
       .run(reason, row.instance_id);
     return;
   }
-  db.query('UPDATE workflow_attempts SET status = ?, reason = ?, finished_at = ? WHERE id = ?').run(status, reason, now, row.id);
+  db.query('UPDATE workflow_attempts SET status = ?, reason = ?, diagnostic = ?, finished_at = ? WHERE id = ?')
+    .run(status, reason, diagnostic, now, row.id);
   const update = db.query('UPDATE workflow_instances SET status = ?, reason = ? WHERE id = ?');
   if (status !== 'unavailable') {
     update.run(status, reason, row.instance_id);
@@ -699,7 +707,8 @@ export class WorkflowEngine {
         if (kind === 'unknown' && live.chat_id && !live.chat_confirmed) {
           reason = 'Chat publication could not be confirmed. Check the chat list before taking further action. ' + reason;
         }
-        finishAttempt(db, live, kind, reason, now);
+        const diagnostic = result.kind === 'succeeded' || !result.diagnostic ? null : result.diagnostic.slice(0, 1024);
+        finishAttempt(db, live, kind, reason, now, diagnostic);
       }
       graph.reconcile();
       return true;

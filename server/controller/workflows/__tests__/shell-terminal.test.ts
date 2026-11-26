@@ -54,9 +54,16 @@ test.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
       expect(() => engine.retry({ runId: missingEvidence, instanceId: unknown.id, operationId: 'unknown-retry' }, actor))
         .toThrow('Only a definitively failed attempt can be retried.');
 
-      const nonzero = launch('exit 7');
+      const nonzero = launch('printf "failing-stderr-line\\n" >&2; exit 7');
       const failed = await settled(nonzero);
-      expect(failed).toMatchObject({ status: 'failed', attempts: [{ status: 'failed', reason: expect.stringContaining('Exit 7') }] });
+      expect(failed).toMatchObject({
+        status: 'failed',
+        attempts: [{
+          status: 'failed',
+          reason: expect.stringContaining('Exit 7'),
+          diagnostic: expect.stringContaining('failing-stderr-line'),
+        }],
+      });
       engine.retry({ runId: nonzero, instanceId: failed.id, operationId: 'known-retry' }, actor);
       expect((await settled(nonzero, 2)).attempts.map(({ status }) => status)).toEqual(['failed', 'failed']);
 

@@ -4,7 +4,10 @@ import { DomainError } from '../../common/domain-error.js';
 import { diagnosticErrorCode } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import { configureDurableSqlite, openPrivateSqliteDatabase, securePrivateSqliteSidecars } from '../lib/private-sqlite.js';
-import { WORKFLOW_ARCHIVE_MIGRATION, WORKFLOW_CHAT_CONFIRMATION_MIGRATION, WORKFLOW_SCHEMA, WORKFLOW_SCHEMA_VERSION } from './schema.js';
+import {
+  WORKFLOW_ARCHIVE_MIGRATION, WORKFLOW_ATTEMPT_DIAGNOSTIC_MIGRATION, WORKFLOW_CHAT_CONFIRMATION_MIGRATION,
+  WORKFLOW_SCHEMA, WORKFLOW_SCHEMA_VERSION,
+} from './schema.js';
 
 const logger = createLogger('workflow-store');
 
@@ -24,9 +27,10 @@ export class WorkflowStore {
         const version = db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;
         if (version === WORKFLOW_SCHEMA_VERSION) return;
         if (version === 0) db.exec(WORKFLOW_SCHEMA);
-        else if (version === 1 || version === 2) {
+        else if (version >= 1 && version <= 3) {
           if (version === 1) db.exec(WORKFLOW_ARCHIVE_MIGRATION);
-          db.exec(WORKFLOW_CHAT_CONFIRMATION_MIGRATION);
+          if (version <= 2) db.exec(WORKFLOW_CHAT_CONFIRMATION_MIGRATION);
+          db.exec(WORKFLOW_ATTEMPT_DIAGNOSTIC_MIGRATION);
         } else throw new Error('Unsupported workflow database schema.');
         db.exec(`PRAGMA user_version = ${WORKFLOW_SCHEMA_VERSION}`);
       }).immediate();

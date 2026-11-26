@@ -1,4 +1,4 @@
-export const WORKFLOW_SCHEMA_VERSION = 3;
+export const WORKFLOW_SCHEMA_VERSION = 4;
 
 const WORKFLOW_READY_INDEX = `CREATE INDEX workflow_instances_ready ON workflow_instances(status)
   WHERE status IN ('ready', 'waiting-executor') AND retired = 0`;
@@ -25,6 +25,10 @@ WHERE a.status = 'succeeded' AND a.chat_id IS NOT NULL AND a.turn_id IS NOT NULL
 );
 DROP INDEX workflow_attempts_active_chats;
 ${WORKFLOW_ACTIVE_CHAT_INDEX};
+`;
+
+export const WORKFLOW_ATTEMPT_DIAGNOSTIC_MIGRATION = `
+ALTER TABLE workflow_attempts ADD COLUMN diagnostic TEXT;
 `;
 
 export const WORKFLOW_SCHEMA = `
@@ -109,6 +113,7 @@ CREATE TABLE workflow_attempts (
   started_at TEXT NOT NULL,
   finished_at TEXT,
   reason TEXT,
+  diagnostic TEXT,
   UNIQUE (instance_id, number)
 ) STRICT;
 CREATE INDEX workflow_attempts_live ON workflow_attempts(status) WHERE status = 'running';

@@ -173,6 +173,7 @@ export interface WorkflowAttempt {
   readonly startedAt: string;
   readonly finishedAt: string | null;
   readonly reason: string | null;
+  readonly diagnostic: string | null;
 }
 
 export interface WorkflowStepInstance {

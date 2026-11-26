@@ -37,7 +37,7 @@ export interface WorkflowAttemptCallbacks {
 
 export type WorkflowAttemptResult =
   | { readonly kind: 'succeeded'; readonly output?: { readonly kind: 'complete'; readonly text: string } | { readonly kind: 'incomplete' } }
-  | { readonly kind: 'failed' | 'unknown' | 'unavailable'; readonly reason: string };
+  | { readonly kind: 'failed' | 'unknown' | 'unavailable'; readonly reason: string; readonly diagnostic?: string | null };
 
 export interface WorkflowRunner {
   run(request: WorkflowAttemptRequest, callbacks: WorkflowAttemptCallbacks): Promise<WorkflowAttemptResult>;

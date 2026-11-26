@@ -23,6 +23,8 @@ import { pinAutomationPreambles, type AutomationAdmission } from './start-admiss
 
 const logger = createLogger('automation');
 const MAX_PREPARED_AND_LIVE_TURNS = 256;
+const COMMAND_TAIL_BUFFER_CHARS = 2048;
+const COMMAND_DIAGNOSTIC_MAX_CHARS = 1024;
 
 export interface AutomationServiceOptions {
   readonly serverInstanceId: string;
@@ -67,6 +69,8 @@ interface Entry {
   starting: Promise<AutomationStartResult> | null;
   timer: ReturnType<typeof setTimeout> | null;
   stopRequested: boolean;
+  stderrTail: string;
+  stdoutTail: string;
 }
 
 export class AutomationService implements AutomationExecutionPort {
@@ -124,7 +128,7 @@ export class AutomationService implements AutomationExecutionPort {
           () => this.#entries.get(chatId) === entry && !entry.cancellation.signal.aborted
             && !entry.stopRequested && entry.phase === 'published' && entry.terminal?.failureCertainty !== 'unknown', onSignal) : null,
         phase: 'prepared', viewId: null, terminal: null, dispatchFailure: null, gapped: false,
-        input: normalized, starting: null, timer: null, stopRequested: false,
+        input: normalized, starting: null, timer: null, stopRequested: false, stderrTail: '', stdoutTail: '',
       };
       this.#entries.set(chatId, entry);
       entry.timer = setTimeout(() => {
@@ -216,6 +220,13 @@ export class AutomationService implements AutomationExecutionPort {
       entry.terminal = { row, commandOutcome, failureCertainty };
     } else if (event.type === 'rows') {
       if (event.publicationGapRunId === entry.key.turnId) entry.gapped = true;
+      if (!entry.terminal) {
+        for (const row of event.rows) {
+          if (row.kind !== 'provider-row' || row.message.type !== 'command-output' || !row.message.content) continue;
+          if (row.message.channel === 'stderr') entry.stderrTail = appendBoundedTail(entry.stderrTail, row.message.content);
+          else if (row.message.channel === 'stdout') entry.stdoutTail = appendBoundedTail(entry.stdoutTail, row.message.content);
+        }
+      }
       if (event.liveAssistantRows?.runId === entry.key.turnId && !entry.terminal) {
         entry.signals?.collect(event.viewId, event.liveAssistantRows.rows);
       }
@@ -298,6 +309,20 @@ export class AutomationService implements AutomationExecutionPort {
   }
 }
 
+function appendBoundedTail(current: string, chunk: string): string {
+  const combined = current + chunk;
+  return combined.length > COMMAND_TAIL_BUFFER_CHARS ? combined.slice(-COMMAND_TAIL_BUFFER_CHARS) : combined;
+}
+
+function commandFailureDiagnostic(entry: Entry, commandOutcome: TerminalEvidence['commandOutcome'] | null): string | null {
+  if (!commandOutcome) return null;
+  if (commandOutcome.outcome === 'finished' && commandOutcome.exitCode === 0 && commandOutcome.signal === null) return null;
+  const raw = (entry.stderrTail.trim() ? entry.stderrTail : entry.stdoutTail).trimEnd();
+  if (!raw) return null;
+  if (raw.length <= COMMAND_DIAGNOSTIC_MAX_CHARS) return raw;
+  return '...' + raw.slice(-(COMMAND_DIAGNOSTIC_MAX_CHARS - 3));
+}
+
 function terminalResult(entry: Entry, record: CommandLedgerRecord): AutomationResult {
   const terminal = entry.terminal;
   const projected = projectAgentTurnReceipt(record);
@@ -307,17 +332,18 @@ function terminalResult(entry: Entry, record: CommandLedgerRecord): AutomationRe
   }
   const receipt = projected.receipt;
   const commandOutcome = terminal?.commandOutcome ?? null;
+  const commandDiagnostic = commandFailureDiagnostic(entry, commandOutcome);
   switch (receipt.state) {
     case 'completed': {
       if (terminal?.row.outcome !== 'finished' || terminal.row.origin !== 'provider') return unavailable();
       const completeText = !entry.gapped && (!commandOutcome || commandOutcome.capture === 'complete')
         && receipt.output.availability === 'available' && receipt.output.completeness === 'complete' ? receipt.output.text : null;
-      return { kind: 'completed', receipt, completeText, commandOutcome };
+      return { kind: 'completed', receipt, completeText, commandOutcome, ...(commandDiagnostic ? { commandDiagnostic } : {}) };
     }
     case 'failed': {
       const certainty = receipt.errorCode === 'OUTCOME_UNKNOWN' ? 'unknown'
         : terminal?.failureCertainty ?? entry.dispatchFailure ?? 'unknown';
-      return { kind: 'failed', certainty, receipt, detail: receipt.error, commandOutcome };
+      return { kind: 'failed', certainty, receipt, detail: receipt.error, commandOutcome, ...(commandDiagnostic ? { commandDiagnostic } : {}) };
     }
     case 'interrupted':
       return { kind: 'interrupted', receipt, termination: terminal?.row.origin === 'provider' ? 'observed' : 'requested' };

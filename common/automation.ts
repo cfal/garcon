@@ -23,9 +23,11 @@ export type ExecutionFailureCertainty = 'not-started' | 'definite' | 'unknown';
 
 export type AutomationResult =
   | { readonly kind: 'completed'; readonly receipt: CompletedAgentTurnReceipt;
-      readonly completeText: string | null; readonly commandOutcome: CommandOutcome | null }
+      readonly completeText: string | null; readonly commandOutcome: CommandOutcome | null;
+      readonly commandDiagnostic?: string | null }
   | { readonly kind: 'failed'; readonly certainty: ExecutionFailureCertainty;
-      readonly receipt: FailedAgentTurnReceipt | null; readonly detail: string; readonly commandOutcome: CommandOutcome | null }
+      readonly receipt: FailedAgentTurnReceipt | null; readonly detail: string; readonly commandOutcome: CommandOutcome | null;
+      readonly commandDiagnostic?: string | null }
   | { readonly kind: 'interrupted'; readonly receipt: InterruptedAgentTurnReceipt; readonly termination: 'observed' | 'requested' }
   | { readonly kind: 'unavailable'; readonly reason: string };
 

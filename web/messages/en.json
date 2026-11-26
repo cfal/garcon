@@ -3444,6 +3444,7 @@
 	"workflow_studio_choose_step_executor": "Choose an executor in Step settings.",
 	"workflow_studio_close_signal": "Intake close signal",
 	"workflow_studio_command": "Command",
+	"workflow_studio_command_diagnostic": "Failure output",
 	"workflow_studio_compare_disk": "Compare with disk",
 	"workflow_studio_compare_required": "Compare with disk before saving again. Your draft is kept.",
 	"workflow_studio_concurrency": "Concurrent instances",

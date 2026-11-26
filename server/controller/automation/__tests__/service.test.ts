@@ -104,6 +104,9 @@ for (const backend of RUNTIME_BACKENDS) {
         [input.command, { kind: 'completed', completeText: emit('literal stdout'), commandOutcome: { exitCode: 0, capture: 'complete' } }],
         ["head -c 80000 /dev/zero | tr '\\000' x", { kind: 'completed', completeText: null, commandOutcome: { exitCode: 0, capture: 'truncated' }, receipt: { output: { completeness: 'best-effort' } } }],
         ['exit 7', { kind: 'failed', certainty: 'definite', commandOutcome: { exitCode: 7 } }],
+        ["printf '%s' 'tail-' >&2 && head -c 1500 /dev/zero | tr '\\000' e >&2 && exit 9", {
+          kind: 'failed', certainty: 'definite', commandOutcome: { exitCode: 9 }, commandDiagnostic: expect.stringMatching(/^\.\.\.e{1021}$/),
+        }],
       ] as const) {
         const turn = prepared(await f.automation.prepare({ ...input, command, clientRequestId: crypto.randomUUID() }));
         expect(await turn.start()).toEqual({ kind: 'published' });
@@ -111,7 +114,7 @@ for (const backend of RUNTIME_BACKENDS) {
         expect(f.chats.getChat(turn.key.chatId)?.parentChatId).toBeNull();
         turn.release();
       }
-      expect(f.chats.listChatIds()).toHaveLength(3);
+      expect(f.chats.listChatIds()).toHaveLength(4);
     } finally { await f.dispose(); await runtime.dispose(); await workspace.dispose(); }
   });
 

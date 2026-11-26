@@ -179,6 +179,11 @@
 								{#if attempt.reason}<p class="wrap-anywhere text-xs text-muted-foreground">
 										{attempt.reason}
 									</p>{/if}
+								{#if attempt.diagnostic}
+									<pre
+										aria-label={m.workflow_studio_command_diagnostic()}
+										class="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap wrap-anywhere">{attempt.diagnostic}</pre>
+								{/if}
 							</li>
 							{#snippet failed()}<li class="text-sm text-destructive">
 									{m.workflow_studio_evidence_unavailable()}

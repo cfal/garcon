@@ -651,6 +651,7 @@ test('migrates only proven published chats and never infers publication from unk
     db.exec(WORKFLOW_SCHEMA);
     db.exec(`DROP INDEX workflow_attempts_active_chats;
       ALTER TABLE workflow_attempts DROP COLUMN chat_confirmed;
+      ALTER TABLE workflow_attempts DROP COLUMN diagnostic;
       CREATE INDEX workflow_attempts_active_chats ON workflow_attempts(chat_id)
         WHERE chat_id IS NOT NULL AND chat_removed = 0 AND status IN ('running', 'failed', 'unknown');
       PRAGMA user_version = 2;`);
@@ -987,4 +988,40 @@ steps:
   expect(() => service.retry({ runId: id, instanceId: decision.id, operationId: 'retry-decision' }, ACTOR))
     .toThrow('cannot be retried');
   expect(after.status).toBe('attention');
+});
+
+test('upgrades v3 workflow databases to v4 and persists bounded attempt diagnostics', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'garcon-workflow-v3-'));
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  const source = 'version: 1\nname: V3 migration\nsteps:\n  - { id: cmd, kind: command, command: exit 7 }\n';
+  const definition = parsed(source);
+  {
+    using db = new Database(join(dir, 'workflow-runs.sqlite'));
+    db.exec(WORKFLOW_SCHEMA);
+    db.exec('ALTER TABLE workflow_attempts DROP COLUMN diagnostic; PRAGMA user_version = 3;');
+    db.query(`INSERT INTO workflow_runs (id, name, draft_json, inputs_json, context_json, status, created_at, updated_at)
+      VALUES ('old-run', 'V3', ?, '{}', '{}', 'attention', 'c', 'u')`).run(
+      JSON.stringify({ definitionId: null, revision: null, source, definition, publishedAt: null }),
+    );
+    db.query("INSERT INTO workflow_run_steps (run_id, id, step_json, max_concurrency, intake, added) VALUES ('old-run', 'cmd', ?, 1, 'closed', 0)")
+      .run(JSON.stringify(definition.steps[0]));
+    db.query("INSERT INTO workflow_instances (id, run_id, step_id, trigger_json, is_repeated, status, attempt_count) VALUES ('old-inst', 'old-run', 'cmd', '{\"kind\":\"root\"}', 0, 'failed', 1)")
+      .run();
+    db.query("INSERT INTO workflow_attempts (id, instance_id, number, status, chat_confirmed, started_at, reason) VALUES ('old-att', 'old-inst', 1, 'failed', 0, 's', 'Exit 7')")
+      .run();
+  }
+  const failingRunner: WorkflowRunner = {
+    async run(_req, callbacks) {
+      callbacks.attachChat('diag-chat', 'diag-turn');
+      callbacks.confirmChat();
+      return { kind: 'failed', reason: 'Exit 7', diagnostic: 'x'.repeat(1200) };
+    },
+  };
+  const service = new WorkflowEngine({ store: new WorkflowStore(dir), runner: failingRunner });
+  cleanups.push(() => service.close());
+  expect(step(service, 'old-run', 'cmd').instances[0]?.attempts[0]).toMatchObject({ diagnostic: null, reason: 'Exit 7' });
+  await service.start();
+  const next = service.testWorkflowDraft({ source, inputs: {}, executionContext: LOCAL }, definition).id;
+  await until(() => service.getRun(next).status === 'attention');
+  expect(step(service, next, 'cmd').instances[0]?.attempts[0]?.diagnostic).toBe('x'.repeat(1024));
 });
