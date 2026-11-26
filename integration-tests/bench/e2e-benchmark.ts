@@ -130,7 +130,7 @@ const report = [
   '## Method',
   '',
   `- Both controllers run at once in isolated integration fixtures with authentication, the production web build, and the scripted OpenAI-compatible provider, which replies deterministically. Each of ${iterations} iterations runs every flow on both, in alternating order, after one unmeasured warm-up pass.`,
-  '- A chat turn is timed from the start or run request until the turn terminal arrives on the WebSocket. Page loads use a fresh Chromium context (cold) and then a reload in it (warm), and are timed until the assistant reply is visible; the other page metrics are the browser's navigation timing.',
+  '- A chat turn is timed from the start or run request until the turn terminal arrives on the WebSocket. Page loads use a fresh Chromium context (cold) and then a reload in it (warm), and are timed until the assistant reply is visible; the other page metrics come from the navigation timing the browser records.',
   '',
   '## Results',
   '',
