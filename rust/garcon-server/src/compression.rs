@@ -50,7 +50,11 @@ impl Encoding {
         }
     }
 
-    fn compress(self, input: &[u8]) -> std::io::Result<Vec<u8>> {
+    pub fn compress(self, input: &[u8]) -> std::io::Result<Bytes> {
+        self.compress_to_vec(input).map(Bytes::from)
+    }
+
+    fn compress_to_vec(self, input: &[u8]) -> std::io::Result<Vec<u8>> {
         match self {
             Encoding::Gzip => {
                 let mut encoder =
@@ -217,11 +221,14 @@ fn weaken_strong_etag(headers: &mut HeaderMap) {
 }
 
 /// Applies the original's compression rules to a native response.
+/// `encode` produces the compressed body; callers with stable content pass
+/// a cache (see `asset_cache.rs`), others `Encoding::compress`.
 pub fn finish(
     method: &Method,
     request: &HeaderMap,
     response: NativeResponse,
     enabled: bool,
+    encode: impl FnOnce(Encoding, &Bytes) -> std::io::Result<Bytes>,
 ) -> NativeResponse {
     if should_skip(method, &response, enabled) {
         return response;
@@ -231,7 +238,7 @@ pub fn finish(
         append_vary_accept_encoding(&mut response.headers);
         return response;
     };
-    let compressed = match encoding.compress(&response.body) {
+    let compressed = match encode(encoding, &response.body) {
         Ok(compressed) => compressed,
         Err(_) => return response,
     };
@@ -241,7 +248,7 @@ pub fn finish(
     response.headers.remove(CONTENT_LENGTH);
     append_vary_accept_encoding(&mut response.headers);
     weaken_strong_etag(&mut response.headers);
-    response.body = Bytes::from(compressed);
+    response.body = compressed;
     response
 }
 
@@ -292,10 +299,11 @@ mod tests {
                 body: Bytes::from_static(b"{}"),
             }
         };
-        let declared = finish(&Method::GET, &request, small(true), true);
+        let compress = |encoding: Encoding, body: &Bytes| encoding.compress(body);
+        let declared = finish(&Method::GET, &request, small(true), true, compress);
         assert!(!declared.headers.contains_key(CONTENT_ENCODING));
         assert!(!declared.headers.contains_key(VARY));
-        let undeclared = finish(&Method::GET, &request, small(false), true);
+        let undeclared = finish(&Method::GET, &request, small(false), true, compress);
         assert_eq!(undeclared.headers.get(CONTENT_ENCODING).unwrap(), "gzip");
         assert_eq!(undeclared.headers.get(VARY).unwrap(), "Accept-Encoding");
     }

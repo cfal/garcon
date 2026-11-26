@@ -13,6 +13,7 @@ use bytes::Bytes;
 use hyper::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue, RANGE};
 use hyper::{Method, StatusCode};
 
+use crate::asset_cache::{AssetCache, FileVersion};
 use crate::compression::NativeResponse;
 
 /// Content types Bun assigns to file responses, for the extensions a web build
@@ -147,7 +148,7 @@ pub fn not_found() -> NativeResponse {
 
 /// Mirrors `resolveStaticFilePath`: the file must be inside the build both
 /// lexically and after resolving symlinks.
-async fn resolve(build_dir: &Path, pathname: &str) -> Option<PathBuf> {
+async fn resolve(build_dir: &Path, pathname: &str) -> Option<(PathBuf, std::fs::Metadata)> {
     let candidate = build_dir.join(pathname.trim_start_matches('/'));
     let real_build = tokio::fs::canonicalize(build_dir).await.ok()?;
     let real_candidate = tokio::fs::canonicalize(&candidate).await.ok()?;
@@ -158,15 +159,31 @@ async fn resolve(build_dir: &Path, pathname: &str) -> Option<PathBuf> {
         .await
         .ok()
         .filter(|metadata| metadata.is_file())
-        .map(|_| real_candidate)
+        .map(|metadata| (real_candidate, metadata))
 }
 
-pub async fn serve(build_dir: &Path, request: &AssetRequest<'_>) -> NativeResponse {
-    let Some(path) = resolve(build_dir, request.pathname).await else {
-        return not_found();
+/// Serves the asset, from `cache` when this version of the file is cached.
+/// Returns the file version alongside the response so its encodings can be
+/// cached too.
+pub async fn serve(
+    build_dir: &Path,
+    request: &AssetRequest<'_>,
+    cache: &AssetCache,
+) -> (NativeResponse, Option<FileVersion>) {
+    let Some((path, metadata)) = resolve(build_dir, request.pathname).await else {
+        return (not_found(), None);
     };
-    let Ok(contents) = tokio::fs::read(&path).await else {
-        return not_found();
+    let version = FileVersion::of(path, &metadata);
+    let contents = match cache.contents(&version) {
+        Some(contents) => contents,
+        None => {
+            let Ok(contents) = tokio::fs::read(&version.path).await else {
+                return (not_found(), None);
+            };
+            let contents = Bytes::from(contents);
+            cache.store_contents(&version, &contents);
+            contents
+        }
     };
     let mut headers = HeaderMap::new();
     if let Some(cache_control) = cache_control(request.pathname) {
@@ -174,11 +191,12 @@ pub async fn serve(build_dir: &Path, request: &AssetRequest<'_>) -> NativeRespon
     }
     headers.insert(CONTENT_LENGTH, HeaderValue::from(contents.len()));
     headers.insert(CONTENT_TYPE, HeaderValue::from_static(request.content_type));
-    NativeResponse {
+    let response = NativeResponse {
         status: StatusCode::OK,
         headers,
-        body: Bytes::from(contents),
-    }
+        body: contents,
+    };
+    (response, Some(version))
 }
 
 #[cfg(test)]
@@ -251,6 +269,12 @@ mod tests {
         )
         .unwrap();
         let request = claim(&Method::GET, &HeaderMap::new(), "/_app/leak.json").unwrap();
-        assert_eq!(serve(&build, &request).await.status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            serve(&build, &request, &AssetCache::new(1 << 20))
+                .await
+                .0
+                .status,
+            StatusCode::NOT_FOUND
+        );
     }
 }

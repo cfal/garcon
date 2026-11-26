@@ -64,6 +64,8 @@ describe('normalizeCapture', () => {
       homeDir: '/tmp/garcon-parity-1/home',
     },
     fallbackLogPath: '/tmp/garcon-parity-1/fallback.log',
+    pid: 4100,
+    startupMs: 1,
     logs: () => '',
     stop: async () => undefined,
   } satisfies StartedServer;

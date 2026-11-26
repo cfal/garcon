@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["garcon-server"]
+members = ["garcon-bench", "garcon-server"]
 
 [workspace.package]
 edition = "2024"

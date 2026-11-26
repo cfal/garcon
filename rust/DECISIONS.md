@@ -216,3 +216,23 @@ delivery is ported.
 The investigation also fixed two relay defects with unit tests: a client that
 kept sending could hold a connection open after the original ended it, and both
 directions shared one lock.
+
+## ADR-011: Cache web build files and their encodings in memory
+
+Status: accepted (2026-11-26)
+
+Context: The original reads every static asset from disk and compresses it on
+every request. For the largest application chunk (1.4 MB) that is about 22 ms
+of CPU per request; the first native implementation did the same with a
+slower encoder and served 60% fewer requests than the original.
+
+Decision: The static-assets unit keeps each file it serves, and each encoding
+it produces, in memory, keyed by path, size, and modification time, within a
+128 MB budget. Built assets are content-addressed, so a rebuild produces new
+paths or new versions and stale entries are never served. Files beyond the
+budget are served uncached. Compression uses zlib-rs, a pure-Rust deflate.
+
+Consequences: Responses are unchanged, so the scenario replay and shadow
+comparison still match. Large compressed assets are served about 40 to 50
+times faster with about 1% of the CPU (BENCHMARKS.md); the front door holds the
+cached build in memory.

@@ -34,6 +34,10 @@ export interface StartedServer {
   credentials: ParityCredentials;
   dirs: ParityDirectories;
   fallbackLogPath: string;
+  // The spawned process; behind the front door the original is its child.
+  pid: number;
+  // From spawn until the server announced its URL.
+  startupMs: number;
   logs(): string;
   stop(): Promise<void>;
 }
@@ -41,6 +45,10 @@ export interface StartedServer {
 export interface ServerOptions {
   basePath?: string;
   files?: Record<string, string>;
+  // Defaults to the fixture build; benchmarks serve a real production build.
+  webBuildDir?: string;
+  // Extra environment for this server, such as a unit kill switch.
+  environment?: Record<string, string>;
 }
 
 // The original is the TypeScript controller, started exactly as `bun run
@@ -129,6 +137,7 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
     '--project-base-dir', dirs.projectDir,
     ...(options.basePath ? ['--base-path', options.basePath] : []),
   ];
+  const spawnedAt = performance.now();
   const child = Bun.spawn({
     cmd: [...build.command, ...args],
     cwd: repoRoot,
@@ -144,7 +153,8 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
       // Front-door settings such as unit kill switches pass through.
       ...frontDoorEnvironment(),
       GARCON_RS_FALLBACK_LOG: fallbackLogPath,
-      GARCON_WEB_BUILD_DIR: join(repoRoot, WEB_BUILD_FIXTURE),
+      GARCON_WEB_BUILD_DIR: options.webBuildDir ?? join(repoRoot, WEB_BUILD_FIXTURE),
+      ...options.environment,
     },
     stdin: 'ignore',
     stdout: 'pipe',
@@ -176,6 +186,7 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
 
   try {
     const baseUrl = await ready.promise;
+    const startupMs = performance.now() - spawnedAt;
     clearTimeout(timer);
     const url = new URL(baseUrl);
     return {
@@ -186,6 +197,8 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
       credentials,
       dirs,
       fallbackLogPath,
+      pid: child.pid,
+      startupMs,
       logs: () => output,
       stop,
     };

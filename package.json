@@ -68,6 +68,7 @@
     "test:live:opencode": "bun run --cwd integration-tests test:live:opencode",
     "lint:runtime": "eslint server/remote server-agents --no-warn-ignored --max-warnings=0",
     "rust:build": "cargo build --locked --release --manifest-path rust/Cargo.toml",
+    "rust:bench": "bun rust/parity/bench.ts",
     "parity:record": "bun rust/parity/cli.ts record",
     "parity:replay": "bun rust/parity/cli.ts replay",
     "parity:replay:rust": "bun rust/parity/cli.ts replay --build rust/target/release/garcon-server --label garcon-server --report rust/parity/replay-report.md",

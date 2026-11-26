@@ -2,6 +2,7 @@
 //! TypeScript original behind it, serves the routes that have been ported, and
 //! proxies everything else. See rust/README.md and rust/DECISIONS.md.
 
+mod asset_cache;
 mod compression;
 mod config;
 mod original;
@@ -23,7 +24,12 @@ use hyper_util::rt::TokioIo;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal::unix::{SignalKind, signal};
 
+use crate::asset_cache::AssetCache;
 use crate::compression::NativeResponse;
+
+/// Memory for cached web build files and their encodings. A production build is
+/// about 30 MB uncompressed; files beyond the budget are served uncached.
+const ASSET_CACHE_BUDGET: usize = 128 * 1024 * 1024;
 use crate::config::{FrontDoorConfig, LaunchMode, ProcessEnvironment};
 use crate::proxy::{BrowserSocket, FallbackLog, Proxy, ResponseBody, full_body};
 use crate::shadow::Shadow;
@@ -37,6 +43,7 @@ struct FrontDoor {
     /// `GARCON_RS_SHADOW_LOG` compares every native response with the
     /// original's answer before returning it.
     shadow: Option<Shadow>,
+    assets: AssetCache,
 }
 
 /// Mirrors `stripBasePath` in `common/base-path.ts`.
@@ -79,12 +86,14 @@ impl FrontDoor {
             && let Some(pathname) = strip_base_path(request.uri().path(), &self.config.base_path)
             && let Some(asset) = static_assets::claim(request.method(), request.headers(), pathname)
         {
-            let response = static_assets::serve(&self.config.web_build_dir, &asset).await;
+            let (response, version) =
+                static_assets::serve(&self.config.web_build_dir, &asset, &self.assets).await;
             let response = compression::finish(
                 request.method(),
                 request.headers(),
                 response,
                 self.config.http_compression,
+                |encoding, body| self.assets.encode(version.as_ref(), encoding, body),
             );
             if let Some(shadow) = &self.shadow {
                 shadow
@@ -175,6 +184,7 @@ async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
         config,
         static_assets_native,
         shadow,
+        assets: AssetCache::new(ASSET_CACHE_BUDGET),
     });
     let server = tokio::spawn(accept_loop(listener, front_door));
 

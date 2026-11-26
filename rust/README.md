@@ -133,6 +133,15 @@ A suite that fails under both controllers is not a parity failure, but it is
 not evidence either; only tests that pass under the original count toward the
 comparison.
 
+## Benchmarks
+
+`bun run rust:bench` compares the original with the front door, with its native
+units on and with every request sent to the original, and writes
+[`BENCHMARKS.md`](BENCHMARKS.md). It needs a production web build
+(`bun run build`) and `bun run rust:build`, which also builds the
+`garcon-bench` load generator. Run it on an otherwise idle machine; the load
+generator shares the CPU with the servers.
+
 ## Porting a unit
 
 1. Claim the unit in [`MAP.md`](MAP.md) and read its ADRs.

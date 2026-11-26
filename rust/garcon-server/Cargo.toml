@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 bytes = "1"
-flate2 = "1"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
