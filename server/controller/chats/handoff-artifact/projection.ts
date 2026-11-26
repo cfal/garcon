@@ -12,7 +12,7 @@ import {
   selectPrioritizedProjection,
   type PrioritizedProjectionEntry,
 } from '../../../../common/transcript-projection.js';
-import { isPublicationGapMessage, projectToolUseSummary, summarizeSchedule } from '../../../../common/transcript-seed.js';
+import { isPublicationGapMessage, projectToolUseSummary } from '../../../../common/transcript-seed.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   redactDataUrl,
@@ -160,8 +160,7 @@ function projectEntry(
 ): HandoffArtifactSourceEntry | null {
   const { ordinal, message } = entry;
   if (isToolUseMessage(message)) {
-    const summary = message.type === 'schedule-tool-use'
-      ? summarizeSchedule(message.request, redactDataUrl) : projectToolUseSummary(message);
+    const summary = projectToolUseSummary(message, redactDataUrl);
     const body = artifactBody(summary.text);
     return sourceEntry({
       ordinal,

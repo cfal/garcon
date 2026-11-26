@@ -2,7 +2,7 @@
 // Known provider-specific tools must arrive here as typed messages.
 
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
-import { toolScheduleDetails, toolScheduleTitle, type ToolScheduleRequest } from '$shared/tool-schedule';
+import { hasSchedulePrompt, toolScheduleDetails, toolScheduleTitle, type ToolScheduleRequest } from '$shared/tool-schedule';
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import { AMP_TOOL_DISPLAY_RULES } from './amp-tool-display-rules.js';
@@ -493,10 +493,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible', contentKind: 'text',
 			title: ({ request }) => toolScheduleTitle(request as ToolScheduleRequest),
-			inlineWhen: ({ request }) => {
-				const { action } = request as ToolScheduleRequest;
-				return action !== 'cron' && action !== 'wakeup';
-			},
+			inlineWhen: ({ request }) => !hasSchedulePrompt(request as ToolScheduleRequest),
 			getContentProps: ({ request }) => ({ content: toolScheduleDetails(request as ToolScheduleRequest) }),
 		},
 		result: COMPLETE_REPORT_RULE,

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { toolScheduleTitle, toolScheduleOptions, type ToolScheduleRequest } from './tool-schedule.js';
+import { hasSchedulePrompt, toolScheduleTitle, toolScheduleOptions, type ToolScheduleRequest } from './tool-schedule.js';
 import type { ChatMessage, PlanStep, TodoItem, ToolUseChatMessage } from './chat-types.js';
 import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
@@ -668,9 +668,9 @@ export interface ProjectedToolUseSummary {
   readonly prefixBeforeLiteral?: string;
 }
 
-export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToolUseSummary {
+export function projectToolUseSummary(message: ToolUseChatMessage, redactSchedulePrompt?: (value: string) => string): ProjectedToolUseSummary {
   if (message.type === 'update-plan-tool-use') return summarizePlan(message.todos);
-  if (message.type === 'schedule-tool-use') return summarizeSchedule(message.request);
+  if (message.type === 'schedule-tool-use') return summarizeSchedule(message.request, redactSchedulePrompt);
   if (message.type === 'background-task-tool-use' && message.input !== undefined) {
     // Collapsing whitespace here would change the literal input sent to the task.
     const raw = `${message.action} ${message.taskId ?? ''} Input: ${JSON.stringify(message.input.slice(0, TOOL_SUMMARY_MAX_CHARS))}`;
@@ -686,30 +686,31 @@ export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToo
   };
 }
 
-export function summarizeSchedule(request: ToolScheduleRequest, redactPrompt?: (value: string) => string): ProjectedToolUseSummary {
+function summarizeSchedule(request: ToolScheduleRequest, redactPrompt?: (value: string) => string): ProjectedToolUseSummary {
   const title = toolScheduleTitle(request);
-  if (request.action !== 'wakeup' && request.action !== 'cron') {
+  if (!hasSchedulePrompt(request)) {
     return { text: truncate(title, TOOL_SUMMARY_MAX_CHARS), abridged: title.length > TOOL_SUMMARY_MAX_CHARS };
   }
   const header = [title, ...toolScheduleOptions(request), 'Prompt:'].join(' ');
   const prefix = boundedCollapse(header);
-  if (header.length > PROJECTED_BODY_MAX_CHARS || prefix.length + 3 > TOOL_SUMMARY_MAX_CHARS) {
+  const literalBudget = TOOL_SUMMARY_MAX_CHARS - prefix.length - ' ""'.length;
+  if (header.length > PROJECTED_BODY_MAX_CHARS || literalBudget < 0) {
     return { text: prefix.slice(0, TOOL_SUMMARY_MAX_CHARS) + '...', abridged: true };
   }
   const shortened = request.prompt.length > TOOL_SUMMARY_MAX_CHARS;
   const raw = shortened ? request.prompt.slice(0, TOOL_SUMMARY_MAX_CHARS).replace(/[\uD800-\uDBFF]$/u, '') : request.prompt;
   const prompt = redactPrompt?.(raw) ?? raw;
   // Stops at a complete escaped character so the retained prefix is a readable literal.
-  let text = prefix + ' "';
+  let literal = '';
   for (const char of prompt) {
     const escaped = JSON.stringify(char).slice(1, -1);
-    if (text.length + escaped.length + 1 > TOOL_SUMMARY_MAX_CHARS) {
-      const fitted = text.length === prefix.length + 2 ? prefix + '...' : text + '"...';
+    if (literal.length + escaped.length > literalBudget) {
+      const fitted = literal ? `${prefix} "${literal}"...` : prefix + '...';
       return { text: fitted, abridged: true, prefixBeforeLiteral: prefix };
     }
-    text += escaped;
+    literal += escaped;
   }
-  return { text: text + (shortened ? '"...' : '"'), abridged: shortened || prompt !== raw, prefixBeforeLiteral: prefix };
+  return { text: `${prefix} "${literal}"${shortened ? '...' : ''}`, abridged: shortened || prompt !== raw, prefixBeforeLiteral: prefix };
 }
 
 function toolSummary(message: ToolUseChatMessage): string {
