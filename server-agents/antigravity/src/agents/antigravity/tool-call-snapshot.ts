@@ -3,7 +3,7 @@ import { ToolResultMessage, type ToolUseChatMessage } from '@garcon/common/chat-
 import { isRecord } from '@garcon/common/json';
 import { toolResultTextPart } from '@garcon/common/tool-result-content';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
-import { planOrScheduleResult } from './plan-schedule-result.js';
+import { planOrScheduleResult, planReportText } from './plan-schedule-result.js';
 import {
   antigravityMcpArguments,
   antigravityToolName,
@@ -50,7 +50,7 @@ function withoutOutputEchoes(blocks: readonly Record<string, unknown>[], output:
   });
 }
 
-function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, content: TrackedCall['content']): boolean {
+function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, content: TrackedCall['content'], readText: typeof joinBlockText): boolean {
   if (rawOutput === previous?.rawOutput && content === previous?.content) return previous?.contentIsNewer ?? false;
   const output = rawOutputText(rawOutput);
   const outputChanged = output !== rawOutputText(previous?.rawOutput);
@@ -62,7 +62,7 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
     // A newly echoed output confirms it alongside the other text on the frame.
     // Once confirmed, only a change to independent text can supersede it.
     if (hasOutputText && after.length < content.length && before.length === oldBlocks.length) return false;
-    if (joinBlockText(before) !== joinBlockText(after)) return !(outputChanged && hasOutputText);
+    if (readText(before) !== readText(after)) return !(outputChanged && hasOutputText);
   }
   const rawChanged = outputChanged || (rawOutput !== previous?.rawOutput &&
     isStructuredOutput(rawOutput) && !isDeepStrictEqual(rawOutput, previous?.rawOutput));
@@ -117,39 +117,36 @@ function acceptsPartialInput(name: string | null, input: Record<string, unknown>
   return isAgentWork(name) || name === 'call_mcp_tool' || !!(asString(input.server) || asString(input.tool));
 }
 
-function mergeInput(previous: unknown, next: unknown, partial: boolean): unknown {
-  if (next === undefined) return previous;
-  if (!isRecord(next) || previous === undefined) return next;
-  if (!Object.keys(next).length) return previous;
-  return partial && isRecord(previous) ? { ...previous, ...next } : next;
-}
-
 export function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
   const name = call.name || previous?.name || null;
   const partial = !previous?.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.input);
-  const input = asObject(mergeInput(previous?.input, call.input, partial));
+  const hasArguments = Object.keys(call.input).length > 0;
+  const input = !hasArguments ? previous?.input ?? call.input
+    : previous && partial ? { ...previous.input, ...call.input } : call.input;
   // The native schedule fallback needs the malformed argument itself. Other tools,
   // including a late MCP identity, still resolve against the last object arguments.
   let rawInput: unknown = input;
-  if ((!name || name === 'schedule') && (previous?.input !== previous?.rawInput || call.input !== call.rawInput)) {
-    rawInput = mergeInput(previous?.rawInput, call.rawInput, partial);
+  if (!hasArguments && (!name || name === 'schedule')) {
+    if (call.rawInput !== undefined && !isRecord(call.rawInput)) rawInput = call.rawInput;
+    else if (previous) rawInput = previous.rawInput;
   }
   // ACP patches rawOutput and content independently. A repeated snapshot does not
   // make its text newer. When both change together, rawOutput takes precedence.
   const rawOutput = update?.rawOutput ?? previous?.rawOutput;
   const content = Array.isArray(update?.content)
     ? update.content.map(asObject).filter(block => block.type !== 'diff') : previous?.content;
+  const isMcp = call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool));
   return {
     ...call,
     name,
     kind: call.kind || previous?.kind || null,
-    isMcp: call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool)),
+    isMcp,
     planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
     input,
     rawInput,
     rawOutput,
     content,
-    contentIsNewer: prefersContent(previous, rawOutput, content),
+    contentIsNewer: prefersContent(previous, rawOutput, content, !isMcp && reportsPlanOrSchedule(name) ? planReportText : joinBlockText),
   };
 }
 
@@ -157,7 +154,7 @@ export function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): b
   const input = call.input;
   if (!Object.keys(input).length) return true;
   if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(input);
-  // Schedule options and the other half of an MCP address can arrive on a later frame.
-  if (call.isMcp || !call.name || call.name === 'schedule' || asString(input.server) || asString(input.tool)) return true;
+  // Plan and schedule identity remains provisional until a pending MCP address can settle.
+  if (call.isMcp || !call.name || reportsPlanOrSchedule(call.name) || asString(input.server) || asString(input.tool)) return true;
   return row.type === 'external-tool-use' && acceptsPartialInput(call.name, input);
 }

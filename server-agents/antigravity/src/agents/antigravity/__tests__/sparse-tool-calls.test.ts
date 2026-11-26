@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
 import { AntigravityAcpEventConverter } from '../antigravity-acp-event-converter.ts';
 
 const LIST_TASK = { name: 'manage_task', rawInput: { Action: 'list' } };
@@ -24,7 +25,8 @@ function session() {
 
 test('reports native plan activity with late arguments, but does not reinterpret MCP tools', () => {
   const s = session();
-  expect(s.start('enter', { name: 'enter_plan_mode', rawInput: { reason: 'Check layout' } }))
+  expect(s.start('enter', { name: 'enter_plan_mode', rawInput: { reason: 'Check layout' } })).toEqual([]);
+  expect(s.end())
     .toMatchObject([{ type: 'antigravity-enter-plan-mode-tool-use', reason: 'Check layout' }]);
   expect(s.start('exit', { name: 'exit_plan_mode', rawInput: { hint: true } })).toEqual([]);
   expect(s.patch('exit', { rawInput: { Plan: '    example\n' }, status: 'completed' })).toMatchObject([
@@ -32,6 +34,14 @@ test('reports native plan activity with late arguments, but does not reinterpret
   ]);
   expect(s.start('mcp', { name: 'exit_plan_mode', _meta: { is_mcp_tool_call: true },
     rawInput: { plan: 'Example' }, status: 'completed' })[0]).toMatchObject({ type: 'external-tool-use' });
+});
+
+test('uses a late MCP address instead of publishing a provisional plan', () => {
+  const s = session();
+  s.start('plan', { name: 'exit_plan_mode', rawInput: { Plan: 'Example' } });
+  const rows = s.patch('plan', { _meta: { is_mcp_tool_call: true }, status: 'completed',
+    rawInput: { server: 'fixture', tool: 'inspect', arguments: { detail: 1 } } });
+  expect(rows.map(row => row.type)).toEqual(['mcp-tool-use', 'tool-result']);
 });
 
 test('pairs delayed and cron schedule requests with provider results, not Garcon jobs', () => {
@@ -231,6 +241,57 @@ test('ranks newly reported terminal text ahead of an unchanged raw progress snap
   expect(row).toMatchObject({ type: 'tool-result', primaryTextItems: [0], content: { items: content, rawOutput } });
 });
 
+test('a textless terminal frame preserves the search priority of the latest cached report', () => {
+  const progress = 'Checking '.repeat(600);
+  const diagnostic = 'Operation refused';
+  const timer = { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' } };
+  for (const frames of [
+    [{ content: [textBlock(progress)] }, { rawOutput: { output: diagnostic } }, { content: [] }],
+    [{ rawOutput: { output: progress } }, { content: [textBlock(diagnostic)] }, { rawOutput: { id: 'job' } }],
+    [{ rawOutput: { output: progress } }, { content: [{ type: 'image', data: 'AA==' }, textBlock(diagnostic)] }, {}],
+    [{ rawOutput: { output: progress } }, { content: [{ type: 'text', text: diagnostic }] }, {}],
+  ] as const) {
+    const s = session();
+    s.start('timer', { ...timer, ...frames[0] });
+    s.patch('timer', frames[1]);
+    const row = s.patch('timer', { status: 'failed', ...frames[2] }).at(-1);
+    if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+    expect(projectSearchMessage(row)?.body).toContain(diagnostic);
+  }
+});
+
+test('does not associate independent output with an ambiguous annotated echo', () => {
+  const s = session();
+  const content = [1, 2].map(priority => ({ ...textBlock('Saved'), priority }));
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, rawOutput: 'Saved', content });
+  const row = s.patch('timer', { status: 'completed' }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content).toEqual({ items: content, rawOutput: 'Saved' });
+  expect(row.primaryTextItems).toBeUndefined();
+});
+
+test('retains annotation and image positions for uniquely aligned terminal text', () => {
+  const s = session();
+  const saved = { ...textBlock('Saved'), priority: 1 };
+  const image = { type: 'image', data: 'AA==' };
+  const detail = textBlock('Job ID');
+  const blank = { ...textBlock(' '), priority: 2 };
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content: [saved, image, detail] });
+  const row = s.patch('timer', { status: 'completed', content: [textBlock('Saved'), detail, blank] }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content.items).toEqual([saved, image, detail, blank]);
+});
+
+test.each(['Saved', ' '])('retains superseded annotation metadata with an annotated terminal report (%j)', text => {
+  const s = session();
+  const old = { ...textBlock('Old progress'), priority: 1 };
+  const terminal = { ...textBlock(text), priority: 2 };
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content: [old] });
+  const row = s.patch('timer', { status: 'completed', rawOutput: { output: 'Saved' }, content: [terminal] }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content.items).toEqual([{ ...textBlock(''), priority: 1 }, terminal]);
+});
+
 test('falls back to cached text when terminal fields are explicitly blank', () => {
   const timer = { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' } };
   for (const content of [[], [textBlock(' \t')]]) {
@@ -332,6 +393,15 @@ test('malformed schedule evidence does not replace ordinary tool arguments or an
   s.patch('mcp', { rawInput: ['invalid'] });
   expect(s.patch('mcp', { rawInput: { tool: 'operation', arguments: { value: 1 } }, status: 'completed' })[0])
     .toMatchObject({ type: 'mcp-tool-use', server: 'fixture', tool: 'operation', input: { value: 1 } });
+});
+
+test('a substantive schedule correction resumes the accumulated object arguments', () => {
+  const s = session();
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 60 } });
+  s.patch('timer', { rawInput: [] });
+  expect(s.patch('timer', { rawInput: { Prompt: 'Check' }, status: 'completed' })[0]).toMatchObject({
+    type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 60, prompt: 'Check' },
+  });
 });
 
 test('keeps unknown options and conflicting aliases from late frames in the raw schedule fallback', () => {

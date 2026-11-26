@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { ToolResultMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
 import { plainToolResultTextPart, toolResultTextPart } from '@garcon/common/tool-result-content';
@@ -18,7 +19,7 @@ function blockText(block: Block): string {
   return toolResultTextPart(block)?.text ?? '';
 }
 
-function joinedText(blocks: readonly Block[]): string {
+export function planReportText(blocks: readonly Block[]): string {
   return blocks.map(blockText).filter(Boolean).join('\n');
 }
 
@@ -71,20 +72,43 @@ function cachedBlocksForText(blocks: readonly Block[], output: string): Block[] 
   });
 }
 
+// Only aligns one-to-one text blocks. Different segmentation does not establish annotation positions.
+function alignTerminalBlocks(retained: readonly Block[], terminal: readonly Block[]): Block[] | undefined {
+  const result: Block[] = [];
+  let next = 0;
+  for (const block of retained) {
+    const before = toolResultTextPart(block);
+    if (!before?.text.trim()) {
+      if (!plainText(block)) result.push(block);
+      continue;
+    }
+    while (next < terminal.length && !blockText(terminal[next]).trim()) result.push(terminal[next++]);
+    const reported = terminal[next++];
+    const after = toolResultTextPart(reported);
+    if (!after || reported.type !== block.type || after.text.trim() !== before.text.trim()) return undefined;
+    const merged = { ...before, ...after };
+    result.push(block === before ? merged : { ...block, ...reported, content: merged });
+  }
+  for (; next < terminal.length; next++) {
+    if (blockText(terminal[next]).trim()) return undefined;
+    result.push(terminal[next]);
+  }
+  return result;
+}
+
 function reportBlocks(cached: readonly Block[], terminal: readonly Block[], terminalText: string, output: string): readonly Block[] {
+  if (terminal.length && isDeepStrictEqual(cached, terminal)) return terminal;
   const terminalHasExtras = terminal.some(block => !plainText(block));
   if (terminalText) {
     if (cached.every(plainText) || terminal.some(block => !toolResultTextPart(block))) return terminal;
-    if (terminalHasExtras) return [...cached.filter(block => !toolResultTextPart(block)), ...terminal];
     const retained = cachedBlocksForText(cached, terminalText);
-    if (joinedText(retained) === joinedText(terminal)) return retained;
-    return [...cachedBlocksForText(cached, ''), ...terminal];
+    return alignTerminalBlocks(retained, terminal) ?? [...cachedBlocksForText(cached, ''), ...terminal];
   }
   const retained = output ? cachedBlocksForText(cached, output) : cached;
   if (!terminalHasExtras) return retained.length ? retained : terminal;
   // Only a supplied attachment list supersedes cached attachments, not annotations on text.
   const replacesAttachments = terminal.some(block => !toolResultTextPart(block));
-  return [...retained.filter(block => blockText(block).trim() || (!replacesAttachments && !toolResultTextPart(block))), ...terminal];
+  return [...retained.filter(block => blockText(block).trim() || (!replacesAttachments && !plainText(block))), ...terminal];
 }
 
 function rawText(raw: unknown): string {
@@ -119,35 +143,37 @@ export function planOrScheduleResult(
   timestamp: string, call: TrackedCall, previous: TrackedCall | undefined, terminal: Record<string, unknown>, status: string,
 ): ToolResultMessage {
   const frame = Array.isArray(terminal.content) ? call.content ?? [] : [];
-  const frameText = joinedText(frame).trim();
+  const frameText = planReportText(frame).trim();
   const frameOutput = rawText(terminal.rawOutput).trim();
   const cachedOutput = previous?.rawOutput;
   const raw = frameOutput ? terminal.rawOutput : cachedOutput;
   const output = rawText(raw).trim();
   const fields = reportMetadata(cachedOutput, terminal.rawOutput);
   const blocks = reportBlocks(previous?.content ?? [], frame, frameText, frameOutput);
-  const echo = findTextEcho(blocks, output);
-  const text = joinedText(blocks);
+  const match = findTextEcho(blocks, output);
+  const echo = match?.unique ? match : undefined;
+  const text = planReportText(blocks);
   const repeatedOutputWithNewText = frameOutput !== '' && frameText !== '' && !echo
-    && frameOutput === rawText(cachedOutput).trim() && frameText !== joinedText(previous?.content ?? []).trim();
+    && frameOutput === rawText(cachedOutput).trim() && frameText !== planReportText(previous?.content ?? []).trim();
   const specificEcho = echo !== undefined && text.trim() !== output;
+  const preferCachedBlocks = !frameText && !frameOutput && previous?.contentIsNewer;
   const body: Body = status === 'completed' ? {} : { status };
   let primary: number[] = [];
   if (specificEcho || repeatedOutputWithNewText || blocks.some(block => !plainAcpText(block))) {
     body.items = blocks;
     storeOutput(body, echo || (frameText && !frameOutput) ? undefined : raw, fields, true);
-    if (echo || (frameText && !frameOutput) || repeatedOutputWithNewText) {
+    if (echo || (frameText && !frameOutput) || repeatedOutputWithNewText || (preferCachedBlocks && output && !match)) {
       primary = blocks.flatMap((block, i) =>
         (!echo || (i >= echo.first && i <= echo.last)) && blockText(block).trim() ? [i] : []);
     }
-  } else if (frameOutput || (!frameText && output && !call.contentIsNewer)) {
+  } else if (frameOutput || (!frameText && output && !preferCachedBlocks)) {
     storeOutput(body, raw, fields, false);
     if (!echo && text.trim()) body.items = blocks;
   } else {
     const keepCachedOutput = !frameText && output && !echo;
     storeOutput(body, keepCachedOutput ? raw : undefined, fields, true);
     if (text.trim()) {
-      if (!frameText && !output && fields !== undefined && !call.contentIsNewer) body.items = blocks;
+      if (!frameText && !output && fields !== undefined && (!preferCachedBlocks || metadata(terminal.rawOutput) !== undefined)) body.items = blocks;
       else body.raw = text;
     }
   }
