@@ -16,7 +16,7 @@ test('shares and bounded handoffs distinguish reported plans and schedule reques
     expect(shared).toContain(detail);
   }
   expect(messages.map(message => projectToolUseSummary(message).text)).toEqual([
-    'Check layout', '# Layout example', 'Request one-time cron: 0 9 * * * Persistence requested: false Prompt: Review',
+    'Check layout', '# Layout example', 'Request one-time cron: 0 9 * * * Persistence requested: false Prompt: "Review"',
   ]);
 });
 
@@ -26,6 +26,19 @@ test('a long prompt does not displace scheduling options from a bounded handoff'
   const summary = projectToolUseSummary(cron);
   expect(summary.abridged).toBe(true);
   expect(summary.text).toContain('Request cron: 0 9 * * * Maximum iterations: 1 Continue after task ends: true Exact timing: true');
+});
+
+test('bounded handoffs quote literal prompts and truncate only at a complete escape', () => {
+  const summary = (prompt: string) => projectToolUseSummary(new ScheduleToolUseMessage('now', 'timer',
+    { action: 'wakeup', delaySeconds: 1, prompt }));
+  const prompt = '  x  y\n    "later"\t';
+  const prefix = 'Request wakeup in 1 second Prompt: ';
+  expect(summary(prompt)).toEqual({ text: prefix + JSON.stringify(prompt), abridged: false });
+  const truncated = summary(prompt.repeat(100));
+  expect(truncated.abridged).toBe(true);
+  expect(truncated.text.endsWith('"...')).toBe(true);
+  const retained: string = JSON.parse(truncated.text.slice(prefix.length, -3));
+  expect(prompt.repeat(100).startsWith(retained)).toBe(true);
 });
 
 test('handoffs and shares retain task intent, agent destinations, and unsuccessful plan steps', () => {
