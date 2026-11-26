@@ -205,7 +205,7 @@ function prepareCarryoverProjection(
   ].join('\n');
   const closing = '  </transcript>\n</carried-context>\n\n';
   const summaryElement = options.summary
-    ? fitElement('    <summary>', options.summary.trim(), '</summary>', Number.POSITIVE_INFINITY)
+    ? renderElement('    <summary>', options.summary.trim(), '</summary>')
     : '';
   const lead = summaryElement ? `${summaryElement}\n` : '';
   const turns = groupIntoTurns(projected);
@@ -263,13 +263,14 @@ function renderTurn(turn: readonly ChatMessage[], turnIndex: number): ProjectedE
         continue;
       }
     }
-    const text = renderMessageElement(message);
+    const text = renderMessageElement(message, renderElement);
     if (text) {
       entries.push({
         level: projectionPriorityLevel(message.type),
         turn: turnIndex,
         text,
-        refit: (maximumCost, cost) => refitMessageElement(message, maximumCost, cost),
+        refit: (maximumCost, cost) => renderMessageElement(message, (open, content, close, prefix) =>
+          fitElementWithinCost(open, content, close, maximumCost, cost, prefix)),
       });
     }
   }
@@ -287,7 +288,7 @@ function aggregateEntry(name: string, content: string, level: number, turn: numb
   return {
     level,
     turn,
-    text: fitElement(open, content, close, Number.POSITIVE_INFINITY),
+    text: renderElement(open, content, close),
     refit: (maximumCost, cost) => fitElementWithinCost(
       open,
       content,
@@ -489,67 +490,28 @@ export function boundProjectedMessage(message: ChatMessage): ChatMessage {
   return message;
 }
 
-function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_INFINITY): string {
-  if (isToolUseMessage(message)) {
-    const detail = toolSummary(message);
-    return fitElement(
-      '    <assistant><tool-use>',
-      detail ? `${toolName(message)}: ${detail}` : toolName(message),
-      '</tool-use></assistant>',
-      maximum,
-    );
-  }
-  switch (message.type) {
-    case 'user-message':
-      return fitElement(userElementOpen(message), userElementContent(message), '</user>', maximum);
-    case 'assistant-message':
-      return fitElement('    <assistant>', boundedCollapse(message.content), '</assistant>', maximum);
-    case 'command-output':
-    case 'command-result':
-      return fitElement('    <execution-output>', commandContent(message), '</execution-output>', maximum);
-    default:
-      return '';
-  }
-}
-
-function refitMessageElement(
+function renderMessageElement(
   message: ChatMessage,
-  maximumCost: number,
-  cost: (text: string) => number,
+  render: (open: string, content: string, close: string, refitPrefix?: string) => string,
 ): string {
   if (isToolUseMessage(message)) {
     const { text, prefixBeforeLiteral } = projectToolUseSummary(message);
     const name = toolName(message);
-    return fitElementWithinCost(
+    return render(
       '    <assistant><tool-use>',
       text ? `${name}: ${text}` : name,
       '</tool-use></assistant>',
-      maximumCost,
-      cost,
       prefixBeforeLiteral === undefined ? undefined : `${name}: ${prefixBeforeLiteral}`,
     );
   }
   switch (message.type) {
     case 'user-message':
-      return fitElementWithinCost(
-        userElementOpen(message),
-        userElementContent(message),
-        '</user>',
-        maximumCost,
-        cost,
-      );
+      return render(userElementOpen(message), userElementContent(message), '</user>');
     case 'assistant-message':
-      return fitElementWithinCost(
-        '    <assistant>',
-        boundedCollapse(message.content),
-        '</assistant>',
-        maximumCost,
-        cost,
-      );
+      return render('    <assistant>', boundedCollapse(message.content), '</assistant>');
     case 'command-output':
     case 'command-result':
-      return fitElementWithinCost('    <execution-output>', commandContent(message),
-        '</execution-output>', maximumCost, cost);
+      return render('    <execution-output>', commandContent(message), '</execution-output>');
     default:
       return '';
   }
@@ -606,8 +568,7 @@ function fitElementWithinCost(
   cost: (text: string) => number,
   refitPrefix = content,
 ): string {
-  const escaped = escapeXml(content);
-  const full = `${open}${escaped}${close}`;
+  const full = renderElement(open, content, close);
   if (cost(full) <= maximumCost) return full;
   const suffix = '...';
   if (cost(`${open}${suffix}${close}`) > maximumCost) return '';
@@ -625,6 +586,10 @@ function fitElementWithinCost(
 
 function codeUnitEntryCost(text: string): number {
   return text.length + 1;
+}
+
+function renderElement(open: string, content: string, close: string): string {
+  return `${open}${escapeXml(content)}${close}`;
 }
 
 function escapeXml(value: string): string {
@@ -711,10 +676,6 @@ function summarizeSchedule(request: ToolScheduleRequest, redactPrompt?: (value: 
     literal += escaped;
   }
   return { text: `${prefix} "${literal}"${shortened ? '...' : ''}`, abridged: shortened || prompt !== raw, prefixBeforeLiteral: prefix };
-}
-
-function toolSummary(message: ToolUseChatMessage): string {
-  return projectToolUseSummary(message).text;
 }
 
 // Frozen alongside `stringifyLegacyToolResult` and for the same reason: the
