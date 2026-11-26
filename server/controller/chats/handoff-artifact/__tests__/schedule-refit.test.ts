@@ -26,3 +26,14 @@ test('applies the same literal boundary to the final carryover fit', () => {
   const fitted = createCarryoverTranscript([timer], full.length - 50)!.prefix;
   expect(fitted).toContain('Request wakeup in 2 minutes Prompt:...</tool-use>');
 });
+
+test('redacts a data URL before quoting its prompt, without consuming a literal quote or disclosing the payload', () => {
+  const prompt = 'data:text/plain,fixture" and continue';
+  const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
+  const sourceFold = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message }]);
+  const entry = sourceFold.entries[0];
+  const header = 'Request wakeup in 1 second Prompt: ';
+  expect(entry.abridged).toBe(true);
+  expect(JSON.parse(entry.body!.slice(header.length))).toBe('[data URL omitted from export]" and continue');
+  expect(createCarryoverTranscript([message], 0)?.prefix).toContain(JSON.stringify(prompt));
+});

@@ -686,7 +686,7 @@ export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToo
   };
 }
 
-function summarizeSchedule(request: ToolScheduleRequest): ProjectedToolUseSummary {
+export function summarizeSchedule(request: ToolScheduleRequest, redactPrompt?: (value: string) => string): ProjectedToolUseSummary {
   const title = toolScheduleTitle(request);
   if (request.action !== 'wakeup' && request.action !== 'cron') {
     return { text: truncate(title, TOOL_SUMMARY_MAX_CHARS), abridged: title.length > TOOL_SUMMARY_MAX_CHARS };
@@ -696,14 +696,17 @@ function summarizeSchedule(request: ToolScheduleRequest): ProjectedToolUseSummar
   if (header.length > PROJECTED_BODY_MAX_CHARS || prefix.length + 3 > TOOL_SUMMARY_MAX_CHARS) {
     return { text: prefix.slice(0, TOOL_SUMMARY_MAX_CHARS) + '...', abridged: true };
   }
+  const shortened = request.prompt.length > TOOL_SUMMARY_MAX_CHARS;
+  const raw = shortened ? request.prompt.slice(0, TOOL_SUMMARY_MAX_CHARS).replace(/[\uD800-\uDBFF]$/u, '') : request.prompt;
+  const prompt = redactPrompt?.(raw) ?? raw;
   // Stops at a complete escaped character so the retained prefix is a readable literal.
   let text = prefix + ' "';
-  for (const char of request.prompt) {
+  for (const char of prompt) {
     const escaped = JSON.stringify(char).slice(1, -1);
     if (text.length + escaped.length + 1 > TOOL_SUMMARY_MAX_CHARS) return { text: text + '"...', abridged: true, prefixBeforeLiteral: prefix };
     text += escaped;
   }
-  return { text: text + '"', abridged: false, prefixBeforeLiteral: prefix };
+  return { text: text + (shortened ? '"...' : '"'), abridged: shortened || prompt !== raw, prefixBeforeLiteral: prefix };
 }
 
 function toolSummary(message: ToolUseChatMessage): string {
