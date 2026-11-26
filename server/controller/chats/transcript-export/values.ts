@@ -27,7 +27,7 @@ const utf8Encoder = new TextEncoder();
 const DATA_URL_OMISSION = '[data URL omitted from export]';
 const IMAGE_BODY_OMISSION = '[image body omitted from export]';
 const standaloneDataUrl = /^data:[^\s,]*,\S*$/i;
-const embeddedDataUrl = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:[^\s,"'<>]*,[^\s"'<>]*/gi;
+const embeddedDataScheme = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:/gi;
 
 export function textSafe(value: string): string {
   return value.toWellFormed().replace(
@@ -228,6 +228,10 @@ function sanitizeStructuredValue(value: unknown): unknown {
           return [key, sanitizeStructuredValue({ ...child, data: IMAGE_BODY_OMISSION })];
         }
       }
+      if (value.type === 'resource' && key === 'resource' && isRecord(child) && typeof child.blob === 'string'
+        && typeof child.mimeType === 'string' && /^image\//i.test(child.mimeType)) {
+        return [key, sanitizeStructuredValue({ ...child, blob: IMAGE_BODY_OMISSION })];
+      }
       return [key, sanitizeStructuredValue(child)];
     }),
   );
@@ -236,21 +240,35 @@ function sanitizeStructuredValue(value: unknown): unknown {
 export function redactDataUrl(value: string): string {
   const trimmed = value.trim();
   if (standaloneDataUrl.test(trimmed)) return value.replace(trimmed, DATA_URL_OMISSION);
-  let cursor = 0;
+  const proseEnd = /[\s"'<>]/g;
+  const linkEnd = /[\s"'<>]|\)(?=!?\[[^\[\]\r\n]*\]\()/g;
+  let copied = 0;
+  let examined = 0;
   let depth = 0;
-  return value.replace(embeddedDataUrl, (url, offset: number) => {
-    for (; cursor < offset; cursor++) {
-      if (value[cursor] === '(') depth++;
-      else if (value[cursor] === ')' && depth) depth--;
+  const parts: string[] = [];
+  for (const { index: offset } of value.matchAll(embeddedDataScheme)) {
+    if (offset < examined) continue;
+    const delimiter = value.slice(offset - 2, offset) === '](' ? linkEnd : proseEnd;
+    delimiter.lastIndex = offset + 5;
+    examined = delimiter.exec(value)?.index ?? value.length;
+    const url = value.slice(offset, examined);
+    if (!url.includes(',')) continue;
+    for (let i = copied; i < offset; i++) {
+      if (value[i] === '(') depth++;
+      else if (value[i] === ')' && depth) depth--;
     }
-    cursor = offset + url.length;
-    if (!depth) return DATA_URL_OMISSION;
+    parts.push(value.slice(copied, offset), DATA_URL_OMISSION);
+    copied = examined;
+    if (!depth) continue;
     let end = url.length;
     while (end && '.,;:!?'.includes(url[end - 1])) end--;
     let start = end;
     while (depth && url[start - 1] === ')') { start--; depth--; }
-    return DATA_URL_OMISSION + (start < end ? url.slice(start) : '');
-  });
+    if (start < end) parts.push(url.slice(start));
+  }
+  if (!parts.length) return value;
+  parts.push(value.slice(copied));
+  return parts.join('');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

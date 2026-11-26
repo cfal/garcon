@@ -43,6 +43,7 @@ test.each([
   ['Review data:text/plain,PUBLIC)SYNTHETIC_PAYLOAD next', 'Review [data URL omitted from export] next'],
   ['Read data:text/plain;name=report%20notes.txt,SYNTHETIC_BODY then continue', 'Read [data URL omitted from export] then continue'],
   ['Attached (see data:text/plain,body). Continue.', 'Attached (see [data URL omitted from export]). Continue.'],
+  ['See [one](data:text/plain,fixture)[two](https://example.test).', 'See [one]([data URL omitted from export])[two](https://example.test).'],
   ['See [report](data:text/plain,PUBLIC)SYNTHETIC_PAYLOAD).', 'See [report]([data URL omitted from export]).'],
 ])('redacts the complete data URL token in %s', (prompt, redacted) => {
   const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });

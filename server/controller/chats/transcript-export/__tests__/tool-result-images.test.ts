@@ -9,6 +9,7 @@ test('ordinary exports omit inline image bytes without losing the ordered result
     { type: 'text', text: 'Before image' },
     { type: 'content', content: { type: 'image', mimeType: 'image/png', data } },
     { type: 'image', data },
+    { type: 'content', content: { type: 'resource', resource: { uri: 'fixture:preview', mimeType: 'image/png', blob: data } } },
     { type: 'text', text: 'After image' },
   ] };
   const message = new ToolResultMessage('', 'schedule', content, false);
@@ -17,6 +18,7 @@ test('ordinary exports omit inline image bytes without losing the ordered result
       omitted: [], entries: [{ kind: 'message', category: 'tool-results', ordinal: 1, message }] });
     expect(document).not.toContain(data);
     expect(document).toContain('image/png');
+    expect(document).toContain('fixture:preview');
     expect(document).toMatch(/Before image.*\[image body omitted from export\].*After image/s);
   }
   expect(content.items[1].content?.data).toBe(data);
