@@ -11,6 +11,7 @@
 		status: ChatLoadingStatus | null;
 		agentId: string;
 		onAbort: (() => void) | null;
+		placement?: 'composer-cap' | 'standalone';
 		spinnerSelectionKey?: string | null;
 		showCommit?: boolean;
 		gitSummary?: GitQuickSummaryReady | null;
@@ -25,6 +26,7 @@
 		status,
 		agentId,
 		onAbort,
+		placement = 'composer-cap',
 		spinnerSelectionKey = null,
 		showCommit = false,
 		gitSummary = null,
@@ -96,7 +98,7 @@
 </script>
 
 {#if isVisible}
-	<ComposerStatusBarFrame tone="processing" {announcementsEnabled}>
+	<ComposerStatusBarFrame tone="processing" {announcementsEnabled} {placement}>
 		<div class="flex min-w-0 items-center gap-1.5">
 			<span
 				class="flex-shrink-0 text-sm text-status-processing"

@@ -1,4 +1,5 @@
 import { normalizePermissionMode } from '../../../common/chat-modes.js';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
 import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
@@ -81,6 +82,7 @@ export class AgentSessionSettingsService {
     return this.#lock.runExclusive(`chat:${chatId}`, async () => {
       const entry = this.deps.registry.getChat(chatId);
       if (!entry) throw new Error(`Session not found: ${chatId}`);
+      assertChatExecutable(entry);
       if (expectedAgentOwnershipEpoch !== undefined && entry.agentOwnershipEpoch !== expectedAgentOwnershipEpoch) {
         throw new DomainError('STALE_CHAT_OWNERSHIP', 'Chat ownership changed before settings were updated.', 409);
       }

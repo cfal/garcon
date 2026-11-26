@@ -18,6 +18,7 @@ test('a server control turn reads the permission mode after an in-flight setting
     admitInput: unexpected, admitQueuedInput: unexpected, hasMatchingInput: unexpected, discardPreparedInput() {},
   }, () => ({ permissionMode: saved }), () => true, new InMemoryChatExecutionControlRepository('instance'), {
     selectionAdmissionLock: lock, canDispatch: () => true, isControlInputViewCurrent: () => true,
+    assertChatExecutable: () => {},
     projectAdmission: { async assertAvailable() { projectChecked.resolve(); } }, attachmentAdmission: { assertSupported() {} },
   });
   const saving = lock.runExclusive('chat:chat-id', async () => { await commit.promise; saved = 'default'; });

@@ -1,4 +1,5 @@
 import { TranscriptSnapshotLoader } from './transcript-snapshot-loader.js';
+import type { TranscriptViewAcceptance, TranscriptViewLease } from './chat-transcript-cache.svelte.js';
 import {
 	applyTranscriptAppend,
 	type ChatHistoryState,
@@ -74,11 +75,12 @@ export type { ChatLoadStatus } from './active-transcript-presentation-state.svel
 
 const MESSAGES_PER_PAGE = 50;
 export type MessageApplyResult = TranscriptReplayApplyResult;
-type PageApplyResult = MessageApplyResult | 'stale';
+export type PageApplyResult = MessageApplyResult | 'stale' | 'cache-ahead';
 
 export interface ActiveTranscriptStateOptions {
 	combineMessages?: boolean;
 	onRecoveredMessages?: (chatId: string, messages: readonly TranscriptMessage[]) => void;
+	onSnapshotViewAccepted?: (chatId: string, acceptance: TranscriptViewAcceptance) => void;
 	recoverTranscript?: (chatId: string, transcriptViewId: string) => Promise<void>;
 	onSnapshotResendCandidates?: (
 		chatId: string,
@@ -142,10 +144,9 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			},
 		});
 		this.#snapshots = new TranscriptSnapshotLoader(this, {
-			pageSize: MESSAGES_PER_PAGE,
 			isCurrentLoad: epoch => epoch === this.#loadEpoch,
 			finishFailedLoad: (chatId, epoch) => this.#finishFailedSnapshotLoad(chatId, epoch),
-			installPage: (chatId, page, epoch, mode, snapshot) => this.#installSnapshotPage(chatId, page, epoch, mode, snapshot),
+			installPage: (chatId, page, epoch, mode, snapshot, lease) => this.#installSnapshotPage(chatId, page, epoch, mode, snapshot, lease),
 			onHistoryUnavailable: (chatId, history) => this.#setUnavailableHistory(chatId, history),
 			onSnapshotResendCandidates: options.onSnapshotResendCandidates,
 			growVisibleWindow: () => this.growExpandedVisibleWindow(),
@@ -177,7 +178,8 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			return;
 		}
 		if (this.activeChatId !== chatId || this.transcriptViewId !== transcriptViewId) return;
-		this.transcriptCache.remove(chatId);
+		this.transcriptCache.retireOperations(chatId);
+		this.transcriptCache.discardInvalidFrontier(chatId, transcriptViewId);
 		this.clearMessages();
 		await this.loadMessages(chatId);
 	}
@@ -425,6 +427,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		if (epoch !== this.#loadEpoch) return;
 		this.#commitBuffer = null;
 		this.isLoadingMessages = false;
+		if (this.loadStatus === 'loading') this.loadStatus = this.entries.length ? 'loaded' : 'empty';
 	}
 
 	#finishFailedSnapshotLoad(chatId: string, epoch: number): boolean {
@@ -470,8 +473,9 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		chatId: string,
 		page: TranscriptWindowPage,
 		epoch: number,
+		lease?: TranscriptViewLease,
 	): PageApplyResult {
-		return this.#installSnapshotPage(chatId, page, epoch);
+		return this.#installSnapshotPage(chatId, page, epoch, undefined, undefined, lease);
 	}
 
 	installCachedSnapshot(chatId: string): PageApplyResult {
@@ -491,6 +495,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		epoch: number,
 		requiredInstallMode?: TranscriptSnapshotInstallMode,
 		anchorSnapshot?: TranscriptAnchorSnapshot,
+		lease: TranscriptViewLease = this.transcriptCache.openViewLease(chatId),
 	): PageApplyResult {
 		if (epoch !== this.#loadEpoch) return 'stale';
 
@@ -503,10 +508,6 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			this.isLoadingMessages = false;
 			return 'view-changed';
 		}
-
-		this.#reconnectReplay.reset();
-		this.invalidatePendingHistoryLoad();
-		this.historyState = { kind: 'complete' };
 		const installMode = requiredInstallMode ?? transcriptSnapshotInstallMode({
 			activeChatId: this.activeChatId,
 			chatId,
@@ -516,10 +517,29 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			nextBeforeOrdinal: this.nextBeforeOrdinal,
 			page,
 		});
+		const recoveryFloor = this.transcriptCache.snapshotRecoveryFloor(chatId, page.transcriptViewId);
+		if (recoveryFloor > 0) {
+			let coveredOrdinal = installMode === 'merge'
+				? Math.max(page.pageNewestOrdinal, this.loadedThroughOrdinal) : page.pageNewestOrdinal;
+			for (const batch of buffered) {
+				if (batch.firstOrdinal <= coveredOrdinal + 1) coveredOrdinal = Math.max(coveredOrdinal, batch.lastOrdinal);
+			}
+			if (coveredOrdinal < recoveryFloor) return 'cache-ahead';
+		}
+		const acceptance = lease.accept(page.transcriptViewId);
+		if (!acceptance) {
+			this.abortSnapshotLoad(epoch);
+			return 'stale';
+		}
+
+		this.#reconnectReplay.reset();
+		this.invalidatePendingHistoryLoad();
+		this.historyState = { kind: 'complete' };
 		const olderAnchors = this.transcriptViewId === page.transcriptViewId
 			? countTranscriptAnchors(this.entries, page.nextBeforeOrdinal ?? 1) : 0;
 		if (installMode === 'replace') this.#invalidatePageLoad();
 		this.#snapshots.installWindow(chatId, page, installMode);
+		this.options.onSnapshotViewAccepted?.(chatId, acceptance);
 		this.options.onRecoveredMessages?.(chatId, page.messages);
 		if (requiredInstallMode === 'replace') this.#windowSelectionRevision += 1;
 		if (page.resendCandidates !== undefined) {
@@ -537,8 +557,13 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		return this.#replayBufferedBatches(chatId, buffered);
 	}
 
-	loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
+	loadSnapshot(chatId: string, options: ChatLoadMessagesOptions = {}) {
 		return this.#snapshots.load(chatId, options);
+	}
+
+	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
+		await this.loadSnapshot(chatId, options);
+		return this.chatMessages;
 	}
 
 	async loadEarlierPage(
@@ -659,16 +684,15 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		const transcriptViewId = this.transcriptViewId;
 		const latestLastOrdinal = this.lastOrdinal;
 		this.#activeWindowNavigationEpoch = windowNavigationEpoch;
+		const read = this.transcriptCache.trackSnapshotRead(chatId);
+		const lease = this.transcriptCache.openViewLease(chatId);
+		const isCurrent = () => windowNavigationEpoch === this.#windowNavigationEpoch && loadEpoch === this.#loadEpoch
+			&& this.activeChatId === chatId && this.transcriptViewId === transcriptViewId && read.isCurrent()
+			&& lease.isCurrent();
 		try {
 			if (this.combinedMode) {
-				return await this.#navigateToAnchorWindow(chatId, target, transcriptViewId, loadEpoch, windowNavigationEpoch);
+				return await this.#navigateToAnchorWindow(chatId, target, transcriptViewId, loadEpoch, windowNavigationEpoch, isCurrent);
 			}
-			const isCurrent = () => (
-				windowNavigationEpoch === this.#windowNavigationEpoch
-				&& loadEpoch === this.#loadEpoch
-				&& this.activeChatId === chatId
-				&& this.transcriptViewId === transcriptViewId
-			);
 			const result = await loadTranscriptWindowPage({
 				chatId,
 				target,
@@ -677,7 +701,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 				visibleLimit: MESSAGES_PER_PAGE,
 				isCurrent,
 			});
-			if (result.kind === 'invalidated') return 'invalidated';
+			if (!isCurrent() || result.kind === 'invalidated') return 'invalidated';
 			if (result.kind === 'unavailable') {
 				this.#setUnavailableHistory(chatId, result.response.historyState);
 				return 'loaded';
@@ -694,25 +718,19 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 					this.#snapshots.restoreCache(chatId),
 					this.resendCandidates,
 				);
-				return this.#installSnapshotPage(chatId, latestPage, loadEpoch, 'replace') === 'applied'
-					? 'loaded'
-					: 'invalidated';
+				const applied = this.#installSnapshotPage(chatId, latestPage, loadEpoch, 'replace');
+				if (applied === 'cache-ahead') void this.loadMessages(chatId).catch(() => {});
+				return applied === 'applied' ? 'loaded' : 'invalidated';
 			}
 
 			this.#replaceWindowPage(page);
 			return 'loaded';
 		} catch (error) {
-			if (
-				windowNavigationEpoch !== this.#windowNavigationEpoch ||
-				loadEpoch !== this.#loadEpoch ||
-				this.activeChatId !== chatId ||
-				this.transcriptViewId !== transcriptViewId
-			) {
-				return 'invalidated';
-			}
+			if (!isCurrent()) return 'invalidated';
 			console.error(`Error loading ${target} messages:`, error);
 			return 'failed';
 		} finally {
+			read.release();
 			if (this.#activeWindowNavigationEpoch === windowNavigationEpoch) {
 				this.#activeWindowNavigationEpoch = null;
 			}
@@ -725,11 +743,9 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		transcriptViewId: string,
 		loadEpoch: number,
 		windowEpoch: number,
+		isCurrent: () => boolean,
 	): Promise<TranscriptWindowLoadResult> {
 		this.#commitBuffer = { owner: windowEpoch, batches: [] };
-		const read = this.transcriptCache.trackSnapshotRead(chatId);
-		const isCurrent = () => windowEpoch === this.#windowNavigationEpoch && loadEpoch === this.#loadEpoch
-			&& this.activeChatId === chatId && this.transcriptViewId === transcriptViewId && read.isCurrent();
 		const knownHeads = [{ transcriptViewId, lastOrdinal: this.lastOrdinal }];
 		const cachedCursor = this.transcriptCache.readAppliedCursor(chatId);
 		if (cachedCursor) knownHeads.push(cachedCursor);
@@ -740,7 +756,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 				isCurrent,
 				knownHeads,
 			});
-			if (result.kind === 'invalidated') return 'invalidated';
+			if (!isCurrent() || result.kind === 'invalidated') return 'invalidated';
 			if (result.kind === 'view-changed' || result.kind === 'cursor-ahead') {
 				await this.recoverTranscriptCursorAhead(chatId, transcriptViewId);
 				return 'invalidated';
@@ -752,7 +768,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			if (target === 'latest') {
 				const latest = mergeCachedLatestAnchorWindow(result.page, this.#snapshots.restoreCache(chatId));
 				const applied = this.#installSnapshotPage(chatId, latest, loadEpoch, 'replace', result);
-				if (applied === 'view-changed' || applied === 'gap-detected') {
+				if (applied === 'view-changed' || applied === 'gap-detected' || applied === 'cache-ahead') {
 					void this.loadMessages(chatId).catch(() => {});
 				}
 				return applied === 'applied' ? 'loaded' : 'invalidated';
@@ -765,7 +781,6 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			console.error(`Error loading ${target} messages:`, error);
 			return 'failed';
 		} finally {
-			read.release();
 			this.#drainNavigationBuffer(windowEpoch);
 		}
 	}
@@ -857,7 +872,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		historyState: Exclude<ChatHistoryState, { kind: 'complete' }>,
 	): void {
 		this.activeChatId = chatId;
-		this.transcriptCache.remove(chatId);
+		this.transcriptCache.discardData(chatId);
 		this.#resetToEmptyTranscript();
 		this.visibleMessageCount = INITIAL_VISIBLE_MESSAGES;
 		this.loadStatus = 'loaded';

@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import type { ForkRunCommandResponse } from '../../../common/chat-command-contracts.js';
 import type { SelfHandoffRunCommandRequest } from '../../../common/self-handoff-contracts.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import { createLogger } from '../../common/log.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
@@ -271,6 +272,7 @@ export class SelfHandoffCommands {
     if (!source) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Source session not found', 404);
     }
+    assertChatExecutable(source);
     // Any executing source is refused, not just a materializing one. Settled
     // capture only proves the transcript held still for a moment, so a long tool
     // call can look stable and then append the rest of its turn afterwards —

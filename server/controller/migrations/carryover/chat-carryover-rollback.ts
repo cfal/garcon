@@ -130,7 +130,7 @@ function parseMigratedRegistrySessions(
   } catch {
     throw new Error('Current chat registry does not match the migration or its backup');
   }
-  if (!isRecord(value) || (value.version !== 5 && value.version !== 6) || !isRecord(value.sessions)) {
+  if (!isRecord(value) || (value.version !== 5 && value.version !== 6 && value.version !== 7) || !isRecord(value.sessions)) {
     throw new Error('Current chat registry does not match the migration or its backup');
   }
   const sessions: Record<string, Readonly<Record<string, unknown>>> = {};

@@ -302,9 +302,10 @@ test('Claude retires a mutated process when runtime cap verification fails and d
 
 async function prepareUnstartedClaudeChat(dirs: IntegrationDirectories, chatId: string, executorId: string): Promise<void> {
   await writeFile(join(dirs.workspace, 'chats.json'), JSON.stringify({
-    version: 6,
+    version: 7,
     sessions: {
       [chatId]: {
+        nativeObservation: null,
         agentId: 'claude',
         executorId,
         model: 'custom[1m]',

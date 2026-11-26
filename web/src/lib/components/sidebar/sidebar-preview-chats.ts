@@ -24,6 +24,7 @@ const parent: ChatSessionRecord = {
 	processingPhase: null,
 	activityStatus: null,
 	canReloadFromNativeHistory: false,
+	observation: null,
 	isUnread: false,
 	status: 'running',
 	agentOwnershipEpoch: null,

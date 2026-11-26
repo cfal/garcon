@@ -3,8 +3,8 @@ import type { ChatRegistryEntry } from './registry-contracts.js';
 export function isDirectDelegatedChild(
   sourceChatId: string,
   targetChatId: string,
-  target: Pick<ChatRegistryEntry, 'parentChatId'> | null,
+  target: Pick<ChatRegistryEntry, 'parentChatId' | 'nativeObservation'> | null,
 ): boolean {
-  return target !== null && targetChatId !== sourceChatId
+  return target !== null && !target.nativeObservation && targetChatId !== sourceChatId
     && target.parentChatId === sourceChatId;
 }

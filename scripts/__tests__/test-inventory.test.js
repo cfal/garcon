@@ -16,7 +16,7 @@ const directoryLanes = [
   { directory: 'bombadil', timeout: 180000 },
 ];
 const lanes = [
-  { name: 'common', include: ['common/__tests__/*.test.js'] },
+  { name: 'common', include: ['common/__tests__/*.{test.js,test.ts}'] },
   { name: 'scripts', include: ['scripts/__tests__/*.test.js'] },
   { name: 'providers', include: ['server-agents/**/__tests__/*.{test.js,test.ts}'] },
   { name: 'server', include: ['server/**/__tests__/*.{test.js,test.ts}'] },
@@ -43,7 +43,7 @@ function owners(file, definitions = lanes) {
 
 test('inventory patterns match the executable discovery commands', () => {
   expect(rootScripts.test).toBe('bun run test:server && bun run test:cli && bun run --cwd native test && bun run --cwd web test');
-  expect(rootScripts['test:server']).toBe(`bun test ./${pattern('common')} && bun test ./${pattern('scripts')} && bun scripts/run-test-files.js '${pattern('providers')}' && bun scripts/run-test-files.js '${pattern('server')}'`);
+  expect(rootScripts['test:server']).toBe(`bun scripts/run-test-files.js '${pattern('common')}' && bun test ./${pattern('scripts')} && bun scripts/run-test-files.js '${pattern('providers')}' && bun scripts/run-test-files.js '${pattern('server')}'`);
   expect(rootScripts['test:cli']).toBe('bun run --cwd cli test');
   expect(scripts('cli').test).toBe(`bun test ${pattern('cli').replace(/^cli\//, '')}`);
   expect(scripts('web').test).toBe('vitest run');
@@ -104,11 +104,12 @@ test('every repository test file belongs to exactly one primary lane', () => {
 });
 
 test('inventory matching catches unsupported extensions, nesting and overlapping lanes', () => {
-  for (const file of ['common/__tests__/new.test.ts', 'scripts/__tests__/new.test.ts',
+  for (const file of ['common/__tests__/nested/new.test.ts', 'scripts/__tests__/new.test.ts',
     'cli/__tests__/nested/new.test.ts', 'web/src/new.test.js', 'integration-tests/tests/unknown/new.test.ts']) {
     expect(owners(file), file).toEqual([]);
   }
   expect(owners('web/src/new.logic.test.ts')).toEqual(['web logic']);
+  expect(owners('common/__tests__/new.test.ts')).toEqual(['common']);
   expect(owners('web/src/new.test.ts')).toEqual(['web ui']);
   expect(owners('common/__tests__/new.test.js', [...lanes, lanes[0]])).toEqual(['common', 'common']);
 });

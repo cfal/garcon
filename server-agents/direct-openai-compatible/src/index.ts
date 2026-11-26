@@ -58,6 +58,7 @@ export default class DirectOpenAiCompatibleIntegration implements AgentIntegrati
   readonly permissions;
   readonly legacyHistoryImport = null;
   readonly nativeHistoryImport;
+  readonly nativeChildObservation = null;
   readonly nativeActivity = null;
   readonly nativeSessions;
   readonly sessionConfiguration = null;

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import type { AssistantMessage } from '@garcon/common/chat-types';
+import { AssistantMessage } from '@garcon/common/chat-types';
 import {
   AgentCallError,
   AgentIntegrationError,
@@ -76,6 +76,52 @@ function rows(text: string): AgentProducerNotification['event'] {
 }
 
 describe('ProducerRelay', () => {
+  test('retires observation under pressure without evicting parent rows or losing the terminal marker', () => {
+    const relay = new ProducerRelay({ retainedBytes: 8 * 1024 });
+    const { integration, binding, publish, abort, detach } = integrationDouble();
+    relay.track(integration);
+    const first = session(0);
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    publish({ binding: ref, event: rows('Parent retained') });
+    for (let i = 0; i < 100; i++) publish({ binding: ref, event: {
+      type: 'native-child-rows', childKey: 'child', rows: [{ message: new AssistantMessage('now', 'x'.repeat(900)) }],
+    } });
+    publish({ binding: ref, event: { type: 'native-child-detached', childKey: 'child' } });
+    publish({ binding: ref, event: rows('Parent still healthy') });
+    relay.suspend(first);
+    const second = session();
+    relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]);
+    expect(second.texts()).toEqual(['Parent retained', 'native-child-capture-ended', 'Parent still healthy']);
+    const lastSeq = second.frames().at(-1)!.seq;
+    expect(lastSeq).toBeLessThan(7);
+    relay.acknowledge(second, [{ bindingId: ref.id, seq: lastSeq }]);
+    publish({ binding: ref, event: { type: 'native-child-status', childKey: 'child', status: 'running' } });
+    expect(second.frames()).toHaveLength(3);
+    expect(abort).not.toHaveBeenCalled();
+    expect(detach).not.toHaveBeenCalled();
+    relay.dispose();
+  });
+
+  test('ordinary pressure retires observer backlogs first, including a previously sent replay tail', () => {
+    const relay = new ProducerRelay({ retainedBytes: 8 * 1024 });
+    const { integration, binding, publish } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    publish({ binding: ref, event: { type: 'native-child-status', childKey: 'child', status: 'completed' } });
+    relay.suspend(first);
+    const second = session(0);
+    relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]);
+    publish({ binding: ref, event: rows('x'.repeat(8000)) });
+    relay.suspend(second);
+    const third = session();
+    relay.resume(third, integration, [{ binding: ref, acknowledgedSeq: 0 }]);
+    expect(third.frames().map(frame => frame.notification.event.type)).toEqual(['rows', 'native-child-capture-ended']);
+    relay.dispose();
+  });
+
   test('numbers frames per binding and replays only unacknowledged frames on resume', () => {
     const relay = new ProducerRelay();
     const { integration, binding, publish } = integrationDouble();

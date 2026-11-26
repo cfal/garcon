@@ -62,6 +62,8 @@ import { ExecutionAborts } from './execution-aborts.js';
 import { retryAfterSessionLoss } from './session-loss-retry.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 import { readBefore } from '../../common/interactive-deadline.js';
+import type { NativeChildObserverService } from '../chats/native-child-observer-service.js';
+import { assertChatExecutable } from '../chats/native-observation.js';
 const logger = createLogger('agents:runtime-router');
 const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output could not be delivered from the executor. Reload from native history after this turn finishes to recover it.';
 
@@ -74,6 +76,7 @@ export interface AgentRuntimeRouterOptions {
   createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
   ledger: TranscriptLedgerService;
   adoption: TranscriptAdoptionService;
+  observers?: NativeChildObserverService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
   resolveFileMentions(command: string, projectPath: string, executorId?: string | null, options?: ExecutorCallOptions): Promise<string>;
 }
@@ -100,6 +103,7 @@ export class AgentRuntimeRouter {
   readonly #createCarriedContext: AgentRuntimeRouterOptions['createCarriedContext'];
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
+  readonly #observers: NativeChildObserverService | undefined;
   readonly #resolveFileMentions: AgentRuntimeRouterOptions['resolveFileMentions'];
   readonly #hasPendingOwnershipTransfer: (chatId: string) => boolean;
   readonly #producerLeases = new Map<string, { readonly executorId: string; readonly lease: TranscriptProducerLease }>();
@@ -123,6 +127,7 @@ export class AgentRuntimeRouter {
     },
     (chatId, lease) => {
       if (this.#producerLeases.get(chatId)?.lease !== lease || lease.closed) return;
+      this.#observers?.reportSourceGap(lease);
       const view = this.#ledger.currentView(chatId);
       if (!view) return;
       this.#ledger.appendNotice(chatId, view.viewId, {
@@ -137,6 +142,7 @@ export class AgentRuntimeRouter {
       if (this.#ledger.activeRunId(chatId) !== runId) return;
       void this.#events.publishRunSteerable(chatId);
     },
+    (chatId, lease, integration, event) => this.#observers?.accept(chatId, lease, integration, event),
   );
   readonly #aborts: ExecutionAborts;
 
@@ -150,6 +156,7 @@ export class AgentRuntimeRouter {
     this.#createCarriedContext = options.createCarriedContext;
     this.#ledger = options.ledger;
     this.#adoption = options.adoption;
+    this.#observers = options.observers;
     this.#resolveFileMentions = options.resolveFileMentions;
     this.#hasPendingOwnershipTransfer = options.hasPendingOwnershipTransfer;
     this.#ledger.subscribe((event) => {
@@ -895,12 +902,16 @@ export class AgentRuntimeRouter {
   }
 
   #producer(chatId: string): TranscriptProducerLease {
+    const registered = this.#registry.getChat(chatId);
+    if (!registered) throw new Error(`Session not initialized: ${chatId}`);
+    assertChatExecutable(registered);
+    const entry = requireAgentChatEntry(chatId, registered);
     const existing = this.#producerLeases.get(chatId);
     if (existing && !existing.lease.closed) return existing.lease;
     if (this.#hasPendingOwnershipTransfer(chatId)) throw ownershipTransferPendingError();
-    const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     const lease = this.#ledger.openProducer(chatId, entry.agentId);
     this.#producerLeases.set(chatId, { executorId: effectiveExecutorId(entry.executorId), lease });
+    this.#observers?.registerSource(chatId, lease, registered);
     return lease;
   }
 

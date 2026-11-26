@@ -107,7 +107,8 @@ for (const dialer of ['controller', 'worker'] as const) {
       await entered.promise;
       abort.abort();
       await expect(cancelled).rejects.toMatchObject({ code: 'GIT_TIMEOUT' });
-      await expect(git.getStatus(request, { timeoutMs: 10 })).rejects.toMatchObject({ code: 'GIT_TIMEOUT' });
+      const timedOut = await git.getStatus(request, { timeoutMs: 10 }).then(() => null, error => error);
+      expect(timedOut).toMatchObject({ code: 'GIT_TIMEOUT' });
       await expect(gh.getStatus({ timeoutMs: 10 })).rejects.toMatchObject({ code: 'GIT_TIMEOUT' });
       await expect(git.commitIndex({ ...request, message: 'Synthetic held commit' }, { timeoutMs: 10 }))
         .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
@@ -150,8 +151,9 @@ for (const dialer of ['controller', 'worker'] as const) {
       if (bodies.status !== 'ready') throw new Error('Expected patch');
       const body = bodies.files['example.txt'];
       expect(body.patch).toContain('+changed');
-      await expect(git.getReviewDocumentFileBodies({ ...request, document: { ...document, instanceId: 'old' }, files: ['example.txt'], purpose: 'visible' }))
-        .rejects.toMatchObject({ code: 'GIT_STALE_DOCUMENT' });
+      const staleDocument = await git.getReviewDocumentFileBodies({ ...request, document: { ...document, instanceId: 'old' }, files: ['example.txt'], purpose: 'visible' })
+        .then(() => null, error => error);
+      expect(staleDocument).toMatchObject({ code: 'GIT_STALE_DOCUMENT' });
       await git.stageHunk({ ...request, document, bodyFingerprint: body.bodyFingerprint, patchDigest: body.patchDigest!, file: 'example.txt', hunkIndex: 0, mode: 'stage', contextLines: 3 });
       await git.commitIndex({ ...request, message: 'staged on executor' });
       expect((await git.getStatus(request)).modified).toEqual([]);
@@ -161,8 +163,9 @@ for (const dialer of ['controller', 'worker'] as const) {
       await git.createStash({ ...request, message: 'synthetic stash' });
       const [stash] = (await git.getStashes(request)).stashes;
       expect(stash).toMatchObject({ index: 0, ref: 'stash@{0}', message: 'On main: synthetic stash' });
-      await expect(git.dropStash({ ...request, stashRef: stash!.ref, expectedHash: '0'.repeat(40) }))
-        .rejects.toMatchObject({ code: 'GIT_STALE_STASH', status: 409 });
+      const staleStash = await git.dropStash({ ...request, stashRef: stash!.ref, expectedHash: '0'.repeat(40) })
+        .then(() => null, error => error);
+      expect(staleStash).toMatchObject({ code: 'GIT_STALE_STASH', status: 409 });
       await git.popStash({ ...request, stashRef: stash!.ref, expectedHash: stash!.hash });
       await git.discard({ ...request, file: 'example.txt' });
       const destination = path.join(root, 'linked');

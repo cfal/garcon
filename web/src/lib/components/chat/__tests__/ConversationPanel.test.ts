@@ -116,7 +116,7 @@ function chat(): ChatSessionRecord {
 		processingPhase: runtime.processing ? 'running' : null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: runtime.processing ? 'running' : 'draft',
 		agentOwnershipEpoch: null,
 		tags: [],
@@ -234,6 +234,32 @@ function makeActions(): ConversationPanelActions {
 }
 
 describe('ConversationPanel', () => {
+	it('keeps native observation controls absent and follows child activity without remounting the feed', async () => {
+		runtime.queue = queue();
+		runtime.summary = gitSummary();
+		const { panel } = makePanel();
+		const props = { surfaceId: panel.surfaceId, chat: chat(), panel,
+			isCommandOwner: true, ownsComposer: true, actions: makeActions(), composerInsetPx: 96 };
+		const rendered = render(ConversationPanel, props);
+		const feed = rendered.container.querySelector('[data-conversation-feed-stub]');
+		for (const isWorking of [true, false, true, false]) {
+			await rendered.rerender({ ...props, chat: { ...props.chat,
+				observation: { kind: 'native-child', captureStatus: 'attached', isWorking } } });
+			expect(rendered.container.querySelector('[data-conversation-feed-stub]')).toBe(feed);
+			expect(Boolean(rendered.container.querySelector('[data-native-child-status-tray]'))).toBe(isWorking);
+			expect(rendered.container.querySelector('[data-conversation-panel-composer-spacer]')).toBeNull();
+			expect(rendered.container.querySelector('[data-conversation-panel-status-dock]')).toBeNull();
+			expect(rendered.container.querySelector('[data-reserve-composer-cap-space]')?.getAttribute('data-reserve-composer-cap-space')).toBe('false');
+			expect(screen.queryByRole('button', { name: m.chat_loading_stop() })).toBeNull();
+			expect(screen.queryByText('Queued input')).toBeNull();
+			expect(screen.queryByRole('button', { name: /Commit/ })).toBeNull();
+		}
+		await rendered.rerender(props);
+		expect(rendered.container.querySelector('[data-conversation-feed-stub]')).toBe(feed);
+		expect(rendered.container.querySelector('[data-conversation-panel-composer-spacer]')?.getAttribute('style')).toContain('height: 96px');
+		expect(screen.getByRole('button', { name: m.chat_loading_stop() })).toBeTruthy();
+	});
+
 	afterEach(() => {
 		cleanup();
 		runtime.autoScrollToBottom = false;

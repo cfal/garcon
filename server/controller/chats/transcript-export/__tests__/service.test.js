@@ -209,7 +209,7 @@ function createService(rows, rendering = inlineTranscriptRendering) {
           thinkingMode: 'default',
           projectPath: '/workspace/project',
           tags: [],
-          canReloadFromNativeHistory: false,
+          observation: null, canReloadFromNativeHistory: false,
           activity: { createdAt: AT, lastActivityAt: AT },
         },
       }),

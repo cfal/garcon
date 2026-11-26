@@ -10,6 +10,7 @@ import {
 } from '../core-record-migration.js';
 import { ChatRegistry } from '../../chats/store.js';
 import { splitChatRelationships } from '../chat-relationships-split.js';
+import { migrateNativeChildObservers } from '../native-child-observers.js';
 import { ScheduledPromptStore } from '../../scheduled-prompts/store.js';
 
 const MIGRATION_DIR = path.join('migration-journals', 'agent-integration-v1');
@@ -602,6 +603,7 @@ describe('agent integration core-record migration', () => {
       })}\n`);
 
       await splitChatRelationships(workspaceDir);
+      await migrateNativeChildObservers(workspaceDir);
       const registry = await new ChatRegistry(workspaceDir).init();
       expect(registry.sessions[chatId]).toMatchObject({
         agentId: 'removed-agent',

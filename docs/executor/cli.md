@@ -104,6 +104,11 @@ or network bandwidth.
 
 ## HTTP Transparency
 
+Native-child chat list entries and snapshots carry nullable `observation`
+metadata. The same controller admission guard returns `CHAT_READ_ONLY` for
+execution and presentation-row mutations through both HTTP entry points. No
+additional forwarding route or child execution authority is introduced.
+
 Chat list entries and snapshot chat summaries include nullable `activityStatus`
 (`working`, `complete`, `error`, or `pending-user-action`). Direct controller
 HTTP and the executor gateway return the same field through the existing

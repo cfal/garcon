@@ -63,6 +63,35 @@ export type CodexThreadStatus =
   | { type: 'systemError' }
   | { type: 'active'; activeFlags: string[] };
 
+export interface CodexThreadMetadata {
+  readonly id: string;
+  readonly parentThreadId: string | null;
+  readonly sessionId: string;
+  readonly historyMode: 'legacy' | 'paginated';
+  readonly ephemeral: boolean;
+  readonly path: string | null;
+  readonly updatedAt: number;
+  readonly status: 'notLoaded' | 'idle' | 'systemError' | 'active';
+}
+
+export function parseThreadMetadata(value: unknown): CodexThreadMetadata {
+  const response = protocolRecord(value, 'thread/read response');
+  const thread = protocolRecord(response.thread, 'thread/read thread');
+  const status = protocolRecord(thread.status, 'thread/read status');
+  if (thread.historyMode !== 'legacy' && thread.historyMode !== 'paginated') throw new Error('Invalid thread history mode');
+  if (typeof thread.ephemeral !== 'boolean' || typeof thread.updatedAt !== 'number'
+    || !Number.isFinite(thread.updatedAt)) throw new Error('Invalid thread metadata');
+  if (status.type !== 'notLoaded' && status.type !== 'idle'
+    && status.type !== 'systemError' && status.type !== 'active') throw new Error('Invalid thread status');
+  return {
+    id: protocolString(thread.id, 'thread id'),
+    parentThreadId: nullableProtocolString(thread.parentThreadId, 'thread parent'),
+    sessionId: protocolString(thread.sessionId, 'thread session'),
+    historyMode: thread.historyMode, ephemeral: thread.ephemeral,
+    path: nullableProtocolString(thread.path, 'thread path'), updatedAt: thread.updatedAt, status: status.type,
+  };
+}
+
 type CodexHttpErrorInfo = { httpStatusCode: number | null };
 
 export type CodexErrorInfo =
@@ -481,7 +510,7 @@ export function parseThreadItemsListResponse(value: unknown): ThreadItemsListRes
   };
 }
 
-function parseCodexThreadItem(value: unknown, label: string): CodexThreadItem {
+export function parseCodexThreadItem(value: unknown, label: string): CodexThreadItem {
   const item = protocolRecord(value, label);
   if (typeof item.id !== 'string' || !item.id) throw new Error(`Invalid ${label} id`);
   if (!CODEX_THREAD_ITEM_TYPES.has(item.type as CodexThreadItem['type'])) {

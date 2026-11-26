@@ -77,6 +77,41 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it('keeps observer click, Enter and steer shortcuts inert while retaining the ordinary draft', async () => {
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		const rendered = render(PromptComposerTestHost, { onsubmit, onSteerPreferredSubmit, steerWithCtrlEnter: true });
+		const editor = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(editor, { target: { value: 'Retained draft' } });
+		await rendered.rerender({ observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true } });
+		expect(screen.queryByRole('button', { name: 'Send message' })).toBeNull();
+		await fireEvent.keyDown(editor, { key: 'Enter' });
+		await fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true });
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+		await rendered.rerender({ observation: null });
+		expect(screen.getByRole('textbox')).toBe(editor);
+		expect(editor.value).toBe('Retained draft');
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
+	});
+
+	it('discards portalled settings when switching to an observer without remounting its editor', async () => {
+		const rendered = render(PromptComposerTestHost, {
+			selectedChatId: 'parent', selectedStatus: 'running', selectableAgents: ['claude', 'codex'],
+		});
+		const editor = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(editor, { target: { value: 'Retained draft' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Claude Opus' }));
+		expect(await screen.findByRole('button', { name: 'Codex' })).toBeTruthy();
+		await rendered.rerender({ observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true } });
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Codex' })).toBeNull());
+		expect(screen.getByRole('textbox')).toBe(editor);
+		await rendered.rerender({ observation: null });
+		expect(screen.getByRole('textbox')).toBe(editor);
+		expect(editor.value).toBe('Retained draft');
+		expect(screen.queryByRole('button', { name: 'Codex' })).toBeNull();
+	});
+
 	it.each(['in', 'rename', 'move', 'tag', 'fork'])(
 		'completes the literal /%s app command without provider discovery or submission', async name => {
 			const onsubmit = vi.fn();

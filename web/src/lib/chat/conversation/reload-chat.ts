@@ -40,7 +40,7 @@ export async function reloadChatFromNative(
 	chatId: string,
 	options: ChatReloadOptions,
 ): Promise<ChatReloadOutcome> {
-	const applyReload = panels.captureNativeReload(chatId);
+	const reload = panels.captureNativeReload(chatId);
 	const request = ws.sendProgressRequest(
 		{ type: 'chat-reload', chatId },
 		{
@@ -61,6 +61,13 @@ export async function reloadChatFromNative(
 		raw = await request.response;
 	} catch (error) {
 		if (error instanceof WsRequestError && error.code === 'REQUEST_CANCELLED') return 'cancelled';
+		if (error instanceof WsRequestError && error.code === 'RELOAD_OUTCOME_UNKNOWN') {
+			try {
+				await reload.recoverUnknown();
+			} catch {
+				// A failed ledger read leaves the outcome unknown; native Reload is never retried.
+			}
+		}
 		throw error;
 	} finally {
 		options.signal.removeEventListener('abort', cancel);
@@ -71,6 +78,6 @@ export async function reloadChatFromNative(
 		throw new Error('Unexpected chat reload response');
 	}
 
-	applyReload(message);
+	reload.apply(message);
 	return 'reloaded';
 }

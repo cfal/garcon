@@ -61,6 +61,7 @@ describe('delegated startup admission interleavings', () => {
 
   test('releases accepted child work after the parent SQLite ledger becomes read-fenced', async () => {
     const parent: ChatRegistryEntry = {
+      nativeObservation: null,
       agentId: 'test', model: 'test', permissionMode: 'default', thinkingMode: 'none',
       projectPath: directory, tags: [], agentSettingsById: {}, agentOwnershipEpoch: 'synthetic-epoch',
       nativeSession: null, agentSessionId: null, nativeSeedReceipt: null, carryOverSegments: [],

@@ -2,6 +2,7 @@
 // This is the single place where dependencies are resolved.
 
 import path from 'path';
+import { assertChatExecutable } from './chats/native-observation.js';
 import { rm } from 'node:fs/promises';
 import { cliRuntimeFile } from '@garcon/common/cli-runtime-paths';
 import { getConfigDir, initializeServerConfig } from './config.js';
@@ -19,6 +20,7 @@ import { startExecutionControlPlane } from './execution-control-plane.js';
 import { ChatRegistry } from './chats/store.js';
 import { ChatParentMutationService } from './chats/chat-parent-mutation-service.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
+import { NativeChildObserverService } from './chats/native-child-observer-service.js';
 import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { RecentTitleIconStore } from './chats/recent-title-icons.js';
@@ -120,12 +122,12 @@ import {
   NativeActivityAnchorPageReader,
   NativeTranscriptActivityService,
   TranscriptLedgerStore,
-  TranscriptReloadService,
   TranscriptViewReader,
 } from './ledger/index.js';
 
 import createAllRoutes from './routes/index.js';
 import { TranscriptClearService } from './ledger/clear.js';
+import { createChatReloader } from './ledger/reload-chat.js';
 import { ModelCatalogResponseCache } from './agents/model-catalog-cache.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
@@ -145,6 +147,7 @@ import {
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
 import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
 import { splitChatRelationships } from './migrations/chat-relationships-split.js';
+import { migrateNativeChildObservers } from './migrations/native-child-observers.js';
 import { installUnhandledRejectionPolicy } from '../common/unhandled-rejection-policy.js';
 
 const logger = createLogger('server');
@@ -280,6 +283,8 @@ export async function startServer(): Promise<void> {
     providerAccess = access;
     await workspaceMigrations.checkpointThrough('provider-assignments');
     await workspaceMigrations.run('chat-relationships-split', () => splitChatRelationships(workspaceDir));
+    await workspaceMigrations.checkpointThrough('chat-relationships-split');
+    await workspaceMigrations.run('native-child-observers', () => migrateNativeChildObservers(workspaceDir));
     await chatRegistry.init();
     await settings.init();
     let queue: ChatExecutionCoordinator | null = null;
@@ -420,7 +425,13 @@ export async function startServer(): Promise<void> {
       onSelectionCommitted: (chatId, revision) => eventWiring?.notifyChatPreamblesInvalidated(chatId, revision),
     });
 
+    const chatIds = new ChatIdAllocator(chatRegistry);
+    const nativeChildren = new NativeChildObserverService({
+      registry: chatRegistry, ledger: transcriptLedger, chatIds, settings,
+      onError: (message, chatId) => logger.warn(message, { chatId }),
+    });
     agentRegistry = new AgentRegistry({
+      observers: nativeChildren,
       onSettingsCommitted: (chatId) => eventWiring?.notifyChatSettingsUpdated(chatId),
       getSettingsExecution() {
         if (!queue) throw new Error('Chat execution coordinator is not initialized');
@@ -539,6 +550,10 @@ export async function startServer(): Promise<void> {
         workingDirectorySettlement: new WorkingDirectorySettler({ registry: chatRegistry, ledger: transcriptLedger, inspect: inspectProject, lock: chatMutationLock }),
         attachmentAdmission: queuedAttachmentAdmission(chatRegistry, agentRegistry),
         canDispatch: (chatId) => executors.isReady(effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId)),
+        assertChatExecutable: (chatId) => {
+          const entry = chatRegistry.getChat(chatId);
+          if (entry) assertChatExecutable(entry);
+        },
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
         appendControlReceipt: agentCommands.appendControlReceipt,
         isControlInputViewCurrent: (chatId, viewId) => chatRegistry.getChat(chatId) !== null
@@ -549,8 +564,8 @@ export async function startServer(): Promise<void> {
     );
     transcriptLedger.subscribeRunEndedCommitted((chatId, runId) => queue.markRunTerminalCommitted(chatId, runId));
     executionQueries = queue;
-    const transcriptReload = new TranscriptReloadService({
-      ledger: transcriptLedger,
+    const transcriptReload = createChatReloader({
+      reader: transcriptReader, ledger: transcriptLedger, observers: nativeChildren,
       adoption: transcriptAdoption,
       registry: chatRegistry,
       integrations: directory,
@@ -586,18 +601,20 @@ export async function startServer(): Promise<void> {
       ),
     });
     const lastSelectedChat = new InMemoryLastSelectedChatState();
-    const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({
       registry: chatRegistry,
       settings,
       metadata,
       processing: chatProcessingActivity,
       transientFeeds,
+      observers: nativeChildren,
       canReloadFromNativeHistory(_chatId, session) {
+        const integration = directory.get(session.agentId, session.executorId);
+        if (session.nativeObservation) return Boolean(integration?.nativeChildObservation);
         return Boolean(
           session.agentSessionId
           && session.nativeSession
-          && directory.get(session.agentId, session.executorId)?.nativeHistoryImport,
+          && integration?.nativeHistoryImport,
         );
       },
     });
@@ -808,10 +825,7 @@ export async function startServer(): Promise<void> {
           transcriptReader.replay(chatId, viewId, afterOrdinal, throughOrdinal),
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
-      transcriptReload: async (chatId, options) => {
-        await transcriptReload.reload(chatId, options);
-        return transcriptReader.page(chatId, 100);
-      },
+      transcriptReload,
       queue,
       transientFeeds,
       registry: chatRegistry,

@@ -191,7 +191,7 @@ function createRunningChat(overrides: Partial<ChatSessionRecord> = {}): ChatSess
 		processingPhase: isProcessing ? 'running' : null,
 		isUnread: true,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
@@ -294,7 +294,7 @@ function chatSnapshot(
 			projectPath: '/workspace/project',
 			tags: [],
 			activityStatus: null,
-			canReloadFromNativeHistory: false,
+			observation: null, canReloadFromNativeHistory: false,
 			activity: {
 				createdAt: null,
 				lastActivityAt: '2026-03-27T08:00:00.000Z',
@@ -328,7 +328,7 @@ function controlWithQueue(
 	};
 }
 
-function mountedTranscriptFixture(loadTranscriptSnapshot?: ConstructorParameters<typeof ConversationPanelRegistry>[0]['loadTranscriptSnapshot']) {
+function mountedTranscriptFixture(readHead?: ChatTranscriptCache['headReads']['read']) {
 	const chatId = 'chat-1';
 	const transcriptViewId = 'generation-1';
 	const timestamp = '2026-01-01T00:00:00.000Z';
@@ -336,11 +336,11 @@ function mountedTranscriptFixture(loadTranscriptSnapshot?: ConstructorParameters
 		ordinal, message: new AssistantMessage(timestamp, 'output'),
 	});
 	const cache = new ChatTranscriptCache({ limit: 100 });
+	if (readHead) cache.headReads.read = readHead;
 	const lifecycle = new ConversationLifecycleState();
 	const registry = new ConversationPanelRegistry({
 		cache,
 		overlays: new ConversationTranscriptOverlayStore(),
-		loadTranscriptSnapshot,
 		lifecycle: { forChat: () => lifecycle, remove: () => {} },
 		getSelectedChatId: () => chatId,
 		getComposerAnchorSurfaceId: () => 'chat-view:window-left',
@@ -381,7 +381,7 @@ function createServerEntry(id: string) {
 		agentOwnershipEpoch: 'epoch-1',
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 	};
 }
 
@@ -819,6 +819,23 @@ function createClearDeps() {
 }
 
 describe('ConversationSessionController', () => {
+	it('rejects observer submission, steering, Stop and queue creation without changing the draft', async () => {
+		const { deps } = createDeps(createRunningChat({
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true },
+		}));
+		deps.composerState.inputText = 'Keep draft';
+		const controller = new ConversationSessionController(deps);
+		expect(await controller.submitForChat('chat-1')).toBe('rejected');
+		expect(await controller.submitComposerWithSteerPreference('chat-1')).toBe('rejected');
+		await controller.handleAbortForChat('chat-1');
+		await controller.createQueueEntryForChat('chat-1', 'Queued');
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(mockSteerChat).not.toHaveBeenCalled();
+		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		expect(deps.lifecycle.beginStopping).not.toHaveBeenCalled();
+		expect(deps.composerState.inputText).toBe('Keep draft');
+	});
+
 	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
 		'only confirms literal Clear through %s and never dispatches unsupported requests', async (submit) => {
 			for (const policy of ['conversation', 'literal', 'unknown']) {
@@ -1713,7 +1730,7 @@ describe('ConversationSessionController', () => {
 		expect(deps.scrollToBottom).not.toHaveBeenCalled();
 	});
 
-	it('does not validate an incomplete snapshot when its last panel is hidden during refresh', async () => {
+	it('finishes the chat-owned snapshot when its last panel is hidden during refresh', async () => {
 		const { deps } = createDeps();
 		const cache = new ChatTranscriptCache({ limit: 100 });
 		const lifecycle = new ConversationLifecycleState();
@@ -1752,7 +1769,7 @@ describe('ConversationSessionController', () => {
 			refresh.resolve(page(3));
 			await load;
 			expect(markValidated).not.toHaveBeenCalled();
-			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: true });
+			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 3, stale: false });
 			registry.reconcile([panel]);
 			await registry.loadChatSnapshot('chat-1');
 			expect(getChatMessages).toHaveBeenCalledTimes(3);
@@ -5279,7 +5296,7 @@ describe('ConversationSessionController', () => {
 	it.each(['confirmed predecessor', 'newer HTTP instance'] as const)(
 		'retires an unbound steer ACK without fetching or replacing the %s', async authority => {
 			const { deps } = createDeps(createRunningChat({ agentId: 'claude', isProcessing: true }));
-			const loadTranscriptSnapshot = vi.fn(async () => {});
+			const loadTranscriptSnapshot = vi.fn(async () => ({ kind: 'invalidated' as const }));
 			const { registry, cache, selected, chatId, timestamp, transcriptViewId } = mountedTranscriptFixture(loadTranscriptSnapshot);
 			const ui = new ConversationUiState((id, control) => registry.reconcileQueuedSteers(id, control));
 			ui.confirmExecutionControlSocketInstance('first');
@@ -5539,7 +5556,7 @@ describe('ConversationSessionController', () => {
 		{ replyOrder: 'before', outcome: 'unknown' }, { replyOrder: 'after', outcome: 'unknown' },
 	] as const)('retires a buffered echo before an $outcome reply $replyOrder snapshot recovery', async ({ replyOrder, outcome }) => {
 		const { deps } = createDeps(createRunningChat({ agentId: 'codex', isProcessing: true }));
-		const loadTranscriptSnapshot = vi.fn(async () => {});
+		const loadTranscriptSnapshot = vi.fn(async () => ({ kind: 'invalidated' as const }));
 		const { chatId, transcriptViewId, timestamp, output, cache, registry, panel, selected } = mountedTranscriptFixture(loadTranscriptSnapshot);
 		const pending = deferred<Awaited<ReturnType<typeof steerChat>>>();
 		mockSteerChat.mockImplementation(() => pending.promise);

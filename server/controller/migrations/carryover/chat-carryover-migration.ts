@@ -500,7 +500,7 @@ async function directorySize(directory: string): Promise<number> {
 
 async function targetRegistryHasQuarantine(workspaceDir: string): Promise<boolean> {
   const value: unknown = parseStoredJson(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'), 'Chat registry');
-  if (!isRecord(value) || (value.version !== 5 && value.version !== 6) || !isRecord(value.sessions)) {
+  if (!isRecord(value) || (value.version !== 5 && value.version !== 6 && value.version !== 7) || !isRecord(value.sessions)) {
     throw new Error('Invalid chat registry during carryover finalization');
   }
   const sessions = Object.values(value.sessions).map((entry) => {

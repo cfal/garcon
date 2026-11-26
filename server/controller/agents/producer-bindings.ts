@@ -1,6 +1,8 @@
 import {
   createAgentResourceRef,
   isAgentResourceRef,
+  isNativeChildEvent,
+  type AgentNativeChildEvent,
   type AgentIntegration,
   type AgentProducerBinding,
   type AgentProducerNotification,
@@ -45,6 +47,7 @@ export class ProducerBindings {
       chatId: string, lease: TranscriptProducerLease, agentId: string, event: LaunchSettledEvent,
     ) => void,
     private readonly onSteerable: (chatId: string, lease: TranscriptProducerLease, runId: string) => void,
+    private readonly onNativeChild: (chatId: string, lease: TranscriptProducerLease, integration: AgentIntegration, event: AgentNativeChildEvent) => void = () => undefined,
   ) {}
 
   async bind(
@@ -109,6 +112,11 @@ export class ProducerBindings {
         // session installs and replays retained events.
         const route = this.#routes.get(binding.id);
         if (!route || route.lease.closed || !isAgentResourceRef(binding, 'producer', route.binding)) return;
+        if (isNativeChildEvent(event)) {
+          try { this.onNativeChild(route.chatId, route.lease, integration, event); }
+          catch { this.onError(new Error('Native child observation failed')); }
+          return;
+        }
         if (event.type === 'publication-failed') {
           try { this.onPublicationFailed(route.chatId, route.lease, event.error); }
           catch (error) { this.onError(error); }

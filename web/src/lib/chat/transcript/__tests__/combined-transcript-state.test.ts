@@ -23,6 +23,8 @@ import {
 } from '../../conversation/conversation-panel-registry.svelte.js';
 import { ConversationLifecycleState } from '../../conversation/conversation-lifecycle-state.svelte.js';
 import { CurrentConversationPanelTranscript } from '../../conversation/current-conversation-panel-transcript.js';
+import * as windowLoader from '../transcript-window-loader.js';
+import * as anchorDemand from '../transcript-anchor-demand.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
@@ -203,6 +205,54 @@ afterEach(() => {
 });
 
 describe('combined transcript intervals', () => {
+	it.each([false, true])('fences window reads invalidated by uncertain recovery (combined=%s)', async combined => {
+		const { transcript, cache } = fixture(combined);
+		seedTranscript(transcript, chatId, viewId, [assistant(1)], { lastOrdinal: 2, pageNewestOrdinal: 1,
+			pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		const response = Promise.withResolvers<CompleteChatHistoryResponse>();
+		if (combined) {
+			vi.mocked(getCombinedChatMessages).mockImplementationOnce(async () => {
+				await response.promise;
+				return history([assistant(1), assistant(2)])({ chatId, direction: 'backward', anchorsRemaining: 100 });
+			});
+		} else vi.mocked(getChatMessages).mockReturnValueOnce(response.promise);
+		const navigation = transcript.navigateToWindow(chatId, 'latest');
+		cache.invalidateSnapshotReads(chatId);
+		cache.markStale(chatId);
+		response.resolve({ chatId, transcriptViewId: viewId, messages: [assistant(1), assistant(2)], lastOrdinal: 2,
+			pageOldestOrdinal: 1, pageNewestOrdinal: 2, nextBeforeOrdinal: null, hasMore: false,
+			limit: 50, resendCandidates: [], historyState: { kind: 'complete' } });
+		expect(await navigation).toBe('invalidated');
+		expect(cache.readAppliedCursor(chatId)?.stale).toBe(true);
+		expect(transcript.entries).toEqual([assistant(1)]);
+	});
+
+	it.each([false, true])('rechecks ownership after a queued window result (combined=%s)', async combined => {
+		const { transcript, cache } = fixture(combined);
+		seedTranscript(transcript, chatId, viewId, [assistant(1)], { lastOrdinal: 2, pageNewestOrdinal: 1,
+			pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		const result = { kind: 'unavailable', response: { chatId, messages: [],
+			historyState: { kind: 'degraded', errorCode: 'HISTORY_LOAD_FAILED', retryable: true } } } satisfies windowLoader.TranscriptWindowPageResult;
+		if (combined) vi.spyOn(anchorDemand, 'loadTranscriptAnchorSnapshot').mockResolvedValueOnce(result);
+		else vi.spyOn(windowLoader, 'loadTranscriptWindowPage').mockResolvedValueOnce(result);
+		const navigation = transcript.navigateToWindow(chatId, 'latest');
+		cache.replace(chatId, 'new-view', [assistant(1)], 1, null);
+		transcript.installCachedSnapshot(chatId);
+		expect(await navigation).toBe('invalidated');
+		expect(transcript.transcriptViewId).toBe('new-view');
+		expect(cache.readAppliedCursor(chatId)).toMatchObject({ transcriptViewId: 'new-view', stale: false });
+	});
+
+	it('does not stale a newer cache after a queued old-view rejection', async () => {
+		const { transcript, cache } = fixture(false);
+		seedTranscript(transcript, chatId, viewId, [assistant(1)], { lastOrdinal: 2, pageNewestOrdinal: 1,
+			pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		vi.spyOn(windowLoader, 'loadTranscriptWindowPage').mockResolvedValueOnce({ kind: 'view-changed' });
+		const navigation = transcript.navigateToWindow(chatId, 'latest');
+		cache.replace(chatId, 'new-view', [assistant(1)], 1, null);
+		expect(await navigation).toBe('invalidated');
+		expect(cache.readAppliedCursor(chatId)).toMatchObject({ transcriptViewId: 'new-view', stale: false });
+	});
 	it.each(['earlier', 'later'] as const)('leaves held combined %s paging untouched on steer acknowledgement', async direction => {
 		const { registry, overlays, mount } = panelFixture();
 		const entries = Array.from({ length: 300 }, (_, index) => assistant(index + 1));
@@ -459,7 +509,7 @@ describe('combined transcript intervals', () => {
 		}
 	});
 
-	it('accepts newer fallback handoff after loader and captured peer snapshot replacements', async () => {
+	it.each([false, true])('accepts fallback handoff only without an intervening view change (replaced=%s)', async replaced => {
 		const { registry, cache, mount } = panelFixture();
 		cache.replace(chatId, viewId, [assistant(1)], 1, null);
 		const current = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => chatId });
@@ -469,16 +519,19 @@ describe('combined transcript intervals', () => {
 		const fallback = current.loadMessages(chatId);
 		try {
 			mount('left', 'right');
-			const replacementView = 'synthetic-replacement';
+			const replacementView = replaced ? 'synthetic-replacement' : viewId;
 			vi.mocked(getCombinedChatMessages).mockImplementation(async request => history([assistant(1), assistant(2)], 200, 2, replacementView)(request));
-			await registry.loadChatSnapshot(chatId);
-			for (const panel of registry.panelsForChat(chatId)) expect(panel.transcript.lastOrdinal).toBe(2);
+			if (replaced) {
+				registry.handleViewReplacement(chatId, replacementView, viewId);
+				await registry.loadChatSnapshot(chatId);
+			}
+			if (replaced) for (const panel of registry.panelsForChat(chatId)) expect(panel.transcript.lastOrdinal).toBe(2);
 			response.resolve({ chatId, transcriptViewId: replacementView, messages: [assistant(1), assistant(2), assistant(3)],
 				lastOrdinal: 3, pageOldestOrdinal: 1, pageNewestOrdinal: 3, nextBeforeOrdinal: null, hasMore: false,
 				historyState: { kind: 'complete' }, limit: 50, resendCandidates: [] });
 			await fallback;
-			expect(cache.get(chatId)?.lastOrdinal).toBe(3);
-			for (const panel of registry.panelsForChat(chatId)) expect(panel.transcript.lastOrdinal).toBe(3);
+			expect(cache.get(chatId)?.lastOrdinal).toBe(replaced ? 2 : 3);
+			for (const panel of registry.panelsForChat(chatId)) expect(panel.transcript.lastOrdinal).toBe(replaced ? 2 : 3);
 		} finally {
 			registry.destroy();
 			cache.flush();
@@ -1726,7 +1779,7 @@ describe('combined transcript intervals', () => {
 			});
 			cache.replace(chatId, viewId, original, 100, null);
 			installHistory(retained);
-			const recovery = vi.spyOn(transcript, 'recoverTranscriptCursorAhead');
+			const recovery = vi.spyOn(cache, 'discardInvalidFrontier');
 			switch (operation) {
 				case 'snapshot':
 				case 'cached snapshot':
@@ -1897,7 +1950,7 @@ describe('combined transcript intervals', () => {
 		let reload: ReturnType<typeof selected.loadMessages> | undefined;
 		try {
 			await replacementStarted.promise;
-			expect(vi.mocked(getCombinedChatMessages).mock.calls.at(-1)![0].purpose).toBe('activation');
+			expect(vi.mocked(getCombinedChatMessages).mock.calls.at(-1)![0].purpose).toBe(origin === 'cold' ? 'activation' : undefined);
 			const result = selected.applyMessages(chatId, viewId, [assistant(81)], 81, 81);
 			if (result !== 'applied') reload = selected.loadMessages(chatId);
 			replacement.resolve(read({ chatId, direction: 'backward', anchorsRemaining: 100 }));
@@ -1910,9 +1963,10 @@ describe('combined transcript intervals', () => {
 			}
 			expect(cache.get(chatId)?.messages).toEqual([...retained, assistant(81)]);
 			expect(cache.readAppliedCursor(chatId)?.lastOrdinal).toBe(81);
-			expect(getCombinedChatMessages).toHaveBeenCalledTimes(origin === 'cold' ? 2 : 4);
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(origin === 'cold' ? 1 : 3);
 			expect(vi.mocked(getCombinedChatMessages).mock.calls.at(-1)![0]).toEqual({
 				chatId, direction: 'backward', anchorsRemaining: 100,
+				...(origin === 'cold' ? { purpose: 'activation' } : {}),
 			});
 		} finally {
 			replacement.resolve(read({ chatId, direction: 'backward', anchorsRemaining: 100 }));
@@ -1921,24 +1975,17 @@ describe('combined transcript intervals', () => {
 		}
 	});
 
-	it.each(['no-peer', 'peer', 'second-removal'] as const)('keeps refresh responsibility when the loader is hidden (%s)', async outcome => {
+	it.each(['no-peer', 'peer', 'second-removal'] as const)('keeps chat-owned recovery when panels are hidden (%s)', async outcome => {
 		const { cache, registry, mount } = panelFixture({ retainInactive: true });
 		const entries = Array.from({ length: 81 }, (_, index) => assistant(index + 1));
 		const snapshot = Promise.withResolvers<TranscriptAnchorPage>();
 		const refresh = Promise.withResolvers<TranscriptAnchorPage>();
-		const handoff = Promise.withResolvers<TranscriptAnchorPage>();
 		const started = Promise.withResolvers<void>();
-		const handoffStarted = Promise.withResolvers<void>();
 		const remainingPeer = outcome !== 'no-peer';
-		const succeeds = outcome === 'peer';
 		installHistory(entries);
 		vi.mocked(getCombinedChatMessages)
 			.mockImplementationOnce(() => snapshot.promise)
 			.mockImplementationOnce(() => { started.resolve(); return refresh.promise; });
-		if (outcome === 'second-removal') vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => {
-			handoffStarted.resolve();
-			return handoff.promise;
-		});
 		const peers = outcome === 'second-removal' ? ['right', 'third'] : remainingPeer ? ['right'] : [];
 		mount('left', ...peers);
 		const selected = new CurrentConversationPanelTranscript({ panels: registry, getSelectedChatId: () => chatId });
@@ -1946,29 +1993,23 @@ describe('combined transcript intervals', () => {
 		const settled = load.then(() => { cache.markValidated(chatId); return 'loaded'; }, () => 'failed');
 		try {
 			expect(selected.applyMessages(chatId, viewId, [assistant(81)], 81, 81)).toBe('gap-detected');
-			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			snapshot.resolve(history(entries.slice(0, 79))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			await started.promise;
-			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 80, stale: true });
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 79, stale: true });
 			mount(...peers);
 			refresh.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
-			if (outcome === 'second-removal') {
-				await handoffStarted.promise;
-				mount('third');
-				handoff.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
-			}
-			expect(await settled).toBe(succeeds ? 'loaded' : 'failed');
-			expect(getCombinedChatMessages).toHaveBeenCalledTimes(remainingPeer ? 3 : 2);
-			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: succeeds ? 81 : 80, stale: !succeeds });
+			if (outcome === 'second-removal') mount('third');
+			expect(await settled).toBe('loaded');
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(2);
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 81, stale: false });
 			mount('left');
-			if (!succeeds) await registry.loadChatSnapshot(chatId);
 			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 81, stale: false });
 			expect(registry.panel('chat-view:window-left')!.transcript.entries).toEqual(entries);
-			expect(getCombinedChatMessages).toHaveBeenCalledTimes(outcome === 'second-removal' ? 4 : 3);
+			expect(getCombinedChatMessages).toHaveBeenCalledTimes(2);
 			expect(vi.mocked(getCombinedChatMessages).mock.calls.at(-1)![0]).toEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
 		} finally {
-			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			snapshot.resolve(history(entries.slice(0, 79))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			refresh.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
-			handoff.resolve(history(entries)({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			await settled;
 		}
 	});
@@ -1984,12 +2025,15 @@ describe('combined transcript intervals', () => {
 		vi.mocked(getCombinedChatMessages)
 			.mockImplementationOnce(() => snapshot.promise)
 			.mockImplementationOnce(() => { started.resolve(); return refresh.promise; });
+		cache.replace(chatId, viewId, entries.slice(0, 81), 81, null);
+		cache.markStale(chatId);
 		mount('left', 'right');
 		const load = registry.loadChatSnapshot(chatId);
 		try {
 			expect(registry.applyCommittedBatch({ chatId, transcriptViewId: viewId, firstOrdinal: 81, lastOrdinal: 81,
 				messages: [input(81)], resendCandidates: candidates(81), noticeRevision: 0,
-			})).toMatchObject({ kind: 'chat-recovery-required' });
+			})).toMatchObject({ kind: 'applied' });
+			cache.applyMessages(chatId, 'retired', { firstOrdinal: 1, lastOrdinal: 1, messages: [input(1)] });
 			snapshot.resolve(captured);
 			await started.promise;
 			expect(registry.applyCommittedBatch({ chatId, transcriptViewId: viewId, firstOrdinal: 82, lastOrdinal: 82,
@@ -2025,13 +2069,14 @@ describe('combined transcript intervals', () => {
 			expect(registry.applyCommittedBatch({ chatId, transcriptViewId: viewId,
 				firstOrdinal: 81, lastOrdinal: 81, messages: [assistant(81)], resendCandidates: [], noticeRevision: 0,
 			})).toMatchObject({ kind: 'chat-recovery-required' });
-			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			snapshot.resolve(history(entries.slice(0, 79))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			await started.promise;
-			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 80, stale: true });
+			expect(cache.readAppliedCursor(chatId)).toMatchObject({ lastOrdinal: 79, stale: true });
 			if (interruption === 'failure' || interruption === 'unavailable') {
 				if (interruption === 'failure') refresh.reject(new Error('Synthetic refresh failure'));
 				else refresh.resolve({ chatId, historyState: { kind: 'degraded', errorCode: 'LEDGER_FENCED', retryable: false }, messages: [] });
-				expect(await settled).toHaveProperty('error');
+				if (interruption === 'failure') expect(await settled).toHaveProperty('error');
+				else expect(await settled).toEqual({ value: false });
 				if (interruption === 'failure') expect(cache.readAppliedCursor(chatId)?.stale).toBe(true);
 				else expect(cache.readAppliedCursor(chatId)).toBeNull();
 				expect(registry.hasInactiveWindow(chatId)).toBe(false);
@@ -2055,11 +2100,16 @@ describe('combined transcript intervals', () => {
 				await settled;
 				if (interruption === 'replacement') expect(cache.get(chatId)).toMatchObject({ transcriptViewId: 'synthetic-new-view', lastOrdinal: 1, stale: false });
 				else if (interruption === 'removal') expect(cache.get(chatId)).toBeNull();
-				else for (const panel of registry.panelsForChat(chatId)) expect(panel.transcript.entries).toEqual(entries);
+				else {
+					expect(await settled).toEqual({ value: false });
+					expect(cache.readAppliedCursor(chatId)?.stale).toBe(true);
+					await registry.loadChatSnapshot(chatId);
+					for (const panel of registry.panelsForChat(chatId)) expect(panel.transcript.entries).toEqual(entries);
+				}
 			}
 			expect(getCombinedChatMessages).toHaveBeenCalledTimes(interruption === 'removal' ? 2 : 3);
 		} finally {
-			snapshot.resolve(history(entries.slice(0, 80))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
+			snapshot.resolve(history(entries.slice(0, 79))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			refresh.resolve(history(entries.slice(0, 81))({ chatId, direction: 'backward', anchorsRemaining: 100 }));
 			await settled;
 		}
@@ -2070,7 +2120,7 @@ describe('combined transcript intervals', () => {
 		{ persisted: true, sameView: false },
 		{ persisted: false, sameView: true },
 		{ persisted: true, sameView: true },
-	])('preserves a distinct peer after eviction (persisted $persisted, same-view retry $sameView)', async ({ persisted, sameView }) => {
+	])('retires old-view peer recovery before cache eviction (persisted $persisted, old-view response $sameView)', async ({ persisted, sameView }) => {
 		const { cache, registry, mount } = panelFixture({ maxHiddenEntries: 1 });
 		installHistory(Array.from({ length: 101 }, (_, index) => assistant(index + 1)));
 		mount('left', 'matching', 'right');
@@ -2089,6 +2139,10 @@ describe('combined transcript intervals', () => {
 				pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
 			}, right.beginSnapshotLoad())).toBe('applied');
 			const newerEntries = right.entries;
+			for (const peer of [left, matching]) {
+				expect(peer.transcriptViewId).toBe(newerView);
+				expect(peer.entries).toEqual(newerEntries);
+			}
 			const clearPeer = vi.spyOn(right, 'clearMessages');
 			// Injects a cache miss independently of visible-panel retention.
 			cache.setMountedChatIds([]);
@@ -2105,20 +2159,20 @@ describe('combined transcript intervals', () => {
 			expect(await load).toBe('invalidated');
 			expect(clearPeer).not.toHaveBeenCalled();
 			expect(right.entries).toBe(newerEntries);
-			expect(left.transcriptViewId).toBe(recoveredView);
-			expect(left.entries).toEqual(recovered);
-			expect(left.lastOrdinal).toBe(recovered.length);
+			expect(left.transcriptViewId).toBe(newerView);
+			expect(left.entries).toEqual(newerEntries);
+			expect(left.lastOrdinal).toBe(1);
 			expect(left.hasLaterMessages).toBe(false);
-			expect(matching.entries).toEqual(recovered);
-			expect(matching.lastOrdinal).toBe(recovered.length);
-			expect(recoveryReads).toBe(1);
+			expect(matching.entries).toEqual(newerEntries);
+			expect(matching.lastOrdinal).toBe(1);
+			expect(recoveryReads).toBe(0);
 		} finally {
 			registry.destroy();
 			cache.flush();
 		}
 	});
 
-	it('prevents reverse-order peer snapshots from regressing the shared receipt cache', async () => {
+	it('coalesces peer head reads before publishing the shared receipt cache', async () => {
 		const { transcript: first, cache } = fixture();
 		const second = new ActiveTranscriptState(cache, null, { combineMessages: true });
 		cleanups.push(() => second.clearMessages());
@@ -2127,12 +2181,13 @@ describe('combined transcript intervals', () => {
 		installHistory([assistant(100), assistant(101)]);
 		vi.mocked(getCombinedChatMessages).mockImplementationOnce(() => response.promise);
 		const load = first.loadMessages(chatId);
-		await second.loadMessages(chatId);
+		const peerLoad = second.loadMessages(chatId);
 		response.resolve(
-			history([assistant(100)])({ chatId, direction: 'backward', anchorsRemaining: 100 }),
+			history([assistant(100), assistant(101)])({ chatId, direction: 'backward', anchorsRemaining: 100 }),
 		);
-		await load;
-		expect(first.lastOrdinal).toBe(100);
+		await Promise.all([load, peerLoad]);
+		expect(getCombinedChatMessages).toHaveBeenCalledOnce();
+		expect(first.lastOrdinal).toBe(101);
 		expect(cache.readAppliedCursor(chatId)?.lastOrdinal).toBe(101);
 		expect(
 			cache.applyMessages(chatId, viewId, {

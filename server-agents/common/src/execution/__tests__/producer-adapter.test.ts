@@ -22,6 +22,30 @@ const TS = '2026-08-12T00:00:00.000Z';
 const scope = { executorId: 'test-node', instanceId: 'test-runtime', integrationId: 'test' };
 
 describe('createAgentProducerAdapter', () => {
+  it('keeps child publication alive after the parent terminal and ends only publication on detach', async () => {
+    const fixture = await createFixture();
+    const captured = Promise.withResolvers<{ signal: AbortSignal; publish: AgentRuntimePublisher }>();
+    fixture.runtime.start = async (request, publish) => {
+      captured.resolve({ signal: request.publicationSignal, publish });
+      return { agentSessionId: 'session', nativeSession: null, nativeSeedReceipt: null };
+    };
+    const abort = mock(async () => true);
+    fixture.runtime.abort = abort;
+    await fixture.adapter.execution.start(fixture.request);
+    const { signal, publish } = await captured.promise;
+    publish({ type: 'run-ended', runId: fixture.request.runId, outcome: 'finished' });
+    expect(signal.aborted).toBe(false);
+    publish({ type: 'native-child-rows', childKey: 'child', rows: [{ message: new AssistantMessage(TS, 'Late child') }] });
+    expect(fixture.events.at(-1)).toMatchObject({ type: 'native-child-rows' });
+    fixture.adapter.producers.detach(fixture.request.producerBinding);
+    expect(signal.aborted).toBe(true);
+    const count = fixture.events.length;
+    for (let i = 0; i < 10; i++) publish({ type: 'native-child-status', childKey: 'child', status: 'running' });
+    expect(fixture.events).toHaveLength(count);
+    expect(fixture.warnings).toEqual([]);
+    expect(abort).not.toHaveBeenCalled();
+  });
+
   it('publishes sessions, normalized rows, and terminal events through the supplied sink', async () => {
     const fixture = await createFixture();
     const handle = await fixture.adapter.execution.start(fixture.request);

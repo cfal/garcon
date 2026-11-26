@@ -38,6 +38,176 @@ function contents(messages: TranscriptMessage[]): string[] {
 }
 
 describe('ChatTranscriptCache', () => {
+	it('retains accepted recovery coverage through eviction and discards it with the replaced view', () => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 0 });
+		cache.setMountedChatIds(['chat']);
+		cache.replaceFromPage('chat', page('b', [entry(1, 'First row')]));
+		cache.applyMessages('chat', 'a', { firstOrdinal: 2, lastOrdinal: 2, messages: [entry(2, 'Retired row')] });
+		cache.applyMessages('chat', 'b', { firstOrdinal: 2, lastOrdinal: 2, messages: [entry(2, 'Current row')] });
+		cache.setMountedChatIds([]);
+		expect(cache.get('chat')).toBeNull();
+		expect(cache.snapshotRecoveryFloor('chat', 'b')).toBe(2);
+		cache.discardData('chat');
+		expect(cache.snapshotRecoveryFloor('chat', 'b')).toBe(2);
+		cache.discardInvalidFrontier('chat', 'a');
+		expect(cache.snapshotRecoveryFloor('chat', 'b')).toBe(2);
+		cache.discardInvalidFrontier('chat', 'b');
+		expect(cache.snapshotRecoveryFloor('chat', 'b')).toBe(0);
+		expect(cache.needsSnapshotRecovery('chat')).toBe(true);
+		cache.openViewLease('chat').accept('c');
+		expect(cache.snapshotRecoveryFloor('chat', 'c')).toBe(0);
+		cache.remove('chat');
+		expect(cache.needsSnapshotRecovery('chat')).toBe(false);
+	});
+
+	it.each(['fresh', 'invalidated', 'new-debt', 'same-view'] as const)('qualifies current-head confirmation against its read (%s)', situation => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.replaceFromPage('chat', page('b', [entry(1, 'Current row')]));
+		const missedView = situation === 'same-view' ? 'b' : 'a';
+		cache.applyMessages('chat', missedView, { firstOrdinal: 3, lastOrdinal: 3, messages: [entry(3, 'Missed row')] });
+		const read = cache.beginHeadRead('chat', cache.openViewLease('chat'));
+		if (situation === 'invalidated') cache.invalidateSnapshotReads('chat');
+		if (situation === 'new-debt') cache.applyMessages('chat', 'a', { firstOrdinal: 4, lastOrdinal: 4, messages: [entry(4, 'Later missed row')] });
+		read.accept(page('b', [entry(1, 'Current row')]));
+		expect(cache.readAppliedCursor('chat')?.stale).toBe(situation !== 'fresh');
+		read.release();
+		cache.remove('chat');
+	});
+
+	it.each(['discard', 'evict'] as const)('retains the highest missed frontier through partial snapshots and %s', removal => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 0 });
+		cache.setMountedChatIds(['chat']);
+		cache.replaceFromPage('chat', page('a', [entry(1, 'Old row')]));
+		for (const ordinal of [3, 2]) cache.applyMessages('chat', 'b', {
+			firstOrdinal: ordinal, lastOrdinal: ordinal, messages: [entry(ordinal, `Row ${ordinal}`)],
+		});
+		cache.replaceFromPage('chat', page('b', [entry(1, 'First row')], 1));
+		cache.markValidated('chat');
+		expect(cache.readAppliedCursor('chat')).toMatchObject({ transcriptViewId: 'b', stale: true });
+		if (removal === 'discard') cache.discardData('chat');
+		else cache.setMountedChatIds([]);
+		cache.setMountedChatIds(['chat']);
+		cache.replaceFromPage('chat', page('b', [entry(2, 'Second row')], 2));
+		expect(cache.needsSnapshotRecovery('chat')).toBe(true);
+		expect(cache.readAppliedCursor('chat')?.stale).toBe(true);
+		cache.replaceFromPage('chat', page('b', [entry(3, 'Third row')], 3));
+		expect(cache.needsSnapshotRecovery('chat')).toBe(false);
+		expect(cache.readAppliedCursor('chat')?.stale).toBe(false);
+		cache.flush();
+	});
+
+	it('does not certify a partial first live base over a known gap', () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.applyMessages('chat', 'b', { firstOrdinal: 3, lastOrdinal: 3, messages: [entry(3, 'Third row')] });
+		cache.applyMessages('chat', 'b', { firstOrdinal: 1, lastOrdinal: 1, messages: [entry(1, 'First row')] });
+		expect(cache.readAppliedCursor('chat')?.stale).toBe(true);
+		expect(cache.listCursors()).toEqual([]);
+		cache.replaceFromPage('chat', page('c', [entry(1, 'Replacement row')], 1));
+		expect(cache.needsSnapshotRecovery('chat')).toBe(false);
+		expect(cache.readAppliedCursor('chat')?.stale).toBe(false);
+		cache.remove('chat');
+	});
+
+	it('retires competing operations but not the installer on replacement', () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.replaceFromPage('chat', page('a', [entry(1, 'one')]));
+		const installer = cache.openViewLease('chat');
+		const competitor = cache.openViewLease('chat');
+		expect(installer.accept('b')).toEqual({ viewId: 'b', previousViewId: 'a', replaced: true, resetOverlays: true });
+		expect(installer.isCurrent()).toBe(true);
+		expect(installer.continuationIsCurrent()).toBe(false);
+		expect(competitor.isCurrent()).toBe(false);
+		expect(competitor.accept('b')).toBeNull();
+		cache.remove('chat');
+		expect(installer.isCurrent()).toBe(false);
+		cache.replaceFromPage('chat', page('b', []));
+		expect(installer.accept('b')).toBeNull();
+		cache.flush();
+	});
+
+	it('admits matching cold responses without allowing viewless failures or conflicting responses', () => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 0 });
+		const cold = cache.openViewLease('chat');
+		cache.replaceFromPage('chat', page('b', [entry(1, 'one')]));
+		cache.flush();
+		expect(cache.get('chat')).toBeNull();
+		expect(cold.isLive()).toBe(true);
+		expect(cold.isCurrent()).toBe(false);
+		expect(cold.continuationIsCurrent()).toBe(true);
+		expect(cold.accept('a')).toBeNull();
+		expect(cold.accept('b')).toMatchObject({ replaced: false });
+		expect(cold.isCurrent()).toBe(true);
+	});
+
+	it('distinguishes refreshing attempts from retiring an operation', () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		const lease = cache.openViewLease('chat');
+		const read = cache.trackSnapshotRead('chat');
+		cache.invalidateSnapshotReads('chat');
+		expect(read.isCurrent()).toBe(false);
+		expect(lease.isCurrent()).toBe(true);
+		expect(lease.continuationIsCurrent()).toBe(true);
+		cache.retireOperations('chat');
+		expect(lease.accept('b')).toBeNull();
+		read.release();
+	});
+
+	it('restores pending drafts before disk and rejects contradictory disk cursors', () => {
+		const storage = new LocalChatTranscriptStorage();
+		const cache = new ChatTranscriptCache({ limit: 2, maxHiddenEntries: 0, storage });
+		cache.replaceFromPage('chat', page('a', [entry(1, 'old')]));
+		cache.flush();
+		cache.replaceFromPage('chat', { ...page('b', [entry(4, 'new')], 5), nextBeforeOrdinal: 3, hasMore: true });
+		expect(cache.hydrate('chat')).toMatchObject({ transcriptViewId: 'b', lastOrdinal: 5, nextBeforeOrdinal: 3 });
+		cache.markStale('chat');
+		expect(cache.hydrate('chat')).toBeNull();
+		expect(cache.listCursors()).toEqual([]);
+		expect(storage.restore('chat')?.transcriptViewId).toBe('a');
+		expect(cache.acceptedView('chat')).toBe('b');
+	});
+
+	it('keeps view identity through data loss but retires it on inventory pruning', () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.replaceFromPage('chat', page('a', []));
+		cache.discardData('chat');
+		expect(cache.acceptedView('chat')).toBe('a');
+		expect(cache.applyMessages('chat', 'b', { firstOrdinal: 1, lastOrdinal: 1, messages: [entry(1, 'late')] }).status).toBe('view-changed');
+		const lease = cache.openViewLease('chat');
+		cache.setMountedChatIds(['chat']);
+		cache.retainChats(new Set());
+		expect(lease.isCurrent()).toBe(true);
+		cache.setMountedChatIds([]);
+		cache.retainChats(new Set());
+		expect(lease.isCurrent()).toBe(false);
+		expect(cache.acceptedView('chat')).toBeNull();
+		cache.flush();
+	});
+
+	it('clears overlays once for matching announcement and reply, including after eviction', () => {
+		const cache = new ChatTranscriptCache({ limit: 100, maxHiddenEntries: 0 });
+		cache.replaceFromPage('chat', page('a', []));
+		const reload = cache.captureReload('chat');
+		expect(cache.announceReplacement('chat', 'b')).toBe('reset');
+		expect(cache.announceReplacement('chat', null)).toBe('unchanged');
+		expect(reload.canApply('b')).toBe(true);
+		expect(cache.openViewLease('chat').accept('b')).toEqual({ viewId: 'b', previousViewId: 'a', replaced: true, resetOverlays: false });
+		expect(cache.announceReplacement('chat', 'b')).toBe('unchanged');
+		expect(reload.isCurrent()).toBe(false);
+		cache.flush();
+	});
+
+	it('refuses an old initial live batch after a named replacement discards its rows', () => {
+		const cache = new ChatTranscriptCache({ limit: 100 });
+		cache.replaceFromPage('chat', page('a', [entry(1, 'old')]));
+		cache.announceReplacement('chat', 'b');
+		cache.discardData('chat');
+		expect(cache.applyMessages('chat', 'a', { firstOrdinal: 1, lastOrdinal: 1, messages: [entry(1, 'late')] }).status).toBe('view-changed');
+		expect(cache.get('chat')).toBeNull();
+		expect(cache.applyMessages('chat', 'b', { firstOrdinal: 1, lastOrdinal: 1, messages: [entry(1, 'new')] }).status).toBe('applied');
+		expect(cache.acceptedView('chat')).toBe('b');
+		cache.remove('chat');
+	});
+
 	it.each(['remove', 'replace'] as const)('repairs a snapshot after another writer performs %s and a duplicate arrives', (action) => {
 		const storage = new LocalChatTranscriptStorage();
 		const cache = new ChatTranscriptCache({ storage, limit: 100 });

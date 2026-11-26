@@ -41,6 +41,7 @@ export interface CodexExecutionRequest extends CodexThreadConfiguration {
   readonly envOverrides?: Record<string, string>;
   readonly codexConfig?: CodexProviderConfig;
   readonly operation: CodexRuntimeOperation;
+  readonly publicationSignal?: AbortSignal;
 }
 
 export interface CodexRuntimeOperation extends AgentRuntimeOperation {

@@ -24,7 +24,7 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 		processingPhase,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { thinkingMode: 'auto' } },
 		...overrides,
 		parentChatId: overrides.parentChatId ?? null,

@@ -16,7 +16,6 @@ import type { ConversationPanelRegistry } from './conversation-panel-registry.sv
 export class CurrentConversationPanelTranscript implements ActiveTranscriptPort {
 	readonly transcriptCache;
 	readonly #fallback;
-	#fallbackLoadEpoch = 0;
 
 	constructor(
 		private readonly options: {
@@ -27,6 +26,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		this.transcriptCache = options.panels.transcriptCache;
 		this.#fallback = new ActiveTranscriptState(this.transcriptCache, null, {
 			onRecoveredMessages: options.panels.observeRecoveredMessages,
+			onSnapshotViewAccepted: options.panels.observeAcceptedTranscriptView,
 			onSnapshotResendCandidates: (chatId, candidates, frontier) => {
 				options.panels.publishSnapshotResendCandidates(chatId, candidates, frontier);
 			},
@@ -166,13 +166,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	async loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]> {
 		const panel = this.#panelForChat(chatId);
 		if (!panel) {
-			const epoch = ++this.#fallbackLoadEpoch;
 			const messages = await this.#fallback.loadMessages(chatId, options);
-			if (epoch === this.#fallbackLoadEpoch && this.#fallback.activeChatId === chatId) {
-				for (const mounted of this.options.panels.panelsForChat(chatId)) {
-					mounted.installInitialSnapshot();
-				}
-			}
 			return this.#panelForChat(chatId)?.transcript.chatMessages ?? messages;
 		}
 		await this.options.panels.loadChatSnapshot(chatId, options);
@@ -252,7 +246,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 	}
 
 	#activateFallback(chatId: string | null): ChatRestoreResult | null {
-		this.#fallbackLoadEpoch += 1;
 		return this.#fallback.activateChat(chatId);
 	}
 

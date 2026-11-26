@@ -101,6 +101,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   readonly #readControlRunOptions: (chatId: string, signal: AbortSignal) => Promise<RunAgentTurnOptions>;
   #chatExists: ChatExistsResolver;
   #canDispatch: (chatId: string) => boolean;
+  readonly #assertChatExecutable: (chatId: string) => void;
   #projectAdmission: ProjectAdmissionPort;
   #queueDrainer: QueueDrainer;
   #controlOperations: ChatExecutionControlOperations;
@@ -125,12 +126,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (!inputTranscript) throw new Error('ChatExecutionCoordinator requires an input transcript');
     if (!getDrainOptions) throw new Error('ChatExecutionCoordinator requires a drain option resolver');
     if (!chatExists) throw new Error('ChatExecutionCoordinator requires a chat existence resolver');
-    if (!controls) {
-      throw new Error('ChatExecutionCoordinator requires an execution control repository');
-    }
-    if (!options?.projectAdmission) {
-      throw new Error('ChatExecutionCoordinator requires project admission');
-    }
+    if (!controls) throw new Error('ChatExecutionCoordinator requires an execution control repository');
+    if (!options?.projectAdmission) throw new Error('ChatExecutionCoordinator requires project admission');
     if (!options.attachmentAdmission) {
       throw new Error('ChatExecutionCoordinator requires attachment admission');
     }
@@ -145,6 +142,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       selectionAdmissionLock.runExclusive(`chat:${chatId}`, async () => getDrainOptions(chatId), signal);
     this.#chatExists = chatExists;
     this.#canDispatch = options.canDispatch;
+    if (typeof options.assertChatExecutable !== 'function') throw new Error('ChatExecutionCoordinator requires execution admission policy');
+    this.#assertChatExecutable = options.assertChatExecutable;
     this.#projectAdmission = options.projectAdmission;
     this.#acceptedInputTranscript = new AcceptedInputTranscript(inputTranscript);
     this.#controlOperations = new ChatExecutionControlOperations(controls, {
@@ -485,6 +484,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
+    this.#assertChatExecutable(chatId);
 
     const control = await this.#controlOperations.read(chatId);
     signal.throwIfAborted();
@@ -505,6 +505,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
+    this.#assertChatExecutable(chatId);
     await this.#controlOperations.enqueueControl(chatId, input);
     this.#requestDrain(chatId, 'server control input');
     return 'queued';

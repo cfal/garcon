@@ -7,6 +7,7 @@ import type {
 
 interface PendingReload {
 	readonly chatId: string;
+	readonly source: 'session' | 'native-child';
 	readonly candidates: readonly ResendCandidate[];
 	readonly complete: () => void;
 	readonly fail: (error: unknown) => void;
@@ -33,6 +34,10 @@ export class ReloadChatDialogState {
 		return this.#pending?.candidates ?? [];
 	}
 
+	get source(): 'session' | 'native-child' {
+		return this.#pending?.source ?? 'session';
+	}
+
 	get running(): boolean {
 		return this.#cancellation !== null;
 	}
@@ -46,9 +51,9 @@ export class ReloadChatDialogState {
 	}
 
 	/** Opens the confirmation. Settles when it is dismissed or the reload ends. */
-	request(chatId: string, candidates: readonly ResendCandidate[]): Promise<void> {
+	request(chatId: string, candidates: readonly ResendCandidate[], source: 'session' | 'native-child' = 'session'): Promise<void> {
 		return new Promise<void>((complete, fail) => {
-			this.#pending = { chatId, candidates, complete, fail };
+			this.#pending = { chatId, candidates: source === 'native-child' ? [] : candidates, source, complete, fail };
 		});
 	}
 

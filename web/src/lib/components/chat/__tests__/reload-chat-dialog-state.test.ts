@@ -5,6 +5,16 @@ import { ReloadChatDialogState } from '../reload-chat-dialog-state.svelte.js';
 const CANDIDATES = [{ ordinal: 3, content: 'unsent', attachmentNames: [] }];
 
 describe('ReloadChatDialogState', () => {
+	it('captures the observer warning and never offers observed input as resend candidates', async () => {
+		const dialog = new ReloadChatDialogState();
+		const requested = dialog.request('child-1', CANDIDATES, 'native-child');
+		expect(dialog.source).toBe('native-child');
+		expect(dialog.candidates).toEqual([]);
+		dialog.cancel();
+		await requested;
+		expect(dialog.source).toBe('session');
+	});
+
 	it('settles a dismissed confirmation without running a reload', async () => {
 		const dialog = new ReloadChatDialogState();
 		const requested = dialog.request('chat-1', CANDIDATES);

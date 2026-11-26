@@ -23,10 +23,11 @@ for (const dialer of ['controller', 'worker'] as const) {
         return String(reply);
       };
       const integration = await fixture.executor.getAgentIntegration('test');
-      await expect(integration.singleQuery!.run({
+      const queryFailure = await integration.singleQuery!.run({
         prompt: 'Synthetic query', model: 'test-model', thinkingMode: 'medium',
         settings: integration.settings.defaults(), endpoint: null, signal: new AbortController().signal,
-      })).rejects.toMatchObject({ code: 'PROVIDER_FAILURE', message: 'Malformed data' });
+      }).then(() => null, error => error);
+      expect(queryFailure).toMatchObject({ code: 'PROVIDER_FAILURE', message: 'Malformed data' });
 
       expect(redactionWarnings(warn)).toEqual([redactedCall('singleQuery.run')]);
       expect(JSON.stringify(warn.mock.calls)).not.toContain('SYNTHETIC_SENTINEL');
@@ -43,7 +44,8 @@ for (const dialer of ['controller', 'worker'] as const) {
     try {
       fixture.generations[0]!.hooks.start = async () => { JSON.parse('{"run": SYNTHETIC_SENTINEL}'); };
       const integration = await fixture.executor.getAgentIntegration('test');
-      await expect(integration.execution.start(await requestFor(integration))).rejects.toMatchObject({ message: 'Malformed data' });
+      const startFailure = await integration.execution.start(await requestFor(integration)).then(() => null, error => error);
+      expect(startFailure).toMatchObject({ message: 'Malformed data' });
 
       expect(redactionWarnings(warn)).toEqual([redactedCall('execution.start')]);
       expect(JSON.stringify(warn.mock.calls)).not.toContain('SYNTHETIC_SENTINEL');

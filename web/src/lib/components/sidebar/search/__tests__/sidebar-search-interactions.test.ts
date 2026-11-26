@@ -35,7 +35,7 @@ function createChat(id: string, title: string): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,
 		lastMessage: `${title} preview`,

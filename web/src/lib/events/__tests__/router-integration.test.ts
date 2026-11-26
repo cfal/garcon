@@ -11,7 +11,7 @@ import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/convers
 import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
-import { AssistantMessage, BashToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, EnterPlanModeToolUseMessage, ExitPlanModeToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
 import type { CompleteChatHistoryResponse } from '$shared/chat-view';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
@@ -103,7 +103,7 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: 'epoch-1',
 		tags: [],
@@ -144,7 +144,7 @@ function chatSnapshot(transcriptViewId: string): ChatSnapshotResponse {
 			projectPath: '/repo',
 			tags: [],
 			activityStatus: null,
-			canReloadFromNativeHistory: false,
+			observation: null, canReloadFromNativeHistory: false,
 			activity: { createdAt: TS, lastActivityAt: TS },
 		},
 		processingPhase: null,
@@ -163,6 +163,7 @@ function createStores(overrides: Partial<EventRouterStores> = {}): EventRouterSt
 			setPermissionMode: vi.fn(),
 		},
 		chatState: {
+			recheckChatTranscript: vi.fn(),
 			getCursor: vi.fn(() => ({ transcriptViewId: 'generation-current', lastOrdinal: 1 })),
 			getChatCursor: vi.fn(() => ({
 				transcriptViewId: 'generation-current',
@@ -585,7 +586,7 @@ describe('event router integration', () => {
 			...defaults, chatState: { ...defaults.chatState,
 				getChatCursor: chatId => cache.readAppliedCursor(chatId),
 				isRenderedChat: chatId => panels.panelsForChat(chatId).length > 0,
-				markRenderedChatStale: chatId => panels.handleViewReplacement(chatId),
+				markRenderedChatStale: (chatId, viewId) => panels.handleViewReplacement(chatId, viewId),
 				loadRenderedChat: async chatId => { await panels.loadChatSnapshot(chatId); },
 			},
 		} });
@@ -1161,7 +1162,7 @@ describe('event router integration', () => {
 
 		expect(calls).toEqual(['apply', 'reload']);
 		expect(stores.chatState.reloadChatTranscript).toHaveBeenCalledWith('chat-a');
-		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-a');
+		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-a', 'generation-new', 'generation-old');
 	});
 
 	it('marks background transcripts stale on transcript replacement', () => {
@@ -1179,7 +1180,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.markChatTranscriptStale).toHaveBeenCalledWith('chat-b', 'generation-new', 'generation-old');
 	});
 
 	it('reloads rendered background panels on transcript replacement', () => {
@@ -1206,7 +1207,7 @@ describe('event router integration', () => {
 			stores,
 		);
 
-		expect(stores.chatState.markRenderedChatStale).toHaveBeenCalledWith('chat-b');
+		expect(stores.chatState.markRenderedChatStale).toHaveBeenCalledWith('chat-b', 'generation-new', 'generation-old');
 		expect(stores.chatState.loadRenderedChat).toHaveBeenCalledWith('chat-b');
 		expect(stores.chatState.markChatTranscriptStale).not.toHaveBeenCalled();
 	});
@@ -1222,6 +1223,168 @@ describe('event router integration', () => {
 		}], stores);
 		await vi.waitFor(() => expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(snapshot.transientFeed));
 		expect(getChatSnapshot).toHaveBeenCalledOnce();
+	});
+
+	it('does not announce unavailable transient placeholder IDs as replacement views', async () => {
+		const stores = createStores();
+		stores.conversationUi.setTransientFeedFromSnapshot(transientFeed('generation-old'));
+		const snapshot = { ...chatSnapshot('pending:7'), transcript: { availability: 'unavailable' as const,
+			errorCode: 'HISTORY_LOAD_FAILED', retryable: true, message: 'Unavailable transcript' } };
+		vi.mocked(getChatSnapshot).mockResolvedValue(snapshot);
+		renderRouterWithRawMessages([{ type: 'chat-transient-feed-mutation', ...transientFeed('generation-new', 2),
+			mutation: { kind: 'clear-run', runId: 'run' } }], stores);
+		await vi.waitFor(() => expect(stores.chatState.recheckChatTranscript).toHaveBeenCalledWith('chat-a'));
+		expect(stores.chatState.markChatTranscriptStale).not.toHaveBeenCalled();
+	});
+
+	it('qualifies delayed transient replacement snapshots with their captured view', async () => {
+		const stores = createStores();
+		stores.conversationUi.setTransientFeedFromSnapshot(transientFeed('generation-old'));
+		const held = Promise.withResolvers<ChatSnapshotResponse>();
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(held.promise);
+		renderRouterWithRawMessages([{ type: 'chat-transient-feed-mutation', ...transientFeed('generation-intermediate', 2),
+			mutation: { kind: 'clear-run', runId: 'run' } }], stores);
+		held.resolve({ ...chatSnapshot('generation-intermediate'), transcript: { availability: 'available',
+			transcriptViewId: 'generation-intermediate', messages: [], lastOrdinal: 0,
+			pageOldestOrdinal: 0, pageNewestOrdinal: 0, nextBeforeOrdinal: null, hasMore: false } });
+		await vi.waitFor(() => expect(stores.chatState.markChatTranscriptStale)
+			.toHaveBeenCalledWith('chat-a', 'generation-intermediate', 'generation-old'));
+	});
+
+	it.each(['generation-new', 'generation-newer'])('preserves permissions already on %s when an older replacement arrives', view => {
+		const stores = createStores();
+		stores.conversationUi.activateTransientFeed('chat-a');
+		const feed = { ...transientFeed(view), rows: [{
+			permissionOccurrenceId: 'permission-current', runId: 'run', displayOrder: 1,
+			transcript: { transcriptViewId: view, afterOrdinal: 1 },
+			message: new PermissionRequestMessage(TS, 'permission-current', new BashToolUseMessage(TS, 'tool', 'pwd')),
+		}] };
+		stores.conversationUi.setTransientFeedFromSnapshot(feed);
+		vi.mocked(getChatSnapshot).mockResolvedValue({ ...chatSnapshot(view), transientFeed: feed });
+		renderRouterWithRawMessages([{ type: 'chat-transcript-replaced', chatId: 'chat-a',
+			previousTranscriptViewId: 'generation-old', transcriptViewId: 'generation-new', lastOrdinal: 1 }], stores);
+		expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(feed);
+		expect(stores.conversationUi.pendingPermissionRequests.map(request => request.permissionOccurrenceId)).toEqual(['permission-current']);
+	});
+
+	it.each(['pending:epoch-1', 'generation-old'])('recovers permissions from a mismatched %s feed after a missed replacement', async previous => {
+		const socket = new RouterTestSocket();
+		vi.stubGlobal('WebSocket', class extends RouterTestSocket { constructor() { super(); return socket; } });
+		const connection = new WsConnection();
+		const stores = createStores();
+		stores.conversationUi.activateTransientFeed('chat-a');
+		const router = render(RouterIntegrationHost, { connection, drainHandle: createDrainCursor(connection), stores });
+		try {
+			connection.connect('token');
+			socket.open();
+			socket.message({ type: 'chat-transcript-replaced', chatId: 'chat-a',
+				previousTranscriptViewId: 'generation-first', transcriptViewId: 'generation-old', lastOrdinal: 1 });
+			flushSync();
+			const oldFeed = transientFeed(previous, 2);
+			stores.conversationUi.setTransientFeedFromSnapshot(oldFeed);
+			vi.mocked(stores.chatState.getChatCursor).mockReturnValue({ transcriptViewId: 'generation-middle', lastOrdinal: 2 });
+			const held = Promise.withResolvers<ChatSnapshotResponse>();
+			vi.mocked(getChatSnapshot).mockReturnValueOnce(held.promise);
+			socket.message({ type: 'chat-transcript-replaced', chatId: 'chat-a',
+				previousTranscriptViewId: 'generation-middle', transcriptViewId: 'generation-new', lastOrdinal: 1 });
+			flushSync();
+			expect(getChatSnapshot).toHaveBeenCalledOnce();
+			expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(oldFeed);
+			held.reject(new Error('Synthetic offline snapshot'));
+			await held.promise.catch(() => {});
+			const permission = { permissionOccurrenceId: 'permission-new', runId: 'run-new', displayOrder: 1,
+				transcript: { transcriptViewId: 'generation-new', afterOrdinal: 1 },
+				message: new PermissionRequestMessage(TS, 'permission-new', new BashToolUseMessage(TS, 'tool-new', 'pwd')) };
+			const snapshot = { ...chatSnapshot('generation-new'), transientFeed: { ...transientFeed('generation-new', 1), rows: [permission] } };
+			vi.mocked(getChatSnapshot).mockResolvedValue(snapshot);
+			socket.message({ type: 'chat-transient-feed-mutation', ...transientFeed('generation-new', 1),
+				mutation: { kind: 'upsert', row: permission } });
+			flushSync();
+			await vi.waitFor(() => expect(stores.conversationUi.pendingPermissionRequests.map(request => request.permissionOccurrenceId)).toEqual(['permission-new']));
+			expect(getChatSnapshot).toHaveBeenCalledTimes(2);
+		} finally {
+			router.unmount();
+			connection.disconnect();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('fences a mismatched replacement recheck when a newer feed wins the read', async () => {
+		const stores = createStores();
+		stores.conversationUi.setTransientFeedFromSnapshot(transientFeed('generation-third'));
+		const held = Promise.withResolvers<ChatSnapshotResponse>();
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(held.promise);
+		renderRouterWithRawMessages([{ type: 'chat-transcript-replaced', chatId: 'chat-a',
+			previousTranscriptViewId: 'generation-old', transcriptViewId: 'generation-new', lastOrdinal: 1 }], stores);
+		expect(getChatSnapshot).toHaveBeenCalledOnce();
+		const current = transientFeed('generation-fourth');
+		stores.conversationUi.setTransientFeedFromSnapshot(current);
+		held.resolve(chatSnapshot('generation-third'));
+		await held.promise;
+		await Promise.resolve();
+		expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(current);
+	});
+
+	it('retires pre-event feed reads even while a mismatched replacement preserves the installed feed', async () => {
+		const stores = createStores();
+		stores.conversationUi.activateTransientFeed('chat-a');
+		stores.conversationUi.setTransientFeedFromSnapshot(transientFeed('generation-old'));
+		const retired = Promise.withResolvers<ChatSnapshotResponse>();
+		const current = Promise.withResolvers<ChatSnapshotResponse>();
+		const mutation = Promise.withResolvers<ChatSnapshotResponse>();
+		vi.mocked(getChatSnapshot).mockReturnValueOnce(retired.promise).mockReturnValueOnce(current.promise).mockReturnValueOnce(mutation.promise);
+		renderRouterWithRawMessages([
+			{ type: 'chat-transient-feed-mutation', ...transientFeed('generation-middle', 1), mutation: { kind: 'clear-run', runId: 'middle' } },
+			{ type: 'chat-transcript-replaced', chatId: 'chat-a', previousTranscriptViewId: 'generation-middle', transcriptViewId: 'generation-new', lastOrdinal: 1 },
+			{ type: 'chat-transient-feed-mutation', ...transientFeed('generation-new', 1), mutation: { kind: 'clear-run', runId: 'new' } },
+		], stores);
+		expect(getChatSnapshot).toHaveBeenCalledTimes(3);
+		retired.resolve(chatSnapshot('generation-middle'));
+		await retired.promise;
+		await Promise.resolve();
+		expect(stores.conversationUi.getTransientFeed('chat-a')?.transcriptViewId).toBe('generation-old');
+		const snapshot = { ...chatSnapshot('generation-new'), transientFeed: { ...transientFeed('generation-new', 1), rows: [{
+			permissionOccurrenceId: 'permission-new', runId: 'run-new', displayOrder: 1,
+			transcript: { transcriptViewId: 'generation-new', afterOrdinal: 1 },
+			message: new PermissionRequestMessage(TS, 'permission-new', new BashToolUseMessage(TS, 'tool-new', 'pwd')),
+		}] } };
+		current.resolve(snapshot);
+		mutation.resolve(snapshot);
+		await vi.waitFor(() => expect(stores.conversationUi.pendingPermissionRequests.map(request => request.permissionOccurrenceId)).toEqual(['permission-new']));
+	});
+
+	it('only rechecks an unchanged ledger when the transient recheck reports unavailable history', async () => {
+		const stores = createStores();
+		stores.conversationUi.setTransientFeedFromSnapshot(transientFeed('generation-current', 1));
+		vi.mocked(getChatSnapshot).mockResolvedValue({ ...chatSnapshot('generation-current'),
+			transientFeed: transientFeed('generation-current', 2), transcript: { availability: 'unavailable',
+				errorCode: 'HISTORY_LOAD_FAILED', retryable: true, message: 'Synthetic unavailable history' } });
+		renderRouterWithRawMessages([{ type: 'chat-transcript-replaced', chatId: 'chat-a',
+			previousTranscriptViewId: 'generation-old', transcriptViewId: 'generation-middle', lastOrdinal: 1 }], stores);
+		await vi.waitFor(() => expect(stores.chatState.recheckChatTranscript).toHaveBeenCalledWith('chat-a'));
+		expect(vi.mocked(stores.chatState.markChatTranscriptStale).mock.calls).toEqual([['chat-a', 'generation-middle', 'generation-old']]);
+		expect(stores.conversationUi.getTransientFeed('chat-a')?.transcriptViewId).toBe('generation-current');
+	});
+
+	it('retires old plan controls separately from an already installed destination permission feed', () => {
+		const stores = createStores();
+		stores.conversationUi.activateTransientFeed('chat-a');
+		const feed = { ...transientFeed('generation-new', 1), rows: [{
+			permissionOccurrenceId: 'permission-new', runId: 'run-new', displayOrder: 1,
+			transcript: { transcriptViewId: 'generation-new', afterOrdinal: 1 },
+			message: new PermissionRequestMessage(TS, 'permission-new', new BashToolUseMessage(TS, 'tool-new', 'pwd')),
+		}] };
+		stores.conversationUi.setTransientFeedFromSnapshot(feed);
+		renderRouterWithRawMessages([
+			{ type: 'chat-messages', chatId: 'chat-a', transcriptViewId: 'generation-old', firstOrdinal: 1, lastOrdinal: 2,
+				resendCandidates: [], messages: [rawMessage(1, { ...new EnterPlanModeToolUseMessage(TS, 'enter-old') }),
+					rawMessage(2, { ...new ExitPlanModeToolUseMessage(TS, 'exit-old', 'Synthetic plan') })] },
+			{ type: 'chat-transcript-replaced', chatId: 'chat-a', previousTranscriptViewId: 'generation-old',
+				transcriptViewId: 'generation-new', lastOrdinal: 1 },
+		], stores);
+		expect(stores.conversationUi.getTransientFeed('chat-a')).toEqual(feed);
+		expect(stores.conversationUi.pendingPermissionRequests.map(request => request.permissionOccurrenceId)).toEqual(['permission-new']);
+		expect(stores.conversationUi.previousPermissionModeFor('chat-a')).toBeNull();
 	});
 
 	it.each([

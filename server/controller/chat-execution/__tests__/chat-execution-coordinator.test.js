@@ -90,6 +90,7 @@ function createFixture(overrides = {}) {
       projectAdmission,
       attachmentAdmission,
       canDispatch: overrides.canDispatch ?? (() => true),
+      assertChatExecutable: overrides.assertChatExecutable ?? (() => {}),
       executionPolicy: overrides.executionPolicy,
       workingDirectorySettlement: overrides.workingDirectorySettlement,
       unsettledQueueReceiptKeys: () => new Set(),

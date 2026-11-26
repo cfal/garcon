@@ -1075,6 +1075,12 @@ CLI exit codes:
 
 ## Presentation Rows And Stop
 
+Native subagent chats are read-only observations. `add-row`, input, queue,
+steering, Stop, fork, and handoff operations reject them with `CHAT_READ_ONLY`;
+this applies equally to controller HTTP and an executor's CLI gateway. History,
+export, metadata organization, and deletion remain available. Deleting an
+observer never stops or releases the provider's native child.
+
 `add-row` appends a durable presentation-only row without submitting agent work. It is excluded from model context and transcript search.
 
 ```bash

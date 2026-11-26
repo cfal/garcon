@@ -1,12 +1,10 @@
-import type { ChatTranscriptSnapshot } from './chat-transcript-cache.svelte.js';
-import type { ChatMessage } from '$shared/chat-types';
+import type { ChatTranscriptSnapshot, TranscriptViewLease } from './chat-transcript-cache.svelte.js';
+import type { TranscriptHeadResult } from './transcript-head-coordinator.js';
 import type { ChatHistoryState, ResendCandidate, TranscriptMessage, TranscriptPage } from '$shared/chat-view';
-import { TRANSCRIPT_ANCHOR_TARGET } from '$shared/transcript-anchor-page';
-import type { ActiveTranscriptState, ActiveTranscriptStateOptions, MessageApplyResult } from './active-transcript-state.svelte.js';
+import type { ActiveTranscriptState, ActiveTranscriptStateOptions, PageApplyResult } from './active-transcript-state.svelte.js';
 import type { ChatLoadMessagesOptions } from './active-transcript-port.js';
 import type { ConversationFeedMutationKind } from './conversation-feed-mutations.js';
-import { loadTranscriptAnchorSnapshot, type TranscriptAnchorSnapshot, type TranscriptAnchorSnapshotResult } from './transcript-anchor-demand.js';
-import { collapseBackwardTranscriptDemand, loadTranscriptPageDemand, type TranscriptPageDemandResult } from './transcript-page-demand.js';
+import type { TranscriptAnchorSnapshot } from './transcript-anchor-demand.js';
 import { mergeTranscriptEntriesByOrdinal, retainTranscriptEntries, retainedEarlierPageCursor } from './transcript-page-progress.js';
 import { responseMessageTypesAfter } from './transcript-row-projection.js';
 import { transcriptSnapshotInstallMode, type TranscriptSnapshotInstallMode, type TranscriptWindowPage } from './transcript-window-loader.js';
@@ -25,7 +23,6 @@ type TranscriptSnapshotHost = Pick<ActiveTranscriptState,
 	| 'loadStatus'
 	| 'loadedThroughOrdinal'
 	| 'nextBeforeOrdinal'
-	| 'recoverTranscriptCursorAhead'
 	| 'setResendCandidates'
 	| 'transcriptCache'
 	| 'transcriptViewId'
@@ -33,11 +30,10 @@ type TranscriptSnapshotHost = Pick<ActiveTranscriptState,
 >;
 
 interface TranscriptSnapshotLoaderOptions {
-	pageSize: number;
 	isCurrentLoad(epoch: number): boolean;
 	finishFailedLoad(chatId: string, epoch: number): boolean;
 	installPage(chatId: string, page: TranscriptWindowPage, epoch: number,
-		mode?: TranscriptSnapshotInstallMode, anchorSnapshot?: TranscriptAnchorSnapshot): MessageApplyResult | 'stale';
+		mode?: TranscriptSnapshotInstallMode, anchorSnapshot?: TranscriptAnchorSnapshot, lease?: TranscriptViewLease): PageApplyResult;
 	onHistoryUnavailable(chatId: string, history: Exclude<ChatHistoryState, { kind: 'complete' }>): void;
 	onSnapshotResendCandidates?: ActiveTranscriptStateOptions['onSnapshotResendCandidates'];
 	growVisibleWindow(): void;
@@ -52,7 +48,7 @@ export class TranscriptSnapshotLoader {
 		private readonly options: TranscriptSnapshotLoaderOptions,
 	) {}
 
-	installCachedSnapshot(chatId: string): MessageApplyResult | 'stale' {
+	installCachedSnapshot(chatId: string, lease?: TranscriptViewLease): PageApplyResult {
 		const snapshot = this.restoreCache(chatId);
 		if (!snapshot || snapshot.stale) return 'stale';
 		const epoch = this.host.beginSnapshotLoad();
@@ -68,6 +64,9 @@ export class TranscriptSnapshotLoader {
 				hasMore: snapshot.nextBeforeOrdinal !== null,
 			},
 			epoch,
+			undefined,
+			undefined,
+			lease,
 		);
 	}
 
@@ -195,123 +194,49 @@ export class TranscriptSnapshotLoader {
 		this.options.onApplied('replacement');
 	}
 
-	async load(
-		chatId: string,
-		options: ChatLoadMessagesOptions = {},
-	): Promise<ChatMessage[]> {
-		if (!chatId) return [];
-		const limit = Math.max(
-			this.options.pageSize,
-			Math.floor(options.minimumLimit ?? this.options.pageSize),
-		);
-		const maxAttempts = 2;
-
-		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-			const snapshotRead = this.host.transcriptCache.trackSnapshotRead(chatId);
-			const cachedCursorAtStart = this.host.transcriptCache.readAppliedCursor(chatId);
-			const cachedViewAtStart = cachedCursorAtStart?.transcriptViewId;
-			const epoch = this.host.beginSnapshotLoad();
-			const isCurrent = () => this.options.isCurrentLoad(epoch)
-				&& snapshotRead.isCurrent()
-				&& (!this.host.activeChatId || this.host.activeChatId === chatId);
-			try {
-				let demand: TranscriptAnchorSnapshotResult | TranscriptPageDemandResult;
-				if (this.host.combinedMode) {
-					const knownHeads = [{ transcriptViewId: this.host.transcriptViewId, lastOrdinal: this.host.lastOrdinal }];
-					if (cachedCursorAtStart) knownHeads.push(cachedCursorAtStart);
-					demand = await loadTranscriptAnchorSnapshot({
-						knownHeads,
-						request: {
-							chatId,
-							direction: 'backward',
-							anchorsRemaining: TRANSCRIPT_ANCHOR_TARGET,
-							...(options.purpose ? { purpose: options.purpose } : {}),
-						},
-						isCurrent,
-						isDisjoint: (page) => transcriptSnapshotInstallMode({
-							activeChatId: this.host.activeChatId,
-							chatId,
-							transcriptViewId: this.host.transcriptViewId,
-							entryCount: this.host.entries.length,
-							loadedThroughOrdinal: this.host.loadedThroughOrdinal,
-							nextBeforeOrdinal: this.host.nextBeforeOrdinal,
-							page,
-						}) === 'preserve-window',
-					});
-				} else {
-					demand = await loadTranscriptPageDemand({
-						direction: 'backward',
-						chatId,
-						visibleLimit: limit,
-						purpose: options.purpose,
-						isCurrent,
-					});
-				}
-				if (demand.kind === 'invalidated' || !isCurrent()) {
-					this.host.abortSnapshotLoad(epoch);
-					return this.host.chatMessages;
-				}
-				const cachedView = this.host.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId;
-				let responseView: string | undefined;
-				if (demand.kind === 'complete') {
-					responseView = 'finalChunk' in demand
-						? demand.page.transcriptViewId
-						: demand.pages[0]?.transcriptViewId;
-				}
-				// Independent snapshot owners must not restore a view replaced in the shared cache.
-				if (cachedView && cachedView !== cachedViewAtStart && cachedView !== responseView) {
-					this.host.abortSnapshotLoad(epoch);
-					if (this.installCachedSnapshot(chatId) === 'applied') return this.host.chatMessages;
-					continue;
-				}
-				if (demand.kind === 'unavailable') {
-					if (!this.options.isCurrentLoad(epoch)) return this.host.chatMessages;
-					this.options.onHistoryUnavailable(chatId, demand.response.historyState);
-					return [];
-				}
-				if (demand.kind === 'view-changed') {
-					this.host.abortSnapshotLoad(epoch);
-					continue;
-				}
-				if (demand.kind === 'cursor-ahead') {
-					await this.host.recoverTranscriptCursorAhead(chatId, demand.transcriptViewId ?? this.host.transcriptViewId);
-					if (this.options.isCurrentLoad(epoch)) {
-						this.host.abortSnapshotLoad(epoch);
-						continue;
-					}
-					return this.host.chatMessages;
-				}
-				let page: TranscriptWindowPage;
-				let anchorSnapshot: TranscriptAnchorSnapshot | undefined;
-				if ('finalChunk' in demand) {
-					page = demand.page;
-					anchorSnapshot = demand;
-				} else {
-					page = collapseBackwardTranscriptDemand(demand);
-				}
-				const result = this.options.installPage(chatId, page, epoch, undefined, anchorSnapshot);
-
-				if (result === 'applied' || result === 'stale') return this.host.chatMessages;
-
-				this.host.abortSnapshotLoad(epoch);
-			} catch (error) {
-				if (this.options.finishFailedLoad(chatId, epoch)) {
-					this.host.loadStatus = 'error';
-					this.host.loadError = error instanceof Error ? error.message : 'Failed to load messages';
-				}
-				throw error;
-			} finally {
-				snapshotRead.release();
+	async load(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<TranscriptHeadResult> {
+		if (!chatId) return { kind: 'invalidated' };
+		const epoch = this.host.beginSnapshotLoad();
+		const lease = this.host.transcriptCache.openViewLease(chatId);
+		const knownHeads = [{ transcriptViewId: this.host.transcriptViewId, lastOrdinal: this.host.lastOrdinal }];
+		const cached = this.host.transcriptCache.readAppliedCursor(chatId);
+		if (cached) knownHeads.push(cached);
+		const window = { activeChatId: this.host.activeChatId, chatId, transcriptViewId: this.host.transcriptViewId,
+			entryCount: this.host.entries.length, loadedThroughOrdinal: this.host.loadedThroughOrdinal,
+			nextBeforeOrdinal: this.host.nextBeforeOrdinal };
+		try {
+			const result = await this.host.transcriptCache.headReads.load(chatId, {
+				...options, combinedMode: this.host.combinedMode, knownHeads,
+				isDisjoint: page => transcriptSnapshotInstallMode({ ...window, page }) === 'preserve-window',
+			});
+			if (!this.options.isCurrentLoad(epoch)) return result;
+			if (result.kind === 'unavailable' && result.lease.isCurrent()) {
+				this.options.onHistoryUnavailable(chatId, result.response.historyState);
+				return result;
 			}
+			if (result.kind === 'complete' && result.lease.isCurrent()) {
+				this.options.installPage(chatId, { ...result.page, resendCandidates: undefined }, epoch, result.resetWindow ? 'replace' : undefined,
+					result.anchorSnapshot, result.lease);
+				if (result.page.resendCandidates) this.publishResendCandidates(chatId, result.page.resendCandidates, result.frontier);
+			} else {
+				this.host.abortSnapshotLoad(epoch);
+				if (lease.isLive()) this.installCachedSnapshot(chatId);
+			}
+			return result;
+		} catch (error) {
+			if (!this.options.isCurrentLoad(epoch)) {
+				this.host.abortSnapshotLoad(epoch);
+				return { kind: 'invalidated' };
+			}
+			if (this.options.finishFailedLoad(chatId, epoch)) {
+				this.host.loadStatus = 'error';
+				this.host.loadError = error instanceof Error ? error.message : 'Failed to load messages';
+			}
+			throw error;
 		}
-
-		this.host.loadStatus = 'error';
-		this.host.loadError = 'Chat generation changed while loading messages';
-		throw new Error(this.host.loadError);
 	}
-
 	#publishSnapshotCache(chatId: string, page: TranscriptPage): void {
-		const current = this.host.transcriptCache.get(chatId);
+		const current = this.restoreCache(chatId);
 		if (current && !current.stale && current.transcriptViewId === page.transcriptViewId) {
 			if (current.lastOrdinal > page.pageNewestOrdinal) return;
 			if (current.lastOrdinal === page.pageNewestOrdinal

@@ -15,6 +15,7 @@ import { ConversationSessionController } from '$lib/chat/conversation/conversati
 import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 import { playCompletionSound } from '$lib/notifications/completion-sound.js';
 import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+import * as m from '$lib/paraglide/messages.js';
 
 vi.mock('$lib/notifications/completion-sound.js', () => ({ playCompletionSound: vi.fn() }));
 
@@ -98,6 +99,41 @@ const mockStopChat = vi.mocked(stopChat);
 const mockGetGitRefs = vi.mocked(getGitRefs);
 
 describe('ConversationWorkspace Escape abort handling', () => {
+	it('opens the native-child Reload warning through the registered workspace action', async () => {
+		let reload!: (chatId: string) => Promise<void>;
+		render(ConversationWorkspaceEscapeHost, {
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: false },
+			onRegisterReload: callback => { reload = callback; },
+		});
+		await waitFor(() => expect(reload).toBeTypeOf('function'));
+		const requested = reload('chat-1');
+		expect(await screen.findByText(m.chat_native_child_reload_description())).toBeTruthy();
+		expect(screen.queryByRole('list')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_cancel() }));
+		await requested;
+	});
+
+	it('hides the observer composer and blocks editor, Stop and sibling submit shortcuts', async () => {
+		let submit!: (message: string) => Promise<boolean>;
+		let append!: ChatDraftAppend;
+		const { container } = render(ConversationWorkspaceEscapeHost, {
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true },
+			onRegisterSubmit: callback => { submit = callback; },
+			onRegisterAppendToDraft: callback => { append = callback; },
+		});
+		await waitFor(() => expect(submit).toBeTypeOf('function'));
+		const host = container.querySelector<HTMLElement>('[data-conversation-composer-host]');
+		expect(host?.hidden).toBe(true);
+		expect(host?.inert).toBe(true);
+		expect(container.querySelector('[data-conversation-panel-composer-spacer]')).toBeNull();
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		await fireEvent.keyDown(window, { key: 'e', ctrlKey: true, shiftKey: true });
+		expect(screen.getByTestId('composer-editor-open-request').textContent).toBe('0');
+		expect(await submit('Review')).toBe(false);
+		expect(append('Review')).toBe('unavailable');
+		expect(mockStopChat).not.toHaveBeenCalled();
+	});
+
 	it.each(['conversation', 'literal', null] as const)('gates sibling prose and completion sounds with %s policy', async (executionPolicy) => {
 		const submit = vi.spyOn(ConversationSessionController.prototype, 'submitForChat').mockResolvedValue('accepted');
 		let registeredSubmit!: (message: string) => Promise<boolean>;

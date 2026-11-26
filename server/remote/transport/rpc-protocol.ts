@@ -8,6 +8,7 @@ import type {
   AgentIntegration,
   AgentHost,
   AgentHistoryImportRequest,
+  AgentNativeChildRef,
   AgentImportedTranscriptRow,
   AgentProducerBinding,
   AgentProducerNotification,
@@ -33,12 +34,12 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 64;
+export const EXECUTOR_PROTOCOL_REVISION = 70;
 
 export const NULLABLE_AGENT_FACETS = [
   'readiness',
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
-  'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',
+  'legacyHistoryImport', 'nativeHistoryImport', 'nativeChildObservation', 'nativeActivity', 'nativeSessions',
   'configurationValidation', 'sessionConfiguration', 'projectPathUpdates', 'usageHistory', 'cliUpdates',
 ] as const satisfies readonly (keyof AgentIntegration)[];
 
@@ -57,6 +58,10 @@ export interface IntegrationManifest {
 }
 
 export type HistoryReaderRef = AgentResourceRef<'history-reader'>;
+
+export type HistoryOpenRequest =
+  | { readonly source: 'legacyHistoryImport' | 'nativeHistoryImport'; readonly request: WithoutSignal<AgentHistoryImportRequest> }
+  | { readonly source: 'nativeChildObservation'; readonly request: { readonly child: AgentNativeChildRef } };
 
 export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, GitRpcMethods, CliRpcMethods {
   'executor.describe': Call<null, { readonly info: ExecutorInfo; readonly integrations: readonly IntegrationManifest[] }>;
@@ -99,7 +104,7 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'steering.steer': Call<Request<'steering', 'steer'>, Result<'steering', 'steer'>>;
   'endpoints.validate': Call<Request<'endpoints', 'validate'>, void>;
   'singleQuery.run': Call<WithoutSignal<Request<'singleQuery', 'run'>>, string>;
-  'history.open': Call<{ readonly source: 'legacyHistoryImport' | 'nativeHistoryImport'; readonly request: WithoutSignal<AgentHistoryImportRequest> }, HistoryReaderRef>;
+  'history.open': Call<HistoryOpenRequest, HistoryReaderRef>;
   // Pages are numbered from zero so a reader may keep several requests in flight.
   'history.next': Call<{ readonly reader: HistoryReaderRef; readonly page: number }, { readonly done: boolean; readonly rows: readonly AgentImportedTranscriptRow[] }>;
   'history.close': Call<HistoryReaderRef, void>;

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import ComposerInputSurface from './ComposerInputSurface.svelte';
 	import { PromptComposerMarkdownController } from './prompt-composer-markdown-controller.js';
@@ -595,10 +596,6 @@
 		}
 	}
 
-	function editSnippets(): void {
-		appShell.openSnippets(() => appShell.requestComposerFocus());
-	}
-
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
 		if (!fileMenuVisible && !slashMenuVisible) return false;
 		const menu = fileMenuVisible ? fileMentionMenu : slashCommandMenu;
@@ -681,7 +678,8 @@
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
-	const isDisabled = $derived(directAdmissionPending && sessions.selectedChat?.status === 'draft');
+	const isDisabled = $derived(!canExecuteChat(sessions.selectedChat)
+		|| (directAdmissionPending && sessions.selectedChat?.status === 'draft'));
 	const canFormat = $derived(
 		isVisible && isPresented && !isDisabled && !promptTransformPending && !ui.composerEditorOpen,
 	);
@@ -816,7 +814,7 @@
 			onReturnFocus={returnComposerFocus}
 			onEditSnippets={() => {
 				ui.snippetPalette.dismiss();
-				editSnippets();
+				appShell.openSnippets(() => appShell.requestComposerFocus());
 			}}
 		/>
 
@@ -868,57 +866,59 @@
 				onRecallReset={() => promptRecall.reset()}
 			/>
 
-			<ComposerBottomBar
-				modelControlsLeft={localSettings.modelControlsLeft}
-				image={{
-					supported: canAttachAttachments,
-					unavailableReason: m.chat_composer_image_attachments_unavailable(),
-					onSelect: () => attachmentController.pick(),
-				}}
-				onOpenSnippetPalette={() => void markdown.openSnippets()}
-				onOpenExpandedEditor={() => expandedEditor?.open()}
-				onRefinePrompt={() => {
-					returnComposerFocus();
-					promptRefinement.handleAction();
-				}}
-				canRefinePrompt={promptRefinement.canStart}
-				isPromptRefinementPending={promptRefinement.pending}
-				editingDisabled={isDisabled}
-				settingsDisabled={directAdmissionPending}
-				isPromptTransformPending={promptTransformPending}
-				{promptTransformStatus}
-				permission={{
-					options: permissionOptions,
-					selected: agentState.permissionMode,
-					onSelect: (mode) => {
-						agentState.permissionMode = mode;
-						onPermissionModeChange?.(mode);
-					},
-				}}
-				effort={{
-					options: thinkingOptions,
-					selected: agentState.thinkingMode,
-					onSelect: (mode) => {
-						agentState.thinkingMode = mode;
-						onThinkingModeChange?.(mode);
-					},
-				}}
-				send={{ enabled: canSubmit, title: sendTitle, onSend: () => handleFormSubmit() }}
-				executor={{
-					executors,
-					executorId: agentState.executorId,
-					onSelect: (id) => {
-						if (id !== agentState.executorId) onExecutorChange?.(id);
-					},
-				}}
-				agentSettings={{
-					descriptors: modelCatalog.getAgentSettingsDescriptors(agentState.agentId),
-					envelope: agentState.agentSettings,
-					defaults: modelCatalog.getDefaultAgentSettings(agentState.agentId),
-					onChange: onAgentSettingChange,
-				}}
-				model={{ ...activeModel, onChange: (next) => onModelChange?.(next) }}
-			/>
+			{#if canExecuteChat(sessions.selectedChat)}
+				<ComposerBottomBar
+					modelControlsLeft={localSettings.modelControlsLeft}
+					image={{
+						supported: canAttachAttachments,
+						unavailableReason: m.chat_composer_image_attachments_unavailable(),
+						onSelect: () => attachmentController.pick(),
+					}}
+					onOpenSnippetPalette={() => void markdown.openSnippets()}
+					onOpenExpandedEditor={() => expandedEditor?.open()}
+					onRefinePrompt={() => {
+						returnComposerFocus();
+						promptRefinement.handleAction();
+					}}
+					canRefinePrompt={promptRefinement.canStart}
+					isPromptRefinementPending={promptRefinement.pending}
+					editingDisabled={isDisabled}
+					settingsDisabled={directAdmissionPending}
+					isPromptTransformPending={promptTransformPending}
+					{promptTransformStatus}
+					permission={{
+						options: permissionOptions,
+						selected: agentState.permissionMode,
+						onSelect: (mode) => {
+							agentState.permissionMode = mode;
+							onPermissionModeChange?.(mode);
+						},
+					}}
+					effort={{
+						options: thinkingOptions,
+						selected: agentState.thinkingMode,
+						onSelect: (mode) => {
+							agentState.thinkingMode = mode;
+							onThinkingModeChange?.(mode);
+						},
+					}}
+					send={{ enabled: canSubmit, title: sendTitle, onSend: () => handleFormSubmit() }}
+					executor={{
+						executors,
+						executorId: agentState.executorId,
+						onSelect: (id) => {
+							if (id !== agentState.executorId) onExecutorChange?.(id);
+						},
+					}}
+					agentSettings={{
+						descriptors: modelCatalog.getAgentSettingsDescriptors(agentState.agentId),
+						envelope: agentState.agentSettings,
+						defaults: modelCatalog.getDefaultAgentSettings(agentState.agentId),
+						onChange: onAgentSettingChange,
+					}}
+					model={{ ...activeModel, onChange: (next) => onModelChange?.(next) }}
+				/>
+			{/if}
 		</form>
 	</div>
 {/snippet}

@@ -44,10 +44,12 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(failures).toEqual(['test-chat']);
       expect(generation.calls.abort).toBe(0);
       release.resolve();
-      await expect(starting).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+      const startFailure = await starting.then(() => null, error => error);
+      expect(startFailure).toMatchObject({ code: 'STALE_RESOURCE' });
       expect(generation.calls.abort).toBe(1);
       expect(healthyLease.closed).toBe(false);
-      await expect(integration.execution.abort(healthy)).resolves.toBe(true);
+      const aborted = await integration.execution.abort(healthy);
+      expect(aborted).toBe(true);
       expect(generation.calls.abort).toBe(2);
       expect(errors).toEqual([]);
       expect(fixture.controller.current).toBe(session);
@@ -99,7 +101,8 @@ for (const dialer of ['controller', 'worker'] as const) {
         finally { closed = true; }
       };
       const reader = integration.nativeHistoryImport!.load({ chat, signal: new AbortController().signal })[Symbol.asyncIterator]();
-      await expect(reader.next()).rejects.toMatchObject({ outcome: 'rejected' });
+      const readFailure = await reader.next().then(() => null, error => error);
+      expect(readFailure).toMatchObject({ outcome: 'rejected' });
       expect(closed).toBe(true);
       release.resolve();
       await unrelated;
@@ -124,10 +127,11 @@ for (const dialer of ['controller', 'worker'] as const) {
       const session = fixture.controller.current;
       const oversized = 'x'.repeat(17 * 1024 * 1024);
       generation.hooks.query = async () => oversized;
-      await expect(integration.singleQuery!.run({
+      const queryFailure = await integration.singleQuery!.run({
         prompt: 'test', model: request.model, thinkingMode: request.thinkingMode,
         settings: request.settings, endpoint: null, signal: new AbortController().signal,
-      })).rejects.toMatchObject({ outcome: 'unknown' });
+      }).then(() => null, error => error);
+      expect(queryFailure).toMatchObject({ outcome: 'unknown' });
       generation.nativePublishers[0]!({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', oversized) }] });
       await failure.promise;
       generation.nativePublishers[0]!({ type: 'run-ended', runId: request.runId, outcome: 'finished' });

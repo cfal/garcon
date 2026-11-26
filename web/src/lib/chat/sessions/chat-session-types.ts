@@ -7,6 +7,7 @@ import type { ChatOrderGroup } from '$shared/chat-list';
 import type { ChatLineage } from '$shared/chat-parentage';
 import type { ChatProcessingPhase } from '$shared/chat-types';
 import type { ChatActivityStatus } from '$shared/chat-activity';
+import type { ChatObservation } from '$shared/chat-observation';
 
 export type ChatStatus = 'draft' | 'running';
 export type SessionAgentId = string;
@@ -32,6 +33,7 @@ export interface NewChatConfig extends ChatStartupConfig {
 }
 
 export interface ChatSessionRecord {
+  observation: ChatObservation | null;
 	executorId?: string | null;
 	id: string;
 	parentChatId: string | null;

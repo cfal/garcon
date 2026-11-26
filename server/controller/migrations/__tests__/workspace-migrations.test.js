@@ -79,6 +79,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('fork-ordinal-cleanup', migrate);
     await runner.run('provider-assignments', migrate);
     await runner.run('chat-relationships-split', async () => undefined);
+    await runner.run('native-child-observers', async () => undefined);
     await runner.finish();
 
     expect(migrate).not.toHaveBeenCalled();
@@ -115,6 +116,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('fork-ordinal-cleanup', async () => { events.push('fork-ordinal-cleanup'); });
     await runner.run('provider-assignments', async () => { events.push('provider-assignments'); });
     await runner.run('chat-relationships-split', async () => undefined);
+    await runner.run('native-child-observers', async () => undefined);
     await runner.finish();
 
     expect(events).toEqual([
@@ -160,6 +162,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('fork-ordinal-cleanup', cleanup);
     await runner.run('provider-assignments', cleanup);
     await runner.run('chat-relationships-split', async () => undefined);
+    await runner.run('native-child-observers', async () => undefined);
     await runner.finish();
 
     expect(early).not.toHaveBeenCalled();
@@ -187,6 +190,7 @@ describe('WorkspaceMigrationRunner', () => {
     await runner.run('fork-ordinal-cleanup', async () => undefined);
     await runner.run('provider-assignments', async () => undefined);
     await runner.run('chat-relationships-split', async () => undefined);
+    await runner.run('native-child-observers', async () => undefined);
     await runner.finish();
 
     expect(previous).not.toHaveBeenCalled();
@@ -216,6 +220,7 @@ describe('WorkspaceMigrationRunner', () => {
         await runner.run('fork-ordinal-cleanup', cleanup);
         await runner.run('provider-assignments', async () => undefined);
         await runner.run('chat-relationships-split', async () => undefined);
+        await runner.run('native-child-observers', async () => undefined);
         await runner.finish();
       }
     }

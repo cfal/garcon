@@ -24,12 +24,14 @@ import {
 import { normalizeTags } from './tags.js';
 import { isExecutorId } from './executors.js';
 import { isChatActivityStatus, type ChatActivityStatus } from './chat-activity.js';
+import { parseChatObservation, type ChatObservation } from './chat-observation.js';
 
 export const CHAT_SNAPSHOT_DEFAULT_MESSAGE_LIMIT = 10;
 export const CHAT_SNAPSHOT_MAX_MESSAGE_LIMIT = 200;
 
 export interface ChatSnapshotChat {
   id: string;
+  observation: ChatObservation | null;
   executorId?: string | null;
   title: string;
   agentId: string;
@@ -106,6 +108,7 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
   const processingPhase = raw.processingPhase === null
     ? null
     : CHAT_PROCESSING_PHASES.find((phase) => phase === raw.processingPhase) ?? fail('processingPhase is invalid');
+  if (chat.observation && processingPhase) fail('observer cannot own processing');
   const control = parseChatExecutionControlState(raw.control);
   if (!control) fail('control is invalid');
   const transientFeed = parseChatTransientFeedSnapshot(raw.transientFeed);
@@ -152,12 +155,16 @@ function parseChat(value: unknown): ChatSnapshotChat {
 
   const activity = record(raw.activity, 'chat.activity');
   const executorId = raw.executorId;
+  let observation: ChatObservation | null;
+  try { observation = parseChatObservation(raw.observation); }
+  catch { return fail('chat.observation is invalid'); }
   if (raw.activityStatus !== null && !isChatActivityStatus(raw.activityStatus)) {
     fail('chat.activityStatus is invalid');
   }
   if (executorId != null && !isExecutorId(executorId)) fail('chat.executorId is invalid');
   return {
     id,
+    observation,
     ...(executorId === undefined ? {} : { executorId }),
     title: requiredString(raw.title, 'chat.title'),
     activityStatus: raw.activityStatus as ChatActivityStatus | null,

@@ -52,6 +52,7 @@ async function fixture(options: {
     admitInput, hasMatchingInput: () => false, admitQueuedInput: unused, discardPreparedInput() {},
   }, () => ({}), id => chats.hasChat(id), new InMemoryChatExecutionControlRepository('instance'), {
     selectionAdmissionLock: new KeyedPromiseLock(), canDispatch: () => false,
+    assertChatExecutable: () => {},
     projectAdmission: { assertAvailable: async () => {} }, attachmentAdmission: { assertSupported() {} },
     isControlInputViewCurrent: () => true, resolveSteerContent: options.resolveSteerContent,
   });

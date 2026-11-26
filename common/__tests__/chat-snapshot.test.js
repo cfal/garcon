@@ -25,7 +25,7 @@ function snapshot(overrides = {}) {
       carryOverRevision: 'carry-v1:0',
       projectPath: '/work/project',
       tags: ['cli', 'review'],
-      canReloadFromNativeHistory: true,
+      observation: null, canReloadFromNativeHistory: true,
       activityStatus: 'working',
       activity: { createdAt: TIMESTAMP, lastActivityAt: TIMESTAMP },
     },

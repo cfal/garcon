@@ -1,4 +1,5 @@
 import type { ClearChatRequest, ClearChatResponse } from '../../../common/chat-clear.js';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -38,6 +39,7 @@ export class TranscriptClearService {
     return this.options.chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
       const { ledger } = this.options;
       const entry = this.#requireChat(chatId);
+      assertChatExecutable(entry);
       if (this.options.ownership.hasPending(chatId)) throw ownershipTransferPendingError();
       if (!this.options.integrations.get(entry.agentId, entry.executorId)?.literalExecution) {
         throw new DomainError('OPERATION_UNSUPPORTED', 'Clearing displayed history is not available for this agent.', 422, false);

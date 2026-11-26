@@ -75,6 +75,21 @@ async function fixture(chatExecutors: readonly string[] = IDS, mentionGate?: () 
   return { root, chats, providers, directory, ledger, router, mentions, ready, registries };
 }
 
+test('the final producer gate rejects direct observer dispatch and reopen', async () => {
+  const f = await fixture();
+  const chatId = '1783725900000499';
+  f.chats.addChat({ id: chatId, agentId: 'test', model: 'synthetic-model', projectPath: f.root,
+    parentChatId: CHAT_IDS[0]!, lineage: null, preambleSelection: { revision: 0, orderedPreambleIds: [] },
+    nativeObservation: { kind: 'native-child', sourceChatId: CHAT_IDS[0]!, sourceOwnershipEpoch: 'epoch',
+      sourceAgentSessionId: 'root', child: { ownerId: 'test', schemaVersion: 1, key: 'child', value: {} },
+      parentKey: null, reportedModel: null } });
+  f.ledger.initializeChat(chatId);
+  expect(() => f.router.reopenProducer(chatId)).toThrow('read-only');
+  await expect(f.router.runAgentTurn(chatId, 'Synthetic input', {})).rejects.toMatchObject({ code: 'CHAT_READ_ONLY' });
+  expect(f.ledger.currentRows(chatId)).toEqual([]);
+  for (const provider of f.providers) expect(provider.calls.start).toBe(0);
+});
+
 test.each(['default', 'bypassPermissions'] as const)('a permission reset from saved %s waits for provider admission', async savedMode => {
   const preparing = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();

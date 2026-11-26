@@ -4,6 +4,8 @@
 	import ConversationFeed from './transcript/ConversationFeed.svelte';
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
 	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
+	import LoadingStatus from './LoadingStatus.svelte';
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import ComposerAvailabilityNotice from './composer/ComposerAvailabilityNotice.svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import MessageRenderFallback from './transcript/MessageRenderFallback.svelte';
@@ -71,9 +73,11 @@
 	const localSettings = getLocalSettings();
 	const rootModelCatalog = getModelCatalog();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(chat.executorId));
+	const executable = $derived(canExecuteChat(chat));
+	const childWorking = $derived(chat.observation?.isWorking === true);
 	const conversationActions = $derived.by(() => {
 		const agent = modelCatalog.getAgent(chat.agentId);
-		return Boolean(agent && agent.executionPolicy !== 'literal');
+		return executable && Boolean(agent && agent.executionPolicy !== 'literal');
 	});
 	const appShell = getAppShell();
 	const quickGit = getGitQuickSummary();
@@ -102,7 +106,7 @@
 		return answers;
 	});
 	function canReplyToQuestion(ordinal: number): boolean {
-		return Boolean(chat.agentOwnershipEpoch && panel.transcript.transcriptViewId
+		return executable && Boolean(chat.agentOwnershipEpoch && panel.transcript.transcriptViewId
 			&& !panel.transcript.hasLaterMessages && ordinal > lastOwnershipBoundary);
 	}
 	setAsyncQuestionPanel({
@@ -121,11 +125,11 @@
 
 	const chatId = $derived(chat.id);
 	const availabilityNotice = $derived(
-		ownsComposer && composerNotice?.chatId === chatId ? composerNotice : null,
+		executable && ownsComposer && composerNotice?.chatId === chatId ? composerNotice : null,
 	);
 	const queue = $derived(conversationUi.getExecutionControl(chatId)?.queue ?? null);
 	const pendingPermissions = $derived(conversationUi.pendingPermissionsFor(chatId));
-	const isProcessing = $derived(sessions.isChatProcessing(chatId));
+	const isProcessing = $derived(executable && sessions.isChatProcessing(chatId));
 	const canInterrupt = $derived(
 		isProcessing && panel.lifecycle.loadingStatus?.can_interrupt !== false,
 	);
@@ -151,18 +155,18 @@
 		}),
 	);
 	const canUpdateProjectPath = $derived(
-		!isProcessing &&
+		executable && !isProcessing &&
 			executors.isReady(executorId) &&
 			(chat.status === 'draft' || modelCatalog.supportsUpdateProjectPath(chat.agentId)),
 	);
 	const statusBarVisible = $derived(isProcessing || statusBar.visible);
 	const reserveStatusCap = $derived(
-		shouldReserveComposerCapSlot({
+		executable && shouldReserveComposerCapSlot({
 			hasProjectPath: Boolean(projectPath),
 			isProcessing,
 		}),
 	);
-	const queueVisible = $derived((queue?.entries.length ?? 0) > 0);
+	const queueVisible = $derived(executable && (queue?.entries.length ?? 0) > 0);
 	const capSpace = $derived(
 		composerCapReservation(reserveStatusCap, queueVisible, availabilityNotice !== null),
 	);
@@ -349,8 +353,8 @@
 					actions?.exitPlanMode(surfaceId, chatId, permissionOccurrenceId, choice, plan)}
 				pendingPermissionRequests={pendingPermissions}
 				onRetry={() => actions?.reload(surfaceId, chatId)}
-				onForkChat={(ordinal) => actions?.fork(surfaceId, chatId, ordinal)}
-				onClearBefore={(ordinal) => actions?.clearBefore(surfaceId, chatId, ordinal)}
+				onForkChat={executable ? (ordinal) => actions?.fork(surfaceId, chatId, ordinal) : undefined}
+				onClearBefore={executable ? (ordinal) => actions?.clearBefore(surfaceId, chatId, ordinal) : undefined}
 				onAppendToDraft={conversationActions
 					? (block) => actions?.appendToDraft(surfaceId, chatId, block)
 					: undefined}
@@ -375,6 +379,7 @@
 		<ConversationPanelScrollControls {panel} {reserveMobileToolbar} />
 	</div>
 
+	{#if executable}
 	<div bind:this={queueControlsContainer} class={queueShellClass}>
 		<div class={cn(dockFrameClass, 'flex min-h-0 flex-col')}>
 			<QueueControls
@@ -401,6 +406,7 @@
 			/>
 		</div>
 	</div>
+	{/if}
 
 	{#if availabilityNotice}
 		<!-- The notice reserves only the visible status bar height: min-h-14 minus translate-y-3. -->
@@ -414,6 +420,7 @@
 		</div>
 	{/if}
 
+	{#if executable}
 	<ConversationPanelStatusDock
 		chatMaxWidth={localSettings.chatMaxWidth}
 		{isVisible}
@@ -442,4 +449,19 @@
 		data-conversation-panel-composer-spacer
 		style:height={`${ownsComposer ? composerInsetPx : 0}px`}
 	></div>
+	{:else if childWorking}
+		<div class={cn(dockShellClass, 'shrink-0 pb-3')} data-native-child-status-tray>
+			<div class={cn(dockFrameClass, 'composer-thinking-active', localSettings.reduceMotion && 'composer-reduce-motion')}>
+				<LoadingStatus
+					{isVisible}
+					status={null}
+					agentId={chat.agentId}
+					spinnerSelectionKey={`${surfaceId}:${chatId}`}
+					onAbort={null}
+					placement="standalone"
+					{announcementsEnabled}
+				/>
+			</div>
+		</div>
+	{/if}
 </div>

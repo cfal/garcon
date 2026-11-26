@@ -18,6 +18,7 @@ import {
   SubmissionConflictError,
 } from '../ledger/errors.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
+import { assertChatExecutable } from './native-observation.js';
 
 export interface ChatRowServiceOptions {
   readonly registry: Pick<IChatRegistry, 'getChat'>;
@@ -40,16 +41,13 @@ export class ChatRowService {
   }
 
   async add(input: AddChatRowRequest, signal: AbortSignal): Promise<AddChatRowResponse> {
-    this.#requireChat(input.chatId);
-    await this.#withTranscriptErrors(
-      () => this.options.adoption.ensure(input.chatId, signal),
-    );
     return this.options.chatMutationLock.runExclusive(`chat:${input.chatId}`, async () => {
-      this.#requireChat(input.chatId);
+      assertChatExecutable(this.#requireChat(input.chatId));
       if (this.options.ownershipJournal.hasPending(input.chatId)) {
         throw ownershipTransferPendingError();
       }
       signal.throwIfAborted();
+      await this.#withTranscriptErrors(() => this.options.adoption.ensure(input.chatId, signal));
       const result = await this.#withTranscriptErrors(() => this.options.ledger.appendChatRow({
         chatId: input.chatId,
         viewId: transcriptViewId(input.transcriptViewId),
@@ -77,10 +75,12 @@ export class ChatRowService {
     });
   }
 
-  #requireChat(chatId: string): void {
-    if (!this.options.registry.getChat(chatId)) {
+  #requireChat(chatId: string) {
+    const entry = this.options.registry.getChat(chatId);
+    if (!entry) {
       throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
     }
+    return entry;
   }
 
   async #withTranscriptErrors<T>(work: () => T | Promise<T>): Promise<T> {

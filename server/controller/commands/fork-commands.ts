@@ -5,6 +5,7 @@ import type {
   ForkRunCommandResponse,
 } from '../../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import { ForkCreationCleanupError, rollbackForkTarget, type ForkedChatResult } from '../chats/fork-chat.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {
@@ -43,6 +44,8 @@ export class ForkCommands {
       chatId: this.support.requireChatId(input.chatId),
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
+      const source = this.deps.chats.getChat(normalized.sourceChatId);
+      if (source) assertChatExecutable(source);
       if (normalized.clientRequestId === undefined) {
         await this.createFork(normalized, signal);
       } else {
@@ -102,6 +105,8 @@ export class ForkCommands {
   }
 
   private async submitHttpForkRun(input: NormalizedSubmitForkRunInput, deadline: number): Promise<ForkRunCommandResponse> {
+    const existingSource = this.deps.chats.getChat(input.sourceChatId);
+    if (existingSource) assertChatExecutable(existingSource);
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();

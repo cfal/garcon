@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
@@ -203,7 +204,7 @@
 	const rootModelCatalog = getModelCatalog();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(session.executorId));
 	const windowDnd = getWorkspaceWindowDnd();
-	const canFork = $derived(modelCatalog.supportsFork(agentId));
+	const canFork = $derived(canExecuteChat(session) && modelCatalog.supportsFork(agentId));
 	const hasChatPlacement = $derived(windowDnd.hasChatPlacement(session.id));
 	const canForkNow = $derived(
 		canUseForkAction({

@@ -72,7 +72,7 @@ function chat(): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,
 		tags: [],

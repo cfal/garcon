@@ -16,7 +16,7 @@ export interface PlanModeContext {
 }
 
 export function handlePlanModeMessages(
-	msg: { chatId?: string | null; messages: ChatMessage[] },
+	msg: { chatId?: string | null; transcriptViewId?: string; lastOrdinal?: number; messages: ChatMessage[] },
 	ctx: PlanModeContext,
 ) {
 	const chatId = msg.chatId ?? null;
@@ -28,7 +28,7 @@ export function handlePlanModeMessages(
 		if (chatMsg.type === 'enter-plan-mode-tool-use') {
 			const permissionMode = ctx.getPermissionMode(chatId);
 			if (permissionMode && permissionMode !== 'plan') {
-				ctx.conversationUi.beginPlanModeForChat(chatId, permissionMode);
+				ctx.conversationUi.beginPlanModeForChat(chatId, permissionMode, msg.transcriptViewId);
 			}
 			ctx.setPermissionMode(chatId, 'plan');
 		}
@@ -44,6 +44,9 @@ export function handlePlanModeMessages(
 						permissionOccurrenceId,
 						requestedTool: chatMsg,
 						chatId,
+						...(msg.transcriptViewId && msg.lastOrdinal !== undefined ? {
+							transcript: { transcriptViewId: msg.transcriptViewId, afterOrdinal: msg.lastOrdinal },
+						} : {}),
 						receivedAt: new Date(),
 					},
 				];

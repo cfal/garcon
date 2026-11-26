@@ -9,6 +9,7 @@
     ]
   },
   "include": [
+    "common/__tests__/**/*.ts",
     "server/**/*.d.ts",
     "server/**/__tests__/**/*.ts",
     "server-agents/**/__tests__/**/*.ts",

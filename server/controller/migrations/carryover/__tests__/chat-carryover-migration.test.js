@@ -15,6 +15,7 @@ import { rollbackLegacyCarryOverMigration } from '../chat-carryover-rollback.ts'
 import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
 import { ChatRegistry } from '../../../chats/store.ts';
 import { splitChatRelationships } from '../../chat-relationships-split.ts';
+import { migrateNativeChildObservers } from '../../native-child-observers.ts';
 
 const CHAT_ID = '1786077000000001';
 const POST_MIGRATION_CHAT_ID = '1786077000000002';
@@ -669,6 +670,7 @@ describe('legacy carryover migration', () => {
     await migrateLegacyCarryOverWorkspace(workspaceDir);
     await writeWorkspaceVersion(5);
     await splitChatRelationships(workspaceDir);
+    await migrateNativeChildObservers(workspaceDir);
     const registry = new ChatRegistry(workspaceDir);
     await registry.init();
     registry.addChat({
@@ -703,6 +705,7 @@ describe('legacy carryover migration', () => {
     const registryPath = path.join(workspaceDir, 'chats.json');
     const migratedBytes = await fs.readFile(registryPath);
     await splitChatRelationships(workspaceDir);
+    await migrateNativeChildObservers(workspaceDir);
     const registry = new ChatRegistry(workspaceDir);
     await registry.init();
     await registry.flush();

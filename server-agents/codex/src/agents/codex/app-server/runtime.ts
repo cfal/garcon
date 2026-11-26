@@ -1,4 +1,9 @@
 import { ErrorMessage, PermissionExpiredMessage, type ChatMessage } from '@garcon/common/chat-types';
+import path from 'node:path';
+import { isRecord } from '@garcon/common/json';
+import { NativeChildSnapshots } from '@garcon/server-agent-common/execution/native-child-snapshots';
+import { CodexNativeChildObserver } from './native-child-observer.js';
+import { loadCodexChildHistory, parseCodexChildRef } from './native-child-history.js';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import {
   publishFailed,
@@ -13,6 +18,7 @@ import {
   type AgentFinalResponse,
   type AgentLogger,
   type AgentSteerResult,
+  type AgentNativeChildHistoryRequest,
 } from '@garcon/server-agent-interface';
 import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import { CodexHistoryService } from '../history-source.js';
@@ -118,6 +124,9 @@ export type { CodexAppServerRuntimeOptions } from './runtime-session-state.js';
 export class CodexAppServerRuntime {
   #sessions = new Map<string, RunningCodexSession>();
   #sources = new Map<CodexAppServerClient, RunningCodexSession>();
+  readonly #nativeWriters = new Map<CodexAppServerClient, string>();
+  readonly #childObservers = new WeakMap<CodexAppServerClient, CodexNativeChildObserver>();
+  readonly #childSnapshots = new NativeChildSnapshots(rootId => this.#assertNativeIdle(rootId));
   #latestSourceByChat = new Map<string, RunningCodexSession>();
   #terminalOperations = new WeakSet<CodexOperation>();
   #finalResponses = new WeakMap<CodexOperation, AgentFinalResponse>();
@@ -144,7 +153,7 @@ export class CodexAppServerRuntime {
   #history: CodexHistoryService;
   #idlePurger = new IdleSessionPurger<RunningCodexSession>({
     sessions: () => this.#sessions.entries(),
-    isRunning: (session) => isActiveSessionStatus(session.status),
+    isRunning: (session) => isActiveSessionStatus(session.status) || this.#childrenActive(session),
     lastActivityAt: () => 0,
     purge: (threadId, session) => {
       this.#sessions.delete(threadId);
@@ -166,9 +175,12 @@ export class CodexAppServerRuntime {
     this.#capacityRetryDelay = options.capacityRetryDelay ?? delay;
     this.#nativePathDiscoveryRefresh = new NativePathDiscoveryRefreshLimiter(options.nativePathDiscoveryRefresh);
     this.#retainedSourcePurger = new IdleSessionPurger<RunningCodexSession>({
-      sessions: () => [...this.#sources.values()]
-        .map((session): [string, RunningCodexSession] => [session.threadId, session]),
-      isRunning: (session) => isRetainedSourceInUse(session, this.#sessions),
+      sessions: () => {
+        this.#reapNativeWriters();
+        return [...this.#sources.values()]
+          .map((session): [string, RunningCodexSession] => [session.threadId, session]);
+      },
+      isRunning: (session) => isRetainedSourceInUse(session, this.#sessions) || this.#childrenActive(session),
       // An unstamped source never finished and must never be idle-reclaimed.
       lastActivityAt: (session) => session.idleSince ?? Number.MAX_SAFE_INTEGER,
       purge: (_client, session) => {
@@ -183,6 +195,50 @@ export class CodexAppServerRuntime {
     this.#skillDiscovery = options.skillDiscovery ?? new CodexSkillDiscovery({
       logger: this.#logger,
     });
+  }
+
+  admitNativeRoot(rootId: string): () => void { return this.#childSnapshots.admit(rootId); }
+
+  async *loadChildHistory(request: AgentNativeChildHistoryRequest) {
+    parseCodexChildRef(request.child);
+    const snapshot = this.#childSnapshots.capture(request.child.key);
+    try {
+      yield* loadCodexChildHistory(request, snapshot.assertUnchanged,
+        home => this.#createClient({ env: { CODEX_HOME: home } }));
+    } finally { snapshot.release(); }
+  }
+
+  #childrenActive(session: RunningCodexSession): boolean {
+    return this.#childObservers.get(session.client)?.ownsNativeWork ?? false;
+  }
+
+  #assertNativeIdle(rootId: string): void {
+    this.#reapNativeWriters();
+    for (const [client, root] of this.#nativeWriters) {
+      if (root !== rootId) continue;
+      const source = this.#sources.get(client);
+      if (!source || source.superseded || this.#clientShutdownByClient.has(client)
+        || isRetainedSourceInUse(source, this.#sessions) || this.#childrenActive(source)) {
+        throw new AgentIntegrationError('SESSION_BUSY', 'The native Codex source is still running', true);
+      }
+    }
+  }
+
+  #reapNativeWriters(): void {
+    for (const client of this.#nativeWriters.keys()) {
+      if (client.nativeWritersExited) this.#nativeWriters.delete(client);
+    }
+  }
+
+  #bindChildObserver(session: RunningCodexSession, request: CodexExecutionRequest): void {
+    let observer = this.#childObservers.get(session.client);
+    if (!observer && session.codexHome && path.isAbsolute(session.codexHome)) {
+      observer = new CodexNativeChildObserver({ codexHome: session.codexHome, rootThreadId: session.threadId }, child => {
+        this.#childSnapshots.remember(child.key, session.threadId);
+      });
+      this.#childObservers.set(session.client, observer);
+    }
+    if (request.publicationSignal) observer?.bind(request.publicationSignal, request.operation.publish);
   }
 
   // Resolves available skills only when the command opens with a "/<name>"
@@ -318,6 +374,12 @@ export class CodexAppServerRuntime {
   }
 
   async runTurn(request: CodexResumeRequest): Promise<void> {
+    const release = this.admitNativeRoot(request.agentSessionId);
+    try { await this.#runTurn(request); }
+    finally { release(); }
+  }
+
+  async #runTurn(request: CodexResumeRequest): Promise<void> {
     assertCodexExecutionOpen(request);
     const operation = request.operation;
     let activeSession: RunningCodexSession | null = null;
@@ -379,6 +441,12 @@ export class CodexAppServerRuntime {
   // starts the turn via thread/compact/start; the resulting contextCompaction
   // item and turn lifecycle arrive through the shared notification handlers.
   async compact(request: CodexResumeRequest): Promise<void> {
+    const release = this.admitNativeRoot(request.agentSessionId);
+    try { await this.#compact(request); }
+    finally { release(); }
+  }
+
+  async #compact(request: CodexResumeRequest): Promise<void> {
     assertCodexExecutionOpen(request);
     // A live session means a turn is already active for this thread; starting a
     // second one would overwrite the session map and leak the existing client.
@@ -668,6 +736,14 @@ export class CodexAppServerRuntime {
   #shutdownClient(client: CodexAppServerClient): Promise<void> {
     const existing = this.#clientShutdownByClient.get(client);
     if (existing) return existing;
+    const root = this.#nativeWriters.get(client);
+    if (root) this.#childSnapshots.activity(root);
+    this.#childObservers.get(client)?.dispose();
+    const exited = client.exited;
+    if (exited) void exited.then(() => {
+      if (client.nativeWritersExited) this.#nativeWriters.delete(client);
+    }, () => undefined);
+    else this.#nativeWriters.delete(client);
     const shutdown = Promise.resolve(client.shutdown()).catch((error) => {
       this.#logger.warn('Codex app-server shutdown failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -829,6 +905,9 @@ export class CodexAppServerRuntime {
     }
     this.#sessions.set(threadId, session);
     this.#sources.set(args.client, session);
+    this.#nativeWriters.set(args.client, threadId);
+    this.#childSnapshots.activity(threadId);
+    this.#bindChildObserver(session, request);
     this.#latestSourceByChat.set(chatId, session);
     return session;
   }
@@ -929,6 +1008,7 @@ export class CodexAppServerRuntime {
     }
 
     const client = this.#newClient(request, true);
+    this.#nativeWriters.set(client, request.agentSessionId);
     try {
       const initialized = await client.connect();
       assertCodexExecutionOpen(request);
@@ -997,6 +1077,8 @@ export class CodexAppServerRuntime {
     session.turnAttemptGeneration += 1;
     session.pendingCapacityFailure = null;
     session.sourceOperation = operation;
+    this.#childSnapshots.activity(session.threadId);
+    this.#bindChildObserver(session, request);
     session.nextTurnOperation = operation;
     session.lastTurnOperation = null;
     this.#sessions.set(session.threadId, session);
@@ -1141,6 +1223,12 @@ export class CodexAppServerRuntime {
   }
 
   #handleNotification(client: CodexAppServerClient, notification: JsonRpcNotification): void {
+    const source = this.#sources.get(client);
+    if (source) this.#childSnapshots.activity(source.threadId);
+    const params = notification.params;
+    const operation = isRecord(params) && typeof params.turnId === 'string'
+      ? source?.turnRoutes.get(params.turnId) ?? null : null;
+    if (this.#childObservers.get(client)?.acceptSafely(notification, operation)) return;
     switch (notification.method) {
       case 'turn/started':
         this.#handleTurnStarted(client, notification.params as TurnStartedNotification);
@@ -1489,6 +1577,9 @@ export class CodexAppServerRuntime {
   }
 
   #handleClientExit(client: CodexAppServerClient, code: number): void {
+    const root = this.#nativeWriters.get(client);
+    if (root) this.#childSnapshots.activity(root);
+    if (client.nativeWritersExited) this.#nativeWriters.delete(client);
     const session = this.#sources.get(client);
     if (session && isActiveSessionStatus(session.status)) {
       this.#finishSession(
@@ -1601,6 +1692,9 @@ export class CodexAppServerRuntime {
   #retireSource(client: CodexAppServerClient): void {
     const session = this.#sources.get(client);
     if (!session) return;
+    this.#childSnapshots.activity(session.threadId);
+    this.#childObservers.get(client)?.dispose();
+    this.#childObservers.delete(client);
     this.#sources.delete(client);
     if (this.#sessions.get(session.threadId) === session) this.#sessions.delete(session.threadId);
     if (this.#latestSourceByChat.get(session.chatId) === session) {

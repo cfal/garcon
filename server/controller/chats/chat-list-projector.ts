@@ -16,6 +16,7 @@ import { carryOverRevision } from './carryover/segments.js';
 import type { ChatActivityStatus, ChatRunOutcome } from '../../../common/chat-activity.js';
 import type { ChatTransientFeedStore } from './chat-transient-feed.js';
 import { projectChatActivityStatus } from './chat-activity-status.js';
+import type { NativeChildObserverService } from './native-child-observer-service.js';
 
 interface ChatListProjectorSettings {
   getPinnedChatIds(): string[];
@@ -42,6 +43,7 @@ export interface ChatListProjectorDeps {
   metadata: ChatListProjectorMetadata;
   processing: { phase(chatId: string): ChatProcessingPhase | null };
   transientFeeds: Pick<ChatTransientFeedStore, 'hasPendingUserAction'>;
+  observers: Pick<NativeChildObserverService, 'projection'>;
   canReloadFromNativeHistory(chatId: string, session: ChatRegistryEntry): boolean;
 }
 
@@ -123,9 +125,11 @@ export class ChatListProjector {
     const overrideTitle = this.deps.settings.getChatName(chatId);
     const title = resolveChatTitle(overrideTitle, metadata?.firstMessage);
     const processingPhase = this.deps.processing.phase(chatId);
+    const observation = this.deps.observers.projection(chatId);
     return {
       chat: {
         id: chatId,
+        observation,
         activityStatus: this.#activityStatus(chatId, processingPhase),
         ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
         agentId: session.agentId,
@@ -134,7 +138,7 @@ export class ChatListProjector {
           session.carryOverSegments,
           session.carryOverMigrationQuarantine,
         ),
-        model: session.model || null,
+        model: session.nativeObservation ? session.nativeObservation.reportedModel : session.model || null,
         apiProviderId: session.apiProviderId ?? null,
         modelEndpointId: session.modelEndpointId ?? null,
         modelProtocol: session.modelProtocol ?? null,
@@ -170,6 +174,7 @@ export class ChatListProjector {
     const lastActivityAt = chat.activity.lastActivityAt;
     return {
       id: chat.id,
+      observation: chat.observation,
       activityStatus: chat.activityStatus,
       ...(session.executorId === undefined ? {} : { executorId: session.executorId }),
       parentChatId: session.parentChatId,

@@ -117,29 +117,24 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		};
 	}
 
-	it('refreshes a cold raw snapshot after a rejected live commit instead of coalescing it away', async () => {
+	it('completes a cold raw snapshot with the shared rejected live commit', async () => {
 		const { cache, registry, selected } = fixture();
 		registry.reconcile([presentation('window-left'), presentation('window-right')]);
 		cache.remove('chat-1');
 		const releaseSnapshot = deferredPage(2, 'view-1', 150);
-		const releaseRefresh = deferredPage(3, 'view-1', 150);
 		const load = selected.loadMessages('chat-1', { minimumLimit: 150, purpose: 'activation' });
 		try {
 			expect(getChatMessages).toHaveBeenNthCalledWith(1, { chatId: 'chat-1', limit: 150, purpose: 'activation' });
 			expect(selected.applyMessages('chat-1', 'view-1', [entry(3)], 3, 3)).toBe('gap-detected');
 			const reload = registry.loadChatSnapshot('chat-1');
 			releaseSnapshot();
-			await vi.waitFor(() => expect(getChatMessages).toHaveBeenCalledTimes(2));
-			expect(getChatMessages).toHaveBeenNthCalledWith(2, { chatId: 'chat-1', limit: 150 });
-			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 2, stale: true });
-			releaseRefresh();
 			await load;
 			await reload;
+			expect(getChatMessages).toHaveBeenCalledOnce();
 			for (const panel of registry.panelsForChat('chat-1')) expect(panel.transcript.entries).toEqual([entry(1), entry(2), entry(3)]);
 			expect(cache.readAppliedCursor('chat-1')).toMatchObject({ lastOrdinal: 3, stale: false });
 		} finally {
 			releaseSnapshot();
-			releaseRefresh();
 			await load;
 		}
 	});
@@ -276,23 +271,21 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		},
 	);
 
-	it.each([1, 2])('preserves the newer snapshot load for %i mounted panels', async (panelCount) => {
+	it.each([1, 2])('shares the fallback activation with %i mounted panels', async (panelCount) => {
 		const { cache, registry, selected } = fixture();
 		cache.markStale('chat-1');
-		const resolveFallback = deferredPage();
+		const resolveFallback = deferredPage(3);
 		const activation = selected.loadMessages('chat-1', { purpose: 'activation' });
-		const resolveMounted = deferredPage(3);
 		registry.reconcile([
 			presentation('window-left'),
 			...(panelCount === 2 ? [presentation('window-right')] : []),
 		]);
 		const mountedLoad = registry.loadChatSnapshot('chat-1');
 		expect(selected.isLoadingMessages).toBe(true);
-		expect(getChatMessages).toHaveBeenCalledTimes(2);
+		expect(getChatMessages).toHaveBeenCalledOnce();
 
 		resolveFallback();
 		await activation;
-		resolveMounted();
 		await mountedLoad;
 
 		expect(cache.get('chat-1')?.lastOrdinal).toBe(3);
@@ -303,20 +296,19 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		}
 	});
 
-	it('does not fan out a superseded fallback before the current fallback completes', async () => {
+	it('shares repeated fallback demands and publishes once to a newly mounted panel', async () => {
 		const { registry, selected } = fixture();
-		const resolveOlder = deferredPage(2);
+		const resolve = deferredPage(3);
 		const older = selected.loadMessages('chat-1');
-		const resolveNewer = deferredPage(3);
 		const newer = selected.loadMessages('chat-1');
 		registry.reconcile([presentation('window-left')]);
 		const panel = registry.panel('chat-view:window-left')!;
 		const install = vi.spyOn(panel, 'installInitialSnapshot');
-		resolveOlder();
+		resolve();
 		await older;
-		expect(install).not.toHaveBeenCalled();
-		resolveNewer();
 		await newer;
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(install).toHaveBeenCalledOnce();
 		expect(panel.transcript.lastOrdinal).toBe(3);
 	});
 
@@ -330,6 +322,7 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 			presentation('window-left'),
 			...(panelCount === 2 ? [presentation('window-right')] : []),
 		]);
+		registry.handleViewReplacement('chat-1', 'view-2', 'view-1');
 		const mountedLoad = registry.loadChatSnapshot('chat-1');
 		resolveMounted();
 		await mountedLoad;
@@ -350,7 +343,6 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		cache.markStale('chat-1');
 		const resolveFallback = deferredPage(2, 'view-2');
 		const activation = selected.loadMessages('chat-1', { purpose: 'activation' });
-		const resolveMounted = deferredPage(3);
 		registry.reconcile([
 			presentation('window-left'),
 			...(panelCount === 2 ? [presentation('window-right')] : []),
@@ -360,8 +352,8 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 		await activation;
 		expect(cache.get('chat-1')?.transcriptViewId).toBe('view-2');
 
-		resolveMounted();
 		await mountedLoad;
+		expect(getChatMessages).toHaveBeenCalledOnce();
 
 		expect(cache.get('chat-1')?.transcriptViewId).toBe('view-2');
 		for (const panel of registry.panelsForChat('chat-1')) {

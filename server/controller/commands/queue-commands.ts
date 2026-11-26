@@ -35,6 +35,7 @@ export class QueueCommands {
     this.support.requireChat(input.chatId);
     this.support.assertContent(input.content, input.images);
     return this.support.withChatMutationLock(input.chatId, async (deadline) => {
+      this.support.requireExecutableChat(input.chatId);
       await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
       return this.submitQueueEntryCreateLocked(input, deadline);
     });
@@ -47,6 +48,7 @@ export class QueueCommands {
       throw new CommandValidationError('VALIDATION_FAILED', 'expectedRevision must be a positive integer');
     }
     return this.support.withChatMutationLock(input.chatId, async () => {
+      this.support.requireExecutableChat(input.chatId);
       const content = input.content;
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-replace',
@@ -99,6 +101,7 @@ export class QueueCommands {
     this.support.requireChat(input.chatId);
     const entryId = this.support.requireQueueEntryId(input.entryId);
     return this.support.withChatMutationLock(input.chatId, async () => {
+      this.support.requireExecutableChat(input.chatId);
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-delete',
         chatId: input.chatId,
@@ -166,6 +169,7 @@ export class QueueCommands {
     }
 
     return this.support.withChatMutationLock(input.chatId, async () => {
+      this.support.requireExecutableChat(input.chatId);
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-move',
         chatId: input.chatId,
@@ -224,6 +228,7 @@ export class QueueCommands {
     const chatId = input.chatId.trim();
     this.support.assertContent(input.command);
     return this.support.withChatMutationLock(chatId, async (deadline) => {
+      this.support.requireExecutableChat(chatId);
       const session = this.deps.chats.getChat(chatId);
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
@@ -280,6 +285,7 @@ export class QueueCommands {
     input: QueueEntryCreateCommandRequest,
     deadline: number,
   ): Promise<QueueEntryCommandResponse> {
+    this.support.requireExecutableChat(input.chatId);
     const content = input.content;
     const preparedEntryId = crypto.randomUUID();
     const acceptance: LedgerAcceptInput = {
@@ -342,6 +348,7 @@ export class QueueCommands {
   }
 
   private async mutateQueueLocked(input: QueueMutationInput): Promise<QueueMutationResponse> {
+    this.support.requireExecutableChat(input.chatId);
     let queue;
     if (input.action === 'clear') {
       queue = await this.deps.queue.clearChatQueue(input.chatId);

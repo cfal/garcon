@@ -19,12 +19,14 @@ describe('transcript retention architecture', () => {
 	it('[TLV5-PAGE.09-WEB-STATIC-01] routes rendered-panel snapshots through visible-demand paging', () => {
 		const activeTranscript = transcriptSource('active-transcript-state.svelte.ts');
 		const snapshots = transcriptSource('transcript-snapshot-loader.ts');
+		const headReads = transcriptSource('transcript-head-coordinator.ts');
 
 		expect(activeTranscript).toMatch(/new TranscriptSnapshotLoader\(this,/);
 		expect(activeTranscript).toContain('return this.#snapshots.load(chatId, options)');
-		expect(snapshots).toMatch(
+		expect(snapshots).toContain('this.host.transcriptCache.headReads.load(chatId,');
+		expect(headReads).toMatch(
 			/import[\s\S]*\bloadTranscriptPageDemand\b[\s\S]*from\s+['"][^'"]*transcript-page-demand\.js['"]/,
 		);
-		expect(snapshots).toMatch(/\bloadTranscriptPageDemand\s*\(/);
+		expect(headReads).toMatch(/\bloadTranscriptPageDemand\s*\(/);
 	});
 });

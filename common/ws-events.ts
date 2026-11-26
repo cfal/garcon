@@ -345,6 +345,7 @@ export const CHAT_LIST_INVALIDATION_REASONS = [
   'agent-handoff',
   'execution-settings-updated',
   'metadata-repaired',
+  'observation-changed',
 ] as const;
 
 export type ChatListInvalidationReason =
@@ -426,6 +427,7 @@ export type ClientRequestErrorCode = Extract<
   | 'CHAT_RUNNING'
   | 'NATIVE_PATH_UNRESOLVED'
   | 'HISTORY_LOAD_FAILED'
+  | 'RELOAD_OUTCOME_UNKNOWN'
   | 'STALE_TRANSCRIPT_VIEW'
   | 'REQUEST_TIMEOUT'
   | 'REQUEST_CANCELLED'
@@ -439,6 +441,7 @@ const CLIENT_REQUEST_ERROR_CODES: readonly ClientRequestErrorCode[] = [
   'CHAT_RUNNING',
   'NATIVE_PATH_UNRESOLVED',
   'HISTORY_LOAD_FAILED',
+  'RELOAD_OUTCOME_UNKNOWN',
   'STALE_TRANSCRIPT_VIEW',
   'REQUEST_TIMEOUT',
   'REQUEST_CANCELLED',

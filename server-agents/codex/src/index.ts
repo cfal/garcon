@@ -97,6 +97,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly permissions;
   readonly legacyHistoryImport;
   readonly nativeHistoryImport;
+  readonly nativeChildObservation: NonNullable<AgentIntegration['nativeChildObservation']>;
   readonly nativeActivity;
   readonly nativeSessions;
   readonly sessionConfiguration: NonNullable<AgentIntegration['sessionConfiguration']>;
@@ -136,6 +137,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
       logger,
       skillDiscovery,
     });
+    this.nativeChildObservation = { loadHistory: request => runtime.loadChildHistory(request) };
     const login = new CliLoginController({
       command: () => [resolveCodexCli().command, 'login', '--device-auth'],
       mode: 'device-code',

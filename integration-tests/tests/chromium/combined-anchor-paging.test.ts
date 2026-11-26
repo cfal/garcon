@@ -370,7 +370,7 @@ test('reconnect replay and held combined coverage preserve both the historical p
   });
 }, 180_000);
 
-test('cold combined history refreshes commits received after its snapshot was captured', async () => {
+test('cold combined history retains commits received after its snapshot was captured', async () => {
   await withChromiumFixture('combined-anchor-cold-commit', async ({ integration, page, context }, phase) => {
     const chatId = integration.newChatId();
     const initial = await integration.client.startDirectChat({
@@ -383,17 +383,17 @@ test('cold combined history refreshes commits received after its snapshot was ca
     const held = Promise.withResolvers<void>();
     let holding = true;
     let captured = 0;
-    const combined: TranscriptAnchorRequest[] = [];
+    let requests = 0;
     await page.route(/\/api\/v1\/chats\/(?:combined-)?messages(?:\?|$)/, async route => {
       const url = new URL(route.request().url());
       const request = route.request().method() === 'POST'
         ? route.request().postDataJSON() as TranscriptAnchorRequest : null;
       if ((request?.chatId ?? url.searchParams.get('chatId')) !== chatId) return route.continue();
-      if (request) combined.push(request);
+      requests += 1;
       if (!holding) return route.continue();
       const response = await route.fetch();
       expect((await response.json()).lastOrdinal).toBe(head);
-      if (request) captured += 1;
+      captured += 1;
       await held.promise;
       await route.fulfill({ response });
     });
@@ -413,7 +413,7 @@ test('cold combined history refreshes commits received after its snapshot was ca
       // Terminal handling flushes the browser's message accumulator before clearing processing.
       await browserExpect(stop).toHaveCount(0);
       await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(0);
-      const beforeRelease = combined.length;
+      const beforeRelease = requests;
       phase('installing the captured response and recovering the missed commits');
       holding = false;
       held.resolve();
@@ -421,7 +421,7 @@ test('cold combined history refreshes commits received after its snapshot was ca
       await browserExpect(feed.getByText(marker, { exact: true })).toHaveCount(1);
       await browserExpect(feed.getByText(`echo:${marker}`, { exact: true })).toBeVisible();
       await browserExpect(feed).toHaveAttribute('aria-busy', 'false');
-      expect(combined[beforeRelease]).toEqual({ chatId, direction: 'backward', anchorsRemaining: 100 });
+      expect(requests - beforeRelease).toBeLessThanOrEqual(1);
     } finally {
       provider.releaseEcho();
       held.resolve();

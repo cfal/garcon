@@ -1,4 +1,5 @@
 import { parseChatId, type ChatId } from '../../../common/chat-id.js';
+import { assertChatExecutable } from './native-observation.js';
 import {
   garconMessageContent,
   INTER_AGENT_MESSAGE_NOTICE_TITLE,
@@ -97,6 +98,8 @@ export class InterAgentMessageController {
   constructor(private readonly options: InterAgentMessageControllerOptions) {}
 
   request(input: InterAgentMessageRequest): void {
+    const source = this.options.registry.getChat(input.sourceChatId);
+    if (!source || source.nativeObservation) return;
     const attempt = this.#registerAttempt(input.sourceChatId);
     void this.#deliver(input, attempt).finally(() => {
       this.#retireAttempt(input.sourceChatId, attempt);
@@ -229,9 +232,11 @@ export class InterAgentMessageController {
     const deadline = interactiveDeadline();
     return this.options.chatMutationLock.runExclusive(`chat:${targetChatId}`, async () => {
       signal.throwIfAborted();
-      if (!this.options.registry.getChat(targetChatId)) {
+      const target = this.options.registry.getChat(targetChatId);
+      if (!target) {
         return this.#result(input.sourceChatId, targetChatId, 'target-not-found');
       }
+      assertChatExecutable(target);
 
       let view: Awaited<ReturnType<TranscriptAdoptionService['ensure']>>;
       try {

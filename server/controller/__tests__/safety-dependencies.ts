@@ -9,8 +9,9 @@ export function controllerSafetyDependencies() {
     selectionAdmissionLock: new KeyedPromiseLock(),
     chatMutationLock: new KeyedPromiseLock(),
     canDispatch: () => true,
+    assertChatExecutable: () => {},
     isExecutorConfigured: () => true,
-  } satisfies Pick<ChatExecutionCoordinatorOptions, 'canDispatch'> & {
+  } satisfies Pick<ChatExecutionCoordinatorOptions, 'canDispatch' | 'assertChatExecutable'> & {
     selectionAdmissionLock: KeyedPromiseLock;
     chatMutationLock: KeyedPromiseLock;
     isExecutorConfigured(executorId: string): boolean;

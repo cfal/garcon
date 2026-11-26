@@ -1513,6 +1513,7 @@ describe('server event wiring', () => {
     const projector = new ChatListProjector({
       registry, metadata: index, processing: { phase: () => null },
       transientFeeds: { hasPendingUserAction: () => false }, canReloadFromNativeHistory: () => false,
+      observers: { projection: () => null },
       settings: { getPinnedChatIds: () => [], getNormalChatIds: () => ['1783725900000900'],
         getArchivedChatIds: () => [], getChatName: () => null },
     });

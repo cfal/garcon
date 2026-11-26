@@ -31,7 +31,7 @@ const chat: ChatSessionRecord = {
 	isProcessing: false,
 	processingPhase: null,
 	activityStatus: null,
-	canReloadFromNativeHistory: false,
+	observation: null, canReloadFromNativeHistory: false,
 	isUnread: true,
 	status: 'running',
 	agentOwnershipEpoch: null,

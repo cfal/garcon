@@ -102,7 +102,7 @@ describe('chats API contract', () => {
 			processingPhase: 'running',
 			isUnread: false,
 			activityStatus: null,
-			canReloadFromNativeHistory: false,
+			observation: null, canReloadFromNativeHistory: false,
 		};
 	}
 
@@ -179,7 +179,7 @@ describe('chats API contract', () => {
 					processingPhase: null,
 					isUnread: false,
 					activityStatus: null,
-					canReloadFromNativeHistory: false,
+					observation: null, canReloadFromNativeHistory: false,
 				},
 			],
 			total: 1,

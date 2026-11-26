@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
+import { SvelteMap } from 'svelte/reactivity';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalWorkspaceSnapshot } from '$lib/workspace/canonical-layout.js';
 import {
@@ -40,6 +41,7 @@ import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.sve
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { panelMounts } from './ConversationPanelTestStub.svelte';
+import type { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn(), getCombinedChatMessages: vi.fn() }));
@@ -126,7 +128,7 @@ function chat(
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		agentOwnershipEpoch: null,
 		tags: [],
@@ -1599,6 +1601,64 @@ describe('WorkspaceRoot', () => {
 		expect(screen.getAllByTestId('conversation-panel')).toHaveLength(1);
 		expect(screen.getByTestId('conversation-panel').dataset.chatId).toBe('chat-a');
 		expect(screen.getByTestId('chat-surface-stub').dataset.visible).toBe('true');
+	});
+
+	it('updates mobile observer activity in place when its chat record is replaced', async () => {
+		installContext();
+		const records = new SvelteMap([['chat-a', chat('chat-a', 'Child', {
+			observation: { kind: 'native-child', captureStatus: 'attached', isWorking: true },
+		})]]);
+		const sessions = {
+			selectedChatId: 'chat-a',
+			get selectedChat() { return records.get('chat-a')!; },
+			get byId() { return Object.fromEntries(records); },
+			isLoadingChats: false, isChatProcessing: () => false, processingPhase: () => null,
+		};
+		testContext.current!.sessions = sessions;
+		renderRoot(true);
+		const panel = screen.getByTestId('conversation-panel');
+		const mounts = panelMounts.length;
+		expect(panel.dataset.observerWorking).toBe('true');
+		for (const captureStatus of ['attached', 'detached'] as const) {
+			records.set('chat-a', { ...sessions.selectedChat,
+				observation: { kind: 'native-child', captureStatus, isWorking: false } });
+			await tick();
+			expect(screen.getByTestId('conversation-panel')).toBe(panel);
+			expect(panel.dataset.observerWorking).toBe('false');
+			expect(panel.dataset.captureStatus).toBe(captureStatus);
+			expect(panelMounts).toHaveLength(mounts);
+		}
+	});
+
+	it('retires a removed ready-inventory chat after unmounting its panel', async () => {
+		installContext();
+		const records = new SvelteMap([['chat-a', chat('chat-a', 'Chat A')]]);
+		testContext.current!.sessions = {
+			selectedChatId: 'chat-a', get selectedChat() { return records.get('chat-a') ?? null; },
+			get byId() { return Object.fromEntries(records); }, chatListStatus: 'ready',
+			isLoadingChats: false, isChatProcessing: () => false, processingPhase: () => null,
+		};
+		renderRoot();
+		const panels = testContext.current!.conversationPanels as ConversationPanelRegistry;
+		await waitFor(() => expect(panels.transcriptCache.acceptedView('chat-a')).toBe('view-chat-a'));
+		const reload = panels.captureNativeReload('chat-a');
+		records.delete('chat-a');
+		await tick();
+		expect(panels.panelsForChat('chat-a')).toHaveLength(0);
+		reload.apply({ ...emptyChatHistory({ chatId: 'chat-a' }), transcriptViewId: 'late-view' });
+		expect(panels.transcriptCache.get('chat-a')).toBeNull();
+		expect(panels.transcriptCache.acceptedView('chat-a')).toBeNull();
+	});
+
+	it('retires predecessor plan mode when its shared cache accepts a replacement', async () => {
+		installContext();
+		renderRoot();
+		const panels = testContext.current!.conversationPanels as ConversationPanelRegistry;
+		const ui = testContext.current!.conversationUi as ConversationUiState;
+		await waitFor(() => expect(panels.transcriptCache.acceptedView('chat-a')).toBe('view-chat-a'));
+		ui.beginPlanModeForChat('chat-a', 'acceptEdits', 'view-chat-a');
+		panels.captureNativeReload('chat-a').apply({ ...emptyChatHistory({ chatId: 'chat-a' }), transcriptViewId: 'new-view' });
+		expect(ui.previousPermissionModeFor('chat-a')).toBeNull();
 	});
 
 	it('keeps empty mobile chat chrome interactive without binding the composer', async () => {

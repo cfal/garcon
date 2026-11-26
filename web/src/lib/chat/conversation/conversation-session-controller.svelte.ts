@@ -1,6 +1,7 @@
 // Owns chat lifecycle and delegates all viewport operations through the dependency interface.
 
 import { getChatSnapshot, handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
+import { canExecuteChat } from '$lib/chat/sessions/chat-capabilities.js';
 import { literalInputFormat } from '$shared/input-format';
 import { isStopSatisfied, type ChatImage } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
@@ -521,6 +522,7 @@ export class ConversationSessionController {
 		imageOverride?: File[],
 	): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
+		if (!canExecuteChat(deps.sessions.byId[chatId])) return 'rejected';
 		const ownsComposer = messageOverride === undefined && imageOverride === undefined;
 		while (this.isDirectAdmissionPending(chatId)) {
 			if (
@@ -722,6 +724,7 @@ export class ConversationSessionController {
 
 	async submitComposerWithSteerPreference(chatId: string): Promise<ConversationSubmissionOutcome> {
 		const { deps } = this;
+		if (!canExecuteChat(deps.sessions.byId[chatId])) return 'rejected';
 		this.#reconcileExecutionSelection(chatId);
 		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)) {
 			return 'no-op';
@@ -774,6 +777,7 @@ export class ConversationSessionController {
 		upToOrdinal?: number,
 		transcript?: SessionTranscriptLoadTarget & ConversationForkSource['transcript'],
 	): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[sourceChatId])) return Promise.resolve();
 		const source = transcript
 			? ({
 					transcript,
@@ -804,7 +808,7 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const response = deps.conversationUi.captureExecutionResponse();
 		const chat = deps.sessions.byId[chatId];
-		if (!chat) return Promise.resolve();
+		if (!canExecuteChat(chat)) return Promise.resolve();
 		const lifecycle = deps.lifecycleForChat(chatId);
 		if (lifecycle.loadingStatus?.can_interrupt === false) return Promise.resolve();
 		const clientRequestId = createClientCommandId();
@@ -843,6 +847,7 @@ export class ConversationSessionController {
 		permissionOccurrenceId: string,
 		decision: PermissionDecisionPayload,
 	): void {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		this.#permissions.handlePermissionDecision(chatId, permissionOccurrenceId, decision);
 	}
 
@@ -852,6 +857,7 @@ export class ConversationSessionController {
 		choice: string,
 		plan: string,
 	): void {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		this.#permissions.handleExitPlanMode(chatId, permissionOccurrenceId, choice, plan);
 	}
 
@@ -864,14 +870,17 @@ export class ConversationSessionController {
 	}
 
 	async pauseQueueForChat(chatId: string): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.pauseForChat(chatId);
 	}
 
 	async resumeQueueForChat(chatId: string, pauseId: string): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.resumeForChat(chatId, pauseId);
 	}
 
 	async createQueueEntryForChat(chatId: string, content: string): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.createForChat(chatId, content);
 	}
 
@@ -881,14 +890,17 @@ export class ConversationSessionController {
 		content: string,
 		expectedRevision: number,
 	): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.replaceForChat(chatId, entryId, content, expectedRevision);
 	}
 
 	async deleteQueueEntryForChat(chatId: string, entryId: string): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.deleteForChat(chatId, entryId);
 	}
 
 	async deleteQueueEntryFromPanelForChat(chatId: string, entryId: string): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.deleteFromPanelForChat(chatId, entryId);
 	}
 
@@ -899,6 +911,7 @@ export class ConversationSessionController {
 		placement: QueueEntryPlacement,
 		reorderRevision: number,
 	): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.moveForChat(chatId, source, target, placement, reorderRevision);
 	}
 
@@ -907,31 +920,37 @@ export class ConversationSessionController {
 		entry: QueueEntry,
 		reorderRevision: number,
 	): Promise<void> {
+		if (!canExecuteChat(this.deps.sessions.byId[chatId])) return;
 		await this.#queue.steerEntryForChat(chatId, entry, reorderRevision);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
+		if (!canExecuteChat(this.deps.sessions.selectedChat)) return;
 		if (this.isDirectAdmissionPending(this.deps.sessions.selectedChatId)) return;
 		this.#reconcileExecutionSelection(this.deps.sessions.selectedChatId);
 		this.#settings.handleModelSelectionChange(next);
 	}
 
 	handleModelChange(model: string): void {
+		if (!canExecuteChat(this.deps.sessions.selectedChat)) return;
 		if (this.isDirectAdmissionPending(this.deps.sessions.selectedChatId)) return;
 		this.#settings.handleModelChange(model);
 	}
 
 	handlePermissionModeChange(mode: PermissionMode): void {
+		if (!canExecuteChat(this.deps.sessions.selectedChat)) return;
 		if (this.isDirectAdmissionPending(this.deps.sessions.selectedChatId)) return;
 		this.#settings.handlePermissionModeChange(mode);
 	}
 
 	handleThinkingModeChange(mode: ThinkingMode): void {
+		if (!canExecuteChat(this.deps.sessions.selectedChat)) return;
 		if (this.isDirectAdmissionPending(this.deps.sessions.selectedChatId)) return;
 		this.#settings.handleThinkingModeChange(mode);
 	}
 
 	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
+		if (!canExecuteChat(this.deps.sessions.selectedChat)) return;
 		if (this.isDirectAdmissionPending(this.deps.sessions.selectedChatId)) return;
 		this.#settings.handleAgentSettingChange(descriptor, value);
 	}

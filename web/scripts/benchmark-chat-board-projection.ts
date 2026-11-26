@@ -45,6 +45,7 @@ const chats: ChatSessionRecord[] = Array.from({ length: CHAT_COUNT }, (_, chatIn
 	isProcessing: chatIndex % 13 === 0,
 	processingPhase: null,
 	canReloadFromNativeHistory: false,
+	observation: null,
 	isUnread: false,
 	status: 'running',
 	agentOwnershipEpoch: null,

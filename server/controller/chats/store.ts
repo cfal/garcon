@@ -59,7 +59,9 @@ import {
   type CarryOverSegmentRef,
   type ChatRegistryEntry,
   type ChatRegistrySnapshot,
+  type NativeChildObservationOrigin,
 } from './registry-contracts.js';
+import { assertChatExecutable, assertObservationBindings, parseNativeObservationOrigin } from './native-observation.js';
 import {
   normalizeChatPreambleSelection,
   normalizePendingPreambleBoundary,
@@ -122,6 +124,7 @@ export class ChatRegistryDurabilityUnknownError extends Error {
 }
 
 export interface NewChatRegistryEntry {
+  nativeObservation?: NativeChildObservationOrigin | null;
   id: string;
   executorId?: string | null;
   agentId: AgentName;
@@ -298,6 +301,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         if (!isObjectRecord(rawEntry)) {
           throw new Error(`Invalid chat registry entry for ${chatId}`);
         }
+        if (!Object.hasOwn(rawEntry, 'nativeObservation')) throw new Error(`Missing nativeObservation for ${chatId}`);
         sessions[chatId] = normalizeChatRegistryEntry(rawEntry, chatId);
       }
       this.#registry = {
@@ -360,6 +364,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
   }
 
   addChat({
+    nativeObservation = null,
     id,
     executorId,
     agentId,
@@ -408,6 +413,12 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     });
     const normalizedParentChatId = requireParentChatId(parentChatId, chatId);
     const normalizedLineage = requireChatLineage(lineage, chatId);
+    const observation = parseNativeObservationOrigin(nativeObservation, agentId);
+    if (observation?.sourceChatId === chatId) throw new Error('Observation cannot own its source');
+    assertObservationBindings({ nativeObservation: observation, agentSessionId, nativeSession,
+      nativeSeedReceipt: normalizedReceipt, lineage: normalizedLineage, carryOverSegments: normalizedSegments,
+      carryOverMigrationQuarantine: normalizedQuarantine, pendingPreambleBoundary: normalizedPreambleBoundary,
+      preambleSelection: normalizedPreambleSelection });
     assertSeedReceiptBinding({
       agentSessionId,
       nativeSeedReceipt: normalizedReceipt,
@@ -418,6 +429,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       const releaseProvider = this.#providerReferences.retain?.([apiProviderId]);
       try {
         registry.sessions[chatId] = {
+          nativeObservation: observation,
           ...(executorId == null || executorId === LOCAL_EXECUTOR_ID ? {} : { executorId }),
           agentId,
           nativeSession: nativeSession ? structuredClone(nativeSession) : null,
@@ -486,6 +498,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     const registry = this.getRegistry();
     const existing = registry.sessions[id];
     if (!existing) return options.flush ? Promise.resolve(null) : null;
+    if (ownership) assertChatExecutable(existing);
     const normalizedPatch = { ...this.#normalizeChatPatch(id, existing, patch), ...ownership };
     const candidate = { ...existing, ...normalizedPatch };
     // Ordinary updates prove the complete boundary binding, matching
@@ -540,6 +553,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     existing: ChatRegistryEntry,
     patch: ChatRegistryPatch,
   ): ChatRegistryPatch {
+    if (Object.hasOwn(patch, 'nativeObservation')) throw new Error('Native observation is creation-only');
+    if (Object.keys(patch).some((key) => key !== 'tags' && key !== 'lastReadAt')) assertChatExecutable(existing);
     const normalizedPatch = pickAllowedPatch(patch);
     if ('permissionMode' in normalizedPatch) {
       normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
@@ -646,6 +661,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       const registry = this.getRegistry();
       if (!Object.hasOwn(registry.sessions, id)) return null;
       const existing = registry.sessions[id]!;
+      if (observedProjectPath !== undefined) assertChatExecutable(existing);
       if (this.#unknownDurabilityChats.has(id)) {
         throw new ChatRegistryDurabilityUnknownError(
           `The chat registry has an unconfirmed save for ${id}; reload before further changes.`,
@@ -732,6 +748,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     const registry = this.getRegistry();
     const existing = registry.sessions[id];
     if (!existing) return null;
+    assertChatExecutable(existing);
     if (update.chatId !== id) {
       throw new Error(`Project path update identity mismatch: ${id}`);
     }
@@ -923,6 +940,7 @@ function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
     // state through a handed-out entry. New entry fields declare themselves by
     // landing in one of these two groups.
     agentSettingsById: structuredClone(entry.agentSettingsById),
+    nativeObservation: entry.nativeObservation ? structuredClone(entry.nativeObservation) : null,
     tags: [...entry.tags],
     nativeSession: entry.nativeSession ? structuredClone(entry.nativeSession) : null,
     nativeSeedReceipt: entry.nativeSeedReceipt ? { ...entry.nativeSeedReceipt } : null,

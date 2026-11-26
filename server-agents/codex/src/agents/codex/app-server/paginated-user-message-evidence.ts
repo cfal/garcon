@@ -15,6 +15,7 @@ export async function loadPaginatedUserMessageEvidence(
   fallbackTimestamp: string,
   signal: AbortSignal,
   survivingTurnIds: ReadonlySet<string>,
+  parseLine: (line: string) => unknown = parseEvidenceLine,
 ): Promise<CodexPaginatedItemEvidence> {
   // Pinned Codex persists ItemCompleted user messages but omits them from terminal
   // history reconstruction: https://github.com/openai/codex/blob/5d1fbf26c43abc65a203928b2e31561cb039e06d/codex-rs/rollout/src/policy.rs#L86-L93
@@ -22,9 +23,7 @@ export async function loadPaginatedUserMessageEvidence(
   const messages: ChatMessage[] = [];
   const orderedItemIdsByTurn = new Map<string, string[]>();
   for await (const entry of readJsonlLineEntries(nativePath, { signal })) {
-    const parsed = parseFirstJsonlValue<unknown>(entry.line);
-    if (parsed.kind !== 'value') continue;
-    const rollout = record(parsed.value);
+    const rollout = record(parseLine(entry.line));
     const payload = record(rollout?.payload);
     const item = record(payload?.item);
     const turnId =
@@ -48,11 +47,11 @@ export async function loadPaginatedUserMessageEvidence(
     if (item.type !== 'UserMessage' && item.type !== 'userMessage') continue;
     const clientId =
       nonEmptyString(item.client_id) ?? nonEmptyString(item.clientId);
-    if (!clientId || !Array.isArray(item.content)) continue;
+    if (!Array.isArray(item.content)) continue;
     const threadItem: CodexThreadItem = {
       type: 'userMessage',
       id,
-      clientId,
+      ...(clientId ? { clientId } : {}),
       content: item.content as CodexUserInput[],
     };
     const timestamp = codexEvidenceTimestamp(
@@ -74,6 +73,11 @@ export async function loadPaginatedUserMessageEvidence(
     });
   }
   return { messages, orderedItemIdsByTurn };
+}
+
+function parseEvidenceLine(line: string): unknown {
+  const parsed = parseFirstJsonlValue<unknown>(line);
+  return parsed.kind === 'value' ? parsed.value : null;
 }
 
 function codexEvidenceTimestamp(

@@ -34,7 +34,7 @@ function createChat(): ChatSessionRecord {
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		lastMessage: 'First chat preview',
 		firstMessage: 'First chat first',

@@ -56,6 +56,7 @@ import { PermissionControlEvents, type PermissionActionabilityChange } from './p
 import { inputDetail } from './input-submission.js';
 export type { PermissionActionabilityChange } from './permission-control-events.js';
 import { ProducerLease } from './producer-lease.js';
+import { ObservationWriters, type TranscriptObservationLease } from './observation.js';
 import { projectFinalResponse } from './final-response.js';
 import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
@@ -89,6 +90,7 @@ export class TranscriptLedgerService {
   readonly #runAbandonedListeners = new Set<(chatId: string, runId: string) => void | Promise<void>>();
   readonly #permissionEvents: PermissionControlEvents;
   readonly #leases = new Map<string, ProducerLease>();
+  readonly #observations: ObservationWriters;
   readonly #activeRuns = new Map<string, string>();
   readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
   readonly #permissionClaims = new Map<string, PermissionResolutionClaim>();
@@ -97,6 +99,8 @@ export class TranscriptLedgerService {
   constructor(store: TranscriptLedgerStore, options: TranscriptLedgerServiceOptions = {}) {
     this.#store = store;
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#observations = new ObservationWriters({ store, now: this.#now,
+      hasProducer: chatId => this.#leases.has(chatId), notify: event => this.#notify(event) });
     this.#createRunId = options.createRunId ?? (() => crypto.randomUUID());
     this.#serverInstanceId = options.serverInstanceId ?? crypto.randomUUID();
     this.#onListenerError = options.onListenerError ?? (() => undefined);
@@ -164,6 +168,7 @@ export class TranscriptLedgerService {
   }
 
   openProducer(chatId: string, ownerAgentId: string): TranscriptProducerLease {
+    if (this.#observations.has(chatId)) throw new TypeError('Observation writer already owns this chat');
     if (!ownerAgentId) throw new TypeError('Producer owner agent ID is required');
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
@@ -191,6 +196,10 @@ export class TranscriptLedgerService {
 
   closeProducer(chatId: string): void {
     this.#leases.get(chatId)?.close();
+  }
+
+  openObservation(chatId: string): TranscriptObservationLease {
+    return this.#observations.open(chatId);
   }
 
   beginRun(chatId: string, runId = this.#createRunId()): string {
@@ -703,6 +712,7 @@ export class TranscriptLedgerService {
   }
 
   close(): void {
+    this.#observations.closeAll();
     for (const lease of this.#leases.values()) lease.close();
     this.#leases.clear();
     this.#activeRuns.clear();
@@ -724,6 +734,7 @@ export class TranscriptLedgerService {
   }
 
   #clearChatState(chatId: string): void {
+    this.#observations.close(chatId);
     this.closeProducer(chatId);
     this.#activeRuns.delete(chatId);
     this.#clearChatPermissions(chatId);

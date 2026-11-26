@@ -9,6 +9,7 @@
 	let {
 		open,
 		candidates,
+		source = 'session',
 		busy,
 		cancelling,
 		progress,
@@ -17,6 +18,7 @@
 	}: {
 		open: boolean;
 		candidates: readonly ResendCandidate[];
+		source?: 'session' | 'native-child';
 		busy: boolean;
 		cancelling: boolean;
 		progress: ChatReloadProgress | null;
@@ -46,7 +48,7 @@
 		<Dialog.Header>
 			<Dialog.Title>{m.sidebar_chats_reload_confirm_title()}</Dialog.Title>
 			<Dialog.Description>
-				{m.sidebar_chats_reload_confirm_description()}
+				{source === 'native-child' ? m.chat_native_child_reload_description() : m.sidebar_chats_reload_confirm_description()}
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if candidates.length > 0}

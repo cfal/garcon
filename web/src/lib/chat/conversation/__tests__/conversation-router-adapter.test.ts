@@ -42,7 +42,7 @@ function chatRecord(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 		processingPhase: null,
 		isUnread: false,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		status: 'running',
 		tags: [],
 		...overrides,
@@ -276,9 +276,9 @@ describe('buildRouterStores', () => {
 			if (presentation === 'rendered') deps.panels.reconcile(panels);
 			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
 			if (presentation === 'rendered') {
-				stores.chatState.markRenderedChatStale('chat-1');
+				stores.chatState.markRenderedChatStale('chat-1', 'view-2');
 			} else {
-				stores.chatState.markChatTranscriptStale('chat-1');
+				stores.chatState.markChatTranscriptStale('chat-1', 'view-2');
 				deps.panels.reconcile(panels);
 			}
 			await stores.chatState.loadRenderedChat('chat-1');
@@ -317,7 +317,7 @@ describe('buildRouterStores', () => {
 			expect(deps.panels.overlayFor('chat-1')?.optimisticInputs).toHaveLength(1);
 			deps.panels.reconcile([]);
 			deps.chatState.activateChat(null);
-			stores.chatState.markChatTranscriptStale('chat-1');
+			stores.chatState.markChatTranscriptStale('chat-1', 'view-2');
 			deps.chatState.clearOptimisticUserInput('chat-1', 'input-1');
 			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
 			deps.panels.reconcile(panels);
@@ -330,6 +330,27 @@ describe('buildRouterStores', () => {
 			deps.panels.destroy();
 			cache.flush();
 		}
+	});
+
+	it('rechecks uncertain history without resetting the accepted view or its overlays', () => {
+		const deps = depsFor(chatRecord());
+		const cache = deps.panels.transcriptCache;
+		cache.replaceFromPage('chat-1', page('view-1'));
+		deps.panels.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'pending', content: 'Synthetic input',
+			createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending' });
+		deps.panels.appendLocalNotice('chat-1', 'warning', 'Synthetic notice');
+		const lease = cache.openViewLease('chat-1');
+		const read = cache.trackSnapshotRead('chat-1');
+		buildRouterStores(deps).chatState.recheckChatTranscript('chat-1');
+		expect(lease.isCurrent()).toBe(true);
+		expect(read.isCurrent()).toBe(false);
+		expect(cache.hasPendingReplacement('chat-1')).toBe(false);
+		expect(cache.readAppliedCursor('chat-1')).toMatchObject({ transcriptViewId: 'view-1', stale: true });
+		expect(deps.panels.overlayFor('chat-1')?.optimisticInputs).toHaveLength(1);
+		expect(deps.panels.overlayFor('chat-1')?.notices.map(notice => notice.content)).toEqual(['Synthetic notice']);
+		read.release();
+		deps.panels.destroy();
+		cache.flush();
 	});
 
 	it('maps remote chat deletion to workspace presentation cleanup', () => {

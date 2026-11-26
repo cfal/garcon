@@ -2,13 +2,23 @@ import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import type { ChatLineage } from '../../../common/chat-parentage.js';
-import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import type { AgentNativeChildRef, AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import type { AgentName } from '../agents/session-types.js';
 import type { NativeSeedReceipt } from '../../../common/transcript-seed.js';
 import type { ChatPreambleSelection, PendingPreambleBoundary } from '../../../common/preambles.js';
 
 
-export const CHAT_REGISTRY_VERSION = 6;
+export const CHAT_REGISTRY_VERSION = 7;
+
+export interface NativeChildObservationOrigin {
+  readonly kind: 'native-child';
+  readonly sourceChatId: string;
+  readonly sourceOwnershipEpoch: string;
+  readonly sourceAgentSessionId: string;
+  readonly child: AgentNativeChildRef;
+  readonly parentKey: string | null;
+  readonly reportedModel: string | null;
+}
 
 export interface CarryOverMigrationQuarantine {
   artifactId: string;
@@ -31,6 +41,7 @@ export interface CarryOverSegmentRef {
 }
 
 export interface ChatRegistryEntry {
+  readonly nativeObservation: NativeChildObservationOrigin | null;
   executorId?: string | null;
   agentId: AgentName;
   nativeSession: AgentNativeSessionRef | null;

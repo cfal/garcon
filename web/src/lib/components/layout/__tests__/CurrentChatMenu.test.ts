@@ -25,7 +25,7 @@ function chat(): ChatSessionRecord {
 		isProcessing: false,
 		processingPhase: null,
 		activityStatus: null,
-		canReloadFromNativeHistory: false,
+		observation: null, canReloadFromNativeHistory: false,
 		isUnread: false,
 		status: 'draft',
 		agentOwnershipEpoch: null,
@@ -54,6 +54,24 @@ function props(onOpenUserMessageNavigator?: () => void) {
 }
 
 describe('CurrentChatMenu', () => {
+	it.each([true, false])('keeps observer navigation and recovery but omits execution actions (working=%s)', async isWorking => {
+		const callbacks = props(vi.fn());
+		render(CurrentChatMenu, { ...callbacks, onConfigurePreambles: vi.fn(),
+			selectedChat: { ...chat(), status: 'running',
+				observation: { kind: 'native-child', captureStatus: 'attached', isWorking } } });
+		await fireEvent.click(screen.getByRole('button', { name: m.sidebar_actions_settings() }));
+		for (const name of [m.sidebar_chats_fork(), m.sidebar_chats_configure_preambles(), m.sidebar_project_path_menu_item()]) {
+			expect(screen.queryByRole('menuitem', { name })).toBeNull();
+		}
+		for (const name of [m.share_button(), m.sidebar_tooltips_delete_chat(), m.chat_user_message_navigator_menu()]) {
+			expect(screen.getByRole('menuitem', { name })).toBeTruthy();
+		}
+		const reload = screen.getByRole('menuitem', { name: m.sidebar_chats_reload() });
+		expect(reload.getAttribute('aria-disabled')).toBe('false');
+		await fireEvent.click(reload);
+		expect(callbacks.onReload).toHaveBeenCalledOnce();
+	});
+
 	it('closes the open menu when the selected chat changes, not when its metadata refreshes', async () => {
 		const callbacks = props();
 		const selectedChat = { ...chat(), status: 'running' as const };

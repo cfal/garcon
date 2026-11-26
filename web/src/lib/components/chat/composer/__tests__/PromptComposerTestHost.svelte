@@ -73,6 +73,7 @@
 		executors?: readonly ExecutorSnapshot[];
 		catalog?: ModelCatalogStore;
 		selectedChatId?: string;
+		observation?: ChatSessionRecord['observation'];
 		projectPath?: string;
 		selectedAgentId?: SessionAgentId;
 		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
@@ -116,6 +117,7 @@
 		executors: executorSnapshots,
 		catalog,
 		selectedChatId = 'chat-1',
+		observation = null,
 		projectPath = '/workspace/project',
 		selectedAgentId = 'claude',
 		selectedThinkingMode = 'none',
@@ -290,6 +292,7 @@
 	const selectedChat = $derived<ChatSessionRecord>({
 		executorId: selectedExecutorId,
 		id: selectedChatId,
+		observation,
 		parentChatId: null,
 		lineage: null,
 		projectPath,

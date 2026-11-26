@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { assertChatExecutable } from '../chats/native-observation.js';
 import { EventEmitter } from 'events';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import {
@@ -405,6 +406,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       if (!chat) {
         throw new ScheduledPromptDomainError('SESSION_NOT_FOUND', 'Selected chat was not found', 404);
       }
+      assertChatExecutable(chat);
       if (this.deps.agents.hasAgent(chat.agentId, chat.executorId)) {
         policy = this.deps.agents.chatExecutionPolicy(target.chatId);
       }
@@ -465,9 +467,11 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
   }
 
   #assertCurrentSelection(target: ScheduledPromptTarget): void {
-    if (target.type !== 'existing-chat' || !target.expectedSelection) return;
+    if (target.type !== 'existing-chat') return;
     const chat = this.deps.chats.getChat(target.chatId);
     if (!chat) throw new ScheduledPromptDomainError('SESSION_NOT_FOUND', 'Selected chat was not found', 404);
+    assertChatExecutable(chat);
+    if (!target.expectedSelection) return;
     if (!scheduledPromptSelectionMatches(target.expectedSelection, chat)) {
       throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_SELECTION_CHANGED', 'Execution selection changed before scheduling. Check the chat mode and try again.', 409);
     }

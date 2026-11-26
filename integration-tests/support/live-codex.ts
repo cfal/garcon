@@ -82,7 +82,7 @@ export interface LiveCodexTestEnvironment {
     directories: IntegrationDirectories,
     options?: {
       useFixtureModelCatalog?: boolean;
-      multiAgentVersion?: 'v2';
+      multiAgentVersion?: 'v1' | 'v2';
     },
   ): Promise<void>;
   dispose(): Promise<void>;
