@@ -198,17 +198,19 @@ test('references terminal output echoed by one or all cached text blocks', () =>
   }
 });
 
-test('keeps a terminal report at its unique run of whole cached blocks', () => {
+test.each(['cached', 'terminal'])('keeps a terminal report at its unique run of whole %s blocks', source => {
   const s = session();
-  const saved = { type: 'content', content: { type: 'text', text: 'Saved', annotations: { priority: 1 } } };
+  const saved = { type: 'content', content: { type: 'text', text: '  Saved', annotations: { priority: 1 } } };
   const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
-  const detail = textBlock('Job details');
+  const detail = textBlock('Job details  ');
+  const blocks = [textBlock('Previously: Saved\nJob details were not confirmed.'), saved, image, detail, textBlock('Waiting')];
   s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' },
-    content: [textBlock('Preparing'), saved, image, detail, textBlock('Waiting')] });
-  const result = s.patch('timer', { status: 'completed', rawOutput: { output: 'Saved\nJob details', id: 'job' } }).at(-1);
+    content: source === 'cached' ? blocks : undefined });
+  const result = s.patch('timer', { status: 'completed', rawOutput: { output: 'Saved\nJob details', id: 'job' },
+    content: source === 'terminal' ? blocks : undefined }).at(-1);
   if (result?.type !== 'tool-result') throw new Error('Expected a tool result');
-  expect(result.content).toEqual({ items: [saved, image, detail], rawOutput: { id: 'job' } });
-  expect(result.primaryTextItems).toEqual([0, 2]);
+  expect(result.content).toEqual({ items: source === 'cached' ? [saved, image, detail] : blocks, rawOutput: { id: 'job' } });
+  expect(result.primaryTextItems).toEqual(source === 'cached' ? [0, 2] : [1, 3]);
 });
 
 test('ranks a cached diagnostic echoed by terminal blocks ahead of long progress', () => {

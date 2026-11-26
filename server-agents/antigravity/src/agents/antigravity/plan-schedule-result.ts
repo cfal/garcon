@@ -22,36 +22,48 @@ function joinedText(blocks: readonly Block[]): string {
   return blocks.map(blockText).filter(Boolean).join('\n');
 }
 
-// An output spanning text blocks can cross images, but cannot start or end inside a block.
-function echoIndices(blocks: readonly Block[], output: string): number[] {
-  if (!output) return [];
+interface TextEcho {
+  readonly first: number;
+  readonly last: number;
+  readonly unique: boolean;
+}
+
+// A report can cross attachments. Only whole text blocks, apart from outer whitespace, can witness its text.
+function findTextEcho(blocks: readonly Block[], output: string): TextEcho | undefined {
+  if (!output) return undefined;
   const texts = blocks.map(blockText);
-  const joined = texts.filter(Boolean).join('\n');
-  if (joined.trim() === output) return texts.flatMap((text, i) => text ? [i] : []);
-  const single = texts.flatMap((text, i) => text.trim() === output ? [i] : []);
-  if (!output.includes('\n')) return single.length === 1 ? single : [];
-  const start = joined.indexOf(output);
-  if (start < 0 || start !== joined.lastIndexOf(output)) return [];
-  const end = start + output.length;
-  const indices: number[] = [];
+  const starts = new Map<number, number>();
+  const ends = new Map<number, number>();
   let offset = 0;
   for (const [i, text] of texts.entries()) {
     if (!text) continue;
-    if (offset === start || indices.length) {
-      indices.push(i);
-      if (offset + text.length === end) return indices;
+    const end = text.trimEnd().length;
+    if (end) {
+      starts.set(offset + text.length - text.trimStart().length, i);
+      ends.set(offset + end, i);
     }
     offset += text.length + 1;
-    if (offset > end) break;
   }
-  return [];
+  const joined = texts.filter(Boolean).join('\n');
+  let match: TextEcho | undefined;
+  let occurrence = -1;
+  for (const [start, first] of starts) {
+    const last = ends.get(start + output.length);
+    if (last === undefined) continue;
+    if (start > occurrence) occurrence = joined.indexOf(output, start);
+    if (occurrence < 0) break;
+    if (start !== occurrence) continue;
+    if (match) return { ...match, unique: false };
+    match = { first, last, unique: true };
+  }
+  return match;
 }
 
 function cachedBlocksForText(blocks: readonly Block[], output: string): Block[] {
-  const echoes = new Set(echoIndices(blocks, output));
+  const echo = findTextEcho(blocks, output);
   return blocks.flatMap((block, i) => {
     const part = toolResultTextPart(block);
-    if (!part || echoes.has(i)) return [block];
+    if (!part || (echo?.unique && i >= echo.first && i <= echo.last)) return [block];
     if (plainText(block)) return [];
     // Retains block annotations without presenting their superseded text.
     const metadata = { ...part, text: '' };
@@ -112,27 +124,25 @@ export function planOrScheduleResult(
   const output = rawText(raw).trim();
   const fields = reportMetadata(cachedOutput, terminal.rawOutput);
   const blocks = reportBlocks(previous?.content ?? [], frame, frameText, frameOutput);
-  const echoes = echoIndices(blocks, output);
+  const echo = findTextEcho(blocks, output);
   const text = joinedText(blocks);
-  const repeatedOutputWithNewText = frameOutput !== '' && frameText !== '' && !echoes.length
+  const repeatedOutputWithNewText = frameOutput !== '' && frameText !== '' && !echo
     && frameOutput === rawText(cachedOutput).trim() && frameText !== joinedText(previous?.content ?? []).trim();
-  const specificEcho = echoes.length > 0 && text.trim() !== output;
+  const specificEcho = echo !== undefined && text.trim() !== output;
   const body: Body = status === 'completed' ? {} : { status };
   let primary: number[] = [];
   if (specificEcho || repeatedOutputWithNewText || blocks.some(block => !plainAcpText(block))) {
     body.items = blocks;
-    storeOutput(body, echoes.length || (frameText && !frameOutput) ? undefined : raw, fields, true);
-    if (echoes.length) primary = echoes.filter(i => blockText(blocks[i]).trim());
-    else if ((frameText && !frameOutput) || repeatedOutputWithNewText) {
-      primary = blocks.flatMap((block, i) => blockText(block).trim() ? [i] : []);
+    storeOutput(body, echo || (frameText && !frameOutput) ? undefined : raw, fields, true);
+    if (echo || (frameText && !frameOutput) || repeatedOutputWithNewText) {
+      primary = blocks.flatMap((block, i) =>
+        (!echo || (i >= echo.first && i <= echo.last)) && blockText(block).trim() ? [i] : []);
     }
   } else if (frameOutput || (!frameText && output && !call.contentIsNewer)) {
     storeOutput(body, raw, fields, false);
-    const echoed = new Set(echoes);
-    const other = blocks.filter((block, i) => !echoed.has(i) && blockText(block).trim());
-    if (other.length) body.items = other;
+    if (!echo && text.trim()) body.items = blocks;
   } else {
-    const keepCachedOutput = !frameText && output && !echoes.length;
+    const keepCachedOutput = !frameText && output && !echo;
     storeOutput(body, keepCachedOutput ? raw : undefined, fields, true);
     if (text.trim()) {
       if (!frameText && !output && fields !== undefined && !call.contentIsNewer) body.items = blocks;
