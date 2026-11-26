@@ -92,6 +92,17 @@ function describe(value: Json | undefined): string {
   return text.length > 120 ? `${text.slice(0, 117)}...` : text;
 }
 
+// Locates where a long string first departs from its expectation and how the
+// lengths differ, which is where a body mismatch is visible (the fingerprint
+// Anthropic describes for its Rust migration). Wildcard patterns have no fixed
+// offsets, so they are not fingerprinted.
+function stringFingerprint(expected: string, actual: string): string {
+  if (expected.includes(WILDCARD) || (expected.length < 120 && actual.length < 120)) return '';
+  const offset = commonPrefixLength(expected, actual);
+  const excerpt = JSON.stringify(actual.slice(Math.max(0, offset - 20), offset + 40));
+  return ` (first difference at offset ${offset}: ${excerpt}; length ${actual.length}, expected ${expected.length})`;
+}
+
 function childPath(path: string, key: string | number): string {
   if (typeof key === 'number') return `${path}[${key}]`;
   return /^[A-Za-z_$][\w$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
@@ -111,9 +122,8 @@ export function firstDifference(expected: Json | undefined, actual: Json | undef
     return { path, kind: 'type', expected: describe(expected), actual: describe(actual) };
   }
   if (typeof expected === 'string') {
-    return stringMatches(expected, actual as string)
-      ? null
-      : { path, kind: 'value', expected: describe(expected), actual: describe(actual) };
+    if (stringMatches(expected, actual as string)) return null;
+    return { path, kind: 'value', expected: describe(expected), actual: `${describe(actual)}${stringFingerprint(expected, actual as string)}` };
   }
   if (Array.isArray(expected)) {
     const actualArray = actual as Json[];

@@ -49,6 +49,7 @@ export interface ServerConfig {
   trustProxyEnabled: boolean;
   httpCompressionEnabled: boolean;
   webBuildDir: string;
+  runtimeOrigin: string | null;
   rollbackCarryOverMigration: boolean;
 }
 
@@ -150,9 +151,22 @@ function parseServerConfig(): ServerConfig {
     authDisabled: parseAuthDisabled(),
     trustProxyEnabled: envBool('TRUST_PROXY', false),
     httpCompressionEnabled: envBool('HTTP_COMPRESSION', true),
+    runtimeOrigin: parseRuntimeOrigin(envValue('GARCON_RUNTIME_ORIGIN')),
     webBuildDir: path.resolve(envValue('GARCON_WEB_BUILD_DIR') ?? path.join(serverRoot, 'web', 'build')),
     rollbackCarryOverMigration: process.argv.includes('--rollback-carryover-migration'),
   };
+}
+
+// A front door that owns the public listener publishes its own origin for CLI
+// discovery instead of this process's loopback listener.
+function parseRuntimeOrigin(value: string | null): string | null {
+  if (value === null) return null;
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error(`Invalid GARCON_RUNTIME_ORIGIN value: ${value}`); }
+  if (url.protocol !== 'http:' || url.origin !== value.replace(/\/$/, '')) {
+    throw new Error(`Invalid GARCON_RUNTIME_ORIGIN value: ${value}. Must be an http origin such as http://127.0.0.1:8080.`);
+  }
+  return url.origin;
 }
 
 function parseConfigDir(): string {
@@ -279,6 +293,11 @@ export function isTrustProxyEnabled(): boolean {
 
 export function isHttpCompressionEnabled(): boolean {
   return currentConfig().httpCompressionEnabled;
+}
+
+// Origin published in the runtime descriptor, when another process owns the listener.
+export function getRuntimeOrigin(): string | null {
+  return currentConfig().runtimeOrigin;
 }
 
 // Directory the SPA is served from when assets are not embedded in the executable.

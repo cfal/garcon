@@ -30,6 +30,9 @@ const packageDirectory = (directories: IntegrationDirectories) => join(npmPrefix
 const claudeLauncher = (directories: IntegrationDirectories) => join(npmPrefix(directories), 'bin', 'claude');
 const codexLauncher = (directories: IntegrationDirectories) => join(toolsDirectory(directories), 'custom-codex');
 const installerLog = (directories: IntegrationDirectories) => join(directories.root, 'cli-update-npm.jsonl');
+// The fake installer holds `npm install` until this file exists, so the test
+// observes the run while it is still in progress.
+const installRelease = (directories: IntegrationDirectories) => join(directories.root, 'cli-update-npm-release');
 
 test(`Claude Code updates through its npm installer on its executor (${executionBackend()})`, async () => {
   await withIntegrationFixture('agent-cli-updates', async (fixture) => {
@@ -80,6 +83,7 @@ test(`Claude Code updates through its npm installer on its executor (${execution
       agentId: 'claude', executorId,
     }));
     expect(repeated?.run.startedAt).toBe(started!.run.startedAt);
+    await writeFile(installRelease(fixture.executionDirs), '');
 
     const settled = await waitFor('the update to settle', statuses, (response) => response.statuses.claude?.run.state !== 'running');
     expect(settled.statuses.claude).toMatchObject({
@@ -138,12 +142,14 @@ exit 2
 // recording each run with the process that started it.
 function fakeNpmSource(directories: IntegrationDirectories): string {
   return `#!${process.execPath}
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(installerLog(directories))}, JSON.stringify({ pid: process.pid, parentPid: process.ppid, args: args.join(' ') }) + '\\n');
 if (args[0] === 'view') {
   console.log(JSON.stringify(${JSON.stringify(LATEST_VERSION)}));
 } else if (args[0] === 'install') {
+  const deadline = Date.now() + 15_000;
+  while (!existsSync(${JSON.stringify(installRelease(directories))}) && Date.now() < deadline) await Bun.sleep(10);
   console.log('added 1 package in 1s');
   writeFileSync(${JSON.stringify(join(packageDirectory(directories), 'VERSION'))}, ${JSON.stringify(LATEST_VERSION)});
 } else {

@@ -1,8 +1,9 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
 import { fixtureAuthToken, prepareFixtureAuth } from './fixture-auth.js';
+import { SERVER_RUNTIME_FILENAME } from '../../common/server-runtime.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const LOG_CAPACITY = 2_000;
@@ -88,6 +89,37 @@ export async function pumpLines(
   }
 }
 
+// GARCON_TEST_CONTROLLER=front-door starts the controller behind the Rust front
+// door (rust/README.md) so every suite also verifies it; the default starts the
+// TypeScript controller directly. Front-door settings (GARCON_RS_*), such as the
+// shadow log and unit kill switches, pass through to it.
+export function controllerLaunch(repoRoot: string, value = process.env.GARCON_TEST_CONTROLLER ?? 'original'): {
+  command: string[];
+  environment: Record<string, string>;
+} {
+  if (value === 'original') return { command: [process.execPath, 'server/main.ts'], environment: {} };
+  if (value !== 'front-door') throw new Error(`Unknown controller: ${value}`);
+  return {
+    command: [join(repoRoot, 'rust/target/release/garcon-server')],
+    environment: {
+      GARCON_RS_BUN: process.execPath,
+      ...Object.fromEntries(Object.entries(process.env)
+        .filter((entry): entry is [string, string] => entry[0].startsWith('GARCON_RS_') && Boolean(entry[1]))),
+    },
+  };
+}
+
+// Reads the controller pid from the runtime descriptor it publishes before it
+// reports readiness; absent when publication was suppressed or failed.
+async function publishedControllerPid(configDir: string): Promise<number | null> {
+  try {
+    const descriptor = JSON.parse(await readFile(join(configDir, SERVER_RUNTIME_FILENAME), 'utf8')) as { pid?: unknown };
+    return typeof descriptor.pid === 'number' ? descriptor.pid : null;
+  } catch {
+    return null;
+  }
+}
+
 export class GarconProcess {
   readonly #child: GarconChild;
   readonly #logs = new BoundedLog<string>(LOG_CAPACITY);
@@ -95,6 +127,7 @@ export class GarconProcess {
   readonly #stderrPump: Promise<void>;
   #baseUrl = '';
   #authToken: string | null = null;
+  #controllerPid: number | null = null;
   #credentials: { username: string; password: string } | null = null;
   #expectedExit = false;
   #unexpectedExit: string | null = null;
@@ -132,7 +165,8 @@ export class GarconProcess {
 
   static async start(options: GarconProcessOptions): Promise<GarconProcess> {
     const ready = new Deferred<string>();
-    const environment = isolatedEnvironment(options.homeDir, options.environment);
+    const launch = controllerLaunch(options.repoRoot);
+    const environment = isolatedEnvironment(options.homeDir, { ...launch.environment, ...options.environment });
     await mkdir(environment.TMPDIR, { recursive: true });
     const credentials = options.authentication === 'existing' ? null : await prepareFixtureAuth(options.configDir);
     const workspaceArguments = options.workspaceName
@@ -140,8 +174,7 @@ export class GarconProcess {
       : ['--workspace-dir', options.workspaceDir];
     const child = Bun.spawn({
       cmd: [
-        process.execPath,
-        'server/main.ts',
+        ...launch.command,
         '--port',
         String(options.port ?? 0),
         '--bind-address',
@@ -172,6 +205,7 @@ export class GarconProcess {
       );
       if (credentials) instance.#authToken = await fixtureAuthToken(instance.#baseUrl, credentials);
       instance.#credentials = credentials;
+      instance.#controllerPid = await publishedControllerPid(options.configDir);
       return instance;
     } catch (error) {
       await instance.#terminateAfterStartupFailure();
@@ -189,8 +223,11 @@ export class GarconProcess {
 
   get credentials(): { username: string; password: string } | null { return this.#credentials; }
 
+  // The controller process, which spawns providers and executes work. Behind
+  // the front door it is the front door's child; lifecycle signals still go to
+  // the spawned process, whose exit ends the controller.
   get pid(): number | null {
-    return this.#exitCode === null ? this.#child.pid : null;
+    return this.#exitCode === null ? this.#controllerPid ?? this.#child.pid : null;
   }
 
   get logs(): readonly string[] {

@@ -36,6 +36,13 @@ describe('firstDifference', () => {
     expect(firstDifference({ a: '1' }, { a: 1 })?.kind).toBe('type');
   });
 
+  test('fingerprints long string differences by offset and length', () => {
+    const expected = 'a'.repeat(150);
+    const actual = `${'a'.repeat(100)}b${'a'.repeat(60)}`;
+    expect(firstDifference(expected, actual)?.actual).toContain('first difference at offset 100');
+    expect(firstDifference(expected, actual)?.actual).toContain('length 161, expected 150');
+  });
+
   test('matches wildcards inside strings literally elsewhere', () => {
     expect(stringMatches(`a.${WILDCARD}(b)`, 'a.anything(b)')).toBe(true);
     expect(stringMatches(`a.${WILDCARD}(b)`, 'aXanything(b)')).toBe(false);

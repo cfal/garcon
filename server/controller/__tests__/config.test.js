@@ -22,6 +22,7 @@ const configEnvironment = Object.fromEntries([
   'GARCON_MAX_WS_CLIENTS',
   'GARCON_HTTP_COMPRESSION',
   'GARCON_DISABLE_AUTH',
+  'GARCON_RUNTIME_ORIGIN',
   'HOME',
 ].map((key) => [key, process.env[key]]));
 
@@ -35,6 +36,16 @@ afterEach(() => {
 });
 
 describe('server configuration', () => {
+  it('accepts only an http origin for the published runtime URL', () => {
+    expect(initializeServerConfig().runtimeOrigin).toBeNull();
+    process.env.GARCON_RUNTIME_ORIGIN = 'http://127.0.0.1:8080';
+    expect(initializeServerConfig().runtimeOrigin).toBe('http://127.0.0.1:8080');
+    for (const invalid of ['http://127.0.0.1:8080/base', 'https://garcon.test', 'not a url']) {
+      process.env.GARCON_RUNTIME_ORIGIN = invalid;
+      expect(() => initializeServerConfig()).toThrow('GARCON_RUNTIME_ORIGIN');
+    }
+  });
+
   it('public URL flags override environment, preserve base paths, and reject invalid configuration', () => {
     process.env.GARCON_PUBLIC_URL = 'https://public.test/base';
     process.env.GARCON_BASE_PATH = '/base';

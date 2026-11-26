@@ -100,10 +100,25 @@ fn bad_gateway() -> Response<ResponseBody> {
     response
 }
 
+/// A connector to the original with Nagle's algorithm disabled, so proxying
+/// adds no write coalescing delay that a direct connection would not have.
+pub fn no_delay_connector() -> HttpConnector {
+    let mut connector = HttpConnector::new();
+    connector.set_nodelay(true);
+    connector
+}
+
+/// Opens a dedicated connection to the original for a protocol upgrade.
+async fn connect_upstream(authority: &str) -> std::io::Result<TcpStream> {
+    let stream = TcpStream::connect(authority).await?;
+    stream.set_nodelay(true)?;
+    Ok(stream)
+}
+
 impl Proxy {
     pub fn new(origin: String, trust_proxy: bool, fallback_log: Option<FallbackLog>) -> Self {
         let authority = origin.trim_start_matches("http://").to_string();
-        let client = Client::builder(TokioExecutor::new()).build_http();
+        let client = Client::builder(TokioExecutor::new()).build(no_delay_connector());
         Self {
             client,
             origin,
@@ -182,7 +197,7 @@ impl Proxy {
             .expect("an upgrade request copies a valid request line");
         *upstream_request.headers_mut() = request.headers().clone();
 
-        let Ok(stream) = TcpStream::connect(&self.authority).await else {
+        let Ok(stream) = connect_upstream(&self.authority).await else {
             return bad_gateway();
         };
         let Ok((mut sender, connection)) =
@@ -216,6 +231,26 @@ impl Proxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener;
+    use tower_service::Service;
+
+    #[tokio::test]
+    async fn upstream_connections_disable_nagle() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let pooled = no_delay_connector()
+            .call(format!("http://{address}").parse().unwrap())
+            .await
+            .unwrap();
+        assert!(pooled.inner().nodelay().unwrap());
+        assert!(
+            connect_upstream(&address.to_string())
+                .await
+                .unwrap()
+                .nodelay()
+                .unwrap()
+        );
+    }
 
     #[test]
     fn removes_hop_by_hop_and_connection_listed_headers() {

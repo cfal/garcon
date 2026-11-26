@@ -45,6 +45,7 @@ rust/target/release/garcon-server --port 8080
 | `GARCON_RS_ORIGINAL_ROOT` | Checkout containing `server/main.ts` (default: working directory) |
 | `GARCON_RS_BUN` | Bun executable used to start the original (default: `bun`) |
 | `GARCON_RS_FALLBACK_LOG` | Appends `METHOD path` for every request handed to the original |
+| `GARCON_RS_SHADOW_LOG` | Compares every native response with the original's answer and appends `match` or `diverge` |
 | `GARCON_RS_UNIT_<UNIT>=original` | Sends a native unit's routes back to the original without a rebuild |
 
 Unit names for the kill switch are listed in [`MAP.md`](MAP.md).
@@ -97,6 +98,40 @@ The loop is only as good as its coverage. Before trusting a green replay for a
 unit, plant a deliberate bug in it (a header, a status, an off-by-one) and
 confirm the replay fails on the expected field; a surviving mutant means a
 scenario is missing.
+
+## Shadowing the end-to-end suites
+
+Recorded scenarios only cover the inputs someone wrote down. Following
+Anthropic's account of [migrating its API to Rust](https://www.anthropic.com/research/migrating-api-to-rust),
+whose port passed 98% of its tests while matching only about a quarter of real
+traffic, the front door is also verified on the traffic of the existing
+end-to-end suites:
+
+- `GARCON_TEST_CONTROLLER=front-door` makes the integration fixtures start
+  the controller behind the front door, so the server integration suite (with
+  the deterministic scripted providers standing in for live models, as the
+  article replays one model output to both implementations) and the Chromium
+  suite run unchanged against it.
+- `GARCON_RS_SHADOW_LOG` shadows that traffic: each response a native unit
+  serves is compared with the original's answer to the same request. A
+  `diverge` line names the first differing field and, for bodies, the byte
+  offset of the first difference and both lengths, so divergences with one
+  cause group together.
+- `bun rust/parity/compare-junit.ts <original> <front-door>` compares the JUnit
+  reports of the two runs test by test and fails on any outcome that differs.
+
+```bash
+cd integration-tests
+GARCON_TEST_CONTROLLER=original bun run-server-tests.ts --reporter=junit --reporter-outfile=/tmp/original.xml
+GARCON_TEST_CONTROLLER=front-door GARCON_RS_SHADOW_LOG=/tmp/shadow.log \
+  bun run-server-tests.ts --reporter=junit --reporter-outfile=/tmp/front-door.xml
+bun ../rust/parity/compare-junit.ts /tmp/original.xml /tmp/front-door.xml
+grep -c ^diverge /tmp/shadow.log
+```
+
+A suite that fails under both controllers is not a parity failure, but it is
+not evidence either; only tests that pass under the original count toward the
+comparison.
 
 ## Porting a unit
 

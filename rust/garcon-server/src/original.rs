@@ -92,6 +92,7 @@ pub async fn start(
     args: &[String],
     trust_proxy: bool,
     public_url: String,
+    runtime_origin: &str,
 ) -> std::io::Result<OriginalServer> {
     let mut command = original_command(root);
     command
@@ -101,12 +102,35 @@ pub async fn start(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    #[cfg(target_os = "linux")]
+    {
+        // The original dies with the front door even when the front door is
+        // killed abruptly, so it never outlives it holding the workspace lease.
+        let parent = std::process::id() as libc::pid_t;
+        // SAFETY: the closure runs in the forked child before exec and only
+        // makes async-signal-safe calls.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0
+                    || libc::getppid() != parent
+                {
+                    return Err(std::io::Error::other(
+                        "the front door exited before the original started",
+                    ));
+                }
+                Ok(())
+            });
+        }
+    }
     // The front door replaces the forwarded client address headers (see
     // proxy.rs), so the original may trust them; otherwise every client would
     // share the front door's loopback address in the login rate limiter.
     if !trust_proxy {
         command.env("GARCON_TRUST_PROXY", "1");
     }
+    // CLI discovery must reach the front door, whose address survives a restart
+    // of the original; the original's own port is ephemeral.
+    command.env("GARCON_RUNTIME_ORIGIN", runtime_origin);
     let mut child = command.spawn()?;
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");

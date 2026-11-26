@@ -42,6 +42,7 @@ Environment Variables:
   GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
   GARCON_HTTP_COMPRESSION          Enable streamed HTTP response compression. Default: true
   GARCON_WEB_BUILD_DIR             Serve the web app from this directory. Default: <install>/web/build
+  GARCON_RUNTIME_ORIGIN            Origin published for CLI discovery when a front door owns the listener.
   SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
 
 Notes:

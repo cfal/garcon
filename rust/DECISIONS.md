@@ -152,3 +152,34 @@ routing framework when native routes outgrow a match on path prefixes.
 
 Consequences: Encoders differ from Bun's byte for byte, which the harness
 tolerates by comparing decoded bodies and the `Content-Encoding` header.
+
+## ADR-009: Shadow the end-to-end suites, not only recorded scenarios
+
+Status: accepted (2026-11-26)
+
+Context: Anthropic's Rust migration of its API passed about 98% of its tests
+while matching only about a quarter of production inputs, and was verified by
+shadowing: the same traffic to both implementations, nondeterministic model
+output recorded once and replayed to both, and each divergence fingerprinted by
+where it begins and the length difference
+([Migrating the Claude API to Rust](https://www.anthropic.com/research/migrating-api-to-rust)).
+Garcon has no production traffic to shadow, but its server and Chromium suites
+generate realistic traffic against deterministic scripted providers.
+
+Decision: The integration fixtures can start the controller behind the front
+door (`GARCON_TEST_CONTROLLER=front-door`). In shadow mode
+(`GARCON_RS_SHADOW_LOG`) the front door sends each natively served request to
+the original as well and logs a fingerprinted comparison. A unit is verified by
+three loops: the scenario replay, the end-to-end suites with identical
+outcomes under both controllers, and zero shadow divergences across them.
+
+Consequences: Shadow mode doubles the work of native requests and is for
+verification only. It applies to idempotent native units; a unit with side
+effects needs a different comparison before it can be shadowed.
+
+The first full run justified the third loop: the scenario replay and 76,091
+shadowed asset responses all matched, yet three Chromium suites failed only
+behind the front door. Its sockets left Nagle's algorithm on, so small
+WebSocket and API writes waited for acknowledgements that a direct connection
+to Bun never waits for. Content comparison cannot see latency; suite outcomes
+can.

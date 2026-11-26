@@ -206,6 +206,15 @@ pub fn listening_server_url(bind_address: &str, port: u16) -> String {
     }
 }
 
+/// Mirrors `advertisedServerUrl`: the URL local clients use, with wildcard
+/// bind addresses replaced by loopback.
+pub fn advertised_server_url(bind_address: &str, port: u16) -> String {
+    match bind_address {
+        "0.0.0.0" | "::" | "[::]" => listening_server_url("127.0.0.1", port),
+        _ => listening_server_url(bind_address, port),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +298,13 @@ mod tests {
         assert_eq!(parse_base_path("tools"), None);
         assert_eq!(parse_base_path("/a//b"), None);
         assert_eq!(parse_base_path("/a b"), None);
+    }
+
+    #[test]
+    fn advertises_loopback_for_wildcard_binds() {
+        assert_eq!(advertised_server_url("0.0.0.0", 80), "http://127.0.0.1:80");
+        assert_eq!(advertised_server_url("::", 80), "http://127.0.0.1:80");
+        assert_eq!(advertised_server_url("::1", 80), "http://[::1]:80");
     }
 
     #[test]

@@ -6,6 +6,7 @@ mod compression;
 mod config;
 mod original;
 mod proxy;
+mod shadow;
 mod static_assets;
 
 use std::net::SocketAddr;
@@ -18,12 +19,13 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response};
 use hyper_util::rt::TokioIo;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::compression::NativeResponse;
 use crate::config::{FrontDoorConfig, LaunchMode, ProcessEnvironment};
 use crate::proxy::{FallbackLog, Proxy, ResponseBody, full_body};
+use crate::shadow::Shadow;
 
 struct FrontDoor {
     config: FrontDoorConfig,
@@ -31,6 +33,9 @@ struct FrontDoor {
     /// `GARCON_RS_UNIT_STATIC_ASSETS=original` sends the unit's routes back to
     /// the original without a rebuild.
     static_assets_native: bool,
+    /// `GARCON_RS_SHADOW_LOG` compares every native response with the
+    /// original's answer before returning it.
+    shadow: Option<Shadow>,
 }
 
 /// Mirrors `stripBasePath` in `common/base-path.ts`.
@@ -80,15 +85,35 @@ impl FrontDoor {
                 response,
                 self.config.http_compression,
             );
+            if let Some(shadow) = &self.shadow {
+                shadow
+                    .check(
+                        request.method(),
+                        request.uri(),
+                        request.headers(),
+                        &response,
+                    )
+                    .await;
+            }
             return into_response(request.method(), response);
         }
         self.proxy.forward(request, peer).await
     }
 }
 
+/// Accepts a client connection. Small writes such as WebSocket frames must not
+/// wait for Nagle's algorithm, which the original's server also disables;
+/// without this the Chromium sidebar reorder suite timed out behind the front
+/// door.
+async fn accept(listener: &TcpListener) -> std::io::Result<(TcpStream, SocketAddr)> {
+    let (stream, peer) = listener.accept().await?;
+    stream.set_nodelay(true)?;
+    Ok((stream, peer))
+}
+
 async fn accept_loop(listener: TcpListener, front_door: Arc<FrontDoor>) {
     loop {
-        let Ok((stream, peer)) = listener.accept().await else {
+        let Ok((stream, peer)) = accept(&listener).await else {
             continue;
         };
         let front_door = front_door.clone();
@@ -123,6 +148,7 @@ async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
         &config.original_args,
         config.trust_proxy,
         public_url,
+        &config::advertised_server_url(&config.bind_address, port),
     )
     .await?;
     let fallback_log = match std::env::var_os("GARCON_RS_FALLBACK_LOG") {
@@ -131,10 +157,15 @@ async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
     };
     let static_assets_native =
         std::env::var("GARCON_RS_UNIT_STATIC_ASSETS").as_deref() != Ok("original");
+    let shadow = match std::env::var_os("GARCON_RS_SHADOW_LOG") {
+        Some(path) => Some(Shadow::open(path.as_ref(), original.origin.clone())?),
+        None => None,
+    };
     let front_door = Arc::new(FrontDoor {
         proxy: Proxy::new(original.origin.clone(), config.trust_proxy, fallback_log),
         config,
         static_assets_native,
+        shadow,
     });
     let server = tokio::spawn(accept_loop(listener, front_door));
 
@@ -179,6 +210,15 @@ async fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn accepted_connections_disable_nagle() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let _client = TcpStream::connect(address).await.unwrap();
+        let (stream, _) = accept(&listener).await.unwrap();
+        assert!(stream.nodelay().unwrap());
+    }
 
     #[test]
     fn strips_base_paths_like_the_original() {
