@@ -107,14 +107,15 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
   const isMcp = asObject(raw._meta).is_mcp_tool_call === true;
   if (isMcp || (raw.kind && raw.kind !== 'other')) planTitle = 'excluded';
   else if (raw.title === 'Run update_steps') planTitle = 'matched';
+  const rawInput = raw.args === undefined ? raw.rawInput : raw.rawInput ?? raw.args;
   return {
     toolCallId,
     name: asString(raw.name) ?? null,
     planTitle,
     isMcp,
     kind: asString(raw.kind) ?? null,
-    input: asObject(raw.rawInput ?? raw.args),
-    rawInput: raw.rawInput === undefined ? raw.args : raw.rawInput,
+    input: asObject(rawInput),
+    rawInput,
   };
 }
 

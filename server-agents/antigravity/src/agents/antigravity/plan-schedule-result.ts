@@ -114,13 +114,18 @@ export function planOrScheduleResult(
   const blocks = reportBlocks(previous?.content ?? [], frame, frameText, frameOutput);
   const echoes = echoIndices(blocks, output);
   const text = joinedText(blocks);
+  const repeatedOutputWithNewText = frameOutput !== '' && frameText !== '' && !echoes.length
+    && frameOutput === rawText(cachedOutput).trim() && frameText !== joinedText(previous?.content ?? []).trim();
+  const specificEcho = echoes.length > 0 && text.trim() !== output;
   const body: Body = status === 'completed' ? {} : { status };
   let primary: number[] = [];
-  if (blocks.some(block => !plainAcpText(block))) {
+  if (specificEcho || repeatedOutputWithNewText || blocks.some(block => !plainAcpText(block))) {
     body.items = blocks;
     storeOutput(body, echoes.length || (frameText && !frameOutput) ? undefined : raw, fields, true);
-    if (frameText && !frameOutput) primary = blocks.flatMap((block, i) => blockText(block).trim() ? [i] : []);
-    else primary = echoes.filter(i => blockText(blocks[i]).trim());
+    if (echoes.length) primary = echoes.filter(i => blockText(blocks[i]).trim());
+    else if ((frameText && !frameOutput) || repeatedOutputWithNewText) {
+      primary = blocks.flatMap((block, i) => blockText(block).trim() ? [i] : []);
+    }
   } else if (frameOutput || (!frameText && output && !call.contentIsNewer)) {
     storeOutput(body, raw, fields, false);
     const echoed = new Set(echoes);

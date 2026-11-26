@@ -135,9 +135,10 @@ test('retains every terminal block when a cached output is echoed alongside othe
     const progress = textBlock('Checking limits');
     s.start('call', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content: [progress] });
     s.patch('call', { rawOutput });
-    const row = s.patch('call', { status: 'failed', content: [progress, textBlock('Operation refused')] }).at(-1);
-    expect(row).toEqual(expect.objectContaining({ isError: true, content: {
-      raw: 'Checking limits\nOperation refused', status: 'failed', ...('attempts' in rawOutput ? { rawOutput: { attempts: 1 } } : {}),
+    const items = [progress, textBlock('Operation refused')];
+    const row = s.patch('call', { status: 'failed', content: items }).at(-1);
+    expect(row).toEqual(expect.objectContaining({ isError: true, primaryTextItems: [1], content: {
+      items, status: 'failed', ...('attempts' in rawOutput ? { rawOutput: { attempts: 1 } } : {}),
     } }));
   }
 });
@@ -208,6 +209,24 @@ test('keeps a terminal report at its unique run of whole cached blocks', () => {
   if (result?.type !== 'tool-result') throw new Error('Expected a tool result');
   expect(result.content).toEqual({ items: [saved, image, detail], rawOutput: { id: 'job' } });
   expect(result.primaryTextItems).toEqual([0, 2]);
+});
+
+test('ranks a cached diagnostic echoed by terminal blocks ahead of long progress', () => {
+  const s = session();
+  const diagnostic = 'Operation refused';
+  const content = [textBlock('Checking '.repeat(600)), { type: 'image', data: 'AA==', mimeType: 'image/png' }, textBlock(diagnostic)];
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, rawOutput: { output: diagnostic } });
+  const row = s.patch('timer', { status: 'failed', content }).at(-1);
+  expect(row).toMatchObject({ type: 'tool-result', primaryTextItems: [2], content: { items: content } });
+});
+
+test('ranks newly reported terminal text ahead of an unchanged raw progress snapshot', () => {
+  const s = session();
+  const rawOutput = { output: 'Checking '.repeat(600), attempts: 1 };
+  const content = [textBlock('Operation refused')];
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, rawOutput });
+  const row = s.patch('timer', { status: 'failed', content, rawOutput }).at(-1);
+  expect(row).toMatchObject({ type: 'tool-result', primaryTextItems: [0], content: { items: content, rawOutput } });
 });
 
 test('falls back to cached text when terminal fields are explicitly blank', () => {
@@ -289,6 +308,8 @@ test('malformed schedule evidence does not replace ordinary tool arguments or an
   const s = session();
   expect(s.start('read', { name: 'read_file', rawInput: null, args: { Path: '/fixture/readme' } })[0])
     .toMatchObject({ type: 'read-tool-use', filePath: '/fixture/readme' });
+  expect(s.start('alias', { name: 'schedule', rawInput: null, args: { DurationSeconds: 2, Prompt: 'Check' }, status: 'completed' })[0])
+    .toMatchObject({ type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 2 } });
   s.start('late-name', { rawInput: { Path: '/fixture/late' } });
   s.patch('late-name', { rawInput: 'invalid' });
   expect(s.patch('late-name', { name: 'read_file', status: 'completed' })[0])
