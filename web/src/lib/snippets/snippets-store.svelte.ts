@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import { CatalogRefresh, runCatalogLoad } from '$lib/api/catalog-refresh.js';
 import { ApiError } from '$lib/api/client.js';
 import { createSnippet, getSnippets, removeSnippet, updateSnippet } from '$lib/api/snippets.js';
 import {
@@ -22,8 +23,7 @@ export class SnippetsStore {
 	error = $state<string | null>(null);
 	isRefreshing = $state(false);
 	#loadPromise: Promise<SnippetsSnapshot> | null = null;
-	#refreshLoopPromise: Promise<void> | null = null;
-	#refreshRequested = false;
+	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
 	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
 
@@ -60,25 +60,17 @@ export class SnippetsStore {
 		return this.#loadPromise;
 	}
 
-	async refreshIfLoaded(): Promise<void> {
-		if (!this.snapshot && this.status === 'idle') return;
-		this.#refreshRequested = true;
-		if (this.#refreshLoopPromise) return this.#refreshLoopPromise;
-		this.#refreshLoopPromise = untrack(async () => {
-			do {
-				this.#refreshRequested = false;
-				const joinedExistingLoad = this.#loadPromise !== null;
-				try {
-					await this.refresh();
-				} catch {
-					if (!joinedExistingLoad && !this.#refreshRequested) return;
-				}
-				if (joinedExistingLoad) this.#refreshRequested = true;
-			} while (this.#refreshRequested);
-		}).finally(() => {
-			this.#refreshLoopPromise = null;
-		});
-		return this.#refreshLoopPromise;
+	loadInBackground(): Promise<void> {
+		return runCatalogLoad(() => this.ensureLoaded());
+	}
+
+	refreshInBackground(): Promise<void> {
+		return runCatalogLoad(() => this.refresh());
+	}
+
+	refreshIfLoaded(): Promise<void> {
+		if (!this.snapshot && this.status === 'idle') return Promise.resolve();
+		return untrack(() => this.#refreshLoop.request());
 	}
 
 	async create(definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {

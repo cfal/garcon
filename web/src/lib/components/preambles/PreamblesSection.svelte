@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ApiError } from '$lib/api/client.js';
 	import { Button } from '$lib/components/ui/button';
 	import { getPreambles } from '$lib/context';
@@ -26,6 +27,7 @@
 
 	let { active }: Props = $props();
 	const preambles = getPreambles();
+	const catalogIndexById = $derived(new Map(preambles.preambles.map((item, index) => [item.id, index])));
 	let query = $state('');
 	let formOpen = $state(false);
 	let editingPreamble = $state<Preamble | null>(null);
@@ -47,7 +49,7 @@
 
 	$effect(() => {
 		if (!active) return;
-		void preambles.ensureLoaded().catch(() => {});
+		untrack(() => void preambles.loadInBackground());
 	});
 
 	function openCreate(): void {
@@ -149,7 +151,8 @@
 
 	async function refresh(): Promise<void> {
 		if (catalogMutationBusy) return;
-		await preambles.refresh();
+		operationError = null;
+		await preambles.refreshInBackground();
 	}
 </script>
 
@@ -166,7 +169,7 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={() => void refresh().catch(() => {})}
+				onclick={() => void refresh()}
 				disabled={preambles.isRefreshing || catalogMutationBusy}
 				title={m.preambles_refresh()}
 				aria-label={m.preambles_refresh()}
@@ -232,7 +235,7 @@
 			<p class="max-w-md text-sm text-muted-foreground">
 				{preambles.error ?? m.preambles_load_error()}
 			</p>
-			<Button variant="secondary" onclick={() => void preambles.ensureLoaded().catch(() => {})}>
+			<Button variant="secondary" onclick={() => void preambles.loadInBackground()}>
 				{m.preambles_retry()}
 			</Button>
 		</div>
@@ -251,7 +254,7 @@
 	{:else}
 		<div class="space-y-2">
 			{#each visiblePreambles as preamble (preamble.id)}
-				{@const catalogIndex = preambles.preambles.findIndex((item) => item.id === preamble.id)}
+				{@const catalogIndex = catalogIndexById.get(preamble.id) ?? -1}
 				<svelte:boundary>
 					<PreambleRow
 						{preamble}
@@ -279,18 +282,22 @@
 	{/if}
 </div>
 
-<PreambleFormDialog
-	open={formOpen}
-	preamble={editingPreamble}
-	isStale={formIsStale}
-	onSave={save}
-	onClose={() => (formOpen = false)}
-/>
-<PreambleRemoveDialog
-	open={removePreamble !== null}
-	preamble={removePreamble}
-	{removing}
-	error={removeError}
-	onConfirm={() => void confirmRemove()}
-	onClose={() => (removePreamble = null)}
-/>
+{#if formOpen}
+	<PreambleFormDialog
+		open
+		preamble={editingPreamble}
+		isStale={formIsStale}
+		onSave={save}
+		onClose={() => (formOpen = false)}
+	/>
+{/if}
+{#if removePreamble}
+	<PreambleRemoveDialog
+		open
+		preamble={removePreamble}
+		{removing}
+		error={removeError}
+		onConfirm={() => void confirmRemove()}
+		onClose={() => (removePreamble = null)}
+	/>
+{/if}

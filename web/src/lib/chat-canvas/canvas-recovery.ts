@@ -1,5 +1,6 @@
 import { parseChatCanvas, type ChatCanvas } from '$shared/chat-canvas';
 import { canPersistBrowserData } from '$lib/utils/browser-data-lifetime';
+import { CANVAS_RECOVERY_STORAGE_PREFIX } from './canvas-recovery-storage.js';
 
 export interface CanvasRecoveryPort {
 	list(): ChatCanvas[];
@@ -8,7 +9,7 @@ export interface CanvasRecoveryPort {
 	remove(id: string): void;
 }
 
-const prefix = 'chat-canvas-recovery-v1:';
+const prefix = CANVAS_RECOVERY_STORAGE_PREFIX;
 
 function parseRecovery(raw: string, id: string): ChatCanvas {
 	const canvas = parseChatCanvas(JSON.parse(raw));

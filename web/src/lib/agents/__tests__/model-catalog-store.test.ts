@@ -173,7 +173,20 @@ describe('ModelCatalogStore', () => {
 		expect(remote.isRefreshing).toBe(false);
 		expect(remote.getModels('sample')).toEqual([]);
 		expect(store.forExecutor(remoteExecutor.id)).not.toBe(remote);
-		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors)).toBe('{}');
+		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors)).toBeNull();
+	});
+
+	it('does not rewrite persisted snapshots for equivalent executor inventories', async () => {
+		const store = createModelCatalogStore();
+		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample')])));
+		await store.forExecutor(remoteExecutor.id).forceRefresh();
+		const write = vi.spyOn(localStorage, 'setItem');
+		store.reconcileExecutors([localExecutor, remoteExecutor]);
+		store.reconcileExecutors([localExecutor, { ...remoteExecutor }]);
+		expect(write).not.toHaveBeenCalled();
+		store.reconcileExecutors([localExecutor]);
+		expect(write).toHaveBeenCalledOnce();
+		write.mockRestore();
 	});
 
 	it('starts empty instead of embedding integration-specific fallbacks', () => {
@@ -279,7 +292,10 @@ describe('ModelCatalogStore', () => {
 		expect(restored.forExecutor(remoteExecutor.id).isValidated).toBe(true);
 		const replaced = createModelCatalogStore();
 		if (mounted) replaced.forExecutor(remoteExecutor.id);
+		const write = vi.spyOn(localStorage, 'setItem');
 		replaced.reconcileExecutors([{ ...remoteExecutor, instanceId: 'replacement' }]);
+		expect(write).toHaveBeenCalledExactlyOnceWith(LOCAL_STORAGE_KEYS.modelCatalogExecutors, '{}');
+		write.mockRestore();
 		expect(replaced.forExecutor(remoteExecutor.id).isValidated).toBe(false);
 		expect(replaced.forExecutor(remoteExecutor.id).isStale()).toBe(true);
 	});

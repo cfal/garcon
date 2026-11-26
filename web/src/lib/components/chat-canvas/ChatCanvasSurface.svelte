@@ -1,22 +1,22 @@
 <script lang="ts">
 	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
-	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
+	import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import CanvasPanel from './CanvasPanel.svelte';
 
 	let {
 		controller,
-		chats,
+		sessions,
 		visible,
 		presentation,
 	}: {
 		controller: CanvasController;
-		chats: readonly ChatSessionRecord[];
+		sessions: Pick<ChatSessionsStore, 'byId' | 'orderedChats'>;
 		visible: boolean;
 		presentation: PresentationHostId;
 	} = $props();
 </script>
 
 <div class="h-full min-h-0" style:display={visible ? undefined : 'none'}>
-	<CanvasPanel {controller} {chats} {visible} {presentation} />
+	<CanvasPanel {controller} {sessions} {visible} {presentation} />
 </div>

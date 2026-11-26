@@ -417,8 +417,10 @@ describe('ChatBoardPanel', () => {
 		const readySelector = `[data-chat-board-lane-list="${column.id}"]`;
 		const reviewSelector = `[data-chat-board-lane-list="${reviewColumn.id}"]`;
 		const panel = container.querySelector<HTMLElement>('[data-chat-board-panel]')!;
-		let panelWidth = 700;
-		vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(
+		let panelWidth = 899.75;
+		Object.defineProperty(panel, 'clientWidth', { get: () => Math.round(panelWidth) });
+		TestResizeObserver.emit(panelWidth);
+		const bounds = vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(
 			() => ({ width: panelWidth }) as DOMRect,
 		);
 		const ready = container.querySelector<HTMLElement>(readySelector)!;
@@ -429,11 +431,13 @@ describe('ChatBoardPanel', () => {
 		review.scrollTop = 83;
 		await fireEvent.scroll(ready);
 		await fireEvent.scroll(review);
+		expect(bounds).not.toHaveBeenCalled();
 		await nextAnimationFrame();
 
 		panelWidth = 420;
 		ready.scrollTop = 0;
 		await fireEvent.scroll(ready);
+		await nextAnimationFrame();
 		TestResizeObserver.emit(panelWidth);
 		await waitFor(() =>
 			expect(container.querySelector<HTMLElement>(readySelector)?.scrollTop).toBe(37),

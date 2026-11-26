@@ -97,7 +97,10 @@ it('cancels pending scheduled snippets when the same target changes execution po
 	await fireEvent.click(screen.getByRole('button', { name: 'Insert Snippet' }));
 	await fireEvent.click(await screen.findByRole('option', { name: /^command/ }));
 	await waitFor(() => expect(expandSnippet).toHaveBeenCalledOnce());
-	deps.remoteCatalog.agentMetadata.claude!.executionPolicy = 'literal';
+	deps.remoteCatalog.agentMetadata = {
+		...deps.remoteCatalog.agentMetadata,
+		claude: { ...deps.remoteCatalog.agentMetadata.claude!, executionPolicy: 'literal' },
+	};
 	await waitFor(() => expect(vi.mocked(expandSnippet).mock.calls[0][1]?.signal?.aborted).toBe(true));
 	pending.resolve({ success: true, source: 'snippet', sourceId: snippet.id, sourceUpdatedAt: snippet.updatedAt,
 		shortName: snippet.shortName, contextExecutorId: remoteExecutor.id, contextProjectPath: '/workspace',

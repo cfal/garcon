@@ -50,6 +50,7 @@ export class UsageController implements PortableSingletonController {
 	#error = $state<string | null>(null);
 	#loading = $state(false);
 	#readAtMs = 0;
+	#windowCache: { minute: number; days: UsageWindowDays; zone: string; window: ReturnType<typeof usageWindow> } | undefined;
 	#visible = false;
 	#generation = 0;
 	#request: UsageRequest | null = null;
@@ -87,12 +88,16 @@ export class UsageController implements PortableSingletonController {
 	get stale(): boolean {
 		const summary = this.#summary;
 		if (!summary) return false;
-		const window = usageWindow(this.windowDays, this.#now(), summary.timeZone);
-		return (
-			summary.executorId !== this.executorId ||
-			summary.sinceDay !== window.sinceDay ||
-			summary.untilDay !== window.untilDay
-		);
+		if (summary.executorId !== this.executorId) return true;
+		const days = this.windowDays;
+		const zone = summary.timeZone;
+		const now = this.#now();
+		const minute = Math.floor(now.getTime() / 60_000);
+		if (this.#windowCache?.minute !== minute || this.#windowCache.days !== days || this.#windowCache.zone !== zone) {
+			this.#windowCache = { minute, days, zone, window: usageWindow(days, now, zone) };
+		}
+		const { window } = this.#windowCache;
+		return summary.sinceDay !== window.sinceDay || summary.untilDay !== window.untilDay;
 	}
 
 	get selectedModel(): UsageModelTotals | null {

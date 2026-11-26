@@ -101,7 +101,7 @@
 	data-chat-board-drop-target={isDropTarget ? '' : undefined}
 >
 	<header
-		class="z-10 shrink-0 border-b border-chat-board-lane-border bg-chat-board-lane/95 px-3 py-2.5 backdrop-blur"
+		class="z-10 shrink-0 border-b border-chat-board-lane-border bg-chat-board-lane/95 px-3 py-2.5"
 	>
 		<div class="flex min-w-0 items-center gap-2">
 			<h2

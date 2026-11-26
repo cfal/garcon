@@ -14,9 +14,10 @@ import { ApiError } from '$lib/api/client.js';
 import { ticketsApi, type TicketsApi } from '$lib/api/tickets.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import { TicketRelationships } from '../commands/ticket-relationships.js';
 import { TicketDetailState } from '../detail/ticket-detail-state.svelte.js';
 import { TicketMutationFeedback } from '../commands/ticket-mutation-feedback.svelte.js';
-import { canSubmitTicketForm, submitTicketForm } from '../commands/ticket-form.js';
+import { TicketCreateState } from '../commands/ticket-create-state.svelte.js';
 import { TicketDraftStore } from '../drafts/ticket-draft-store.svelte.js';
 import { attachTicketDraftExitGuard } from '../drafts/ticket-draft-exit-guard.js';
 import {
@@ -68,13 +69,13 @@ export class TicketsController implements PortableSingletonController {
 	stale = $state(true);
 	error = $state<string | null>(null);
 	pagePending = $state<TicketWindowKey | 'comments' | 'history' | null>(null);
-	createDraft = $state.raw<TicketDraftState | null>(null);
 	closeDraft = $state.raw<TicketDraftState | null>(null);
 	closeConfirmation = $state.raw<TicketCloseConfirmation | null>(null);
-	projectDefaultError = $state<string | null>(null);
 	createdTicketId = $state<string | null>(null);
 	activeLane = $state<'open' | 'in-progress' | 'in-review' | 'closed'>('open');
 	readonly #api: TicketsApi;
+	readonly #create: TicketCreateState;
+	readonly #relationships: TicketRelationships;
 	readonly #preferences: TicketPreferencesPort;
 	readonly #unsubscribe: () => void;
 	readonly #releaseExitGuard: () => void;
@@ -88,16 +89,17 @@ export class TicketsController implements PortableSingletonController {
 	#refreshPromise: Promise<void> | null = null;
 	#request: AbortController | null = null;
 	#pageRequest: AbortController | null = null;
-	#createRequest: AbortController | null = null;
-	#createChatIntent: {
-		draft: TicketDraftState;
-		version: number;
-		open: (ticket: Ticket) => void;
-	} | null = null;
 	#collectionQuery = $state.raw<TicketListQuery | null>(null);
 
 	constructor(deps: TicketsControllerDeps) {
 		this.#api = deps.api ?? ticketsApi;
+		this.#create = new TicketCreateState(this.#api);
+		this.#relationships = new TicketRelationships({
+			api: this.#api,
+			current: () => !this.#disposed && this.#authenticated ? this.bootstrap : null,
+			mutate: (ticket, payload) => this.mutate(ticket, payload),
+			onError: (error) => this.#pageError(error),
+		});
 		this.#preferences = deps.preferences ?? browserTicketPreferences;
 		const preferences = this.#preferences.read();
 		this.layout = preferences.layout;
@@ -130,6 +132,7 @@ export class TicketsController implements PortableSingletonController {
 		this.drafts.setAvailable(this.#authenticated);
 		this.#unsubscribe = deps.invalidations.subscribe((event) => {
 			if (event.kind === 'availability') {
+				if (!event.authenticated) this.#relationships.cancelReads();
 				this.#authenticated = event.authenticated;
 				this.drafts.setAvailable(event.authenticated);
 				this.#needsBootstrap = true;
@@ -137,6 +140,7 @@ export class TicketsController implements PortableSingletonController {
 				return;
 			}
 			if (event.kind === 'authority') {
+				this.#relationships.cancelReads();
 				this.#authenticated = event.authenticated;
 				this.drafts.setAvailable(event.authenticated);
 				this.#needsBootstrap = true;
@@ -202,6 +206,12 @@ export class TicketsController implements PortableSingletonController {
 	get collectionQuery() {
 		return this.#collectionQuery ?? this.query;
 	}
+	get createDraft() {
+		return this.#create.draft;
+	}
+	get projectDefaultError() {
+		return this.#create.projectDefaultError;
+	}
 	get saveFeedback() {
 		return this.mutations.status;
 	}
@@ -228,7 +238,15 @@ export class TicketsController implements PortableSingletonController {
 			limit: _limit,
 			...query
 		} = parseTicketListQuery(input);
-		if (this.loading && stableJsonStringify(query) === stableJsonStringify(this.query)) return;
+		if (stableJsonStringify(query) === stableJsonStringify(this.query)) return;
+		this.#resetQuery(query);
+	}
+
+	revealCreatedTicket(): void {
+		this.#resetQuery({ includeClosed: true });
+	}
+
+	#resetQuery(query: TicketListQuery): void {
 		this.query = query;
 		this.#anchors = {};
 		this.createdTicketId = null;
@@ -270,7 +288,7 @@ export class TicketsController implements PortableSingletonController {
 
 	openDraft(draft: TicketDraftState): void {
 		if (!this.drafts.active.includes(draft)) return;
-		if (draft.current.kind === 'create') this.createDraft = draft;
+		if (draft.current.kind === 'create') this.#create.draft = draft;
 		else if (draft.current.kind === 'close') this.closeDraft = draft;
 		else {
 			this.select(draft.current.ticketId);
@@ -338,7 +356,7 @@ export class TicketsController implements PortableSingletonController {
 							this.collection = null;
 							this.detail.reset();
 							this.#anchors = {};
-							this.createDraft = null;
+							this.#create.draft = null;
 							this.closeDraft = null;
 							this.closeConfirmation = null;
 							this.createdTicketId = null;
@@ -609,40 +627,15 @@ export class TicketsController implements PortableSingletonController {
 			project: this.query.project ?? '',
 			priority: '2',
 		});
-		if (!draft) return;
-		this.createDraft = draft;
-		this.projectDefaultError = null;
-		this.#createRequest?.abort();
-		if (draft.field('project') || draft.dirty || !directory) return;
-		const request = new AbortController();
-		this.#createRequest = request;
-		const version = draft.projectDefaultVersion;
-		try {
-			const resolved = await this.#api.projectDefault(directory, request.signal, executorId);
-			if (this.createDraft !== draft || request.signal.aborted) return;
-			draft.applyDefaultProject(resolved.project, version);
-		} catch (error) {
-			if (this.createDraft === draft && !request.signal.aborted)
-				this.projectDefaultError =
-					error instanceof Error ? error.message : 'Enter a project to continue';
-		}
+		if (draft) await this.#create.begin(draft, directory, executorId);
 	}
 
-	async createAndOpenChat(open: (ticket: Ticket) => void): Promise<void> {
-		const draft = this.createDraft;
-		if (!draft || !canSubmitTicketForm(draft)) return;
-		const intent = { draft, version: draft.current.version, open };
-		this.#createChatIntent = intent;
-		await submitTicketForm(draft);
-		// An uncertain create retains the continuation only for an explicit retry of this request.
-		if (this.#createChatIntent === intent && !draft.current.frozen) this.#createChatIntent = null;
+	createAndOpenChat(open: (ticket: Ticket) => void): Promise<void> {
+		return this.#create.submitAndOpen(open);
 	}
 
 	closeCreate(): void {
-		this.#createChatIntent = null;
-		this.#createRequest?.abort();
-		this.createDraft?.flush();
-		this.createDraft = null;
+		this.#create.close();
 	}
 
 	async facets(field: 'project' | 'label', prefix: string, signal: AbortSignal) {
@@ -670,50 +663,17 @@ export class TicketsController implements PortableSingletonController {
 		return !draft.dirty && !draft.error;
 	}
 
-	async unlink(link: TicketLink): Promise<void> {
-		const partition = this.bootstrap;
-		if (!partition) return;
-		try {
-			const source = await this.#api.read({
-				ticketId: link.sourceId,
-				includeDescription: false,
-				commentLimit: 0,
-			});
-			if (this.bootstrap !== partition) return;
-			requireTicketVersion(source, partition.storeId);
-			await this.link(source.ticket, link.targetId, link.kind, 'unlink');
-		} catch (error) {
-			this.#pageError(error);
-		}
+	unlink(link: TicketLink): Promise<void> {
+		return this.#relationships.unlink(link);
 	}
 
-	async link(
+	link(
 		ticket: Pick<Ticket, 'id' | 'revision'>,
 		targetId: string,
 		kind: TicketLinkKind,
 		action: 'link' | 'unlink',
 	): Promise<void> {
-		const partition = this.bootstrap;
-		if (!partition) return;
-		try {
-			const target = await this.#api.read({
-				ticketId: targetId,
-				includeDescription: false,
-				commentLimit: 0,
-			});
-			if (this.bootstrap !== partition) return;
-			requireTicketVersion(target, partition.storeId);
-			await this.mutate(ticket, {
-				action,
-				ticketId: ticket.id,
-				expectedRevision: ticket.revision,
-				targetId,
-				targetRevision: target.ticket.revision,
-				kind,
-			});
-		} catch (error) {
-			this.#pageError(error);
-		}
+		return this.#relationships.link(ticket, targetId, kind, action);
 	}
 
 	#acceptConfirmation({ draft, result, cleared, reused }: TicketDraftConfirmation): void {
@@ -747,11 +707,7 @@ export class TicketsController implements PortableSingletonController {
 			...(result.relatedTicket ? [result.relatedTicket.id] : []),
 		]);
 		if (draft.current.kind === 'create') {
-			const intent = this.#createChatIntent;
-			const openChat =
-				cleared && intent?.draft === draft && intent.version === draft.current.version
-					? intent.open
-					: null;
+			const openChat = cleared ? this.#create.openChatAfterConfirmation(draft) : null;
 			this.createdTicketId = result.ticket.id;
 			if (cleared) this.closeCreate();
 			this.detail.select(result.ticket.id);
@@ -761,13 +717,13 @@ export class TicketsController implements PortableSingletonController {
 	}
 
 	dispose(): void {
-		this.#createChatIntent = null;
+		this.#create.cancel();
 		this.mutations.reset();
 		this.#disposed = true;
+		this.#relationships.cancelReads();
 		this.#epoch++;
 		this.#request?.abort();
 		this.#pageRequest?.abort();
-		this.#createRequest?.abort();
 		this.#unsubscribe();
 		this.#releaseExitGuard();
 		this.drafts.dispose();

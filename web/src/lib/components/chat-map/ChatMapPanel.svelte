@@ -4,6 +4,7 @@
 	import Search from '@lucide/svelte/icons/search';
 	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import { untrack } from 'svelte';
+	import { getMinuteClock } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { PresentationHostId } from '$lib/workspace/surface-types';
@@ -21,7 +22,8 @@
 
 	let { controller, chats, selectedChatId, visible, presentation }: ChatMapPanelProps = $props();
 
-	let currentTime = $state(new Date());
+	const minuteClock = getMinuteClock();
+	const currentTime = $derived(minuteClock.currentTime);
 	let scrollRegion = $state<HTMLDivElement>();
 	let scrollTop = 0;
 	let scrollLeft = 0;
@@ -41,14 +43,6 @@
 		}
 	});
 
-	$effect(() => {
-		if (!visible) return;
-		currentTime = new Date();
-		const interval = window.setInterval(() => {
-			currentTime = new Date();
-		}, 60_000);
-		return () => window.clearInterval(interval);
-	});
 </script>
 
 {#if model}

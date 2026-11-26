@@ -10,6 +10,7 @@
 	import { copyChatBoard } from '$lib/chat-board/catalog/chat-board-copy.js';
 	import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte.js';
 	import type { ChatBoard } from '$shared/chat-boards';
+	import { BoardReorderState } from './board-reorder-state.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {
@@ -35,8 +36,7 @@
 	let deletingId = $state<string | null>(null);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
-	let draggedId = $state<string | null>(null);
-	let dragOverId = $state<string | null>(null);
+	const reorder = new BoardReorderState(() => controller.catalog.boards, () => busy, (items) => void commitOrder(items.map((item) => item.id)));
 	let pendingBoardEditor = $state<{ boardId: string; catalogRevision: number } | null>(null);
 	let renameOutdated = $derived(
 		renameDraft !== null && renameDraft.catalogRevision !== controller.catalog.revision,
@@ -146,43 +146,6 @@
 		await commitOrder(ids);
 	}
 
-	function handleDragStart(event: DragEvent, boardId: string): void {
-		if (busy) {
-			event.preventDefault();
-			return;
-		}
-		draggedId = boardId;
-		event.dataTransfer?.setData('text/plain', boardId);
-		if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-	}
-
-	function handleDragOver(event: DragEvent, boardId: string): void {
-		if (!draggedId || draggedId === boardId || busy) return;
-		event.preventDefault();
-		dragOverId = boardId;
-		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-	}
-
-	function handleDrop(event: DragEvent, targetId: string): void {
-		event.preventDefault();
-		const sourceId = draggedId;
-		draggedId = null;
-		dragOverId = null;
-		if (!sourceId || sourceId === targetId || busy) return;
-		const ids = controller.catalog.boards.map((candidate) => candidate.id);
-		const sourceIndex = ids.indexOf(sourceId);
-		const targetIndex = ids.indexOf(targetId);
-		if (sourceIndex < 0 || targetIndex < 0) return;
-		ids.splice(sourceIndex, 1);
-		ids.splice(targetIndex, 0, sourceId);
-		void commitOrder(ids);
-	}
-
-	function clearDrag(): void {
-		draggedId = null;
-		dragOverId = null;
-	}
-
 	async function removeBoard(board: ChatBoard): Promise<void> {
 		if (deletingId !== board.id || busy) {
 			deletingId = board.id;
@@ -246,13 +209,11 @@
 				{#each controller.catalog.boards as board, index (board.id)}
 					<li
 						class="rounded-lg border bg-card p-2.5 transition-colors"
-						class:border-ring={dragOverId === board.id}
-						class:border-border={dragOverId !== board.id}
-						ondragover={(event) => handleDragOver(event, board.id)}
-						ondragleave={() => {
-							if (dragOverId === board.id) dragOverId = null;
-						}}
-						ondrop={(event) => handleDrop(event, board.id)}
+						class:border-ring={reorder.overId === board.id}
+						class:border-border={reorder.overId !== board.id}
+						ondragover={(event) => reorder.over(event, board.id)}
+						ondragleave={() => reorder.leave(board.id)}
+						ondrop={(event) => reorder.drop(event, board.id)}
 						data-chat-board-manager-row={board.id}
 					>
 						{#if renameDraft?.board.id === board.id}
@@ -307,8 +268,8 @@
 									class="grid size-7 shrink-0 cursor-grab place-items-center rounded text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
 									aria-label={m.chat_board_drag_board({ name: board.name })}
 									disabled={busy}
-									ondragstart={(event) => handleDragStart(event, board.id)}
-									ondragend={clearDrag}
+									ondragstart={(event) => reorder.start(event, board.id)}
+									ondragend={() => reorder.clear()}
 									data-chat-board-manager-drag={board.id}
 								>
 									<GripVertical class="size-3.5" aria-hidden="true" />

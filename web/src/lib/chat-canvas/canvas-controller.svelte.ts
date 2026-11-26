@@ -244,7 +244,12 @@ export class CanvasController implements PortableSingletonController {
 				(error.status !== 404 && error.errorCode !== 'CANVAS_CORRUPT')
 			)
 				throw error;
-			const draft = this.recovery.read(id);
+			let draft: ChatCanvas | null;
+			try {
+				draft = this.recovery.read(id);
+			} catch {
+				throw error;
+			}
 			if (!draft) throw error;
 			canvas = draft;
 			recovered = true;

@@ -1,4 +1,5 @@
 import { untrack } from 'svelte';
+import { CatalogRefresh, runCatalogLoad } from '$lib/api/catalog-refresh.js';
 import { ApiError } from '$lib/api/client.js';
 import {
 	createPreamble,
@@ -30,8 +31,7 @@ export class PreamblesStore {
 	isRefreshing = $state(false);
 	invalidationVersion = $state(0);
 	#loadPromise: Promise<PreamblesSnapshot> | null = null;
-	#refreshLoopPromise: Promise<void> | null = null;
-	#refreshRequested = false;
+	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 	#localRevision = 0;
 
 	constructor(private readonly deps: PreamblesStoreDeps = {}) {}
@@ -69,26 +69,18 @@ export class PreamblesStore {
 		return this.#loadPromise;
 	}
 
-	async refreshIfLoaded(): Promise<void> {
+	loadInBackground(): Promise<void> {
+		return runCatalogLoad(() => this.ensureLoaded());
+	}
+
+	refreshInBackground(): Promise<void> {
+		return runCatalogLoad(() => this.refresh());
+	}
+
+	refreshIfLoaded(): Promise<void> {
 		this.invalidationVersion += 1;
-		if (!this.snapshot && this.status === 'idle') return;
-		this.#refreshRequested = true;
-		if (this.#refreshLoopPromise) return this.#refreshLoopPromise;
-		this.#refreshLoopPromise = untrack(async () => {
-				do {
-					this.#refreshRequested = false;
-					const joinedExistingLoad = this.#loadPromise !== null;
-					try {
-						await this.refresh();
-					} catch {
-						if (!joinedExistingLoad && !this.#refreshRequested) return;
-					}
-					if (joinedExistingLoad) this.#refreshRequested = true;
-			} while (this.#refreshRequested);
-		}).finally(() => {
-			this.#refreshLoopPromise = null;
-		});
-		return this.#refreshLoopPromise;
+		if (!this.snapshot && this.status === 'idle') return Promise.resolve();
+		return untrack(() => this.#refreshLoop.request());
 	}
 
 	async create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
@@ -33,7 +34,7 @@
 	const operationLocked = $derived(removing || snippets.isRefreshing);
 
 	$effect(() => {
-		if (active) void snippets.ensureLoaded().catch(() => undefined);
+		if (active) untrack(() => void snippets.loadInBackground());
 	});
 
 	function errorDetail(error: unknown): string {
@@ -88,7 +89,7 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={() => void snippets.refresh().catch(() => undefined)}
+				onclick={() => void snippets.refreshInBackground()}
 				disabled={operationLocked}
 				title={m.snippets_refresh()}
 				aria-label={m.snippets_refresh()}
@@ -122,7 +123,7 @@
 			</p>
 			<Button
 				variant="secondary"
-				onclick={() => void snippets.ensureLoaded().catch(() => undefined)}
+				onclick={() => void snippets.loadInBackground()}
 			>
 				{m.snippets_retry()}
 			</Button>
@@ -159,18 +160,22 @@
 	{/if}
 </div>
 
-<SnippetFormDialog
-	open={formOpen}
-	snippet={editingSnippet}
-	onSave={save}
-	onClose={() => (formOpen = false)}
-/>
-<SnippetRemoveDialog
-	open={removeSnippet !== null}
-	snippet={removeSnippet}
-	{removing}
-	disabled={operationLocked}
-	error={removeError}
-	onConfirm={() => void confirmRemove()}
-	onClose={() => (removeSnippet = null)}
-/>
+{#if formOpen}
+	<SnippetFormDialog
+		open
+		snippet={editingSnippet}
+		onSave={save}
+		onClose={() => (formOpen = false)}
+	/>
+{/if}
+{#if removeSnippet}
+	<SnippetRemoveDialog
+		open
+		snippet={removeSnippet}
+		{removing}
+		disabled={operationLocked}
+		error={removeError}
+		onConfirm={() => void confirmRemove()}
+		onClose={() => (removeSnippet = null)}
+	/>
+{/if}

@@ -37,7 +37,8 @@
 	const remoteSettings = getRemoteSettings();
 	const executors = getExecutors();
 	let searchQuery = $state('');
-	const searchResults = $derived(searchSettings(settingsSearchEntries(), searchQuery));
+	const searchEntries = $derived(settingsSearchEntries());
+	const searchResults = $derived(searchSettings(searchEntries, searchQuery));
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	// App tabs are stored in this browser; server tabs are shared by every client.
 	const tabGroups = $derived([
@@ -69,7 +70,11 @@
 	// Browser-local tabs need no server data, so refresh once per open on the first server tab.
 	let serverDataRefreshed = false;
 	$effect(() => {
-		if (!appShell.showSettings || serverDataRefreshed) return;
+		if (!appShell.showSettings) {
+			serverDataRefreshed = false;
+			return;
+		}
+		if (serverDataRefreshed) return;
 		if (!isServerSettingsTab(appShell.settingsTab)) return;
 		serverDataRefreshed = true;
 		untrack(() => {
