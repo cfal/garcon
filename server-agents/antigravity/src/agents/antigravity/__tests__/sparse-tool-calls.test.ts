@@ -70,7 +70,8 @@ test('retains the original arguments when a native schedule cannot be represente
   for (const [index, rawInput] of [
     { DurationSeconds: -1 }, { DurationSeconds: 1.5 }, { DurationSeconds: 10, ExactTiming: true },
     { DurationSeconds: 10, TimerCondition: ' ' }, { CronExpression: '  ' },
-    { CronExpression: '* * * * *', MaxIterations: 0 }, { CronExpression: '* * * * *', TimerCondition: 'any' },
+    { CronExpression: '* * * * *', MaxIterations: -1 }, { CronExpression: '* * * * *', TimerCondition: 'any' },
+    { DurationSeconds: 120, MaxIterations: 2 },
   ].entries()) {
     const input = { ...rawInput, Prompt: 'Check' };
     expect(s.start(String(index), { name: 'schedule', rawInput: input, status: 'failed' })[0])

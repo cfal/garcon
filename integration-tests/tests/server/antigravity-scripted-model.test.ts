@@ -444,7 +444,10 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
     model.scriptTurn([geminiFunctionCall('status-call', 'manage_task', { Action: 'status', TaskId: 'missing-job' })]);
     model.scriptTurn([geminiFunctionCall('send-call', 'send_message', { Recipient: 'missing-agent', Message: 'Check the result.' })]);
     model.scriptTurn([geminiFunctionCall('timer-call', 'schedule', {
-      DurationSeconds: 600, Prompt: 'Check the result.', TimerCondition: '', IsDaemon: true, ExactTiming: false,
+      DurationSeconds: 600, Prompt: 'Check the result.', TimerCondition: '', IsDaemon: true, ExactTiming: false, CronExpression: '', MaxIterations: 0,
+    })]);
+    model.scriptTurn([geminiFunctionCall('cron-call', 'schedule', {
+      CronExpression: '0 9 1 1 *', Prompt: 'Check again.', MaxIterations: 0, DurationSeconds: 0, TimerCondition: '',
     })]);
     model.scriptTurn([geminiText('Finished checking tasks.')]);
     await withIntegrationFixture('antigravity-background-tasks', async (fixture) => {
@@ -467,7 +470,9 @@ describe.skipIf(!ANTIGRAVITY_BINARY)('scripted Antigravity', () => {
         { toolId: 'send-call', type: 'agent-message-tool-use', recipient: 'missing-agent', message: 'Check the result.' },
         { toolId: 'send-call', type: 'tool-result', isError: true },
         { toolId: 'timer-call', type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 600,
-          prompt: 'Check the result.', timerCondition: '', daemon: true, exactTiming: false } },
+          prompt: 'Check the result.', timerCondition: '', daemon: true, exactTiming: false, expression: '', maxIterations: 0 } },
+        { toolId: 'cron-call', type: 'schedule-tool-use', request: { action: 'cron', expression: '0 9 1 1 *',
+          prompt: 'Check again.', maxIterations: 0, delaySeconds: 0, timerCondition: '' } },
       ]);
       const events = fixture.client.eventsSince(cursor);
       const end = events.indexOf(terminal);

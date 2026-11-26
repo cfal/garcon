@@ -1,9 +1,37 @@
 import { isRecord } from './json.js';
 
+interface WakeupRequest {
+  action: 'wakeup';
+  delaySeconds: number;
+  prompt: string;
+  timerCondition?: string;
+  daemon?: boolean;
+  exactTiming?: false;
+  reason?: string;
+  noop?: boolean;
+  // Agy can explicitly send zero values for the inactive cron options.
+  expression?: '';
+  maxIterations?: 0;
+}
+
+interface CronRequest {
+  action: 'cron';
+  expression: string;
+  prompt: string;
+  recurring?: boolean;
+  durable?: boolean;
+  daemon?: boolean;
+  maxIterations?: number;
+  exactTiming?: boolean;
+  // Agy can explicitly send zero values for the inactive timer options.
+  delaySeconds?: 0;
+  timerCondition?: '';
+}
+
 // Describes a provider tool request, not a controller-owned scheduled prompt.
 export type ToolScheduleRequest =
-  | { action: 'wakeup'; delaySeconds: number; prompt: string; timerCondition?: string; daemon?: boolean; exactTiming?: false; reason?: string; noop?: boolean }
-  | { action: 'cron'; expression: string; prompt: string; recurring?: boolean; durable?: boolean; daemon?: boolean; maxIterations?: number; exactTiming?: boolean }
+  | WakeupRequest
+  | CronRequest
   | { action: 'list' }
   | { action: 'delete'; jobId: string }
   | { action: 'stop-loop' };
@@ -12,10 +40,11 @@ export function parseToolScheduleRequest(value: unknown): ToolScheduleRequest | 
   if (!isRecord(value)) return null;
   switch (value.action) {
     case 'wakeup': {
-      const { delaySeconds, prompt, timerCondition, daemon, exactTiming, reason, noop } = value;
+      const { delaySeconds, prompt, timerCondition, daemon, exactTiming, reason, noop, expression, maxIterations } = value;
       if (typeof delaySeconds !== 'number' || !Number.isFinite(delaySeconds) || typeof prompt !== 'string'
         || (timerCondition !== undefined && (typeof timerCondition !== 'string' || (timerCondition !== '' && !timerCondition.trim())))
         || (daemon !== undefined && typeof daemon !== 'boolean') || (exactTiming !== undefined && exactTiming !== false)
+        || (expression !== undefined && expression !== '') || (maxIterations !== undefined && maxIterations !== 0)
         || (reason !== undefined && typeof reason !== 'string')
         || (noop !== undefined && typeof noop !== 'boolean')) return null;
       const request: ToolScheduleRequest = { action: 'wakeup', delaySeconds, prompt };
@@ -24,20 +53,25 @@ export function parseToolScheduleRequest(value: unknown): ToolScheduleRequest | 
       if (exactTiming !== undefined) request.exactTiming = exactTiming;
       if (reason !== undefined) request.reason = reason;
       if (noop !== undefined) request.noop = noop;
+      if (expression !== undefined) request.expression = expression;
+      if (maxIterations !== undefined) request.maxIterations = maxIterations;
       return request;
     }
     case 'cron': {
-      const { expression, prompt, recurring, durable, daemon, maxIterations, exactTiming } = value;
+      const { expression, prompt, recurring, durable, daemon, maxIterations, exactTiming, delaySeconds, timerCondition } = value;
       if (typeof expression !== 'string' || !expression.trim() || typeof prompt !== 'string'
         || (recurring !== undefined && typeof recurring !== 'boolean') || (exactTiming !== undefined && typeof exactTiming !== 'boolean')
         || (durable !== undefined && typeof durable !== 'boolean') || (daemon !== undefined && typeof daemon !== 'boolean')
-        || (maxIterations !== undefined && (typeof maxIterations !== 'number' || !Number.isInteger(maxIterations) || maxIterations < 1))) return null;
+        || (delaySeconds !== undefined && delaySeconds !== 0) || (timerCondition !== undefined && timerCondition !== '')
+        || (maxIterations !== undefined && (typeof maxIterations !== 'number' || !Number.isInteger(maxIterations) || maxIterations < 0))) return null;
       const request: ToolScheduleRequest = { action: 'cron', expression, prompt };
       if (recurring !== undefined) request.recurring = recurring;
       if (durable !== undefined) request.durable = durable;
       if (daemon !== undefined) request.daemon = daemon;
       if (maxIterations !== undefined) request.maxIterations = maxIterations;
       if (exactTiming !== undefined) request.exactTiming = exactTiming;
+      if (delaySeconds !== undefined) request.delaySeconds = delaySeconds;
+      if (timerCondition !== undefined) request.timerCondition = timerCondition;
       return request;
     }
     case 'delete':
@@ -68,7 +102,7 @@ export function toolScheduleTitle(request: ToolScheduleRequest): string {
   }
 }
 
-export function toolScheduleOptions(request: Extract<ToolScheduleRequest, { action: 'wakeup' | 'cron' }>): string[] {
+export function toolScheduleOptions(request: WakeupRequest | CronRequest): string[] {
   const lines: string[] = [];
   if (request.action === 'wakeup') {
     if (request.timerCondition === '') lines.push('Timer condition: default');
@@ -79,7 +113,7 @@ export function toolScheduleOptions(request: Extract<ToolScheduleRequest, { acti
     if (request.noop !== undefined) lines.push(`No changes reported: ${request.noop}`);
     if (request.daemon !== undefined) lines.push(`Daemon requested: ${request.daemon}`);
   } else {
-    if (request.maxIterations !== undefined) lines.push(`Maximum iterations: ${request.maxIterations}`);
+    if (request.maxIterations !== undefined) lines.push(`Maximum iterations: ${request.maxIterations || 'unlimited'}`);
     if (request.daemon !== undefined) lines.push(`Continue after task ends: ${request.daemon}`);
     if (request.durable !== undefined) lines.push(`Persistence requested: ${request.durable}`);
   }

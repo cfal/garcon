@@ -190,13 +190,13 @@ export function convertAntigravityToolUse(
       const daemon = field(input, 'IsDaemon', 'is_daemon');
       const maxIterations = field(input, 'MaxIterations', 'max_iterations');
       const exactTiming = field(input, 'ExactTiming', 'exact_timing');
-      if (typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0
-        && expression === undefined && maxIterations === undefined) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', delaySeconds, prompt, timerCondition, daemon, exactTiming });
+      // Agy treats the inactive mode's zero/empty fields as unset. The row retains explicit defaults.
+      if (typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0) {
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'wakeup', delaySeconds, prompt, timerCondition, daemon, exactTiming, expression, maxIterations });
         if (row) return row;
       }
-      if (expression !== undefined && delaySeconds === undefined && timerCondition === undefined) {
-        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', expression, prompt, daemon, maxIterations, exactTiming });
+      if (expression !== undefined) {
+        const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action: 'cron', expression, prompt, daemon, maxIterations, exactTiming, delaySeconds, timerCondition });
         if (row) return row;
       }
       break;
