@@ -8,6 +8,7 @@ import type { ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/too
 import { AMP_TOOL_DISPLAY_RULES } from './amp-tool-display-rules.js';
 import { CODEX_TOOL_DISPLAY_RULES } from './codex-tool-display-rules.js';
 import {
+	completeReportProps,
 	diffProps,
 	extractContentString,
 	fileTitlePresenter,
@@ -24,6 +25,7 @@ const REPORTED_RESULT_RULE: ToolResultDisplayRule = {
 	contentKind: 'text',
 	getContentProps: reportedResultProps,
 };
+const COMPLETE_REPORT_RULE: ToolResultDisplayRule = { ...REPORTED_RESULT_RULE, getContentProps: completeReportProps };
 
 function filesFoundTitle(count: number): string {
 	return count === 1 ? m.chat_tool_file_found() : m.chat_tool_files_found({ count });
@@ -497,7 +499,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 			},
 			getContentProps: ({ request }) => ({ content: toolScheduleDetails(request as ToolScheduleRequest) }),
 		},
-		result: REPORTED_RESULT_RULE,
+		result: COMPLETE_REPORT_RULE,
 	},
 
 	'background-task-tool-use': {
@@ -583,17 +585,18 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 	'antigravity-enter-plan-mode-tool-use': {
 		input: {
 			mode: 'collapsible', title: 'Enter plan mode', contentKind: 'text',
-			inlineWhen: ({ reason }) => reason === '',
+			inlineWhen: ({ reason }) => typeof reason === 'string' && !reason.trim(),
 			getContentProps: ({ reason }) => ({ content: reason }),
 		},
-		result: REPORTED_RESULT_RULE,
+		result: COMPLETE_REPORT_RULE,
 	},
 	'antigravity-exit-plan-mode-tool-use': {
 		input: {
 			mode: 'collapsible', title: () => m.chat_tool_implementation_plan(), defaultOpen: true,
+			inlineWhen: ({ plan }) => typeof plan === 'string' && !plan.trim(),
 			contentKind: 'markdown', getContentProps: ({ plan }) => ({ content: plan }),
 		},
-		result: REPORTED_RESULT_RULE,
+		result: COMPLETE_REPORT_RULE,
 	},
 
 	'ask-user-question-tool-use': {

@@ -4,6 +4,7 @@
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolPayload } from '$lib/chat/tools/tool-display-contract.js';
 import { isEmptyToolResult } from '$shared/tool-result-content';
+import { isRecord } from '$shared/json';
 
 interface ReadRangePayload {
 	offset?: unknown;
@@ -70,15 +71,17 @@ export function extractContentString(content: unknown): string {
 	return JSON.stringify(rec, null, 2);
 }
 
-export function reportedToolResultText(content: unknown): string {
-	if (!content || typeof content !== 'object') return '';
-	if ('toolUseResult' in content && content.toolUseResult != null) {
-		const { toolUseResult, ...body } = content;
-		const text = isEmptyToolResult(body) ? '' : reportedToolResultText(body);
-		const details = JSON.stringify(toolUseResult, null, 2);
-		return text && text !== details ? `${text}\n\n${details}` : details;
-	}
-	const { raw, rawOutput, items } = content as Record<string, unknown>;
+function formatToolReport(content: unknown, formatBody: (body: ToolPayload) => string): string {
+	if (!isRecord(content)) return '';
+	if (content.toolUseResult == null) return formatBody(content);
+	const { toolUseResult, ...body } = content;
+	const text = isEmptyToolResult(body) ? '' : formatBody(body);
+	const details = JSON.stringify(toolUseResult, null, 2);
+	return text && text !== details ? `${text}\n\n${details}` : details;
+}
+
+function reportedResultBody(content: ToolPayload): string {
+	const { raw, rawOutput, items } = content;
 	const text = typeof raw === 'string' ? raw : '';
 	if (rawOutput === undefined) {
 		if (text) return text;
@@ -106,6 +109,21 @@ export function reportedToolResultText(content: unknown): string {
 
 export function reportedResultProps(result: ToolPayload) {
 	return { content: reportedToolResultText(result.content), format: 'plain' };
+}
+
+export function reportedToolResultText(content: unknown): string {
+	return formatToolReport(content, reportedResultBody);
+}
+
+function completeReportBody(body: ToolPayload): string {
+	const fields = Object.keys(body).filter(key => key !== 'status');
+	// Plain-text shortcuts are safe only if they account for every field in the report.
+	if (fields.length === 0 || (fields.length === 1 && ['raw', 'rawOutput', 'items'].includes(fields[0]))) return reportedResultBody(body);
+	return JSON.stringify(body, null, 2);
+}
+
+export function completeReportProps(result: ToolPayload) {
+	return { content: formatToolReport(result.content, completeReportBody), format: 'plain' };
 }
 
 /** Derives a short file name from a tool input's filePath field. */

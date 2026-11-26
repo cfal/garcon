@@ -46,9 +46,8 @@ export function resolveToolResultDisplayRule(
 	if (toolResult.isError === true) {
 		if (!rule.result?.reportsStatus) return hasEmptyRequiredInput(tool) ? FAILED_RESULT_RULE : rule.result;
 		const status = (toolResult.content as { status?: unknown } | undefined)?.status;
-		return typeof status === 'string' && status
-			? { ...FAILED_RESULT_RULE, title: `${m.chat_message_error()}: ${status}` }
-			: FAILED_RESULT_RULE;
+		return { ...FAILED_RESULT_RULE, getContentProps: rule.result.getContentProps ?? reportedResultProps,
+			title: typeof status === 'string' && status ? `${m.chat_message_error()}: ${status}` : FAILED_RESULT_RULE.title };
 	}
 	const content = toolResult.content;
 	if (rule.result?.contentKind === 'todoList' && isRecord(content) && Array.isArray(content.items) && content.items.length === 0) return rule.result;

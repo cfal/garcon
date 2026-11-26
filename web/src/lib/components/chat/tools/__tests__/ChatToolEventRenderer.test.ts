@@ -112,6 +112,33 @@ describe('ChatToolEventRenderer', () => {
 		});
 		expect(await screen.findByRole('heading', { name: 'Layout changes' })).toBeTruthy();
 	});
+
+	it.each([new AntigravityEnterPlanModeToolUseMessage('', 'enter', ' \n'), new AntigravityExitPlanModeToolUseMessage('', 'exit', '')])(
+		'keeps a blank informational plan transition inline: $type', toolMessage => {
+			const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+			expect(container.textContent?.trim()).toBeTruthy();
+			expect(container.querySelector('button')).toBeNull();
+		});
+
+	it.each([false, true])('keeps structured schedule evidence in both success and failure disclosures (%s)', isError => {
+		const items = [{ type: 'text', text: 'Listed' }];
+		const content = { items, count: 0, toolUseResult: { jobs: [] } };
+		render(ChatToolEventRenderer, { toolMessage: new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			mode: 'result', autoExpandTools: true, toolResult: { content, isError } });
+		const shown = screen.getByText(/Listed/).textContent;
+		expect(shown).toContain('"count": 0');
+		expect(shown).toContain('"jobs": []');
+	});
+
+	it('shows ordered terminal schedule blocks and metadata together', () => {
+		const items = [{ type: 'content', content: { type: 'text', text: 'Checking' } },
+			{ type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } },
+			{ type: 'content', content: { type: 'text', text: 'Operation refused' } }];
+		render(ChatToolEventRenderer, { toolMessage: new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			mode: 'result', autoExpandTools: true, toolResult: { content: { status: 'failed', items, rawOutput: { attempts: 1 } }, isError: true } });
+		const shown = screen.getByText(/Operation refused/).textContent!;
+		expect(JSON.parse(shown)).toMatchObject({ items, rawOutput: { attempts: 1 } });
+	});
 	it('shows a stop request and target without a blank disclosure for an empty success', () => {
 		const toolMessage = new BackgroundTaskToolUseMessage('', 'stop', 'stop', 'job-1');
 		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
