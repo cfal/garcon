@@ -179,6 +179,24 @@ test('references the explicit output within ordered blocks without repeating it'
   }
 });
 
+test('references terminal output echoed by one or all cached text blocks', () => {
+  const progress = textBlock('Checking');
+  const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  const diagnostic = textBlock('Operation refused');
+  const content = [progress, image, diagnostic];
+  for (const [output, items, refs] of [
+    ['Operation refused', [image, diagnostic], [1]],
+    ['Checking\nOperation refused', content, [0, 2]],
+  ] as const) {
+    const s = session();
+    s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, content });
+    const row = s.patch('timer', { status: 'failed', rawOutput: { output, attempts: 1 } }).at(-1);
+    if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+    expect(row.content).toEqual({ items, status: 'failed', rawOutput: { attempts: 1 } });
+    expect(row.primaryTextItems).toEqual(refs);
+  }
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [
