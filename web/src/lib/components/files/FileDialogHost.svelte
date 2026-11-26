@@ -192,8 +192,11 @@
 	open={Boolean(files.overwriteRequest)}
 	requestClose={() => files.resolveOverwrite('cancel')}
 >
-	<Dialog.Content class="max-w-[calc(100vw-2rem)] sm:max-w-5xl" showCloseButton={false}>
-		<Dialog.Header>
+	<Dialog.Content
+		class="flex max-h-[90dvh] max-w-[calc(100vw-2rem)] flex-col overflow-hidden sm:max-w-5xl"
+		showCloseButton={false}
+	>
+		<Dialog.Header class="shrink-0">
 			<Dialog.Title>{m.file_session_overwrite_title()}</Dialog.Title>
 			<Dialog.Description>
 				{m.file_session_overwrite_description({
@@ -202,15 +205,17 @@
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if files.overwriteRequest}
-			<FileConflictComparison
-				baseContent={files.overwriteRequest.baseContent}
-				localContent={files.overwriteRequest.localContent}
-				diskContent={files.overwriteRequest.diskContent}
-				lineSeparator={files.overwriteRequest.lineSeparator}
-				onCancel={() => files.resolveOverwrite('cancel')}
-				onAcceptDisk={() => files.resolveOverwrite('accept-disk')}
-				onSaveChecked={(content) => files.resolveOverwrite('save-checked', content)}
-			/>
+			<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+				<FileConflictComparison
+					baseContent={files.overwriteRequest.baseContent}
+					localContent={files.overwriteRequest.localContent}
+					diskContent={files.overwriteRequest.diskContent}
+					lineSeparator={files.overwriteRequest.lineSeparator}
+					onCancel={() => files.resolveOverwrite('cancel')}
+					onAcceptDisk={() => files.resolveOverwrite('accept-disk')}
+					onSaveChecked={(content) => files.resolveOverwrite('save-checked', content)}
+				/>
+			</div>
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

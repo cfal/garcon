@@ -355,7 +355,7 @@ steps:
 		render(WorkflowDefinitionEditor, {
 			props: { draft, context: null, busy: false, onPublish: vi.fn(), onTest: vi.fn() },
 		});
-		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Edit graph' }).disabled).toBe(
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Edit steps' }).disabled).toBe(
 			true,
 		);
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Add step' }).disabled).toBe(true);
@@ -861,5 +861,18 @@ steps:
 		// Clearing the field manually must persist instead of re-seeding immediately.
 		await fireEvent.input(localFolder, { target: { value: '' } });
 		expect(localFolder.value).toBe('');
+	});
+
+	it('resets narrow-layout detail view when switching Studio views', async () => {
+		const draft = new WorkflowDraftState(workflowRevision().source);
+		const { container } = render(WorkflowDefinitionEditor, {
+			props: { draft, context: null, busy: false, onPublish: vi.fn(), onTest: vi.fn() },
+		});
+		const split = () => container.querySelector('.workflow-split')?.getAttribute('data-detail');
+		expect(split()).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: /Review report/ }));
+		expect(split()).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+		expect(split()).toBe('false');
 	});
 });

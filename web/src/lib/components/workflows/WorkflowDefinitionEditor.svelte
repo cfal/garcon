@@ -261,6 +261,7 @@
 
 	function reveal(range: WorkflowSourceRange) {
 		view = 'source';
+		detailOpen = false;
 		location = { ...range };
 	}
 </script>
@@ -271,7 +272,7 @@
 	class="flex min-h-0 min-w-0 flex-1 flex-col"
 	aria-label={m.workflow_studio_editor()}
 >
-	<header class="space-y-2 border-b border-border bg-card px-3 py-2">
+	<header class="space-y-1.5 border-b border-border bg-card px-3 py-1.5">
 		<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
 			<div class="min-w-0">
 				<h2 class="wrap-anywhere text-sm font-semibold">
@@ -306,7 +307,11 @@
 				variant={view === 'outline' ? 'secondary' : 'ghost'}
 				aria-pressed={view === 'outline'}
 				onclick={() => {
-					if (view !== 'outline') runGuarded(() => (view = 'outline'));
+					if (view !== 'outline')
+						runGuarded(() => {
+							view = 'outline';
+							detailOpen = false;
+						});
 				}}><List class="size-4" /> {m.workflow_studio_outline()}</Button
 			>
 			<Button
@@ -314,7 +319,11 @@
 				variant={view === 'graph' ? 'secondary' : 'ghost'}
 				aria-pressed={view === 'graph'}
 				onclick={() => {
-					if (view !== 'graph') runGuarded(() => (view = 'graph'));
+					if (view !== 'graph')
+						runGuarded(() => {
+							view = 'graph';
+							detailOpen = false;
+						});
 				}}><WorkflowIcon class="size-4" /> {m.workflow_studio_graph()}</Button
 			>
 			<Button
@@ -322,7 +331,11 @@
 				variant={view === 'source' ? 'secondary' : 'ghost'}
 				aria-pressed={view === 'source'}
 				onclick={() => {
-					if (view !== 'source') runGuarded(() => (view = 'source'));
+					if (view !== 'source')
+						runGuarded(() => {
+							view = 'source';
+							detailOpen = false;
+						});
 				}}><CodeXml class="size-4" /> {m.workflow_studio_source()}</Button
 			>
 			<Button
@@ -455,6 +468,7 @@
 						if (!rejected?.attemptedSource || busy || file?.comparison) return;
 						draft.replaceSource(rejected.attemptedSource);
 						view = 'source';
+						detailOpen = false;
 						if (rejected.diagnostics[0]) reveal(rejected.diagnostics[0].range);
 					}}>{m.workflow_studio_inspect_edit()}</Button
 				>
@@ -464,7 +478,7 @@
 
 	{#if file?.comparison}
 		{@const comparison = file.comparison}
-		<div class="min-h-0 flex-1 overflow-auto p-3" {@attach nativeWorkspaceScrollRegion('primary')}>
+		<div class="flex min-h-0 flex-1 flex-col overflow-auto p-3" {@attach nativeWorkspaceScrollRegion('primary')}>
 			<FileConflictComparison
 				baseContent={file.baseline}
 				localContent={comparison.source}

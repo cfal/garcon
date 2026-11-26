@@ -5,7 +5,8 @@
 		WorkflowGraphNode,
 	} from '$lib/workflows/definition/workflow-graph';
 	import * as m from '$lib/paraglide/messages.js';
-	import { workflowStepKindLabel } from './workflow-labels';
+	import WorkflowStepToneIcon from './WorkflowStepToneIcon.svelte';
+	import { workflowStepKindLabel, workflowToneTextClass } from './workflow-labels';
 
 	let {
 		steps,
@@ -39,12 +40,18 @@
 					type="button"
 					class="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4 py-3 text-left hover:bg-muted focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring aria-pressed:bg-accent"
 					data-workflow-step={step.id}
+					data-workflow-tone={step.tone}
 					aria-pressed={selected === step.id}
 					onclick={() => onSelect(step.id)}
 				>
 					<span class="min-w-0 space-y-1">
-						<span class="block wrap-anywhere text-sm font-medium">{step.title}</span>
-						<span class="block wrap-anywhere text-xs text-muted-foreground">
+						<span class="flex min-w-0 items-center gap-1.5">
+							{#if step.tone}
+								<WorkflowStepToneIcon tone={step.tone} />
+							{/if}
+							<span class="min-w-0 wrap-anywhere text-sm font-medium">{step.title}</span>
+						</span>
+						<span class="block wrap-anywhere text-xs {workflowToneTextClass(step.tone)}">
 							{workflowStepKindLabel(step.kind)}{#if step.detail}
 								· {step.detail}{/if}
 						</span>

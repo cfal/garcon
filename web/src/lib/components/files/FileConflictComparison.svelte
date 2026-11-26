@@ -45,9 +45,9 @@
 	}
 </script>
 
-<div class="space-y-4">
+<div class="flex h-full min-h-0 flex-col gap-3">
 	<div
-		class="flex gap-2"
+		class="flex shrink-0 gap-2"
 		role="tablist"
 		aria-label={m.file_conflict_snapshots()}
 		tabindex="-1"
@@ -76,6 +76,7 @@
 	</div>
 	<div
 		id="file-conflict-comparison-panel"
+		class="flex min-h-0 flex-1 flex-col"
 		role="tabpanel"
 		aria-labelledby={selected === 'base' ? 'file-conflict-base-tab' : 'file-conflict-disk-tab'}
 		tabindex="0"
@@ -103,7 +104,7 @@
 			</div>
 		{/await}
 	</div>
-	<div class="flex flex-wrap justify-end gap-2">
+	<div class="flex shrink-0 flex-wrap justify-end gap-2">
 		<Button variant="ghost" onclick={onCancel}>{m.common_cancel()}</Button>
 		<Button variant="outline" onclick={onAcceptDisk} disabled={!comparisonReady}
 			>{m.file_conflict_accept_disk()}</Button

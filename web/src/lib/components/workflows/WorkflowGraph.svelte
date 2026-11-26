@@ -34,8 +34,8 @@
 			type: 'step',
 			data: { step, active: selected === step.id, onSelect },
 			position: positions.get(step.id)!,
-			width: 196,
-			height: 64,
+			width: 216,
+			height: 74,
 		})),
 	);
 	const edges = $derived<Edge[]>(
@@ -68,6 +68,7 @@
 		fitView
 		fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
 		minZoom={0.1}
+		proOptions={{ hideAttribution: true }}
 		nodesDraggable={false}
 		nodesConnectable={false}
 		nodesFocusable={false}

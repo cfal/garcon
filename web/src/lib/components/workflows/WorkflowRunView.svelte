@@ -40,6 +40,7 @@
 		workflowRunCanStop,
 		workflowRunFinished,
 		workflowRunHasLiveAttempt,
+		workflowStepTone,
 	} from '$lib/workflows/run/workflow-run-projection';
 	import WorkflowRunAddItem from './WorkflowRunAddItem.svelte';
 	import WorkflowRunAddStep from './WorkflowRunAddStep.svelte';
@@ -97,17 +98,21 @@
 	const canStop = $derived(Boolean(run && workflowRunCanStop(run)));
 	const canArchive = $derived(run && run.status !== 'archived' && !workflowRunHasLiveAttempt(run));
 	const nodes = $derived(
-		run?.steps.map(({ step, instances, waitingReason }) => ({
-			id: step.id,
-			title: step.name ?? step.id,
-			kind: step.kind,
-			detail:
-				step.on?.kind === 'each'
-					? m.workflow_studio_instance_count({ count: instances.length })
-					: instances[0]
-						? workflowStatusLabel(instances[0].status)
-						: (waitingReason ?? undefined),
-		})) ?? [],
+		run?.steps.map((entry) => {
+			const { step, instances, waitingReason } = entry;
+			return {
+				id: step.id,
+				title: step.name ?? step.id,
+				kind: step.kind,
+				tone: workflowStepTone(entry),
+				detail:
+					step.on?.kind === 'each'
+						? m.workflow_studio_instance_count({ count: instances.length })
+						: instances[0]
+							? workflowStatusLabel(instances[0].status)
+							: (waitingReason ?? undefined),
+			};
+		}) ?? [],
 	);
 	const edges = $derived(
 		run ? [...workflowEdges(run.steps.map(({ step }) => step)), ...manualWorkflowEdges(run)] : [],
@@ -306,14 +311,24 @@
 							data-workflow-view
 							variant={listMode === 'list' ? 'secondary' : 'ghost'}
 							aria-pressed={listMode === 'list'}
-							onclick={() => (listMode = 'list')}
+							onclick={() => {
+								if (listMode !== 'list') {
+									listMode = 'list';
+									detailOpen = false;
+								}
+							}}
 							><List class="size-4" /> {m.workflow_studio_list()}</Button
 						>
 						<Button
 							size="sm"
 							variant={listMode === 'graph' ? 'secondary' : 'ghost'}
 							aria-pressed={listMode === 'graph'}
-							onclick={() => (listMode = 'graph')}
+							onclick={() => {
+								if (listMode !== 'graph') {
+									listMode = 'graph';
+									detailOpen = false;
+								}
+							}}
 							><WorkflowIcon class="size-4" /> {m.workflow_studio_graph()}</Button
 						>
 					</div>

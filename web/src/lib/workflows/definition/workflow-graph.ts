@@ -1,10 +1,13 @@
 import type { WorkflowStep } from '$shared/workflow-definition';
 
+export type WorkflowGraphNodeTone = 'neutral' | 'info' | 'warning' | 'success' | 'error';
+
 export interface WorkflowGraphNode {
 	id: string;
 	title: string;
 	kind: WorkflowStep['kind'];
 	detail?: string;
+	tone?: WorkflowGraphNodeTone;
 }
 
 export interface WorkflowGraphEdge {
@@ -76,7 +79,7 @@ export function workflowGraphPositions(
 			const depth = depths.get(id) ?? 0;
 			const row = rows.get(depth) ?? 0;
 			rows.set(depth, row + 1);
-			return [id, { x: depth * 300, y: row * 100 }];
+			return [id, { x: depth * 380, y: row * 124 }];
 		}),
 	);
 }

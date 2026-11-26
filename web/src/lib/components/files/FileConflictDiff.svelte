@@ -68,7 +68,7 @@
 <div
 	bind:this={host}
 	data-typography-conflict
-	class="h-[min(50dvh,36rem)] min-h-64 overflow-auto rounded-md border border-border bg-card [&_.cm-editor]:min-w-0 [&_.cm-mergeView]:h-full [&_.cm-scroller]:overflow-auto"
+	class="h-[min(50dvh,36rem)] min-h-48 w-full flex-1 overflow-auto rounded-md border border-border bg-card [&_.cm-editor]:min-w-0 [&_.cm-mergeView]:h-full [&_.cm-scroller]:overflow-auto"
 	aria-label={m.file_conflict_comparison()}
 	role="group"
 ></div>

@@ -319,13 +319,21 @@ describe('Workflow run viewer', () => {
 		const run = workflowRun();
 		const onOpenEditor = vi.fn();
 		const onRunAgain = vi.fn();
-		render(WorkflowRunViewer, {
+		const { container } = render(WorkflowRunViewer, {
 			runId: 'run-a',
 			onOpenChat: vi.fn(),
 			onOpenEditor,
 			onRunAgain,
 		});
-		await fireEvent.click(await screen.findByRole('button', { name: 'Open in editor' }));
+		const stepButton = await screen.findByRole('button', { name: /Verify findings/ });
+		expect(stepButton.getAttribute('data-workflow-tone')).toBe('error');
+		expect(container.querySelector('.workflow-split')?.getAttribute('data-detail')).toBe('false');
+		await fireEvent.click(stepButton);
+		expect(container.querySelector('.workflow-split')?.getAttribute('data-detail')).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
+		expect(container.querySelector('.workflow-split')?.getAttribute('data-detail')).toBe('false');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open in editor' }));
 		expect(onOpenEditor).toHaveBeenCalledExactlyOnceWith(run.pinnedRevision, {
 			executorId: 'local',
 			cwd: '/fixture',

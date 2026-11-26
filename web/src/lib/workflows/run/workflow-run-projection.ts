@@ -1,4 +1,4 @@
-import type { WorkflowGraphEdge } from '../definition/workflow-graph';
+import type { WorkflowGraphEdge, WorkflowGraphNodeTone } from '../definition/workflow-graph';
 import type {
 	WorkflowInstanceStatus,
 	WorkflowRunDetail,
@@ -76,4 +76,25 @@ export function manualWorkflowEdges(run: WorkflowRunDetail): WorkflowGraphEdge[]
 			? [{ source: signal.ref.stepId, target: amendment.stepId, label: signal.ref.signal }]
 			: [];
 	});
+}
+
+export function workflowStepTone(step: WorkflowRunStep): WorkflowGraphNodeTone {
+	if (!step.instances.length) return 'neutral';
+	if (step.instances.some(({ status }) => status === 'failed' || status === 'unknown')) {
+		return 'error';
+	}
+	if (
+		step.instances.some(
+			({ status }) =>
+				status === 'awaiting-decision' ||
+				status === 'waiting-executor' ||
+				status === 'blocked',
+		)
+	) {
+		return 'warning';
+	}
+	if (step.instances.some(({ status }) => status === 'running' || status === 'ready')) {
+		return 'info';
+	}
+	return step.instances.every(({ status }) => status === 'succeeded') ? 'success' : 'neutral';
 }

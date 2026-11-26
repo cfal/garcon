@@ -3468,7 +3468,7 @@
 	"workflow_studio_download_yaml": "Download YAML",
 	"workflow_studio_duplicate": "Duplicate step",
 	"workflow_studio_edit_definition": "Edit selected definition",
-	"workflow_studio_edit_graph": "Edit graph",
+	"workflow_studio_edit_graph": "Edit steps",
 	"workflow_studio_editor": "Definition editor",
 	"workflow_studio_effective_locations": "Effective step locations",
 	"workflow_studio_evidence": "Evidence",
