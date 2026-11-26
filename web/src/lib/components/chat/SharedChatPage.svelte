@@ -5,7 +5,7 @@
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { parseChatMessage } from '$shared/chat-types';
-	import type { ChatMessage, ScheduleToolUseMessage } from '$shared/chat-types';
+	import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
 	import {
 		UserMessage,
 		AssistantMessage,
@@ -52,7 +52,7 @@
 		message: ChatMessage;
 	}
 	interface RenderedEntry extends SharedMessageEntry {
-		pairedSchedule?: ScheduleToolUseMessage;
+		pairedTool?: ToolUseChatMessage;
 	}
 
 	type SharedViewError = 'not-found' | 'load-failed';
@@ -67,8 +67,9 @@
 			if (message.type === 'command-result' && commandResultPresentation(message.result) === 'hidden') return [];
 			if (message.type !== 'tool-result') return [{ ...entry, message }];
 			const tool = pairs.toolUseByResultRowId.get(String(entry.index));
-			if (tool?.type !== 'schedule-tool-use' || !shouldRenderPairedToolResult(tool, message)) return [];
-			return [{ ...entry, pairedSchedule: tool }];
+			if (tool?.type !== 'schedule-tool-use' && tool?.type !== 'antigravity-enter-plan-mode-tool-use'
+				&& tool?.type !== 'antigravity-exit-plan-mode-tool-use') return [];
+			return shouldRenderPairedToolResult(tool, message) ? [{ ...entry, pairedTool: tool }] : [];
 		});
 	});
 	let title = $state('');
@@ -424,8 +425,8 @@
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
 								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
-							{:else if message.type === 'tool-result' && entry.pairedSchedule}
-								<ChatToolEventRenderer toolMessage={entry.pairedSchedule} mode="result"
+							{:else if message.type === 'tool-result' && entry.pairedTool}
+								<ChatToolEventRenderer toolMessage={entry.pairedTool} mode="result"
 									toolResult={{ content: message.content, isError: message.isError }} resultAnchorId={`shared-result-${entry.index}`} />
 							{:else if message instanceof CliRowMessage}
 								<CliRow {message} />

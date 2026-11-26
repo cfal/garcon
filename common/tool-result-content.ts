@@ -23,15 +23,21 @@ export function plainToolResultTextPart(block: unknown): ToolTextPart | null {
 export function isEmptyToolResult(content: unknown, limits?: { maxChars: number; maxBlocks: number }): boolean {
   if (content == null) return true;
   if (!isRecord(content)) return false;
-  for (const key in content) {
-    if (Object.hasOwn(content, key) && key !== 'raw' && key !== 'items' && key !== 'content') return false;
-  }
   const maxChars = limits?.maxChars ?? Infinity;
-  if (Object.hasOwn(content, 'raw') && (typeof content.raw !== 'string' || /\S/.test(content.raw.slice(0, maxChars)))) return false;
   let chars = maxChars;
   let blocks = limits?.maxBlocks ?? Infinity;
   for (const key in content) {
-    if (key === 'raw' || !Object.hasOwn(content, key)) continue;
+    if (!Object.hasOwn(content, key)) continue;
+    if (key === 'raw' || key === 'rawOutput') {
+      let value = content[key];
+      if (key === 'rawOutput' && isRecord(value)) {
+        for (const field in value) if (Object.hasOwn(value, field) && field !== 'output') return false;
+        value = value.output;
+      }
+      if (typeof value !== 'string' || /\S/.test(value.slice(0, maxChars))) return false;
+      continue;
+    }
+    if (key !== 'items' && key !== 'content') return false;
     const items = content[key];
     if (!Array.isArray(items)) return false;
     for (const block of items) {

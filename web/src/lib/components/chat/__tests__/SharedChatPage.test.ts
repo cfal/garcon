@@ -8,6 +8,7 @@ import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
 import { AgentSwitchMessage, BackgroundTaskToolUseMessage, UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage, PermissionExpiredMessage, ScheduleToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import { AntigravityExitPlanModeToolUseMessage } from '$shared/chat-types';
 
 vi.mock('$lib/api/shares', () => ({
 	getSharedChat: vi.fn(),
@@ -109,6 +110,22 @@ describe('SharedChatPage', () => {
 		expect(details).toHaveLength(1);
 		await fireEvent.click(details[0]);
 		expect(screen.getByText('Earlier schedule result')).toBeTruthy();
+	});
+
+	it('shows a failed informational plan result without showing empty successful reports', async () => {
+		const page = response(['', '', '', ''], 0, 4);
+		page.snapshot.messages = [
+			new AntigravityExitPlanModeToolUseMessage('', 'empty', 'First plan'),
+			new ToolResultMessage('', 'empty', {}, false),
+			new AntigravityExitPlanModeToolUseMessage('', 'failed', 'Second plan'),
+			new ToolResultMessage('', 'failed', { raw: 'Plan could not be saved' }, true),
+		];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(page);
+		render(SharedChatPageTestHost);
+		const disclosure = await screen.findByRole('button', { name: /Error/ });
+		await fireEvent.click(disclosure);
+		expect(screen.getByText('Plan could not be saved')).toBeTruthy();
+		expect(document.getElementById('shared-result-1')).toBeNull();
 	});
 
 	it('anchors to visible content when an empty permission row precedes a newly paired result', async () => {
