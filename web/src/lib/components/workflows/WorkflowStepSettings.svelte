@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
-	import AgentSettingsControls from '$lib/components/chat/composer/AgentSettingsControls.svelte';
+	import AgentSettingControl from '$lib/components/chat/composer/AgentSettingControl.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import NewChatPreambleControls from '$lib/components/preambles/NewChatPreambleControls.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
@@ -379,12 +379,24 @@
 			{/if}
 		</div>
 		<div class="flex flex-wrap gap-2">
-			<AgentSettingsControls
-				descriptors={form.agentSettingDescriptors}
-				envelope={form.agentSettings}
-				defaults={catalog.getDefaultAgentSettings(form.agentId)}
-				onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
-			/>
+			{#each form.agentSettingDescriptors as descriptor (descriptor.key)}
+				<svelte:boundary>
+					<AgentSettingControl
+						{descriptor}
+						settings={{
+							descriptors: form.agentSettingDescriptors,
+							envelope: form.agentSettings,
+							defaults: catalog.getDefaultAgentSettings(form.agentId),
+							onChange: (setting, value) => form.setAgentSetting(setting, value),
+						}}
+						placement="inline"
+						align="start"
+						side="bottom"
+						disabled={disabled || !loaded}
+					/>
+					{#snippet failed()}{/snippet}
+				</svelte:boundary>
+			{/each}
 			<Button
 				variant="outline"
 				size="sm"

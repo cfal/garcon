@@ -16,7 +16,7 @@ import type { SidebarRowModelInput } from '$lib/sidebar/display/sidebar-row-mode
 import { sidebarOrderErrorMessage } from '../sidebar/sidebar-order-notifications';
 
 export function createAppShellSidebarOrder(
-	workflows: NonNullable<SidebarRowModelInput['workflows']>,
+	workflows?: SidebarRowModelInput['workflows'],
 ): SidebarOrderController {
 	const sessions = getChatSessions();
 	const executors = getExecutors();

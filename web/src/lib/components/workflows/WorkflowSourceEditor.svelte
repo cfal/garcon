@@ -7,7 +7,7 @@
 	import type { WorkflowSourceRange } from '$shared/workflow-definition';
 	import * as m from '$lib/paraglide/messages.js';
 	import { documentPosition } from '$lib/files/editor/file-document-runtime';
-	import { loadLanguageExtension } from '$lib/highlighting/codemirror-language-registry';
+	import { loadCodeMirrorLanguageForFile } from '$lib/highlighting/codemirror-language-registry';
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region';
 	import { applyWorkflowSourceChanges } from '$lib/workflows/definition/workflow-editor-source';
 
@@ -85,8 +85,8 @@
 		});
 		view = editor;
 		const unregister = registerNativeWorkspaceScrollRegion(editor.scrollDOM, 'primary');
-		void loadLanguageExtension('definition.workflow.yaml').then((extensions) => {
-			if (view === editor) editor.dispatch({ effects: language.reconfigure(extensions) });
+		void loadCodeMirrorLanguageForFile('definition.workflow.yaml').then((loaded) => {
+			if (view === editor && loaded) editor.dispatch({ effects: language.reconfigure(loaded.extensions) });
 		});
 		return () => {
 			view = undefined;
