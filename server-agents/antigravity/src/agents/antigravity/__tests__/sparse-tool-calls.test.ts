@@ -128,6 +128,26 @@ test('retains every terminal block when a cached output is echoed alongside othe
   }
 });
 
+test('publishes a large aggregate echo only once and keeps interleaved attachments in order', () => {
+  const s = session();
+  const timer = { name: 'schedule', rawInput: { DurationSeconds: 60, Prompt: 'Check' } };
+  const first = 'x'.repeat(9 * 1024 * 1024);
+  const output = first + '\nOperation refused';
+  s.start('aggregate', { ...timer, rawOutput: { output, attempts: 1 } });
+  const row = s.patch('aggregate', { status: 'failed', content: [textBlock(first), textBlock('Operation refused')] }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(Buffer.byteLength(JSON.stringify(row))).toBeLessThan(output.length + 1024);
+  expect(row.content.raw === output).toBe(true);
+  expect(row.content.rawOutput).toEqual({ attempts: 1 });
+
+  const content = [textBlock('Checking'), { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } },
+    textBlock('Operation refused')];
+  s.start('mixed', { ...timer, rawOutput: { output: 'Operation refused', attempts: 1 } });
+  expect(s.patch('mixed', { status: 'failed', content }).at(-1)).toEqual(expect.objectContaining({
+    content: { status: 'failed', items: content, rawOutput: { attempts: 1 } },
+  }));
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [

@@ -64,32 +64,17 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
   return !rawChanged && !!previous?.contentIsNewer;
 }
 
-function agentWorkResult(call: TrackedCall, status: string, terminal: Record<string, unknown>): ToolResultMessage['content'] {
-  const name = antigravityToolName(call);
-  const reportsPlanOrSchedule = name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
-  const terminalOutput = reportsPlanOrSchedule && rawOutputText(terminal.rawOutput).trim();
-  const terminalBlocks = reportsPlanOrSchedule && !terminalOutput && Array.isArray(terminal.content);
-  const allBlocks = call.content ?? [];
-  let rawOutput = call.rawOutput;
-  let output = rawOutputText(rawOutput);
-  let blocks = withoutOutputEchoes(allBlocks, output);
-  // Deduplicate against the primary source, not against cached output that the terminal frame repeats.
-  if (terminalBlocks && blocks.length !== allBlocks.length && output.trim()) {
-    const { output: _echo, ...metadata } = asObject(rawOutput);
-    rawOutput = metadata;
-    output = '';
-    blocks = allBlocks;
-  }
+function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['content'] {
+  const rawOutput = call.rawOutput;
+  const output = rawOutputText(rawOutput);
+  const blocks = withoutOutputEchoes(call.content ?? [], output);
   const blockText = joinBlockText(blocks);
   const trimmedOutput = output.trim();
   const trimmedBlocks = blockText.trim();
   const distinct = trimmedOutput !== '' && trimmedBlocks !== '' && trimmedOutput !== trimmedBlocks;
   const structured = isStructuredOutput(rawOutput);
-  // The terminal frame's text takes precedence even if it repeats an earlier frame.
   let primary: 'output' | 'metadata' | 'content';
-  if (terminalOutput) primary = 'output';
-  else if (terminalBlocks && trimmedBlocks) primary = 'content';
-  else if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
+  if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
   else if (structured && !trimmedOutput && !call.contentIsNewer) primary = 'metadata';
   else primary = 'content';
 
@@ -105,10 +90,39 @@ function agentWorkResult(call: TrackedCall, status: string, terminal: Record<str
   return result;
 }
 
+function planOrScheduleResult(call: TrackedCall, terminal: Record<string, unknown>, status: string): ToolResultMessage['content'] {
+  const blocks = call.content ?? [];
+  const mixed = blocks.some(block => {
+    const part = asObject(block.content);
+    return block.type !== 'content' || part.type !== 'text' || typeof part.text !== 'string'
+      || Object.keys(block).length !== 2 || Object.keys(part).length !== 2;
+  });
+  const terminalOutput = rawOutputText(terminal.rawOutput).trim();
+  if (!mixed && (terminalOutput || !Array.isArray(terminal.content))) {
+    return agentWorkResult(terminalOutput ? { ...call, contentIsNewer: false } : call, status);
+  }
+
+  const text = joinBlockText(blocks);
+  if (!mixed && !text.trim()) return agentWorkResult(call, status);
+  // Mixed blocks are an ordered result; flattening the text would detach it from its attachments.
+  const result: ToolResultMessage['content'] = mixed ? { items: blocks } : { raw: text };
+  if (status !== 'completed') result.status = status;
+  let rawOutput = call.rawOutput;
+  const output = rawOutputText(rawOutput).trim();
+  if (output && (output === text.trim() || withoutOutputEchoes(blocks, output).length !== blocks.length)) {
+    const { output: _echo, ...metadata } = asObject(rawOutput);
+    rawOutput = metadata;
+  }
+  if (isStructuredOutput(rawOutput) || rawOutputText(rawOutput).trim()) result.rawOutput = rawOutput;
+  return result;
+}
+
 export function toolCallResult(timestamp: string, call: TrackedCall, terminal: Record<string, unknown>, status: string): ToolResultMessage {
   const name = call.isMcp ? null : antigravityToolName(call);
   if (isAgentWork(name)) {
-    return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status, terminal), status !== 'completed');
+    const result = name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode'
+      ? planOrScheduleResult(call, terminal, status) : agentWorkResult(call, status);
+    return new ToolResultMessage(timestamp, call.toolCallId, result, status !== 'completed');
   }
 
   // Other tools report text from the terminal frame, but a command's exit code can arrive earlier.
