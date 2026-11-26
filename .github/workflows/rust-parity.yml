@@ -39,7 +39,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Check Rust formatting
-        run: cargo fmt --manifest-path rust/Cargo.toml --check
+        run: cargo fmt --manifest-path rust/Cargo.toml --all --check
 
       - name: Lint Rust
         run: cargo clippy --locked --manifest-path rust/Cargo.toml --release --all-targets -- -D warnings
