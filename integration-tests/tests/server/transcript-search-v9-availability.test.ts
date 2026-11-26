@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, open, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TranscriptSearchStatusResponse } from '../../../common/chat-search.js';
+import { TRANSCRIPT_SEARCH_SCHEMA_VERSION } from '../../../server-agents/common/src/search/schema.js';
 import {
   SEARCH_CORPUS_TIER_S,
   bulkAppendCorpusRows,
@@ -52,7 +53,7 @@ describe('transcript search v9 availability', () => {
       expect(result.results.every((entry) => corpus.denseChatIds.includes(entry.chatId))).toBe(true);
 
       const before = readDerivedIndexSnapshot(fixture.dirs.workspace);
-      expect(before.userVersion).toBe(10);
+      expect(before.userVersion).toBe(TRANSCRIPT_SEARCH_SCHEMA_VERSION);
       await fixture.restartGarcon();
       await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 5_000 });
       const after = readDerivedIndexSnapshot(fixture.dirs.workspace);
@@ -99,7 +100,7 @@ describe('transcript search v9 availability', () => {
         });
         await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 30_000 });
         const snapshot = readDerivedIndexSnapshot(fixture.dirs.workspace);
-        expect(snapshot.userVersion).toBe(10);
+        expect(snapshot.userVersion).toBe(TRANSCRIPT_SEARCH_SCHEMA_VERSION);
         const found = await fixture.client.searchChats({
           query: corpus.markerTerm,
           chatIds: [...corpus.denseChatIds],
@@ -119,7 +120,7 @@ describe('transcript search v9 availability', () => {
         },
       });
       await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 30_000 });
-      expect(readDerivedIndexSnapshot(fixture.dirs.workspace).userVersion).toBe(10);
+      expect(readDerivedIndexSnapshot(fixture.dirs.workspace).userVersion).toBe(TRANSCRIPT_SEARCH_SCHEMA_VERSION);
       const recovered = await fixture.client.searchChats({
         query: corpus.markerTerm,
         chatIds: [...corpus.denseChatIds],
