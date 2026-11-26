@@ -148,6 +148,23 @@ test('publishes a large aggregate echo only once and keeps interleaved attachmen
   }));
 });
 
+test('references the explicit output within ordered blocks without repeating it', () => {
+  const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  const progress = 'Checking '.repeat(500);
+  const content = [textBlock(progress), image, textBlock('Operation refused')];
+  for (const [output, refs] of [
+    ['Operation refused', [2]],
+    [progress + '\nOperation refused', [0, 2]],
+  ] as const) {
+    const s = session();
+    const row = s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 60, Prompt: 'Check' },
+      status: 'failed', content, rawOutput: { output, attempts: 1 } }).at(-1);
+    expect(row).toMatchObject({ type: 'tool-result', primaryTextItems: refs });
+    if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+    expect(row.content).toEqual({ items: content, status: 'failed', rawOutput: { attempts: 1 } });
+  }
+});
+
 test('retains the original arguments when a native schedule cannot be represented', () => {
   const s = session();
   for (const [index, rawInput] of [

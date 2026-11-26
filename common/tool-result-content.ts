@@ -1,5 +1,11 @@
 import { isRecord } from './json.js';
 
+export function toolResultTextPart(block: unknown): (Record<string, unknown> & { text: string }) | null {
+  const part = isRecord(block) && block.type === 'content' ? block.content : block;
+  return isRecord(part) && part.type === 'text' && typeof part.text === 'string'
+    ? part as Record<string, unknown> & { text: string } : null;
+}
+
 // Search inspects only its indexed prefix; the transcript inspects the full body.
 export function isEmptyToolResult(content: unknown, limits?: { maxChars: number; maxBlocks: number }): boolean {
   if (content == null) return true;

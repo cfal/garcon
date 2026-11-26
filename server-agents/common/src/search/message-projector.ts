@@ -1,6 +1,6 @@
-import type { ChatMessage } from '@garcon/common/chat-types';
+import type { ChatMessage, ToolResultMessage } from '@garcon/common/chat-types';
 import { isCleanCommandSuccess } from '@garcon/common/command-output';
-import { isEmptyToolResult } from '@garcon/common/tool-result-content';
+import { isEmptyToolResult, toolResultTextPart } from '@garcon/common/tool-result-content';
 import type { ChatSearchSnippetRole } from '@garcon/common/chat-search';
 import type { SearchMessageRowInput } from './rows.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from './schema.js';
@@ -18,6 +18,7 @@ interface ExtractionBudget {
   remaining: number;
   remainingNodes: number;
   seen: Set<object>;
+  indexedTextParts?: Set<object>;
   truncated: boolean;
 }
 
@@ -142,6 +143,7 @@ function boundedUnknownText(
     }
     for (const key in record) {
       if ((preferred && Object.hasOwn(preferred, key)) || !Object.hasOwn(record, key)) continue;
+      if (key === 'text' && budget.indexedTextParts?.has(record)) continue;
       appendChild(key, record[key]);
       if (budget.remaining <= 0 || budget.remainingNodes <= 0) {
         budget.truncated = true;
@@ -166,14 +168,32 @@ function boundedUnknownForJoin(value: unknown, outerBudget: ExtractionBudget): s
   return text;
 }
 
-function boundedToolResult(value: unknown, budget: ExtractionBudget): string {
+function boundedToolResult(message: ToolResultMessage, budget: ExtractionBudget): string {
+  const value: unknown = message.content;
   if (typeof value !== 'string') {
     const nestedBudget = { ...budget, remaining: MAX_TOOL_RESULT_CHARS };
+    const primary: string[] = [];
+    const items = message.content?.items;
+    if (Array.isArray(items) && message.primaryTextItems?.length) {
+      nestedBudget.indexedTextParts = new Set();
+      for (const index of message.primaryTextItems) {
+        if (nestedBudget.remaining <= 0 || nestedBudget.remainingNodes <= 0) break;
+        nestedBudget.remainingNodes--;
+        const part = toolResultTextPart(items[index]);
+        if (part) {
+          appendText(primary, searchablePrefix(part.text, nestedBudget), nestedBudget);
+          nestedBudget.indexedTextParts.add(part);
+        }
+      }
+    }
+    if (primary.length && nestedBudget.remaining > 0) nestedBudget.remaining--;
     // Indexes the user-visible diagnostic before supplementary tool payloads.
     const text = boundedUnknownText(value, nestedBudget, 0, TOOL_RESULT_FIELDS);
     budget.remainingNodes = nestedBudget.remainingNodes;
     budget.truncated ||= nestedBudget.truncated;
-    return text;
+    if (!primary.length) return text;
+    if (text) primary.push(' ', text);
+    return primary.join('');
   }
   if (value.length <= MAX_TOOL_RESULT_CHARS) return value;
   budget.truncated = true;
@@ -198,8 +218,8 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'agent-switch':
       return joinTool(message.fromAgentId, message.toAgentId, message.fromModel, message.toModel);
     case 'tool-result':
-      if (!message.isError && isEmptyToolResult(message.content, { maxChars: MAX_TOOL_RESULT_CHARS, maxBlocks: MAX_RECURSIVE_NODES })) return '';
-      return boundedToolResult(message.content, budget);
+      if (!message.isError && !message.primaryTextItems?.length && isEmptyToolResult(message.content, { maxChars: MAX_TOOL_RESULT_CHARS, maxBlocks: MAX_RECURSIVE_NODES })) return '';
+      return boundedToolResult(message, budget);
     case 'permission-request':
       return messageText(message.requestedTool, budget);
     case 'bash-tool-use':
