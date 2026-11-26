@@ -183,3 +183,32 @@ behind the front door. Its sockets left Nagle's algorithm on, so small
 WebSocket and API writes waited for acknowledgements that a direct connection
 to Bun never waits for. Content comparison cannot see latency; suite outcomes
 can.
+
+## ADR-010: A relay changes when a slow WebSocket client is dropped
+
+Status: open (2026-11-26)
+
+Context: The original drops a browser socket when more than
+`GARCON_WS_BACKPRESSURE_LIMIT` bytes are queued in Bun for it. In
+`websocket-backpressure.test.ts` (`direct replies drop a slow browser`), a
+paused client sends 64 large pings. Connected directly, the original
+terminates it after 42 to 47 of them. Behind the front door, every ping is
+accepted, the client resumes reading, receives all 16.8 MB of replies, and is
+never dropped: the original passes 5 of 5 runs and the front door 0 of 5. The
+relay hop adds kernel buffering between the original and the client, so the
+original's queue stays under its budget until the client starts reading
+again. Clamping the relay's receive buffer from the original, and its send
+buffer to the client (256 KB and 1 MB), did not change the outcome.
+
+The investigation fixed two relay defects with unit tests: a client that kept
+sending could hold a connection open after the original ended it, and both
+directions shared one lock. Once a drop happens, it reaches the client within
+20 ms of the client reading again.
+
+Decision: Pending. Options are to accept that the front door delays slow-client
+detection by the buffering of one loopback hop, which leaves memory bounded by
+kernel buffers, or to move browser WebSocket delivery and its budget into Rust,
+so the budget is applied where the client's socket is.
+
+Consequences: Until decided, this test is the one known end-to-end difference
+between the controllers on this machine.

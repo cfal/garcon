@@ -17,7 +17,11 @@ use hyper::{Request, Response, StatusCode, Uri};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use tokio::net::TcpStream;
+use std::io::Cursor;
+
+use hyper::upgrade::Upgraded;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpSocket, TcpStream};
 
 pub type ResponseBody = BoxBody<Bytes, hyper::Error>;
 
@@ -108,11 +112,97 @@ pub fn no_delay_connector() -> HttpConnector {
     connector
 }
 
+/// Relays an upgraded connection until the original ends it.
+///
+/// Unlike `copy_bidirectional`, which keeps the client-to-original direction
+/// open after the original closes, the original ending its side ends the
+/// relay. The original drops a slow WebSocket client by closing its
+/// connection; with half-close semantics the relay stayed blocked forwarding
+/// the client's queued frames to an original that no longer reads them, and
+/// the client never saw the drop. A client that ends its side first still
+/// receives whatever the original sends until it closes.
+///
+/// The two directions must not share one lock: when the client stops reading,
+/// a write blocked on it must not stop the relay reading the client's
+/// requests, or the original never sees the backpressure it drops slow
+/// clients on. Upgraded TCP connections are therefore relayed through
+/// independent socket halves (`relay_upgraded`).
+async fn relay<CR, CW, UR, UW>(client: (CR, CW), upstream: (UR, UW))
+where
+    CR: AsyncRead + Unpin,
+    CW: AsyncWrite + Unpin,
+    UR: AsyncRead + Unpin,
+    UW: AsyncWrite + Unpin,
+{
+    let ((mut client_read, mut client_write), (mut upstream_read, mut upstream_write)) =
+        (client, upstream);
+    let downstream = async {
+        let _ = tokio::io::copy(&mut upstream_read, &mut client_write).await;
+        let _ = client_write.shutdown().await;
+    };
+    let upstream_bound = async {
+        let _ = tokio::io::copy(&mut client_read, &mut upstream_write).await;
+        let _ = upstream_write.shutdown().await;
+        std::future::pending::<()>().await;
+    };
+    tokio::select! {
+        () = downstream => {}
+        () = upstream_bound => {}
+    }
+}
+
+/// Recovers the TCP connection and any bytes hyper read past the upgrade.
+fn into_tcp(upgraded: Upgraded) -> Result<(TcpStream, Bytes), Upgraded> {
+    let parts = upgraded.downcast::<TokioIo<TcpStream>>()?;
+    Ok((parts.io.into_inner(), parts.read_buf))
+}
+
+/// Relays an upgraded client connection to the original.
+async fn relay_upgraded(client: Upgraded, upstream: Upgraded) {
+    // Both connections are TCP connections this proxy created, so a failed
+    // downcast is a programming error; dropping them closes both sides.
+    let (Ok((client, client_buffered)), Ok((upstream, upstream_buffered))) =
+        (into_tcp(client), into_tcp(upstream))
+    else {
+        return;
+    };
+    let (client_read, client_write) = client.into_split();
+    let (upstream_read, upstream_write) = upstream.into_split();
+    relay(
+        (
+            Cursor::new(client_buffered).chain(client_read),
+            client_write,
+        ),
+        (
+            Cursor::new(upstream_buffered).chain(upstream_read),
+            upstream_write,
+        ),
+    )
+    .await;
+}
+
+/// Receive buffer for upgraded connections to the original. The relay adds a
+/// hop between the original and the client; with autotuned buffers that hop
+/// absorbs megabytes, so the original would detect a slow WebSocket client, and
+/// drop it at its send budget, far later than without the front door. The hop
+/// is loopback, where a small window costs no throughput.
+const UPGRADED_UPSTREAM_RECEIVE_BUFFER: u32 = 32 * 1024;
+
 /// Opens a dedicated connection to the original for a protocol upgrade.
 async fn connect_upstream(authority: &str) -> std::io::Result<TcpStream> {
-    let stream = TcpStream::connect(authority).await?;
-    stream.set_nodelay(true)?;
-    Ok(stream)
+    let address: std::net::SocketAddr = authority.parse().map_err(|_| {
+        std::io::Error::other(format!(
+            "the original's address is not a socket address: {authority}"
+        ))
+    })?;
+    let socket = if address.is_ipv4() {
+        TcpSocket::new_v4()?
+    } else {
+        TcpSocket::new_v6()?
+    };
+    socket.set_recv_buffer_size(UPGRADED_UPSTREAM_RECEIVE_BUFFER)?;
+    socket.set_nodelay(true)?;
+    socket.connect(address).await
 }
 
 impl Proxy {
@@ -216,11 +306,7 @@ impl Proxy {
         let upstream_upgrade = hyper::upgrade::on(&mut response);
         tokio::spawn(async move {
             if let (Ok(client), Ok(upstream)) = tokio::join!(client_upgrade, upstream_upgrade) {
-                let _ = tokio::io::copy_bidirectional(
-                    &mut TokioIo::new(client),
-                    &mut TokioIo::new(upstream),
-                )
-                .await;
+                relay_upgraded(client, upstream).await;
             }
         });
         let (parts, _) = response.into_parts();
@@ -233,6 +319,66 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
     use tower_service::Service;
+
+    #[tokio::test]
+    async fn the_original_closing_ends_the_relay_while_the_client_is_still_sending() {
+        use tokio::io::AsyncReadExt;
+        let (client, mut browser) = tokio::io::duplex(1024);
+        let (upstream, mut original) = tokio::io::duplex(1024);
+        let relay = tokio::spawn(relay(tokio::io::split(client), tokio::io::split(upstream)));
+        // The browser queues more than the relay can deliver, and the original
+        // stops reading and ends its side, as it does when it drops a client.
+        let sending = tokio::spawn(async move {
+            let chunk = vec![0u8; 64 * 1024];
+            while browser.write_all(&chunk).await.is_ok() {}
+            browser
+        });
+        original.shutdown().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), relay)
+            .await
+            .expect("the relay ends when the original does")
+            .unwrap();
+        let mut browser = tokio::time::timeout(std::time::Duration::from_secs(2), sending)
+            .await
+            .expect("the browser sees its connection end")
+            .unwrap();
+        let mut rest = Vec::new();
+        assert_eq!(browser.read_to_end(&mut rest).await.unwrap(), 0);
+        drop(original);
+    }
+
+    #[tokio::test]
+    async fn a_client_that_closes_first_still_receives_the_original_reply() {
+        use tokio::io::AsyncReadExt;
+        let (client, mut browser) = tokio::io::duplex(1024);
+        let (upstream, mut original) = tokio::io::duplex(1024);
+        let relay = tokio::spawn(relay(tokio::io::split(client), tokio::io::split(upstream)));
+        browser.write_all(b"request").await.unwrap();
+        browser.shutdown().await.unwrap();
+        let mut received = Vec::new();
+        original.read_to_end(&mut received).await.unwrap();
+        assert_eq!(received, b"request");
+        original.write_all(b"reply").await.unwrap();
+        original.shutdown().await.unwrap();
+        let mut reply = Vec::new();
+        browser.read_to_end(&mut reply).await.unwrap();
+        assert_eq!(reply, b"reply");
+        relay.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn upgraded_upstream_connections_bound_their_receive_buffer() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let stream = connect_upstream(&listener.local_addr().unwrap().to_string())
+            .await
+            .unwrap();
+        // Linux reports twice the requested size to account for bookkeeping.
+        let size = socket2::SockRef::from(&stream).recv_buffer_size().unwrap();
+        assert!(
+            size <= 2 * UPGRADED_UPSTREAM_RECEIVE_BUFFER as usize,
+            "receive buffer is {size} bytes"
+        );
+    }
 
     #[tokio::test]
     async fn upstream_connections_disable_nagle() {

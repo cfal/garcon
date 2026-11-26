@@ -111,6 +111,7 @@ dependencies = [
  "hyper-util",
  "libc",
  "ruzstd",
+ "socket2",
  "tempfile",
  "tokio",
  "tower-service",
