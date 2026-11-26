@@ -11,36 +11,20 @@
 	} from '$shared/chat-command-contracts';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
-	import {
-		getToolDisplayDetails,
-		getToolDisplayLabel,
-	} from '$lib/chat/tools/tool-display-registry.js';
+	import { getToolDisplayLabel } from '$lib/chat/tools/tool-display-registry.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import Check from '@lucide/svelte/icons/check';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import X from '@lucide/svelte/icons/x';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import AskUserQuestionForm from './AskUserQuestionForm.svelte';
+	import PermissionToolInput from './PermissionToolInput.svelte';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
+	import { createChatMarkdownNavigation } from './chat-markdown-navigation.js';
 	import {
-		resolveFileLinkTarget,
-		resolveImageFileTarget,
-		type ResolveMarkdownImageFile,
-	} from '$lib/chat/file-links/file-link-resolver.js';
-	import {
-		resolveChatReferenceTarget,
-		type ResolveChatReference,
-	} from '$lib/chat/transcript/chat-reference.js';
-	import {
-		getAppShell,
 		getChatSessions,
-		getFileSessions,
 		getExecutors,
-		getNotifications,
-		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
 
@@ -74,11 +58,7 @@
 	}: Props = $props();
 
 	const sessions = getChatSessions();
-	const fileSessions = getFileSessions();
 	const executors = getExecutors();
-	const appShell = getAppShell();
-	const workspace = getWorkspaceCoordinator();
-	const notifications = getNotifications();
 
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
 		if (chatContext?.chatId) return chatContext;
@@ -95,11 +75,7 @@
 			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.executorId : null) ??
 			'local',
 	);
-	const filesAvailable = $derived(executors.filesAvailable(executorId));
 	const projectBasePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
-	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
-	const resolveChatReference: ResolveChatReference = (chatId) =>
-		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 	const isPending = $derived(!terminal && actionable);
 	// An executor known to be away cannot receive an answer, and the request stays pending.
 	// Before the executor list loads, the server still reports an undelivered answer safely.
@@ -127,47 +103,11 @@
 
 	const resolvedOpacity = $derived(!isPending ? 'opacity-75' : '');
 
-	const resolveImageFile: ResolveMarkdownImageFile = (href) => {
-		if (!filesAvailable || !imageFileRootPath || !activeChatContext?.projectPath) return null;
-		return resolveImageFileTarget(href, {
-			executorId,
-			executorContextKey: executors.pathContextKey(executorId),
-			fileRootPath: imageFileRootPath,
-			sourceDirectoryPath: activeChatContext.projectPath,
-		});
-	};
-
-	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
-		if (link.kind !== 'file') return;
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
-		if (!filesAvailable) {
-			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
-			return true;
-		}
-		if (!projectBasePath) {
-			notifications.error(m.markdown_file_link_root_unavailable({ path: link.rawHref }), {
-				key: 'file-root-unavailable',
-			});
-			return true;
-		}
-		const resolved = resolveFileLinkTarget(link.rawHref, {
-			fileRootPath: projectBasePath,
-			sourceDirectoryPath: chat.projectPath,
-		});
-		if (!resolved) return;
-		void fileSessions.open({
-			executorId,
-			fileRootPath: resolved.fileRootPath,
-			relativePath: resolved.relativePath,
-			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : workspace.currentWindowId,
-			reason: 'user-open',
-			line: resolved.line,
-			col: resolved.col,
-		});
-		return true;
-	}
+	const { handleLinkNavigate, resolveImageFile, resolveChatReference } = createChatMarkdownNavigation({
+		get sourceChatId() { return activeChatContext?.chatId; },
+		get executorId() { return executorId; },
+		get projectPath() { return activeChatContext?.projectPath ?? null; },
+	});
 
 	const isExitPlanMode = $derived(request.requestedTool.type === 'exit-plan-mode-tool-use');
 	const isCursorCreatePlan = $derived(request.requestedTool.type === 'cursor-create-plan-tool-use');
@@ -187,7 +127,6 @@
 	const prompts = $derived(exitPlanRequest?.allowedPrompts ?? []);
 
 	const toolLabel = $derived(getToolDisplayLabel(request.requestedTool));
-	const rawInput = $derived(JSON.stringify(getToolDisplayDetails(request.requestedTool), null, 2));
 
 	const planTitle = $derived.by(() => {
 		if (isPending) return m.chat_permission_plan_ready();
@@ -577,24 +516,11 @@
 
 		{#snippet body()}
 			{@render permissionReason()}
-			{#if rawInput}
-				<details
-					class="mt-1"
-					open={effectiveDraft.rawInputOpen}
-					ontoggle={(event) => {
-						const open = event.currentTarget.open;
-						if (open === effectiveDraft.rawInputOpen) return;
-						setDraft({ ...effectiveDraft, rawInputOpen: open });
-					}}
-				>
-					<summary class="cursor-pointer text-xs opacity-80 flex items-center gap-1 select-none">
-						<ChevronDown class="w-3.5 h-3.5" />
-						{m.chat_permission_view_tool_input()}
-					</summary>
-					<pre
-						class="typography-chat-code mt-2 max-h-40 overflow-auto rounded-md border border-current/20 bg-background/50 p-2 text-xs font-mono whitespace-pre-wrap">{rawInput}</pre>
-				</details>
-			{/if}
+			<PermissionToolInput
+				tool={request.requestedTool}
+				open={effectiveDraft.rawInputOpen}
+				onOpenChange={(open) => setDraft({ ...effectiveDraft, rawInputOpen: open })}
+			/>
 		{/snippet}
 
 		{#snippet footer()}

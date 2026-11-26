@@ -2,7 +2,7 @@
 	// Owns the singleton conversation runtime, composer, and dialogs while
 	// rendered panels own transcript presentation and scrolling.
 
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import PromptComposer from './composer/PromptComposer.svelte';
 	import QueuedInputEditorDialog from './queue/QueuedInputEditorDialog.svelte';
@@ -11,12 +11,12 @@
 	import ExecutorHandoffDialog from './ExecutorHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
 	import UserMessageNavigatorDialog from './transcript/UserMessageNavigatorDialog.svelte';
-	import {
-		StaleConversationSurfaceError,
-		type ConversationPanelActions,
-	} from './conversation-panel-actions.js';
+	import type { ConversationPanelActions } from './conversation-panel-actions.js';
+	import { ConversationBranchController } from './conversation-branch-controller.js';
+	import { createConversationPanelActions } from './conversation-panel-action-dispatcher.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { recentRecallPrompts } from '$lib/chat/composer/prompt-recall';
+	import { UserMessage } from '$shared/chat-types';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -37,7 +37,6 @@
 	import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
 	import { applyChatMessageBatchActivity } from '$lib/chat/sessions/chat-message-batch-activity.js';
 	import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
-	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import { requiresQueuedSubmission } from '$lib/chat/conversation/submission-classifier.js';
 	import { CurrentConversationPanelTranscript } from '$lib/chat/conversation/current-conversation-panel-transcript.js';
 	import { CurrentConversationLifecycle } from '$lib/chat/conversation/current-conversation-lifecycle.js';
@@ -100,7 +99,6 @@
 		isPresented?: boolean;
 	}
 
-	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 
 	let {
 		onRegisterSubmit,
@@ -121,7 +119,7 @@
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 
 	function getInitialTranscriptCache(): ChatTranscriptCache {
-		return providedTranscriptCache ?? fallbackTranscriptCache;
+		return providedTranscriptCache ?? new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 	}
 
 	const sessions = getChatSessions();
@@ -178,8 +176,6 @@
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
 	const projectResolution = getProjectResolution();
-	let branchCommandGeneration = 0;
-	let branchDropdownGeneration: number | null = null;
 	const startupCoordinator = new StartupCoordinator();
 	const reconnectCoordinator = new ChatReconnectCoordinator({
 		ws,
@@ -209,16 +205,22 @@
 	setAgentState(agentState);
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
-	const hasSubagentEvents = $derived(
-		chatState.entries.some(({ message }) => message.type === 'codex-subagent-tool-use'),
-	);
-	const subagentModel = $derived(
-		buildSubagentManagementModel(hasSubagentEvents ? chatState.displayMessages : [], {
-			rootTitle: sessions.selectedChat?.title || 'Root',
-			rootModel: sessions.selectedChat?.model ?? agentState.model,
+	const selectedTitle = $derived(sessions.selectedChat?.title || 'Root');
+	const selectedModel = $derived(sessions.selectedChat?.model ?? agentState.model);
+	const recallPrompts = $derived(recentRecallPrompts(chatState.entries));
+	const subagentModel = $derived.by(() => {
+		const index = chatState.rowIndex;
+		const optimistic = index.hasSubagentEvents ? chatState.visibleOptimisticInputs : [];
+		const messages = !index.hasSubagentEvents ? [] : optimistic.length === 0 ? index.subagentMessages : [
+			...index.subagentMessages,
+			...optimistic.map(input => new UserMessage(input.createdAt, input.content)),
+		];
+		return buildSubagentManagementModel(messages, {
+			rootTitle: selectedTitle,
+			rootModel: selectedModel,
 			rootStatus: selectedIsProcessing ? 'running' : 'idle',
-		}),
-	);
+		});
+	});
 	const canInterruptSelectedChat = $derived(
 		selectedIsProcessing && lifecycle.loadingStatus?.can_interrupt !== false,
 	);
@@ -363,14 +365,6 @@
 	const directAdmissionPending = $derived(
 		controller.isDirectAdmissionPending(sessions.selectedChatId),
 	);
-	function assertRenderedPanel(surfaceId: ChatViewSurfaceId, chatId: string) {
-		const panel = conversationPanels.panel(surfaceId);
-		if (panel?.chatId !== chatId || !panel.isPresentationVisible) {
-			throw new StaleConversationSurfaceError(surfaceId, chatId);
-		}
-		return panel;
-	}
-
 	function allowsConversationalActions(chatId: string): boolean {
 		const chat = sessions.byId[chatId];
 		if (!chat) return false;
@@ -378,119 +372,15 @@
 		return agent?.executionPolicy === 'conversation';
 	}
 
-	const panelActions: ConversationPanelActions = {
-		reload(surfaceId, chatId) {
-			const panel = assertRenderedPanel(surfaceId, chatId);
-			void controller.loadPanelChat(chatId, panel.transcript, (options) =>
-				conversationPanels.loadChatSnapshot(chatId, options),
-			);
-		},
-		decidePermission(surfaceId, chatId, permissionOccurrenceId, decision) {
-			assertRenderedPanel(surfaceId, chatId);
-			controller.handlePermissionDecisionForChat(chatId, permissionOccurrenceId, decision);
-		},
-		exitPlanMode(surfaceId, chatId, permissionOccurrenceId, choice, plan) {
-			assertRenderedPanel(surfaceId, chatId);
-			controller.handleExitPlanModeForChat(chatId, permissionOccurrenceId, choice, plan);
-		},
-		fork(surfaceId, chatId, upToOrdinal) {
-			const panel = assertRenderedPanel(surfaceId, chatId);
-			void controller.forkChat(chatId, upToOrdinal, panel.transcript);
-		},
-		clearBefore(surfaceId, chatId, ordinal) {
-			const panel = assertRenderedPanel(surfaceId, chatId);
-			const chat = sessions.byId[chatId];
-			if (!chat || rootModelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId)?.executionPolicy !== 'literal') return;
-			controller.clearHistory.requestBeforeMessage(chatId, {
-				transcriptViewId: panel.transcript.transcriptViewId,
-				lastOrdinal: panel.transcript.lastOrdinal,
-			}, ordinal);
-		},
-		appendToDraft(surfaceId, chatId, block) {
-			assertRenderedPanel(surfaceId, chatId);
-			if (!allowsConversationalActions(chatId)) return;
-			composerState.appendDraftBlock(chatId, block, { allowDuplicate: true });
-		},
-		async generateTitle(surfaceId, chatId, message, ordinal) {
-			assertRenderedPanel(surfaceId, chatId);
-			await sessions.generateChatTitleFromMessage(chatId, message, ordinal);
-		},
-		interruptQueue(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			return controller.handleInterruptAndSendForChat(chatId);
-		},
-		steerQueue(surfaceId, chatId, entry, reorderRevision) {
-			assertRenderedPanel(surfaceId, chatId);
-			return controller.handleSteerQueuedInputForChat(chatId, entry, reorderRevision);
-		},
-		pauseQueue(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			return controller.pauseQueueForChat(chatId);
-		},
-		resumeQueue(surfaceId, chatId, pauseId) {
-			assertRenderedPanel(surfaceId, chatId);
-			return controller.resumeQueueForChat(chatId, pauseId);
-		},
-		reportQueueControlError(surfaceId, chatId, action, error) {
-			controller.handleQueueControlErrorForChat(chatId, action, error);
-		},
-		editQueue(surfaceId, chatId, entry) {
-			assertRenderedPanel(surfaceId, chatId);
-			editQueuedInput(chatId, entry);
-		},
-		moveQueue(surfaceId, chatId, source, target, placement, reorderRevision) {
-			assertRenderedPanel(surfaceId, chatId);
-			return controller.moveQueueEntryForChat(chatId, source, target, placement, reorderRevision);
-		},
-		deleteQueue(surfaceId, chatId, entryId) {
-			assertRenderedPanel(surfaceId, chatId);
-			return controller.deleteQueueEntryFromPanelForChat(chatId, entryId);
-		},
-		stop(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			return controller.handleAbortForChat(chatId);
-		},
-		openCommit(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			openCommitForPanel(surfaceId, chatId);
-		},
-		chooseProjectFolder(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			onChooseProjectFolder?.(chatId);
-		},
-		toggleBranch(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			return toggleCommitBranchDropdown(surfaceId, chatId);
-		},
-		closeBranch(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			closeCommitBranchDropdown();
-		},
-		createBranch(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			void openNewBranchDialog(surfaceId, chatId);
-		},
-		switchBranch(surfaceId, chatId, branch) {
-			assertRenderedPanel(surfaceId, chatId);
-			return switchCommitBranch(surfaceId, chatId, branch);
-		},
-		searchBranches(surfaceId, chatId, query) {
-			assertRenderedPanel(surfaceId, chatId);
-			const projectPath = sessions.byId[chatId]?.projectPath;
-			if (projectPath) void quickGitBranches.searchBranchRefs(projectPath, query);
-		},
-		sortBranches(surfaceId, chatId, key, query) {
-			assertRenderedPanel(surfaceId, chatId);
-			const projectPath = sessions.byId[chatId]?.projectPath;
-			if (projectPath) void quickGitBranches.toggleBranchSort(projectPath, key, query);
-		},
-		closeSwitchBranchDialog(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
-			if (workspace.composerAnchorSurfaceId === surfaceId && sessions.selectedChatId === chatId) {
-				appShell.requestComposerFocus();
-			}
-		},
-	};
+	const branches = new ConversationBranchController({
+		sessions, executors, conversationPanels, workspace, quickGitBranches, quickGit, projectResolution,
+	});
+	const panelActions = createConversationPanelActions({
+		conversationPanels, sessions, rootModelCatalog, controller, composerState, branches,
+		quickGitBranches, workspace, appShell, allowsConversationalActions, editQueuedInput,
+		openCommitForPanel,
+		onChooseProjectFolder: chatId => onChooseProjectFolder?.(chatId),
+	});
 	const userMessageNavigator = new UserMessageNavigatorController({
 		transcript: chatState,
 		getSelectedChatId: () => sessions.selectedChatId,
@@ -531,13 +421,17 @@
 		const chatId = sessions.selectedChatId;
 		// The selected record may hydrate after the route-selected ID.
 		void sessions.selectedChat;
+		untrack(() => controller.handleChatSwitchIfChanged(chatId));
+	});
+
+	$effect(() => {
+		const chatId = sessions.selectedChatId;
 		if (queueEditorChatId && queueEditorChatId !== chatId) {
 			closeQueueEditor();
 		}
 		if (reloadDialog.open && !reloadDialog.running && reloadDialog.chatId !== chatId) {
 			reloadDialog.cancel();
 		}
-		controller.handleChatSwitchIfChanged(chatId);
 	});
 
 	$effect(() => {
@@ -678,174 +572,6 @@
 		});
 	}
 
-	async function toggleCommitBranchDropdown(
-		surfaceId: ChatViewSurfaceId,
-		chatId: string,
-	): Promise<void> {
-		const command = beginBranchCommand(surfaceId, chatId, true);
-		if (!command) return;
-		const projectPath = sessions.byId[chatId]?.projectPath;
-		if (!projectPath) return;
-		if (
-			quickGitBranches.executorId === command.executorId &&
-			quickGitBranches.currentProjectPath === projectPath &&
-			quickGitBranches.showBranchDropdown
-		) {
-			closeCommitBranchDropdown();
-			return;
-		}
-		const project = await resolveChatProject(chatId);
-		if (!project || !ownsBranchCommand(command)) return;
-		quickGitBranches.setProject(
-			project.projectPath,
-			quickGit.summaryFor(project)?.branch,
-			project.effectiveProjectKey,
-			project.executorId,
-		);
-		await quickGitBranches.openBranchDropdown(project.projectPath, project.effectiveProjectKey);
-		if (command.generation === branchCommandGeneration && !ownsBranchCommand(command)) {
-			quickGitBranches.closeBranchDropdown();
-		}
-	}
-
-	type BranchCommand = {
-		readonly executorId: string;
-		readonly projectPath: string;
-		readonly generation: number;
-		readonly surfaceId: ChatViewSurfaceId;
-		readonly chatId: string;
-		readonly focusOwnerRevision: number;
-		readonly panel: ConversationPanelRegistration;
-	};
-
-	function beginBranchCommand(
-		surfaceId: ChatViewSurfaceId,
-		chatId: string,
-		opensDropdown = false,
-	): BranchCommand | null {
-		const chat = sessions.byId[chatId];
-		const executorId = chat?.executorId ?? 'local';
-		if (!chat?.projectPath || !executors.gitAvailable(executorId)) return null;
-		const panel = conversationPanels.panel(surfaceId);
-		const owner = workspace.focusOwner;
-		if (
-			!panel ||
-			panel.chatId !== chatId ||
-			owner.kind === 'chat-list' ||
-			owner.surfaceId !== surfaceId
-		) {
-			return null;
-		}
-		const generation = ++branchCommandGeneration;
-		if (opensDropdown) branchDropdownGeneration = generation;
-		return {
-			executorId,
-			projectPath: chat.projectPath,
-			generation,
-			surfaceId,
-			chatId,
-			focusOwnerRevision: workspace.focusOwnerRevision,
-			panel,
-		};
-	}
-
-	function ownsBranchCommand(command: BranchCommand): boolean {
-		return (
-			(sessions.byId[command.chatId]?.executorId ?? 'local') === command.executorId &&
-			sessions.byId[command.chatId]?.projectPath === command.projectPath &&
-			executors.gitAvailable(command.executorId) &&
-			command.generation === branchCommandGeneration &&
-			workspace.focusOwnerRevision === command.focusOwnerRevision &&
-			workspace.focusOwner.kind !== 'chat-list' &&
-			workspace.focusOwner.surfaceId === command.surfaceId &&
-			conversationPanels.panel(command.surfaceId) === command.panel &&
-			command.panel.chatId === command.chatId
-		);
-	}
-
-	function closeCommitBranchDropdown(): void {
-		if (branchDropdownGeneration === branchCommandGeneration) branchCommandGeneration += 1;
-		branchDropdownGeneration = null;
-		quickGitBranches.closeBranchDropdown();
-	}
-
-	async function openNewBranchDialog(surfaceId: ChatViewSurfaceId, chatId: string): Promise<void> {
-		const command = beginBranchCommand(surfaceId, chatId);
-		if (!command) return;
-		const project = await resolveChatProject(chatId);
-		if (!project || !ownsBranchCommand(command)) return;
-		quickGitBranches.setProject(
-			project.projectPath,
-			quickGit.summaryFor(project)?.branch,
-			project.effectiveProjectKey,
-			project.executorId,
-		);
-		quickGitBranches.openNewBranchDialog(
-			project.projectPath,
-			surfaceId,
-			project.effectiveProjectKey,
-		);
-	}
-
-	async function switchCommitBranch(
-		surfaceId: ChatViewSurfaceId,
-		chatId: string,
-		branch: string,
-	): Promise<void> {
-		const command = beginBranchCommand(surfaceId, chatId);
-		if (!command) return;
-		const project = await resolveChatProject(chatId);
-		if (!project || !ownsBranchCommand(command)) return;
-		quickGitBranches.setProject(
-			project.projectPath,
-			quickGit.summaryFor(project)?.branch,
-			project.effectiveProjectKey,
-			project.executorId,
-		);
-		await quickGitBranches.switchBranch(
-			project.projectPath,
-			branch,
-			undefined,
-			surfaceId,
-			project.effectiveProjectKey,
-		);
-	}
-
-	async function resolveChatProject(chatId: string): Promise<{
-		executorId: string;
-		projectPath: string;
-		effectiveProjectKey: string;
-	} | null> {
-		const chat = sessions.byId[chatId];
-		const executorId = chat?.executorId ?? 'local';
-		const executorContextKey = executors.gitContextKey(executorId);
-		if (!chat?.projectPath || !executors.gitAvailable(executorId)) return null;
-		const target =
-			chat.status === 'draft'
-				? { kind: 'path' as const, executorId, projectPath: chat.projectPath }
-				: { kind: 'chat' as const, executorId, chatId, projectPath: chat.projectPath };
-		const lease = projectResolution.retain(target);
-		try {
-			await lease.resolve();
-			if (
-				sessions.byId[chatId]?.projectPath !== target.projectPath ||
-				(sessions.byId[chatId]?.executorId ?? 'local') !== executorId ||
-				executorContextKey !== executors.gitContextKey(executorId) ||
-				!executors.gitAvailable(executorId)
-			)
-				return null;
-			return lease.snapshot.kind === 'available'
-				? {
-						executorId,
-						projectPath: target.projectPath,
-						effectiveProjectKey: lease.snapshot.effectiveProjectKey,
-					}
-				: null;
-		} finally {
-			lease.release();
-		}
-	}
-
 	let composerHost = $state<HTMLDivElement | null>(null);
 
 	$effect(() => {
@@ -899,7 +625,7 @@
 			recallIdentity={sessions.selectedChatId && chatState.activeChatId === sessions.selectedChatId
 				? `${sessions.selectedChatId}:${chatState.transcriptViewId}`
 				: null}
-			recallPrompts={recentRecallPrompts(chatState.entries)}
+			{recallPrompts}
 			onExcludeResendCandidate={(ordinal) => chatState.excludeResendCandidate(ordinal)}
 		/>
 	</div>

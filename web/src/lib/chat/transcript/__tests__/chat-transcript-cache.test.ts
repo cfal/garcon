@@ -72,7 +72,7 @@ describe('ChatTranscriptCache', () => {
 		expect(storage.restore('chat')).toMatchObject({ transcriptViewId: 'view', entries: messages });
 	});
 
-	it('coalesces duplicate repair writes without replacing rows and retains hidden-row frontier advances', () => {
+	it('skips duplicate writes without replacing rows and retains hidden-row frontier advances', () => {
 		const storage = new LocalChatTranscriptStorage();
 		const persist = vi.spyOn(storage, 'persist');
 		const cache = new ChatTranscriptCache({ storage, limit: 100 });
@@ -86,7 +86,7 @@ describe('ChatTranscriptCache', () => {
 		}
 		expect(cache.get('chat')!.messages).toBe(previous);
 		cache.flush();
-		expect(persist).toHaveBeenCalledOnce();
+		expect(persist).not.toHaveBeenCalled();
 		persist.mockClear();
 		cache.applyMessages('chat', 'view', { firstOrdinal: 2, lastOrdinal: 3, messages: [] });
 		cache.flush();

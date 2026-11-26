@@ -1,10 +1,11 @@
 import type { CodeHighlightSegment } from './code-highlight-types';
+import { normalizeCodeFenceLanguage } from './code-language-aliases';
 
 export class CodeHighlightCache {
 	#entries = new Map<string, { segments: CodeHighlightSegment[]; bytes: number }>();
 	#bytes = 0;
 
-	constructor(private readonly maxBytes = 2 * 1024 * 1024, private readonly maxEntries = 32) {}
+	constructor(private readonly maxBytes = 2 * 1024 * 1024, private readonly maxEntries = 256) {}
 
 	get(key: string): CodeHighlightSegment[] | undefined {
 		const entry = this.#entries.get(key);
@@ -30,4 +31,12 @@ export class CodeHighlightCache {
 			this.#entries.delete(oldest);
 		}
 	}
+}
+
+export const MAX_HIGHLIGHT_CHARS = 200_000;
+export const codeFenceHighlightCache = new CodeHighlightCache();
+
+export function readCachedCodeFence(text: string, language: string | null | undefined) {
+	if (!text || text.length > MAX_HIGHLIGHT_CHARS) return undefined;
+	return codeFenceHighlightCache.get(`${normalizeCodeFenceLanguage(language)}\0${text}`);
 }

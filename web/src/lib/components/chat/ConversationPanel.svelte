@@ -87,13 +87,12 @@
 		expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch ?? '',
 	});
 	const lastOwnershipBoundary = $derived(
-		panel.transcript.entries.findLast(entry => entry.message.type === 'agent-switch')?.ordinal ?? 0,
+		panel.transcript.rowIndex.lastOwnershipBoundary,
 	);
 	const recordedQuestionAnswers = $derived.by(() => {
 		const answers = new Map<string, string>();
-		for (const entry of panel.transcript.entries) {
-			if (entry.message.type !== 'user-message') continue;
-			const reply = entry.message.metadata?.questionReply;
+		for (const message of panel.transcript.rowIndex.questionAnswers) {
+			const reply = message.metadata?.questionReply;
 			const source = reply?.source;
 			if (!reply || !source || source.chatId !== chat.id) continue;
 			if (source.transcriptViewId !== panel.transcript.transcriptViewId) continue;
@@ -419,7 +418,6 @@
 		{isVisible}
 		{isProcessing}
 		status={panel.lifecycle.loadingStatus}
-		agentId={chat.agentId}
 		spinnerSelectionKey={`${surfaceId}:${chatId}`}
 		{statusBar}
 		projectPath={chat.projectPath}

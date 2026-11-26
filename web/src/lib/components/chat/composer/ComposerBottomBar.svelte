@@ -37,7 +37,7 @@
 	let promptGroup = $state<ComposerPromptActions>();
 	let settingsGroup = $state<ComposerSettingsGroup>();
 	let ruler = $state<HTMLElement>();
-	let rowRect = $state<DOMRectReadOnly>();
+	let rowRect = $state.raw<DOMRectReadOnly>();
 	let measuredRem = $state<number>();
 	const rowWidth = $derived(rowRect?.width ?? row?.clientWidth ?? 0);
 	const rem = $derived(measuredRem ?? (ruler?.clientWidth || 16));

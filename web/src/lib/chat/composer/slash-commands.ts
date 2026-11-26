@@ -75,7 +75,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 	},
 ];
 
-export const SNIPPET_SLASH_COMMAND_NAMES = ['s', 'snippet'] as const;
+const SNIPPET_SLASH_COMMAND_NAMES = ['s', 'snippet'] as const;
 const SNIPPET_SLASH_COMMAND_NAME_SET: ReadonlySet<string> = new Set(SNIPPET_SLASH_COMMAND_NAMES);
 
 export const LITERAL_APP_COMMAND_NAMES: readonly string[] = [

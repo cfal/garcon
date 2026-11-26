@@ -185,6 +185,7 @@
 				label={inlineLabel}
 				value={inlineValue}
 				secondary={inlineSecondary}
+				pattern={cfg.getPattern?.(parsedData)}
 				action={cfg.action === 'openFile' && !inlineValue ? 'none' : cfg.action}
 				onAction={handleAction}
 				style={cfg.style}

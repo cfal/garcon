@@ -60,6 +60,21 @@ describe('PermissionRequestRow', () => {
 		cleanup();
 	});
 
+	it('reads and formats raw tool input only while its disclosure is open', async () => {
+		const tool = new BashToolUseMessage(TS, 'tool-id', 'synthetic command');
+		const readCommand = vi.fn(() => 'synthetic command');
+		Object.defineProperty(tool, 'command', { get: readCommand, enumerable: true });
+		const request = new PermissionRequestMessage(TS, 'permission-id', tool);
+		const { rerender } = render(PermissionRequestRowTestHost, {
+			request, onDecision: vi.fn(), draft: { selectedQuestionOptions: {}, rawInputOpen: false },
+		});
+		expect(screen.getByText('View tool input')).toBeTruthy();
+		expect(readCommand).not.toHaveBeenCalled();
+		await rerender({ draft: { selectedQuestionOptions: {}, rawInputOpen: true } });
+		expect(readCommand).toHaveBeenCalledOnce();
+		expect(screen.getByText(/synthetic command/)).toBeTruthy();
+	});
+
 	it.each(['ask-user-question-tool-use', 'cursor-ask-question-tool-use'])(
 		'retains the empty-question body for %s', (type) => {
 			const tool = parseChatMessage({ type, timestamp: TS, toolId: 'empty-question', questions: [] });

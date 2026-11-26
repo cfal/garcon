@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { isPlainTextInput } from '$shared/input-format';
-	import { onDestroy, tick } from 'svelte';
 	import {
 		UserMessage,
 		AssistantMessage,
@@ -19,33 +18,19 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import FileText from '@lucide/svelte/icons/file-text';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Clock3 from '@lucide/svelte/icons/clock-3';
-	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import type { InputStatus } from '$lib/chat/transcript/optimistic-user-input.js';
 	import {
-		getAppShell,
 		getChatSessions,
-		getFileSessions,
 		getExecutors,
 		getLocalSettings,
-		getNotifications,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
-	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
-	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
-	import {
-		resolveFileLinkTarget,
-		resolveImageFileTarget,
-		type ResolveMarkdownImageFile,
-	} from '$lib/chat/file-links/file-link-resolver.js';
-	import {
-		resolveChatReferenceTarget,
-		type ResolveChatReference,
-	} from '$lib/chat/transcript/chat-reference.js';
+	import { createChatMarkdownNavigation } from './chat-markdown-navigation.js';
+	import MessageContextMenuShell from './MessageContextMenuShell.svelte';
 	import PermissionRequestRow from './PermissionRequestRow.svelte';
 	import AsyncQuestionMessage from './AsyncQuestionMessage.svelte';
 	import CompactionRow from './CompactionRow.svelte';
@@ -55,32 +40,19 @@
 	import CommandStatusRow from './rows/CommandStatusRow.svelte';
 	import CliPresentationHeader from './rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from './rows/CollapsibleBody.svelte';
+	import UserMessageAttachments from './UserMessageAttachments.svelte';
 	import TranscriptNoticeRow from './rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
 	import ChatToolEventRenderer from '../tools/ChatToolEventRenderer.svelte';
-	import {
-		ContextMenu,
-		ContextMenuTrigger,
-		ContextMenuContent,
-	} from '$lib/components/ui/context-menu';
 	import * as m from '$lib/paraglide/messages.js';
-	import { formatQuoteBlock } from '$lib/chat/composer/quote-selection.js';
-	import { isImageAttachmentMimeType } from '@garcon/common/attachments';
-	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { cn } from '$lib/utils/cn';
-	import MessageActionMenu from './MessageActionMenu.svelte';
-	import MessageTextSelectionDialog from './MessageTextSelectionDialog.svelte';
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
 	import { historicalAskUserQuestion } from '$lib/chat/transcript/ask-user-question-history.js';
 	import type {
 		ConversationDisclosureStatePort,
 		PermissionQuestionDraft,
 	} from './ConversationFeedItemState.svelte.js';
-
-	const MESSAGE_CONTEXT_MENU_LONG_PRESS_MS = 250;
-	const MESSAGE_CONTEXT_INTERACTIVE_SELECTOR =
-		'a, button, input, textarea, select, [role="button"], [contenteditable]:not([contenteditable="false"])';
 
 	interface Props {
 		isVisible?: boolean;
@@ -145,11 +117,8 @@
 	}: Props = $props();
 
 	const sessions = getChatSessions();
-	const fileSessions = getFileSessions();
 	const executors = getExecutors();
-	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
-	const notifications = getNotifications();
 	const localSettings = getLocalSettings();
 
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
@@ -169,15 +138,11 @@
 	);
 	const filesAvailable = $derived(executors.filesAvailable(executorId));
 	const projectBasePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
-	// Automatic reads wait for the confirmed executor root, not the shell's startup default.
-	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const chatProjectPath = $derived.by(() => {
 		if (!filesAvailable) return null;
 		if (message.type === 'command-output') return message.context?.projectPath ?? null;
 		return activeChatContext?.projectPath ?? null;
 	});
-	const resolveChatReference: ResolveChatReference = (chatId) =>
-		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 
 	const shouldHideThinking = $derived(message instanceof ThinkingMessage && !showThinking);
 
@@ -258,294 +223,11 @@
 		),
 	);
 
-	function getMessageMenuText(): string {
-		if (asAssistant) return String(asAssistant.content || '');
-		if (asCommandOutput) return asCommandOutput.content;
-		if (asUser) return String(asUser.content || '');
-		return '';
-	}
-
-	const messageMenuText = $derived(getMessageMenuText());
-	const canGenerateTitleFromMessage = $derived(
-		Boolean(
-			(asUser || asAssistant || asCommandOutput) &&
-			messageMenuText.trim() &&
-			activeChatContext?.chatId &&
-			forkUpToSeq !== undefined &&
-			onGenerateTitleFromMessage,
-		),
-	);
-	function attachmentMimeType(attachment: { data?: string; mimeType?: string }): string {
-		if (attachment.mimeType) return attachment.mimeType;
-		return attachment.data?.match(/^data:([^;]+);base64,/)?.[1] ?? '';
-	}
-
-	function isImageAttachment(attachment: { data?: string; mimeType?: string }): boolean {
-		return isImageAttachmentMimeType(attachmentMimeType(attachment));
-	}
-
-	// Undefined keeps unopened portals out of document.body; false retains their close and focus lifecycle.
-	let messageMenuOpen = $state<boolean>();
-	let messageMenuTriggerRef = $state<HTMLElement | null>(null);
-	let messageMenuContentRef = $state<HTMLElement | null>(null);
-	let selectTextDialogOpen = $state<boolean>();
-	let messageSelectionText = $state<string | null>(null);
-	let messageLongPressTimer: ReturnType<typeof setTimeout> | null = null;
-	let suppressNextMenuButtonClick = false;
-	let releaseMessageMenu: (() => void) | null = null;
-	let releaseSelectionDialog: (() => void) | null = null;
-
-	const hasMessageSelection = $derived(messageSelectionText !== null);
-
-	async function releaseAfterPortalClose(release: (() => void) | null): Promise<void> {
-		if (!release) return;
-		await tick();
-		release();
-	}
-
-	function handleMessageMenuOpenChange(open: boolean): void {
-		if (open) {
-			releaseMessageMenu ??=
-				acquireTransientActivity?.(() => handleMessageMenuOpenChange(false)) ?? null;
-			messageMenuOpen = true;
-			return;
-		}
-		messageMenuOpen = false;
-		const release = releaseMessageMenu;
-		releaseMessageMenu = null;
-		void releaseAfterPortalClose(release);
-	}
-
-	function openContextMenuFromButton(e: MouseEvent) {
-		e.preventDefault();
-		e.stopPropagation();
-		if (suppressNextMenuButtonClick) {
-			suppressNextMenuButtonClick = false;
-			return;
-		}
-		const trigger =
-			(e.currentTarget as HTMLElement | null)?.closest('[data-slot="context-menu-trigger"]') ??
-			messageMenuTriggerRef;
-		if (trigger) {
-			trigger.dispatchEvent(
-				new MouseEvent('contextmenu', { bubbles: true, clientX: e.clientX, clientY: e.clientY }),
-			);
-		}
-	}
-
-	function clearMessageLongPressTimer(): void {
-		if (messageLongPressTimer === null) return;
-		clearTimeout(messageLongPressTimer);
-		messageLongPressTimer = null;
-	}
-
-	function openContextMenuAtPoint(trigger: HTMLElement, clientX: number, clientY: number): void {
-		trigger.dispatchEvent(
-			new MouseEvent('contextmenu', {
-				bubbles: true,
-				clientX,
-				clientY,
-			}),
-		);
-	}
-
-	function isMessageInteractiveTarget(event: PointerEvent): boolean {
-		return (
-			event.target instanceof Element &&
-			Boolean(event.target.closest(MESSAGE_CONTEXT_INTERACTIVE_SELECTOR))
-		);
-	}
-
-	function startMessageLongPress(trigger: HTMLElement, event: PointerEvent): void {
-		if (
-			event.defaultPrevented ||
-			event.pointerType === 'mouse' ||
-			messageMenuOpen ||
-			isMessageInteractiveTarget(event)
-		) {
-			return;
-		}
-		clearMessageLongPressTimer();
-		const { clientX, clientY } = event;
-		messageLongPressTimer = setTimeout(() => {
-			messageLongPressTimer = null;
-			if (!isVisible) return;
-			openContextMenuAtPoint(trigger, clientX, clientY);
-		}, MESSAGE_CONTEXT_MENU_LONG_PRESS_MS);
-	}
-
-	function eventTargetsMenuContent(event: PointerEvent): boolean {
-		const content = messageMenuContentRef;
-		if (!content) return false;
-		if (event.composedPath().includes(content)) return true;
-		return event.target instanceof Node && content.contains(event.target);
-	}
-
-	function closeMessageMenuFromOutsidePointer(event: PointerEvent): void {
-		if (eventTargetsMenuContent(event)) return;
-		if (event.pointerType === 'touch') event.preventDefault();
-		suppressNextMenuButtonClick =
-			event.target instanceof Element &&
-			Boolean(event.target.closest('.chat-message-menu-button, .chat-message-action-button'));
-		handleMessageMenuOpenChange(false);
-	}
-
-	function closeMessageMenuFromInteractOutside(): void {
-		handleMessageMenuOpenChange(false);
-	}
-
-	// Closes touch context menus on pointerdown because Bits UI defers touch dismissal to click.
-	$effect(() => {
-		if (!messageMenuOpen || typeof document === 'undefined') return;
-		document.addEventListener('pointerdown', closeMessageMenuFromOutsidePointer, true);
-		return () => {
-			document.removeEventListener('pointerdown', closeMessageMenuFromOutsidePointer, true);
-		};
+	const { handleLinkNavigate, handleToolFileOpen, resolveImageFile, resolveChatReference } = createChatMarkdownNavigation({
+		get sourceChatId() { return activeChatContext?.chatId; },
+		get executorId() { return executorId; },
+		get projectPath() { return chatProjectPath; },
 	});
-
-	// Opens message context menus faster than Bits UI's default long-press delay.
-	$effect(() => {
-		const trigger = messageMenuTriggerRef;
-		if (!isVisible || !trigger || typeof window === 'undefined') return;
-
-		const handlePointerDown = (event: PointerEvent) => startMessageLongPress(trigger, event);
-		trigger.addEventListener('pointerdown', handlePointerDown);
-		trigger.addEventListener('pointermove', clearMessageLongPressTimer);
-		trigger.addEventListener('pointercancel', clearMessageLongPressTimer);
-		trigger.addEventListener('pointerup', clearMessageLongPressTimer);
-
-		return () => {
-			trigger.removeEventListener('pointerdown', handlePointerDown);
-			trigger.removeEventListener('pointermove', clearMessageLongPressTimer);
-			trigger.removeEventListener('pointercancel', clearMessageLongPressTimer);
-			trigger.removeEventListener('pointerup', clearMessageLongPressTimer);
-			clearMessageLongPressTimer();
-		};
-	});
-
-	// Snapshots the live selection on the capture-phase contextmenu event, before Bits UI
-	// focus management can collapse it. Each menu open overwrites the previous snapshot.
-	function captureMessageSelection(): void {
-		const trigger = messageMenuTriggerRef;
-		const selection = window.getSelection();
-		if (!trigger || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-			messageSelectionText = null;
-			return;
-		}
-		const fullyInsideMessage = Array.from({ length: selection.rangeCount }, (_, index) => {
-			const range = selection.getRangeAt(index);
-			return trigger.contains(range.startContainer) && trigger.contains(range.endContainer);
-		}).every(Boolean);
-		const text = selection.toString();
-		messageSelectionText = fullyInsideMessage && text.trim() ? text : null;
-	}
-
-	async function copyText() {
-		const text = messageSelectionText ?? messageMenuText;
-		if (!text) return;
-		await copyToClipboard(text);
-	}
-
-	function quoteSelection() {
-		const text = messageSelectionText;
-		if (!text) return;
-		onAppendToDraft?.(formatQuoteBlock(text));
-	}
-
-	function sendToNewSession() {
-		if (!messageMenuText) return;
-		appShell.openNewChatDialog({
-			prefill: messageMenuText,
-		});
-	}
-
-	function handleFork(e: MouseEvent) {
-		e.stopPropagation();
-		if (!canForkAtMessageNow) return;
-		onForkChat?.(forkUpToSeq);
-	}
-
-	function openSelectTextDialog(): void {
-		if (!messageMenuText) return;
-		releaseSelectionDialog ??= acquireTransientActivity?.(closeSelectTextDialog) ?? null;
-		selectTextDialogOpen = true;
-	}
-
-	async function generateTitleFromCurrentMessage(): Promise<void> {
-		if (!canGenerateTitleFromMessage) return;
-		await onGenerateTitleFromMessage?.(messageMenuText, forkUpToSeq);
-	}
-
-	function closeSelectTextDialog(): void {
-		selectTextDialogOpen = false;
-		const release = releaseSelectionDialog;
-		releaseSelectionDialog = null;
-		void releaseAfterPortalClose(release);
-	}
-
-	const resolveImageFile: ResolveMarkdownImageFile = (href) => {
-		if (!filesAvailable || !imageFileRootPath || !chatProjectPath) return null;
-		return resolveImageFileTarget(href, {
-			executorId,
-			executorContextKey: executors.pathContextKey(executorId),
-			fileRootPath: imageFileRootPath,
-			sourceDirectoryPath: chatProjectPath,
-		});
-	};
-
-	/** Routes a file-like markdown link to the viewer overlay. */
-	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
-		if (link.kind !== 'file') return;
-		if (!filesAvailable) {
-			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
-			return true;
-		}
-		if (!projectBasePath) {
-			notifications.error(m.markdown_file_link_root_unavailable({ path: link.rawHref }), {
-				key: 'file-root-unavailable',
-			});
-			return true;
-		}
-		if (!chatProjectPath) return true;
-		const resolved = resolveFileLinkTarget(link.rawHref, {
-			fileRootPath: projectBasePath,
-			sourceDirectoryPath: chatProjectPath,
-		});
-		if (!resolved) return;
-		void fileSessions.open({
-			executorId,
-			fileRootPath: resolved.fileRootPath,
-			relativePath: resolved.relativePath,
-			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : workspace.currentWindowId,
-			reason: 'user-open',
-			line: resolved.line,
-			col: resolved.col,
-		});
-		return true;
-	}
-
-	/** Routes a tool file-open action to the viewer overlay. */
-	function handleToolFileOpen(filePath: string): void {
-		if (!filesAvailable) return;
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
-		const resolved = resolveFileOpenTarget(filePath, {
-			fileRootPath: projectBasePath,
-			sourceDirectoryPath: chat.projectPath,
-		});
-		if (!resolved) return;
-		void fileSessions.open({
-			executorId,
-			fileRootPath: resolved.fileRootPath,
-			relativePath: resolved.relativePath,
-			mode: 'auto',
-			origin: appShell.isMobile ? 'mobile' : workspace.currentWindowId,
-			reason: 'user-open',
-			line: resolved.line,
-			col: resolved.col,
-		});
-	}
 
 	let localThinkingOpen = $state(true);
 	let thinkingOpen = $derived(
@@ -558,50 +240,8 @@
 		else localThinkingOpen = next;
 	}
 
-	onDestroy(() => {
-		clearMessageLongPressTimer();
-		releaseMessageMenu?.();
-		releaseSelectionDialog?.();
-	});
+
 </script>
-
-{#snippet messageMenuContent()}
-	{#if messageMenuOpen !== undefined}
-		<ContextMenuContent
-			bind:ref={messageMenuContentRef}
-			onInteractOutside={closeMessageMenuFromInteractOutside}
-		>
-			<MessageActionMenu
-				hasSelection={hasMessageSelection}
-				canFork={Boolean(onForkChat && forkUpToSeq)}
-				onClearBefore={asUser && onClearBefore && forkUpToSeq !== undefined ? () => onClearBefore?.(forkUpToSeq!) : undefined}
-				canForkNow={canForkAtMessageNow}
-				onFork={handleFork}
-				onCopy={copyText}
-				onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
-				onSendToNewSession={sendToNewSession}
-				onSelectText={openSelectTextDialog}
-				onGenerateTitleFromMessage={canGenerateTitleFromMessage
-					? generateTitleFromCurrentMessage
-					: undefined}
-			/>
-		</ContextMenuContent>
-	{/if}
-{/snippet}
-
-{#snippet floatingMessageMenuButton(positionClass: string)}
-	<button
-		type="button"
-		class={cn(
-			'chat-message-action-button absolute z-10 h-7 w-7 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-			positionClass,
-		)}
-		onclick={openContextMenuFromButton}
-		aria-label={m.chat_message_more_actions()}
-	>
-		<EllipsisVertical class="size-4" />
-	</button>
-{/snippet}
 
 {#if !shouldHideThinking}
 	<div
@@ -611,111 +251,99 @@
 		data-chat-message-type={message.type}
 	>
 		{#if asUser}
-			<div
-				class="user-message-row group/message mt-1 flex min-w-0 max-w-[85%] items-stretch gap-1.5"
-				data-message-menu-open={messageMenuOpen ? 'true' : undefined}
-				style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
-				style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}
+			<MessageContextMenuShell
+				{isVisible}
+				{forkUpToSeq}
+				{canForkAtMessageNow}
+				{onForkChat}
+				{onAppendToDraft}
+				{acquireTransientActivity}
+				onGenerateTitleFromMessage={activeChatContext?.chatId ? onGenerateTitleFromMessage : undefined}
+				messageMenuText={String(asUser.content || '')}
+				{onClearBefore}
+				triggerClass={cn(
+					'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 min-w-0 max-w-full',
+					userMessagePresentation ? 'shadow-sm' : 'data-[state=open]:shadow-sm',
+					!userMessagePresentation?.style &&
+						'data-[state=open]:bg-user-bubble-selected selection:bg-user-bubble-foreground selection:text-user-bubble',
+					userMessageSurfaceClass,
+				)}
+				presentationStyle={userMessagePresentation?.style}
 			>
-				<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
-					<ContextMenuTrigger
-						disabled={!isVisible}
-						bind:ref={messageMenuTriggerRef}
-						oncontextmenucapture={captureMessageSelection}
-						class={cn(
-							'user-message-context-target chat-message-context-target message-context-menu-trigger relative block bg-user-bubble text-user-bubble-foreground rounded-xl border border-border px-3 py-2 min-w-0 max-w-full',
-							userMessagePresentation ? 'shadow-sm' : 'data-[state=open]:shadow-sm',
-							!userMessagePresentation?.style &&
-								'data-[state=open]:bg-user-bubble-selected selection:bg-user-bubble-foreground selection:text-user-bubble',
-							userMessageSurfaceClass,
-						)}
-						data-user-message-presentation={userMessagePresentation?.style}
+				{#snippet frame(trigger, menuButton, open)}
+					<div
+						class="user-message-row group/message mt-1 flex min-w-0 max-w-[85%] items-stretch gap-1.5"
+						data-message-menu-open={open ? 'true' : undefined}
+						style:--cli-presentation-accent-light={userMessageCustomStyle?.lightAccent}
+						style:--cli-presentation-accent-dark={userMessageCustomStyle?.darkAccent}
 					>
-						<div>
-							{#if userMessagePresentation?.style}
-								<CliPresentationHeader
-									style={userMessagePresentation.style}
-									title={userMessagePresentation.title}
+						{@render trigger()}
+						<div
+							class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
+						>
+							{#if inputStatus === 'sending'}
+								<LoaderCircle
+									class="absolute bottom-0 right-0 size-3.5 animate-spin text-muted-foreground"
+									aria-label={m.chat_message_delivery_sending()}
 								/>
-							{/if}
-							<CollapsibleBody
-								disclosure={userMessageDisclosure}
-								previewHeight={userMessagePresentation?.style ? 'default' : 'tall'}
-								alwaysExpanded={Boolean(userMessagePresentation) &&
-									localSettings.alwaysExpandCliMessages}
-								expanded={disclosureState?.open(userMessageDisclosureKind, 'body', false)}
-								onExpandedChange={disclosureState
-									? (expanded) =>
-											disclosureState.setOpen(userMessageDisclosureKind, 'body', expanded, false)
-									: undefined}
-							>
-								<div
-									class={['typography-chat-prose text-sm', userMessagePresentation?.style && 'mt-1']}
-								>
-									{#if isPlainTextInput(asUser)}
-										<pre
-											class="typography-chat-plain whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
-									{:else}
-									<Markdown
-										source={asUser.content}
-										variant={userMessagePresentation?.style ? 'presented' : 'user'}
-										fileLinkBasePath={projectBasePath}
-										onLinkNavigate={handleLinkNavigate}
-										{resolveImageFile}
-										{resolveChatReference}
-										chatReferencePolicy={userMessagePresentation ? 'explicit' : 'explicit-and-bare'}
-										{acquireTransientActivity}
-									/>
-									{/if}
-								</div>
-							</CollapsibleBody>
-							{#if asUser.images && asUser.images.length > 0}
-								<div class="mt-2 grid grid-cols-2 gap-2">
-									{#each asUser.images as img, idx (idx)}
-										{#if isImageAttachment(img)}
-											<img
-												src={img.data}
-												alt={img.name}
-												class="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
-											/>
-										{:else}
-											<div
-												class="user-message-attachment flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-foreground"
-											>
-												<FileText
-													class="h-4 w-4 flex-shrink-0 text-muted-foreground"
-													aria-hidden="true"
-												/>
-												<span class="truncate text-xs">{img.name}</span>
-											</div>
-										{/if}
-									{/each}
-								</div>
+							{:else if inputStatus === 'waiting-to-steer'}
+								<span
+									class="absolute bottom-0 right-0 text-muted-foreground"
+									role="img"
+									aria-label={m.chat_queue_pending_steer()}
+									title={m.chat_queue_pending_steer()}
+								><Clock3 class="size-3.5" aria-hidden="true" /></span>
+							{:else}
+								{@render menuButton('bottom-0 right-0')}
 							{/if}
 						</div>
-					</ContextMenuTrigger>
-					{@render messageMenuContent()}
-				</ContextMenu>
-				<div
-					class="user-message-accessory-rail relative w-3.5 shrink-0 [@media(hover:hover)_and_(pointer:fine)]:w-7"
-				>
-					{#if inputStatus === 'sending'}
-						<LoaderCircle
-							class="absolute bottom-0 right-0 size-3.5 animate-spin text-muted-foreground"
-							aria-label={m.chat_message_delivery_sending()}
+					</div>
+				{/snippet}
+				{#snippet children(_menuButton)}
+				<div>
+					{#if userMessagePresentation?.style}
+						<CliPresentationHeader
+							style={userMessagePresentation.style}
+							title={userMessagePresentation.title}
 						/>
-					{:else if inputStatus === 'waiting-to-steer'}
-						<span
-							class="absolute bottom-0 right-0 text-muted-foreground"
-							role="img"
-							aria-label={m.chat_queue_pending_steer()}
-							title={m.chat_queue_pending_steer()}
-						><Clock3 class="size-3.5" aria-hidden="true" /></span>
-					{:else}
-						{@render floatingMessageMenuButton('bottom-0 right-0')}
+					{/if}
+					<CollapsibleBody
+						disclosure={userMessageDisclosure}
+						previewHeight={userMessagePresentation?.style ? 'default' : 'tall'}
+						alwaysExpanded={Boolean(userMessagePresentation) &&
+							localSettings.alwaysExpandCliMessages}
+						expanded={disclosureState?.open(userMessageDisclosureKind, 'body', false)}
+						onExpandedChange={disclosureState
+							? (expanded) =>
+									disclosureState.setOpen(userMessageDisclosureKind, 'body', expanded, false)
+							: undefined}
+					>
+						<div
+							class={['typography-chat-prose text-sm', userMessagePresentation?.style && 'mt-1']}
+						>
+							{#if isPlainTextInput(asUser)}
+								<pre
+									class="typography-chat-plain whitespace-pre-wrap break-words font-mono">{asUser.content}</pre>
+							{:else}
+							<Markdown
+								source={asUser.content}
+								variant={userMessagePresentation?.style ? 'presented' : 'user'}
+								fileLinkBasePath={projectBasePath}
+								onLinkNavigate={handleLinkNavigate}
+								{resolveImageFile}
+								{resolveChatReference}
+								chatReferencePolicy={userMessagePresentation ? 'explicit' : 'explicit-and-bare'}
+								{acquireTransientActivity}
+							/>
+							{/if}
+						</div>
+					</CollapsibleBody>
+					{#if asUser.images}
+						<UserMessageAttachments attachments={asUser.images} />
 					{/if}
 				</div>
-			</div>
+				{/snippet}
+			</MessageContextMenuShell>
 		{:else}
 			<div class="w-full">
 				{#if showNonAssistantHeader}
@@ -832,13 +460,18 @@
 					{:else if asAssistant?.questions}
 						<AsyncQuestionMessage questions={asAssistant.questions} ordinal={forkUpToSeq} />
 					{:else if asAssistant || asCommandOutput}
-						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
-							<ContextMenuTrigger
-								disabled={!isVisible}
-								bind:ref={messageMenuTriggerRef}
-								oncontextmenucapture={captureMessageSelection}
-								class="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
-							>
+						<MessageContextMenuShell
+							{isVisible}
+							{forkUpToSeq}
+							{canForkAtMessageNow}
+							{onForkChat}
+							{onAppendToDraft}
+							{acquireTransientActivity}
+							onGenerateTitleFromMessage={activeChatContext?.chatId ? onGenerateTitleFromMessage : undefined}
+							messageMenuText={formattedContent}
+							triggerClass="assistant-message-context-target chat-message-context-target message-context-menu-trigger relative -my-1 block w-full py-1"
+						>
+							{#snippet children(menuButton)}
 								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 									<div class="typography-chat-prose px-px text-sm text-foreground">
 										{#if plainResponse}
@@ -856,11 +489,10 @@
 										/>
 										{/if}
 									</div>
-									{@render floatingMessageMenuButton('-bottom-1 right-1')}
+									{@render menuButton('-bottom-1 right-1')}
 								</div>
-							</ContextMenuTrigger>
-							{@render messageMenuContent()}
-						</ContextMenu>
+							{/snippet}
+						</MessageContextMenuShell>
 					{:else if asCliRow}
 						<CliRow
 							message={asCliRow}
@@ -926,12 +558,4 @@
 			</div>
 		{/if}
 	</div>
-{/if}
-
-{#if selectTextDialogOpen !== undefined && !shouldHideThinking && messageMenuText}
-	<MessageTextSelectionDialog
-		open={selectTextDialogOpen}
-		text={messageMenuText}
-		onClose={closeSelectTextDialog}
-	/>
 {/if}

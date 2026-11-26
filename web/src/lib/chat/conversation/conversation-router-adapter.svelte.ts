@@ -96,7 +96,7 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 			},
 			reloadChatTranscript: (chatId) => {
-				void deps.panels.loadChatSnapshot(chatId).catch(() => {});
+				void deps.panels.loadChatSnapshot(chatId).catch(error => console.error('Failed to recover the chat snapshot', error));
 			},
 			isRenderedChat: (chatId) => deps.panels.panelsForChat(chatId).length > 0,
 			loadRenderedChat: async (chatId) => {

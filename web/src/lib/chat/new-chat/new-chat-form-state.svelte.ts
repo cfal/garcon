@@ -68,15 +68,15 @@ export class NewChatFormState {
 	// Agent and model
 	agentId = $state<SessionAgentId>(DEFAULT_AGENT_ID);
 	executorId = $state('local');
-	selectedModelsByAgent = $state<Record<string, string>>({});
-	#selectedModelTargetsByAgent = $state<Record<string, ResolvedModelSelection>>({});
+	selectedModelsByAgent = $state.raw<Record<string, string>>({});
+	#selectedModelTargetsByAgent = $state.raw<Record<string, ResolvedModelSelection>>({});
 	#catalogRefreshCompleted = $state(false);
 	#executorModelCandidate: ResolvedModelSelection | null = null;
 	#executorSelectionExplicit = false;
 
 	// Path
 	projectPath = $state('');
-	#pinnedProjectPaths = $state<string[]>([]);
+	#pinnedProjectPaths = $state.raw<string[]>([]);
 	browseStartPath = $state('');
 	#localProjectBasePath = $state('/');
 
@@ -97,7 +97,7 @@ export class NewChatFormState {
 	#startupSelectionPending = true;
 
 	// Tags
-	chatTags = $state<string[]>([]);
+	chatTags = $state.raw<string[]>([]);
 	showTagInput = $state(false);
 
 	readonly preambles: NewChatPreambleSelectionState;
@@ -107,7 +107,6 @@ export class NewChatFormState {
 	#contentRevision = 0;
 	error = $state<string | null>(null);
 	showBrowser = $state(false);
-	hasAutoOpened = $state(false);
 	settingsLoaded = $state(false);
 	isUpdatingPinnedPath = $state(false);
 
@@ -528,27 +527,27 @@ export class NewChatFormState {
 
 	set attachedImages(files: File[]) {
 		this.#images.images = files;
+		this.#images.syncUrls();
 		this.#contentChanged();
 	}
 
-	imageUrlFor(file: File, idx: number): string | undefined {
-		return this.#images.urlFor(file, idx);
+	get attachmentPreviewUrls(): ReadonlyMap<File, string> {
+		return this.#images.urls;
 	}
 
 	addImages(files: File[], support?: ChatAttachmentSupport): void {
 		const previousImages = this.#images.images;
 		this.#images.add(files, support);
-		if (this.#images.images !== previousImages) this.#contentChanged();
+		if (this.#images.images !== previousImages) {
+			this.#images.syncUrls();
+			this.#contentChanged();
+		}
 	}
 
 	removeImage(index: number): void {
 		const previousImages = this.#images.images;
 		this.#images.remove(index);
 		if (this.#images.images !== previousImages) this.#contentChanged();
-	}
-
-	reconcileImageUrls(): void {
-		this.#images.syncUrls();
 	}
 
 	revokeAllImageUrls(): void {
@@ -722,10 +721,10 @@ export class NewChatFormState {
 		const retained = this.#options.promptDraft?.seed(prefill, prospectiveChatId);
 		this.#firstMessage = retained?.text ?? prefill;
 		this.#images.images = [...(retained?.attachments ?? [])];
+		this.#images.syncUrls();
 		this.#contentRevision += 1;
 		this.error = null;
 		this.showBrowser = false;
-		this.hasAutoOpened = false;
 		this.gitRepoStatus = 'unknown';
 		this.worktreePicker.close();
 		this.chatTags = [];

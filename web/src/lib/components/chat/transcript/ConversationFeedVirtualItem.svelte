@@ -82,6 +82,10 @@
 			request.reason,
 		);
 	}
+
+	const transientPermission = $derived(item.kind === 'permission'
+		? permissionRequestMessage(item.request)
+		: null);
 </script>
 
 {#if item.kind === 'viewport-start-spacer'}
@@ -120,9 +124,9 @@
 	<TranscriptPageBoundary direction="later" pageState={laterPageState} onRequest={onLoadLater} />
 {:else if item.kind === 'permission'}
 	<div class:pt-2={item.leadingSpacing}>
-		{#if onPermissionDecision}
+		{#if onPermissionDecision && transientPermission}
 			<PermissionRequestRow
-				request={permissionRequestMessage(item.request)}
+				request={transientPermission}
 				onDecision={onPermissionDecision}
 				{chatContext}
 				draft={itemState.permissionDraft(item.request.permissionOccurrenceId)}

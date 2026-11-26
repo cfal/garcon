@@ -3,7 +3,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import Copy from '@lucide/svelte/icons/copy';
 	import * as m from '$lib/paraglide/messages.js';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { ChatClipboardFeedback } from './chat-clipboard-feedback.svelte.js';
 
 	interface Props {
 		label: string;
@@ -12,25 +12,13 @@
 	}
 
 	let { label, value, surfaceClass }: Props = $props();
-	let copied = $state(false);
-	let copiedResetTimer: ReturnType<typeof setTimeout> | null = null;
+	const clipboard = new ChatClipboardFeedback();
+	onDestroy(() => clipboard.reset());
 
-	async function copyValue(event: MouseEvent): Promise<void> {
-		if (!value) return;
+	function copyValue(event: MouseEvent): Promise<void> {
 		const container = (event.currentTarget as HTMLElement).closest('[role="dialog"]') ?? undefined;
-		if (!(await copyToClipboard(value, container))) return;
-
-		copied = true;
-		if (copiedResetTimer) clearTimeout(copiedResetTimer);
-		copiedResetTimer = setTimeout(() => {
-			copied = false;
-			copiedResetTimer = null;
-		}, 2000);
+		return clipboard.copy(value, container);
 	}
-
-	onDestroy(() => {
-		if (copiedResetTimer) clearTimeout(copiedResetTimer);
-	});
 </script>
 
 <div class="min-w-0 space-y-1">
@@ -43,7 +31,7 @@
 			title={m.chat_tool_display_copy_to_clipboard()}
 			aria-label={m.chat_tool_display_copy_to_clipboard()}
 		>
-			{#if copied}
+			{#if clipboard.copied}
 				<Check class="size-4 text-status-success-foreground" />
 			{:else}
 				<Copy class="size-4" />

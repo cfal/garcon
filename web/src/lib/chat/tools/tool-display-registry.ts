@@ -4,6 +4,8 @@
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
+import { AMP_TOOL_DISPLAY_RULES } from './amp-tool-display-rules.js';
+import { CODEX_TOOL_DISPLAY_RULES } from './codex-tool-display-rules.js';
 import {
 	diffProps,
 	extractContentString,
@@ -14,8 +16,6 @@ import {
 } from '$lib/chat/tools/tool-display-presenters.js';
 
 type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
-
-const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '...' : s);
 
 const REPORTED_RESULT_RULE: ToolResultDisplayRule = {
 	mode: 'collapsible',
@@ -94,8 +94,8 @@ function fallbackDisplayName(type: string): string {
 const EXIT_PLAN_MODE_RULE: ToolDisplayRule = {
 	input: {
 		mode: 'collapsible',
-		label: m.chat_tool_implementation_plan(),
-		title: m.chat_tool_implementation_plan(),
+		getLabel: () => m.chat_tool_implementation_plan(),
+		title: () => m.chat_tool_implementation_plan(),
 		defaultOpen: true,
 		contentKind: 'markdown',
 		getContentProps: (input) => ({
@@ -134,7 +134,7 @@ const WEB_SEARCH_RULE: ToolDisplayRule = {
 const WEB_FETCH_RULE: ToolDisplayRule = {
 	input: {
 		mode: 'inline',
-		label: m.chat_tool_web_fetch_label(),
+		getLabel: () => m.chat_tool_web_fetch_label(),
 		getValue: (input) => String(input.url ?? ''),
 		getSecondary: (input) => webFetchSecondaryPresenter(input),
 		action: 'none',
@@ -176,7 +176,7 @@ function parametersToolRule(label: string): ToolDisplayRule {
 		input: {
 			mode: 'collapsible',
 			label,
-			title: m.chat_tool_parameters(),
+			title: () => m.chat_tool_parameters(),
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({ content: JSON.stringify(input, null, 2), format: 'code' }),
@@ -188,111 +188,6 @@ function parametersToolRule(label: string): ToolDisplayRule {
 			getContentProps: (result) => ({ content: extractContentString(result?.content), format: 'plain' }),
 		},
 	};
-}
-
-function appendDetailLine(lines: string[], label: string, value: string | undefined): void {
-	if (!value) return;
-	lines.push(
-		value.includes('\n') || value.startsWith('- ')
-			? `**${label}:**\n${value}`
-			: `**${label}:** ${value}`,
-	);
-}
-
-function codexSubagentActionLabel(action: string): string {
-	switch (action) {
-		case 'spawn_agent':
-			return 'Spawn agent';
-		case 'send_input':
-		case 'send_message':
-			return 'Send message';
-		case 'followup_task':
-			return 'Follow-up task';
-		case 'wait_agent':
-			return 'Wait for agent';
-		case 'interrupt_agent':
-			return 'Interrupt agent';
-		case 'list_agents':
-			return 'List agents';
-		case 'close_agent':
-			return 'Close agent';
-		case 'resume_agent':
-			return 'Resume agent';
-		case 'agent_status':
-			return 'Agent status';
-		default:
-			return 'Subagent';
-	}
-}
-
-function codexSubagentDetails(input: Record<string, unknown>): Record<string, unknown> {
-	return input.details && typeof input.details === 'object' && !Array.isArray(input.details)
-		? (input.details as Record<string, unknown>)
-		: {};
-}
-
-function codexSubagentTitle(input: Record<string, unknown>): string {
-	const action = String(input.action ?? '');
-	const details = codexSubagentDetails(input);
-	const label = codexSubagentActionLabel(action);
-	const primary = String(details.taskName ?? details.message ?? details.target ?? '').trim();
-	return primary ? `${label}: ${truncate(primary, 80)}` : label;
-}
-
-function codexSubagentItemsMarkdown(value: unknown): string | undefined {
-	if (!Array.isArray(value)) return undefined;
-	const lines = value
-		.map((item) => {
-			if (!item || typeof item !== 'object') return '';
-			const raw = item as Record<string, unknown>;
-			return String(raw.text ?? raw.path ?? raw.name ?? raw.type ?? '').trim();
-		})
-		.filter(Boolean)
-		.map((item) => `- ${item}`);
-	return lines.length > 0 ? lines.join('\n') : undefined;
-}
-
-function codexSubagentStatesMarkdown(value: unknown): string | undefined {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-	const lines = Object.entries(value as Record<string, unknown>)
-		.map(([target, value]) => {
-			if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
-			const agentState = value as Record<string, unknown>;
-			const status = String(agentState.status ?? '').trim();
-			const message = String(agentState.message ?? '').trim();
-			return status ? `- ${target}: ${status}${message ? ` — ${message}` : ''}` : '';
-		})
-		.filter(Boolean);
-	return lines.length > 0 ? lines.join('\n') : undefined;
-}
-
-function codexSubagentMarkdown(input: Record<string, unknown>): string {
-	const action = String(input.action ?? '');
-	const details = codexSubagentDetails(input);
-	const lines: string[] = [];
-	appendDetailLine(lines, 'Action', codexSubagentActionLabel(action));
-	appendDetailLine(lines, 'Task', details.taskName as string | undefined);
-	appendDetailLine(lines, 'Target', details.target as string | undefined);
-	appendDetailLine(
-		lines,
-		'Targets',
-		Array.isArray(details.targets) ? details.targets.filter(Boolean).join(', ') : undefined,
-	);
-	appendDetailLine(lines, 'Message', details.message as string | undefined);
-	appendDetailLine(lines, 'Agent type', details.agentType as string | undefined);
-	appendDetailLine(lines, 'Model', details.model as string | undefined);
-	appendDetailLine(lines, 'Reasoning', details.reasoningEffort as string | undefined);
-	appendDetailLine(lines, 'Service tier', details.serviceTier as string | undefined);
-	appendDetailLine(lines, 'Fork turns', details.forkTurns as string | undefined);
-	appendDetailLine(
-		lines,
-		'Timeout',
-		typeof details.timeoutMs === 'number' ? `${details.timeoutMs} ms` : undefined,
-	);
-	appendDetailLine(lines, 'Path prefix', details.pathPrefix as string | undefined);
-	appendDetailLine(lines, 'Items', codexSubagentItemsMarkdown(details.items));
-	appendDetailLine(lines, 'States', codexSubagentStatesMarkdown(details.agentStates));
-	return lines.join('\n\n');
 }
 
 export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
@@ -462,9 +357,9 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				if (!rawPath) return m.chat_tool_project_files();
 				return rawPath.split(/[\\/]/).pop() || rawPath;
 			},
-			getSecondary: (input) => {
+			getPattern: (input) => {
 				const pattern = String(input.pattern ?? '').trim();
-				return pattern ? m.chat_tool_pattern({ pattern }) : undefined;
+				return pattern || undefined;
 			},
 			action: 'none',
 			colorScheme: {
@@ -540,7 +435,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'TodoWrite',
-			title: m.chat_tool_updating_todo_list(),
+			title: () => m.chat_tool_updating_todo_list(),
 			defaultOpen: true,
 			contentKind: 'todoList',
 			getContentProps: (input) => ({
@@ -653,30 +548,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-	'codex-subagent-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'Subagent',
-			title: codexSubagentTitle,
-			defaultOpen: true,
-			contentKind: 'markdown',
-			getContentProps: (input) => ({
-				content: codexSubagentMarkdown(input),
-			}),
-			colorScheme: {
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			title: 'Subagent result',
-			defaultOpen: true,
-			contentKind: 'markdown',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content) || m.chat_tool_no_response(),
-			}),
-		},
-	},
+	...CODEX_TOOL_DISPLAY_RULES,
 
 	'enter-plan-mode-tool-use': {
 		input: {
@@ -728,7 +600,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'UpdatePlan',
-			title: m.chat_tool_updating_plan(),
+			title: () => m.chat_tool_updating_plan(),
 			defaultOpen: false,
 			contentKind: 'todoList',
 			getContentProps: (input) => ({
@@ -742,238 +614,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
-	'amp-finder-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Search',
-			getValue: (input) => String(input.query ?? ''),
-			action: 'jumpToResult',
-			colorScheme: {
-				border: 'border-status-neutral-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'markdown',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-			}),
-		},
-	},
-
-	'amp-oracle-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'Oracle',
-			title: (input) =>
-				m.chat_tool_oracle_title({
-					task: truncate(String(input.task || m.chat_tool_analyzing()), 80),
-				}),
-			defaultOpen: false,
-			contentKind: 'markdown',
-			getContentProps: (input) => {
-				const parts: string[] = [];
-				if (input.task) parts.push(m.chat_tool_field_task({ task: String(input.task) }));
-				if (input.context) {
-					parts.push(m.chat_tool_field_context({ context: String(input.context) }));
-				}
-				if (Array.isArray(input.files) && input.files.length > 0) {
-					parts.push(
-						m.chat_tool_field_files({
-							files: (input.files as string[]).map((file) => `- ${file}`).join('\n'),
-						}),
-					);
-				}
-				return { content: parts.join('\n\n') };
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: true,
-			title: m.chat_tool_oracle_response(),
-			contentKind: 'markdown',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-			}),
-		},
-	},
-
-	'amp-librarian-tool-use': {
-		input: {
-			mode: 'collapsible',
-			label: 'Librarian',
-			title: (input) =>
-				m.chat_tool_librarian_title({
-					query: truncate(String(input.query || m.chat_tool_exploring()), 80),
-				}),
-			defaultOpen: false,
-			contentKind: 'markdown',
-			getContentProps: (input) => {
-				const parts: string[] = [];
-				if (input.query) parts.push(m.chat_tool_field_query({ query: String(input.query) }));
-				if (input.context) {
-					parts.push(m.chat_tool_field_context({ context: String(input.context) }));
-				}
-				return { content: parts.join('\n\n') };
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: true,
-			title: m.chat_tool_librarian_response(),
-			contentKind: 'markdown',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-			}),
-		},
-	},
-
-	'amp-skill-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Skill',
-			getValue: (input) => String(input.name ?? ''),
-			action: 'none',
-			colorScheme: {
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			hidden: true,
-		},
-	},
-
-	'amp-mermaid-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Diagram',
-			getValue: () => m.chat_tool_rendering(),
-			action: 'none',
-			colorScheme: {
-				primary: 'text-muted-foreground',
-				border: 'border-status-neutral-border',
-			},
-		},
-		result: {
-			hidden: true,
-		},
-	},
-
-	'amp-handoff-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Handoff',
-			getValue: (input) => truncate(String(input.goal ?? ''), 60),
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			hidden: true,
-		},
-	},
-
-	'amp-look-at-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Analyze',
-			getValue: (input) =>
-				String(input.path ?? '')
-					.split('/')
-					.pop() || String(input.path ?? ''),
-			getSecondary: (input) => truncate(String(input.objective ?? ''), 60),
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				border: 'border-border',
-			},
-		},
-		result: {
-			hidden: true,
-		},
-	},
-
-	'amp-find-thread-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Threads',
-			getValue: (input) => truncate(String(input.query ?? ''), 60),
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				border: 'border-status-neutral-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
-		},
-	},
-
-	'amp-read-thread-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Thread',
-			getValue: (input) => String(input.threadId ?? 'reading'),
-			getSecondary: (input) => truncate(String(input.goal ?? ''), 60),
-			action: 'none',
-			colorScheme: {
-				primary: 'text-foreground',
-				border: 'border-status-neutral-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'markdown',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-			}),
-		},
-	},
-
-	'amp-task-list-tool-use': {
-		input: {
-			mode: 'inline',
-			label: 'Tasks',
-			getValue: (input) => {
-				const action = String(input.action ?? '');
-				if (action === 'create') {
-					return m.chat_tool_task_creating({ title: String(input.title || m.chat_tool_task()) });
-				}
-				if (action === 'update') {
-					return m.chat_tool_task_updating({ taskId: String(input.taskId || '') });
-				}
-				if (action === 'get') {
-					return m.chat_tool_task_fetching({ taskId: String(input.taskId || '') });
-				}
-				if (action === 'delete') {
-					return m.chat_tool_task_deleting({ taskId: String(input.taskId || '') });
-				}
-				return m.chat_tool_task_listing();
-			},
-			action: 'none',
-			colorScheme: {
-				border: 'border-status-info-border',
-			},
-		},
-		result: {
-			mode: 'collapsible',
-			defaultOpen: false,
-			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-			}),
-		},
-	},
+	...AMP_TOOL_DISPLAY_RULES,
 
 	'pi-tool-search-tool-use': TOOL_SEARCH_RULE,
 	'claude-tool-search-tool-use': TOOL_SEARCH_RULE,
@@ -985,7 +626,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'Permissions',
-			title: m.chat_tool_requested_permissions(),
+			title: () => m.chat_tool_requested_permissions(),
 			defaultOpen: true,
 			contentKind: 'text',
 			getContentProps: (input) => ({
@@ -1002,7 +643,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'Tool',
-			title: m.chat_tool_parameters(),
+			title: () => m.chat_tool_parameters(),
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({
@@ -1025,7 +666,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		input: {
 			mode: 'collapsible',
 			label: 'Tool',
-			title: m.chat_tool_parameters(),
+			title: () => m.chat_tool_parameters(),
 			defaultOpen: false,
 			contentKind: 'text',
 			getContentProps: (input) => ({
@@ -1067,6 +708,13 @@ export function getToolDisplayDetails(toolMessage: ToolUseChatMessage): Record<s
 	);
 }
 
+const payloads = new WeakMap<ToolUseChatMessage, Record<string, unknown>>();
+
 export function getToolDisplayPayload(toolMessage: ToolUseChatMessage): Record<string, unknown> {
-	return Object.fromEntries(Object.entries(toolMessage));
+	let payload = payloads.get(toolMessage);
+	if (!payload) {
+		payload = { ...toolMessage };
+		payloads.set(toolMessage, payload);
+	}
+	return payload;
 }

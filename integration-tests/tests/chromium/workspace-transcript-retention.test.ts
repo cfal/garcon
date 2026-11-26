@@ -34,6 +34,11 @@ test('updates an idle visible chat without a snapshot refetch after hidden-cache
     ]);
     await page.addInitScript((layout) => {
       localStorage.setItem('workspace_layout_v2', JSON.stringify(layout));
+      localStorage.setItem('chat_snapshot_index_v3', JSON.stringify({ version: 6, entries: [] }));
+      for (let i = 0; i < 25; i++) {
+        localStorage.setItem(`chat_snapshot_obsolete-${i}`, 'obsolete');
+        if (i % 3 === 0) localStorage.setItem(`unrelated-${i}`, 'keep');
+      }
     }, serializeWorkspaceLayout(snapshot));
     await page.setViewportSize({ width: 1920, height: 2160 });
     await page.goto(`${integration.garcon.baseUrl}/chat/${idleChatId}`, {
@@ -47,6 +52,8 @@ test('updates an idle visible chat without a snapshot refetch after hidden-cache
       (chatId) => localStorage.getItem(`chat_snapshot_${chatId}`) !== null,
       idleChatId,
     );
+    expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('chat_snapshot_obsolete-')))).toEqual([]);
+    expect(await page.evaluate(() => localStorage.getItem('unrelated-0'))).toBe('keep');
     await page.locator('[data-workspace-window-titlebar="window-switching"]')
       .click({ position: { x: 20, y: 3 } });
 

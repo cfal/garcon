@@ -5,6 +5,16 @@ import ChatSessionsReactivityTestHost from './ChatSessionsReactivityTestHost.sve
 describe('ChatSessionsStore collection reactivity', () => {
 	afterEach(cleanup);
 
+	it('reacts to processing events before the chat record hydrates', async () => {
+		render(ChatSessionsReactivityTestHost);
+		const processing = screen.getByTestId('pending-processing');
+		expect(processing.textContent).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: 'Start pending' }));
+		expect(processing.textContent).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: 'Stop pending' }));
+		expect(processing.textContent).toBe('false');
+	});
+
 	it('updates selected, ordered, unread, and Sidebar consumers after replacements', async () => {
 		render(ChatSessionsReactivityTestHost);
 

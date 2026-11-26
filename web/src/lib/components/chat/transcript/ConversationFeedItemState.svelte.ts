@@ -29,40 +29,56 @@ const EMPTY_PERMISSION_DRAFT: PermissionQuestionDraft = {
 	selectedQuestionOptions: {},
 	rawInputOpen: false,
 };
+const MAX_DISCLOSURE_PORTS = 128;
 
 export function disclosureStateKey(
 	rowId: string,
 	kind: ConversationDisclosureKind,
 	localId: string,
 ): string {
-	return JSON.stringify([rowId, kind, localId]);
+	return `${rowId.length}:${rowId}:${kind}:${localId}`;
 }
 
-function rowIdFromStateKey(key: string): string | null {
-	try {
-		const parsed: unknown = JSON.parse(key);
-		return Array.isArray(parsed) && typeof parsed[0] === 'string' ? parsed[0] : null;
-	} catch {
-		return null;
+function rowIdFromStateKey(key: string): string {
+	const delimiter = key.indexOf(':');
+	return key.slice(delimiter + 1, delimiter + 1 + Number(key.slice(0, delimiter)));
+}
+
+function pruneMap<T>(entries: Map<string, T>, retain: (key: string) => boolean): Map<string, T> {
+	let retained = entries;
+	for (const key of entries.keys()) {
+		if (retain(key)) continue;
+		if (retained === entries) retained = new Map(entries);
+		retained.delete(key);
 	}
+	return retained;
 }
 
 export class ConversationFeedItemState {
 	#surfaceIdentity: string | null = null;
 	#disclosureOverrides = $state.raw(new Map<string, boolean>());
 	#permissionDrafts = $state.raw(new Map<string, PermissionQuestionDraft>());
+	#ports = new Map<string, ConversationDisclosureStatePort>();
 
 	get hasDisclosureOverrides(): boolean {
 		return this.#disclosureOverrides.size > 0;
 	}
 
 	disclosurePort(rowId: string): ConversationDisclosureStatePort {
-		return {
+		const existing = this.#ports.get(rowId);
+		if (existing) return existing;
+		const port: ConversationDisclosureStatePort = {
 			open: (kind, localId, defaultOpen) =>
 				this.disclosureOpen(disclosureStateKey(rowId, kind, localId), defaultOpen),
 			setOpen: (kind, localId, open, defaultOpen) =>
 				this.setDisclosureOpen(disclosureStateKey(rowId, kind, localId), open, defaultOpen),
 		};
+		this.#ports.set(rowId, port);
+		if (this.#ports.size > MAX_DISCLOSURE_PORTS) {
+			const oldest = this.#ports.keys().next().value;
+			if (oldest !== undefined) this.#ports.delete(oldest);
+		}
+		return port;
 	}
 
 	disclosureOpen(key: string, defaultOpen: boolean): boolean {
@@ -98,24 +114,18 @@ export class ConversationFeedItemState {
 			this.clear();
 			this.#surfaceIdentity = surfaceIdentity;
 		}
-		const disclosures = new Map(
-			[...this.#disclosureOverrides].filter(([key]) => {
-				const rowId = rowIdFromStateKey(key);
-				return rowId !== null && validRowIds.has(rowId);
-			}),
-		);
-		if (disclosures.size !== this.#disclosureOverrides.size) {
-			this.#disclosureOverrides = disclosures;
+		if (this.#disclosureOverrides.size > 0) {
+			this.#disclosureOverrides = pruneMap(this.#disclosureOverrides, key => validRowIds.has(rowIdFromStateKey(key)));
 		}
-		const drafts = new Map(
-			[...this.#permissionDrafts].filter(([key]) => pendingPermissionOccurrences.has(key)),
-		);
-		if (drafts.size !== this.#permissionDrafts.size) this.#permissionDrafts = drafts;
+		if (this.#permissionDrafts.size > 0) {
+			this.#permissionDrafts = pruneMap(this.#permissionDrafts, key => pendingPermissionOccurrences.has(key));
+		}
 	}
 
 	clear(): void {
 		this.#surfaceIdentity = null;
 		this.#disclosureOverrides = new Map();
 		this.#permissionDrafts = new Map();
+		this.#ports.clear();
 	}
 }

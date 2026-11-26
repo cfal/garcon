@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-	canHighlightCodeFenceLanguage,
 	loadCodeFenceLanguage,
 	loadCodeMirrorLanguageForFile,
-	loadLanguageExtension,
 	normalizeCodeFenceLanguage,
 } from '../codemirror-language-registry';
 
@@ -32,22 +30,6 @@ describe('normalizeCodeFenceLanguage', () => {
 	});
 });
 
-describe('canHighlightCodeFenceLanguage', () => {
-	it('recognizes supported CodeMirror languages and no-op languages', () => {
-		expect(canHighlightCodeFenceLanguage('plaintext')).toBe(false);
-		expect(canHighlightCodeFenceLanguage('txt')).toBe(false);
-		expect(canHighlightCodeFenceLanguage('unknown-language')).toBe(false);
-		expect(canHighlightCodeFenceLanguage('diff')).toBe(true);
-		expect(canHighlightCodeFenceLanguage('js')).toBe(true);
-		expect(canHighlightCodeFenceLanguage('yaml')).toBe(true);
-		expect(canHighlightCodeFenceLanguage('bash')).toBe(true);
-		expect(canHighlightCodeFenceLanguage('csharp')).toBe(true);
-		expect(canHighlightCodeFenceLanguage('ruby')).toBe(true);
-		expect(canHighlightCodeFenceLanguage('swift')).toBe(true);
-		expect(canHighlightCodeFenceLanguage('kotlin')).toBe(true);
-	});
-});
-
 describe('loadCodeFenceLanguage', () => {
 	it.each([
 		['yaml', 'yaml'],
@@ -69,7 +51,7 @@ describe('loadCodeFenceLanguage', () => {
 	});
 });
 
-describe('loadLanguageExtension', () => {
+describe('editor language selection', () => {
 	it.each([
 		'main.go',
 		'config.yaml',
@@ -88,21 +70,21 @@ describe('loadLanguageExtension', () => {
 		'Counter.svelte',
 		'Containerfile',
 	])('loads editor support for %s', async (filePath) => {
-		const extensions = await loadLanguageExtension(filePath);
-		expect(extensions.length).toBeGreaterThan(0);
+		const loaded = await loadCodeMirrorLanguageForFile(filePath);
+		expect(loaded?.extensions.length).toBeGreaterThan(0);
 	});
 
 	it('leaves Makefile unsupported until CodeMirror publishes official metadata', async () => {
-		await expect(loadLanguageExtension('Makefile')).resolves.toEqual([]);
+		await expect(loadCodeMirrorLanguageForFile('Makefile')).resolves.toBeNull();
 	});
 
 	it('uses explicit editor language before filename matching', async () => {
-		const extensions = await loadLanguageExtension({
+		const loaded = await loadCodeMirrorLanguageForFile({
 			filePath: 'notes.txt',
 			language: 'typescript',
 		});
 
-		expect(extensions.length).toBeGreaterThan(0);
+		expect(loaded?.extensions.length).toBeGreaterThan(0);
 	});
 });
 
@@ -110,14 +92,14 @@ describe('loadCodeMirrorLanguageForFile', () => {
 	it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
 		'treats %s as an unsupported filename, extension, and language',
 		async (name) => {
-			expect(canHighlightCodeFenceLanguage(name)).toBe(false);
+
 			await expect(loadCodeFenceLanguage(name)).resolves.toBeNull();
 			await expect(loadCodeMirrorLanguageForFile(name)).resolves.toBeNull();
 			await expect(loadCodeMirrorLanguageForFile(`notes.${name}`)).resolves.toBeNull();
 			await expect(
 				loadCodeMirrorLanguageForFile({ filePath: 'notes.txt', language: name }),
 			).resolves.toBeNull();
-			await expect(loadLanguageExtension(name)).resolves.toEqual([]);
+
 		},
 	);
 
@@ -132,12 +114,6 @@ describe('loadCodeMirrorLanguageForFile', () => {
 		expect(loaded?.key).toBe(expectedKey);
 		expect(loaded?.language.parser).toBeTruthy();
 		expect(loaded?.extensions.length).toBeGreaterThan(0);
-	});
-
-	it('preserves the extension-only compatibility API', async () => {
-		const loaded = await loadCodeMirrorLanguageForFile('src/main.ts');
-
-		await expect(loadLanguageExtension('src/main.ts')).resolves.toEqual(loaded?.extensions);
 	});
 
 	it('returns null for unsupported filenames', async () => {

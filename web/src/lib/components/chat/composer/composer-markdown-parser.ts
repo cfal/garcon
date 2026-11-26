@@ -35,6 +35,22 @@ export interface ComposerMarkdownPasteRequest {
 	text: string;
 }
 
+function equalJson(left: unknown, right: unknown): boolean {
+	if (left === right) return true;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		return Array.isArray(left) && Array.isArray(right)
+			&& left.length === right.length
+			&& left.every((value, index) => equalJson(value, right[index]));
+	}
+	if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+	const leftRecord = left as Record<string, unknown>;
+	const rightRecord = right as Record<string, unknown>;
+	for (const key of Object.keys(leftRecord)) {
+		if (!equalJson(leftRecord[key], rightRecord[key])) return false;
+	}
+	return Object.keys(rightRecord).every(key => rightRecord[key] === undefined || Object.hasOwn(leftRecord, key));
+}
+
 export function serializeComposerMarkdownPaste({
 	blocks,
 	originalCount,
@@ -171,8 +187,7 @@ function placeCaret(
 			.filter((child) => child.text !== '');
 		return { ...node, content };
 	};
-	const same = JSON.stringify(strip(marked, 0)) === JSON.stringify(document);
-	return same ? placement : null;
+	return equalJson(strip(marked, 0), document) ? placement : null;
 }
 
 export function parseComposerMarkdown({

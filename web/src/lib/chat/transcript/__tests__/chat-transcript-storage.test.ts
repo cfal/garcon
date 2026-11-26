@@ -61,6 +61,23 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(snapshot()).toEqual(before);
 	});
 
+	it.each(['read', 'write'])('discards obsolete snapshot bodies on the first %s without touching preferences', (first) => {
+		const oldKeys = Array.from({ length: 25 }, (_, i) => snapshotKey(`old-${i}`));
+		for (const key of oldKeys) localStorage.setItem(key, 'obsolete');
+		localStorage.setItem(INDEX_KEY, JSON.stringify({ version: 6, entries: [{ chatId: 'old' }] }));
+		localStorage.setItem('pref_local_settings', '{}');
+		const keyAt = localStorage.key.bind(localStorage);
+		// Storage enumeration may reorder the remaining keys after each removal.
+		vi.spyOn(localStorage, 'key').mockImplementation(i =>
+			keyAt(localStorage.length % 2 === 0 ? i : localStorage.length - 1 - i));
+		if (first === 'read') expect(storage.listCursors()).toEqual([]);
+		persist(storage, 'new', [entry(1, 'new')]);
+		expect(oldKeys.filter(key => localStorage.getItem(key) !== null)).toEqual([]);
+		expect(localStorage.getItem('pref_local_settings')).toBe('{}');
+		expect(storage.restore('new')?.stale).toBe(false);
+		expect(storage.listCursors().map(c => c.chatId)).toEqual(['new']);
+	});
+
 	it('persists and restores entries with generation cursor metadata', () => {
 		storage.persist('chat-1', [entry(1, 'hello')], cursor(1));
 
@@ -319,15 +336,28 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(storage.listCursors()).toEqual([]);
 	});
 
-	it.each(['restore', 'listCursors'] as const)('rejects stored oversized snapshots before parsing in %s', (method) => {
+	it('rejects stored oversized snapshots before parsing on restore', () => {
 		persist(storage, 'chat-1', [entry(1, 'old')]);
 		const oversized = ' '.repeat(300_000);
 		localStorage.setItem(snapshotKey('chat-1'), oversized);
 		const parse = vi.spyOn(JSON, 'parse');
-		if (method === 'restore') expect(storage.restore('chat-1')).toBeNull();
-		else expect(storage.listCursors()).toEqual([]);
+		expect(storage.restore('chat-1')).toBeNull();
 		expect(parse).not.toHaveBeenCalledWith(oversized);
 		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
+		expect(storage.listCursors()).toEqual([]);
+	});
+
+	it('prunes and enumerates cursors without reading snapshot bodies', () => {
+		for (let index = 0; index < 25; index++) {
+			persist(storage, `chat-${index}`, [entry(1, 'synthetic')]);
+		}
+		const get = vi.spyOn(localStorage, 'getItem');
+		const transcriptReads = () => get.mock.calls.filter(([key]) => key.startsWith('chat_snapshot_'));
+		persist(storage, 'new-chat', [entry(1, 'new')]);
+		expect(transcriptReads()).toEqual([[INDEX_KEY]]);
+		get.mockClear();
+		expect(storage.listCursors(25)).toHaveLength(25);
+		expect(transcriptReads()).toEqual([[INDEX_KEY]]);
 	});
 
 	it('bounds aggregate retention and does not exempt the newest oversized snapshot', () => {
@@ -343,10 +373,8 @@ describe('LocalChatTranscriptStorage', () => {
 			0,
 		);
 		expect(retainedCharacters).toBeLessThanOrEqual(1_500_000);
-		localStorage.setItem(snapshotKey('chat-7'), 'x'.repeat(300_000));
-		vi.setSystemTime(new Date(TS));
-		persist(storage, 'chat-older', [entry(1, 'small')]);
+		persist(storage, 'chat-7', [entry(1, 'x'.repeat(300_000))]);
 		expect(localStorage.getItem(snapshotKey('chat-7'))).toBeNull();
-		expect(storage.restore('chat-older')?.entries).toEqual([entry(1, 'small')]);
+		expect(storage.restore('chat-6')?.entries).toHaveLength(1);
 	});
 });

@@ -4,6 +4,7 @@
 	// then filters locally by query.
 
 	import { observeTypographyScale } from '$lib/theme/typography.js';
+	import { untrack } from 'svelte';
 	import Slash from '@lucide/svelte/icons/slash';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { getSlashCommands, type SlashCommand } from '$lib/api/commands.js';
@@ -16,11 +17,6 @@
 
 	let interfaceScale = $state(1);
 	const commandRowHeight = $derived(Math.ceil(48 * Math.max(1, interfaceScale)));
-	$effect(() =>
-		observeTypographyScale(document, 'interface', (scale) => {
-			interfaceScale = scale;
-		}),
-	);
 	const COMMAND_OVERSCAN = 3;
 	const COMMAND_LIST_HEIGHT = 240;
 
@@ -66,13 +62,20 @@
 	const transientLayers = getTransientLayers();
 	const layerId = allocateTransientLayerId('slash-command');
 
-	let allCommands = $state<SlashCommand[]>([]);
+	$effect(() => {
+		if (!isVisible) return;
+		return observeTypographyScale(document, 'interface', (scale) => {
+			interfaceScale = scale;
+		});
+	});
+
+	let allCommands = $state.raw<SlashCommand[]>([]);
 	let selectedIndex = $state(0);
 	let listElement: HTMLDivElement | null = $state(null);
 	let isLoading = $state(false);
 	let loadFailed = $state(false);
 
-	let fetchedKey = '';
+	let fetchedKey = $state('');
 	let activeLoad: AbortController | null = null;
 	const contextKey = $derived(JSON.stringify([executorId, executorContextKey, agent, chatId, projectPath]));
 
@@ -81,7 +84,7 @@
 	$effect(() => {
 		const key = contextKey;
 		if (!conversationInput || !projectPath || !isVisible) return;
-		if (fetchedKey === key) return;
+		if (untrack(() => fetchedKey) === key) return;
 		isLoading = true;
 		loadFailed = false;
 
@@ -182,14 +185,15 @@
 			.filter((entry): entry is { index: number; command: SlashCommand } => Boolean(entry.command)),
 	);
 
-	// Resets selectedIndex when the filtered results change.
+	// Resets selection on open and when visible results change.
 	$effect(() => {
-		filteredCommands;
+		if (!isVisible) return;
+		void filteredCommands;
 		selectedIndex = 0;
-		if (listElement) {
-			listElement.scrollTop = 0;
+		untrack(() => {
+			if (listElement) listElement.scrollTop = 0;
 			virtualWindow.scrollTop = 0;
-		}
+		});
 	});
 
 	$effect(() => {

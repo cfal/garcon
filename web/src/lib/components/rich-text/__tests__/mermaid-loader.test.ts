@@ -15,6 +15,20 @@ describe('mermaid-loader', () => {
 		mermaid.render.mockResolvedValue({ svg: '<svg></svg>' });
 	});
 
+	it('retries the import after a rejected lazy module load', async () => {
+		vi.doMock('mermaid', () => { throw new Error('Synthetic chunk failure'); });
+		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
+		const source = 'flowchart LR\nA --> B';
+		try {
+			await expect(renderMermaid(source, 'standard-light')).rejects.toThrow();
+			expect(mermaid.render).not.toHaveBeenCalled();
+		} finally {
+			vi.doMock('mermaid', () => ({ default: mermaid }));
+		}
+		await expect(renderMermaid(source, 'standard-light')).resolves.toBe('<svg></svg>');
+		expect(mermaid.render).toHaveBeenCalledOnce();
+	});
+
 	it('keys completed and in-flight renders by source and renderer theme', async () => {
 		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
 		const source = 'flowchart LR\nA --> B';
@@ -31,6 +45,27 @@ describe('mermaid-loader', () => {
 		await renderMermaid(source, 'colorblind-light');
 		expect(mermaid.render).toHaveBeenCalledTimes(2);
 		expect(mermaid.initialize).toHaveBeenCalledTimes(2);
+	});
+
+	it('skips abandoned work when the renderer finishes loading', async () => {
+		const loading = Promise.withResolvers<void>();
+		vi.doMock('mermaid', async () => {
+			await loading.promise;
+			return { default: mermaid };
+		});
+		try {
+			const { renderMermaid } = await import('../mermaid-loader');
+			const abort = new AbortController();
+			const cancelled = expect(renderMermaid('abandoned', 'standard-light', abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+			abort.abort();
+			const visible = renderMermaid('visible', 'standard-dark');
+			loading.resolve();
+			await cancelled;
+			await visible;
+			expect(mermaid.render.mock.calls.map(([, source]) => source)).toEqual(['visible']);
+		} finally {
+			vi.doMock('mermaid', () => ({ default: mermaid }));
+		}
 	});
 
 	it('serializes initialize and render when renderer themes change', async () => {

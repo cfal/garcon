@@ -90,7 +90,6 @@
 	const canRenderConversation = $derived(chatSurfacePresentation === 'conversation');
 	const conversationWorkspacePresented = $derived(isVisible && canRenderConversation);
 	// Keeps modal interactivity separate from visibility so row-owned dialogs remain mounted.
-	const conversationWorkspaceVisible = $derived(conversationWorkspacePresented);
 	const reserveMobileToolbar = $derived(isMobile && hasUsableChatContext);
 	const canUpdateSelectedProjectPath = $derived(
 		selectedChat && executors.isReady(selectedChat.executorId)
@@ -117,7 +116,7 @@
 	});
 
 	$effect.pre(() => {
-		if (conversationWorkspaceVisible) return;
+		if (conversationWorkspacePresented) return;
 		untrack(() => prepareConversationHide?.());
 	});
 
@@ -182,9 +181,9 @@
 
 	<div
 		class="relative min-h-0 flex-1 overflow-hidden"
-		class:invisible={!conversationWorkspaceVisible}
-		inert={!conversationWorkspaceVisible || !isInteractive}
-		aria-hidden={!conversationWorkspaceVisible}
+		class:invisible={!conversationWorkspacePresented}
+		inert={!conversationWorkspacePresented || !isInteractive}
+		aria-hidden={!conversationWorkspacePresented}
 		data-conversation-workspace-layer
 	>
 		<ConversationWorkspace
@@ -200,7 +199,7 @@
 			{onComposerNoticeChange}
 			{transcriptCache}
 			{reserveMobileToolbar}
-			isVisible={conversationWorkspaceVisible}
+			isVisible={conversationWorkspacePresented}
 			onChooseProjectFolder={(chatId) => {
 				const chat = sessions.byId[chatId];
 				if (chat) chatActions.requestProjectPath(chat);

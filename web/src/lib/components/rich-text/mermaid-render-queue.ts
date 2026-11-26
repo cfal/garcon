@@ -2,7 +2,7 @@ import type { RendererThemeId } from '$lib/theme/themes';
 
 export const MERMAID_SOURCE_LIMIT = 50_000;
 export const MERMAID_OUTPUT_LIMIT = 1_000_000;
-export const MERMAID_CACHE_BYTE_LIMIT = 4 * 1024 * 1024;
+const MERMAID_CACHE_BYTE_LIMIT = 4 * 1024 * 1024;
 const MERMAID_CACHE_ENTRY_LIMIT = 64;
 
 interface RenderConsumer {
@@ -15,14 +15,13 @@ interface RenderJob {
 	key: string;
 	source: string;
 	theme: RendererThemeId;
-	controller: AbortController;
 	consumers: Set<RenderConsumer>;
 }
 
 export type RenderDiagram = (
 	source: string,
 	theme: RendererThemeId,
-	signal: AbortSignal,
+	requireConsumer: () => void,
 ) => Promise<string>;
 
 export class MermaidRenderQueue {
@@ -47,7 +46,7 @@ export class MermaidRenderQueue {
 		}
 		let job = this.#jobs.get(key);
 		if (!job) {
-			job = { key, source, theme, controller: new AbortController(), consumers: new Set() };
+			job = { key, source, theme, consumers: new Set() };
 			this.#jobs.set(key, job);
 			this.#pending.push(job);
 		}
@@ -72,10 +71,11 @@ export class MermaidRenderQueue {
 	}
 
 	#cancel(job: RenderJob): void {
-		job.controller.abort();
-		if (this.#jobs.get(job.key) === job) this.#jobs.delete(job.key);
 		const index = this.#pending.indexOf(job);
-		if (index !== -1) this.#pending.splice(index, 1);
+		// The running render cannot be interrupted. New consumers can still join it.
+		if (index === -1) return;
+		this.#pending.splice(index, 1);
+		this.#jobs.delete(job.key);
 	}
 
 	#startNext(): void {
@@ -88,10 +88,13 @@ export class MermaidRenderQueue {
 
 	async #run(job: RenderJob): Promise<void> {
 		try {
-			const svg = await this.renderDiagram(job.source, job.theme, job.controller.signal);
-			if (job.controller.signal.aborted) return;
+			const svg = await this.renderDiagram(job.source, job.theme, () => {
+				if (job.consumers.size > 0) return;
+				this.#jobs.delete(job.key);
+				throw new DOMException('No remaining diagram consumers', 'AbortError');
+			});
 			if (svg.length > MERMAID_OUTPUT_LIMIT) throw new Error('Rendered diagram is too large');
-			this.#cacheResult(job.key, svg);
+			if (job.consumers.size > 0) this.#cacheResult(job.key, svg);
 			for (const consumer of job.consumers) consumer.resolve(svg);
 		} catch (error) {
 			for (const consumer of job.consumers) consumer.reject(error);

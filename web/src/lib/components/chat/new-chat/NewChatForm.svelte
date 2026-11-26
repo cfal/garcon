@@ -13,14 +13,11 @@
 	import {
 		chatAttachmentAccept,
 		hasChatAttachmentSupport,
-		isImageAttachment,
 		isSupportedChatAttachment,
-		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
 	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 	import {
-		applySnippetTriggerReplacement,
 		findSnippetTrigger,
 	} from '$lib/chat/composer/snippet-trigger.js';
 	import { newChatToolbarSettings } from './new-chat-toolbar-settings';
@@ -31,6 +28,7 @@
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
 	import ComposerBottomBar from '../composer/ComposerBottomBar.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
+	import ComposerAttachmentList from '../composer/ComposerAttachmentList.svelte';
 	import ComposerAttachmentBadge from '../composer/ComposerAttachmentBadge.svelte';
 	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import ComposerSnippetPalette from '../composer/ComposerSnippetPalette.svelte';
@@ -57,26 +55,18 @@
 	import NewChatPinnedPaths from './NewChatPinnedPaths.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import FileText from '@lucide/svelte/icons/file-text';
-	import FileVideo from '@lucide/svelte/icons/file-video';
-	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
+	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 	import {
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
-	import {
-		SnippetExpansionController,
-		snippetErrorDetail,
-	} from '$lib/snippets/snippet-expansion-controller.svelte.js';
-	import { ApiError } from '$lib/api/client.js';
-	import { snippetTemplateUsesArguments } from '$shared/snippets';
-	import {
-		matchesSelectableSnippetExpansion,
-		type SelectableSnippet,
-	} from '$lib/snippets/selectable-snippet.js';
+	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { ChatSnippetInsertionController } from '$lib/chat/composer/chat-snippet-insertion-controller.js';
+	import { snippetTemplateUsesArguments, type SnippetArgumentsInput } from '$shared/snippets';
+	import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -152,7 +142,7 @@
 		restoreFocus: returnTextareaFocus,
 	});
 
-	let isMobile = $state(false);
+	const isMobile = $derived(appShell.isMobile);
 	let pendingTextareaFocus = $state(true);
 	const initialContentReady = $derived(form.settingsLoaded);
 	const allKnownTags = $derived(
@@ -252,16 +242,6 @@
 		if (seed?.startup) form.restoreStartup(seed.startup);
 		else if (seed?.project) form.seedProject(seed.project);
 		form.loadSettingsAndModels();
-		const mql = window.matchMedia('(max-width: 768px)');
-		isMobile = mql.matches;
-		const handleMediaChange = (e: MediaQueryListEvent) => {
-			isMobile = e.matches;
-		};
-		mql.addEventListener('change', handleMediaChange);
-
-		return () => {
-			mql.removeEventListener('change', handleMediaChange);
-		};
 	});
 
 	$effect(() => {
@@ -296,12 +276,6 @@
 		}
 		textareaRef.focus();
 		pendingTextareaFocus = false;
-	});
-
-	// Reconcile image preview URLs when attached images change.
-	$effect(() => {
-		void form.attachedImages;
-		form.reconcileImageUrls();
 	});
 
 	// Debounced path validation reacts to path changes.
@@ -423,96 +397,63 @@
 		return null;
 	}
 
+	const snippetInsertion = new ChatSnippetInsertionController({
+		refreshSnippets: () => snippets.refreshIfLoaded(),
+		refreshPreambles: () => preambles.refreshIfLoaded(),
+		reportError: message => notifications.error(message),
+		settle: settleTextareaAfterSnippet,
+	});
+
+	function runSnippet(
+		shortName: string,
+		argumentsInput: SnippetArgumentsInput,
+		context: NonNullable<ReturnType<typeof expansionContext>>,
+		insertion?: { snippet: SelectableSnippet; selection: { start: number; end: number };
+			trigger: { start: number; end: number } | null },
+	): Promise<SnippetInsertionResult> {
+		const sourceExecutionKey = executionKey;
+		const sourceText = form.firstMessage;
+		return snippetInsertion.execute({
+			expand: () => snippetExpansion.runPrepared(shortName, () => ({
+				request: { shortName, arguments: argumentsInput, context },
+				prepared: context,
+			})),
+			isCurrent: ({ response }) => form.nonblankPath === context.projectPath
+				&& response.contextProjectPath === context.projectPath && response.contextExecutorId === form.executorId
+				&& (insertion !== undefined || conversationInput)
+				&& executionKey === sourceExecutionKey && form.firstMessage === sourceText,
+			apply: (text) => {
+				form.firstMessage = text;
+			},
+			insertion: insertion ? { ...insertion, source: sourceText } : undefined,
+		});
+	}
+
 	async function insertSnippet(
 		snippet: SelectableSnippet,
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
 		if (promptTransformPending || !textareaRef) return 'cancelled';
-		const sourceExecutionKey = executionKey;
 		const context = expansionContext();
 		if (!context) {
 			await settleTextareaAfterSnippet();
 			return 'cancelled';
 		}
-		const sourceText = form.firstMessage;
-		const projectPath = context.projectPath;
-		const start = range?.start ?? textareaRef.selectionStart;
-		const end = range?.end ?? textareaRef.selectionEnd;
-		try {
-			const result = await snippetExpansion.run({
-				shortName: snippet.shortName,
-				arguments: { type: 'value', value: argumentsText },
-				context,
-			});
-			if (result.kind !== 'expanded') return 'cancelled';
-			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
-				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
-				else void preambles.refreshIfLoaded();
-				notifications.error(m.snippets_changed_before_expansion());
-				await settleTextareaAfterSnippet();
-				return 'cancelled';
-			}
-			if (
-				executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
-				result.response.contextExecutorId !== form.executorId ||
-				form.firstMessage !== sourceText
-			)
-				return 'cancelled';
-			const replacement = range
-				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
-				: {
-						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
-						caret: start + result.response.expandedText.length,
-					};
-			form.firstMessage = replacement.text;
-			await settleTextareaAfterSnippet(replacement.caret);
-			return 'inserted';
-		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) {
-				void snippets.refreshIfLoaded();
-				void preambles.refreshIfLoaded();
-			}
-			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await settleTextareaAfterSnippet();
-			return 'failed';
-		}
+		return runSnippet(snippet.shortName, { type: 'value', value: argumentsText }, context, {
+			snippet,
+			trigger: range,
+			selection: { start: textareaRef.selectionStart, end: textareaRef.selectionEnd },
+		});
 	}
 
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
 		if (!conversationInput || promptTransformPending) return;
-		const sourceExecutionKey = executionKey;
 		const context = expansionContext();
 		if (!context) return;
-		const sourceText = form.firstMessage;
-		const projectPath = context.projectPath;
-		try {
-			const result = await snippetExpansion.run({
-				shortName: command.shortName,
-				arguments: command.arguments,
-				context,
-			});
-			if (result.kind !== 'expanded') return;
-			if (
-				!conversationInput || executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
-				result.response.contextProjectPath !== projectPath ||
-				result.response.contextExecutorId !== form.executorId ||
-				form.firstMessage !== sourceText
-			)
-				return;
-			form.firstMessage = result.response.expandedText;
-			await settleTextareaAfterSnippet(result.response.expandedText.length);
-		} catch (error) {
-			if (error instanceof ApiError && error.status === 404) {
-				void snippets.refreshIfLoaded();
-				void preambles.refreshIfLoaded();
-			}
-			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
-			await settleTextareaAfterSnippet();
-		}
+		await runSnippet(command.shortName, command.arguments, context);
 	}
 
 	function editSnippets(): void {
@@ -845,50 +786,13 @@
 				/>
 			</div>
 
-			{#if form.attachedImages.length > 0}
-				<div data-slot="new-chat-attachments" class="mt-6 p-2 bg-muted/40 rounded-lg">
-					<div class="flex flex-wrap gap-2">
-						{#each form.attachedImages as file, idx (file.name + idx)}
-							<div class="relative group">
-								<div data-slot="composer-attachment-preview" class="w-16 h-16 rounded-lg overflow-hidden border border-border">
-									{#if isImageAttachment(file) && form.imageUrlFor(file, idx)}
-										<img
-											src={form.imageUrlFor(file, idx)}
-											alt={file.name}
-											class="w-full h-full object-cover"
-										/>
-									{:else}
-										<div
-											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
-										>
-											{#if isVideoChatAttachment(file)}
-												<FileVideo class="h-5 w-5" aria-hidden="true" />
-											{:else}
-												<FileText class="h-5 w-5" aria-hidden="true" />
-											{/if}
-											<span class="w-full truncate text-center text-[10px] leading-tight"
-												>{file.name}</span
-											>
-										</div>
-									{/if}
-								</div>
-								<button
-									type="button"
-									aria-label={m.chat_composer_remove_image({ name: file.name })}
-									title={m.chat_composer_remove_image({ name: file.name })}
-									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-									onclick={() => {
-										if (!promptTransformPending) form.removeImage(idx);
-									}}
-									disabled={promptTransformPending}
-								>
-									<X class="w-3 h-3" aria-hidden="true" />
-								</button>
-							</div>
-						{/each}
-					</div>
-				</div>
-			{/if}
+			<ComposerAttachmentList
+				files={form.attachedImages}
+				previewUrls={form.attachmentPreviewUrls}
+				disabled={promptTransformPending}
+				class="mt-6 p-2 bg-muted/40 rounded-lg"
+				onRemove={(index) => form.removeImage(index)}
+			/>
 		</div>
 
 		{#if !initialContentReady}

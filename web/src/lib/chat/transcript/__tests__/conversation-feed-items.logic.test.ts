@@ -22,7 +22,6 @@ import {
 } from '$shared/chat-types';
 import { compileHiddenBashCommandPatterns } from '$lib/chat/transcript/hidden-bash-commands.js';
 import {
-	buildConversationFeedRenderItems,
 	buildConversationFeedRenderModel,
 	conversationFeedItemLayout,
 	filterHiddenToolRenderItems,
@@ -68,7 +67,7 @@ it('keeps duplicate command output records separately visible without mutating d
 	const second = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', 'n = 1;\n```', context, first.content.length);
 	const result = new CommandResultMessage(TS, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
 		capture: 'complete', cwd: { kind: 'reported', path: '/original' } });
-	const items = buildConversationFeedRenderItems(rows([first, second, result]));
+	const items = buildConversationFeedRenderModel(rows([first, second, result])).items;
 	expect(items).toHaveLength(3);
 	expect(items[0]).toMatchObject({ id: 'row-0', message: { ...first, format: 'plain' } });
 	expect(items[1]).toMatchObject({ id: 'row-1', message: { ...second, format: 'plain' } });
@@ -76,7 +75,7 @@ it('keeps duplicate command output records separately visible without mutating d
 	expect(conversationFeedItemLayout(items[1])).toBe('standard');
 	expect(first.content).toBe('```ts\nconst ');
 	expect(first.format).toBe('markdown');
-	expect(buildConversationFeedRenderItems(rows([second]))[0]).toMatchObject({ message: { ...second, format: 'plain' } });
+	expect(buildConversationFeedRenderModel(rows([second])).items[0]).toMatchObject({ message: { ...second, format: 'plain' } });
 });
 
 it('does not combine output across missing rows or command boundaries', () => {
@@ -88,7 +87,7 @@ it('does not combine output across missing rows or command boundaries', () => {
 	]);
 	messages[1].ordinal = 3;
 	messages[2].ordinal = 4;
-	expect(buildConversationFeedRenderItems(messages).map(conversationFeedItemLayout)).toEqual(['standard', 'standard', 'standard']);
+	expect(buildConversationFeedRenderModel(messages).items.map(conversationFeedItemLayout)).toEqual(['standard', 'standard', 'standard']);
 });
 
 function rows(messages: ChatMessage[]) {
@@ -137,7 +136,7 @@ function pendingPermission(
 	};
 }
 
-describe('buildConversationFeedRenderItems', () => {
+describe('buildConversationFeedRenderModel', () => {
 	it('[TLV5-UX.08-WEB-UNIT-01] keeps every renderable transcript message in exact source order', () => {
 		const messages = [
 			new UserMessage(TS, 'start'),
@@ -300,14 +299,14 @@ describe('buildConversationFeedRenderItems', () => {
 	});
 
 	it('uses transcript row identity even when providers repeat tool ids', () => {
-		const items = buildConversationFeedRenderItems(
+		const items = buildConversationFeedRenderModel(
 			rows([
 				new BashToolUseMessage(TS, 'duplicate-tool', 'pwd'),
 				new BashToolUseMessage(TS, 'duplicate-tool', 'ls'),
 				new ReadToolUseMessage(TS, 'duplicate-tool', '/tmp/a.ts'),
 				new ReadToolUseMessage(TS, 'duplicate-tool', '/tmp/b.ts'),
 			]),
-		);
+		).items;
 
 		expect(items.map((item) => item.id)).toEqual(['row-0', 'row-1', 'row-2', 'row-3']);
 		expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
@@ -499,11 +498,11 @@ describe('buildConversationFeedRenderItems', () => {
 
 	it('keeps local notices as individual rows', () => {
 		const localNotice = notice('Chat interrupted by user.');
-		const items = buildConversationFeedRenderItems([
+		const items = buildConversationFeedRenderModel([
 			{ kind: 'message', id: 'assistant-1', message: new AssistantMessage(TS, 'before') },
 			localNotice,
 			{ kind: 'message', id: 'assistant-2', message: new AssistantMessage(TS, 'after') },
-		]);
+		]).items;
 
 		expect(items.map((item) => [item.kind, item.id])).toEqual([
 			['message', 'assistant-1'],

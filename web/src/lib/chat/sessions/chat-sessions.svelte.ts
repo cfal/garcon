@@ -1,20 +1,15 @@
 import { RecentChatHistoryState } from './recent-chat-history.svelte.js';
+import { SvelteMap } from 'svelte/reactivity';
 // Canonical chat session store. Single source of truth for chat entities,
 // selection state, and draft lifecycle. Replaces split ownership between
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
 
 import {
 	deleteChat as deleteChatApi,
-	applyChatTagDelta as applyChatTagDeltaApi,
 	generateChatTitle,
-	getChatTagConflictResponse,
 	listChats,
-	recoverChatTags as recoverChatTagsApi,
-	replaceChatTags as replaceChatTagsApi,
-	transitionChatTags as transitionChatTagsApi,
 	setChatArchived as setChatArchivedApi,
 } from '$lib/api/chats.js';
-import { ApiError } from '$lib/api/client.js';
 import { ChatTitleController } from './chat-title-controller.js';
 import { ChatSettingsMutations } from './chat-settings-mutations.js';
 import { ChatSelectionWriter } from './chat-selection-writer.js';
@@ -22,7 +17,6 @@ import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/ch
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
-import { normalizeTags } from '$shared/tags';
 import type {
 	ApplyChatTagDeltaRequest,
 	ChatTagsMutationResponse,
@@ -40,16 +34,7 @@ import {
 	ChatProjectBindingState,
 	type ProjectPathChangedListener,
 } from './chat-project-binding-state.js';
-import {
-	ChatTagMutationBlockedError,
-	createChatTagMutationResult,
-	isUnknownChatTagOutcome,
-	sameChatTags,
-} from './chat-tag-mutation-result.js';
-import {
-	ChatTagReconciliationState,
-	type ChatTagSnapshotVersion,
-} from './chat-tag-reconciliation-state.svelte.js';
+import { ChatTagMutationController } from './chat-tag-mutation-controller.js';
 import type {
 	ChatArchiveMutation,
 	ChatListLoadStatus,
@@ -74,7 +59,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	selectedChatId = $state<string | null>(null);
 	lastSelectedChatId = $state<string | null>(null);
 	readonly #recentHistory = new RecentChatHistoryState();
-	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
+	startupByChatId = $state.raw<Record<string, ChatStartupConfig>>({});
 	isLoadingChats = $state(true);
 	chatListStatus = $state<ChatListLoadStatus>('loading');
 	chatListError = $state<string | null>(null);
@@ -89,11 +74,10 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	readonly #titles: ChatTitleController;
 	readonly #serverEntryGenerationByChatId = new Map<string, number>();
 	readonly #serverEntryFetchGenerationByChatId = new Map<string, number>();
-	readonly #tagRecoveryByChatId = new Map<string, Promise<RecoverChatTagsResponse>>();
-	readonly #tagReconciliation = new ChatTagReconciliationState();
+	readonly #tags: ChatTagMutationController;
 	readonly #selectionWriter: ChatSelectionWriter;
-	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
-	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
+	#processingSnapshot = $state.raw<Map<string, ChatProcessingPhase> | null>(null);
+	readonly #processingOverrides = new SvelteMap<string, ChatProcessingPhase | null>();
 	readonly #archiveProjection = new ChatArchiveProjectionState();
 	readonly #projectBindings = new ChatProjectBindingState();
 
@@ -113,6 +97,15 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	constructor(deps: ChatSessionsStoreDeps = {}) {
 		this.#deps = deps;
+		this.#tags = new ChatTagMutationController({
+			api: deps,
+			getChat: chatId => this.#baseById[chatId],
+			patchDraftTags: (chatId, tags) => this.patchDraftStartup(chatId, { tags }),
+			patchTags: (chatId, tags) => this.patchChat(chatId, { tags }),
+			refreshChats: () => this.quietRefreshChats(),
+			entryGeneration: chatId => this.#serverEntryGenerationByChatId.get(chatId) ?? 0,
+			fetchGeneration: () => this.#nextFetchGeneration,
+		});
 		this.#selectionWriter = new ChatSelectionWriter({
 			deps,
 			onConfirmed: (chatId) => { this.lastSelectedChatId = chatId; },
@@ -150,15 +143,15 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	get pendingTagMutationChatIds(): ReadonlySet<string> {
-		return this.#tagReconciliation.pendingChatIds;
+		return this.#tags.pendingTagMutationChatIds;
 	}
 
 	get tagRecoveryRequiredChatIds(): ReadonlySet<string> {
-		return this.#tagReconciliation.recoveryRequiredChatIds;
+		return this.#tags.tagRecoveryRequiredChatIds;
 	}
 
 	tagReconciliationKind(chatId: string): ChatTagReconciliationKind {
-		return this.#tagReconciliation.kind(chatId);
+		return this.#tags.tagReconciliationKind(chatId);
 	}
 
 	setSelectedChatId(chatId: string | null): void {
@@ -195,7 +188,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			this.lastSelectedChatId =
 				typeof res.lastSelectedChatId === 'string' ? res.lastSelectedChatId : null;
 			this.#upsertFromServer((res.sessions ?? []).filter(entry => !removedChatIds.has(entry.id)), projectPathRevisions, fetchGeneration, activityUpdates);
-			this.#tagReconciliation.settleFetch(fetchGeneration);
+			this.#tags.reconciliation.settleFetch(fetchGeneration);
 			this.#latestSuccessfulFetchGeneration = fetchGeneration;
 			this.chatListStatus = 'ready';
 			this.chatListError = null;
@@ -382,107 +375,28 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		return this.#titles.renameChat(chatId, newTitle);
 	}
 
-	async replaceChatTags(request: ReplaceChatTagsRequest): Promise<ChatTagsMutationResponse> {
-		const chat = this.#baseById[request.chatId];
-		if (!chat) throw new Error('Chat not found');
-		if (chat.status === 'draft') {
-			if (!sameChatTags(chat.tags, request.expectedTags)) throw new Error('Chat tags changed');
-			const tags = normalizeTags(request.tags);
-			const result = createChatTagMutationResult(request.chatId, chat.tags, tags);
-			this.patchDraftStartup(request.chatId, { tags });
-			this.patchChat(request.chatId, { tags });
-			return result;
-		}
-		return this.#runTagMutation(
-			request.chatId,
-			() => (this.#deps.replaceChatTags ?? replaceChatTagsApi)(request),
-		);
+	replaceChatTags(request: ReplaceChatTagsRequest): Promise<ChatTagsMutationResponse> {
+		return this.#tags.replaceChatTags(request);
 	}
 
-	async applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse> {
-		const chat = this.#baseById[request.chatId];
-		if (!chat) throw new Error('Chat not found');
-		if (chat.status === 'draft') {
-			const remove = new Set(normalizeTags(request.removeTags ?? []));
-			const tags = normalizeTags([
-				...chat.tags.filter((tag) => !remove.has(tag)),
-				...normalizeTags(request.addTags ?? []),
-			]);
-			const result = createChatTagMutationResult(request.chatId, chat.tags, tags);
-			this.patchDraftStartup(request.chatId, { tags });
-			this.patchChat(request.chatId, { tags });
-			return result;
-		}
-		return this.#runTagMutation(
-			request.chatId,
-			() => (this.#deps.applyChatTagDelta ?? applyChatTagDeltaApi)(request),
-		);
+	applyChatTagDelta(request: ApplyChatTagDeltaRequest): Promise<ChatTagsMutationResponse> {
+		return this.#tags.applyChatTagDelta(request);
 	}
 
 	transitionChatTags(request: TransitionChatTagsRequest): Promise<ChatTagsMutationResponse> {
-		if (this.#baseById[request.chatId]?.status === 'draft') {
-			return Promise.reject(new Error('Draft chats cannot be transitioned'));
-		}
-		return this.#runTagMutation(
-			request.chatId,
-			() => (this.#deps.transitionChatTags ?? transitionChatTagsApi)(request),
-		);
+		return this.#tags.transitionChatTags(request);
 	}
 
-	async recoverChatTags(chatId: string): Promise<RecoverChatTagsResponse> {
-		const existing = this.#tagRecoveryByChatId.get(chatId);
-		if (existing) return existing;
-		const chat = this.#baseById[chatId];
-		if (chat?.status === 'draft') return { success: true, chatId, tags: chat.tags };
-		const recovery = this.#recoverLatestChatTags(chatId);
-		this.#tagRecoveryByChatId.set(chatId, recovery);
-		return recovery;
+	recoverChatTags(chatId: string): Promise<RecoverChatTagsResponse> {
+		return this.#tags.recoverChatTags(chatId);
 	}
 
-	async retryTagReconciliation(chatId: string): Promise<void> {
-		if (this.#tagReconciliation.recoveryRequiredChatIds.has(chatId)) {
-			await this.recoverChatTags(chatId);
-		}
-		if (this.#tagReconciliation.hasRefreshRequirement(chatId)) {
-			await this.quietRefreshChats();
-		}
-		if (this.tagReconciliationKind(chatId) !== null) {
-			throw new Error('Saved tags could not be refreshed');
-		}
+	retryTagReconciliation(chatId: string): Promise<void> {
+		return this.#tags.retryTagReconciliation(chatId);
 	}
 
-	async #recoverLatestChatTags(chatId: string): Promise<RecoverChatTagsResponse> {
-		try {
-			while (true) {
-				const recoveryGeneration = this.#tagReconciliation.recoveryGeneration(chatId);
-				const snapshotVersion = this.#captureTagSnapshotVersion(chatId);
-				const result = await (this.#deps.recoverChatTags ?? recoverChatTagsApi)(chatId);
-				if (this.#tagReconciliation.recoveryGeneration(chatId) !== recoveryGeneration) {
-					continue;
-				}
-				this.#tagReconciliation.clearRecovery(chatId);
-				this.#reconcileTagResponse(chatId, result.tags, snapshotVersion, 'committed');
-				return result;
-			}
-		} finally {
-			this.#tagRecoveryByChatId.delete(chatId);
-		}
-	}
-
-	async observeCommandTagMutation(
-		chatId: string,
-		outcome: CommandTagMutationOutcome,
-	): Promise<void> {
-		if (outcome.status === 'applied') {
-			await this.quietRefreshChats();
-			return;
-		}
-		if (outcome.status === 'unknown') {
-			this.#tagReconciliation.requireRecovery(chatId);
-			void this.recoverChatTags(chatId).catch(() => {});
-			return;
-		}
-		this.#deps.notifyError?.(m.notifications_update_chat_tags_failed());
+	observeCommandTagMutation(chatId: string, outcome: CommandTagMutationOutcome): Promise<void> {
+		return this.#tags.observeCommandTagMutation(chatId, outcome);
 	}
 
 	reconcileAcceptedHandoffProjection(entry: ChatListEntry): void {
@@ -507,74 +421,6 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			this.#serverEntryFetchGenerationByChatId.delete(entry.id);
 		}
 		void this.quietRefreshChats();
-	}
-
-	async #runTagMutation(
-		chatId: string,
-		request: () => Promise<ChatTagsMutationResponse>,
-	): Promise<ChatTagsMutationResponse> {
-		const reconciliationKind = this.#tagReconciliation.kind(chatId);
-		if (reconciliationKind) throw new ChatTagMutationBlockedError(reconciliationKind);
-		const snapshotVersion = this.#captureTagSnapshotVersion(chatId);
-		this.#tagReconciliation.beginMutation(chatId);
-		try {
-			const result = await request();
-			this.#reconcileTagResponse(chatId, result.tags, snapshotVersion, 'committed');
-			return result;
-		} catch (error) {
-			const conflict = getChatTagConflictResponse(error);
-			if (conflict) {
-				this.#reconcileTagResponse(chatId, conflict.currentTags, snapshotVersion, 'conflict');
-			} else if (
-				error instanceof ApiError &&
-				error.errorCode === 'CHAT_TAG_REVISION_CONFLICT'
-			) {
-				this.#tagReconciliation.requireRefresh(
-					chatId,
-					'conflict-refresh',
-					this.#nextFetchGeneration,
-				);
-				void this.quietRefreshChats();
-			}
-			if (isUnknownChatTagOutcome(error)) {
-				this.#tagReconciliation.requireRecovery(chatId);
-				void this.recoverChatTags(chatId).catch(() => {});
-			}
-			throw error;
-		} finally {
-			this.#tagReconciliation.endMutation(chatId);
-		}
-	}
-
-	#reconcileTagResponse(
-		chatId: string,
-		tags: readonly string[],
-		snapshotVersion: ChatTagSnapshotVersion,
-		settlement: 'committed' | 'conflict',
-	): void {
-		if (this.#tagReconciliation.hasNewerSnapshot(
-			chatId,
-			this.#serverEntryGenerationByChatId.get(chatId) ?? 0,
-			snapshotVersion,
-		)) {
-			this.#tagReconciliation.requireRefresh(
-				chatId,
-				settlement === 'committed' ? 'committed-refresh' : 'conflict-refresh',
-				this.#nextFetchGeneration,
-			);
-			void this.quietRefreshChats();
-			return;
-		}
-		this.patchChat(chatId, { tags: [...tags] });
-		this.#tagReconciliation.recordSettlement(chatId, this.#nextFetchGeneration);
-		void this.quietRefreshChats();
-	}
-
-	#captureTagSnapshotVersion(chatId: string): ChatTagSnapshotVersion {
-		return this.#tagReconciliation.captureSnapshot(
-			chatId,
-			this.#serverEntryGenerationByChatId.get(chatId) ?? 0,
-		);
 	}
 
 	async generateChatTitleFromMessage(
@@ -649,7 +495,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			next.isProcessing = next.processingPhase !== null;
 			const prev = this.#baseById[next.id];
 			next = this.#projectBindings.reconcileFetchedRecord(next, prev, requestProjectPathRevisions);
-			next = this.#tagReconciliation.preserveSettledTags(next, prev, fetchGeneration);
+			next = this.#tags.reconciliation.preserveSettledTags(next, prev, fetchGeneration);
 			reconcileActivityProjection(prev, next);
 			if (prev && sameRecord(prev, next)) {
 				nextById[next.id] = prev;
@@ -789,7 +635,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
-		this.#tagReconciliation.remove(chatId);
+		this.#tags.reconciliation.remove(chatId);
 		if (!this.#baseById[chatId]) return;
 		this.#projectBindings.publish(chatId, null);
 
@@ -819,7 +665,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		for (const chatId of this.#fetchActivityUpdates?.keys() ?? []) {
 			if (!records[chatId]) this.#fetchActivityUpdates?.delete(chatId);
 		}
-		this.#tagReconciliation.pruneSettlements(records);
+		this.#tags.reconciliation.pruneSettlements(records);
 	}
 
 	/** Patches preview text for a chat in the sidebar. */
@@ -872,7 +718,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			'executorId' in patch ? patch.executorId : chat.executorId,
 		);
 		const nextChat = { ...chat, ...patch };
-		Object.assign(nextChat, normalizeExecutionFields(nextChat));
+		if ('agentId' in patch || 'permissionMode' in patch || 'thinkingMode' in patch || 'agentSettings' in patch) {
+			Object.assign(nextChat, normalizeExecutionFields(nextChat));
+		}
 		if (patch.title !== undefined) this.#titles.noteConfirmation();
 		this.#baseById = {
 			...this.#baseById,
@@ -971,7 +819,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		restValue: ChatProcessingPhase | null,
 	): ChatProcessingPhase | null {
 		const override = this.#processingOverrides.get(chatId);
-		if (override !== undefined || this.#processingOverrides.has(chatId)) return override ?? null;
+		if (override !== undefined) return override;
 		if (this.#processingSnapshot) return this.#processingSnapshot.get(chatId) ?? null;
 		return restValue;
 	}

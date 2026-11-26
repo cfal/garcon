@@ -69,8 +69,8 @@ export function isVideoChatAttachment(file: Pick<File, 'name' | 'type'>): boolea
 
 /** Manages selected attachments and image preview object URLs. */
 export class ImageAttachmentState {
-	images = $state<File[]>([]);
-	#urls = $state<Map<File, string>>(new Map());
+	images = $state.raw<File[]>([]);
+	#urls = $state.raw<Map<File, string>>(new Map());
 
 	get urls(): ReadonlyMap<File, string> {
 		return this.#urls;

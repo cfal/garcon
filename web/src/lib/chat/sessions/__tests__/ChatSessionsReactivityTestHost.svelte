@@ -65,4 +65,7 @@
 <span data-testid="selected-unread">{sessions.selectedChat?.isUnread}</span>
 <span data-testid="ordered-ids">{sessions.orderedChats.map((chat) => chat.id).join(',')}</span>
 <span data-testid="sidebar-ids">{sidebarIds.join(',')}</span>
+<span data-testid="pending-processing">{sessions.isChatProcessing('pending')}</span>
+<button type="button" onclick={() => sessions.applyProcessingEvent('pending', 'running')}>Start pending</button>
+<button type="button" onclick={() => sessions.applyProcessingEvent('pending', null)}>Stop pending</button>
 <button type="button" onclick={replaceCollections}>Replace collections</button>

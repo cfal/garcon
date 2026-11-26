@@ -29,6 +29,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		createLiteralHtmlMarkdownExtension(),
 		createImageParagraphMarkdownExtension(),
 	];
+	const preserveLineBreaks = { breaks: true };
 	const bareChatIdMarkdownExtensions = [
 		...baseMarkdownExtensions,
 		createChatReferenceMarkdownExtension(),
@@ -174,7 +175,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			: baseMarkdownExtensions,
 	);
 	const markdownOptions = $derived(
-		variant === 'user' || variant === 'presented' ? { breaks: true } : undefined,
+		variant === 'user' || variant === 'presented' ? preserveLineBreaks : undefined,
 	);
 
 	$effect(() => {
@@ -202,7 +203,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		sanitizeUrl={sanitizeMarkdownUrl}
 	>
 		{#snippet code({ lang, text })}
-			{#if lang === 'mermaid'}
+			{#if lang?.trim().toLowerCase().split(/\s+/, 1)[0] === 'mermaid'}
 				<svelte:boundary>
 					<MermaidBlock {text} {acquireTransientActivity} />
 					{#snippet failed()}

@@ -301,7 +301,7 @@ describe('Chromium preambles', () => {
         const composerAttachmentGap = await dialog.evaluate((element) => {
           const composer = element.querySelector<HTMLElement>('[data-slot="new-chat-composer"]');
           const attachments = element.querySelector<HTMLElement>(
-            '[data-slot="new-chat-attachments"]',
+            '[data-slot="composer-attachments"]',
           );
           if (!composer || !attachments)
             throw new Error('Missing New Chat attachment spacing targets.');
