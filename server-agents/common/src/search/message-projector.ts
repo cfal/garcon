@@ -260,7 +260,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'agent-message-tool-use':
       return joinTool(message.recipient, message.message);
     case 'schedule-tool-use':
-      return boundedUnknownText(message.request, budget);
+      return boundedUnknownText({ schedule: message.request }, budget);
     case 'antigravity-enter-plan-mode-tool-use':
       return joinTool(message.reason);
     case 'antigravity-exit-plan-mode-tool-use':

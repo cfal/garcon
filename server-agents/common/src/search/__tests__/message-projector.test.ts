@@ -16,7 +16,7 @@ describe('transcript search message projector', () => {
     expect(projectSearchMessage(new AntigravityExitPlanModeToolUseMessage('', 'exit', '# Review'))).toMatchObject({ role: 'tool', body: '# Review' });
     const row = new ScheduleToolUseMessage('', 'schedule', { action: 'wakeup', delaySeconds: 60, prompt: 'Check build', timerCondition: 'builder' });
     const body = projectSearchMessage(row)?.body;
-    for (const value of ['wakeup', '60', 'Check build', 'builder']) expect(body).toContain(value);
+    for (const value of ['schedule', 'wakeup', '60', 'Check build', 'builder']) expect(body).toContain(value);
   });
   test('reserves result search space for the visible diagnostic regardless of field order', () => {
     const progress = 'working '.repeat(500);
