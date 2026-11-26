@@ -8,6 +8,7 @@ test('ordinary exports omit inline image bytes without losing the ordered result
   const content = { items: [
     { type: 'text', text: 'Before image' },
     { type: 'content', content: { type: 'image', mimeType: 'image/png', data } },
+    { type: 'image', data },
     { type: 'text', text: 'After image' },
   ] };
   const message = new ToolResultMessage('', 'schedule', content, false);

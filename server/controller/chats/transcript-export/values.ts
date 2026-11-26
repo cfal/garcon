@@ -27,7 +27,7 @@ const utf8Encoder = new TextEncoder();
 const DATA_URL_OMISSION = '[data URL omitted from export]';
 const IMAGE_BODY_OMISSION = '[image body omitted from export]';
 const standaloneDataUrl = /^data:[^\s,]*,\S*$/i;
-const embeddedDataUrl = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:(?:[A-Za-z0-9][\w.+-]*\/[\w.+-]+)?(?:;[\w.+=-]+)*,[^\s"'<>)]*/gi;
+const embeddedDataUrl = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:(?:[A-Za-z0-9][\w.+-]*\/[\w.+-]+)?(?:;[\w.+=-]+)*,[^\s"'<>]*/gi;
 
 export function textSafe(value: string): string {
   return value.toWellFormed().replace(
@@ -223,7 +223,7 @@ function sanitizeStructuredValue(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => {
       if (value.type === 'image') {
-        if (key === 'data' && typeof child === 'string' && typeof value.mimeType === 'string') return [key, IMAGE_BODY_OMISSION];
+        if (key === 'data' && typeof child === 'string') return [key, IMAGE_BODY_OMISSION];
         if (key === 'source' && isRecord(child) && child.type === 'base64' && typeof child.data === 'string') {
           return [key, sanitizeStructuredValue({ ...child, data: IMAGE_BODY_OMISSION })];
         }
@@ -236,7 +236,10 @@ function sanitizeStructuredValue(value: unknown): unknown {
 export function redactDataUrl(value: string): string {
   const trimmed = value.trim();
   if (standaloneDataUrl.test(trimmed)) return value.replace(trimmed, DATA_URL_OMISSION);
-  return value.replace(embeddedDataUrl, DATA_URL_OMISSION);
+  return value.replace(embeddedDataUrl, (url, offset: number) => {
+    const closing = value[offset - 1] === '(' ? /\)[.,;:!?]*$/.exec(url)?.[0] : '';
+    return DATA_URL_OMISSION + (closing ?? '');
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
