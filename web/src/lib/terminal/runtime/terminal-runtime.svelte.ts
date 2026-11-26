@@ -73,6 +73,7 @@ export class TerminalRuntime {
 	#fontWaiters = new Set<(family: string | null) => void>();
 	#fontPreference: FontPreference = 'default';
 	#fitFrame = 0;
+	#blurFrame = 0;
 	#lastSentSize: { cols: number; rows: number } | null = null;
 	#pasteCleanup: (() => void) | null = null;
 	#focusCleanup: (() => void) | null = null;
@@ -164,7 +165,12 @@ export class TerminalRuntime {
 	}
 
 	fitIfMeasurable(): void {
-		if (!this.#presentationActive || !this.#host) return;
+		if (
+			!this.#presentationActive ||
+			!this.#host ||
+			this.terminal.element?.parentElement !== this.#host
+		)
+			return;
 		if (this.#host.clientWidth <= 0 || this.#host.clientHeight <= 0) return;
 		this.fitAddon.fit();
 		if (this.terminal.cols <= 1 || this.terminal.rows <= 1) return;
@@ -194,7 +200,8 @@ export class TerminalRuntime {
 
 	applyTheme(theme: ITheme): void {
 		this.terminal.options.theme = theme;
-		if (this.#presentationActive) this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
+		if (this.#presentationActive && this.terminal.element?.parentElement === this.#host)
+			this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
 	}
 
 	applyFontSize(fontSize: number): void {
@@ -281,6 +288,7 @@ export class TerminalRuntime {
 		this.#rendererGeneration += 1;
 		this.#presentationActive = false;
 		cancelAnimationFrame(this.#fitFrame);
+		cancelAnimationFrame(this.#blurFrame);
 		this.#pasteCleanup?.();
 		this.#focusCleanup?.();
 		this.inputControls.reset();
@@ -320,7 +328,10 @@ export class TerminalRuntime {
 		const syncFocus = () => {
 			this.isFocused = document.activeElement === textarea;
 		};
-		const onBlur = () => requestAnimationFrame(syncFocus);
+		const onBlur = () => {
+			cancelAnimationFrame(this.#blurFrame);
+			this.#blurFrame = requestAnimationFrame(syncFocus);
+		};
 		textarea?.addEventListener('paste', onPaste);
 		textarea?.addEventListener('focus', syncFocus);
 		textarea?.addEventListener('blur', onBlur);

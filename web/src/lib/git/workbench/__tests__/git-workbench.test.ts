@@ -317,17 +317,18 @@ describe('GitWorkbenchStore', () => {
 			expect(mockedApi.getGitWorkingTreeFingerprint).toHaveBeenCalledTimes(1);
 		});
 
-		it('cancels a scheduled refresh when the workbench resets', async () => {
+		it('cancels the error timer when dismissing, suspending or resetting', async () => {
 			await wb.setTarget(makeTarget('/project'));
-			mockedApi.getGitWorkbenchSnapshot.mockClear();
 			vi.useFakeTimers();
 			try {
-				wb.scheduleRefresh({ reason: 'manual' }, 100);
-				wb.reset();
-
-				await vi.advanceTimersByTimeAsync(100);
-
-				expect(mockedApi.getGitWorkbenchSnapshot).not.toHaveBeenCalled();
+				for (const clear of [() => wb.dismissError(), () => wb.suspend(), () => wb.reset()]) {
+					const timers = vi.getTimerCount();
+					wb.reportError('Synthetic error');
+					expect(vi.getTimerCount()).toBe(timers + 1);
+					clear();
+					expect(vi.getTimerCount()).toBeLessThanOrEqual(timers);
+					expect(wb.lastError).toBeNull();
+				}
 			} finally {
 				vi.useRealTimers();
 			}
@@ -2246,6 +2247,29 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('porcelain inspector', () => {
+		it.each([12, 13])('labels a %i-line blame preview only when lines are omitted', async (count) => {
+			mockedApi.getGitFileHistory.mockResolvedValue({ commits: [] });
+			mockedApi.getGitBlame.mockImplementation(async (_project, _file, _ref, limit = 12) => {
+				const lines = Array.from({ length: count }, (_, i) => ({
+					line: i + 1,
+					originalLine: i + 1,
+					finalLine: i + 1,
+					commit: 'head',
+					author: 'A',
+					authorMail: '',
+					authorTime: '',
+					summary: '',
+					content: 'text',
+				}));
+				return { lines: lines.slice(0, limit), truncated: count >= limit };
+			});
+			wb.files.selectedFile = 'file.ts';
+			wb.porcelain.setInspectorView('history');
+			await wb.porcelain.loadCurrentView({ executorId: 'local', projectPath: '/project' });
+			expect(wb.porcelain.blameLines).toHaveLength(12);
+			expect(wb.porcelain.blameTruncated).toBe(count === 13);
+		});
+
 		it('aborts and ignores stale history loads when the selected file changes', async () => {
 			const firstHistory = deferred<Awaited<ReturnType<typeof gitApi.getGitFileHistory>>>();
 			const firstBlame = deferred<Awaited<ReturnType<typeof gitApi.getGitBlame>>>();

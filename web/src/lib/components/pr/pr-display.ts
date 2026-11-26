@@ -4,7 +4,6 @@
 import type {
 	PullRequestCheck,
 	PullRequestChecksState,
-	PullRequestReviewDecision,
 	PullRequestState,
 } from '$lib/api/pull-requests';
 import {
@@ -14,13 +13,6 @@ import {
 	type PullRequestReviewSkipReason,
 } from '$shared/pull-request-reviews';
 import * as m from '$lib/paraglide/messages.js';
-
-export function overallChecksState(checks: PullRequestCheck[]): PullRequestChecksState {
-	if (checks.length === 0) return 'none';
-	if (checks.some((check) => check.state === 'failure')) return 'failing';
-	if (checks.some((check) => check.state === 'pending')) return 'pending';
-	return 'passing';
-}
 
 export interface PrBadge {
 	label: string;
@@ -32,26 +24,6 @@ export function prStateBadge(state: PullRequestState, isDraft: boolean): PrBadge
 	if (state === 'merged') return { label: 'Merged', class: 'bg-pr-merged/15 text-pr-merged' };
 	if (state === 'closed') return { label: 'Closed', class: 'bg-git-deleted/15 text-git-deleted' };
 	return { label: 'Open', class: 'bg-git-added/15 text-git-added' };
-}
-
-export function prStateDotClass(state: PullRequestState, isDraft: boolean): string {
-	if (isDraft) return 'bg-muted-foreground';
-	if (state === 'merged') return 'bg-pr-merged';
-	if (state === 'closed') return 'bg-git-deleted';
-	return 'bg-git-added';
-}
-
-export function reviewDecisionBadge(decision: PullRequestReviewDecision): PrBadge | null {
-	switch (decision) {
-		case 'approved':
-			return { label: 'Approved', class: 'bg-git-added/15 text-git-added' };
-		case 'changes_requested':
-			return { label: 'Changes requested', class: 'bg-git-deleted/15 text-git-deleted' };
-		case 'review_required':
-			return { label: 'Review required', class: 'bg-muted text-muted-foreground' };
-		default:
-			return null;
-	}
 }
 
 export function checksStateLabel(state: PullRequestChecksState): string {

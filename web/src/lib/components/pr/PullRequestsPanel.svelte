@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { getMinuteClock } from '$lib/context';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
@@ -53,10 +54,11 @@
 		'needs-team-review': m.pull_request_inbox_needs_team_review,
 		'other-open': m.pull_request_inbox_other_open,
 	};
-	let collapsedGroups = $state<Set<PullRequestInboxGroupId>>(new Set());
+	let collapsedGroups = $state.raw<Set<PullRequestInboxGroupId>>(new Set());
 	let repositoriesOpen = $state(false);
 	let connecting = $state(false);
-	let currentTime = $state(new Date());
+	const minuteClock = getMinuteClock();
+	const currentTime = $derived(minuteClock.currentTime);
 
 	const containerBreakpoints = { compactMinWidth: 720, wideMinWidth: 960 } as const;
 	let containerWidth = $state(0);
@@ -74,12 +76,6 @@
 		const region = listViewportRef;
 		if (!region) return;
 		return registerNativeWorkspaceScrollRegion(region, 'contextual');
-	});
-
-	// Relative ages in the list stay current while the view is open.
-	$effect(() => {
-		const timer = setInterval(() => (currentTime = new Date()), 60_000);
-		return () => clearInterval(timer);
 	});
 
 	// Loads the selection's detail and reloads its runs when the inbox snapshot changes.

@@ -81,6 +81,22 @@ describe('GitPorcelainPanel confirmations', () => {
 describe('GitPorcelainPanel stash list', () => {
 	afterEach(cleanup);
 
+	it.each(['conflicts', 'stash', 'graph', 'history'] as const)(
+		'reloads %s on file selection only when it needs the path',
+		async (view) => {
+			const porcelain = createPorcelain();
+			porcelain.inspectorView = view;
+			const load = vi.spyOn(porcelain, 'loadCurrentView').mockResolvedValue(undefined);
+			const panel = render(GitPorcelainPanel, { project, selectedFile: 'first.ts', porcelain });
+			expect(load).toHaveBeenCalledOnce();
+			await panel.rerender({ selectedFile: 'second.ts' });
+			expect(load).toHaveBeenCalledTimes(view === 'history' ? 2 : 1);
+			load.mockClear();
+			await panel.rerender({ project: { ...project } });
+			expect(load).toHaveBeenCalledOnce();
+		},
+	);
+
 	it('acts on each listed stash when several share a date or a commit', async () => {
 		const porcelain = createPorcelain();
 		porcelain.inspectorView = 'stash';
@@ -97,9 +113,15 @@ describe('GitPorcelainPanel stash list', () => {
 
 		expect(screen.getAllByRole('button', { name: 'Apply' })).toHaveLength(3);
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Apply' })[1]!);
-		expect(apply).toHaveBeenCalledWith(project, expect.objectContaining({ ref: 'stash@{1}', hash: 'b'.repeat(40) }));
+		expect(apply).toHaveBeenCalledWith(
+			project,
+			expect.objectContaining({ ref: 'stash@{1}', hash: 'b'.repeat(40) }),
+		);
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Pop' })[2]!);
-		expect(pop).toHaveBeenCalledWith(project, expect.objectContaining({ ref: 'stash@{2}', hash: 'a'.repeat(40) }));
+		expect(pop).toHaveBeenCalledWith(
+			project,
+			expect.objectContaining({ ref: 'stash@{2}', hash: 'a'.repeat(40) }),
+		);
 
 		await fireEvent.click(screen.getAllByRole('button', { name: 'Drop' })[2]!);
 		expect(screen.getAllByRole('button', { name: 'Confirm' })).toHaveLength(1);

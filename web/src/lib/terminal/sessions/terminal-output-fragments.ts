@@ -8,9 +8,13 @@ interface PendingFragments {
 	timer: ReturnType<typeof setTimeout>;
 }
 
+const outputDecoder = new TextDecoder('utf-8', { fatal: true });
+
 export function decodeTerminalOutput(value: string): string {
-	const bytes = Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
-	return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+	const binary = atob(value);
+	const bytes = new Uint8Array(binary.length);
+	for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+	return outputDecoder.decode(bytes);
 }
 
 export class TerminalOutputFragments {

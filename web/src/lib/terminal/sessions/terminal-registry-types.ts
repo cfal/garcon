@@ -48,7 +48,7 @@ export interface TerminalClientSession {
 	runtimeState: 'idle' | 'loading' | 'ready' | 'failed';
 	runtimeError: string | null;
 	runtimeErrorRequiresPageReload: boolean;
-	lastReceivedSequence: number;
+	readonly lastReceivedSequence: number;
 	replayTruncatedAt: number | null;
 }
 

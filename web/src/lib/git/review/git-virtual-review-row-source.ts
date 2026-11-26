@@ -9,7 +9,11 @@ import {
 	type SplitDiffCell,
 	type SplitDiffRow,
 } from './git-diff-rows.js';
-import { getGitSplitPatchIndex, type GitSplitPatchIndex } from './git-patch-index.js';
+import {
+	getGitSplitPatchIndex,
+	type GitPatchIndex,
+	type GitSplitPatchIndex,
+} from './git-patch-index.js';
 import type {
 	BuildVirtualRowsOptions,
 	GitVirtualReviewRow,
@@ -19,6 +23,9 @@ import type { GitDiffActionTarget } from '$lib/git/workbench/git-workbench-types
 import * as m from '$lib/paraglide/messages.js';
 
 const DEFAULT_ROW_HEIGHT = 22;
+const EMPTY_SELECTION = new Set<string>();
+const selectableKeys = new WeakMap<GitPatchIndex, Map<string, string[]>>();
+let structuralRevision = 0;
 
 type SegmentKind = 'header' | 'placeholder' | 'limit' | 'unified' | 'split' | 'collection';
 
@@ -40,6 +47,7 @@ export interface GitVirtualReviewMeasurements {
 export interface GitVirtualReviewRowSource {
 	readonly rowCount: number;
 	readonly measurementRevision: string;
+	readonly syntaxRevision?: object;
 	rowAt(index: number): GitVirtualReviewRow | null;
 	rowKey(index: number): string | number;
 	estimateRowHeight(index: number, lineHeight: number): number;
@@ -73,59 +81,14 @@ export function emptyGitVirtualReviewRowSource(): GitVirtualReviewRowSource {
 	};
 }
 
-export function arrayGitVirtualReviewRowSource(
-	rows: GitVirtualReviewRow[],
-	fileRowIndex?: ReadonlyMap<string, number>,
-): GitVirtualReviewRowSource {
-	const starts =
-		fileRowIndex ??
-		new Map(
-			rows.flatMap((row, index) =>
-				row.kind === 'file-header' ? ([[row.filePath, index]] as const) : [],
-			),
-		);
-	const estimateHeight = (row: GitVirtualReviewRow, lineHeight: number): number =>
-		row.kind === 'unified-row' || row.kind === 'split-row'
-			? Math.max(row.estimatedHeight, lineHeight)
-			: row.estimatedHeight;
-	return {
-		rowCount: rows.length,
-		measurementRevision: JSON.stringify(rows.map((row) => [row.id, row.kind, row.estimatedHeight])),
-		rowAt: (index) => rows[index] ?? null,
-		rowKey: (index) => rows[index]?.id ?? index,
-		estimateRowHeight: (index, lineHeight) => {
-			const row = rows[index];
-			if (!row) return lineHeight;
-			return estimateHeight(row, lineHeight);
-		},
-		buildVirtualMeasurements: (lineHeight) => ({
-			keys: rows.map((row) => virtualMeasurementKey(row.id)),
-			estimates: rows.map((row) => estimateHeight(row, lineHeight)),
-		}),
-		fileStart: (filePath) => starts.get(filePath),
-		fileState: (filePath) => {
-			const fileRows = rows.filter((row) => row.filePath === filePath);
-			if (fileRows.some((row) => row.kind === 'file-placeholder')) return 'pending';
-			if (fileRows.some((row) => row.kind === 'unified-row' || row.kind === 'split-row')) {
-				return 'resolved';
-			}
-			return 'terminal';
-		},
-		filePathAt: (index) => rows[index]?.filePath || null,
-		filePathsInRange: (start, end) =>
-			uniqueFilePaths(rows.slice(clampIndex(start, rows.length), clampIndex(end, rows.length))),
-		rowsInRange: (start, end) => rows.slice(start, end),
-	};
-}
-
 class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 	readonly rowCount: number;
-	readonly measurementRevision: string;
+	private readonly structuralRevision = ++structuralRevision;
 	private readonly segments: RowSegment[] = [];
 	private readonly fileStarts = new Map<string, number>();
 	private readonly fileKeyBases = new Map<string, number>();
 	private readonly fileStates = new Map<string, 'pending' | 'resolved' | 'terminal'>();
-	private readonly selectableKeys = new Map<string, string[]>();
+	private lastInteraction?: { file: GitReviewFileSummary; value: FileInteraction };
 
 	constructor(private readonly options: BuildVirtualRowsOptions) {
 		const summaryByPath = new Map(options.summary.files.map((file) => [file.path, file]));
@@ -209,7 +172,25 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 			start += 1;
 		}
 		this.rowCount = start;
-		this.measurementRevision = buildMeasurementRevision(options, this.segments);
+	}
+
+	get measurementRevision(): string {
+		const interaction = this.options.interaction;
+		const composer = interaction.kind === 'read-only' ? null : interaction.composerState;
+		return composer?.open
+			? `${this.structuralRevision}:${composer.side}:${composer.line}:${composer.filePath}`
+			: String(this.structuralRevision);
+	}
+
+	get syntaxRevision(): object | undefined {
+		return this.options.syntaxResults;
+	}
+
+	private interactionForFile(file: GitReviewFileSummary) {
+		const previous = this.lastInteraction?.file === file ? this.lastInteraction.value : undefined;
+		const next = interactionForFile(this.options, file, previous);
+		if (next !== previous) this.lastInteraction = { file, value: next };
+		return next;
 	}
 
 	rowAt(index: number): GitVirtualReviewRow | null {
@@ -406,7 +387,7 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		localIndex: number,
 	): GitVirtualReviewRow {
 		const row = renderUnifiedDiffRow(renderedRowAt(body, localIndex));
-		const interaction = interactionForFile(this.options, file);
+		const interaction = this.interactionForFile(file);
 		const view = buildUnifiedDiffRowView(interaction.viewOptions, row);
 		return {
 			kind: 'unified-row',
@@ -425,7 +406,7 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		const file = segment.file!;
 		const body = segment.body!;
 		const row = indexedSplitRow(body, segment.splitIndex!, localIndex);
-		const interaction = interactionForFile(this.options, file);
+		const interaction = this.interactionForFile(file);
 		const view = buildSplitDiffRowView(interaction.splitViewOptions, row);
 		return {
 			kind: 'split-row',
@@ -445,17 +426,20 @@ class IndexedGitVirtualReviewRowSource implements GitVirtualReviewRowSource {
 		body: GitReviewFileBody,
 		activeTab: 'staged' | 'unstaged',
 	): string[] {
-		if (this.options.interaction.kind !== 'workbench') return [];
-		const cached = this.selectableKeys.get(file.path);
+		if (!body.patchIndex) return [];
+		let byFile = selectableKeys.get(body.patchIndex);
+		if (!byFile) selectableKeys.set(body.patchIndex, (byFile = new Map()));
+		const cacheKey = `${activeTab}\0${file.path}`;
+		const cached = byFile.get(cacheKey);
 		if (cached) return cached;
 		const keys: string[] = [];
-		const count = body.patchIndex?.rowCount ?? 0;
+		const count = body.patchIndex.rowCount;
 		for (let index = 0; index < count; index += 1) {
 			const row = renderUnifiedDiffRow(renderedRowAt(body, index));
 			const key = getRenderedSelectionKey(row, file.path, activeTab);
 			if (key) keys.push(key);
 		}
-		this.selectableKeys.set(file.path, keys);
+		byFile.set(cacheKey, keys);
 		return keys;
 	}
 }
@@ -464,33 +448,8 @@ export function virtualMeasurementKey(value: string | number): string {
 	return `${typeof value}:${String(value)}`;
 }
 
-function buildMeasurementRevision(
-	options: BuildVirtualRowsOptions,
-	segments: readonly RowSegment[],
-): string {
-	const composer =
-		options.interaction.kind === 'read-only' ? null : options.interaction.composerState;
-	return JSON.stringify([
-		options.summary.documentId,
-		options.diffMode,
-		options.contextLines,
-		segments.map((segment) => [
-			segment.file?.path ?? '',
-			segment.kind,
-			segment.count,
-			segment.file?.estimatedRows ?? 0,
-			segment.body?.bodyFingerprint ?? '',
-		]),
-		composer?.open ? [composer.filePath, composer.side, composer.line] : null,
-	]);
-}
-
 function clampIndex(index: number, rowCount: number): number {
 	return Math.min(rowCount, Math.max(0, Math.trunc(index)));
-}
-
-function uniqueFilePaths(rows: readonly GitVirtualReviewRow[]): string[] {
-	return Array.from(new Set(rows.map((row) => row.filePath).filter(Boolean)));
 }
 
 function terminalRow(
@@ -642,17 +601,59 @@ function splitCell(
 	};
 }
 
-function interactionForFile(options: BuildVirtualRowsOptions, file: GitReviewFileSummary) {
-	const workbench = options.interaction.kind === 'workbench' ? options.interaction : null;
+type FileInteraction = ReturnType<typeof buildFileInteraction>;
+
+function interactionForFile(
+	options: BuildVirtualRowsOptions,
+	file: GitReviewFileSummary,
+	previous?: FileInteraction,
+): FileInteraction {
+	const overlay = options.interaction;
+	const workbench = overlay.kind === 'workbench' ? overlay : null;
+	const activeTab = workbench?.activeTab ?? 'staged';
+	const selectedLineKeys = workbench?.selectedLineKeys ?? EMPTY_SELECTION;
+	const syntaxResult = options.syntaxResults?.[file.path];
+	const composer = overlay.kind === 'read-only' ? null : overlay.composerState;
+	const composerHere = composer?.open && composer.filePath === file.path ? composer : null;
+	const previousView = previous?.viewOptions;
+	if (
+		previous &&
+		previous.workbench === (workbench !== null) &&
+		previousView?.activeTab === activeTab &&
+		previousView.selectedLineKeys === selectedLineKeys &&
+		previousView.syntaxResult === syntaxResult &&
+		previousView.composerTarget?.side === composerHere?.side &&
+		previousView.composerTarget?.line === composerHere?.line
+	)
+		return previous;
+	return buildFileInteraction(
+		options,
+		file,
+		workbench !== null,
+		activeTab,
+		selectedLineKeys,
+		syntaxResult,
+		composerHere,
+	);
+}
+
+function buildFileInteraction(
+	options: BuildVirtualRowsOptions,
+	file: GitReviewFileSummary,
+	workbench: boolean,
+	activeTab: 'staged' | 'unstaged',
+	selectedLineKeys: Set<string>,
+	syntaxResult: NonNullable<BuildVirtualRowsOptions['syntaxResults']>[string] | undefined,
+	composer:
+		| Extract<BuildVirtualRowsOptions['interaction'], { kind: 'commentable' }>['composerState']
+		| null,
+) {
 	const document = options.summary.document;
 	const body = options.fileBodies[file.path];
 	const proof =
 		document && body?.patchDigest && body.bodyFingerprint === file.bodyFingerprint
 			? { document, bodyFingerprint: body.bodyFingerprint, patchDigest: body.patchDigest }
 			: null;
-	const activeTab = workbench?.activeTab ?? 'staged';
-	const composer =
-		options.interaction.kind === 'read-only' ? null : options.interaction.composerState;
 	const composerTarget =
 		composer?.open && composer.filePath === file.path
 			? {
@@ -666,11 +667,9 @@ function interactionForFile(options: BuildVirtualRowsOptions, file: GitReviewFil
 		filePath: file.path,
 		activeTab,
 		readOnly: !workbench || !proof,
-		selectedLineKeys: workbench?.selectedLineKeys ?? new Set<string>(),
+		selectedLineKeys,
 		composerTarget,
-		...(options.syntaxResults?.[file.path]
-			? { syntaxResult: options.syntaxResults[file.path] }
-			: {}),
+		syntaxResult,
 	};
 	const actionTarget: GitDiffActionTarget | null =
 		workbench && proof
@@ -683,6 +682,7 @@ function interactionForFile(options: BuildVirtualRowsOptions, file: GitReviewFil
 				}
 			: null;
 	return {
+		workbench,
 		activeTab,
 		actionTarget,
 		viewOptions: common,

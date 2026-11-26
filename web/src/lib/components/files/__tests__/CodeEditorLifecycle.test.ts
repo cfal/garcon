@@ -1,10 +1,11 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 import { CodeEditorController } from '$lib/files/editor/code-editor-controller.svelte.js';
+import { FileDocumentIoCoordinator } from '$lib/files/persistence/file-document-io-coordinator.js';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 import CodeEditorLifecycleTestHost from './CodeEditorLifecycleTestHost.svelte';
@@ -12,6 +13,60 @@ import CodeEditorLifecycleTestHost from './CodeEditorLifecycleTestHost.svelte';
 afterEach(cleanup);
 
 describe('CodeEditor lifecycle', () => {
+	it('reconfigures once per read-only transition during a mounted disk refresh', async () => {
+		const file = new FileDocumentState(
+			{
+				executorId: 'local',
+				canonicalFileRootPath: '/workspace',
+				normalizedRelativePath: 'file.txt',
+			},
+			'file',
+		);
+		file.content = file.baseline = 'initial';
+		file.loadedRevision = 'v1:initial';
+		const session = new FileViewSession(file);
+		const settings = createLocalSettingsStore();
+		const editorSettings = {
+			editorThemeId: 'standard-light',
+			wordWrap: false,
+			showLineNumbers: true,
+			fontSize: 14,
+		} as const;
+		const controller = new CodeEditorController(session, editorSettings);
+		session.editor = controller;
+		const reconfigure = vi.spyOn(controller, 'reconfigure');
+		const disk = Promise.withResolvers<{ content: string; path: string; revision: string }>();
+		const io = new FileDocumentIoCoordinator({
+			getSession: (id) => (id === session.id ? session : null),
+			getDocument: (id) => (id === file.id ? file : null),
+			getEditorSettings: () => editorSettings,
+			readText: () => disk.promise,
+			isDocumentVisible: () => true,
+		});
+		const bridge = new SurfaceFrameBridge();
+		const activated = bridge.activate(true);
+		const rendered = render(CodeEditorLifecycleTestHost, { session, settings, bridge });
+		try {
+			await activated;
+			await waitFor(() => expect(controller.isAttached).toBe(true));
+			expect(reconfigure).toHaveBeenCalledOnce();
+			reconfigure.mockClear();
+			const refresh = io.refresh(session.id, async () => true);
+			await waitFor(() => expect(session.editorState?.readOnly).toBe(true));
+			expect(reconfigure).toHaveBeenCalledOnce();
+			disk.resolve({ content: 'refreshed', path: '/workspace/file.txt', revision: 'v1:refresh' });
+			await refresh;
+			await waitFor(() => expect(session.editorState?.readOnly).toBe(false));
+			expect(reconfigure).toHaveBeenCalledTimes(2);
+			expect(controller.currentContent()).toBe('refreshed');
+		} finally {
+			rendered.unmount();
+			bridge.deactivate();
+			io.destroy();
+			session.dispose();
+		}
+	});
+
 	it.each([true, false])(
 		'reconfigures guards without replacing a renderer (pending activation: %s)',
 		async (waitForProvider) => {

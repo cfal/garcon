@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GitTreeNode } from '$lib/api/git.js';
-import type { QuickCommitPathIntent } from '../commit-controller.svelte.js';
+import type { QuickCommitPathIntent } from '../commit-stage-queue.js';
 import { buildCommitTreeRows } from '../commit-tree-rows.js';
 
 function fileNode(path: string, overrides: Partial<GitTreeNode> = {}): GitTreeNode {

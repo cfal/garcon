@@ -2,47 +2,57 @@ import { describe, expect, test } from 'bun:test';
 import { captureBrowserErrors } from '../../support/browser-errors.js';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 
-describe('File draft storage failures', () => {
-  test('rolls back failed transactions and handles open failures during close', async () => {
-    const root = fileURLToPath(new URL('../../..', import.meta.url));
-    const build = await Bun.build({
-      entrypoints: [`${root}web/src/lib/files/persistence/file-draft-repository.ts`],
-      target: 'browser',
-      plugins: [
-        {
-          name: 'file-repository-aliases',
-          setup(builder) {
-            builder.onResolve({ filter: /^\$(lib|shared)\// }, ({ path }) => {
-              let resolved = path
-                .replace(/^\$lib\//, `${root}web/src/lib/`)
-                .replace(/^\$shared\//, `${root}common/`);
-              if (!existsSync(resolved) && resolved.endsWith('.js'))
-                resolved = resolved.slice(0, -3) + '.ts';
-              if (!existsSync(resolved) && existsSync(resolved + '.ts')) resolved += '.ts';
-              return { path: resolved };
-            });
-          },
+async function withRepositoryPage(run: (page: Page, source: string) => Promise<void>) {
+  const root = fileURLToPath(new URL('../../..', import.meta.url));
+  const build = await Bun.build({
+    entrypoints: [`${root}web/src/lib/files/persistence/file-draft-repository.ts`],
+    target: 'browser',
+    plugins: [
+      {
+        name: 'file-repository-aliases',
+        setup(builder) {
+          builder.onResolve({ filter: /^\$(lib|shared)\// }, ({ path }) => {
+            let resolved = path
+              .replace(/^\$lib\//, `${root}web/src/lib/`)
+              .replace(/^\$shared\//, `${root}common/`);
+            if (!existsSync(resolved) && resolved.endsWith('.js'))
+              resolved = resolved.slice(0, -3) + '.ts';
+            if (!existsSync(resolved) && existsSync(resolved + '.ts')) resolved += '.ts';
+            return { path: resolved };
+          });
         },
-      ],
-    });
-    if (!build.success) throw new AggregateError(build.logs, 'Repository bundle failed');
-    const source = await build.outputs[0]!.text();
-    const server = Bun.serve({
-      hostname: '0.0.0.0',
-      port: 0,
-      fetch: () =>
-        new Response('<!doctype html><title>Storage failure fixture</title>', {
-          headers: { 'content-type': 'text/html' },
-        }),
-    });
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage();
-      const browserErrors: string[] = [];
-      captureBrowserErrors(page.context(), browserErrors);
-      await page.goto(`http://127.0.0.1:${server.port}`);
+      },
+    ],
+  });
+  if (!build.success) throw new AggregateError(build.logs, 'Repository bundle failed');
+  const source = await build.outputs[0]!.text();
+  const server = Bun.serve({
+    hostname: '0.0.0.0',
+    port: 0,
+    fetch: () =>
+      new Response('<!doctype html><title>Storage failure fixture</title>', {
+        headers: { 'content-type': 'text/html' },
+      }),
+  });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const browserErrors: string[] = [];
+    captureBrowserErrors(page.context(), browserErrors);
+    await page.goto(`http://127.0.0.1:${server.port}`);
+    await run(page, source);
+    expect(browserErrors).toEqual([]);
+  } finally {
+    await browser.close();
+    server.stop(true);
+  }
+}
+
+describe('File draft storage', () => {
+  test('rolls back failed transactions and handles open failures during close', () =>
+    withRepositoryPage(async (page, source) => {
       const result = await page.evaluate(async (source) => {
         const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
         const {
@@ -257,10 +267,115 @@ describe('File draft storage failures', () => {
         recentLine: 1,
         bounded: Array.from({ length: 20 }, (_, i) => 20 - i + '.txt'),
       });
-      expect(browserErrors).toEqual([]);
-    } finally {
-      await browser.close();
-      server.stop(true);
-    }
-  }, 30_000);
+    }), 30_000);
+
+  test('checks the current draft and deletes both records in one transaction', () =>
+    withRepositoryPage(async (page, source) => {
+      const result = await page.evaluate(async (source) => {
+        const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+        const { createFileDraftRepository, fileDraftKey } = (await import(
+          url
+        )) as typeof import('../../../web/src/lib/files/persistence/file-draft-repository.js');
+        URL.revokeObjectURL(url);
+        const repository = createFileDraftRepository();
+        const peer = createFileDraftRepository();
+        const documentId = fileDraftKey('user', 'deployment', '/project', 'a.txt');
+        const original = {
+          schemaVersion: 1 as const,
+          userNamespace: 'user',
+          deploymentId: 'deployment',
+          documentId,
+          canonicalFileRootPath: '/project',
+          normalizedRelativePath: 'a.txt',
+          content: 'saved text',
+          savedAt: 1,
+          checkpointId: 'original',
+        };
+        const newer = { ...original, checkpointId: 'newer', content: 'different edit' };
+        try {
+          await peer.putDraft(original);
+          let writing: Promise<void> | undefined;
+          await repository.deleteDraft(documentId, current => {
+            writing = peer.putDraft(newer);
+            return current.content === original.content;
+          });
+          await writing;
+          await repository.deleteDraft(documentId, current => current.content === original.content);
+          const retained = await repository.getDraft(documentId);
+          await repository.deleteDraft(documentId, current =>
+            current.checkpointId === newer.checkpointId && current.content === newer.content,
+          );
+          return {
+            retained: retained?.checkpointId,
+            body: await repository.getDraft(documentId),
+            summaries: await repository.getDrafts('user', 'deployment'),
+          };
+        } finally {
+          repository.close();
+          peer.close();
+        }
+      }, source);
+      expect(result).toEqual({
+        retained: 'newer',
+        body: null,
+        summaries: [],
+      });
+    }));
+
+  test('upgrades populated recents and evicts only within the writing user and deployment', () =>
+    withRepositoryPage(async (page, source) => {
+      const result = await page.evaluate(async source => {
+        const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+        const { createFileDraftRepository, FILE_DRAFT_DATABASE_NAME, FILE_RECENT_LIMIT } =
+          await import(url) as typeof import('../../../web/src/lib/files/persistence/file-draft-repository.js');
+        URL.revokeObjectURL(url);
+        const recent = (userNamespace: string, deploymentId: string, timestamp: number) => ({
+          userNamespace, deploymentId, timestamp, schemaVersion: 1 as const, key: `location-${timestamp}`,
+          canonicalFileRootPath: '/project', normalizedRelativePath: 'file.txt', displayPath: 'file.txt',
+          revision: null, line: 1, column: 1, viewPreference: 'source' as const,
+        });
+        const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open(FILE_DRAFT_DATABASE_NAME, 3);
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+          request.onupgradeneeded = () => {
+            const store = request.result.createObjectStore('recents', { keyPath: 'key' });
+            for (const record of [
+              ...Array.from({ length: FILE_RECENT_LIMIT }, (_, i) => recent('a', 'one', i)),
+              recent('a', 'two', 0), recent('b', 'one', 0),
+            ]) {
+              store.put({ ...record, locationKey: record.key,
+                key: JSON.stringify([record.userNamespace, record.deploymentId, record.key]) });
+            }
+          };
+        });
+        legacy.close();
+
+        const repository = createFileDraftRepository();
+        const originalGetAll = IDBObjectStore.prototype.getAll;
+        let recentsScans = 0;
+        IDBObjectStore.prototype.getAll = function (...args) {
+          if (this.name === 'recents') recentsScans++;
+          return originalGetAll.apply(this, args);
+        };
+        try {
+          await repository.putRecent(recent('a', 'one', FILE_RECENT_LIMIT));
+          const readKeys = async (user: string, deployment: string) =>
+            (await repository.getRecents(user, deployment)).map(record => record.key).sort();
+          return {
+            current: await readKeys('a', 'one'),
+            otherDeployment: await readKeys('a', 'two'),
+            otherUser: await readKeys('b', 'one'),
+            limit: FILE_RECENT_LIMIT, recentsScans,
+          };
+        } finally {
+          IDBObjectStore.prototype.getAll = originalGetAll;
+          repository.close();
+        }
+      }, source);
+      expect(result.current).toEqual(Array.from({ length: result.limit }, (_, i) => `location-${i + 1}`).sort());
+      expect(result.otherDeployment).toEqual(['location-0']);
+      expect(result.otherUser).toEqual(['location-0']);
+      expect(result.recentsScans).toBe(0);
+    }), 30_000);
 });

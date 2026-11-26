@@ -22,8 +22,15 @@
 		| null
 	>(null);
 	let loadKey = $derived(
-		JSON.stringify([project.executorId, project.projectPath, porcelain.inspectorView, selectedFile]),
+		JSON.stringify([
+			project.executorId,
+			project.projectPath,
+			porcelain.inspectorView,
+			porcelain.inspectorView === 'history' ? selectedFile : null,
+		]),
 	);
+	const loadOwner = $derived(porcelain);
+	const loadTarget = $derived(project);
 	let confirmationKey = $derived(JSON.stringify([loadKey, porcelain.confirmationScope]));
 	let title = $derived(
 		porcelain.inspectorView === 'conflicts'
@@ -49,13 +56,17 @@
 	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 
 	$effect(() => {
-		loadKey;
-		if (!project || porcelain.inspectorView === 'none') {
-			untrack(() => porcelain.cancelActiveLoad());
-			return;
-		}
-		untrack(() => void porcelain.loadCurrentView(project));
-		return () => porcelain.cancelActiveLoad();
+		void loadKey;
+		const owner = loadOwner;
+		const target = loadTarget;
+		return untrack(() => {
+			if (owner.inspectorView === 'none') {
+				owner.cancelActiveLoad();
+				return;
+			}
+			void owner.loadCurrentView(target);
+			return () => owner.cancelActiveLoad();
+		});
 	});
 
 	function requestAcceptConflict(filePath: string, side: 'ours' | 'theirs'): void {
@@ -115,6 +126,30 @@
 		};
 	}
 </script>
+
+{#snippet confirmation(margin: string)}
+	<div
+		class="{margin} rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground"
+	>
+		<div class="mb-2">{confirmationLabel}</div>
+		<div class="flex gap-2">
+			<button
+				type="button"
+				class="rounded bg-status-warning px-2 py-1 text-status-warning-foreground"
+				onclick={() => void confirmPendingAction()}
+			>
+				{m.common_confirm()}
+			</button>
+			<button
+				type="button"
+				class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
+				onclick={() => (pendingConfirmation = null)}
+			>
+				{m.common_cancel()}
+			</button>
+		</div>
+	</div>
+{/snippet}
 
 {#if porcelain.inspectorView !== 'none'}
 	<svelte:boundary>
@@ -188,27 +223,7 @@
 										</button>
 									</div>
 									{#if activeConfirmation?.type === 'accept-conflict' && activeConfirmation.filePath === detail.path}
-										<div
-											class="rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground"
-										>
-											<div class="mb-2">{confirmationLabel}</div>
-											<div class="flex gap-2">
-												<button
-													type="button"
-													class="rounded bg-status-warning px-2 py-1 text-status-warning-foreground"
-													onclick={() => void confirmPendingAction()}
-												>
-													{m.common_confirm()}
-												</button>
-												<button
-													type="button"
-													class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-													onclick={() => (pendingConfirmation = null)}
-												>
-													{m.common_cancel()}
-												</button>
-											</div>
-										</div>
+										{@render confirmation('')}
 									{/if}
 									{#if detail.truncated}
 										<div class="rounded border border-border bg-muted/40 p-2 text-muted-foreground">
@@ -217,7 +232,8 @@
 									{/if}
 									<pre
 										class="max-h-24 overflow-auto rounded border border-border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">{detail
-											.working.content ?? 'Working content exceeds the conflict preview limit.'}</pre>
+											.working.content ??
+											'Working content exceeds the conflict preview limit.'}</pre>
 								</div>
 							{/if}
 						</div>
@@ -279,27 +295,7 @@
 									</button>
 								</div>
 								{#if isPendingDrop(stash)}
-									<div
-										class="ml-2 rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground"
-									>
-										<div class="mb-2">{confirmationLabel}</div>
-										<div class="flex gap-2">
-											<button
-												type="button"
-												class="rounded bg-status-warning px-2 py-1 text-status-warning-foreground"
-												onclick={() => void confirmPendingAction()}
-											>
-												{m.common_confirm()}
-											</button>
-											<button
-												type="button"
-												class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-												onclick={() => (pendingConfirmation = null)}
-											>
-												{m.common_cancel()}
-											</button>
-										</div>
-									</div>
+									{@render confirmation('ml-2')}
 								{/if}
 							{/each}
 						</div>
@@ -315,7 +311,7 @@
 									<p class="py-2 text-muted-foreground">{m.git_history_none()}</p>
 								{:else}
 									<div class="space-y-1">
-										{#each porcelain.fileHistory.slice(0, 8) as commit (commit.hash)}
+										{#each porcelain.fileHistory as commit (commit.hash)}
 											<div class="rounded px-2 py-1 hover:bg-muted">
 												<div class="truncate text-foreground">{commit.subject}</div>
 												<div class="truncate font-mono text-[10px] text-muted-foreground">
@@ -328,10 +324,11 @@
 							</div>
 							<div>
 								<div class="mb-1 text-muted-foreground">
-									{m.git_history_blame()} {porcelain.blameTruncated ? '(truncated)' : ''}
+									{m.git_history_blame()}
+									{porcelain.blameTruncated ? '(truncated)' : ''}
 								</div>
 								<div class="space-y-1">
-									{#each porcelain.blameLines.slice(0, 12) as line (line.line)}
+									{#each porcelain.blameLines as line (line.line)}
 										<div
 											class="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 rounded px-2 py-0.5 hover:bg-muted"
 										>
@@ -345,9 +342,12 @@
 					{/if}
 				{:else if porcelain.inspectorView === 'graph'}
 					<div class="space-y-1">
-						{#each porcelain.graphCommits.slice(0, 30) as commit (commit.hash)}
-							<div class="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded px-2 py-1 hover:bg-muted">
-								<span class="truncate font-mono text-muted-foreground">{commit.hash.slice(0, 8)}</span
+						{#each porcelain.graphCommits as commit (commit.hash)}
+							<div
+								class="grid grid-cols-[4rem_minmax(0,1fr)] gap-2 rounded px-2 py-1 hover:bg-muted"
+							>
+								<span class="truncate font-mono text-muted-foreground"
+									>{commit.hash.slice(0, 8)}</span
 								>
 								<span class="truncate text-foreground">{commit.subject}</span>
 							</div>

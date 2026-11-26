@@ -15,6 +15,31 @@ const target: GitDiffActionTarget = {
 };
 
 describe('partial staging selection provenance', () => {
+	it('updates proof once per range and excludes keys from other files or tabs', () => {
+		const selection = new GitLineSelectionState();
+		const key = (index: number) => makeLineSelectionKey('file.ts', 'unstaged', 'after', index);
+		selection.toggleLineSelection(key(0), target);
+		const replacement = {
+			...target,
+			proof: { ...target.proof, document: { ...target.proof.document, instanceId: 'replacement' } },
+		};
+		const validKeys = Array.from({ length: 2_000 }, (_, index) => key(index + 1));
+		const mixed = [
+			validKeys[0],
+			makeLineSelectionKey('other.ts', 'unstaged', 'after', 1),
+			makeLineSelectionKey('file.ts', 'staged', 'after', 1),
+			...validKeys.slice(1),
+		];
+		selection.selectLineRange(key(1), key(2_000), mixed, replacement);
+		expect(selection.selectedLineKeys).toEqual(new Set(validKeys));
+		const selected = selection.selectedLineKeys;
+		selection.pruneToFilePaths(new Set(['file.ts']));
+		expect(selection.selectedLineKeys).toBe(selected);
+		expect(selection.groupSelectedLineIndicesByTarget('stage')).toEqual([
+			{ target: replacement, lineIndices: Array.from({ length: 2_000 }, (_, index) => index + 1) },
+		]);
+	});
+
 	it('captures the displayed proof and discards old indices after a body change', () => {
 		const selection = new GitLineSelectionState();
 		selection.toggleLineSelection(makeLineSelectionKey('file.ts', 'unstaged', 'after', 1), target);

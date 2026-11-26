@@ -65,13 +65,13 @@ export class GitHistoryController {
 	readonly document = new GitDiffDocumentController();
 	readonly comparison = new GitComparisonController();
 	screen = $state<GitHistoryScreen>('list');
-	commits = $state<GitHistoryCommitListItem[]>([]);
+	commits = $state.raw<GitHistoryCommitListItem[]>([]);
 	nextOffset = $state<number | null>(0);
 	listLoading = $state(false);
 	listError = $state<string | null>(null);
 	selectedCommitHash = $state<string | null>(null);
 	selectedParentHash = $state<string | null>(null);
-	commitSnapshot = $state<GitCommitSnapshotReady | null>(null);
+	commitSnapshot = $state.raw<GitCommitSnapshotReady | null>(null);
 	commitLoading = $state(false);
 	commitError = $state<string | null>(null);
 	listPosition = $state<GitHistoryListPosition>({ ...EMPTY_GIT_HISTORY_LIST_POSITION });

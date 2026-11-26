@@ -82,6 +82,10 @@ class PullRequestVirtualRowSource implements GitVirtualReviewRowSource {
 		}
 	}
 
+	get syntaxRevision(): object | undefined {
+		return this.baseSource.syntaxRevision;
+	}
+
 	rowAt(index: number): GitVirtualReviewRow | null {
 		const run = this.runAt(index);
 		if (!run) return null;

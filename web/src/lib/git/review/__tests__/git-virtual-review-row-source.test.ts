@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFileBody, GitReviewFileSummary } from '$lib/api/git.js';
-import type { BuildVirtualRowsOptions } from '$lib/git/review/git-virtual-review-document.svelte.js';
+import { indexedBody, reviewRowOptions as options, reviewFileSummary as summary } from './git-review-row-fixtures.js';
 import { createGitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import {
 	buildGitVirtualReviewRowSource,
@@ -8,74 +8,6 @@ import {
 	type GitVirtualReviewRowSource,
 } from '$lib/git/review/git-virtual-review-row-source.js';
 import type { GitDiffFileSyntaxResult } from '$lib/git/review/git-diff-syntax.js';
-
-function summary(path: string, renderedRows: number): GitReviewFileSummary {
-	return {
-		path,
-		indexStatus: 'M',
-		workTreeStatus: 'M',
-		category: 'normal',
-		additions: renderedRows,
-		deletions: 0,
-		estimatedRows: renderedRows,
-		bodyState: 'unloaded',
-		bodyFingerprint: `fingerprint:${path}`,
-		isGenerated: false,
-		isBinary: false,
-		isTooLarge: false,
-	};
-}
-
-function indexedBody(path: string, lineCount: number): GitReviewFileBody {
-	const lines = Array.from({ length: lineCount }, (_, index) => `+line ${index}`).join('\n');
-	const patch = `diff --git a/${path} b/${path}\n@@ -0,0 +1,${lineCount} @@\n${lines}\n`;
-	const patchIndex = createGitPatchIndex(patch, lineCount + 1);
-	return {
-		path,
-		bodyFingerprint: `fingerprint:${path}`,
-		bodyState: 'loaded',
-		category: 'normal',
-		isBinary: false,
-		isTooLarge: false,
-		renderedRowCount: lineCount + 1,
-		patchBytes: patch.length,
-		patch,
-		patchIndex,
-	};
-}
-
-function options(
-	files: GitReviewFileSummary[],
-	bodies: Record<string, GitReviewFileBody>,
-): BuildVirtualRowsOptions {
-	return {
-		summary: {
-			document: { executorId: 'local', instanceId: 'test-instance', documentId: 'document' },
-			documentId: 'document',
-			project: '/project',
-			context: 3,
-			files,
-			limits: {
-				maxSummaryFiles: 10_000,
-				maxBodyBatchFiles: 24,
-				maxLoadedRows: 100_000,
-				maxLoadedPatchBytes: 10_000_000,
-				maxFileRows: 50_000,
-				maxFilePatchBytes: 5_000_000,
-				maxLineBytes: 20_000,
-				maxContextLines: 50,
-				bodyConcurrency: 4,
-			},
-		},
-		visibleFilePaths: files.map((file) => file.path),
-		fileBodies: bodies,
-		loadingBodies: new Set<string>(),
-		focusedFilePath: null,
-		diffMode: 'unified' as const,
-		contextLines: 3,
-		interaction: { kind: 'read-only' as const },
-	};
-}
 
 function expectEveryRowPresent(source: GitVirtualReviewRowSource): void {
 	for (let index = 0; index < source.rowCount; index += 1) {
@@ -86,6 +18,45 @@ function expectEveryRowPresent(source: GitVirtualReviewRowSource): void {
 }
 
 describe('Git virtual review row source', () => {
+	it('reuses selection-key arrays across structural sources for the same patch and tab', () => {
+		const file = summary('file.ts', 12);
+		const bodies = { [file.path]: { ...indexedBody(file.path, 12), patchDigest: 'synthetic' } };
+		const setup = options([file], bodies);
+		const rowFrom = (mode: 'unified' | 'split', tab: 'unstaged' | 'staged') => {
+			const source = buildGitVirtualReviewRowSource({
+				...setup,
+				diffMode: mode,
+				interaction: {
+					kind: 'workbench',
+					activeTab: tab,
+					selectedLineKeys: new Set(),
+					composerState: {
+						open: false,
+						focusPending: false,
+						filePath: '',
+						side: 'after',
+						line: 0,
+						body: '',
+						severity: 'note',
+					},
+				},
+			});
+			const first = source.rowAt(2);
+			const second = source.rowAt(3);
+			if (first?.kind !== 'unified-row' && first?.kind !== 'split-row')
+				throw new Error('Expected diff row');
+			expect(second).toHaveProperty('actionTarget');
+			if (second?.kind === 'unified-row' || second?.kind === 'split-row') {
+				expect(first.actionTarget).toBe(second.actionTarget);
+			}
+			return first;
+		};
+		const keys = rowFrom('unified', 'unstaged').selectableLineKeys();
+		expect(keys).toHaveLength(12);
+		expect(rowFrom('split', 'unstaged').selectableLineKeys()).toBe(keys);
+		expect(rowFrom('unified', 'staged').selectableLineKeys()).not.toEqual(keys);
+	});
+
 	it('resolves only requested rows from a 100,000-row document', () => {
 		const first = summary('first.txt', 49_999);
 		const second = summary('second.txt', 49_999);
@@ -259,18 +230,21 @@ describe('Git virtual review row source', () => {
 	it('changes measurement revision only for structural or height-affecting inputs', () => {
 		const file = summary('file.txt', 2);
 		const baseOptions = options([file], {});
-		const baseRevision = buildGitVirtualReviewRowSource(baseOptions).measurementRevision;
-		const withLoading = {
+		const source = buildGitVirtualReviewRowSource({
 			...baseOptions,
-			loadingBodies: new Set(['file.txt']),
-		};
-		const withFocus = {
-			...baseOptions,
-			focusedFilePath: 'file.txt',
-		};
-
-		expect(buildGitVirtualReviewRowSource(withLoading).measurementRevision).toBe(baseRevision);
-		expect(buildGitVirtualReviewRowSource(withFocus).measurementRevision).toBe(baseRevision);
+			get loadingBodies() {
+				return baseOptions.loadingBodies;
+			},
+			get focusedFilePath() {
+				return baseOptions.focusedFilePath;
+			},
+		});
+		const baseRevision = source.measurementRevision;
+		baseOptions.loadingBodies = new Set(['file.txt']);
+		baseOptions.focusedFilePath = 'file.txt';
+		expect(source.rowAt(0)).toMatchObject({ isFocused: true });
+		expect(source.rowAt(1)).toMatchObject({ loadState: 'loading' });
+		expect(source.measurementRevision).toBe(baseRevision);
 
 		const changedDocument = options([file], {});
 		changedDocument.summary.documentId = 'document-b';
@@ -309,21 +283,14 @@ describe('Git virtual review row source', () => {
 				},
 			},
 		};
-		const composerOpen = {
-			...composerClosed,
-			interaction: {
-				...composerClosed.interaction,
-				composerState: {
-					...composerClosed.interaction.composerState,
-					open: true,
-					filePath: 'file.txt',
-					line: 1,
-				},
-			},
-		};
-		expect(buildGitVirtualReviewRowSource(composerOpen).measurementRevision).not.toBe(
-			buildGitVirtualReviewRowSource(composerClosed).measurementRevision,
-		);
+		const commentable = buildGitVirtualReviewRowSource(composerClosed);
+		const closedRevision = commentable.measurementRevision;
+		Object.assign(composerClosed.interaction.composerState, {
+			open: true,
+			filePath: 'file.txt',
+			line: 1,
+		});
+		expect(commentable.measurementRevision).not.toBe(closedRevision);
 	});
 
 	it('joins syntax by file and diff line without changing virtualization identity', () => {
@@ -379,18 +346,26 @@ describe('Git virtual review row source', () => {
 			segmentCount: 4,
 		};
 		const baseOptions = options([file], { [file.path]: body });
-		const plain = buildGitVirtualReviewRowSource(baseOptions);
 		const highlighted = buildGitVirtualReviewRowSource({
 			...baseOptions,
-			syntaxResults: { [file.path]: syntax },
+			get syntaxResults() {
+				return baseOptions.syntaxResults;
+			},
 		});
 
-		expect(highlighted.rowCount).toBe(plain.rowCount);
-		expect(highlighted.measurementRevision).toBe(plain.measurementRevision);
-		for (let index = 0; index < plain.rowCount; index += 1) {
-			expect(highlighted.rowKey(index)).toBe(plain.rowKey(index));
-			expect(highlighted.estimateRowHeight(index, 20)).toBe(plain.estimateRowHeight(index, 20));
-			expect(highlighted.rowAt(index)?.id).toBe(plain.rowAt(index)?.id);
+		const revision = highlighted.measurementRevision;
+		const keys = Array.from({ length: highlighted.rowCount }, (_, index) => [
+			highlighted.rowKey(index),
+			highlighted.estimateRowHeight(index, 20),
+			highlighted.rowAt(index)?.id,
+		]);
+		baseOptions.syntaxResults = { [file.path]: syntax };
+		expect(highlighted.measurementRevision).toBe(revision);
+		expect(highlighted.rowCount).toBe(keys.length);
+		for (const [index, [key, height, id]] of keys.entries()) {
+			expect(highlighted.rowKey(index)).toBe(key);
+			expect(highlighted.estimateRowHeight(index, 20)).toBe(height);
+			expect(highlighted.rowAt(index)?.id).toBe(id);
 		}
 		expect(highlighted.rowAt(2)).toMatchObject({
 			kind: 'unified-row',

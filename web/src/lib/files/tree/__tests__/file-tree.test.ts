@@ -105,6 +105,27 @@ describe('FileTreeStore', () => {
 		store = new FileTreeStore();
 	});
 
+	it('keeps a newly collapsed listing for immediate reuse at the cold directory limit', async () => {
+		const src = entry('src', 'directory');
+		vi.mocked(filesApi.getTree).mockImplementation(async ({ directoryPath } = {}) =>
+			response(directoryPath ?? undefined, directoryPath === '/workspace/project' ? [src] : []),
+		);
+		store.setProjectState(availableProject());
+		store.activate();
+		await tick();
+		store.toggleDirectory(src.path);
+		await tick();
+		for (let i = 0; i < FILE_TREE_COLD_DIRECTORY_LIMIT; i++) {
+			await store.fetchChildren(`/workspace/project/cold-${i}`);
+		}
+		store.toggleDirectory(src.path);
+		expect(store.childrenCache.has('/workspace/project/cold-0')).toBe(false);
+		vi.mocked(filesApi.getTree).mockClear();
+		store.toggleDirectory(src.path);
+		expect(filesApi.getTree).not.toHaveBeenCalled();
+		store.reset();
+	});
+
 	it('reloads evicted expanded descendants when a collapsed branch is reopened', async () => {
 		const parent = entry('src', 'directory');
 		const nested = entry('nested', 'directory', parent.path);
@@ -124,7 +145,9 @@ describe('FileTreeStore', () => {
 		await tick();
 		store.filterInput = 'child';
 		expect(store.filteredRows.map((row) => row.entry.name)).toContain('child.ts');
+		const warmCache = store.childrenCache;
 		store.toggleDirectory(parent.path);
+		expect(store.childrenCache).toBe(warmCache);
 		for (let index = 0; index <= FILE_TREE_COLD_DIRECTORY_LIMIT; index += 1) {
 			await store.fetchChildren(`/workspace/project/cold-${index}`);
 		}
@@ -669,6 +692,7 @@ describe('FileTreeStore', () => {
 			response: response('/workspace/project', [entry('b.ts', 'file'), entry('a.ts', 'file')]),
 		};
 		const sortEntries = vi.spyOn(store, 'sortEntries');
+		expect(store.filteredRows).toBe(store.materializedRows);
 
 		expect(store.filteredRows.map((row) => row.entry.name)).toEqual(['a.ts', 'b.ts']);
 		const callsAfterMaterialization = sortEntries.mock.calls.length;

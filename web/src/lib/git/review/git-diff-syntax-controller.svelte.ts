@@ -122,6 +122,13 @@ export class GitDiffSyntaxController {
 	}
 
 	pruneToFilePaths(filePaths: ReadonlySet<string>): void {
+		this.pruneCacheToPaths(filePaths);
+		if (
+			[...this.filesByPath.keys(), ...this.viewportPaths, ...this.navigationPaths].every((path) =>
+				filePaths.has(path),
+			)
+		)
+			return;
 		this.viewportPaths = intersect(this.viewportPaths, filePaths);
 		this.navigationPaths = intersect(this.navigationPaths, filePaths);
 		this.filesByPath = new Map(
@@ -134,7 +141,6 @@ export class GitDiffSyntaxController {
 			};
 		}
 		this.pruneActiveResultsToPaths(filePaths);
-		this.pruneCacheToPaths(filePaths);
 		this.reconcileDemand();
 	}
 

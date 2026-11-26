@@ -6,17 +6,17 @@
 	import X from '@lucide/svelte/icons/x';
 	import type { GitWorkbenchSurfaceController } from '$lib/git/workbench/git-workbench-surface.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
-	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
-	import { resolveGitEditorRoot } from '$lib/git/surface/git-editor-root.js';
 	import {
-		getFileSessions,
+		createGitPanelEditorAction,
+		observeGitPanelInvalidation,
+	} from './git-panel-actions.svelte.js';
+	import {
 		getLocalSettings,
 		getNotifications,
 		getWorkspaceCoordinator,
 		getSingletonSurfaces,
 	} from '$lib/context';
 	import { startGitFreshnessPolling } from './git-freshness-polling';
-	import GitConfirmModal from './GitConfirmModal.svelte';
 	import GitFreshnessBanner from './GitFreshnessBanner.svelte';
 	import GitPushModal from './GitPushModal.svelte';
 	import GitWorkbench from './GitWorkbench.svelte';
@@ -41,7 +41,6 @@
 	const workspace = getWorkspaceCoordinator();
 	const surfaces = getSingletonSurfaces();
 	const notifications = getNotifications();
-	const fileSessions = getFileSessions();
 	const localSettings = getLocalSettings();
 	const wb = $derived(controller.workbench);
 	const repository = $derived(controller.repository);
@@ -81,13 +80,10 @@
 		});
 	});
 
-	$effect(() => {
-		if (!presentationVisible) return;
-		const key = controller.target.effectiveProjectKey;
-		if (!key) return;
-		const version = gitProjectInvalidations.version(controller.target.executorId);
-		untrack(() => void controller.refreshForInvalidation(key, version));
-	});
+	observeGitPanelInvalidation(
+		() => presentationVisible,
+		() => controller,
+	);
 
 	async function refresh(): Promise<void> {
 		const target = activeTarget;
@@ -151,22 +147,11 @@
 		});
 	}
 
-	function openInEditor(relativePath: string, line: number): void {
-		const projectPath = activeProjectPath;
-		if (!projectPath || !activeTarget) return;
-		void fileSessions.open({
-			executorId: activeTarget.executorId,
-			fileRootPath: resolveGitEditorRoot({
-				activeProjectPath: projectPath,
-				targetRepoRoot: activeTarget?.repoRoot,
-			}),
-			relativePath,
-			mode: 'code',
-			origin: presentation,
-			reason: 'user-open',
-			line,
-		});
-	}
+	const openInEditor = createGitPanelEditorAction({
+		projectPath: () => activeProjectPath,
+		target: () => activeTarget,
+		presentation: () => presentation,
+	});
 </script>
 
 <div class="relative flex h-full min-h-0 flex-col bg-background">
@@ -221,19 +206,6 @@
 			{diffFontSize}
 			onOpenInEditor={openInEditor}
 		/>
-
-		{#if repository.confirmAction}
-			<GitConfirmModal
-				confirmAction={repository.confirmAction}
-				onConfirm={() =>
-					void runMutation(async (projectPath) => {
-						const ok = await repository.confirmAndExecute(projectPath);
-						if (ok) await wb.refresh({ reason: 'git-action' });
-						return ok;
-					})}
-				onCancel={() => (repository.confirmAction = null)}
-			/>
-		{/if}
 
 		{#if prompt && canConfirmPush}
 			<GitPushModal

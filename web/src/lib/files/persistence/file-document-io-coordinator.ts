@@ -207,7 +207,7 @@ export class FileDocumentIoCoordinator {
 		session.refreshController = controller;
 		const contentAtStart =
 			session.contentKind === 'image' ? null : session.document.currentContent();
-		this.#setRefreshing(session, true);
+		session.refreshing = true;
 		session.refreshError = null;
 		try {
 			const loaded = await this.#readLatest(session, controller.signal);
@@ -223,7 +223,7 @@ export class FileDocumentIoCoordinator {
 		} finally {
 			if (session.refreshController === controller) {
 				session.refreshController = null;
-				this.#setRefreshing(session, false);
+				session.refreshing = false;
 			}
 		}
 	}
@@ -447,11 +447,6 @@ export class FileDocumentIoCoordinator {
 		);
 	}
 
-	#setRefreshing(session: FileViewSession, refreshing: boolean): void {
-		session.refreshing = refreshing;
-		this.#reconfigureViews(session.document);
-	}
-
 	#isCurrentFreshness(
 		session: FileViewSession,
 		controller: AbortController,
@@ -480,9 +475,5 @@ export class FileDocumentIoCoordinator {
 			session.refreshController === controller &&
 			session.refreshGeneration === generation
 		);
-	}
-
-	#reconfigureViews(document: FileDocumentState): void {
-		for (const viewId of document.viewIds) this.options.getSession(viewId)?.editor?.reconfigure();
 	}
 }

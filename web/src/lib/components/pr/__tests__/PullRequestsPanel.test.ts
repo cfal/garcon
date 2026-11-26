@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { getLocalSettings } from '$lib/context';
+import type { MinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 import { createGitPatchIndex, getGitSplitPatchIndex } from '$lib/git/review/git-patch-index.js';
 import { gitReviewWorker } from '$lib/git/review/git-review-worker-client.js';
@@ -29,6 +30,7 @@ afterEach(cleanup);
 vi.mock('$lib/context', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/context')>()),
 	getLocalSettings: vi.fn(),
+	getMinuteClock: () => ({ currentTime: new Date('2026-01-01T00:00:00Z') } satisfies Pick<MinuteClockStore, 'currentTime'>),
 }));
 
 const HEAD = 'a'.repeat(40);
@@ -252,7 +254,8 @@ describe('PullRequestsPanel', () => {
 
 		it('clears Viewed and collapsed marks when the accepted head changes', async () => {
 			const first = diffDetail();
-			const getDetail = vi.fn<() => Promise<PullRequestDetail>>()
+			const getDetail = vi
+				.fn<() => Promise<PullRequestDetail>>()
 				.mockResolvedValueOnce(first)
 				.mockResolvedValue({ ...first, headRefOid: 'b'.repeat(40), documentId: 'revision:b' });
 			const { controller } = setup({ getDetail });
@@ -261,8 +264,12 @@ describe('PullRequestsPanel', () => {
 			await fireEvent.click(await screen.findByRole('button', { name: 'Viewed' }));
 			controller.reviews.apply(refreshedSnapshot(2, { headRefOid: 'b'.repeat(40) }));
 			await waitFor(() => expect(controller.detail?.headRefOid).toBe('b'.repeat(40)));
-			expect(screen.getByRole('button', { name: 'Viewed' }).getAttribute('aria-pressed')).toBe('false');
-			expect(screen.getByRole('button', { name: /synthetic.ts/ }).getAttribute('aria-expanded')).toBe('true');
+			expect(screen.getByRole('button', { name: 'Viewed' }).getAttribute('aria-pressed')).toBe(
+				'false',
+			);
+			expect(
+				screen.getByRole('button', { name: /synthetic.ts/ }).getAttribute('aria-expanded'),
+			).toBe('true');
 		});
 
 		function refreshedSnapshot(
@@ -1003,44 +1010,58 @@ describe('PullRequestsPanel', () => {
 		request.reject(new Error('Posting failed'));
 		await screen.findByText('Posting failed');
 		expect(notifyError).not.toHaveBeenCalled();
-		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty('disabled', false);
+		expect(screen.getByRole('button', { name: 'Post to GitHub' })).toHaveProperty(
+			'disabled',
+			false,
+		);
 		expect(api.post).toHaveBeenCalledTimes(1);
 	});
 
-	it.each(['run', 'pull request'] as const)('does not attribute a post to another %s', async (target) => {
-		const older = { ...run, id: 'older', review: 'Older run' };
-		const { controller, onOpenChat, api, panel, notifyError } = setup({
-			getPage: async (_repository, number) => ({
-				runs: number === 7 ? [run, older] : [], nextCursor: null, revision: 1,
-			}),
-			getRun: async (id) => id === older.id ? older : run,
-		});
-		const request = await startPendingPost(api);
-		if (target === 'run') controller.selectRun(older.id);
-		else controller.select(snapshot.inbox[1]);
-		await panel.unmount();
-		render(PullRequestsPanel, { controller, onOpenChat });
-		await waitFor(() => expect(controller.isRunsLoading || controller.isRunLoading).toBe(false));
-		expect(screen.queryByRole('button', { name: /Posting/ })).toBeNull();
-		const button = target === 'run' ? 'Post to GitHub' : 'Review';
-		expect(screen.getByRole('button', { name: button })).toHaveProperty('disabled', target === 'run');
-		request.reject(new Error('Original post failed'));
-		await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Original post failed'));
-		expect(screen.queryByText('Original post failed')).toBeNull();
-		expect(api.post).toHaveBeenCalledExactlyOnceWith(run.id);
-	});
+	it.each(['run', 'pull request'] as const)(
+		'does not attribute a post to another %s',
+		async (target) => {
+			const older = { ...run, id: 'older', review: 'Older run' };
+			const { controller, onOpenChat, api, panel, notifyError } = setup({
+				getPage: async (_repository, number) => ({
+					runs: number === 7 ? [run, older] : [],
+					nextCursor: null,
+					revision: 1,
+				}),
+				getRun: async (id) => (id === older.id ? older : run),
+			});
+			const request = await startPendingPost(api);
+			if (target === 'run') controller.selectRun(older.id);
+			else controller.select(snapshot.inbox[1]);
+			await panel.unmount();
+			render(PullRequestsPanel, { controller, onOpenChat });
+			await waitFor(() => expect(controller.isRunsLoading || controller.isRunLoading).toBe(false));
+			expect(screen.queryByRole('button', { name: /Posting/ })).toBeNull();
+			const button = target === 'run' ? 'Post to GitHub' : 'Review';
+			expect(screen.getByRole('button', { name: button })).toHaveProperty(
+				'disabled',
+				target === 'run',
+			);
+			request.reject(new Error('Original post failed'));
+			await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Original post failed'));
+			expect(screen.queryByText('Original post failed')).toBeNull();
+			expect(api.post).toHaveBeenCalledExactlyOnceWith(run.id);
+		},
+	);
 
-	it.each(['hidden panel', 'different tab'] as const)('notifies a post failure with a %s', async (view) => {
-		const { controller, api, notifyError } = setup();
-		const request = await startPendingPost(api);
-		if (view === 'hidden panel') controller.setPresentationVisible(false);
-		else controller.tab = 'checks';
-		request.reject(new Error('Post failed while away'));
-		await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Post failed while away'));
-		controller.setPresentationVisible(true);
-		controller.tab = 'review';
-		await screen.findByText('Post failed while away');
-	});
+	it.each(['hidden panel', 'different tab'] as const)(
+		'notifies a post failure with a %s',
+		async (view) => {
+			const { controller, api, notifyError } = setup();
+			const request = await startPendingPost(api);
+			if (view === 'hidden panel') controller.setPresentationVisible(false);
+			else controller.tab = 'checks';
+			request.reject(new Error('Post failed while away'));
+			await waitFor(() => expect(notifyError).toHaveBeenCalledWith('Post failed while away'));
+			controller.setPresentationVisible(true);
+			controller.tab = 'review';
+			await screen.findByText('Post failed while away');
+		},
+	);
 
 	for (const status of ['unknown', 'posted'] as const) {
 		it(`allows ${status === 'unknown' ? 'unknown-post reconciliation' : 'cleanup retry'} for an outdated review`, async () => {

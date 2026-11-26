@@ -77,7 +77,8 @@
 		session.readOnly;
 		session.refreshing;
 		session.document.mixedLineEndings;
-		session.editor?.reconfigure();
+		const controller = session.editor;
+		untrack(() => controller?.reconfigure());
 	});
 </script>
 

@@ -53,11 +53,11 @@ const DEFAULT_API: PullRequestReviewsApi = {
 
 export class PullRequestReviewsStore {
 	status = $state<PullRequestReviewsStatus>('idle');
-	snapshot = $state<PullRequestReviewsSnapshot | null>(null);
+	snapshot = $state.raw<PullRequestReviewsSnapshot | null>(null);
 	error = $state<string | null>(null);
 	isRefreshing = $state(false);
 	// Repositories with a requested scan, keyed to their scan state when it was requested.
-	scanning = $state<ReadonlyMap<string, string>>(new Map());
+	scanning = $state.raw<ReadonlyMap<string, string>>(new Map());
 	#scanTimer: ReturnType<typeof setTimeout> | null = null;
 	#refreshing: Promise<void> | null = null;
 	#refreshAgain = false;

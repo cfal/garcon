@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import AlertTriangle from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
 	import type { GitHistorySurfaceController } from '$lib/git/history/git-history-surface.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
-	import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
-	import { resolveGitEditorRoot } from '$lib/git/surface/git-editor-root.js';
 	import {
-		getFileSessions,
+		createGitPanelEditorAction,
+		observeGitPanelInvalidation,
+	} from './git-panel-actions.svelte.js';
+	import {
 		getGitReviewDisplay,
 		getLocalSettings,
 		getTransientLayers,
@@ -37,7 +37,6 @@
 	const shortcuts = getWorkspaceShortcuts();
 	const reviewDisplay = getGitReviewDisplay();
 	const localSettings = getLocalSettings();
-	const fileSessions = getFileSessions();
 	const transientLayers = getTransientLayers();
 	const presentationVisible = $derived(
 		visible && controller.presentationVisible && !controller.target.projectIdentityPending,
@@ -63,13 +62,10 @@
 		}),
 	);
 
-	$effect(() => {
-		if (!presentationVisible) return;
-		const key = controller.target.effectiveProjectKey;
-		if (!key) return;
-		const version = gitProjectInvalidations.version(controller.target.executorId);
-		untrack(() => void controller.refreshForInvalidation(key, version));
-	});
+	observeGitPanelInvalidation(
+		() => presentationVisible,
+		() => controller,
+	);
 
 	function requestRevert(
 		commit: NonNullable<GitHistorySurfaceController['pendingRevertCommit']>,
@@ -88,21 +84,11 @@
 		void controller.target.refreshTargets('session');
 	}
 
-	function openInEditor(relativePath: string, line: number): void {
-		if (!projectPath || !activeTarget) return;
-		void fileSessions.open({
-			executorId: activeTarget.executorId,
-			fileRootPath: resolveGitEditorRoot({
-				activeProjectPath: projectPath,
-				targetRepoRoot: activeTarget?.repoRoot,
-			}),
-			relativePath,
-			mode: 'code',
-			origin: presentation,
-			reason: 'user-open',
-			line,
-		});
-	}
+	const openInEditor = createGitPanelEditorAction({
+		projectPath: () => projectPath,
+		target: () => activeTarget,
+		presentation: () => presentation,
+	});
 </script>
 
 <div class="relative flex h-full min-h-0 flex-col bg-background">

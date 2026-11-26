@@ -9,9 +9,9 @@ export const FILE_DRAFT_STORE_NAME = 'drafts';
 export const FILE_DRAFT_SUMMARY_STORE_NAME = 'draft-summaries';
 export const FILE_RECENT_STORE_NAME = 'recents';
 export const FILE_NAVIGATION_STORE_NAME = 'navigation';
-export const FILE_DRAFT_SCHEMA_VERSION = 3;
+export const FILE_DRAFT_SCHEMA_VERSION = 4;
 export const FILE_DRAFT_DOCUMENT_LIMIT_BYTES = 24 * 1024 * 1024;
-export const FILE_DRAFT_TOTAL_LIMIT_BYTES = 100 * 1024 * 1024;
+const FILE_DRAFT_TOTAL_LIMIT_BYTES = 100 * 1024 * 1024;
 export const FILE_DRAFT_LIMIT = 20;
 export const FILE_RECENT_LIMIT = 100;
 
@@ -25,6 +25,7 @@ export interface FileDraft {
 	normalizedRelativePath: string;
 	content: string;
 	savedAt: number;
+	checkpointId?: string;
 }
 
 export interface FileDraftSummary extends Omit<FileDraft, 'content'> {
@@ -65,7 +66,7 @@ export interface FileNavigationHistoryV1 {
 export interface FileDraftRepository {
 	readonly durable: boolean;
 	putDraft(record: FileDraft): Promise<void>;
-	deleteDraft(documentId: string): Promise<void>;
+	deleteDraft(documentId: string, canDelete?: (current: FileDraft) => boolean): Promise<void>;
 	getDrafts(userNamespace: string, deploymentId: string): Promise<FileDraftSummary[]>;
 	getDraft(documentId: string): Promise<FileDraft | null>;
 	clearDrafts(userNamespace: string, deploymentId: string): Promise<void>;
@@ -121,14 +122,19 @@ export function createFileDraftRepository(
 				},
 			);
 		},
-		async deleteDraft(documentId) {
+		async deleteDraft(documentId, canDelete) {
 			await runTransaction(
 				await open(),
 				[FILE_DRAFT_SUMMARY_STORE_NAME, FILE_DRAFT_STORE_NAME],
 				'readwrite',
 				async (summaries, transaction) => {
+					const bodies = transaction.objectStore(FILE_DRAFT_STORE_NAME);
+					if (canDelete) {
+						const current = await indexedDbRequest<FileDraft | undefined>(bodies.get(documentId));
+						if (!current || !canDelete(current)) return;
+					}
 					await indexedDbRequest(summaries.delete(documentId));
-					await indexedDbRequest(transaction.objectStore(FILE_DRAFT_STORE_NAME).delete(documentId));
+					await indexedDbRequest(bodies.delete(documentId));
 				},
 			);
 		},
@@ -176,26 +182,21 @@ export function createFileDraftRepository(
 						locationKey: record.key,
 					}),
 				);
-				const records = (await indexedDbRequest<FileRecentLocationV1[]>(store.getAll()))
-					.filter(
-						(entry) =>
-							entry.userNamespace === record.userNamespace &&
-							entry.deploymentId === record.deploymentId,
-					)
-					.sort((first, second) => second.timestamp - first.timestamp);
+				const records = (
+					await readRecentScope(store, record.userNamespace, record.deploymentId)
+				).sort((first, second) => second.timestamp - first.timestamp);
 				for (const stale of records.slice(FILE_RECENT_LIMIT)) {
 					await indexedDbRequest(store.delete(stale.key));
 				}
 			});
 		},
 		async getRecents(userNamespace, deploymentId) {
-			return (await getAll<FileRecentLocationV1>(await open(), FILE_RECENT_STORE_NAME))
-				.filter(
-					(record) =>
-						record.schemaVersion === 1 &&
-						record.userNamespace === userNamespace &&
-						record.deploymentId === deploymentId,
+			return (
+				await runTransaction(await open(), FILE_RECENT_STORE_NAME, 'readonly', (store) =>
+					readRecentScope(store, userNamespace, deploymentId),
 				)
+			)
+				.filter((record) => record.schemaVersion === 1)
 				.map((record) => (record.locationKey ? { ...record, key: record.locationKey } : record));
 		},
 		async putNavigation(record) {
@@ -235,7 +236,11 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 				drafts.delete(id);
 			drafts.set(record.documentId, structuredClone(record));
 		},
-		async deleteDraft(documentId) {
+		async deleteDraft(documentId, canDelete) {
+			if (canDelete) {
+				const current = drafts.get(documentId);
+				if (!current || !canDelete(current)) return;
+			}
 			drafts.delete(documentId);
 		},
 		async getDrafts(userNamespace, deploymentId) {
@@ -284,7 +289,7 @@ export function createMemoryFileDraftRepository(durable = true): FileDraftReposi
 	};
 }
 
-export function scopedRecordKey(...parts: string[]): string {
+function scopedRecordKey(...parts: string[]): string {
 	return JSON.stringify(parts);
 }
 
@@ -315,6 +320,10 @@ function openDatabase(
 			] as const) {
 				if (request.result.objectStoreNames.contains(storeName)) continue;
 				request.result.createObjectStore(storeName, { keyPath });
+			}
+			const recents = request.transaction!.objectStore(FILE_RECENT_STORE_NAME);
+			if (!recents.indexNames.contains('scope')) {
+				recents.createIndex('scope', ['userNamespace', 'deploymentId']);
 			}
 			if (!request.result.objectStoreNames.contains(FILE_DRAFT_SUMMARY_STORE_NAME)) {
 				const summaries = request.result.createObjectStore(FILE_DRAFT_SUMMARY_STORE_NAME, {
@@ -357,9 +366,13 @@ async function write<T>(
 	});
 }
 
-async function getAll<T>(database: IDBDatabase, storeName: string): Promise<T[]> {
-	return runTransaction(database, storeName, 'readonly', (store) =>
-		indexedDbRequest<T[]>(store.getAll()),
+function readRecentScope(
+	store: IDBObjectStore,
+	userNamespace: string,
+	deploymentId: string,
+): Promise<FileRecentLocationV1[]> {
+	return indexedDbRequest<FileRecentLocationV1[]>(
+		store.index('scope').getAll([userNamespace, deploymentId]),
 	);
 }
 

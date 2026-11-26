@@ -31,6 +31,180 @@ function harness(durable = true) {
 }
 
 describe('FileDraftCoordinator', () => {
+	it('clears a failed first backup after reverting an unsaved edit', async () => {
+		const { repository, coordinator } = harness();
+		const value = document();
+		vi.spyOn(repository, 'putDraft').mockRejectedValueOnce(new Error('Storage busy'));
+		await coordinator.settle(value);
+		expect(value.recoveryError).toBe('Storage busy');
+		value.content = value.baseline;
+		await coordinator.flush();
+		expect(value.recoveryError).toBeNull();
+		coordinator.destroy();
+	});
+
+	it.each([false, true])(
+		'retries confirmed-byte cleanup against the live peer draft (replaced: %s)',
+		async (replaced) => {
+			const { repository, coordinator } = harness();
+			const value = document();
+			const peer = new FileDraftCoordinator({
+				repository,
+				deploymentId: 'deployment',
+				userNamespace: 'user',
+			});
+			await peer.settle(value);
+			const [summary] = await repository.getDrafts('user', 'deployment');
+			const stored = (await repository.getDraft(summary.documentId))!;
+			value.baseline = value.content;
+			value.dirty = false;
+			coordinator.confirmSave(value, stored.content);
+			vi.spyOn(repository, 'deleteDraft').mockRejectedValueOnce(new Error('Storage busy'));
+			await coordinator.settle(value);
+			expect(value.recoveryError).toBe('Storage busy');
+			value.content = 'unsaved edit';
+			vi.spyOn(repository, 'putDraft').mockRejectedValueOnce(new Error('Backup unavailable'));
+			await coordinator.settle(value);
+			expect(value.recoveryError).toBe('Backup unavailable');
+			value.content = value.baseline;
+			if (replaced) await repository.putDraft({ ...stored, content: 'new peer edit' });
+			await coordinator.flush();
+			expect(value.recoveryError).toBeNull();
+			expect((await repository.getDraft(summary.documentId))?.content).toBe(
+				replaced ? 'new peer edit' : undefined,
+			);
+			coordinator.destroy();
+			peer.destroy();
+		},
+	);
+
+	it('does not let delayed or duplicate cleanup delete bytes from an older Save', async () => {
+		const { repository, coordinator } = harness();
+		const value = document();
+		const peer = new FileDraftCoordinator({
+			repository,
+			deploymentId: 'deployment',
+			userNamespace: 'user',
+		});
+		await peer.settle(value);
+		const [draft] = await repository.getDrafts('user', 'deployment');
+		const prior = (await repository.getDraft(draft.documentId))!;
+		const remove = repository.deleteDraft.bind(repository);
+		const gate = Promise.withResolvers<void>();
+		const started = Promise.withResolvers<void>();
+		vi.spyOn(repository, 'deleteDraft').mockImplementationOnce(async (...args) => {
+			started.resolve();
+			await gate.promise;
+			return remove(...args);
+		});
+		try {
+			value.baseline = value.content;
+			value.dirty = false;
+			coordinator.confirmSave(value, value.baseline);
+			const first = coordinator.settle(value);
+			const duplicate = coordinator.settle(value);
+			await started.promise;
+			value.baseline = 'newer Save';
+			value.content = value.baseline;
+			coordinator.confirmSave(value, value.baseline);
+			await repository.putDraft({ ...prior, checkpointId: 'new-peer' });
+			gate.resolve();
+			await Promise.all([first, duplicate, coordinator.settle(value)]);
+			expect(await repository.getDraft(draft.documentId)).toMatchObject({
+				checkpointId: 'new-peer',
+				content: prior.content,
+			});
+		} finally {
+			gate.resolve();
+			coordinator.destroy();
+			peer.destroy();
+		}
+	});
+
+	it.each([
+		{ saved: 'saved before close', scenario: 'close' },
+		{ saved: '', scenario: 'reopen' },
+		{ saved: 'before refresh', scenario: 'refresh and edit' },
+	])(
+		'uses the latest file lifetime when cleanup finishes after close (%j)',
+		async ({ saved, scenario }) => {
+			const { repository, coordinator } = harness();
+			const peer = new FileDraftCoordinator({
+				repository,
+				deploymentId: 'deployment',
+				userNamespace: 'user',
+			});
+			const value = document();
+			value.content = saved;
+			await peer.settle(value);
+			const [draft] = await repository.getDrafts('user', 'deployment');
+			value.baseline = saved;
+			value.dirty = false;
+			coordinator.confirmSave(value, saved);
+			const gate = Promise.withResolvers<void>();
+			const started = Promise.withResolvers<void>();
+			const remove = repository.deleteDraft.bind(repository);
+			vi.spyOn(repository, 'deleteDraft').mockImplementationOnce(async (...args) => {
+				started.resolve();
+				await gate.promise;
+				return remove(...args);
+			});
+			try {
+				const saving = coordinator.settle(value);
+				await started.promise;
+				if (scenario === 'refresh and edit') {
+					value.baseline = 'refreshed from disk';
+					value.content = 'new local edit';
+					vi.spyOn(repository, 'putDraft').mockRejectedValueOnce(new Error('Quota exceeded'));
+				}
+				coordinator.closeDocument(value);
+				value.dispose();
+				if (scenario === 'reopen') {
+					const next = document();
+					next.baseline = 'new Save';
+					next.content = next.baseline;
+					coordinator.confirmSave(next, next.baseline);
+					void coordinator.settle(next);
+				}
+				gate.resolve();
+				await saving;
+				await coordinator.flush();
+				if (scenario === 'refresh and edit') expect(value.recoveryError).toBe('Quota exceeded');
+				expect((await repository.getDraft(draft.documentId))?.content).toBe(
+					scenario === 'close' ? undefined : saved,
+				);
+			} finally {
+				gate.resolve();
+				coordinator.destroy();
+				peer.destroy();
+			}
+		},
+	);
+
+	it('skips clean checkpoints without a draft, but deletes confirmed writes before close', async () => {
+		const { repository, coordinator } = harness();
+		const remove = vi.spyOn(repository, 'deleteDraft');
+		await coordinator.initialize();
+		const value = document();
+		value.dirty = false;
+		await coordinator.settle(value);
+		coordinator.closeDocument(value);
+		await coordinator.flush();
+		expect(remove).not.toHaveBeenCalled();
+
+		value.content = 'pending backup';
+		const write = coordinator.settle(value);
+		value.dirty = false;
+		coordinator.closeDocument(value);
+		await write;
+		await coordinator.flush();
+		expect(remove).toHaveBeenCalledOnce();
+		expect(await repository.getDrafts('user', 'deployment')).toEqual([]);
+
+		await coordinator.settle(value);
+		expect(remove).toHaveBeenCalledOnce();
+		coordinator.destroy();
+	});
 	it('keeps only the latest pending checkpoint while a write is blocked', async () => {
 		const { repository, coordinator } = harness();
 		const put = repository.putDraft.bind(repository);
@@ -72,6 +246,31 @@ describe('FileDraftCoordinator', () => {
 			'synthetic revision 99',
 		);
 		coordinator.destroy();
+	});
+
+	it('retains a different peer checkpoint when the owner of an older checkpoint closes clean', async () => {
+		const { repository, coordinator } = harness();
+		try {
+			const value = document();
+			await coordinator.settle(value);
+			const [summary] = await repository.getDrafts('user', 'deployment');
+			const original = (await repository.getDraft(summary.documentId))!;
+			await repository.putDraft({
+				...original,
+				checkpointId: 'peer',
+				content: 'different peer edit',
+			});
+
+			value.content = value.baseline;
+			coordinator.closeDocument(value);
+			await coordinator.flush();
+			expect(await repository.getDraft(summary.documentId)).toMatchObject({
+				checkpointId: 'peer',
+				content: 'different peer edit',
+			});
+		} finally {
+			coordinator.destroy();
+		}
 	});
 
 	it.each([false, true])(

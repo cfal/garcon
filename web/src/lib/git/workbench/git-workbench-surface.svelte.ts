@@ -1,3 +1,4 @@
+import { storeMostRecent, takeMostRecent } from '$lib/git/surface/git-recent-cache.js';
 import type { GitDiffTab } from '$lib/api/git.js';
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
@@ -66,10 +67,7 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 			onTargetChanged: (target, identity, reason, identityChanged) =>
 				this.#applyTarget(target, identity, reason, identityChanged),
 		});
-		this.repository = new GitRepositoryController({
-			branches: this.target.branches,
-			surfaceId: singletonSurfaceId('git'),
-		});
+		this.repository = new GitRepositoryController(this.target.branches);
 		this.#unregisterReviewDisplay = deps.reviewDisplay.register(singletonSurfaceId('git'), {
 			isVisible: () => this.presentationVisible,
 			hasOpenCommentComposer: () => this.workbench.drafts.commentComposer.open,
@@ -179,26 +177,14 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 	#saveSelection(): void {
 		const identity = this.#loadedIdentity;
 		if (!identity) return;
-		storeMostRecent(this.#selectionByTarget, identity, {
-			selectedFile: this.workbench.files.selectedFile,
-			diffTab: this.workbench.files.activeTab,
-		});
+		storeMostRecent(
+			this.#selectionByTarget,
+			identity,
+			{
+				selectedFile: this.workbench.files.selectedFile,
+				diffTab: this.workbench.files.activeTab,
+			},
+			SELECTION_CACHE_LIMIT,
+		);
 	}
-}
-
-function storeMostRecent<V>(entries: Map<string, V>, key: string, value: V): void {
-	entries.delete(key);
-	entries.set(key, value);
-	while (entries.size > SELECTION_CACHE_LIMIT) {
-		const oldest = entries.keys().next().value;
-		if (oldest === undefined) break;
-		entries.delete(oldest);
-	}
-}
-
-function takeMostRecent<V>(entries: Map<string, V>, key: string): V | null {
-	const value = entries.get(key);
-	if (value === undefined) return null;
-	storeMostRecent(entries, key, value);
-	return value;
 }

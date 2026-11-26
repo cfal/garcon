@@ -48,6 +48,7 @@ function createController() {
 		selection: { anchor: 8 },
 		extensions: [history()],
 	});
+	let fontSize = 12;
 	const settings = {
 		get editorThemeId() {
 			return 'standard-light' as const;
@@ -59,15 +60,44 @@ function createController() {
 			return true;
 		},
 		get fontSize() {
-			return 12;
+			return fontSize;
 		},
 	};
 	const controller = new CodeEditorController(session, settings);
 	controllers.push(controller);
-	return { session, controller };
+	return {
+		session,
+		controller,
+		setFontSize: (value: number) => {
+			fontSize = value;
+		},
+	};
 }
 
 describe('CodeEditorController', () => {
+	it.each(['historyUndo', 'historyRedo'] as const)(
+		'blocks native %s immediately when a document starts refreshing',
+		(inputType) => {
+			const { session, controller } = createController();
+			const host = parent();
+			controller.attach(host);
+			const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+			const original = controller.currentContent();
+			view.dispatch({ changes: { from: 0, insert: 'edited ' } });
+			if (inputType === 'historyRedo') expect(controller.run('undo')).toBe(true);
+			const before = controller.currentContent();
+			const applyHistory = () => view.contentDOM.dispatchEvent(
+				new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true }),
+			);
+			session.refreshing = true;
+			applyHistory();
+			expect(controller.currentContent()).toBe(before);
+			session.refreshing = false;
+			applyHistory();
+			expect(controller.currentContent()).toBe(inputType === 'historyUndo' ? original : 'edited ' + original);
+		},
+	);
+
 	it('clamps retained selection when rebuilding after a canonical shrink', () => {
 		const { session, controller } = createController();
 		controller.dispose();
@@ -356,11 +386,14 @@ describe('CodeEditorController', () => {
 		const firstLease = controller.attach(firstParent);
 		const firstScroller = firstParent.querySelector<HTMLElement>('.cm-scroller');
 		if (!firstScroller) throw new Error('Expected CodeMirror scroller');
+		const view = EditorView.findFromDOM(firstParent.querySelector<HTMLElement>('.cm-editor')!)!;
+		const snapshot = vi.spyOn(view, 'scrollSnapshot');
 		expect(controller.scrollElement).toBe(firstScroller);
 		emulateDetachedScrollReset(firstScroller);
 		firstScroller.scrollLeft = 9;
 		firstScroller.scrollTop = 24;
-		firstScroller.dispatchEvent(new Event('scroll'));
+		for (let tick = 0; tick < 10; tick++) firstScroller.dispatchEvent(new Event('scroll'));
+		expect(snapshot).toHaveBeenCalledOnce();
 		firstParent.remove();
 		controller.prepareRendererTransfer();
 		const secondLease = controller.attach(secondParent);
@@ -397,6 +430,7 @@ describe('CodeEditorController', () => {
 		controller.attach(host);
 		const editor = host.querySelector<HTMLElement>('.cm-editor');
 		if (!editor) throw new Error('Expected CodeMirror editor');
+		expect(editor.style.getPropertyValue('--file-editor-font-size')).toBe('12px');
 
 		const styleRules = [...document.querySelectorAll('style')]
 			.map((style) => style.textContent ?? '')
@@ -407,10 +441,10 @@ describe('CodeEditorController', () => {
 				const scope = `.${className}`;
 				return {
 					floorIndex: styleRules.indexOf(
-						`${scope} .cm-content, ${scope} .cm-gutters {font-size: 16px;`,
+						`${scope} .cm-content, ${scope} .cm-gutters {font-size: max(16px, var(--file-editor-font-size));`,
 					),
 					configuredIndex: styleRules.indexOf(
-						`@media (pointer: fine) {${scope} .cm-content, ${scope} .cm-gutters {font-size: 12px;`,
+						`@media (pointer: fine) {${scope} .cm-content, ${scope} .cm-gutters {font-size: var(--file-editor-font-size);`,
 					),
 				};
 			})
@@ -678,15 +712,36 @@ describe('CodeEditorController', () => {
 	it('makes an attached editor read-only while refresh is pending', () => {
 		const { session, controller } = createController();
 		session.editorState = null;
-		const lease = controller.attach(parent());
+		const host = parent();
+		const lease = controller.attach(host);
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
 
 		session.refreshing = true;
+		view.dispatch({ changes: { from: 0, insert: 'blocked' } });
+		expect(controller.currentContent()).toBe('first\nsecond\nthird');
 		controller.reconfigure();
 		expect((session.editorState as EditorState | null)?.facet(EditorState.readOnly)).toBe(true);
 
 		session.refreshing = false;
 		controller.reconfigure();
 		expect((session.editorState as EditorState | null)?.facet(EditorState.readOnly)).toBe(false);
+		controller.detach(lease);
+	});
+
+	it('reuses the installed configuration and keeps the stylesheet stable across font changes', () => {
+		const { session, controller, setFontSize } = createController();
+		const host = parent();
+		const initial = session.editorState;
+		const lease = controller.attach(host);
+		const editor = host.querySelector<HTMLElement>('.cm-editor')!;
+		const classes = editor.className;
+		controller.reconfigure();
+		expect(session.editorState).toBe(initial);
+
+		setFontSize(20);
+		controller.reconfigure();
+		expect(editor.className).toBe(classes);
+		expect(editor.style.getPropertyValue('--file-editor-font-size')).toBe('20px');
 		controller.detach(lease);
 	});
 
