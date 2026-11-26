@@ -41,6 +41,14 @@ test('bounded handoffs quote literal prompts and truncate only at a complete esc
   expect(prompt.repeat(100).startsWith(retained)).toBe(true);
 });
 
+test('distinguishes a truly empty prompt from one whose first character cannot fit', () => {
+  const summarize = (prompt: string) => projectToolUseSummary(new ScheduleToolUseMessage('now', 'timer',
+    { action: 'wakeup', delaySeconds: 1, reason: 'x'.repeat(154), prompt }));
+  expect(summarize('').text).toEndWith('Prompt: ""');
+  expect(summarize('Check').text).toEndWith('Prompt:...');
+  expect(summarize('Check').abridged).toBe(true);
+});
+
 test('handoffs and shares retain task intent, agent destinations, and unsuccessful plan steps', () => {
   const task = new BackgroundTaskToolUseMessage('now', 'call', 'stop', 'job');
   const input = new BackgroundTaskToolUseMessage('now', 'stdin', 'send_input', 'job', 'go\n');

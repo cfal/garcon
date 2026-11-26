@@ -703,7 +703,10 @@ export function summarizeSchedule(request: ToolScheduleRequest, redactPrompt?: (
   let text = prefix + ' "';
   for (const char of prompt) {
     const escaped = JSON.stringify(char).slice(1, -1);
-    if (text.length + escaped.length + 1 > TOOL_SUMMARY_MAX_CHARS) return { text: text + '"...', abridged: true, prefixBeforeLiteral: prefix };
+    if (text.length + escaped.length + 1 > TOOL_SUMMARY_MAX_CHARS) {
+      const fitted = text.length === prefix.length + 2 ? prefix + '...' : text + '"...';
+      return { text: fitted, abridged: true, prefixBeforeLiteral: prefix };
+    }
     text += escaped;
   }
   return { text: text + (shortened ? '"...' : '"'), abridged: shortened || prompt !== raw, prefixBeforeLiteral: prefix };
