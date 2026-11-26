@@ -1,10 +1,4 @@
-import {
-	preambleContentUsesChatId,
-	preambleContentUsesCurrentDate,
-	preambleContentUsesCurrentDateLocal,
-	renderPreambleContent,
-	type Preamble,
-} from '$shared/preambles';
+import { renderPreambleContent, type Preamble } from '$shared/preambles';
 import {
 	expandScheduledSnippetTemplate,
 	expandSnippetTemplate,
@@ -13,15 +7,14 @@ import {
 } from '$shared/snippet-template';
 import {
 	SNIPPET_ARGUMENTS_MAX_LENGTH,
+	SNIPPET_TEMPLATE_VARIABLES,
 	SNIPPET_VALIDATION_ERROR_MESSAGE,
-	snippetTemplateUsesChatId,
-	snippetTemplateUsesCurrentDate,
-	snippetTemplateUsesCurrentDateLocal,
-	snippetTemplateUsesProjectPath,
 	type Snippet,
 	type SnippetArgumentsInput,
 } from '$shared/snippets';
 import {
+	matchTemplateTokens,
+	RUNTIME_TEMPLATE_VARIABLES,
 	TEMPLATE_VALIDATION_VALUES,
 	TemplateExpansionTooLongError,
 } from '$shared/template-tokens';
@@ -41,42 +34,65 @@ export type LocalSnippetExpansionResult =
 	| { readonly kind: 'fallback' };
 
 export interface SnippetCatalogLookup {
+	readonly hasLoaded: boolean;
 	readonly hasFreshSnapshot: boolean;
 	readonly snippets: readonly Snippet[];
 }
 
 export interface PreambleCatalogLookup {
+	readonly hasLoaded: boolean;
 	readonly hasFreshSnapshot: boolean;
 	readonly preambles: readonly Preamble[];
 }
 
-// Returns true when the owning catalog holds a settled snapshot whose entry still matches
-// the captured selection, so edits, restores, or in-flight refreshes while a dialog is open
-// fall back to the server instead of expanding stale captured text.
-export function catalogMatchesSelectableSnippet(
+export interface SelectableSnippetCatalogs {
+	readonly snippets: SnippetCatalogLookup | null;
+	readonly preambles: PreambleCatalogLookup | null;
+}
+
+export type CatalogSelectableSnippetState = 'matched' | 'changed' | 'unavailable';
+
+function collectActiveVariables<Variable extends string>(
+	template: string,
+	allowedVariables: readonly Variable[],
+): Set<Variable> {
+	const active = new Set<Variable>();
+	for (const match of matchTemplateTokens(template, allowedVariables)) {
+		if (!match.escaped) active.add(match.variable);
+	}
+	return active;
+}
+
+// Inspects the loaded catalog before checking freshness so an in-flight refresh or error
+// cannot mask an already-observed selection mismatch, while a still-matching nonfresh catalog
+// continues to fall back safely to the server.
+export function inspectSelectableSnippetInCatalog(
 	item: SelectableSnippet,
-	catalog: SnippetCatalogLookup | PreambleCatalogLookup | null,
-): boolean {
-	if (!catalog || !catalog.hasFreshSnapshot) return false;
+	catalogs: SelectableSnippetCatalogs,
+): CatalogSelectableSnippetState {
 	if (item.source === 'snippet') {
-		if (!('snippets' in catalog)) return false;
+		const catalog = catalogs.snippets;
+		if (!catalog || !catalog.hasLoaded) return 'unavailable';
 		const current = catalog.snippets.find((entry) => entry.id === item.id);
-		return (
+		const matches =
 			current !== undefined &&
 			current.shortName === item.shortName &&
 			current.updatedAt === item.updatedAt &&
 			current.template === item.body &&
-			current.defaultArguments === item.snippet.defaultArguments
-		);
+			current.defaultArguments === item.snippet.defaultArguments;
+		if (!matches) return 'changed';
+		return catalog.hasFreshSnapshot ? 'matched' : 'unavailable';
 	}
-	if (!('preambles' in catalog)) return false;
+	const catalog = catalogs.preambles;
+	if (!catalog || !catalog.hasLoaded) return 'unavailable';
 	const current = catalog.preambles.find((entry) => entry.id === item.id);
-	return (
+	const matches =
 		current !== undefined &&
 		current.snippetShortName === item.shortName &&
 		current.updatedAt === item.updatedAt &&
-		current.content === item.body
-	);
+		current.content === item.body;
+	if (!matches) return 'changed';
+	return catalog.hasFreshSnapshot ? 'matched' : 'unavailable';
 }
 
 // Finds a snippet or named preamble for slash-command fast-path expansion only when the
@@ -130,13 +146,11 @@ function expandPreambleLocally(
 	if (mode.kind === 'scheduled') {
 		return { kind: 'expanded', expandedText: preamble.content };
 	}
-	if (
-		preambleContentUsesCurrentDate(preamble.content) ||
-		preambleContentUsesCurrentDateLocal(preamble.content)
-	) {
+	const active = collectActiveVariables(preamble.content, RUNTIME_TEMPLATE_VARIABLES);
+	if (active.has('current_date') || active.has('current_date_local')) {
 		return { kind: 'fallback' };
 	}
-	const chatId = preambleContentUsesChatId(preamble.content) ? mode.getChatId() : '';
+	const chatId = active.has('chat_id') ? mode.getChatId() : '';
 	try {
 		return {
 			kind: 'expanded',
@@ -160,12 +174,13 @@ function expandSnippetLocally(
 	mode: LocalSnippetExpansionMode,
 ): LocalSnippetExpansionResult {
 	const template = snippet.template;
-	if (snippetTemplateUsesProjectPath(template)) {
+	const active = collectActiveVariables(template, SNIPPET_TEMPLATE_VARIABLES);
+	if (active.has('project_path')) {
 		return { kind: 'fallback' };
 	}
 	if (
 		mode.kind === 'immediate' &&
-		(snippetTemplateUsesCurrentDate(template) || snippetTemplateUsesCurrentDateLocal(template))
+		(active.has('current_date') || active.has('current_date_local'))
 	) {
 		return { kind: 'fallback' };
 	}
@@ -180,7 +195,7 @@ function expandSnippetLocally(
 				expandedText: expandScheduledSnippetTemplate(template, values),
 			};
 		}
-		const chatId = snippetTemplateUsesChatId(template) ? mode.getChatId() : '';
+		const chatId = active.has('chat_id') ? mode.getChatId() : '';
 		return {
 			kind: 'expanded',
 			expandedText: expandSnippetTemplate(template, {

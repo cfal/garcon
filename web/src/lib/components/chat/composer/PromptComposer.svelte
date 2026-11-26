@@ -67,7 +67,6 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { ANY_FILE_ATTACHMENT_MIME_TYPE } from '@garcon/common/attachments';
 	import { activeComposerModel } from './active-composer-model.svelte';
-	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import { acceptsMarkdownInput } from '$lib/chat/composer/markdown-input.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -189,7 +188,7 @@
 		getText: () => composerState.inputText,
 		getSelection: () =>
 			textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd } : null,
-		hasProjectPath: () => Boolean(sessions.selectedChat && projectState.target?.projectPath.trim()),
+		hasProjectPath: () => Boolean(projectState.target?.projectPath.trim()),
 		getLocalChatId: () => sessions.selectedChat?.id ?? '',
 		prepareServerContext: async (signal) => {
 			const operation = await projectState.resolveSnippetContext(signal);
@@ -719,19 +718,8 @@
 			initialQuery={ui.snippetPalette.initialQuery}
 			interactionKey={snippetInteractionKey}
 			contextHint={snippetContextHint}
-			onInsert={async (snippet, argumentsText) => {
-				const trigger = ui.snippetPalette.trigger;
-				const result = await snippetExpansion.insert(snippet, argumentsText, trigger);
-				if (result === 'inserted') ui.snippetPalette.complete();
-				else if (
-					result !== 'failed' ||
-					snippet.source !== 'snippet' ||
-					!snippetTemplateUsesArguments(snippet.body)
-				) {
-					ui.snippetPalette.dismiss();
-				}
-				return result;
-			}}
+			onInsert={(snippet, argumentsText) =>
+				snippetExpansion.insertFromPalette(ui.snippetPalette, snippet, argumentsText)}
 			onCancelled={() => {
 				const caret = ui.snippetPalette.trigger?.end;
 				ui.snippetPalette.dismiss();

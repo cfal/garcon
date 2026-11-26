@@ -2,7 +2,10 @@ import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 import { matchesSelectableSnippetExpansion } from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
-import { tryExpandSelectableSnippetLocally } from '$lib/snippets/local-snippet-expansion.js';
+import {
+	tryExpandSelectableSnippetLocally,
+	type CatalogSelectableSnippetState,
+} from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import {
 	applySnippetTriggerReplacement,
@@ -15,7 +18,7 @@ interface Options {
 	get prompt(): string;
 	get context(): ScheduledSnippetExpansionContext | null;
 	get interactionKey(): string;
-	matchesCatalogItem?(item: SelectableSnippet): boolean;
+	inspectCatalogItem(item: SelectableSnippet): CatalogSelectableSnippetState;
 	onInsert(text: string, caret: number): Promise<void>;
 	onPendingChange(pending: boolean): void;
 	onSourceChanged(source: SelectableSnippet['source']): void;
@@ -64,7 +67,12 @@ export class ScheduledPromptSnippets {
 		this.error = null;
 		let pendingNotified = false;
 		try {
-			if (this.options.matchesCatalogItem?.(snippet)) {
+			const catalogState = this.options.inspectCatalogItem(snippet);
+			if (catalogState === 'changed') {
+				this.error = m.snippets_changed_before_expansion();
+				return 'cancelled';
+			}
+			if (catalogState === 'matched') {
 				const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
 					kind: 'scheduled',
 				});
@@ -87,11 +95,17 @@ export class ScheduledPromptSnippets {
 				source !== this.options.prompt
 			)
 				return 'cancelled';
-			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
+			const responseChanged = !matchesSelectableSnippetExpansion(snippet, result.response);
+			if (
+				responseChanged ||
+				this.options.inspectCatalogItem(snippet) === 'changed'
+			) {
 				this.error = m.snippets_changed_before_expansion();
-				this.options.onSourceChanged(snippet.source);
-				if (result.response.source !== snippet.source) {
-					this.options.onSourceChanged(result.response.source);
+				if (responseChanged) {
+					this.options.onSourceChanged(snippet.source);
+					if (result.response.source !== snippet.source) {
+						this.options.onSourceChanged(result.response.source);
+					}
 				}
 				return 'cancelled';
 			}

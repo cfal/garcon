@@ -59,7 +59,6 @@
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 	import { parseSnippetCommand } from '$lib/chat/composer/slash-commands.js';
-	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import type { ChatId } from '$shared/chat-id';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
@@ -717,19 +716,8 @@
 					initialQuery={snippetPalette.initialQuery}
 					interactionKey={snippetInteractionKey}
 					contextHint={form.nonblankPath ? null : m.snippets_palette_context_hint()}
-					onInsert={async (snippet, argumentsText) => {
-						const trigger = snippetPalette.trigger;
-						const result = await snippetExpansion.insert(snippet, argumentsText, trigger);
-						if (result === 'inserted') snippetPalette.complete();
-						else if (
-							result !== 'failed' ||
-							snippet.source !== 'snippet' ||
-							!snippetTemplateUsesArguments(snippet.body)
-						) {
-							snippetPalette.dismiss();
-						}
-						return result;
-					}}
+					onInsert={(snippet, argumentsText) =>
+						snippetExpansion.insertFromPalette(snippetPalette, snippet, argumentsText)}
 					onCancelled={() => {
 						const caret = snippetPalette.trigger?.end;
 						snippetPalette.dismiss();

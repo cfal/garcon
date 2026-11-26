@@ -1,10 +1,12 @@
 import { ApiError } from '$lib/api/client.js';
 import type { SnippetCommandParseResult } from '$lib/chat/composer/slash-commands.js';
 import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
+import type { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
+import type { RefreshableCatalog } from '$lib/snippets/catalog-reconnect.js';
 import {
-	catalogMatchesSelectableSnippet,
 	findFreshSelectableSnippetByShortName,
+	inspectSelectableSnippetInCatalog,
 	tryExpandSelectableSnippetLocally,
 	type PreambleCatalogLookup,
 	type SnippetCatalogLookup,
@@ -19,15 +21,12 @@ import {
 } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import type {
-	ExpandSnippetResponse,
-	SnippetArgumentsInput,
-	SnippetExpansionContext,
+import {
+	snippetTemplateUsesArguments,
+	type ExpandSnippetResponse,
+	type SnippetArgumentsInput,
+	type SnippetExpansionContext,
 } from '$shared/snippets';
-
-interface RefreshableCatalog {
-	refreshIfLoaded(): Promise<void>;
-}
 
 export interface ComposerSnippetServerContext<Prepared> {
 	readonly requestContext: SnippetExpansionContext;
@@ -74,27 +73,42 @@ export class ComposerSnippetController<Prepared> {
 		this.#expansion.cancel();
 	}
 
-	async insert(
+	async insertFromPalette(
+		palette: Pick<SnippetPaletteTriggerState, 'trigger' | 'complete' | 'dismiss'>,
 		snippet: SelectableSnippet,
 		argumentsText: string,
-		range: { start: number; end: number } | null = null,
+	): Promise<SnippetInsertionResult> {
+		const trigger = palette.trigger;
+		const result = await this.#insert(snippet, argumentsText, trigger);
+		if (result === 'inserted') palette.complete();
+		else if (
+			result !== 'failed' ||
+			snippet.source !== 'snippet' ||
+			!snippetTemplateUsesArguments(snippet.body)
+		) {
+			palette.dismiss();
+		}
+		return result;
+	}
+
+	async #insert(
+		snippet: SelectableSnippet,
+		argumentsText: string,
+		range: { start: number; end: number } | null,
 	): Promise<SnippetInsertionResult> {
 		const selection = this.options.getSelection();
 		if (this.options.isTransformPending() || !selection) return 'cancelled';
 		const sourceExecutionKey = this.options.getExecutionKey();
+		const sourceText = this.options.getText();
 		const replacementRange = range ?? { start: selection.start, end: selection.end };
-		this.options.beforeExpand?.();
-		const owningCatalog =
-			snippet.source === 'snippet' ? this.options.snippets : this.options.preambles;
 		const argumentsInput: SnippetArgumentsInput = { type: 'value', value: argumentsText };
+		this.options.beforeExpand?.();
 		try {
-			const hasProjectPath = this.options.hasProjectPath();
-			if (!hasProjectPath && this.options.onMissingProjectPath) {
+			if (!this.options.hasProjectPath() && this.options.onMissingProjectPath) {
 				this.options.onMissingProjectPath();
 				await this.options.onSettled();
 				return 'cancelled';
 			}
-			const sourceText = this.options.getText();
 			const applyExpanded = (expandedText: string) => {
 				const replacement = applySnippetTriggerReplacement(
 					sourceText,
@@ -103,11 +117,13 @@ export class ComposerSnippetController<Prepared> {
 				);
 				return this.options.onExpanded(replacement.text, replacement.caret);
 			};
-			if (hasProjectPath && catalogMatchesSelectableSnippet(snippet, owningCatalog)) {
-				const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
-					kind: 'immediate',
-					getChatId: () => this.options.getLocalChatId(),
-				});
+			const catalogState = inspectSelectableSnippetInCatalog(snippet, this.options);
+			if (catalogState === 'changed') {
+				await this.#notifyAndSettle(m.snippets_changed_before_expansion());
+				return 'cancelled';
+			}
+			if (this.options.hasProjectPath() && catalogState === 'matched') {
+				const local = this.#tryExpandLocally(snippet, argumentsInput);
 				if (local.kind === 'expanded') {
 					await applyExpanded(local.expandedText);
 					return 'inserted';
@@ -119,16 +135,17 @@ export class ComposerSnippetController<Prepared> {
 			}
 			const result = await this.#expandOnServer(snippet.shortName, argumentsInput);
 			if (result.kind !== 'expanded') return 'cancelled';
-			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
-				void owningCatalog.refreshIfLoaded();
+			const responseChanged = !matchesSelectableSnippetExpansion(snippet, result.response);
+			if (responseChanged || inspectSelectableSnippetInCatalog(snippet, this.options) === 'changed') {
+				if (responseChanged) {
+					const owningCatalog =
+						snippet.source === 'snippet' ? this.options.snippets : this.options.preambles;
+					void owningCatalog.refreshIfLoaded();
+				}
 				await this.#notifyAndSettle(m.snippets_changed_before_expansion());
 				return 'cancelled';
 			}
-			if (
-				this.options.getExecutionKey() !== sourceExecutionKey ||
-				!this.options.matchesServerContext(result.prepared, result.response) ||
-				this.options.getText() !== sourceText
-			) {
+			if (!this.#isServerResultCurrent(sourceExecutionKey, sourceText, result)) {
 				return 'cancelled';
 			}
 			await applyExpanded(result.response.expandedText);
@@ -160,10 +177,7 @@ export class ComposerSnippetController<Prepared> {
 					})
 				: null;
 			if (item) {
-				const local = tryExpandSelectableSnippetLocally(item, command.arguments, {
-					kind: 'immediate',
-					getChatId: () => this.options.getLocalChatId(),
-				});
+				const local = this.#tryExpandLocally(item, command.arguments);
 				if (local.kind === 'expanded') {
 					await this.options.onExpanded(local.expandedText, local.expandedText.length);
 					return;
@@ -174,12 +188,10 @@ export class ComposerSnippetController<Prepared> {
 				}
 			}
 			const result = await this.#expandOnServer(command.shortName, command.arguments);
-			if (result.kind !== 'expanded') return;
 			if (
+				result.kind !== 'expanded' ||
 				!this.options.isConversationInput() ||
-				this.options.getExecutionKey() !== sourceExecutionKey ||
-				!this.options.matchesServerContext(result.prepared, result.response) ||
-				this.options.getText() !== sourceText
+				!this.#isServerResultCurrent(sourceExecutionKey, sourceText, result)
 			) {
 				return;
 			}
@@ -190,6 +202,28 @@ export class ComposerSnippetController<Prepared> {
 		} catch (error) {
 			await this.#reportServerError(error);
 		}
+	}
+
+	#tryExpandLocally(item: SelectableSnippet, argumentsInput: SnippetArgumentsInput) {
+		return tryExpandSelectableSnippetLocally(item, argumentsInput, {
+			kind: 'immediate',
+			getChatId: () => this.options.getLocalChatId(),
+		});
+	}
+
+	#isServerResultCurrent(
+		sourceExecutionKey: string,
+		sourceText: string,
+		result: {
+			readonly prepared: Prepared;
+			readonly response: Pick<ExpandSnippetResponse, 'contextExecutorId' | 'contextProjectPath'>;
+		},
+	): boolean {
+		return (
+			this.options.getExecutionKey() === sourceExecutionKey &&
+			this.options.matchesServerContext(result.prepared, result.response) &&
+			this.options.getText() === sourceText
+		);
 	}
 
 	#expandOnServer(shortName: string, argumentsInput: SnippetArgumentsInput) {

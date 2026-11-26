@@ -1,10 +1,4 @@
-import {
-  CHAT_ID_TEMPLATE_TOKEN,
-  RUNTIME_TEMPLATE_VARIABLES,
-  expandTemplate,
-  templateUsesActiveVariable,
-  type RuntimeTemplateValues,
-} from './template-tokens.js';
+import { CHAT_ID_TEMPLATE_TOKEN, RUNTIME_TEMPLATE_VARIABLES, expandTemplate, type RuntimeTemplateValues } from './template-tokens.js';
 import { isAgentId, type AgentId } from './agents.js';
 import { isSnippetShortName } from './snippets.js';
 import { normalizeTagSlug } from './tags.js';
@@ -250,18 +244,6 @@ export const PREAMBLE_ERROR_CODES = {
 } as const;
 
 export type PreambleErrorCode = (typeof PREAMBLE_ERROR_CODES)[keyof typeof PREAMBLE_ERROR_CODES];
-
-export function preambleContentUsesChatId(content: string): boolean {
-  return templateUsesActiveVariable(content, RUNTIME_TEMPLATE_VARIABLES, 'chat_id');
-}
-
-export function preambleContentUsesCurrentDate(content: string): boolean {
-  return templateUsesActiveVariable(content, RUNTIME_TEMPLATE_VARIABLES, 'current_date');
-}
-
-export function preambleContentUsesCurrentDateLocal(content: string): boolean {
-  return templateUsesActiveVariable(content, RUNTIME_TEMPLATE_VARIABLES, 'current_date_local');
-}
 
 export function renderPreambleContent(content: string, values: RuntimeTemplateValues): string {
   return expandTemplate(

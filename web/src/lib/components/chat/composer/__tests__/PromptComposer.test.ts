@@ -15,7 +15,7 @@ import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-r
 import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-import type { SnippetsSnapshot } from '$shared/snippets';
+import type { Snippet, SnippetsSnapshot } from '$shared/snippets';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 function conversationalCatalog(): ModelCatalogStore {
@@ -2122,16 +2122,9 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('falls back to the server for palette items that use active controller date tokens', async () => {
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'Summary on 2026-01-01',
-		});
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
+			reviewExpansionResponse('Summary on 2026-01-01'),
+		);
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-date-fallback',
 			selectedStatus: 'running',
@@ -2171,25 +2164,10 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 		expect(component.getProjectResolutionRequestCount()).toBe(0);
 
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'Server fallback result',
-		});
-		await rerender({
-			selectedChatId: 'chat-local-slash',
-			selectedStatus: 'running',
-			snippetTemplate: 'Review {{arguments}} in {{chat_id}}',
-			snippetDefaultArguments: 'staged diff',
-			preloadSnippets: true,
-			wsPhase: 'reconnecting',
-			onsubmit,
-		});
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
+			reviewExpansionResponse('Server fallback result'),
+		);
+		await rerender({ wsPhase: 'reconnecting' });
 		await fireEvent.input(textarea, { target: { value: '/s review disconnected' } });
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		await waitFor(() => expect(textarea.value).toBe('Server fallback result'));
@@ -2198,27 +2176,19 @@ describe('PromptComposer focus', () => {
 
 	it('expands a named preamble via /s locally, falls back while refreshing, and applies restored lower-revision catalogs', async () => {
 		let snippetsStore!: SnippetsStore;
-		let resolveRefresh!: (value: SnippetsSnapshot) => void;
+		const refresh = Promise.withResolvers<SnippetsSnapshot>();
 		const loadSnippets = vi
 			.fn<() => Promise<SnippetsSnapshot>>()
-			.mockImplementationOnce(
-				() =>
-					new Promise<SnippetsSnapshot>((resolve) => {
-						resolveRefresh = resolve;
-					}),
-			)
+			.mockReturnValueOnce(refresh.promise)
 			.mockResolvedValueOnce({ revision: 0, snippets: [] })
 			.mockResolvedValueOnce({
 				revision: 1,
 				snippets: [
-					{
+					makeReviewSnippet({
 						id: 'snippet-restored',
-						shortName: 'review',
 						template: 'Restored review',
-						defaultArguments: '',
-						createdAt: '2026-01-01T00:00:00.000Z',
 						updatedAt: '2026-01-02T00:00:00.000Z',
-					},
+					}),
 				],
 			});
 		const { component } = render(PromptComposerTestHost, {
@@ -2258,49 +2228,26 @@ describe('PromptComposer focus', () => {
 		expect(component.getProjectResolutionRequestCount()).toBe(0);
 
 		const refreshing = snippetsStore.refresh();
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'Refreshing fallback',
-		});
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
+			reviewExpansionResponse('Refreshing fallback'),
+		);
 		await fireEvent.input(textarea, { target: { value: '/s review' } });
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		await waitFor(() => expect(textarea.value).toBe('Refreshing fallback'));
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(1);
 
-		resolveRefresh({
+		refresh.resolve({
 			revision: 2,
-			snippets: [
-				{
-					id: 'snippet-review',
-					shortName: 'review',
-					template: 'Updated review',
-					defaultArguments: '',
-					createdAt: '2026-01-01T00:00:00.000Z',
-					updatedAt: '2026-01-01T00:00:00.000Z',
-				},
-			],
+			snippets: [makeReviewSnippet({ template: 'Updated review' })],
 		});
 		await refreshing;
 
 		// Lower-revision restore replaces revision 2 with revision 0, so deleted /s review falls back to the server.
 		await snippetsStore.refreshIfLoaded();
 		expect(snippetsStore.snapshot).toEqual({ revision: 0, snippets: [] });
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'Restored-catalog fallback',
-		});
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
+			reviewExpansionResponse('Restored-catalog fallback'),
+		);
 		await fireEvent.input(textarea, { target: { value: '/s review' } });
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		await waitFor(() => expect(textarea.value).toBe('Restored-catalog fallback'));
@@ -2314,31 +2261,15 @@ describe('PromptComposer focus', () => {
 		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
 	});
 
-	it('falls back to the server when an open arguments dialog survives a 3 -> 2 -> 3 or same-revision restore', async () => {
+	it('rejects an open arguments dialog without calling the server after a 3 -> 2 -> 3 or same-revision restore even when updatedAt is unchanged', async () => {
 		let snippetsStore!: SnippetsStore;
-		const restoredAfterRegression = {
-			id: 'snippet-review',
-			shortName: 'review',
-			template: 'Restored {{arguments}}',
-			defaultArguments: '',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-02T00:00:00.000Z',
-		};
-		const restoredSameRevision = {
-			id: 'snippet-review',
-			shortName: 'review',
-			template: 'Same-rev restored {{arguments}}',
-			defaultArguments: '',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-03T00:00:00.000Z',
-		};
+		const restoredAfterRegression = makeReviewSnippet({ template: 'Restored {{arguments}}' });
+		const restoredSameRevision = makeReviewSnippet({ template: 'Same-rev restored {{arguments}}' });
 		const loadSnippets = vi
 			.fn<() => Promise<SnippetsSnapshot>>()
 			.mockResolvedValueOnce({ revision: 2, snippets: [] })
 			.mockResolvedValueOnce({ revision: 3, snippets: [restoredAfterRegression] })
-			.mockResolvedValueOnce({ revision: 3, snippets: [restoredAfterRegression] })
-			.mockResolvedValueOnce({ revision: 3, snippets: [restoredSameRevision] })
-			.mockResolvedValue({ revision: 3, snippets: [restoredSameRevision] });
+			.mockResolvedValueOnce({ revision: 3, snippets: [restoredSameRevision] });
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-dialog-restore-recovery',
 			selectedStatus: 'running',
@@ -2348,16 +2279,7 @@ describe('PromptComposer focus', () => {
 				snippetsStore = store;
 				store.applySnapshot({
 					revision: 3,
-					snippets: [
-						{
-							id: 'snippet-review',
-							shortName: 'review',
-							template: 'Old {{arguments}}',
-							defaultArguments: '',
-							createdAt: '2026-01-01T00:00:00.000Z',
-							updatedAt: '2026-01-01T00:00:00.000Z',
-						},
-					],
+					snippets: [makeReviewSnippet({ template: 'Old {{arguments}}' })],
 				});
 			},
 			wsPhase: 'connected',
@@ -2373,46 +2295,29 @@ describe('PromptComposer focus', () => {
 		await snippetsStore.refreshIfLoaded();
 		expect(snippetsStore.hasFreshSnapshot).toBe(true);
 
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'Restored selected',
-		});
 		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
 
-		await screen.findByText(/changed/i);
-		await waitFor(() => expect(loadSnippets).toHaveBeenCalledTimes(3));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
+		await screen.findByText('That snippet changed. Select it again.');
+		expect(loadSnippets).toHaveBeenCalledTimes(2);
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 		expect(textarea.value).toBe(';;review');
 
-		// Same-revision reconnect restore (3 -> 3) with changed template also forces server fallback on open dialog.
+		// Same-revision reconnect refresh (3 -> 3) with changed template and identical updatedAt also rejects without server expansion.
 		await inputAtCaret(textarea, '', 0);
 		await inputAtCaret(textarea, ';;review', ';;review'.length);
 		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
 		const secondArgsInput = await screen.findByRole('textbox', { name: 'Arguments' });
 		await fireEvent.input(secondArgsInput, { target: { value: 'second' } });
-		await snippetsStore.reconcileAfterReconnect();
-		expect(loadSnippets).toHaveBeenCalledTimes(4);
+		await snippetsStore.refreshIfLoaded();
+		expect(loadSnippets).toHaveBeenCalledTimes(3);
 
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-03T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'Same-rev restored second',
-		});
 		await fireEvent.keyDown(secondArgsInput, { key: 'Enter' });
 
-		await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2));
-		await waitFor(() => expect(loadSnippets).toHaveBeenCalledTimes(5));
+		await waitFor(() =>
+			expect(screen.getAllByText('That snippet changed. Select it again.')).toHaveLength(2),
+		);
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(loadSnippets).toHaveBeenCalledTimes(3);
 		expect(textarea.value).toBe(';;review');
 
 		// A fresh selection after the same-revision restore expands locally without calling the server.
@@ -2424,8 +2329,58 @@ describe('PromptComposer focus', () => {
 		await fireEvent.keyDown(thirdArgsInput, { key: 'Enter' });
 
 		await waitFor(() => expect(textarea.value).toBe('Same-rev restored fresh'));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
+
+	it.each([false, true])(
+		'rejects a mid-flight fallback expansion when a restore changes the template with identical updatedAt (second refresh held open: %s)',
+		async (holdSecondRefresh) => {
+			const pending = deferredSnippetExpansion();
+			vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+			const secondRefresh = Promise.withResolvers<SnippetsSnapshot>();
+			let snippetsStore!: SnippetsStore;
+			const restoredSameTimestamp = makeReviewSnippet({
+				template: 'Restored {{arguments}} in {{project_path}}',
+			});
+			const loadSnippets = vi
+				.fn<() => Promise<SnippetsSnapshot>>()
+				.mockResolvedValueOnce({ revision: 3, snippets: [restoredSameTimestamp] });
+			if (holdSecondRefresh) loadSnippets.mockReturnValueOnce(secondRefresh.promise);
+			render(PromptComposerTestHost, {
+				selectedChatId: `chat-midflight-${holdSecondRefresh ? 'held' : 'settled'}`,
+				selectedStatus: 'running',
+				snippetTemplate: 'Old {{arguments}} in {{project_path}}',
+				loadSnippets,
+				onSnippets: (store) => {
+					snippetsStore = store;
+					store.applySnapshot({
+						revision: 3,
+						snippets: [makeReviewSnippet({ template: 'Old {{arguments}} in {{project_path}}' })],
+					});
+				},
+				wsPhase: 'connected',
+			});
+			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+			await inputAtCaret(textarea, ';;review', ';;review'.length);
+			await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+			const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
+			await fireEvent.input(argumentsInput, { target: { value: 'selected' } });
+			await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
+			await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce());
+
+			await snippetsStore.refreshIfLoaded();
+			const heldRefresh = holdSecondRefresh ? snippetsStore.refresh() : null;
+			if (holdSecondRefresh) expect(snippetsStore.hasFreshSnapshot).toBe(false);
+			pending.resolve(reviewExpansionResponse('Restored selected in /workspace/project'));
+
+			await screen.findByText('That snippet changed. Select it again.');
+			expect(textarea.value).toBe(';;review');
+			if (heldRefresh) {
+				secondRefresh.resolve({ revision: 3, snippets: [restoredSameTimestamp] });
+				await heldRefresh;
+			}
+		},
+	);
 
 	it('reopens arguments with preserved text when local expansion exceeds the output bound', async () => {
 		render(PromptComposerTestHost, {
@@ -2988,6 +2943,31 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review old path');
 	});
 });
+
+function makeReviewSnippet(overrides: Partial<Snippet> = {}): Snippet {
+	return {
+		id: 'snippet-review',
+		shortName: 'review',
+		template: 'Review {{arguments}}',
+		defaultArguments: '',
+		createdAt: '2026-01-01T00:00:00.000Z',
+		updatedAt: '2026-01-01T00:00:00.000Z',
+		...overrides,
+	};
+}
+
+function reviewExpansionResponse(expandedText: string) {
+	return {
+		success: true as const,
+		source: 'snippet' as const,
+		sourceId: 'snippet-review',
+		sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+		shortName: 'review',
+		contextExecutorId: 'local',
+		contextProjectPath: '/workspace/project',
+		expandedText,
+	};
+}
 
 function deferredSnippetExpansion() {
 	let resolve!: (value: Awaited<ReturnType<typeof snippetsApi.expandSnippet>>) => void;

@@ -2,16 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   SNIPPET_EXPANDED_MAX_LENGTH,
   snippetTemplateUsesChatId,
-  snippetTemplateUsesCurrentDate,
-  snippetTemplateUsesCurrentDateLocal,
   snippetTemplateUsesProjectPath,
   normalizeExpandSnippetRequest,
 } from '../snippets.js';
-import {
-  preambleContentUsesChatId,
-  preambleContentUsesCurrentDate,
-  preambleContentUsesCurrentDateLocal,
-} from '../preambles.js';
 import {
   expandScheduledSnippetTemplate,
   expandSnippetTemplate,
@@ -63,26 +56,6 @@ describe('snippetTemplateUsesChatId', () => {
     expect(snippetTemplateUsesChatId('Send from {{chat_id}}')).toBe(true);
     expect(snippetTemplateUsesChatId('Keep \\{{chat_id}} literal')).toBe(false);
     expect(snippetTemplateUsesChatId('Review {{arguments}}')).toBe(false);
-  });
-});
-
-describe('snippet and preamble date token detection', () => {
-  it('detects only active current date tokens in snippets', () => {
-    expect(snippetTemplateUsesCurrentDate('Date {{current_date}}')).toBe(true);
-    expect(snippetTemplateUsesCurrentDate('Keep \\{{current_date}} literal')).toBe(false);
-    expect(snippetTemplateUsesCurrentDate('Local {{current_date_local}}')).toBe(false);
-    expect(snippetTemplateUsesCurrentDateLocal('Local {{current_date_local}}')).toBe(true);
-    expect(snippetTemplateUsesCurrentDateLocal('Keep \\{{current_date_local}} literal')).toBe(false);
-    expect(snippetTemplateUsesCurrentDateLocal('UTC {{current_date}}')).toBe(false);
-  });
-
-  it('detects only runtime tokens in preambles and ignores snippet-only tokens', () => {
-    expect(preambleContentUsesChatId('Chat {{chat_id}}')).toBe(true);
-    expect(preambleContentUsesChatId('Literal \\{{chat_id}} and {{project_path}}')).toBe(false);
-    expect(preambleContentUsesCurrentDate('UTC {{current_date}}')).toBe(true);
-    expect(preambleContentUsesCurrentDate('Literal \\{{current_date}}')).toBe(false);
-    expect(preambleContentUsesCurrentDateLocal('Local {{current_date_local}}')).toBe(true);
-    expect(preambleContentUsesCurrentDateLocal('Literal \\{{current_date_local}}')).toBe(false);
   });
 });
 

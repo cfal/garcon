@@ -66,15 +66,9 @@ export const [getTicketSourceNavigation, setTicketSourceNavigation] =
 export const [getNavigation, setNavigation] = createContext<NavigationStore>();
 export const [getChatSessions, setChatSessions] = createContext<ChatSessionsStore>();
 export const [getAppShell, setAppShell] = createContext<AppShellStore>();
-const [getRequiredWs, setWsContext] = createContext<WsConnection>();
-export const getWs = getRequiredWs;
-export const setWs = setWsContext;
+export const [getWs, setWs, hasWs] = createContext<WsConnection>();
 export function getOptionalWs(): WsConnection | null {
-	try {
-		return getRequiredWs();
-	} catch {
-		return null;
-	}
+	return hasWs() ? getWs() : null;
 }
 export const [getChatProcessingReconciler, setChatProcessingReconciler] =
 	createContext<ChatProcessingPresentationRegistry>();

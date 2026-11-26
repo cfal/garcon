@@ -6,8 +6,7 @@ import {
 	snippetToSelectable,
 	type SelectableSnippet,
 } from '$lib/snippets/selectable-snippet.js';
-import { catalogMatchesSelectableSnippet } from '$lib/snippets/local-snippet-expansion.js';
-import { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+import type { CatalogSelectableSnippetState } from '$lib/snippets/local-snippet-expansion.js';
 
 vi.mock('$lib/api/snippets.js', () => ({ expandSnippet: vi.fn() }));
 const expand = vi.mocked(expandSnippet);
@@ -60,12 +59,11 @@ const response = {
 
 function fixture(
 	options: {
-		matchesCatalogItem?: (item: SelectableSnippet) => boolean;
-		onInsert?: (text: string, caret: number) => Promise<void>;
+		inspectCatalogItem?: (item: SelectableSnippet) => CatalogSelectableSnippetState;
 	} = {},
 ) {
 	const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
-	const onInsert = vi.fn(options.onInsert ?? (async (_text: string, _caret: number) => {}));
+	const onInsert = vi.fn(async (_text: string, _caret: number) => {});
 	const onPendingChange = vi.fn();
 	const onSourceChanged = vi.fn();
 	const controller = new ScheduledPromptSnippets({
@@ -81,7 +79,7 @@ function fixture(
 				target: { type: 'new-chat' as const, projectPath: '/repo' },
 			};
 		},
-		...(options.matchesCatalogItem ? { matchesCatalogItem: options.matchesCatalogItem } : {}),
+		inspectCatalogItem: options.inspectCatalogItem ?? (() => 'unavailable'),
 		onInsert,
 		onPendingChange,
 		onSourceChanged,
@@ -96,7 +94,9 @@ beforeEach(() => {
 
 describe('scheduled prompt snippets', () => {
 	it('replaces the selection and supplies the caret while blocking save during expansion', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
+		const { controller, onInsert, onPendingChange } = fixture({
+			inspectCatalogItem: () => 'matched',
+		});
 		controller.open(7, 15);
 		expect(await controller.insert(item, 'API')).toBe('inserted');
 		expect(expand.mock.calls[0][0]).toEqual({
@@ -112,7 +112,9 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('expands scheduled snippets without project_path locally without hitting the server', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
+		const { controller, onInsert, onPendingChange } = fixture({
+			inspectCatalogItem: () => 'matched',
+		});
 		controller.open(7, 15);
 		expect(await controller.insert(localItem, '{{chat_id}}')).toBe('inserted');
 		expect(expand).not.toHaveBeenCalled();
@@ -124,7 +126,9 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('inserts named preambles verbatim locally in scheduled prompts', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
+		const { controller, onInsert, onPendingChange } = fixture({
+			inspectCatalogItem: () => 'matched',
+		});
 		controller.open(7, 15);
 		expect(await controller.insert(preambleItem, '')).toBe('inserted');
 		expect(expand).not.toHaveBeenCalled();
@@ -135,48 +139,41 @@ describe('scheduled prompt snippets', () => {
 		);
 	});
 
-	it('falls back to the server when the captured selection no longer matches the catalog after a restore', async () => {
-		const store = new SnippetsStore({
-			get: vi
-				.fn()
-				.mockResolvedValueOnce({ revision: 2, snippets: [] })
-				.mockResolvedValueOnce({
-					revision: 3,
-					snippets: [
-						{
-							...localItem.snippet,
-							template: 'Restored {{arguments}}',
-							updatedAt: '2026-01-02T00:00:00.000Z',
-						},
-					],
-				}),
-		});
-		store.applySnapshot({ revision: 3, snippets: [localItem.snippet] });
-		const capturedItem = snippetToSelectable(store.snippets[0]!);
+	it('rejects a changed selection immediately without calling the server', async () => {
 		const { controller, onInsert } = fixture({
-			matchesCatalogItem: (selected) => catalogMatchesSelectableSnippet(selected, store),
-		});
-
-		await store.refreshIfLoaded();
-		await store.refreshIfLoaded();
-		expect(store.hasFreshSnapshot).toBe(true);
-
-		expand.mockResolvedValueOnce({
-			...response,
-			sourceId: capturedItem.id,
-			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
-			shortName: capturedItem.shortName,
-			expandedText: 'Restored API',
+			inspectCatalogItem: () => 'changed',
 		});
 		controller.open(7, 15);
-		expect(await controller.insert(capturedItem, 'API')).toBe('cancelled');
-		expect(expand).toHaveBeenCalledOnce();
+		expect(await controller.insert(localItem, 'API')).toBe('cancelled');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onInsert).not.toHaveBeenCalled();
+		expect(controller.error).toContain('changed');
+	});
+
+	it('rejects a server fallback response when the catalog selection becomes changed mid-flight', async () => {
+		const serverCall = Promise.withResolvers<typeof response>();
+		expand.mockReturnValueOnce(serverCall.promise);
+		let state: CatalogSelectableSnippetState = 'matched';
+		const { controller, onInsert } = fixture({
+			inspectCatalogItem: () => state,
+		});
+
+		controller.open(7, 15);
+		const inserting = controller.insert(item, 'API');
+		await vi.waitFor(() => expect(expand).toHaveBeenCalledOnce());
+
+		state = 'changed';
+		serverCall.resolve({ ...response, expandedText: 'Restored /repo' });
+
+		expect(await inserting).toBe('cancelled');
 		expect(onInsert).not.toHaveBeenCalled();
 		expect(controller.error).toContain('changed');
 	});
 
 	it('rejects ambiguous deferred token boundaries locally without calling the server', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({ matchesCatalogItem: () => true });
+		const { controller, onInsert, onPendingChange } = fixture({
+			inspectCatalogItem: () => 'matched',
+		});
 		controller.open(7, 15);
 		expect(await controller.insert(boundaryItem, 'report\\')).toBe('failed');
 		expect(expand).not.toHaveBeenCalled();
@@ -185,7 +182,7 @@ describe('scheduled prompt snippets', () => {
 		expect(controller.error).toContain('Add a separator');
 	});
 
-	it('falls back to the server when no catalog matcher is provided', async () => {
+	it('falls back to the server when catalog inspection reports unavailable', async () => {
 		const { controller, onInsert } = fixture();
 		expand.mockResolvedValueOnce({
 			...response,
@@ -204,12 +201,10 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('catches unexpected errors thrown during local insertion without toggling pending state', async () => {
-		const { controller, onPendingChange } = fixture({
-			matchesCatalogItem: () => true,
-			onInsert: async () => {
-				throw new Error('insert callback failed');
-			},
+		const { controller, onInsert, onPendingChange } = fixture({
+			inspectCatalogItem: () => 'matched',
 		});
+		onInsert.mockRejectedValueOnce(new Error('insert callback failed'));
 		controller.open(7, 15);
 		expect(await controller.insert(localItem, 'API')).toBe('failed');
 		expect(controller.error).toBe('insert callback failed');

@@ -4,7 +4,6 @@ import {
   RUNTIME_TEMPLATE_VARIABLES,
   type RuntimeTemplateVariable,
   matchTemplateTokens,
-  templateUsesActiveVariable,
   type TemplateTokenMatch,
 } from './template-tokens.js';
 
@@ -48,7 +47,10 @@ export function hasSameSnippetTemplateTokenSignature(first: string, second: stri
 }
 
 function snippetTemplateUsesVariable(template: string, variable: SnippetTemplateVariable): boolean {
-  return templateUsesActiveVariable(template, SNIPPET_TEMPLATE_VARIABLES, variable);
+  for (const match of matchSnippetTemplateTokens(template)) {
+    if (!match.escaped && match.variable === variable) return true;
+  }
+  return false;
 }
 
 export function snippetTemplateUsesArguments(template: string): boolean {
@@ -61,14 +63,6 @@ export function snippetTemplateUsesProjectPath(template: string): boolean {
 
 export function snippetTemplateUsesChatId(template: string): boolean {
   return snippetTemplateUsesVariable(template, 'chat_id');
-}
-
-export function snippetTemplateUsesCurrentDate(template: string): boolean {
-  return snippetTemplateUsesVariable(template, 'current_date');
-}
-
-export function snippetTemplateUsesCurrentDateLocal(template: string): boolean {
-  return snippetTemplateUsesVariable(template, 'current_date_local');
 }
 
 export const SNIPPET_ERROR_CODES = {

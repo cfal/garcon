@@ -114,7 +114,7 @@ describe('scheduled prompt snippet interactions', () => {
 		expect(expand).not.toHaveBeenCalled();
 	});
 
-	it('falls back to the server when the rendered arguments dialog survives a catalog restore', async () => {
+	it('rejects a changed local snippet before calling the server after a catalog restore', async () => {
 		const { snippets, getSnippets } = renderEditor([localSnippet]);
 		await openArguments('local-review');
 		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
@@ -131,24 +131,16 @@ describe('scheduled prompt snippet interactions', () => {
 					{
 						...localSnippet,
 						template: 'Restored {{arguments}} on {{current_date}}',
-						updatedAt: '2026-01-02T00:00:00.000Z',
 					},
 				],
 			});
 		await snippets.refreshIfLoaded();
 		await snippets.refreshIfLoaded();
 
-		expand.mockResolvedValueOnce({
-			...response,
-			sourceId: localSnippet.id,
-			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
-			shortName: localSnippet.shortName,
-			expandedText: 'Restored pull requests on {{current_date}}',
-		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
 
 		await screen.findByText(/That snippet changed/);
-		expect(expand).toHaveBeenCalledOnce();
+		expect(expand).not.toHaveBeenCalled();
 		expect(screen.getByTestId('prompt-draft').textContent).toBe('Before ');
 	});
 

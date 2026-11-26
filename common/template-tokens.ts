@@ -57,17 +57,6 @@ export function* matchTemplateTokens<Variable extends string>(
   }
 }
 
-export function templateUsesActiveVariable<Variable extends string>(
-  template: string,
-  allowedVariables: readonly Variable[],
-  variable: Variable,
-): boolean {
-  for (const match of matchTemplateTokens(template, allowedVariables)) {
-    if (!match.escaped && match.variable === variable) return true;
-  }
-  return false;
-}
-
 export function expandTemplate<Variable extends string>(
   template: string,
   allowedVariables: readonly Variable[],
