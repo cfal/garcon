@@ -9,14 +9,13 @@ import { isEmptyToolResult } from '$shared/tool-result-content';
 import { reportedResultProps } from '$lib/chat/tools/tool-display-presenters.js';
 import * as m from '$lib/paraglide/messages.js';
 
-const TEXT_RESULT_RULE: ToolResultDisplayRule = {
+const FAILED_RESULT_RULE: ToolResultDisplayRule = {
 	mode: 'collapsible',
 	defaultOpen: false,
 	contentKind: 'text',
+	title: () => m.chat_message_error(),
 	getContentProps: reportedResultProps,
 };
-
-const FAILED_RESULT_RULE: ToolResultDisplayRule = { ...TEXT_RESULT_RULE, title: () => m.chat_message_error() };
 
 function hasEmptyRequiredInput(tool: ToolUseChatMessage | undefined): boolean {
 	switch (tool?.type) {
@@ -42,17 +41,21 @@ export function resolveToolResultDisplayRule(
 	toolResult: ToolPayload | null | undefined,
 	tool?: ToolUseChatMessage,
 ): ToolResultDisplayRule | undefined {
-	if (!toolResult) return rule.result;
-	if (toolResult.isError === true) {
-		if (!rule.result?.reportsStatus) return hasEmptyRequiredInput(tool) ? FAILED_RESULT_RULE : rule.result;
-		const status = (toolResult.content as { status?: unknown } | undefined)?.status;
-		return { ...FAILED_RESULT_RULE, getContentProps: rule.result.getContentProps ?? reportedResultProps,
-			title: typeof status === 'string' && status ? `${m.chat_message_error()}: ${status}` : FAILED_RESULT_RULE.title };
-	}
+	const result = rule.result;
+	if (!toolResult) return result;
 	const content = toolResult.content;
-	if (rule.result?.contentKind === 'todoList' && isRecord(content) && Array.isArray(content.items) && content.items.length === 0) return rule.result;
-	if (rule.result?.mode === 'collapsible' && isEmptyToolResult(content)) return undefined;
-	return rule.result;
+	if (toolResult.isError === true) {
+		if (!result?.reportsStatus) return hasEmptyRequiredInput(tool) ? FAILED_RESULT_RULE : result;
+		const status = isRecord(content) ? content.status : undefined;
+		return {
+			...FAILED_RESULT_RULE,
+			getContentProps: result.getContentProps ?? reportedResultProps,
+			title: typeof status === 'string' && status ? `${m.chat_message_error()}: ${status}` : FAILED_RESULT_RULE.title,
+		};
+	}
+	if (result?.mode !== 'collapsible') return result;
+	if (result.contentKind === 'todoList' && isRecord(content) && Array.isArray(content.items) && content.items.length === 0) return result;
+	return isEmptyToolResult(content) ? undefined : result;
 }
 
 export function shouldRenderToolResult(

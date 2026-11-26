@@ -168,36 +168,34 @@ function boundedUnknownForJoin(value: unknown, outerBudget: ExtractionBudget): s
   return text;
 }
 
-function boundedToolResult(message: ToolResultMessage, budget: ExtractionBudget): string {
-  const value: unknown = message.content;
-  if (typeof value !== 'string') {
-    const nestedBudget = { ...budget, remaining: MAX_TOOL_RESULT_CHARS };
-    const primary: string[] = [];
-    const items = message.content?.items;
-    if (Array.isArray(items) && message.primaryTextItems?.length) {
-      nestedBudget.indexedTextParts = new Set();
-      for (const index of message.primaryTextItems) {
-        if (nestedBudget.remaining <= 0 || nestedBudget.remainingNodes <= 0) break;
-        nestedBudget.remainingNodes--;
-        const part = toolResultTextPart(items[index]);
-        if (part) {
-          appendText(primary, searchablePrefix(part.text, nestedBudget), nestedBudget);
-          nestedBudget.indexedTextParts.add(part);
-        }
-      }
-    }
-    if (primary.length && nestedBudget.remaining > 0) nestedBudget.remaining--;
-    // Indexes the user-visible diagnostic before supplementary tool payloads.
-    const text = boundedUnknownText(value, nestedBudget, 0, TOOL_RESULT_FIELDS);
-    budget.remainingNodes = nestedBudget.remainingNodes;
-    budget.truncated ||= nestedBudget.truncated;
-    if (!primary.length) return text;
-    if (text) primary.push(' ', text);
-    return primary.join('');
+function referencedResultText(message: ToolResultMessage, budget: ExtractionBudget): string {
+  const items = message.content?.items;
+  if (!Array.isArray(items) || !message.primaryTextItems?.length) return '';
+  const parts: string[] = [];
+  budget.indexedTextParts = new Set();
+  for (const index of message.primaryTextItems) {
+    if (budget.remaining <= 0 || budget.remainingNodes <= 0) break;
+    budget.remainingNodes--;
+    const part = toolResultTextPart(items[index]);
+    if (!part) continue;
+    appendText(parts, searchablePrefix(part.text, budget), budget);
+    budget.indexedTextParts.add(part);
   }
-  if (value.length <= MAX_TOOL_RESULT_CHARS) return value;
-  budget.truncated = true;
-  return `${value.slice(0, MAX_TOOL_RESULT_HEAD_CHARS)} ${value.slice(-MAX_TOOL_RESULT_TAIL_CHARS)}`;
+  return parts.join('');
+}
+
+function boundedToolResult(message: ToolResultMessage, budget: ExtractionBudget): string {
+  const content: unknown = message.content;
+  if (typeof content === 'string') {
+    if (content.length <= MAX_TOOL_RESULT_CHARS) return content;
+    budget.truncated = true;
+    return `${content.slice(0, MAX_TOOL_RESULT_HEAD_CHARS)} ${content.slice(-MAX_TOOL_RESULT_TAIL_CHARS)}`;
+  }
+  // Spends the result budget on the diagnostic before supplementary fields.
+  const primary = referencedResultText(message, budget);
+  if (primary && budget.remaining > 0) budget.remaining--;
+  const details = boundedUnknownText(content, budget, 0, TOOL_RESULT_FIELDS);
+  return [primary, details].filter(Boolean).join(' ');
 }
 
 function messageText(message: ChatMessage, budget: ExtractionBudget): string {

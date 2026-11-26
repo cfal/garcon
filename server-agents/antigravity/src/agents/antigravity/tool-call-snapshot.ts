@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { ToolResultMessage, type ToolUseChatMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
-import { toolResultTextPart } from '@garcon/common/tool-result-content';
+import { isPlainTextPart, toolResultTextPart } from '@garcon/common/tool-result-content';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
 import {
   antigravityMcpArguments,
@@ -16,9 +16,12 @@ export interface TrackedCall extends AntigravityToolCall {
   readonly contentIsNewer: boolean;
 }
 
+function reportsPlanOrSchedule(name: string | null): boolean {
+  return name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
+}
+
 function isAgentWork(name: string | null): boolean {
-  return name === 'manage_task' || name === 'update_steps' || name === 'send_message'
-    || name === 'enter_plan_mode' || name === 'exit_plan_mode' || name === 'schedule';
+  return name === 'manage_task' || name === 'update_steps' || name === 'send_message' || reportsPlanOrSchedule(name);
 }
 
 function rawOutputText(raw: unknown): string {
@@ -93,8 +96,7 @@ function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['
 }
 
 function isPlainAcpText(block: Record<string, unknown>): boolean {
-  const part = toolResultTextPart(block);
-  return block.type === 'content' && part !== null && Object.keys(block).length === 2 && Object.keys(part).length === 2;
+  return block.type === 'content' && Object.keys(block).length === 2 && isPlainTextPart(block.content);
 }
 
 function withoutOutputText(raw: unknown): unknown {
@@ -109,7 +111,7 @@ function retainedBlocksForOutput(blocks: readonly Record<string, unknown>[], out
   return blocks.flatMap(block => {
     const part = toolResultTextPart(block);
     if (!part || part.text.trim() === output) return [block];
-    if (isPlainAcpText(block) || (part === block && Object.keys(part).length === 2)) return [];
+    if (isPlainAcpText(block) || isPlainTextPart(block)) return [];
     // Keeps annotations and other block metadata without presenting stale progress.
     const metadata = { ...part, text: '' };
     return [part === block ? metadata : { ...block, content: metadata }];
@@ -125,34 +127,37 @@ function planOrScheduleResult(timestamp: string, call: TrackedCall, terminal: Re
   const blocks = terminalOutput && !hasTerminalBlocks ? retainedBlocksForOutput(cached, terminalOutput) : cached;
   const mixed = blocks.some(block => !isPlainAcpText(block));
   if (!mixed && (terminalOutput || !hasTerminalBlocks)) {
-    return report(agentWorkResult(terminalOutput ? { ...call, content: blocks, contentIsNewer: false } : call, status));
+    const snapshot = terminalOutput ? { ...call, content: blocks, contentIsNewer: false } : call;
+    return report(agentWorkResult(snapshot, status));
   }
 
-  const parts = blocks.map(toolResultTextPart);
-  const text = parts.map(part => part?.text).filter(Boolean).join('\n');
-  if (!mixed && !text.trim()) return report(agentWorkResult(call, status));
+  const texts = blocks.map(block => toolResultTextPart(block)?.text);
+  const text = texts.filter(Boolean).join('\n');
+  const blockOutput = text.trim();
+  if (!mixed && !blockOutput) return report(agentWorkResult(call, status));
   // Mixed blocks are an ordered result; flattening the text would detach it from its attachments.
   const result: ToolResultMessage['content'] = mixed ? { items: blocks } : { raw: text };
   if (status !== 'completed') result.status = status;
-  let rawOutput = hasTerminalBlocks && text.trim() && terminal.rawOutput == null ? withoutOutputText(call.rawOutput) : call.rawOutput;
-  const output = rawOutputText(rawOutput).trim();
-  const aggregateEcho = !!output && output === text.trim();
-  const echoedItem = output && !aggregateEcho ? parts.findIndex(part => part?.text.trim() === output) : -1;
-  if (aggregateEcho || echoedItem >= 0) {
-    rawOutput = withoutOutputText(rawOutput);
-  }
+
+  const output = rawOutputText(call.rawOutput).trim();
+  const aggregateEcho = output !== '' && output === blockOutput;
+  const echoedItem = output && !aggregateEcho ? texts.findIndex(value => value?.trim() === output) : -1;
+  const superseded = hasTerminalBlocks && blockOutput !== '' && terminal.rawOutput == null;
+  const rawOutput = superseded || aggregateEcho || echoedItem >= 0 ? withoutOutputText(call.rawOutput) : call.rawOutput;
   if (isStructuredOutput(rawOutput) || rawOutputText(rawOutput).trim()) result.rawOutput = rawOutput;
-  if (!mixed) return report(result);
-  if (aggregateEcho || (!terminalOutput && hasTerminalBlocks)) {
-    const indices = parts.flatMap((part, i) => part?.text ? [i] : []);
-    return report(result, indices.length ? indices : undefined);
+
+  let primaryTextItems: number[] | undefined;
+  if (mixed && (aggregateEcho || (!terminalOutput && hasTerminalBlocks))) {
+    primaryTextItems = texts.flatMap((value, i) => value ? [i] : []);
+  } else if (mixed && echoedItem >= 0) {
+    primaryTextItems = [echoedItem];
   }
-  return report(result, echoedItem >= 0 ? [echoedItem] : undefined);
+  return report(result, primaryTextItems?.length ? primaryTextItems : undefined);
 }
 
 export function toolCallResult(timestamp: string, call: TrackedCall, terminal: Record<string, unknown>, status: string): ToolResultMessage {
   const name = call.isMcp ? null : antigravityToolName(call);
-  if (name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode') return planOrScheduleResult(timestamp, call, terminal, status);
+  if (reportsPlanOrSchedule(name)) return planOrScheduleResult(timestamp, call, terminal, status);
   if (isAgentWork(name)) return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status), status !== 'completed');
 
   // Other tools report text from the terminal frame, but a command's exit code can arrive earlier.

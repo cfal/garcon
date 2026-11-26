@@ -1,9 +1,25 @@
 import { isRecord } from './json.js';
 
-export function toolResultTextPart(block: unknown): (Record<string, unknown> & { text: string }) | null {
+interface ToolTextPart extends Record<string, unknown> {
+  type: 'text';
+  text: string;
+}
+
+function isTextPart(part: unknown): part is ToolTextPart {
+  return isRecord(part) && part.type === 'text' && typeof part.text === 'string';
+}
+
+export function isPlainTextPart(part: unknown): part is ToolTextPart {
+  if (!isTextPart(part)) return false;
+  for (const key in part) {
+    if (Object.hasOwn(part, key) && key !== 'type' && key !== 'text') return false;
+  }
+  return true;
+}
+
+export function toolResultTextPart(block: unknown): ToolTextPart | null {
   const part = isRecord(block) && block.type === 'content' ? block.content : block;
-  return isRecord(part) && part.type === 'text' && typeof part.text === 'string'
-    ? part as Record<string, unknown> & { text: string } : null;
+  return isTextPart(part) ? part : null;
 }
 
 // Search inspects only its indexed prefix; the transcript inspects the full body.
@@ -23,10 +39,7 @@ export function isEmptyToolResult(content: unknown, limits?: { maxChars: number;
     if (!Array.isArray(items)) return false;
     for (const block of items) {
       if (blocks-- <= 0) break;
-      if (!isRecord(block) || block.type !== 'text' || typeof block.text !== 'string') return false;
-      for (const field in block) {
-        if (Object.hasOwn(block, field) && field !== 'type' && field !== 'text') return false;
-      }
+      if (!isPlainTextPart(block)) return false;
       const prefix = block.text.slice(0, chars);
       if (/\S/.test(prefix)) return false;
       chars -= prefix.length;

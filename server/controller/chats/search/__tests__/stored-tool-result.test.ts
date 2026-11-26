@@ -3,6 +3,16 @@ import { parseChatMessage, ToolResultMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '@garcon/server-agent-common/search/message-projector';
 import { decodeLedgerRow, encodeLedgerDraft } from '../../../ledger/codec.js';
 
+const at = '2026-01-01T00:00:00Z';
+
+function storedResult(message: ToolResultMessage): ToolResultMessage {
+  const { payloadJson, clientMessageId } = encodeLedgerDraft({ kind: 'provider-row', at, message });
+  const row = decodeLedgerRow({ kind: 'provider-row', at, ordinal: 1, view_id: 'view',
+    client_message_id: clientMessageId, payload_json: payloadJson });
+  if (row.kind !== 'provider-row' || row.message.type !== 'tool-result') throw new Error('Expected a tool result');
+  return row.message;
+}
+
 test('empty successful result envelopes have no search target', () => {
   for (const content of [{ items: [] }, { content: [{ type: 'text', text: ' \t\n' }] }]) {
     expect(projectSearchMessage(new ToolResultMessage('', 'call', content, false))).toBeNull();
@@ -14,23 +24,22 @@ test('empty successful result envelopes have no search target', () => {
 });
 
 test('indexes referenced output before long progress or attachments without changing stored block order', () => {
-  const at = '2026-01-01T00:00:00Z';
   const block = (text: string) => ({ type: 'content', content: { type: 'text', text } });
   for (const [progress, refs] of [['Checking '.repeat(500), [2]], ['Checking', [0, 2]]] as const) {
     const content = { items: [block(progress), { type: 'image', data: 'A'.repeat(5000) }, block('Operation refused')], rawOutput: { attempts: 1 } };
-    const message = new ToolResultMessage(at, 'timer', content, true, refs);
-    const { payloadJson, clientMessageId } = encodeLedgerDraft({ kind: 'provider-row', at, message });
-    const row = decodeLedgerRow({ kind: 'provider-row', at, ordinal: 1, view_id: 'view',
-      client_message_id: clientMessageId, payload_json: payloadJson });
-    if (row.kind !== 'provider-row' || row.message.type !== 'tool-result') throw new Error('Expected a tool result');
-    expect(row.message.primaryTextItems).toEqual(refs);
-    expect(row.message.content.items).toEqual(content.items);
-    const body = projectSearchMessage(row.message)?.body ?? '';
+    const result = storedResult(new ToolResultMessage(at, 'timer', content, true, refs));
+    expect(result.primaryTextItems).toEqual(refs);
+    expect(result.content.items).toEqual(content.items);
+    const body = projectSearchMessage(result)?.body ?? '';
     expect(body.startsWith(refs.length === 1 ? 'Operation refused' : 'Checking Operation refused')).toBe(true);
     expect(body.match(/Operation refused/g)).toHaveLength(1);
     expect(body.length).toBeLessThanOrEqual(2512);
-    expect(parseChatMessage({ ...message, primaryTextItems: [9] })).toEqual(new ToolResultMessage(at, 'timer', content, true));
   }
+});
+
+test('invalid primary text references do not discard the stored result', () => {
+  const message = new ToolResultMessage(at, 'timer', { items: [{ type: 'text', text: 'Report' }] }, true);
+  expect(parseChatMessage({ ...message, primaryTextItems: [9] })).toEqual(message);
 });
 
 test.each([
@@ -39,14 +48,9 @@ test.each([
   { error: 'Operation refused', output: ' \t\n'.repeat(1000) },
   { error: 'Operation refused', output: 'Working' + ' '.repeat(3000) },
 ])('indexes the structured diagnostic before supplementary data after ledger serialization', rawOutput => {
-  const at = '2026-01-01T00:00:00Z';
   const message = new ToolResultMessage(at, 'task', { rawOutput,
     items: [{ type: 'text', text: 'working '.repeat(500) }], status: 'failed' }, true);
-  const { payloadJson, clientMessageId } = encodeLedgerDraft({ kind: 'provider-row', at, message });
-  const row = decodeLedgerRow({ kind: 'provider-row', at, ordinal: 1, view_id: 'view',
-    client_message_id: clientMessageId, payload_json: payloadJson });
-  if (row.kind !== 'provider-row') throw new Error('Expected a provider row');
-  const body = projectSearchMessage(row.message)?.body;
+  const body = projectSearchMessage(storedResult(message))?.body;
   expect(body).toContain('Operation refused');
   expect(body!.length).toBeLessThanOrEqual(2512);
 });

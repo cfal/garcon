@@ -3,7 +3,7 @@
 
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolPayload } from '$lib/chat/tools/tool-display-contract.js';
-import { isEmptyToolResult } from '$shared/tool-result-content';
+import { isEmptyToolResult, isPlainTextPart } from '$shared/tool-result-content';
 import { isRecord } from '$shared/json';
 
 interface ReadRangePayload {
@@ -85,7 +85,7 @@ function reportedResultBody(content: ToolPayload): string {
 	const text = typeof raw === 'string' ? raw : '';
 	if (rawOutput === undefined) {
 		if (text) return text;
-		if (Array.isArray(items) && items.every(item => item?.type === 'text' && typeof item.text === 'string' && Object.keys(item).length === 2)) {
+		if (Array.isArray(items) && items.every(isPlainTextPart)) {
 			const body = items.map(item => item.text).join('\n');
 			if (body) return body;
 		}
