@@ -25,7 +25,8 @@ function actor(context: HttpRouteContext | undefined, requireHuman: boolean): Wo
   if (!who || who.mode === 'executor' || !isCurrentBrowserPrincipal(who)) {
     throw new DomainError('WORKFLOW_FORBIDDEN', 'Use a current workspace session to access workflows.', 403);
   }
-  if (requireHuman && who.mode !== 'authenticated') {
+  const hasHumanAccess = who.mode === 'authenticated' || (who.mode === 'local' && who.authDisabled === true);
+  if (requireHuman && !hasHumanAccess) {
     throw new DomainError('WORKFLOW_FORBIDDEN', 'Sign in through Garcon to record a human workflow decision.', 403);
   }
   context?.assertCurrent?.();

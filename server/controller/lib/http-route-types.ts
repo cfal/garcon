@@ -1,13 +1,22 @@
 export type ServerPrincipal =
   | { mode: 'executor'; key: string; executorId: string; expiresAtMs: null }
   | { mode: 'authenticated'; key: string; username: string; expiresAtMs: number; credentialRevision: number; sessionId: string }
-  | { mode: 'local'; key: 'local'; username: 'local'; expiresAtMs: null };
+  | { mode: 'local'; key: 'local'; username: 'local'; expiresAtMs: null; authDisabled?: true };
 
 export const LOCAL_SERVER_PRINCIPAL: ServerPrincipal = Object.freeze({
   mode: 'local',
   key: 'local',
   username: 'local',
   expiresAtMs: null,
+});
+
+// Distinguishes disabled-auth browser access from bearer-authenticated local capability calls.
+export const AUTH_DISABLED_SERVER_PRINCIPAL: ServerPrincipal = Object.freeze({
+  mode: 'local',
+  key: 'local',
+  username: 'local',
+  expiresAtMs: null,
+  authDisabled: true,
 });
 
 export interface HttpRouteContext {

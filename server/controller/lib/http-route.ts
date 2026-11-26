@@ -5,7 +5,7 @@ import { malformedJsonResponse } from './json-route.js';
 import { compressHttpResponse } from './http-compression.js';
 import { jsonError } from '../../common/http-error.js';
 import {
-  LOCAL_SERVER_PRINCIPAL,
+  AUTH_DISABLED_SERVER_PRINCIPAL,
   type HttpRouteContext,
   type RouteHandler,
   type RouteMap,
@@ -174,7 +174,7 @@ function wrapRouteAuth(
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
       if (mismatch) return mismatch;
-      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL }, activity, authOptions.basePath ?? '');
+      return invokeRouteHandler(handler, req, server, { principal: AUTH_DISABLED_SERVER_PRINCIPAL }, activity, authOptions.basePath ?? '');
     };
   }
 

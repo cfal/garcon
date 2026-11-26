@@ -6,7 +6,7 @@ import { workflowPaths } from '../../../../common/workflow-http.js';
 import type { WorkflowExecutionContext, WorkflowRunDetail } from '../../../../common/workflow-runs.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { wrapRoutes } from '../../lib/http-route.js';
-import { LOCAL_SERVER_PRINCIPAL, type HttpRouteContext } from '../../lib/http-route-types.js';
+import { AUTH_DISABLED_SERVER_PRINCIPAL, LOCAL_SERVER_PRINCIPAL, type HttpRouteContext } from '../../lib/http-route-types.js';
 import { createWorkflowRoutes, type PrepareWorkflowSettings } from '../../routes/workflows.js';
 import { WorkflowEngine } from '../engine.js';
 import { WorkflowStore } from '../store.js';
@@ -152,16 +152,35 @@ test('a future listener loses to a decision made while its settings are being pr
   expect(after.amendments).toEqual([]);
 });
 
-test('handoffs cannot be approved by a local CLI or delegated executor; revoked launch never mutates', async () => {
+test('human decisions allow disabled-auth browser sessions but reject local capability CLI or delegated executors', async () => {
   let revoked = false;
-  const { service, post, publish } = fixture(async () => { revoked = true; return () => ({}); });
+  const { service, routes, post, publish } = fixture(async () => { revoked = true; return () => ({}); });
   await publish(null);
-  const decision = { runId: 'run', instanceId: 'review', operationId: 'choice', choice: 'approve' };
+  const run = await (await post(workflowPaths.runs, { definitionId: 'review', inputs: {} })).json() as WorkflowRunDetail;
+  const instanceId = run.steps[0]!.instances[0]!.id;
+  const decision = { runId: run.id, instanceId, operationId: 'choice', choice: 'approve' };
+
   expect((await post(workflowPaths.decide, decision)).status).toBe(403);
+  const wrapped = wrapRoutes(routes, { localCapability: 'synthetic-workspace' });
+  const bearerDecide = await wrapped[workflowPaths.decide]!.POST!(new Request(new URL(workflowPaths.decide, 'http://localhost'), {
+    method: 'POST',
+    headers: { authorization: 'Bearer synthetic-workspace', 'content-type': 'application/json' },
+    body: JSON.stringify(decision),
+  }));
+  expect(bearerDecide.status).toBe(403);
+
   const delegated = { mode: 'executor', key: 'executor', executorId: 'local', expiresAtMs: null } as const;
   expect((await post(workflowPaths.decide, decision, { principal: delegated })).status).toBe(403);
+
+  const authDisabled = await post(workflowPaths.decide, decision, { principal: AUTH_DISABLED_SERVER_PRINCIPAL });
+  expect(authDisabled.status).toBe(200);
+  expect((await authDisabled.json() as WorkflowRunDetail).signals).toMatchObject([{
+    ref: { stepId: 'review', signal: 'approve' },
+    source: { kind: 'decision', actor: { id: 'local', name: 'local' }, operationId: 'choice' },
+  }]);
+
   expect((await post(workflowPaths.runs, { definitionId: 'review', inputs: {} }, {
     ...local, assertCurrent() { if (revoked) throw new DomainError('WORKFLOW_FORBIDDEN', 'Session revoked.', 403); },
   })).status).toBe(403);
-  expect(service.listRuns().items).toHaveLength(0);
+  expect(service.listRuns().items).toHaveLength(1);
 });

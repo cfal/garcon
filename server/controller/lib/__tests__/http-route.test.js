@@ -364,6 +364,7 @@ describe('http route wrapping', () => {
       key: 'local',
       username: 'local',
       expiresAtMs: null,
+      authDisabled: true,
     });
   });
 

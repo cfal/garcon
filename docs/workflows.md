@@ -4,7 +4,7 @@ A workflow definition is a reusable set of steps connected by signals. Publishin
 
 ## First Run
 
-This workflow needs a signed-in Garcon browser session, an executor that supports [Shell](shell.md) with `sh` installed, and an existing folder on that executor. It needs neither an AI provider nor a Git repository.
+This workflow needs a Garcon browser session (signed in, or started with authentication disabled), an executor that supports [Shell](shell.md) with `sh` installed, and an existing folder on that executor. It needs neither an AI provider nor a Git repository.
 
 ```yaml
 version: 1
@@ -29,7 +29,7 @@ steps:
 2. To try it without publishing, select **Test run**, choose the executor and folder, then start the test. To start from a published revision, select **Publish**, then **New run**. Choose the definition, executor, and folder, and select **Start workflow**.
 3. In the run viewer, select `review`. **Print the sample** starts the Shell step. When it has an attempt, select that step and use **Open chat** to read its output. **Stop here** records the other choice and leaves that Shell branch unrun.
 
-Make human decisions in the signed-in browser run viewer. A delegated executor CLI does not have that authority, and running Garcon without authentication does not supply a human identity. A choice selects a branch; it does not grant tool permissions. Neither an agent response nor a successful command counts as a decision.
+Make human decisions in the browser run viewer (signed in, or with authentication disabled). A local capability CLI or delegated executor CLI does not have that authority. A choice selects a branch; it does not grant tool permissions. Neither an agent response nor a successful command counts as a decision.
 
 For typed inputs, keyed verifier instances, a join, and a decision on the summary, see the [full research recipe](../common/workflow-definition/fixtures/research.workflow.yaml). It uses Codex and synthetic findings; supply a `topic` and a folder on an executor where Codex is available.
 
