@@ -65,8 +65,7 @@ function expectEquivalentMarkdown(actual: string, expected: string) {
 async function formatted({
 	selectedStatus = 'running',
 	source = table,
-	snippetTemplate = ' appended',
-}: { selectedStatus?: 'running' | 'draft'; source?: string; snippetTemplate?: string } = {}) {
+}: { selectedStatus?: 'running' | 'draft'; source?: string } = {}) {
 	vi.mocked(parseComposerMarkdownInWorker).mockResolvedValue(
 		parseComposerMarkdown({ source, caret: source.length }),
 	);
@@ -74,7 +73,7 @@ async function formatted({
 	const rendered = render(PromptComposerTestHost, {
 		selectedChatId: 'markdown-test',
 		selectedStatus,
-		snippetTemplate,
+		snippetTemplate: ' appended',
 		onsubmit,
 	});
 	const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
@@ -671,7 +670,17 @@ describe('formatted composer integration', () => {
 	});
 	it('opens the snippet palette for a trigger typed after formatted content', async () => {
 		const source = '**context** then';
-		const { editor, textarea } = await formatted({ source, snippetTemplate: 'appended' });
+		const { editor, textarea } = await formatted({ source });
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'appended',
+		});
 		richEditor(editor).chain().focus('end').insertContent(' ;;').run();
 		await waitFor(() =>
 			expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull(),
@@ -680,7 +689,6 @@ describe('formatted composer integration', () => {
 		expect(textarea.selectionStart).toBe(source.length + 3);
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		await waitFor(() => expect(textarea.value).toBe(source + ' appended'));
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 	it('keeps Formatted mode when a draft is emptied', async () => {
 		const { editor, textarea } = await formatted();
@@ -756,13 +764,22 @@ describe('formatted composer integration', () => {
 		expect(rich.state.selection.$head.parent.textContent).toBe('a  b');
 		expect(rich.state.selection.$head.parentOffset).toBe(4);
 		rich.commands.setTextSelection(2);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValue({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: ' appended',
+		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
 		expect(screen.queryByRole('textbox', { name: 'Formatted message' })).toBeNull();
 		expect(textarea.selectionStart).toBe(source.length);
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		await waitFor(() => expect(textarea.value).toBe(source + ' appended'));
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 	it.each(['Ready', 'a  b'])(
 		'escapes oversized text in table cell %s before falling back to source',

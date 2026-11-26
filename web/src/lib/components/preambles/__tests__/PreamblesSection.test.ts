@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
-import { PREAMBLE_ERROR_CODES, type Preamble, type PreamblesSnapshot } from '$shared/preambles';
+import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import PreamblesSectionTestHost from './PreamblesSectionTestHost.svelte';
 
@@ -402,54 +402,5 @@ describe('PreamblesSection', () => {
 		expect(descriptions[0]).toContain('at least one');
 		expect(descriptions[1]).toContain('unique');
 		expect(descriptions[2]).toContain('unique');
-	});
-
-	it('sends the captured revision when confirming removal even if the catalog advances while open', async () => {
-		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
-		let store!: PreamblesStore;
-		const remove = vi.fn().mockResolvedValue({
-			success: true,
-			snapshot: { revision: 5, preambles: [] },
-		});
-		render(PreamblesSectionTestHost, {
-			snapshot: { revision: 3, preambles: [original] },
-			deps: { remove },
-			onStore: (value) => {
-				store = value;
-			},
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
-		store.applySnapshot({ revision: 4, preambles: [original] });
-		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
-
-		await waitFor(() =>
-			expect(remove).toHaveBeenCalledWith({
-				expectedRevision: 3,
-				id: 'global',
-			}),
-		);
-	});
-
-	it('updates the captured remove revision after a 409 conflict so an explicit retry succeeds', async () => {
-		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
-		const get = vi.fn().mockResolvedValueOnce({ revision: 4, preambles: [original] });
-		const remove = vi
-			.fn()
-			.mockRejectedValueOnce(new ApiError(409, 'conflict', PREAMBLE_ERROR_CODES.revisionConflict))
-			.mockResolvedValueOnce({ success: true, snapshot: { revision: 5, preambles: [] } });
-		render(PreamblesSectionTestHost, {
-			snapshot: { revision: 3, preambles: [original] },
-			deps: { get, remove },
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
-		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
-		expect(await screen.findByText(/conflict/)).toBeTruthy();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Remove preamble' }));
-		expect(remove).toHaveBeenNthCalledWith(1, { expectedRevision: 3, id: 'global' });
-		expect(remove).toHaveBeenNthCalledWith(2, { expectedRevision: 4, id: 'global' });
-		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
 	});
 });

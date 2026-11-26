@@ -25,17 +25,14 @@
 		active: boolean;
 	}
 
-	type PreambleFormTarget =
-		| { kind: 'closed' }
-		| { kind: 'create' }
-		| { kind: 'edit'; preamble: Preamble; revision: number };
-
 	let { active }: Props = $props();
 	const preambles = getPreambles();
 	const catalogIndexById = $derived(new Map(preambles.preambles.map((item, index) => [item.id, index])));
 	let query = $state('');
-	let form = $state<PreambleFormTarget>({ kind: 'closed' });
-	let removeTarget = $state<{ preamble: Preamble; revision: number } | null>(null);
+	let formOpen = $state(false);
+	let editingPreamble = $state<Preamble | null>(null);
+	let editingRevision = $state<number | null>(null);
+	let removePreamble = $state<Preamble | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
 	let catalogMutationBusy = $state(false);
@@ -44,9 +41,10 @@
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
 	let formIsStale = $derived(
-		form.kind === 'edit' &&
+		editingPreamble !== null &&
+			editingRevision !== null &&
 			(editConflict ||
-				(preambles.snapshot !== null && preambles.snapshot.revision !== form.revision)),
+				(preambles.snapshot !== null && preambles.snapshot.revision !== editingRevision)),
 	);
 
 	$effect(() => {
@@ -56,47 +54,32 @@
 
 	function openCreate(): void {
 		if (catalogMutationBusy || preambles.isRefreshing) return;
-		form = { kind: 'create' };
+		editingPreamble = null;
+		editingRevision = null;
 		editConflict = false;
 		operationError = null;
+		formOpen = true;
 	}
 
 	function openEdit(preamble: Preamble): void {
-		const revision = preambles.snapshot?.revision;
-		if (catalogMutationBusy || preambles.isRefreshing || revision === undefined) return;
-		form = { kind: 'edit', preamble, revision };
+		if (catalogMutationBusy || preambles.isRefreshing) return;
+		editingPreamble = preamble;
+		editingRevision = preambles.snapshot?.revision ?? null;
 		editConflict = false;
 		operationError = null;
-	}
-
-	function closeForm(): void {
-		form = { kind: 'closed' };
-		editConflict = false;
-	}
-
-	function openRemove(preamble: Preamble): void {
-		const revision = preambles.snapshot?.revision;
-		if (catalogMutationBusy || preambles.isRefreshing || revision === undefined) return;
-		removeError = null;
-		removeTarget = { preamble, revision };
-	}
-
-	function closeRemove(): void {
-		removeTarget = null;
-		removeError = null;
+		formOpen = true;
 	}
 
 	async function save(definition: PreambleDefinitionInput): Promise<void> {
 		catalogMutationBusy = true;
 		try {
-			if (form.kind === 'edit') {
-				await preambles.update(form.preamble.id, definition, form.revision);
-			} else if (form.kind === 'create') {
-				await preambles.create(definition);
-			}
+			if (editingPreamble) {
+				if (editingRevision === null) throw new Error(m.preambles_edit_stale());
+				await preambles.update(editingPreamble.id, definition, editingRevision);
+			} else await preambles.create(definition);
 		} catch (error) {
 			if (
-				form.kind === 'edit' &&
+				editingPreamble &&
 				error instanceof ApiError &&
 				error.errorCode === PREAMBLE_ERROR_CODES.revisionConflict
 			) {
@@ -109,22 +92,14 @@
 	}
 
 	async function confirmRemove(): Promise<void> {
-		if (!removeTarget || catalogMutationBusy) return;
+		if (!removePreamble || catalogMutationBusy) return;
 		catalogMutationBusy = true;
 		removing = true;
 		removeError = null;
 		try {
-			await preambles.remove(removeTarget.preamble.id, removeTarget.revision);
-			closeRemove();
+			await preambles.remove(removePreamble.id);
+			removePreamble = null;
 		} catch (error) {
-			// Update revision in place so an explicit retry uses the refreshed catalog after a 409.
-			if (
-				error instanceof ApiError &&
-				error.errorCode === PREAMBLE_ERROR_CODES.revisionConflict &&
-				preambles.snapshot !== null
-			) {
-				removeTarget.revision = preambles.snapshot.revision;
-			}
 			removeError = error instanceof Error ? error.message : m.preambles_remove_error();
 		} finally {
 			removing = false;
@@ -288,7 +263,10 @@
 						disabled={catalogMutationBusy || preambles.isRefreshing}
 						reorderDisabled={Boolean(normalizedQuery)}
 						onEdit={() => openEdit(preamble)}
-						onRemove={() => openRemove(preamble)}
+						onRemove={() => {
+							removeError = null;
+							removePreamble = preamble;
+						}}
 						onMoveUp={() => void move(preamble, 'up')}
 						onMoveDown={() => void move(preamble, 'down')}
 						onEnabledChange={(enabled) => void setEnabled(preamble, enabled)}
@@ -304,22 +282,22 @@
 	{/if}
 </div>
 
-{#if form.kind !== 'closed'}
+{#if formOpen}
 	<PreambleFormDialog
 		open
-		preamble={form.kind === 'edit' ? form.preamble : null}
+		preamble={editingPreamble}
 		isStale={formIsStale}
 		onSave={save}
-		onClose={closeForm}
+		onClose={() => (formOpen = false)}
 	/>
 {/if}
-{#if removeTarget}
+{#if removePreamble}
 	<PreambleRemoveDialog
 		open
-		preamble={removeTarget.preamble}
+		preamble={removePreamble}
 		{removing}
 		error={removeError}
 		onConfirm={() => void confirmRemove()}
-		onClose={closeRemove}
+		onClose={() => (removePreamble = null)}
 	/>
 {/if}

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { SNIPPET_EXPANDED_MAX_LENGTH } from '../../../../common/snippets.ts';
-import { SnippetDomainError } from '../errors.ts';
 import { expandScheduledSnippetTemplate, expandSnippetTemplate } from '../template.ts';
 import { renderScheduledPrompt } from '../../../../common/scheduled-prompts.ts';
 import { TEMPLATE_VALIDATION_VALUES, RUNTIME_TEMPLATE_VARIABLES } from '../../../../common/template-tokens.ts';
@@ -43,22 +42,13 @@ describe('snippet template expansion', () => {
   });
 
   it('rejects output beyond the configured bound before joining it', () => {
-    let caught;
-    try {
+    expect(() =>
       expandSnippetTemplate('{{arguments}}{{arguments}}{{arguments}}', {
         arguments: 'x'.repeat(Math.floor(SNIPPET_EXPANDED_MAX_LENGTH / 2)),
         projectPath: '/repo',
         context: { ...TEMPLATE_VALIDATION_VALUES, chat_id: 'chat-a' },
-      });
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(SnippetDomainError);
-    expect(caught).toMatchObject({
-      code: 'SNIPPET_EXPANSION_TOO_LONG',
-      status: 422,
-      message: expect.stringContaining('Expanded snippet exceeds'),
-    });
+      }),
+    ).toThrow('Expanded snippet exceeds');
   });
 });
 
@@ -72,18 +62,8 @@ describe('scheduled snippet template expansion', () => {
       [`{{${variable}{{arguments}}}}`, '', '/repo'],
       [`{{arguments}}${variable}}}`, '{{', '/repo'],
     ]) {
-      let caught;
-      try {
-        expandScheduledSnippetTemplate(template, { arguments: argumentsText, projectPath });
-      } catch (error) {
-        caught = error;
-      }
-      expect(caught).toBeInstanceOf(SnippetDomainError);
-      expect(caught).toMatchObject({
-        code: 'SNIPPET_VALIDATION_FAILED',
-        status: 422,
-        message: expect.stringContaining('Add a separator'),
-      });
+      expect(() => expandScheduledSnippetTemplate(template, { arguments: argumentsText, projectPath }))
+        .toThrow('Add a separator');
     }
     for (const template of [`{{arguments}} {{${variable}}}`, `{{arguments}}\\{{${variable}}}`]) {
       const values = { arguments: 'report\\', projectPath: '/repo', context: TEMPLATE_VALIDATION_VALUES };
@@ -139,19 +119,8 @@ describe('scheduled snippet template expansion', () => {
   });
 
   it('enforces the expansion length bound', () => {
-    let caught;
-    try {
-      expandScheduledSnippetTemplate('{{arguments}}{{arguments}}', {
-        arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH), projectPath: '/repo',
-      });
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(SnippetDomainError);
-    expect(caught).toMatchObject({
-      code: 'SNIPPET_EXPANSION_TOO_LONG',
-      status: 422,
-      message: expect.stringContaining('Expanded snippet exceeds'),
-    });
+    expect(() => expandScheduledSnippetTemplate('{{arguments}}{{arguments}}', {
+      arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH), projectPath: '/repo',
+    })).toThrow('Expanded snippet exceeds');
   });
 });

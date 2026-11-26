@@ -6,7 +6,6 @@
 	import { getSnippets, getPreambles } from '$lib/context';
 	import ComposerSnippetPalette from '$lib/components/chat/composer/ComposerSnippetPalette.svelte';
 	import { ScheduledPromptSnippets } from './scheduled-prompt-snippets.svelte';
-	import { inspectSelectableSnippetInCatalog } from '$lib/snippets/local-snippet-expansion.js';
 	import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 	import { Button } from '$lib/components/ui/button';
 	import { SCHEDULED_PROMPT_CHAT_ID_TOKEN } from '$shared/scheduled-prompts';
@@ -72,11 +71,6 @@
 			ref.setSelectionRange(caret, caret);
 		},
 		onPendingChange: (pending) => onSnippetPendingChange?.(pending),
-		inspectCatalogItem: (item) =>
-			inspectSelectableSnippetInCatalog(item, {
-				snippets: snippetCatalog,
-				preambles: preambleCatalog,
-			}),
 		onSourceChanged: (source) => {
 			if (source === 'snippet') void snippetCatalog?.refreshIfLoaded();
 			else void preambleCatalog?.refreshIfLoaded();

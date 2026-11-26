@@ -14,8 +14,6 @@ import * as filesApi from '$lib/api/files.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
-import type { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-import type { Snippet, SnippetsSnapshot } from '$shared/snippets';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 function conversationalCatalog(): ModelCatalogStore {
@@ -1989,7 +1987,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-edit-during-expansion',
 			selectedStatus: 'running',
-			snippetTemplate: 'Expanded review in {{project_path}}',
+			snippetTemplate: 'Expanded review',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
@@ -2026,7 +2024,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-attachment-during-expansion',
 			selectedStatus: 'running',
-			snippetTemplate: 'Expanded review in {{project_path}}',
+			snippetTemplate: 'Expanded review',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
@@ -2062,8 +2060,18 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('Original draft');
 	});
 
-	it('opens from an inline trigger and replaces only the captured span locally without server calls', async () => {
-		const { component } = render(PromptComposerTestHost, {
+	it('opens from an inline trigger and replaces only the captured span', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'EXPANDED',
+		});
+		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-inline-snippet',
 			selectedStatus: 'running',
 			snippetTemplate: 'Expanded review',
@@ -2079,14 +2087,30 @@ describe('PromptComposer focus', () => {
 		expect(search.value).toBe('review');
 		await fireEvent.click(screen.getByRole('option', { name: /^review\b/ }));
 
-		await waitFor(() => expect(textarea.value).toBe('Before Expanded review after'));
-		expect(textarea.selectionStart).toBe('Before Expanded review'.length);
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(component.getProjectResolutionRequestCount()).toBe(0);
+		await waitFor(() => expect(textarea.value).toBe('Before EXPANDED after'));
+		expect(textarea.selectionStart).toBe('Before EXPANDED'.length);
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: { type: 'value', value: '' },
+				context: { type: 'chat', chatId: 'chat-inline-snippet' },
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 	});
 
-	it('inserts a named preamble from the palette locally without collecting snippet arguments', async () => {
-		const { component } = render(PromptComposerTestHost, {
+	it('inserts a named preamble from the palette without collecting snippet arguments', async () => {
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'preamble',
+			sourceId: '00000000-0000-4000-8000-000000000001',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'manual',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'PREAMBLE',
+		});
+		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-preamble-snippet',
 			selectedStatus: 'running',
 			preambleSnapshot: {
@@ -2113,321 +2137,16 @@ describe('PromptComposer focus', () => {
 		expect(option.textContent).toContain('preamble');
 		await fireEvent.click(option);
 
-		await waitFor(() =>
-			expect(textarea.value).toBe('Before Literal {{arguments}} for chat-preamble-snippet after'),
-		);
+		await waitFor(() => expect(textarea.value).toBe('Before PREAMBLE after'));
 		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(component.getProjectResolutionRequestCount()).toBe(0);
-	});
-
-	it('falls back to the server for palette items that use active controller date tokens', async () => {
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
-			reviewExpansionResponse('Summary on 2026-01-01'),
-		);
-		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-snippet-date-fallback',
-			selectedStatus: 'running',
-			snippetTemplate: 'Summary on {{current_date}}',
-		});
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		await inputAtCaret(textarea, ';;review', ';;review'.length);
-		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
-
-		await waitFor(() => expect(textarea.value).toBe('Summary on 2026-01-01'));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
-	});
-
-	it('expands /s locally when WS is connected and the catalog is loaded, and falls back when disconnected', async () => {
-		const onsubmit = vi.fn();
-		const { component, rerender } = render(PromptComposerTestHost, {
-			selectedChatId: 'chat-local-slash',
-			selectedStatus: 'running',
-			snippetTemplate: 'Review {{arguments}} in {{chat_id}}',
-			snippetDefaultArguments: 'staged diff',
-			preloadSnippets: true,
-			wsPhase: 'connected',
-			onsubmit,
-		});
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-
-		await fireEvent.input(textarea, { target: { value: '/s review' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-		await waitFor(() => expect(textarea.value).toBe('Review staged diff in chat-local-slash'));
-		expect(onsubmit).not.toHaveBeenCalled();
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(component.getProjectResolutionRequestCount()).toBe(0);
-
-		await fireEvent.input(textarea, { target: { value: '/snippet review API contracts' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-		await waitFor(() => expect(textarea.value).toBe('Review API contracts in chat-local-slash'));
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(component.getProjectResolutionRequestCount()).toBe(0);
-
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
-			reviewExpansionResponse('Server fallback result'),
-		);
-		await rerender({ wsPhase: 'reconnecting' });
-		await fireEvent.input(textarea, { target: { value: '/s review disconnected' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-		await waitFor(() => expect(textarea.value).toBe('Server fallback result'));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
-	});
-
-	it('expands a named preamble via /s locally, falls back while refreshing, and applies restored lower-revision catalogs', async () => {
-		let snippetsStore!: SnippetsStore;
-		const refresh = Promise.withResolvers<SnippetsSnapshot>();
-		const loadSnippets = vi
-			.fn<() => Promise<SnippetsSnapshot>>()
-			.mockReturnValueOnce(refresh.promise)
-			.mockResolvedValueOnce({ revision: 0, snippets: [] })
-			.mockResolvedValueOnce({
-				revision: 1,
-				snippets: [
-					makeReviewSnippet({
-						id: 'snippet-restored',
-						template: 'Restored review',
-						updatedAt: '2026-01-02T00:00:00.000Z',
-					}),
-				],
-			});
-		const { component } = render(PromptComposerTestHost, {
-			selectedChatId: 'chat-preamble-slash',
-			selectedStatus: 'running',
-			snippetTemplate: 'Local review',
-			preloadSnippets: true,
-			loadSnippets,
-			onSnippets: (store) => {
-				snippetsStore = store;
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'manual',
+				arguments: { type: 'value', value: '' },
+				context: { type: 'chat', chatId: 'chat-preamble-snippet' },
 			},
-			wsPhase: 'connected',
-			preambleSnapshot: {
-				revision: 1,
-				preambles: [
-					{
-						id: '00000000-0000-4000-8000-000000000001',
-						enabled: false,
-						title: 'Manual',
-						snippetShortName: 'manual',
-						content: 'Preamble for {{chat_id}}',
-						scope: { type: 'global' },
-						agentIds: [],
-						tagFilter: { mode: 'any', tags: [] },
-						createdAt: '2026-01-01T00:00:00.000Z',
-						updatedAt: '2026-01-01T00:00:00.000Z',
-					},
-				],
-			},
-		});
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-
-		await fireEvent.input(textarea, { target: { value: '/s manual' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-		await waitFor(() => expect(textarea.value).toBe('Preamble for chat-preamble-slash'));
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(component.getProjectResolutionRequestCount()).toBe(0);
-
-		const refreshing = snippetsStore.refresh();
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
-			reviewExpansionResponse('Refreshing fallback'),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
-		await fireEvent.input(textarea, { target: { value: '/s review' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-		await waitFor(() => expect(textarea.value).toBe('Refreshing fallback'));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(1);
-
-		refresh.resolve({
-			revision: 2,
-			snippets: [makeReviewSnippet({ template: 'Updated review' })],
-		});
-		await refreshing;
-
-		// Lower-revision restore replaces revision 2 with revision 0, so deleted /s review falls back to the server.
-		await snippetsStore.refreshIfLoaded();
-		expect(snippetsStore.snapshot).toEqual({ revision: 0, snippets: [] });
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce(
-			reviewExpansionResponse('Restored-catalog fallback'),
-		);
-		await fireEvent.input(textarea, { target: { value: '/s review' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-		await waitFor(() => expect(textarea.value).toBe('Restored-catalog fallback'));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
-
-		// Restored lower-revision entries immediately expand locally without waiting to reach the prior revision.
-		await snippetsStore.refreshIfLoaded();
-		await fireEvent.input(textarea, { target: { value: '/s review' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-		await waitFor(() => expect(textarea.value).toBe('Restored review'));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledTimes(2);
-	});
-
-	it('rejects an open arguments dialog without calling the server after a 3 -> 2 -> 3 or same-revision restore even when updatedAt is unchanged', async () => {
-		let snippetsStore!: SnippetsStore;
-		const restoredAfterRegression = makeReviewSnippet({ template: 'Restored {{arguments}}' });
-		const restoredSameRevision = makeReviewSnippet({ template: 'Same-rev restored {{arguments}}' });
-		const loadSnippets = vi
-			.fn<() => Promise<SnippetsSnapshot>>()
-			.mockResolvedValueOnce({ revision: 2, snippets: [] })
-			.mockResolvedValueOnce({ revision: 3, snippets: [restoredAfterRegression] })
-			.mockResolvedValueOnce({ revision: 3, snippets: [restoredSameRevision] });
-		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-dialog-restore-recovery',
-			selectedStatus: 'running',
-			snippetTemplate: 'Old {{arguments}}',
-			loadSnippets,
-			onSnippets: (store) => {
-				snippetsStore = store;
-				store.applySnapshot({
-					revision: 3,
-					snippets: [makeReviewSnippet({ template: 'Old {{arguments}}' })],
-				});
-			},
-			wsPhase: 'connected',
-		});
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		await inputAtCaret(textarea, ';;review', ';;review'.length);
-		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
-		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-		await fireEvent.input(argumentsInput, { target: { value: 'selected' } });
-
-		// Catalog regresses 3 -> 2 and recovers -> 3 while the arguments dialog stays open.
-		await snippetsStore.refreshIfLoaded();
-		await snippetsStore.refreshIfLoaded();
-		expect(snippetsStore.hasFreshSnapshot).toBe(true);
-
-		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
-
-		await screen.findByText('That snippet changed. Select it again.');
-		expect(loadSnippets).toHaveBeenCalledTimes(2);
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(textarea.value).toBe(';;review');
-
-		// Same-revision reconnect refresh (3 -> 3) with changed template and identical updatedAt also rejects without server expansion.
-		await inputAtCaret(textarea, '', 0);
-		await inputAtCaret(textarea, ';;review', ';;review'.length);
-		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
-		const secondArgsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-		await fireEvent.input(secondArgsInput, { target: { value: 'second' } });
-		await snippetsStore.refreshIfLoaded();
-		expect(loadSnippets).toHaveBeenCalledTimes(3);
-
-		await fireEvent.keyDown(secondArgsInput, { key: 'Enter' });
-
-		await waitFor(() =>
-			expect(screen.getAllByText('That snippet changed. Select it again.')).toHaveLength(2),
-		);
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(loadSnippets).toHaveBeenCalledTimes(3);
-		expect(textarea.value).toBe(';;review');
-
-		// A fresh selection after the same-revision restore expands locally without calling the server.
-		await inputAtCaret(textarea, '', 0);
-		await inputAtCaret(textarea, ';;review', ';;review'.length);
-		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
-		const thirdArgsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-		await fireEvent.input(thirdArgsInput, { target: { value: 'fresh' } });
-		await fireEvent.keyDown(thirdArgsInput, { key: 'Enter' });
-
-		await waitFor(() => expect(textarea.value).toBe('Same-rev restored fresh'));
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-	});
-
-	it.each([false, true])(
-		'rejects a mid-flight fallback expansion when a restore changes the template with identical updatedAt (second refresh held open: %s)',
-		async (holdSecondRefresh) => {
-			const pending = deferredSnippetExpansion();
-			vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
-			const secondRefresh = Promise.withResolvers<SnippetsSnapshot>();
-			let snippetsStore!: SnippetsStore;
-			const restoredSameTimestamp = makeReviewSnippet({
-				template: 'Restored {{arguments}} in {{project_path}}',
-			});
-			const loadSnippets = vi
-				.fn<() => Promise<SnippetsSnapshot>>()
-				.mockResolvedValueOnce({ revision: 3, snippets: [restoredSameTimestamp] });
-			if (holdSecondRefresh) loadSnippets.mockReturnValueOnce(secondRefresh.promise);
-			render(PromptComposerTestHost, {
-				selectedChatId: `chat-midflight-${holdSecondRefresh ? 'held' : 'settled'}`,
-				selectedStatus: 'running',
-				snippetTemplate: 'Old {{arguments}} in {{project_path}}',
-				loadSnippets,
-				onSnippets: (store) => {
-					snippetsStore = store;
-					store.applySnapshot({
-						revision: 3,
-						snippets: [makeReviewSnippet({ template: 'Old {{arguments}} in {{project_path}}' })],
-					});
-				},
-				wsPhase: 'connected',
-			});
-			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-			await inputAtCaret(textarea, ';;review', ';;review'.length);
-			await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
-			const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-			await fireEvent.input(argumentsInput, { target: { value: 'selected' } });
-			await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
-			await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce());
-
-			await snippetsStore.refreshIfLoaded();
-			const heldRefresh = holdSecondRefresh ? snippetsStore.refresh() : null;
-			if (holdSecondRefresh) expect(snippetsStore.hasFreshSnapshot).toBe(false);
-			pending.resolve(reviewExpansionResponse('Restored selected in /workspace/project'));
-
-			await screen.findByText('That snippet changed. Select it again.');
-			expect(textarea.value).toBe(';;review');
-			if (heldRefresh) {
-				secondRefresh.resolve({ revision: 3, snippets: [restoredSameTimestamp] });
-				await heldRefresh;
-			}
-		},
-	);
-
-	it('reopens arguments with preserved text when local expansion exceeds the output bound', async () => {
-		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-local-overflow',
-			selectedStatus: 'running',
-			snippetTemplate: '{{arguments}}{{arguments}}{{arguments}}',
-		});
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		await fireEvent.input(textarea, { target: { value: 'Keep draft' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
-		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
-		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-		const largeArgs = 'x'.repeat(30_000);
-		await fireEvent.input(argumentsInput, { target: { value: largeArgs } });
-		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
-
-		await screen.findByText(/Expanded snippet exceeds 64000 characters/);
-		const reopened = (await screen.findByRole('textbox', {
-			name: 'Arguments',
-		})) as HTMLTextAreaElement;
-		expect(reopened.value).toBe(largeArgs);
-		expect(textarea.value).toBe('Keep draft');
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-	});
-
-	it('reports local slash expansion overflow without calling the server or submitting', async () => {
-		const onsubmit = vi.fn();
-		const { component } = render(PromptComposerTestHost, {
-			selectedChatId: 'chat-local-slash-overflow',
-			selectedStatus: 'running',
-			snippetTemplate: '{{arguments}}{{arguments}}{{arguments}}',
-			snippetDefaultArguments: 'x'.repeat(30_000),
-			preloadSnippets: true,
-			wsPhase: 'connected',
-			onsubmit,
-		});
-		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-
-		await fireEvent.input(textarea, { target: { value: '/s review' } });
-		await fireEvent.keyDown(textarea, { key: 'Enter' });
-
-		await screen.findByText(/Expanded snippet exceeds 64000 characters/);
-		expect(textarea.value).toBe('/s review');
-		expect(onsubmit).not.toHaveBeenCalled();
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(component.getProjectResolutionRequestCount()).toBe(0);
 	});
 
 	it('honors the configured trigger without interrupting IME composition', async () => {
@@ -2966,31 +2685,6 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review old path');
 	});
 });
-
-function makeReviewSnippet(overrides: Partial<Snippet> = {}): Snippet {
-	return {
-		id: 'snippet-review',
-		shortName: 'review',
-		template: 'Review {{arguments}}',
-		defaultArguments: '',
-		createdAt: '2026-01-01T00:00:00.000Z',
-		updatedAt: '2026-01-01T00:00:00.000Z',
-		...overrides,
-	};
-}
-
-function reviewExpansionResponse(expandedText: string) {
-	return {
-		success: true as const,
-		source: 'snippet' as const,
-		sourceId: 'snippet-review',
-		sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-		shortName: 'review',
-		contextExecutorId: 'local',
-		contextProjectPath: '/workspace/project',
-		expandedText,
-	};
-}
 
 function deferredSnippetExpansion() {
 	let resolve!: (value: Awaited<ReturnType<typeof snippetsApi.expandSnippet>>) => void;

@@ -2,8 +2,6 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import {
-  SNIPPET_ERROR_CODES,
-  SNIPPET_VALIDATION_ERROR_MESSAGE,
   normalizeExpandSnippetRequest,
   normalizeSnippetDefinitionInput,
   type CreateSnippetRequest,
@@ -24,6 +22,7 @@ import { SnippetCatalogCommittedUnknownError, SnippetStore } from './store.js';
 import {
   expandScheduledSnippetTemplate,
   expandSnippetTemplate,
+  SnippetExpansionError,
 } from './template.js';
 import type { PreambleStore } from '../preambles/store.js';
 import type {
@@ -143,7 +142,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       : this.deps.preambles?.getBySnippetShortName(input.shortName) ?? null;
     if (!snippet && !preamble) {
       throw new SnippetDomainError(
-        SNIPPET_ERROR_CODES.notFound,
+        'SNIPPET_NOT_FOUND',
         `Snippet not found: ${input.shortName}`,
         404,
       );
@@ -155,16 +154,23 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     if (snippet) {
       const argumentsText =
         input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
-      expandedText = input.context.type === 'scheduled-prompt'
-        ? expandScheduledSnippetTemplate(snippet.template, {
-            arguments: argumentsText,
-            projectPath: resolvedProjectPath,
-          })
-        : expandSnippetTemplate(snippet.template, {
-            arguments: argumentsText,
-            projectPath: resolvedProjectPath,
-            context: runtimeTemplateValues(input.context.chatId, this.#now()),
-          });
+      try {
+        expandedText = input.context.type === 'scheduled-prompt'
+          ? expandScheduledSnippetTemplate(snippet.template, {
+              arguments: argumentsText,
+              projectPath: resolvedProjectPath,
+            })
+          : expandSnippetTemplate(snippet.template, {
+              arguments: argumentsText,
+              projectPath: resolvedProjectPath,
+              context: runtimeTemplateValues(input.context.chatId, this.#now()),
+            });
+      } catch (error) {
+        if (error instanceof SnippetExpansionError) {
+          throw new SnippetDomainError(error.code, error.message, 422);
+        }
+        throw error;
+      }
     } else {
       expandedText = input.context.type === 'scheduled-prompt'
         ? preamble!.content
@@ -265,11 +271,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
   }
 
   #validationError(): SnippetDomainError {
-    return new SnippetDomainError(
-      SNIPPET_ERROR_CODES.validationFailed,
-      SNIPPET_VALIDATION_ERROR_MESSAGE,
-      400,
-    );
+    return new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Snippet is invalid', 400);
   }
 
   #emitInvalidated(reason: SnippetsInvalidationReason): void {

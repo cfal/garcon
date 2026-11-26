@@ -1,15 +1,14 @@
+import { untrack } from 'svelte';
+import { CatalogRefresh, runCatalogLoad } from '$lib/api/catalog-refresh.js';
+import { ApiError } from '$lib/api/client.js';
 import { createSnippet, getSnippets, removeSnippet, updateSnippet } from '$lib/api/snippets.js';
-import {
-	VersionedCatalogStore,
-	type VersionedCatalogStatus,
-} from '$lib/stores/versioned-catalog-store.svelte.js';
 import {
 	SNIPPET_ERROR_CODES,
 	type SnippetDefinitionInput,
 	type SnippetsSnapshot,
 } from '$shared/snippets';
 
-export type SnippetsStatus = VersionedCatalogStatus;
+export type SnippetsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface SnippetsStoreDeps {
 	get?: typeof getSnippets;
@@ -19,87 +18,123 @@ export interface SnippetsStoreDeps {
 }
 
 export class SnippetsStore {
-	readonly #catalog: VersionedCatalogStore<SnippetsSnapshot>;
+	status = $state<SnippetsStatus>('idle');
+	snapshot = $state<SnippetsSnapshot | null>(null);
+	error = $state<string | null>(null);
+	isRefreshing = $state(false);
+	#loadPromise: Promise<SnippetsSnapshot> | null = null;
+	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
-	constructor(private readonly deps: SnippetsStoreDeps = {}) {
-		this.#catalog = new VersionedCatalogStore<SnippetsSnapshot>({
-			load: () => (this.deps.get ?? getSnippets)(),
-			loadErrorMessage: 'Failed to load snippets',
-			revisionConflictCode: SNIPPET_ERROR_CODES.revisionConflict,
-		});
-	}
-
-	get status(): SnippetsStatus {
-		return this.#catalog.status;
-	}
-
-	get snapshot(): SnippetsSnapshot | null {
-		return this.#catalog.snapshot;
-	}
-
-	get error(): string | null {
-		return this.#catalog.error;
-	}
-
-	get isRefreshing(): boolean {
-		return this.#catalog.isRefreshing;
-	}
+	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
 
 	get hasLoaded(): boolean {
-		return this.#catalog.hasLoaded;
-	}
-
-	get hasFreshSnapshot(): boolean {
-		return this.#catalog.hasFreshSnapshot;
+		return this.snapshot !== null;
 	}
 
 	get snippets() {
-		return this.#catalog.snapshot?.snippets ?? [];
+		return this.snapshot?.snippets ?? [];
 	}
 
-	ensureLoaded(): Promise<SnippetsSnapshot> {
-		return this.#catalog.ensureLoaded();
+	async ensureLoaded(): Promise<SnippetsSnapshot> {
+		return this.snapshot ?? this.refresh({ initial: true });
 	}
 
-	refresh(): Promise<SnippetsSnapshot> {
-		return this.#catalog.refresh();
+	async refresh(options: { initial?: boolean } = {}): Promise<SnippetsSnapshot> {
+		if (this.#loadPromise) return this.#loadPromise;
+		const initial = options.initial === true || !this.snapshot;
+		if (initial) this.status = 'loading';
+		else this.isRefreshing = true;
+		this.error = null;
+		const get = this.deps.get ?? getSnippets;
+		this.#loadPromise = get()
+			.then((nextSnapshot) => this.applySnapshot(nextSnapshot))
+			.catch((error) => {
+				this.error = error instanceof Error ? error.message : 'Failed to load snippets';
+				if (!this.snapshot) this.status = 'error';
+				throw error;
+			})
+			.finally(() => {
+				this.isRefreshing = false;
+				this.#loadPromise = null;
+			});
+		return this.#loadPromise;
 	}
 
 	loadInBackground(): Promise<void> {
-		return this.#catalog.loadInBackground();
+		return runCatalogLoad(() => this.ensureLoaded());
 	}
 
 	refreshInBackground(): Promise<void> {
-		return this.#catalog.refreshInBackground();
+		return runCatalogLoad(() => this.refresh());
 	}
 
 	refreshIfLoaded(): Promise<void> {
-		return this.#catalog.refreshIfLoaded();
+		if (!this.snapshot && this.status === 'idle') return Promise.resolve();
+		return untrack(() => this.#refreshLoop.request());
 	}
 
-	create(definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
-		const create = this.deps.create ?? createSnippet;
-		return this.#catalog.mutate((current) =>
-			create({ expectedRevision: current.revision, snippet: definition }),
-		);
+	async create(definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
+		const current = await this.#requireSnapshot();
+		try {
+			const create = this.deps.create ?? createSnippet;
+			const result = await create({ expectedRevision: current.revision, snippet: definition });
+			return this.applySnapshot(result.snapshot);
+		} catch (error) {
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
 	}
 
-	update(
-		id: string,
-		definition: SnippetDefinitionInput,
-		expectedRevision: number,
-	): Promise<SnippetsSnapshot> {
-		const update = this.deps.update ?? updateSnippet;
-		return this.#catalog.mutate(() => update({ expectedRevision, id, snippet: definition }));
+	async update(id: string, definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
+		const current = await this.#requireSnapshot();
+		try {
+			const update = this.deps.update ?? updateSnippet;
+			const result = await update({
+				expectedRevision: current.revision,
+				id,
+				snippet: definition,
+			});
+			return this.applySnapshot(result.snapshot);
+		} catch (error) {
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
 	}
 
-	remove(id: string, expectedRevision: number): Promise<SnippetsSnapshot> {
-		const remove = this.deps.remove ?? removeSnippet;
-		return this.#catalog.mutate(() => remove({ expectedRevision, id }));
+	async remove(id: string): Promise<SnippetsSnapshot> {
+		const current = await this.#requireSnapshot();
+		try {
+			const remove = this.deps.remove ?? removeSnippet;
+			const result = await remove({ expectedRevision: current.revision, id });
+			return this.applySnapshot(result.snapshot);
+		} catch (error) {
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
 	}
 
 	applySnapshot(nextSnapshot: SnippetsSnapshot): SnippetsSnapshot {
-		return this.#catalog.applySnapshot(nextSnapshot);
+		if (this.snapshot && nextSnapshot.revision < this.snapshot.revision) return this.snapshot;
+		this.snapshot = nextSnapshot;
+		this.status = 'ready';
+		this.error = null;
+		return nextSnapshot;
+	}
+
+	async #requireSnapshot(): Promise<SnippetsSnapshot> {
+		return this.snapshot ?? this.ensureLoaded();
+	}
+
+	async #refreshAfterConflict(error: unknown): Promise<void> {
+		if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.revisionConflict) {
+			const joinedExistingLoad = this.#loadPromise !== null;
+			try {
+				await this.refresh();
+				if (joinedExistingLoad) await this.refresh();
+			} catch {
+				// The original conflict remains the actionable error.
+			}
+		}
 	}
 }
 

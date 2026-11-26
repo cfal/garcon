@@ -1,3 +1,6 @@
+import { untrack } from 'svelte';
+import { CatalogRefresh, runCatalogLoad } from '$lib/api/catalog-refresh.js';
+import { ApiError } from '$lib/api/client.js';
 import {
 	createPreamble,
 	getPreambles,
@@ -6,16 +9,12 @@ import {
 	updatePreamble,
 } from '$lib/api/preambles.js';
 import {
-	VersionedCatalogStore,
-	type VersionedCatalogStatus,
-} from '$lib/stores/versioned-catalog-store.svelte.js';
-import {
 	PREAMBLE_ERROR_CODES,
 	type PreambleDefinitionInput,
 	type PreamblesSnapshot,
 } from '$shared/preambles';
 
-export type PreamblesStatus = VersionedCatalogStatus;
+export type PreamblesStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface PreamblesStoreDeps {
 	get?: typeof getPreambles;
@@ -26,110 +25,154 @@ export interface PreamblesStoreDeps {
 }
 
 export class PreamblesStore {
-	readonly #catalog: VersionedCatalogStore<PreamblesSnapshot>;
+	status = $state<PreamblesStatus>('idle');
+	snapshot = $state<PreamblesSnapshot | null>(null);
+	error = $state<string | null>(null);
+	isRefreshing = $state(false);
+	invalidationVersion = $state(0);
+	#loadPromise: Promise<PreamblesSnapshot> | null = null;
+	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
+	#localRevision = 0;
 
-	constructor(private readonly deps: PreamblesStoreDeps = {}) {
-		this.#catalog = new VersionedCatalogStore<PreamblesSnapshot>({
-			load: () => (this.deps.get ?? getPreambles)(),
-			loadErrorMessage: 'Failed to load preambles',
-			revisionConflictCode: PREAMBLE_ERROR_CODES.revisionConflict,
-		});
-	}
-
-	get status(): PreamblesStatus {
-		return this.#catalog.status;
-	}
-
-	get snapshot(): PreamblesSnapshot | null {
-		return this.#catalog.snapshot;
-	}
-
-	get error(): string | null {
-		return this.#catalog.error;
-	}
-
-	get isRefreshing(): boolean {
-		return this.#catalog.isRefreshing;
-	}
-
-	get invalidationVersion(): number {
-		return this.#catalog.invalidationVersion;
-	}
+	constructor(private readonly deps: PreamblesStoreDeps = {}) {}
 
 	get hasLoaded(): boolean {
-		return this.#catalog.hasLoaded;
-	}
-
-	get hasFreshSnapshot(): boolean {
-		return this.#catalog.hasFreshSnapshot;
+		return this.snapshot !== null;
 	}
 
 	get preambles() {
-		return this.#catalog.snapshot?.preambles ?? [];
+		return this.snapshot?.preambles ?? [];
 	}
 
-	ensureLoaded(): Promise<PreamblesSnapshot> {
-		return this.#catalog.ensureLoaded();
+	async ensureLoaded(): Promise<PreamblesSnapshot> {
+		return this.snapshot ?? this.refresh({ initial: true });
 	}
 
-	refresh(): Promise<PreamblesSnapshot> {
-		return this.#catalog.refresh();
+	async refresh(options: { initial?: boolean } = {}): Promise<PreamblesSnapshot> {
+		if (this.#loadPromise) return this.#loadPromise;
+		const initial = options.initial === true || !this.snapshot;
+		if (initial) this.status = 'loading';
+		else this.isRefreshing = true;
+		this.error = null;
+		const get = this.deps.get ?? getPreambles;
+		this.#loadPromise = get()
+			.then((next) => this.applySnapshot(next))
+			.catch((error) => {
+				this.error = error instanceof Error ? error.message : 'Failed to load preambles';
+				if (!this.snapshot) this.status = 'error';
+				throw error;
+			})
+			.finally(() => {
+				this.isRefreshing = false;
+				this.#loadPromise = null;
+			});
+		return this.#loadPromise;
 	}
 
 	loadInBackground(): Promise<void> {
-		return this.#catalog.loadInBackground();
+		return runCatalogLoad(() => this.ensureLoaded());
 	}
 
 	refreshInBackground(): Promise<void> {
-		return this.#catalog.refreshInBackground();
+		return runCatalogLoad(() => this.refresh());
 	}
 
 	refreshIfLoaded(): Promise<void> {
-		return this.#catalog.refreshIfLoaded();
+		this.invalidationVersion += 1;
+		if (!this.snapshot && this.status === 'idle') return Promise.resolve();
+		return untrack(() => this.#refreshLoop.request());
 	}
 
-	create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
-		const create = this.deps.create ?? createPreamble;
-		return this.#catalog.mutate((current) =>
-			create({ expectedRevision: current.revision, preamble: definition }),
-		);
+	async create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
+		const current = await this.#requireSnapshot();
+		try {
+			const create = this.deps.create ?? createPreamble;
+			return this.applySnapshot((await create({
+				expectedRevision: current.revision,
+				preamble: definition,
+			})).snapshot);
+		} catch (error) {
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
 	}
 
-	update(
+	async update(
 		id: string,
 		definition: PreambleDefinitionInput,
 		expectedRevision: number,
 	): Promise<PreamblesSnapshot> {
-		const update = this.deps.update ?? updatePreamble;
-		return this.#catalog.mutate(() => update({ expectedRevision, id, preamble: definition }));
+		await this.#requireSnapshot();
+		try {
+			const update = this.deps.update ?? updatePreamble;
+			return this.applySnapshot((await update({
+				expectedRevision,
+				id,
+				preamble: definition,
+			})).snapshot);
+		} catch (error) {
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
 	}
 
-	remove(id: string, expectedRevision: number): Promise<PreamblesSnapshot> {
-		const remove = this.deps.remove ?? removePreamble;
-		return this.#catalog.mutate(() => remove({ expectedRevision, id }));
+	async remove(id: string): Promise<PreamblesSnapshot> {
+		const current = await this.#requireSnapshot();
+		try {
+			const remove = this.deps.remove ?? removePreamble;
+			return this.applySnapshot((await remove({
+				expectedRevision: current.revision,
+				id,
+			})).snapshot);
+		} catch (error) {
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
 	}
 
 	async move(id: string, direction: 'up' | 'down'): Promise<void> {
-		const current = this.#catalog.snapshot ?? (await this.#catalog.ensureLoaded());
+		const current = await this.#requireSnapshot();
 		const index = current.preambles.findIndex((preamble) => preamble.id === id);
 		const target = direction === 'up' ? index - 1 : index + 1;
 		if (index < 0 || target < 0 || target >= current.preambles.length) return;
 		const preambles = [...current.preambles];
 		[preambles[index], preambles[target]] = [preambles[target], preambles[index]];
-		const orderedPreambleIds = preambles.map((preamble) => preamble.id);
-		const reorder = this.deps.reorder ?? reorderPreambles;
-		await this.#catalog.mutate(
-			() =>
-				reorder({
-					expectedRevision: current.revision,
-					orderedPreambleIds,
-				}),
-			{ preview: { ...current, preambles } },
-		);
+		const optimisticMarker = this.#localRevision + 1;
+		this.#localRevision = optimisticMarker;
+		this.snapshot = { ...current, preambles };
+		try {
+			const reorder = this.deps.reorder ?? reorderPreambles;
+			this.applySnapshot((await reorder({
+				expectedRevision: current.revision,
+				orderedPreambleIds: preambles.map((preamble) => preamble.id),
+			})).snapshot);
+		} catch (error) {
+			if (this.#localRevision === optimisticMarker) this.snapshot = current;
+			await this.#refreshAfterConflict(error);
+			throw error;
+		}
 	}
 
 	applySnapshot(next: PreamblesSnapshot): PreamblesSnapshot {
-		return this.#catalog.applySnapshot(next);
+		if (this.snapshot && next.revision < this.snapshot.revision) return this.snapshot;
+		this.snapshot = next;
+		this.status = 'ready';
+		this.error = null;
+		this.#localRevision += 1;
+		return next;
+	}
+
+	async #requireSnapshot(): Promise<PreamblesSnapshot> {
+		return this.snapshot ?? this.ensureLoaded();
+	}
+
+	async #refreshAfterConflict(error: unknown): Promise<void> {
+		if (
+			!(error instanceof ApiError) ||
+			error.errorCode !== PREAMBLE_ERROR_CODES.revisionConflict
+		)
+			return;
+		await this.refreshIfLoaded();
 	}
 }
 

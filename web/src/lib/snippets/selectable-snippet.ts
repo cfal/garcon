@@ -26,8 +26,11 @@ export type SelectableSnippet =
 			preamble: Preamble;
 	  };
 
-export function snippetToSelectable(snippet: Snippet): Extract<SelectableSnippet, { source: 'snippet' }> {
-	return {
+export function selectableSnippets(
+	snippets: readonly Snippet[],
+	preambles: readonly Preamble[],
+): SelectableSnippet[] {
+	const items: SelectableSnippet[] = snippets.map((snippet) => ({
 		source: 'snippet',
 		key: `snippet:${snippet.id}`,
 		id: snippet.id,
@@ -35,32 +38,18 @@ export function snippetToSelectable(snippet: Snippet): Extract<SelectableSnippet
 		shortName: snippet.shortName,
 		body: snippet.template,
 		snippet,
-	};
-}
-
-export function preambleToSelectable(
-	preamble: Preamble,
-): Extract<SelectableSnippet, { source: 'preamble' }> | null {
-	if (preamble.snippetShortName === undefined) return null;
-	return {
-		source: 'preamble',
-		key: `preamble:${preamble.id}`,
-		id: preamble.id,
-		updatedAt: preamble.updatedAt,
-		shortName: preamble.snippetShortName,
-		body: preamble.content,
-		preamble,
-	};
-}
-
-export function selectableSnippets(
-	snippets: readonly Snippet[],
-	preambles: readonly Preamble[],
-): SelectableSnippet[] {
-	const items: SelectableSnippet[] = snippets.map(snippetToSelectable);
+	}));
 	for (const preamble of preambles) {
-		const item = preambleToSelectable(preamble);
-		if (item) items.push(item);
+		if (preamble.snippetShortName === undefined) continue;
+		items.push({
+			source: 'preamble',
+			key: `preamble:${preamble.id}`,
+			id: preamble.id,
+			updatedAt: preamble.updatedAt,
+			shortName: preamble.snippetShortName,
+			body: preamble.content,
+			preamble,
+		});
 	}
 	return items.sort(
 		(left, right) =>

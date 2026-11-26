@@ -2,10 +2,6 @@ import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 import { matchesSelectableSnippetExpansion } from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
-import {
-	tryExpandSelectableSnippetLocally,
-	type CatalogSelectableSnippetState,
-} from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import {
 	applySnippetTriggerReplacement,
@@ -18,7 +14,6 @@ interface Options {
 	get prompt(): string;
 	get context(): ScheduledSnippetExpansionContext | null;
 	get interactionKey(): string;
-	inspectCatalogItem(item: SelectableSnippet): CatalogSelectableSnippetState;
 	onInsert(text: string, caret: number): Promise<void>;
 	onPendingChange(pending: boolean): void;
 	onSourceChanged(source: SelectableSnippet['source']): void;
@@ -57,36 +52,12 @@ export class ScheduledPromptSnippets {
 		const key = this.options.interactionKey;
 		const source = this.options.prompt;
 		const range = this.palette.trigger ?? this.#selection;
-		const argumentsInput = { type: 'value', value: argumentsText } as const;
-		const insertExpanded = async (expandedText: string): Promise<'inserted'> => {
-			const replacement = applySnippetTriggerReplacement(source, range, expandedText);
-			this.palette.complete();
-			await this.options.onInsert(replacement.text, replacement.caret);
-			return 'inserted';
-		};
 		this.error = null;
-		let pendingNotified = false;
+		this.options.onPendingChange(true);
 		try {
-			const catalogState = this.options.inspectCatalogItem(snippet);
-			if (catalogState === 'changed') {
-				this.error = m.snippets_changed_before_expansion();
-				return 'cancelled';
-			}
-			if (catalogState === 'matched') {
-				const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
-					kind: 'scheduled',
-				});
-				if (local.kind === 'expanded') return await insertExpanded(local.expandedText);
-				if (local.kind === 'error') {
-					this.error = local.message;
-					return 'failed';
-				}
-			}
-			pendingNotified = true;
-			this.options.onPendingChange(true);
 			const result = await this.expansion.run({
 				shortName: snippet.shortName,
-				arguments: argumentsInput,
+				arguments: { type: 'value', value: argumentsText },
 				context,
 			});
 			if (
@@ -95,17 +66,11 @@ export class ScheduledPromptSnippets {
 				source !== this.options.prompt
 			)
 				return 'cancelled';
-			const responseChanged = !matchesSelectableSnippetExpansion(snippet, result.response);
-			if (
-				responseChanged ||
-				this.options.inspectCatalogItem(snippet) === 'changed'
-			) {
+			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
 				this.error = m.snippets_changed_before_expansion();
-				if (responseChanged) {
-					this.options.onSourceChanged(snippet.source);
-					if (result.response.source !== snippet.source) {
-						this.options.onSourceChanged(result.response.source);
-					}
+				this.options.onSourceChanged(snippet.source);
+				if (result.response.source !== snippet.source) {
+					this.options.onSourceChanged(result.response.source);
 				}
 				return 'cancelled';
 			}
@@ -116,13 +81,20 @@ export class ScheduledPromptSnippets {
 					result.response.contextExecutorId !== (target.executorId ?? 'local'))
 			)
 				return 'cancelled';
-			return await insertExpanded(result.response.expandedText);
+			const replacement = applySnippetTriggerReplacement(
+				source,
+				range,
+				result.response.expandedText,
+			);
+			this.palette.complete();
+			await this.options.onInsert(replacement.text, replacement.caret);
+			return 'inserted';
 		} catch (error) {
 			if (key !== this.options.interactionKey) return 'cancelled';
 			this.error = error instanceof Error ? error.message : String(error);
 			return 'failed';
 		} finally {
-			if (pendingNotified && !this.expansion.pending) this.options.onPendingChange(false);
+			if (!this.expansion.pending) this.options.onPendingChange(false);
 		}
 	}
 }

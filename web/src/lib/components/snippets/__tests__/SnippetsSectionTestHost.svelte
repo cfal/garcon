@@ -1,12 +1,7 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import SnippetsSection from '../SnippetsSection.svelte';
 	import { setNotifications, setSnippets, setTransientLayers } from '$lib/context';
-	import {
-		createSnippetsStore,
-		type SnippetsStore,
-		type SnippetsStoreDeps,
-	} from '$lib/snippets/snippets-store.svelte.js';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
@@ -16,17 +11,9 @@
 		blockRefresh?: boolean;
 		blockSave?: boolean;
 		showSection?: boolean;
-		deps?: SnippetsStoreDeps;
-		onStore?: (store: SnippetsStore) => void;
 	}
 
-	let {
-		blockRefresh = false,
-		blockSave = false,
-		showSection = true,
-		deps,
-		onStore,
-	}: Props = $props();
+	let { blockRefresh = false, blockSave = false, showSection = true }: Props = $props();
 
 	function entry(id: string, shortName: string, template: string, defaultArguments = ''): Snippet {
 		return {
@@ -50,68 +37,58 @@
 	let releaseRefresh: (() => void) | null = null;
 	let rejectSave: ((error: Error) => void) | null = null;
 	let createCount = $state(0);
-	const customDeps = untrack(() => deps);
 	const store = createSnippetsStore({
-		get:
-			customDeps?.get ??
-			(async () => {
-				loadCount += 1;
-				if (blockRefresh && loadCount > 1) {
-					await new Promise<void>((resolve) => {
-						releaseRefresh = resolve;
-					});
-				}
-				return current;
-			}),
-		create:
-			customDeps?.create ??
-			(async (request) => {
-				createCount += 1;
-				if (blockSave) {
-					await new Promise<void>((_resolve, reject) => {
-						rejectSave = (error) => reject(error);
-					});
-				}
-				current = {
-					revision: current.revision + 1,
-					snippets: sortSnippetsByShortName([
-						...current.snippets,
-						entry(
-							`created-${current.revision}`,
-							request.snippet.shortName,
-							request.snippet.template,
-							request.snippet.defaultArguments,
-						),
-					]),
-				};
-				return { success: true, snapshot: current };
-			}),
-		update:
-			customDeps?.update ??
-			(async (request) => {
-				current = {
-					revision: current.revision + 1,
-					snippets: sortSnippetsByShortName(
-						current.snippets.map((snippet) =>
-							snippet.id === request.id
-								? { ...snippet, ...request.snippet, updatedAt: '2026-01-02T00:00:00.000Z' }
-								: snippet,
-						),
+		get: async () => {
+			loadCount += 1;
+			if (blockRefresh && loadCount > 1) {
+				await new Promise<void>((resolve) => {
+					releaseRefresh = resolve;
+				});
+			}
+			return current;
+		},
+		create: async (request) => {
+			createCount += 1;
+			if (blockSave) {
+				await new Promise<void>((_resolve, reject) => {
+					rejectSave = (error) => reject(error);
+				});
+			}
+			current = {
+				revision: current.revision + 1,
+				snippets: sortSnippetsByShortName([
+					...current.snippets,
+					entry(
+						`created-${current.revision}`,
+						request.snippet.shortName,
+						request.snippet.template,
+						request.snippet.defaultArguments,
 					),
-				};
-				return { success: true, snapshot: current };
-			}),
-		remove:
-			customDeps?.remove ??
-			(async (request) => {
-				current = {
-					revision: current.revision + 1,
-					snippets: current.snippets.filter((snippet) => snippet.id !== request.id),
-				};
-				return { success: true, snapshot: current };
-			}),
+				]),
+			};
+			return { success: true, snapshot: current };
+		},
+		update: async (request) => {
+			current = {
+				revision: current.revision + 1,
+				snippets: sortSnippetsByShortName(
+					current.snippets.map((snippet) =>
+						snippet.id === request.id
+							? { ...snippet, ...request.snippet, updatedAt: '2026-01-02T00:00:00.000Z' }
+							: snippet,
+					),
+				),
+			};
+			return { success: true, snapshot: current };
+		},
+		remove: async (request) => {
+			current = {
+				revision: current.revision + 1,
+				snippets: current.snippets.filter((snippet) => snippet.id !== request.id),
+			};
+			return { success: true, snapshot: current };
+		},
 	});
-	untrack(() => onStore?.(store));
 	setSnippets(store);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);

@@ -15,7 +15,7 @@ import { ApiMutationOutcomeUnknownError } from '$lib/api/client';
 
 vi.mock('$lib/api/snippets', () => ({ expandSnippet: vi.fn() }));
 
-const snippet = { id: 'synthetic-snippet', shortName: 'command', template: 'printf {{project_path}}',
+const snippet = { id: 'synthetic-snippet', shortName: 'command', template: 'printf example',
 	defaultArguments: '', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
 
 let deps: ReturnType<typeof createExecutorStartupFixture>;

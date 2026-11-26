@@ -11,24 +11,8 @@ const expand = vi.mocked(expandSnippet);
 const snippet: Snippet = {
 	id: 'review',
 	shortName: 'review',
-	template: 'Review {{arguments}} in {{project_path}}',
+	template: 'Review {{arguments}}',
 	defaultArguments: 'API',
-	createdAt: '2026-01-01T00:00:00.000Z',
-	updatedAt: '2026-01-01T00:00:00.000Z',
-};
-const localSnippet: Snippet = {
-	id: 'local-review',
-	shortName: 'local-review',
-	template: 'Review {{arguments}} on {{current_date}}',
-	defaultArguments: 'API',
-	createdAt: '2026-01-01T00:00:00.000Z',
-	updatedAt: '2026-01-01T00:00:00.000Z',
-};
-const boundarySnippet: Snippet = {
-	id: 'boundary',
-	shortName: 'boundary',
-	template: '{{arguments}}{{current_date}}',
-	defaultArguments: '',
 	createdAt: '2026-01-01T00:00:00.000Z',
 	updatedAt: '2026-01-01T00:00:00.000Z',
 };
@@ -40,11 +24,11 @@ const response: ExpandSnippetResponse = {
 	shortName: snippet.shortName,
 	contextProjectPath: '/repo',
 	contextExecutorId: 'local',
-	expandedText: 'Review API in /repo',
+	expandedText: 'Review API',
 };
 
-function renderEditor(items: readonly Snippet[] = [snippet]) {
-	const getSnippets = vi.fn(async () => ({ revision: 1, snippets: [...items] }));
+function renderEditor() {
+	const getSnippets = vi.fn(async () => ({ revision: 1, snippets: [snippet] }));
 	const getPreambles = vi.fn(async () => ({ revision: 0, preambles: [] }));
 	const snippets = createSnippetsStore({ get: getSnippets });
 	const preambles = createPreamblesStore({ get: getPreambles });
@@ -52,12 +36,12 @@ function renderEditor(items: readonly Snippet[] = [snippet]) {
 	return { snippets, getSnippets, getPreambles };
 }
 
-async function openArguments(shortName = 'review') {
+async function openArguments() {
 	const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
 	prompt.setSelectionRange(prompt.value.length, prompt.value.length);
 	await fireEvent.click(screen.getByRole('button', { name: 'Insert Snippet' }));
-	await fireEvent.click(await screen.findByRole('option', { name: new RegExp(`^${shortName}\\b`) }));
-	return screen.findByRole('dialog', { name: `Arguments for /snippet ${shortName}` });
+	await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
+	return screen.findByRole('dialog', { name: 'Arguments for /snippet review' });
 }
 
 beforeEach(() => expand.mockReset());
@@ -94,71 +78,8 @@ describe('scheduled prompt snippet interactions', () => {
 		expand.mockResolvedValueOnce({ ...response, sourceUpdatedAt: updated.updatedAt });
 		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
 		await waitFor(() =>
-			expect(screen.getByTestId('prompt-draft').textContent).toBe('Before Review API in /repo'),
+			expect(screen.getByTestId('prompt-draft').textContent).toBe('Before Review API'),
 		);
-	});
-
-	it('expands scheduled snippets without project_path locally without calling the server', async () => {
-		renderEditor([localSnippet]);
-		await openArguments('local-review');
-		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
-			target: { value: 'pull requests' },
-		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
-
-		await waitFor(() =>
-			expect(screen.getByTestId('prompt-draft').textContent).toBe(
-				'Before Review pull requests on {{current_date}}',
-			),
-		);
-		expect(expand).not.toHaveBeenCalled();
-	});
-
-	it('rejects a changed local snippet before calling the server after a catalog restore', async () => {
-		const { snippets, getSnippets } = renderEditor([localSnippet]);
-		await openArguments('local-review');
-		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
-			target: { value: 'pull requests' },
-		});
-
-		// Drive the store through a 3 -> 2 -> 3 restore with a changed template while arguments stay open.
-		snippets.applySnapshot({ revision: 3, snippets: [localSnippet] });
-		getSnippets
-			.mockResolvedValueOnce({ revision: 2, snippets: [] })
-			.mockResolvedValueOnce({
-				revision: 3,
-				snippets: [
-					{
-						...localSnippet,
-						template: 'Restored {{arguments}} on {{current_date}}',
-					},
-				],
-			});
-		await snippets.refreshIfLoaded();
-		await snippets.refreshIfLoaded();
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
-
-		await screen.findByText(/That snippet changed/);
-		expect(expand).not.toHaveBeenCalled();
-		expect(screen.getByTestId('prompt-draft').textContent).toBe('Before ');
-	});
-
-	it('reopens arguments with preserved edits when local deferred boundary validation fails', async () => {
-		renderEditor([boundarySnippet]);
-		await openArguments('boundary');
-		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
-			target: { value: 'report\\' },
-		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
-
-		const dialog = await screen.findByRole('dialog', { name: 'Arguments for /snippet boundary' });
-		expect(within(dialog).getByRole('alert').textContent).toContain('Add a separator');
-		expect(
-			(within(dialog).getByRole('textbox', { name: 'Arguments' }) as HTMLTextAreaElement).value,
-		).toBe('report\\');
-		expect(screen.getByTestId('prompt-draft').textContent).toBe('Before ');
-		expect(expand).not.toHaveBeenCalled();
 	});
 
 	it('shows retryable expansion failures inside the reopened arguments dialog and preserves edits', async () => {
