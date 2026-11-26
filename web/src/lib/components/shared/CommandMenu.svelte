@@ -1,8 +1,8 @@
 <script lang="ts">
+	import Fuse from 'fuse.js';
 	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
 	import { flushSync } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import Fuse from 'fuse.js';
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
@@ -33,6 +33,7 @@
 	let query = $state('');
 	let selectedIndex = $state(0);
 	let inputRef = $state<HTMLInputElement | null>(null);
+	let optionList = $state<HTMLDivElement>();
 	let opener: HTMLElement | null = null;
 
 	let commandContext = $derived(commandRegistry.context());
@@ -55,26 +56,21 @@
 
 	let fuse = $derived(
 		new Fuse(commands, {
-			keys: [
-				'label',
-				'description',
-				{ name: 'category', getFn: (item) => categoryLabels[item.category]() },
-			],
+			keys: ['label', 'description', { name: 'category', getFn: (item) => categoryLabels[item.category]() }],
 			threshold: 0.4,
-			includeScore: true,
 		}),
 	);
 
-	let filteredCommands = $derived(
-		query.trim()
-			? fuse.search(query, { limit: searchResultLimit }).map((r) => r.item)
-			: commands
-					.filter(
-						(command, index) =>
-							!command.id.startsWith(CHAT_OPEN_COMMAND_PREFIX) || index < recentChatLimit,
-					)
-					.slice(0, searchResultLimit),
-	);
+	let filteredCommands = $derived.by(() => {
+		const needle = query.trim();
+		if (needle) return fuse.search(needle, { limit: searchResultLimit }).map((result) => result.item);
+		return commands
+			.filter(
+				(command, index) =>
+					!command.id.startsWith(CHAT_OPEN_COMMAND_PREFIX) || index < recentChatLimit,
+			)
+			.slice(0, searchResultLimit);
+	});
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
 
 	function isEnabled(command: WorkbenchCommand): boolean {
@@ -143,10 +139,10 @@
 		}
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			selectedIndex = Math.min(selectedIndex + 1, Math.max(filteredCommands.length - 1, 0));
+			if (selectedIndex + 1 < filteredCommands.length) selectedIndex++;
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			selectedIndex = Math.max(selectedIndex - 1, 0);
+			if (selectedIndex > 0) selectedIndex--;
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			if (selectedCommand) selectItem(selectedCommand);
@@ -166,7 +162,7 @@
 
 	$effect(() => {
 		if (!isOpen) return;
-		const el = document.querySelector(`[data-cmd-index="${selectedIndex}"]`);
+		const el = optionList?.querySelector(`[data-cmd-index="${selectedIndex}"]`);
 		el?.scrollIntoView({ block: 'nearest' });
 	});
 </script>
@@ -213,7 +209,12 @@
 				</Dialog.Close>
 			</div>
 
-			<div id={listId} class="max-h-[300px] overflow-y-auto p-2" role="listbox">
+			<div
+				bind:this={optionList}
+				id={listId}
+				class="max-h-[300px] overflow-y-auto p-2"
+				role="listbox"
+			>
 				{#if filteredCommands.length === 0}
 					<div class="px-4 py-8 text-center text-sm text-muted-foreground">
 						{m.command_no_matching()}
@@ -221,13 +222,14 @@
 				{:else}
 					{#each filteredCommands as item, i (item.id)}
 						{@const Icon = getCategoryIcon(item.category)}
+						{@const enabled = isEnabled(item)}
 						<button
 							id={optionIdFor(item.id)}
 							data-cmd-index={i}
 							role="option"
 							aria-selected={i === selectedIndex}
-							aria-disabled={!isEnabled(item)}
-							disabled={!isEnabled(item)}
+							aria-disabled={!enabled}
+							disabled={!enabled}
 							class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 {i ===
 							selectedIndex
 								? 'bg-accent text-accent-foreground'

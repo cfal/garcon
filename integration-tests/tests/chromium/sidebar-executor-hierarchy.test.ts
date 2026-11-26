@@ -103,7 +103,7 @@ test('sidebar executor hierarchy separates executors, sections, projects, and ch
     await page.route('**/api/v1/executors', (route) => route.fulfill({ json: { executors } }));
     await context.addInitScript(() => localStorage.setItem('pref_local_settings', JSON.stringify({
       allowDirectChats: true,
-      sidebarGrouping: 'project-and-activity',
+      sidebarGroupingFields: ['executor', 'activity', 'project'].map(field => ({ field, enabled: true })),
       sidebarInactivityDuration: '5-days',
       sidebarChatItemLayout: 'single-line',
       sidebarSortMode: 'recent',

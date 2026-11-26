@@ -1,4 +1,10 @@
-import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences';
+import {
+	defaultSidebarGroupingFields,
+	normalizeSidebarGroupingFields,
+	type SidebarGroupingField,
+} from '$lib/sidebar/display/sidebar-preferences';
+import { flushSync } from 'svelte';
+import { observeSetting } from './observe-setting.svelte.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	createLocalSettingsStore,
@@ -15,9 +21,49 @@ import { CHAT_BOARD_MAX_COUNT, type ChatBoard } from '$shared/chat-boards';
 import { COMPOSER_STATUS_BAR_DEFAULTS } from '$lib/chat/composer/composer-status-bar.js';
 import { DEFAULT_SIDEBAR_DISPLAY_OPTIONS } from '../../sidebar/display/sidebar-display-options';
 
+function grouping(...fields: SidebarGroupingField[]) {
+	return normalizeSidebarGroupingFields(fields.map((field) => ({ field, enabled: true })));
+}
+
 describe('LocalSettingsStore', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	it('does not invalidate compound settings or persist an unchanged primitive', () => {
+		const store = createLocalSettingsStore();
+		let runs = 0;
+		const readCompoundSettings = () => [
+			store.sidebarGroupingFields,
+			store.chatBoardActiveColumnByBoardId,
+			store.globalShortcuts,
+			store.hiddenToolTypes,
+			store.themePreference,
+		];
+		const original = readCompoundSettings();
+		const stop = observeSetting(readCompoundSettings, () => runs++);
+		try {
+			flushSync();
+			flushSync(() => store.set('sidebarWidth', 320));
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)).toBeNull();
+			flushSync(() => store.set('sidebarWidth', 360));
+			expect(store.sidebarWidth).toBe(360);
+
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ ...store.snapshot(), sidebarWidth: 400 }),
+			);
+			flushSync(() => window.dispatchEvent(new StorageEvent('storage', {
+				key: LOCAL_STORAGE_KEYS.localSettings,
+				storageArea: localStorage,
+			})));
+			expect(store.sidebarWidth).toBe(400);
+			expect(runs).toBe(1);
+			readCompoundSettings().forEach((value, index) => expect(value).toBe(original[index]));
+		} finally {
+			stop();
+			store.destroy();
+		}
 	});
 
 	it.each([undefined, null, 'false', 0])(
@@ -211,11 +257,11 @@ describe('LocalSettingsStore', () => {
 
 	it('recognizes existing preferences and captures freshness before early setting writes', () => {
 		const store = createLocalSettingsStore();
-		store.set('sidebarGroupingFields', migrateSidebarGrouping('project'));
+		store.set('sidebarGroupingFields', grouping('executor', 'project'));
 		expect(store.hadSavedSettingsOnLoad).toBe(false);
 		const restored = createLocalSettingsStore();
 		expect(restored.hadSavedSettingsOnLoad).toBe(true);
-		expect(restored.sidebarGroupingFields).toEqual(migrateSidebarGrouping('project'));
+		expect(restored.sidebarGroupingFields).toEqual(grouping('executor', 'project'));
 		store.destroy();
 		restored.destroy();
 	});
@@ -229,7 +275,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.hadSavedSettingsOnLoad).toBe(true);
 		expect(store.composerStatusBarGitProjects).toBe(true);
 		expect(store.composerStatusBarNonGitProjects).toBe(false);
-		store.set('composerStatusBarGitProjects', true);
+		store.save();
 		const saved = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!);
 		expect(saved.showQuickCommitTray).toBeUndefined();
 		store.destroy();
@@ -367,7 +413,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.combineToolUseMessages).toBe(true);
 		expect(store.allowDirectChats).toBe(false);
-		expect(store.sidebarGroupingFields).toEqual(migrateSidebarGrouping('none'));
+		expect(store.sidebarGroupingFields).toEqual(defaultSidebarGroupingFields());
 		expect(store.sidebarNestDelegatedChats).toBe(true);
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
@@ -399,6 +445,7 @@ describe('LocalSettingsStore', () => {
 
 	it.each(USER_MESSAGE_ALIGNMENT_VALUES)('persists and restores %s user messages', (alignment) => {
 		const store = createLocalSettingsStore();
+		store.set('userMessageAlignment', alignment === 'left' ? 'right' : 'left');
 		store.set('userMessageAlignment', alignment);
 		expect(JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)!)).toMatchObject({
 			userMessageAlignment: alignment,
@@ -425,6 +472,7 @@ describe('LocalSettingsStore', () => {
 
 	it.each(IMAGE_CACHE_SIZE_MIB_VALUES)('persists the %i MiB image cache budget', (size) => {
 		const store = createLocalSettingsStore();
+		if (size === store.imageCacheSizeMiB) store.set('imageCacheSizeMiB', 32);
 		store.set('imageCacheSizeMiB', size);
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
@@ -449,6 +497,7 @@ describe('LocalSettingsStore', () => {
 		'persists the %s inline image thumbnail limit',
 		(size) => {
 			const store = createLocalSettingsStore();
+			if (size === store.inlineImageThumbnailSize) store.set('inlineImageThumbnailSize', 'small');
 			store.set('inlineImageThumbnailSize', size);
 			expect(
 				JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
@@ -477,6 +526,7 @@ describe('LocalSettingsStore', () => {
 		'persists the %s inline Mermaid thumbnail limit independently of image sizing',
 		(size) => {
 			const store = createLocalSettingsStore();
+			if (size === store.inlineMermaidThumbnailSize) store.set('inlineMermaidThumbnailSize', 'small');
 			store.set('inlineMermaidThumbnailSize', size);
 			expect(
 				JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
@@ -528,10 +578,13 @@ describe('LocalSettingsStore', () => {
 	it('preserves explicitly saved sidebar grouping and manual order', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ sidebarGrouping: 'project-and-activity', sidebarSortMode: 'manual' }),
+			JSON.stringify({
+				sidebarGroupingFields: grouping('executor', 'activity', 'project'),
+				sidebarSortMode: 'manual',
+			}),
 		);
 		const store = createLocalSettingsStore();
-		expect(store.sidebarGroupingFields).toEqual(migrateSidebarGrouping('project-and-activity'));
+		expect(store.sidebarGroupingFields).toEqual(grouping('executor', 'activity', 'project'));
 		expect(store.sidebarSortMode).toBe('manual');
 		store.destroy();
 	});
@@ -820,6 +873,7 @@ describe('LocalSettingsStore', () => {
 	it('persists every chat item layout and defaults malformed values to single-line', () => {
 		const store = createLocalSettingsStore();
 
+		store.set('sidebarChatItemLayout', 'compact');
 		store.set('sidebarChatItemLayout', 'single-line');
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
@@ -842,12 +896,12 @@ describe('LocalSettingsStore', () => {
 	it('persists the project path toggle independently of grouping and layout', () => {
 		const store = createLocalSettingsStore();
 		store.toggle('sidebarShowProjectPath');
-		store.set('sidebarGroupingFields', migrateSidebarGrouping('project'));
+		store.set('sidebarGroupingFields', grouping('executor', 'project'));
 		store.set('sidebarChatItemLayout', 'compact');
 		const restored = createLocalSettingsStore();
 		expect(restored.sidebarShowProjectPath).toBe(true);
 		expect(restored.sidebarChatItemLayout).toBe('compact');
-		restored.set('sidebarGroupingFields', migrateSidebarGrouping('none'));
+		restored.set('sidebarGroupingFields', defaultSidebarGroupingFields());
 		restored.set('sidebarChatItemLayout', 'detailed');
 		expect(restored.sidebarShowProjectPath).toBe(true);
 		store.destroy();
@@ -869,7 +923,7 @@ describe('LocalSettingsStore', () => {
 
 		const store = createLocalSettingsStore();
 		expect(store.sidebarChatItemLayout).toBe('detailed');
-		store.set('sidebarChatItemLayout', store.sidebarChatItemLayout);
+		store.save();
 		expect(
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({ sidebarChatItemLayout: 'detailed' });
@@ -1356,6 +1410,7 @@ describe('LocalSettingsStore', () => {
 
 	it('persists and restores the sidebar sort mode', () => {
 		const store = createLocalSettingsStore();
+		store.set('sidebarSortMode', 'manual');
 		store.set('sidebarSortMode', 'recent');
 
 		expect(
@@ -1404,6 +1459,7 @@ describe('LocalSettingsStore', () => {
 	it('persists every sidebar inactivity duration and rejects malformed values', () => {
 		for (const duration of SIDEBAR_INACTIVITY_DURATION_VALUES) {
 			const store = createLocalSettingsStore();
+			store.set('sidebarInactivityDuration', duration === '1-week' ? '3-days' : '1-week');
 			store.set('sidebarInactivityDuration', duration);
 
 			expect(
@@ -1425,30 +1481,30 @@ describe('LocalSettingsStore', () => {
 		malformed.destroy();
 	});
 
-	it('persists activity grouping and rejects the unused project-and-time token', () => {
+	it('persists activity grouping and ignores the old preset key', () => {
 		const store = createLocalSettingsStore();
-		store.set('sidebarGroupingFields', migrateSidebarGrouping('activity'));
+		store.set('sidebarGroupingFields', grouping('executor', 'activity'));
 
 		const restored = createLocalSettingsStore();
-		expect(restored.sidebarGroupingFields).toEqual(migrateSidebarGrouping('activity'));
+		expect(restored.sidebarGroupingFields).toEqual(grouping('executor', 'activity'));
 		store.destroy();
 		restored.destroy();
 
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,
-			JSON.stringify({ sidebarGrouping: 'project-and-time' }),
+			JSON.stringify({ sidebarGrouping: 'project' }),
 		);
 		const oldToken = createLocalSettingsStore();
-		expect(oldToken.sidebarGroupingFields).toEqual(migrateSidebarGrouping('none'));
+		expect(oldToken.sidebarGroupingFields).toEqual(defaultSidebarGroupingFields());
 		oldToken.destroy();
 	});
 
 	it('persists status grouping', () => {
 		const store = createLocalSettingsStore();
-		store.set('sidebarGroupingFields', migrateSidebarGrouping('status'));
+		store.set('sidebarGroupingFields', grouping('executor', 'status'));
 
 		const restored = createLocalSettingsStore();
-		expect(restored.sidebarGroupingFields).toEqual(migrateSidebarGrouping('status'));
+		expect(restored.sidebarGroupingFields).toEqual(grouping('executor', 'status'));
 		store.destroy();
 		restored.destroy();
 	});
@@ -1510,7 +1566,7 @@ describe('LocalSettingsStore', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('chatMaxWidth', 'medium');
-		store.set('sidebarGroupingFields', migrateSidebarGrouping('project-and-activity'));
+		store.set('sidebarGroupingFields', grouping('executor', 'activity', 'project'));
 		store.set('sidebarInactivityDuration', '2-weeks');
 		store.set('sidebarGroupNestedProjectPaths', true);
 		store.set('sidebarChatItemLayout', 'compact');
@@ -1521,7 +1577,7 @@ describe('LocalSettingsStore', () => {
 			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
 		).toMatchObject({
 			chatMaxWidth: 'medium',
-			sidebarGroupingFields: migrateSidebarGrouping('project-and-activity'),
+			sidebarGroupingFields: grouping('executor', 'activity', 'project'),
 			sidebarInactivityDuration: '2-weeks',
 			sidebarGroupNestedProjectPaths: true,
 			sidebarChatItemLayout: 'compact',
@@ -1550,7 +1606,7 @@ describe('LocalSettingsStore', () => {
 				overlayBackdropEffects: false,
 				highlightActiveWindow: false,
 				fullscreenCoversSidebar: false,
-				sidebarGroupingFields: migrateSidebarGrouping('project'),
+				sidebarGroupingFields: grouping('executor', 'project'),
 				sidebarInactivityDuration: '1-month',
 				sidebarGroupNestedProjectPaths: true,
 				sidebarChatItemLayout: 'compact',
@@ -1580,7 +1636,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.highlightActiveWindow).toBe(false);
 		expect(secondStore.fullscreenCoversSidebar).toBe(false);
-		expect(secondStore.sidebarGroupingFields).toEqual(migrateSidebarGrouping('project'));
+		expect(secondStore.sidebarGroupingFields).toEqual(grouping('executor', 'project'));
 		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarChatItemLayout).toBe('compact');

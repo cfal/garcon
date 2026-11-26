@@ -31,6 +31,7 @@ test('persists Mermaid thumbnail sizes independently of image sizing', async () 
     await page.reload();
     await fixture.waitForSpaWebSocket();
     await page.waitForFunction(() => document.documentElement.dataset.inlineMermaidThumbnailSize === 'full');
+    await app.waitForButton('More actions');
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Settings');
     await app.clickMenuItem('Settings');

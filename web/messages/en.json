@@ -2092,6 +2092,7 @@
 	"settings_transcript_search_enabled_description": "A local transcript index is being kept for this workspace.",
 	"settings_transcript_search_disabled_description": "Off by default. The local transcript index is deleted while disabled.",
 	"settings_title": "Settings",
+	"settings_load_failed_reload": "Settings could not load. Save any unsaved work, reconnect, and reload this tab before opening Settings again.",
 	"settings_provider_create_on": "Create on",
 	"settings_provider_test_from": "Test from",
 	"preamble_selection_add_candidate": "Add {title}",

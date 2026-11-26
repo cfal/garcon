@@ -36,14 +36,17 @@ test('collects only static imports and their CSS, including cycles and shared ou
 });
 
 test('guards optional language metadata, editor runtimes, and feature engines', () => {
-  for (const name of ['vendor-cm-lang-web', 'vendor-cm-lang-markup', 'vendor-cm-lang-template', 'vendor-cm-lang-programming', 'vendor-cm-legacy-modes', 'vendor-cm-lang-metadata', 'vendor-codemirror-core', 'vendor-codemirror', 'vendor-canvas', 'vendor-xterm']) {
-    expect(() => assertLazyRendererAssets([{ file: 'chunk.js', names: [name] }])).toThrow();
+  for (const name of ['vendor-cm-lang-web', 'vendor-cm-lang-markup', 'vendor-cm-lang-template', 'vendor-cm-lang-programming', 'vendor-cm-legacy-modes', 'vendor-cm-lang-metadata', 'vendor-codemirror-core', 'vendor-codemirror', 'vendor-canvas', 'vendor-xterm', 'vendor-fuse']) {
+    const chunk = [{ file: 'chunk.js', names: [name] }];
+    expect(() => assertLazyRendererAssets(chunk)).toThrow();
+    if (name === 'vendor-fuse') expect(() => assertLazyRendererAssets(chunk, 'workspace')).not.toThrow();
+    else expect(() => assertLazyRendererAssets(chunk, 'workspace')).toThrow();
   }
   expect(() => assertLazyRendererAssets([{ file: 'chunk.js', names: ['vite-runtime', 'vendor-svelte'] }])).not.toThrow();
 });
 
 test('guards raw eager bytes independently of chunk naming', () => {
-  expect(() => assertEagerAssetBudget(3_400_000, 460_000)).not.toThrow();
-  expect(() => assertEagerAssetBudget(3_400_001, 0)).toThrow('Eager asset budget exceeded');
-  expect(() => assertEagerAssetBudget(0, 460_001)).toThrow('Eager asset budget exceeded');
+  expect(() => assertEagerAssetBudget(730_000, 290_000)).not.toThrow();
+  expect(() => assertEagerAssetBudget(730_001, 0)).toThrow('Eager asset budget exceeded');
+  expect(() => assertEagerAssetBudget(0, 290_001)).toThrow('Eager asset budget exceeded');
 });

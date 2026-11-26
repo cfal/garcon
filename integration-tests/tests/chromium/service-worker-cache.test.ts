@@ -3,8 +3,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { Deferred, withTimeout } from "../../support/deferred.js";
 import { captureBrowserErrors } from '../../support/browser-errors.js';
+import { configureServiceWorkerPrecache } from '../../../scripts/runtime-shell.js';
 
-test("service worker caches late navigation and isolates cache-write failures", async () => {
+async function buildWorker(version: string, eager: string[], immutable: string[]): Promise<string> {
   const bundle = await Bun.build({
     entrypoints: [
       fileURLToPath(
@@ -14,16 +15,14 @@ test("service worker caches late navigation and isolates cache-write failures", 
     target: "browser",
     plugins: [
       {
-        name: "test-manifest",
+        name: "worker-env",
         setup(build) {
-          build.onResolve({ filter: /^\$app\/(env|manifest)$/ }, ({ path }) => ({
+          build.onResolve({ filter: /^\$app\/env$/ }, ({ path }) => ({
             path,
-            namespace: "test-manifest",
+            namespace: "worker-env",
           }));
-          build.onLoad({ filter: /.*/, namespace: "test-manifest" }, ({ path }) => ({
-            contents: path === "$app/env"
-              ? "export const version = 'test';"
-              : "export const immutable = []; export const assets = [];",
+          build.onLoad({ filter: /.*/, namespace: "worker-env" }, () => ({
+            contents: `export const dev = false; export const version = ${JSON.stringify(version)};`,
             loader: "js",
           }));
         },
@@ -32,7 +31,11 @@ test("service worker caches late navigation and isolates cache-write failures", 
   });
   if (!bundle.success)
     throw new AggregateError(bundle.logs, "Service worker bundle failed");
-  const workerSource = await bundle.outputs[0]!.text();
+  return configureServiceWorkerPrecache(await bundle.outputs[0]!.text(), eager, immutable);
+}
+
+test("service worker caches late navigation and isolates cache-write failures", async () => {
+  const workerSource = await buildWorker('test', ['asset-shell'], []);
   const lateRequest = new Deferred<void>();
   const lateResponse = new Deferred<Response>();
   let buildVersion = 'first';
@@ -74,6 +77,11 @@ test("service worker caches late navigation and isolates cache-write failures", 
     await page.waitForFunction(
       () => navigator.serviceWorker.controller !== null,
     );
+    const cachedPaths = () => page.evaluate(async () =>
+      (await (await caches.open('garcon::test')).keys()).map(request => new URL(request.url).pathname).sort());
+    expect(await cachedPaths()).toEqual(['/', '/asset-shell']);
+    expect(await page.evaluate(async () => (await fetch('/asset-lazy')).text())).toBe('asset bytes');
+    await page.waitForFunction(async () => !!(await caches.match('/asset-lazy')));
 
     const readBuildVersion = () => page.evaluate(async () =>
       (await fetch('/_app/version.json')).json(),
@@ -136,36 +144,18 @@ test("service worker caches late navigation and isolates cache-write failures", 
   }
 }, 30_000);
 
-test.each(['', '/tools/garcon'])("service worker upgrade preserves requested fonts offline at mount %s", async (basePath) => {
+test.each(['', '/tools/garcon'])("service worker upgrade preserves requested fonts and variants offline at mount %s", async (basePath) => {
+  const variantPath = `${basePath}/immutable/asset`;
   const uiPath = `${basePath}/fonts/ui.woff2`;
   const mathPath = `${basePath}/fonts/math.woff2`;
   const unusedPath = `${basePath}/fonts/unused.woff2`;
   const obsoletePath = `${basePath}/fonts/obsolete.woff2`;
   const ui = Bun.file(fileURLToPath(new URL('../../../web/src/lib/theme/assets/DepartureMono-1.500-core.woff2', import.meta.url)));
   const math = Bun.file(fileURLToPath(new URL('../../../web/node_modules/katex/dist/fonts/KaTeX_Main-Regular.woff2', import.meta.url)));
-  const bundles: string[] = [];
-  for (const version of ['old', 'next']) {
-    const paths = version === 'old' ? ['fonts/obsolete.woff2'] : ['fonts/ui.woff2', 'fonts/math.woff2', 'fonts/unused.woff2'];
-    const bundle = await Bun.build({
-      entrypoints: [fileURLToPath(new URL('../../../web/src/service-worker/index.ts', import.meta.url))],
-      target: 'browser',
-      plugins: [{
-        name: 'upgrade-manifest',
-        setup(build) {
-          build.onResolve({ filter: /^\$app\/(env|manifest)$/ }, ({ path }) => ({ path, namespace: 'upgrade-manifest' }));
-          build.onLoad({ filter: /.*/, namespace: 'upgrade-manifest' }, ({ path }) => ({
-            contents: path === '$app/env'
-              ? `export const version = ${JSON.stringify(version)};`
-              : `export const immutable = ${JSON.stringify(paths.map(path => ({ path })))}; export const assets = [];`,
-            loader: 'js',
-          }));
-        },
-      }],
-    });
-    if (!bundle.success) throw new AggregateError(bundle.logs, 'Service worker upgrade bundle failed');
-    const source = await bundle.outputs[0]!.text();
-    bundles.push(source);
-  }
+  const bundles = [
+    await buildWorker('old', [], ['fonts/obsolete.woff2']),
+    await buildWorker('next', [], ['fonts/ui.woff2', 'fonts/math.woff2', 'fonts/unused.woff2', 'immutable/asset']),
+  ];
   let upgrading = false;
   const installing = new Deferred<void>();
   const releaseInstall = new Deferred<Response>();
@@ -176,6 +166,7 @@ test.each(['', '/tools/garcon'])("service worker upgrade preserves requested fon
     fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === `${basePath}/service-worker.js`) return new Response(bundles[upgrading ? 1 : 0], { headers: { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' } });
+      if (path === variantPath) return new Response(request.headers.get('Accept'), { headers: { Vary: 'Accept' } });
       if ([uiPath, mathPath, unusedPath, obsoletePath].includes(path)) {
         fontRequests.push(path);
         return new Response(path === mathPath ? math : ui, { headers: { 'Content-Type': 'font/woff2' } });
@@ -210,6 +201,9 @@ test.each(['', '/tools/garcon'])("service worker upgrade preserves requested fon
       };
     }, uiPath);
     await page.evaluate(async obsoletePath => { await fetch(obsoletePath); }, obsoletePath);
+    const fetchStylesheet = async (path: string) =>
+      (await fetch(path, { headers: { Accept: 'text/css' }, cache: 'reload' })).text();
+    expect(await page.evaluate(fetchStylesheet, variantPath)).toBe('text/css');
     await page.evaluate(() => navigator.serviceWorker.addEventListener('controllerchange', () => Reflect.set(window, 'fontUpgradeControlled', true)));
     upgrading = true;
     const update = page.evaluate(async () => (await navigator.serviceWorker.ready).update());
@@ -249,6 +243,7 @@ test.each(['', '/tools/garcon'])("service worker upgrade preserves requested fon
     await session.send('Network.enable');
     await session.send('Network.setCacheDisabled', { cacheDisabled: true });
     await context.setOffline(true);
+    expect(await page.evaluate(fetchStylesheet, variantPath)).toBe('text/css');
     await page.reload();
     expect(await page.title()).toBe('Font upgrade proof');
     const offline = await page.evaluate(async paths => {

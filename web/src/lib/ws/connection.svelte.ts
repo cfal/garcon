@@ -18,6 +18,8 @@ import {
 	parseServerWsMessage,
 	WsPongMessage,
 	type ChatProcessingSnapshotResult,
+	type EventKey,
+	type ServerWsMessage,
 } from '$shared/ws-events';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -30,6 +32,8 @@ const CONNECT_ATTEMPT_DEDUPE_MS = 2_000;
 const CONNECT_ATTEMPT_TIMEOUT_MS = 10_000;
 const RESUME_CONNECT_TIMEOUT_MS = 3_000;
 const FAST_RECOVERY_TIMEOUTS = 2;
+const MAX_MESSAGE_LOG_LENGTH = 2048;
+const MESSAGE_LOG_TRIM_BATCH = 512;
 
 export interface WsMessage {
 	data: Record<string, unknown>;
@@ -83,6 +87,14 @@ export type WsMessageConsumer = (
 	context: WsMessageContext,
 ) => boolean;
 export type WsConnectionListener = (connected: boolean) => void;
+type MessageOf<T extends EventKey> = Extract<ServerWsMessage, { type: T }>;
+type MessageListener = (message: ServerWsMessage) => void;
+
+function isMessageType<T extends EventKey>(message: ServerWsMessage, type: T): message is MessageOf<T> {
+	return message.type === type;
+}
+
+export type WsPushEvents = Pick<WsConnection, 'onMessageType'>;
 
 export interface PrimaryWsConnectionPort {
 	readonly isConnected: boolean;
@@ -147,6 +159,7 @@ export class WsConnection {
 
 	#cursors = new Set<DrainCursor>();
 	#trimOffset = 0;
+	#warnedLogOverflow = false;
 	#reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	#connectTimeout: ReturnType<typeof setTimeout> | null = null;
 	#stabilityTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -173,6 +186,7 @@ export class WsConnection {
 	#lastInboundAt: number | null = null;
 	#connectStartedAt: number | null = null;
 	#messageConsumers = new Set<WsMessageConsumer>();
+	#messageListeners = new Map<string, Set<MessageListener>>();
 	#connectionListeners = new Set<WsConnectionListener>();
 	#authDisabled = false;
 	#hasEverConnected = false;
@@ -314,7 +328,16 @@ export class WsConnection {
 					if (this.#consumeMessage(data, { connectionStartedAt })) return;
 
 					this.#messageLog.push({ data, timestamp: Date.now() });
+					if (this.#messageLog.length > MAX_MESSAGE_LOG_LENGTH) {
+						this.#messageLog.splice(0, MESSAGE_LOG_TRIM_BATCH);
+						this.#trimOffset += MESSAGE_LOG_TRIM_BATCH;
+						if (!this.#warnedLogOverflow) {
+							this.#warnedLogOverflow = true;
+							console.warn('WebSocket message buffer exceeded its limit; dropped oldest frames');
+						}
+					}
 					this.messageVersion++;
+					this.#publishMessage(data);
 				} catch (error) {
 					console.error('Error parsing WebSocket message:', error);
 				}
@@ -413,6 +436,7 @@ export class WsConnection {
 		this.#rejectAllPending();
 		this.#closeExisting({ rejectPending: false });
 		this.#messageConsumers.clear();
+		this.#messageListeners.clear();
 		this.#connectionListeners.clear();
 		this.#trimOffset += this.#messageLog.length;
 		this.#messageLog.length = 0;
@@ -517,6 +541,22 @@ export class WsConnection {
 	addMessageConsumer(consumer: WsMessageConsumer): () => void {
 		this.#messageConsumers.add(consumer);
 		return () => this.#messageConsumers.delete(consumer);
+	}
+
+	/** Observes validated unsolicited frames without removing them from the conversation drain. */
+	onMessageType<T extends EventKey>(type: T, listener: (message: MessageOf<T>) => void): () => void {
+		const dispatch: MessageListener = (message) => {
+			if (isMessageType(message, type)) listener(message);
+		};
+		const listeners = this.#messageListeners.get(type) ?? new Set<MessageListener>();
+		this.#messageListeners.set(type, listeners);
+		listeners.add(dispatch);
+		return () => {
+			listeners.delete(dispatch);
+			if (!listeners.size && this.#messageListeners.get(type) === listeners) {
+				this.#messageListeners.delete(type);
+			}
+		};
 	}
 
 	onConnectionChange(listener: WsConnectionListener): () => void {
@@ -688,6 +728,21 @@ export class WsConnection {
 			}
 		}
 		return false;
+	}
+
+	#publishMessage(data: Record<string, unknown>): void {
+		if (typeof data.type !== 'string') return;
+		const listeners = this.#messageListeners.get(data.type);
+		if (!listeners?.size) return;
+		const message = parseServerWsMessage(data);
+		if (!message) return;
+		for (const listener of [...listeners]) {
+			try {
+				listener(message);
+			} catch (error) {
+				console.error('WebSocket message listener failed:', error);
+			}
+		}
 	}
 
 	#scheduleHeartbeat(delayMs: number): void {

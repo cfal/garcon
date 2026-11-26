@@ -1,6 +1,7 @@
 // Reactive local settings store using Svelte 5 runes. Persists
 // browser-only preferences to persisted storage.
 
+import { untrack } from 'svelte';
 import type { ComposerInputMode } from '$lib/chat/composer/markdown-input.js';
 import {
 	defaultSidebarDisplayPreferences,
@@ -8,7 +9,6 @@ import {
 } from '$lib/sidebar/display/sidebar-display-options';
 import {
 	defaultSidebarGroupingFields,
-	migrateSidebarGrouping,
 	normalizeSidebarGroupingFields,
 	type SidebarGroupingSelection,
 } from '$lib/sidebar/display/sidebar-preferences';
@@ -17,7 +17,7 @@ import {
 	type ComposerStatusBarPreferences,
 } from '$lib/chat/composer/composer-status-bar.js';
 import {
-	parseTypographyPreferences,
+	TYPOGRAPHY_SURFACES,
 	parseSurfaceFont,
 	parseFontSizePreference,
 	TYPOGRAPHY_DEFAULTS,
@@ -287,14 +287,6 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	customCompletionSoundName: null,
 };
 
-function parseBoolean(value: unknown, fallback: boolean): boolean {
-	return typeof value === 'boolean' ? value : fallback;
-}
-
-function parseString(value: unknown, fallback: string): string {
-	return typeof value === 'string' ? value : fallback;
-}
-
 function parseCompletionSoundMode(value: unknown): CompletionSoundMode {
 	return typeof value === 'string' &&
 		COMPLETION_SOUND_MODE_VALUES.includes(value as CompletionSoundMode)
@@ -415,14 +407,6 @@ export function isFileOpenPlacement(value: unknown): value is FileOpenPlacementP
 	);
 }
 
-function parseFileOpenPlacement(
-	value: unknown,
-	fallback: FileOpenPlacementPreference,
-): FileOpenPlacementPreference {
-	if (isFileOpenPlacement(value)) return value;
-	return fallback;
-}
-
 export function isForkOpenPlacement(value: unknown): value is ForkOpenPlacementPreference {
 	return (
 		typeof value === 'string' &&
@@ -438,161 +422,107 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 	);
 }
 
+type SettingKey = keyof LocalSettingsSnapshot;
+type SettingParsers = { [K in SettingKey]?: (value: unknown) => LocalSettingsSnapshot[K] };
+
+const parsers: SettingParsers = {
+	themePreference: parseThemePreference,
+	composerInputMode: (value) => (value === 'source' ? 'source' : 'formatted'),
+	snippetTrigger: normalizeSnippetTrigger,
+	chatMaxWidth: parseChatMaxWidth,
+	userMessageAlignment: parseUserMessageAlignment,
+	inlineImageThumbnailSize: (value) =>
+		isInlineImageThumbnailSize(value) ? value : DEFAULTS.inlineImageThumbnailSize,
+	imageCacheSizeMiB: (value) => (isImageCacheSizeMiB(value) ? value : DEFAULTS.imageCacheSizeMiB),
+	inlineMermaidThumbnailSize: (value) =>
+		isInlineMermaidThumbnailSize(value) ? value : DEFAULTS.inlineMermaidThumbnailSize,
+	workspaceWindowTitlebarHeightDeltaPx: parseWorkspaceWindowTitlebarHeightDeltaPx,
+	chatListDock: normalizeChatListDock,
+	sidebarWidth: parseSidebarWidth,
+	sidebarGroupingFields: normalizeSidebarGroupingFields,
+	sidebarInactivityDuration: parseSidebarInactivityDuration,
+	sidebarChatItemLayout: parseSidebarChatItemLayout,
+	selectedChatBoardId: (value) => (isChatBoardId(value) ? value : null),
+	chatBoardItemLayout: parseStoredChatItemLayout,
+	chatBoardActiveColumnByBoardId: parseChatBoardActiveColumns,
+	sidebarSortMode: parseSidebarSortMode,
+	sidebarSearchResultSort: parseSidebarSearchResultSort,
+	textEditorOpenPlacement: (value) =>
+		isFileOpenPlacement(value) ? value : DEFAULTS.textEditorOpenPlacement,
+	imageViewerOpenPlacement: (value) =>
+		isFileOpenPlacement(value) ? value : DEFAULTS.imageViewerOpenPlacement,
+	markdownViewerOpenPlacement: (value) =>
+		isFileOpenPlacement(value) ? value : DEFAULTS.markdownViewerOpenPlacement,
+	forkOpenPlacement: (value) => (isForkOpenPlacement(value) ? value : DEFAULTS.forkOpenPlacement),
+	hiddenToolTypes: normalizeHiddenToolTypes,
+	globalShortcuts: sanitizeGlobalShortcutOverrides,
+	completionSoundMode: parseCompletionSoundMode,
+	completionSoundVolume: parseCompletionSoundVolume,
+	completionSoundVisibility: parseCompletionSoundVisibility,
+	customCompletionSoundName: (value) => (typeof value === 'string' ? value : null),
+};
+
+for (const { id, fontKey, sizeKey } of TYPOGRAPHY_SURFACES) {
+	parsers[fontKey] = (value) => parseSurfaceFont(id, value);
+	parsers[sizeKey] = parseFontSizePreference;
+}
+
+const SETTING_KEYS = Object.keys(DEFAULTS) as SettingKey[];
+
+function parseSetting<K extends SettingKey>(key: K, value: unknown): LocalSettingsSnapshot[K] {
+	const parse = parsers[key];
+	if (parse) return parse(value);
+	const fallback = DEFAULTS[key];
+	return typeof value === typeof fallback ? (value as LocalSettingsSnapshot[K]) : fallback;
+}
+
+function collectSettings(
+	read: <K extends SettingKey>(key: K) => LocalSettingsSnapshot[K],
+): LocalSettingsSnapshot {
+	const snapshot = { ...DEFAULTS };
+	function collect<K extends SettingKey>(key: K): void {
+		snapshot[key] = read(key);
+	}
+	for (const key of SETTING_KEYS) collect(key);
+	return snapshot;
+}
+
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
-	return {
-		themePreference: parseThemePreference(parsed.themePreference),
-		terminalAppearance: parseBoolean(parsed.terminalAppearance, DEFAULTS.terminalAppearance),
-		...parseTypographyPreferences(parsed),
-		highlightActiveWindow: parseBoolean(
-			parsed.highlightActiveWindow,
-			DEFAULTS.highlightActiveWindow,
-		),
-		collapseDelegatedChatsByDefault: parseBoolean(
-			parsed.collapseDelegatedChatsByDefault,
-			DEFAULTS.collapseDelegatedChatsByDefault,
-		),
-		overlayBackdropEffects: parseBoolean(
-			parsed.overlayBackdropEffects,
-			DEFAULTS.overlayBackdropEffects,
-		),
-		autoExpandTools: parseBoolean(parsed.autoExpandTools, DEFAULTS.autoExpandTools),
-		combineToolUseMessages: parseBoolean(
-			parsed.combineToolUseMessages,
-			DEFAULTS.combineToolUseMessages,
-		),
-		alwaysExpandCliMessages: parseBoolean(
-			parsed.alwaysExpandCliMessages,
-			DEFAULTS.alwaysExpandCliMessages,
-		),
-		showThinking: parseBoolean(parsed.showThinking, DEFAULTS.showThinking),
-		allowDirectChats: parseBoolean(parsed.allowDirectChats, DEFAULTS.allowDirectChats),
-		reduceMotion: parseBoolean(parsed.reduceMotion, DEFAULTS.reduceMotion),
-		modelControlsLeft: parseBoolean(parsed.modelControlsLeft, DEFAULTS.modelControlsLeft),
-		composerStatusBarGitProjects: parseBoolean(
-			parsed.composerStatusBarGitProjects,
-			DEFAULTS.composerStatusBarGitProjects,
-		),
-		composerStatusBarNonGitProjects: parseBoolean(
-			parsed.composerStatusBarNonGitProjects,
-			DEFAULTS.composerStatusBarNonGitProjects,
-		),
-		composerStatusBarProjectPath: parseBoolean(
-			parsed.composerStatusBarProjectPath,
-			DEFAULTS.composerStatusBarProjectPath,
-		),
-		composerStatusBarGitBranch: parseBoolean(
-			parsed.composerStatusBarGitBranch,
-			DEFAULTS.composerStatusBarGitBranch,
-		),
-		composerStatusBarCommit: parseBoolean(
-			parsed.composerStatusBarCommit,
-			DEFAULTS.composerStatusBarCommit,
-		),
-		autoScrollToBottom: parseBoolean(parsed.autoScrollToBottom, DEFAULTS.autoScrollToBottom),
-		sendByShiftEnter: parseBoolean(parsed.sendByShiftEnter, DEFAULTS.sendByShiftEnter),
-		composerInputMode:
-			parsed.composerInputMode === 'source' || parsed.composerInputMode === 'formatted'
-				? parsed.composerInputMode
-				: DEFAULTS.composerInputMode,
-		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
-		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
-		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
-		userMessageAlignment: parseUserMessageAlignment(parsed.userMessageAlignment),
-		autoHideChatScrollbar: parseBoolean(
-			parsed.autoHideChatScrollbar,
-			DEFAULTS.autoHideChatScrollbar,
-		),
-		inlineImageThumbnailSize: isInlineImageThumbnailSize(parsed.inlineImageThumbnailSize)
-			? parsed.inlineImageThumbnailSize
-			: DEFAULTS.inlineImageThumbnailSize,
-		imageCacheSizeMiB: isImageCacheSizeMiB(parsed.imageCacheSizeMiB)
-			? parsed.imageCacheSizeMiB
-			: DEFAULTS.imageCacheSizeMiB,
-		inlineMermaidThumbnailSize: isInlineMermaidThumbnailSize(parsed.inlineMermaidThumbnailSize)
-			? parsed.inlineMermaidThumbnailSize
-			: DEFAULTS.inlineMermaidThumbnailSize,
-		workspaceWindowTitlebarHeightDeltaPx: parseWorkspaceWindowTitlebarHeightDeltaPx(
-			parsed.workspaceWindowTitlebarHeightDeltaPx,
-		),
-		fullscreenCoversSidebar: parseBoolean(
-			parsed.fullscreenCoversSidebar,
-			DEFAULTS.fullscreenCoversSidebar,
-		),
-		chatListAutohide: parseBoolean(parsed.chatListAutohide, DEFAULTS.chatListAutohide),
-		chatListDock: normalizeChatListDock(parsed.chatListDock),
-		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
-		sidebarWidth: parseSidebarWidth(parsed.sidebarWidth),
-		sidebarGroupingFields:
-			parsed.sidebarGroupingFields === undefined
-				? migrateSidebarGrouping(parsed.sidebarGrouping)
-				: normalizeSidebarGroupingFields(parsed.sidebarGroupingFields),
-		sidebarNestDelegatedChats: parseBoolean(
-			parsed.sidebarNestDelegatedChats,
-			DEFAULTS.sidebarNestDelegatedChats,
-		),
-		sidebarSeparateArchivedBranches: parseBoolean(
-			parsed.sidebarSeparateArchivedBranches,
-			DEFAULTS.sidebarSeparateArchivedBranches,
-		),
-		sidebarInactivityDuration: parseSidebarInactivityDuration(parsed.sidebarInactivityDuration),
-		sidebarGroupNestedProjectPaths: parseBoolean(
-			parsed.sidebarGroupNestedProjectPaths,
-			DEFAULTS.sidebarGroupNestedProjectPaths,
-		),
-		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
-		sidebarShowProjectPath: parseBoolean(
-			parsed.sidebarShowProjectPath,
-			DEFAULTS.sidebarShowProjectPath,
-		),
-		selectedChatBoardId: isChatBoardId(parsed.selectedChatBoardId)
-			? parsed.selectedChatBoardId
-			: null,
-		chatBoardItemLayout:
-			parsed.chatBoardItemLayout === null
-				? null
-				: parseStoredChatItemLayout(parsed.chatBoardItemLayout),
-		chatBoardActiveColumnByBoardId: parseChatBoardActiveColumns(
-			parsed.chatBoardActiveColumnByBoardId,
-		),
-		sidebarSortMode: parseSidebarSortMode(parsed.sidebarSortMode),
-		sidebarSearchResultSort: parseSidebarSearchResultSort(parsed.sidebarSearchResultSort),
-		codeEditorWordWrap: parseBoolean(parsed.codeEditorWordWrap, DEFAULTS.codeEditorWordWrap),
-		codeEditorVimMode: parseBoolean(parsed.codeEditorVimMode, DEFAULTS.codeEditorVimMode),
-		codeEditorLineNumbers: parseBoolean(
-			parsed.codeEditorLineNumbers,
-			DEFAULTS.codeEditorLineNumbers,
-		),
-		markdownViewerFontSize: parseString(
-			parsed.markdownViewerFontSize,
-			DEFAULTS.markdownViewerFontSize,
-		),
-		textEditorOpenPlacement: parseFileOpenPlacement(
-			parsed.textEditorOpenPlacement,
-			DEFAULTS.textEditorOpenPlacement,
-		),
-		imageViewerOpenPlacement: parseFileOpenPlacement(
-			parsed.imageViewerOpenPlacement,
-			DEFAULTS.imageViewerOpenPlacement,
-		),
-		markdownViewerOpenPlacement: parseFileOpenPlacement(
-			parsed.markdownViewerOpenPlacement,
-			DEFAULTS.markdownViewerOpenPlacement,
-		),
-		forkOpenPlacement: isForkOpenPlacement(parsed.forkOpenPlacement)
-			? parsed.forkOpenPlacement
-			: DEFAULTS.forkOpenPlacement,
-		swapDraggedOpenChats: parseBoolean(parsed.swapDraggedOpenChats, DEFAULTS.swapDraggedOpenChats),
-		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
-		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
-		browserNotifications: parseBoolean(parsed.browserNotifications, DEFAULTS.browserNotifications),
-		completionSoundMode: parseCompletionSoundMode(parsed.completionSoundMode),
-		completionSoundVolume: parseCompletionSoundVolume(parsed.completionSoundVolume),
-		completionSoundVisibility: parseCompletionSoundVisibility(parsed.completionSoundVisibility),
-		customCompletionSoundName:
-			typeof parsed.customCompletionSoundName === 'string'
-				? parsed.customCompletionSoundName
-				: null,
-	};
+	return collectSettings((key) => parseSetting(key, parsed[key]));
+}
+
+// Stored compound preferences are JSON values; object key order is not a setting.
+function sameSetting(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (Array.isArray(left) && Array.isArray(right)) {
+		return left.length === right.length && left.every((value, i) => sameSetting(value, right[i]));
+	}
+	if (
+		!left ||
+		!right ||
+		typeof left !== 'object' ||
+		typeof right !== 'object' ||
+		Array.isArray(left) ||
+		Array.isArray(right)
+	)
+		return false;
+	const entries = Object.entries(left);
+	return (
+		entries.length === Object.keys(right).length &&
+		entries.every(
+			([key, value]) => Object.hasOwn(right, key) && sameSetting(value, Reflect.get(right, key)),
+		)
+	);
+}
+
+function assignSetting<K extends SettingKey>(
+	settings: LocalSettingsSnapshot,
+	key: K,
+	value: LocalSettingsSnapshot[K],
+): boolean {
+	if (untrack(() => sameSetting(settings[key], value))) return false;
+	settings[key] = value;
+	return true;
 }
 
 function readPersistedLocalSettings(): LocalSettingsSnapshot | null {
@@ -618,10 +548,10 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 	setLocalStorageItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify(snapshot));
 }
 
-export class LocalSettingsStore {
+export class LocalSettingsStore implements LocalSettingsSnapshot {
 	readonly hadSavedSettingsOnLoad: boolean;
 	readonly activeCombineToolUseMessages: boolean;
-	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
+	themePreference = $state.raw<ThemePreference>({ ...DEFAULTS.themePreference });
 	terminalAppearance = $state(DEFAULTS.terminalAppearance);
 	interfaceFont = $state(DEFAULTS.interfaceFont);
 	interfaceFontSize = $state(DEFAULTS.interfaceFontSize);
@@ -672,7 +602,7 @@ export class LocalSettingsStore {
 	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
 	sidebarWidth = $state(DEFAULTS.sidebarWidth);
-	sidebarGroupingFields = $state<SidebarGroupingSelection[]>(defaultSidebarGroupingFields());
+	sidebarGroupingFields = $state.raw<SidebarGroupingSelection[]>(defaultSidebarGroupingFields());
 	sidebarNestDelegatedChats = $state(DEFAULTS.sidebarNestDelegatedChats);
 	sidebarSeparateArchivedBranches = $state(DEFAULTS.sidebarSeparateArchivedBranches);
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
@@ -681,7 +611,7 @@ export class LocalSettingsStore {
 	sidebarShowProjectPath = $state(DEFAULTS.sidebarShowProjectPath);
 	selectedChatBoardId = $state<string | null>(DEFAULTS.selectedChatBoardId);
 	chatBoardItemLayout = $state<ChatItemLayout | null>(DEFAULTS.chatBoardItemLayout);
-	chatBoardActiveColumnByBoardId = $state<Record<string, string>>({});
+	chatBoardActiveColumnByBoardId = $state.raw<Record<string, string>>({});
 	sidebarSortMode = $state<SidebarSortMode>(DEFAULTS.sidebarSortMode);
 	sidebarSearchResultSort = $state<ChatSearchSort>(DEFAULTS.sidebarSearchResultSort);
 	codeEditorWordWrap = $state(DEFAULTS.codeEditorWordWrap);
@@ -698,8 +628,8 @@ export class LocalSettingsStore {
 	);
 	forkOpenPlacement = $state<ForkOpenPlacementPreference>(DEFAULTS.forkOpenPlacement);
 	swapDraggedOpenChats = $state(DEFAULTS.swapDraggedOpenChats);
-	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
-	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
+	hiddenToolTypes = $state.raw<HideableToolType[]>([]);
+	globalShortcuts = $state.raw<GlobalShortcutOverrides>({});
 	browserNotifications = $state(DEFAULTS.browserNotifications);
 	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
 	completionSoundVolume = $state(DEFAULTS.completionSoundVolume);
@@ -709,13 +639,13 @@ export class LocalSettingsStore {
 	#storageListener = (event: StorageEvent) => {
 		if (event.storageArea !== window.localStorage) return;
 		if (event.key !== null && event.key !== LOCAL_STORAGE_KEYS.localSettings) return;
-		this.#apply(readPersistedLocalSettings() ?? DEFAULTS);
+		this.#apply(readPersistedLocalSettings() ?? parseFromRaw({}));
 	};
 
 	constructor() {
 		const initial = readPersistedLocalSettings();
 		this.hadSavedSettingsOnLoad = initial !== null;
-		this.#apply(initial ?? DEFAULTS);
+		if (initial) this.#apply(initial);
 		this.activeCombineToolUseMessages = this.combineToolUseMessages;
 		if (typeof window !== 'undefined') {
 			window.addEventListener('storage', this.#storageListener);
@@ -729,59 +659,41 @@ export class LocalSettingsStore {
 	}
 
 	save(): void {
-		persistLocalSettings(this.snapshot());
+		persistLocalSettings(untrack(() => this.#readSettings()));
 	}
 
-	set<K extends keyof LocalSettingsSnapshot>(key: K, value: LocalSettingsSnapshot[K]): void {
-		const next = { ...this.snapshot(), [key]: value };
-		if (key === 'snippetTrigger') next.snippetTrigger = normalizeSnippetTrigger(value);
-		if (key === 'hiddenToolTypes') next.hiddenToolTypes = normalizeHiddenToolTypes(value);
-		if (key === 'sidebarGroupingFields') {
-			next.sidebarGroupingFields = normalizeSidebarGroupingFields(value);
-		}
-		if (key === 'chatListDock') {
-			next.chatListDock = normalizeChatListDock(value);
-		}
-		if (key === 'globalShortcuts') {
-			next.globalShortcuts = sanitizeGlobalShortcutOverrides(value);
-		}
-		if (key === 'completionSoundVolume') {
-			next.completionSoundVolume = parseCompletionSoundVolume(value);
-		}
-		if (key === 'themePreference') {
-			next.themePreference = parseThemePreference(value);
-		}
-		if (key === 'workspaceWindowTitlebarHeightDeltaPx') {
-			next.workspaceWindowTitlebarHeightDeltaPx = parseWorkspaceWindowTitlebarHeightDeltaPx(value);
-		}
-		this.#apply(next);
-		persistLocalSettings(next);
+	set<K extends SettingKey>(key: K, value: LocalSettingsSnapshot[K]): void {
+		if (assignSetting(this, key, parseSetting(key, value))) this.save();
 	}
 
 	setTypography(surface: TypographySurface, font: FontPreference, size: FontSizePreference): void {
 		const { fontKey, sizeKey } = getTypographySurface(surface);
-		const next = {
-			...this.snapshot(),
-			[fontKey]: parseSurfaceFont(surface, font),
-			[sizeKey]: parseFontSizePreference(size),
-		};
-		this.#apply(next);
-		persistLocalSettings(next);
+		const changedFont = assignSetting(this, fontKey, parseSurfaceFont(surface, font));
+		const changedSize = assignSetting(this, sizeKey, parseFontSizePreference(size));
+		if (changedFont || changedSize) this.save();
 	}
 
-	setSidebarDisplay(preferences: SidebarDisplayPreferences): void {
-		const next = {
-			...this.snapshot(),
-			sidebarGroupingFields: normalizeSidebarGroupingFields(preferences.sidebarGroupingFields),
-			sidebarNestDelegatedChats: Boolean(preferences.sidebarNestDelegatedChats),
-			sidebarSeparateArchivedBranches: Boolean(preferences.sidebarSeparateArchivedBranches),
-			sidebarInactivityDuration: preferences.sidebarInactivityDuration,
-			sidebarGroupNestedProjectPaths: preferences.sidebarGroupNestedProjectPaths,
-			sidebarChatItemLayout: preferences.sidebarChatItemLayout,
-			sidebarShowProjectPath: preferences.sidebarShowProjectPath,
-		};
-		this.#apply(next);
-		persistLocalSettings(next);
+	setSidebarDisplay({
+		sidebarGroupingFields,
+		sidebarNestDelegatedChats,
+		sidebarSeparateArchivedBranches,
+		sidebarInactivityDuration,
+		sidebarGroupNestedProjectPaths,
+		sidebarChatItemLayout,
+		sidebarShowProjectPath,
+	}: SidebarDisplayPreferences): void {
+		if (
+			this.#apply({
+				sidebarGroupingFields: normalizeSidebarGroupingFields(sidebarGroupingFields),
+				sidebarNestDelegatedChats: Boolean(sidebarNestDelegatedChats),
+				sidebarSeparateArchivedBranches: Boolean(sidebarSeparateArchivedBranches),
+				sidebarInactivityDuration,
+				sidebarGroupNestedProjectPaths,
+				sidebarChatItemLayout,
+				sidebarShowProjectPath,
+			})
+		)
+			this.save();
 	}
 
 	toggle(key: BooleanLocalSettingKey): void {
@@ -816,171 +728,28 @@ export class LocalSettingsStore {
 	}
 
 	snapshot(): LocalSettingsSnapshot {
+		const snapshot = this.#readSettings();
 		return {
-			themePreference: this.themePreference,
-			terminalAppearance: this.terminalAppearance,
-			interfaceFont: this.interfaceFont,
-			interfaceFontSize: this.interfaceFontSize,
-			chatListFont: this.chatListFont,
-			chatListFontSize: this.chatListFontSize,
-			chatFeedFont: this.chatFeedFont,
-			chatFeedFontSize: this.chatFeedFontSize,
-			chatCodeFont: this.chatCodeFont,
-			chatCodeFontSize: this.chatCodeFontSize,
-			chatOutputFont: this.chatOutputFont,
-			chatOutputFontSize: this.chatOutputFontSize,
-			expandedEditorFont: this.expandedEditorFont,
-			expandedEditorFontSize: this.expandedEditorFontSize,
-			codeEditorFont: this.codeEditorFont,
-			codeDiffFont: this.codeDiffFont,
-			terminalFont: this.terminalFont,
-			overlayBackdropEffects: this.overlayBackdropEffects,
-			highlightActiveWindow: this.highlightActiveWindow,
-			collapseDelegatedChatsByDefault: this.collapseDelegatedChatsByDefault,
-			autoExpandTools: this.autoExpandTools,
-			combineToolUseMessages: this.combineToolUseMessages,
-			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
-			showThinking: this.showThinking,
-			allowDirectChats: this.allowDirectChats,
-			reduceMotion: this.reduceMotion,
-			modelControlsLeft: this.modelControlsLeft,
-			composerStatusBarGitProjects: this.composerStatusBarGitProjects,
-			composerStatusBarNonGitProjects: this.composerStatusBarNonGitProjects,
-			composerStatusBarProjectPath: this.composerStatusBarProjectPath,
-			composerStatusBarGitBranch: this.composerStatusBarGitBranch,
-			composerStatusBarCommit: this.composerStatusBarCommit,
-			autoScrollToBottom: this.autoScrollToBottom,
-			sendByShiftEnter: this.sendByShiftEnter,
-			composerInputMode: this.composerInputMode,
-			steerWithCtrlEnter: this.steerWithCtrlEnter,
-			snippetTrigger: this.snippetTrigger,
-			chatMaxWidth: this.chatMaxWidth,
-			userMessageAlignment: this.userMessageAlignment,
-			autoHideChatScrollbar: this.autoHideChatScrollbar,
-			inlineImageThumbnailSize: this.inlineImageThumbnailSize,
-			imageCacheSizeMiB: this.imageCacheSizeMiB,
-			inlineMermaidThumbnailSize: this.inlineMermaidThumbnailSize,
-			workspaceWindowTitlebarHeightDeltaPx: this.workspaceWindowTitlebarHeightDeltaPx,
-			fullscreenCoversSidebar: this.fullscreenCoversSidebar,
-			chatListAutohide: this.chatListAutohide,
-			chatListDock: this.chatListDock,
-			sidebarVisible: this.sidebarVisible,
-			sidebarWidth: this.sidebarWidth,
-			sidebarGroupingFields: this.sidebarGroupingFields.map((entry) => ({ ...entry })),
-			sidebarNestDelegatedChats: this.sidebarNestDelegatedChats,
-			sidebarSeparateArchivedBranches: this.sidebarSeparateArchivedBranches,
-			sidebarInactivityDuration: this.sidebarInactivityDuration,
-			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
-			sidebarChatItemLayout: this.sidebarChatItemLayout,
-			sidebarShowProjectPath: this.sidebarShowProjectPath,
-			selectedChatBoardId: this.selectedChatBoardId,
-			chatBoardItemLayout: this.chatBoardItemLayout,
-			chatBoardActiveColumnByBoardId: { ...this.chatBoardActiveColumnByBoardId },
-			sidebarSortMode: this.sidebarSortMode,
-			sidebarSearchResultSort: this.sidebarSearchResultSort,
-			codeEditorWordWrap: this.codeEditorWordWrap,
-			codeEditorVimMode: this.codeEditorVimMode,
-			codeEditorLineNumbers: this.codeEditorLineNumbers,
-			codeEditorFontSize: this.codeEditorFontSize,
-			gitDiffFontSize: this.gitDiffFontSize,
-			markdownViewerFontSize: this.markdownViewerFontSize,
-			terminalFontSize: this.terminalFontSize,
-			textEditorOpenPlacement: this.textEditorOpenPlacement,
-			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
-			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
-			forkOpenPlacement: this.forkOpenPlacement,
-			swapDraggedOpenChats: this.swapDraggedOpenChats,
-			hiddenToolTypes: this.hiddenToolTypes,
-			globalShortcuts: { ...this.globalShortcuts },
-			browserNotifications: this.browserNotifications,
-			completionSoundMode: this.completionSoundMode,
-			completionSoundVolume: this.completionSoundVolume,
-			completionSoundVisibility: this.completionSoundVisibility,
-			customCompletionSoundName: this.customCompletionSoundName,
+			...snapshot,
+			themePreference: { ...snapshot.themePreference },
+			sidebarGroupingFields: snapshot.sidebarGroupingFields.map((entry) => ({ ...entry })),
+			chatBoardActiveColumnByBoardId: { ...snapshot.chatBoardActiveColumnByBoardId },
+			hiddenToolTypes: [...snapshot.hiddenToolTypes],
+			globalShortcuts: { ...snapshot.globalShortcuts },
 		};
 	}
 
-	#apply(snap: LocalSettingsSnapshot): void {
-		this.themePreference = snap.themePreference;
-		this.terminalAppearance = snap.terminalAppearance;
-		this.interfaceFont = snap.interfaceFont;
-		this.interfaceFontSize = snap.interfaceFontSize;
-		this.chatListFont = snap.chatListFont;
-		this.chatListFontSize = snap.chatListFontSize;
-		this.chatFeedFont = snap.chatFeedFont;
-		this.chatFeedFontSize = snap.chatFeedFontSize;
-		this.chatCodeFont = snap.chatCodeFont;
-		this.chatCodeFontSize = snap.chatCodeFontSize;
-		this.chatOutputFont = snap.chatOutputFont;
-		this.chatOutputFontSize = snap.chatOutputFontSize;
-		this.expandedEditorFont = snap.expandedEditorFont;
-		this.expandedEditorFontSize = snap.expandedEditorFontSize;
-		this.codeEditorFont = snap.codeEditorFont;
-		this.codeDiffFont = snap.codeDiffFont;
-		this.terminalFont = snap.terminalFont;
-		this.overlayBackdropEffects = snap.overlayBackdropEffects;
-		this.highlightActiveWindow = snap.highlightActiveWindow;
-		this.collapseDelegatedChatsByDefault = snap.collapseDelegatedChatsByDefault;
-		this.autoExpandTools = snap.autoExpandTools;
-		this.combineToolUseMessages = snap.combineToolUseMessages;
-		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;
-		this.showThinking = snap.showThinking;
-		this.allowDirectChats = snap.allowDirectChats;
-		this.reduceMotion = snap.reduceMotion;
-		this.modelControlsLeft = snap.modelControlsLeft;
-		this.composerStatusBarGitProjects = snap.composerStatusBarGitProjects;
-		this.composerStatusBarNonGitProjects = snap.composerStatusBarNonGitProjects;
-		this.composerStatusBarProjectPath = snap.composerStatusBarProjectPath;
-		this.composerStatusBarGitBranch = snap.composerStatusBarGitBranch;
-		this.composerStatusBarCommit = snap.composerStatusBarCommit;
-		this.autoScrollToBottom = snap.autoScrollToBottom;
-		this.sendByShiftEnter = snap.sendByShiftEnter;
-		this.composerInputMode = snap.composerInputMode;
-		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
-		this.snippetTrigger = snap.snippetTrigger;
-		this.chatMaxWidth = snap.chatMaxWidth;
-		this.userMessageAlignment = snap.userMessageAlignment;
-		this.autoHideChatScrollbar = snap.autoHideChatScrollbar;
-		this.inlineImageThumbnailSize = snap.inlineImageThumbnailSize;
-		this.imageCacheSizeMiB = snap.imageCacheSizeMiB;
-		this.inlineMermaidThumbnailSize = snap.inlineMermaidThumbnailSize;
-		this.workspaceWindowTitlebarHeightDeltaPx = snap.workspaceWindowTitlebarHeightDeltaPx;
-		this.fullscreenCoversSidebar = snap.fullscreenCoversSidebar;
-		this.chatListAutohide = snap.chatListAutohide;
-		this.chatListDock = snap.chatListDock;
-		this.sidebarVisible = snap.sidebarVisible;
-		this.sidebarWidth = snap.sidebarWidth;
-		this.sidebarGroupingFields = snap.sidebarGroupingFields;
-		this.sidebarNestDelegatedChats = snap.sidebarNestDelegatedChats;
-		this.sidebarSeparateArchivedBranches = snap.sidebarSeparateArchivedBranches;
-		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
-		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
-		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
-		this.sidebarShowProjectPath = snap.sidebarShowProjectPath;
-		this.selectedChatBoardId = snap.selectedChatBoardId;
-		this.chatBoardItemLayout = snap.chatBoardItemLayout;
-		this.chatBoardActiveColumnByBoardId = { ...snap.chatBoardActiveColumnByBoardId };
-		this.sidebarSortMode = snap.sidebarSortMode;
-		this.sidebarSearchResultSort = snap.sidebarSearchResultSort;
-		this.codeEditorWordWrap = snap.codeEditorWordWrap;
-		this.codeEditorVimMode = snap.codeEditorVimMode;
-		this.codeEditorLineNumbers = snap.codeEditorLineNumbers;
-		this.codeEditorFontSize = snap.codeEditorFontSize;
-		this.gitDiffFontSize = snap.gitDiffFontSize;
-		this.markdownViewerFontSize = snap.markdownViewerFontSize;
-		this.terminalFontSize = snap.terminalFontSize;
-		this.textEditorOpenPlacement = snap.textEditorOpenPlacement;
-		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
-		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
-		this.forkOpenPlacement = snap.forkOpenPlacement;
-		this.swapDraggedOpenChats = snap.swapDraggedOpenChats;
-		this.hiddenToolTypes = snap.hiddenToolTypes;
-		this.globalShortcuts = { ...snap.globalShortcuts };
-		this.browserNotifications = snap.browserNotifications;
-		this.completionSoundMode = snap.completionSoundMode;
-		this.completionSoundVolume = snap.completionSoundVolume;
-		this.completionSoundVisibility = snap.completionSoundVisibility;
-		this.customCompletionSoundName = snap.customCompletionSoundName;
+	#readSettings(): LocalSettingsSnapshot {
+		return collectSettings((key) => this[key]);
+	}
+
+	#apply(snapshot: Partial<LocalSettingsSnapshot>): boolean {
+		let changed = false;
+		for (const key of Object.keys(snapshot) as SettingKey[]) {
+			const value = snapshot[key];
+			if (value !== undefined && assignSetting(this, key, value)) changed = true;
+		}
+		return changed;
 	}
 }
 

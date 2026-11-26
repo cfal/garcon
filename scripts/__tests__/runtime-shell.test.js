@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { prepareRuntimeShell } from '../runtime-shell.ts';
+import { configureServiceWorkerPrecache, prepareRuntimeShell } from '../runtime-shell.ts';
 import { renderRuntimeShell, RUNTIME_BASE_PATH_TOKEN } from '../../common/runtime-shell.ts';
 
 const fixture = `<!doctype html><html><head>
@@ -45,6 +45,29 @@ const unrelated = { base: "" };
   expect(rendered).toContain("const relative = './_app/local.js';");
   expect(rendered).toContain("const external = 'https://cdn.example.test/_app/external.js';");
   expect(rendered).toContain('const unrelated = { base: "" };');
+});
+
+test('strips dynamic CSS from the shell and rebases lazily selected theme sheets', async () => {
+  const html = fixture.replace('</head>', `
+<link rel="stylesheet" href="/_app/lazy.css">
+<script id="garcon-theme-stylesheets" type="application/json">{}</script>
+</head>`);
+  const template = await prepareRuntimeShell(html, {
+    eagerStyles: new Set(['_app/style.css']),
+    themeStylesheets: { 'classic-dark': '/_app/theme-classic-dark.css' },
+  });
+  const rendered = renderRuntimeShell(template, '/tools/garcon');
+  expect(rendered).toContain('href="/tools/garcon/_app/style.css"');
+  expect(rendered).not.toContain('lazy.css');
+  expect(rendered).toContain('{"classic-dark":"/tools/garcon/_app/theme-classic-dark.css"}');
+});
+
+test('injects shell precache paths without rewriting the worker code', () => {
+  const worker = 'const manifest = __GARCON_PRECACHE__;';
+  expect(configureServiceWorkerPrecache(worker, ['app.js'], ['font.woff2'])).toBe(
+    'const __GARCON_PRECACHE__ = {"eager":["app.js"],"immutable":["font.woff2"]};\n' + worker,
+  );
+  expect(() => configureServiceWorkerPrecache(worker.repeat(2), [], [])).toThrow('precache binding');
 });
 
 test.each(['', 'base: 0', 'base: ``', '"base": ""'])(

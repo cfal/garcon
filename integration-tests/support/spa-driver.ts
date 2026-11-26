@@ -245,7 +245,7 @@ export class SpaDriver {
         const snapshot = JSON.parse(window.localStorage.getItem('pref_local_settings') ?? '{}') as {
           sidebarSortMode?: string;
         };
-        return snapshot.sidebarSortMode === 'recent';
+        return (snapshot.sidebarSortMode ?? 'recent') === 'recent';
       } catch {
         return false;
       }
@@ -286,7 +286,7 @@ export class SpaDriver {
         try {
           const raw = window.localStorage.getItem('pref_local_settings') ?? '{}';
           const snapshot = JSON.parse(raw) as { sidebarSortMode?: string };
-          return snapshot.sidebarSortMode === (expected ? 'recent' : 'manual');
+          return (snapshot.sidebarSortMode ?? 'recent') === (expected ? 'recent' : 'manual');
         } catch {
           return false;
         }

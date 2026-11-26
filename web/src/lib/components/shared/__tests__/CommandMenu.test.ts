@@ -131,6 +131,40 @@ function createCatalog(count: number): ChatSessionsStore {
 	return sessions;
 }
 
+it('runs Settings rather than a similarly named recent chat on first and subsequent opens', async () => {
+	const sessions = createCatalog(1);
+	sessions.patchChat('catalog-0', { title: 'Open Settings Notes' });
+	const openChat = vi.fn(async () => {});
+	const unregister = commandRegistry.registerChatNavigation({
+		get recentChats() { return sessions.recentChats; },
+		hasChat: (id) => sessions.hasChat(id),
+		open: openChat,
+	});
+	try {
+		const { component } = render(CommandMenu);
+		for (let opening = 1; opening <= 2; opening++) {
+			component.toggle();
+			const input = await screen.findByRole('combobox');
+			await fireEvent.input(input, { target: { value: 'open settings' } });
+			expect(screen.getByRole('option', { selected: true }).id).toMatch(/-command-open-settings$/);
+			await fireEvent.keyDown(input, { key: 'Enter' });
+			expect(mocks.appShell.openSettings).toHaveBeenCalledTimes(opening);
+			expect(openChat).not.toHaveBeenCalled();
+			expect(screen.queryByRole('dialog')).toBeNull();
+		}
+	} finally {
+		unregister();
+	}
+});
+
+it('matches a typo on the first search', async () => {
+	const { component } = render(CommandMenu);
+	component.toggle();
+	const input = await screen.findByRole('combobox');
+	await fireEvent.input(input, { target: { value: 'settngs' } });
+	expect(await screen.findByRole('option', { name: /settings/i })).toBeTruthy();
+});
+
 it('keeps static command lookup independent of the chat catalog and caches candidates per opening', async () => {
 	const sessions = createCatalog(120);
 	let enumerations = 0;
