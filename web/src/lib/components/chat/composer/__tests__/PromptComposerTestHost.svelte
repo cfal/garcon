@@ -22,7 +22,9 @@
 		setTransientLayers,
 		setWorkspaceShortcuts,
 		setChatDrafts,
+		setWs,
 	} from '$lib/context';
+	import { WsConnection, type WsConnectionPhase } from '$lib/ws/connection.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
 	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
@@ -41,9 +43,10 @@
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
-	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createSnippetsStore, type SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
+	import type { SnippetsSnapshot } from '$shared/snippets';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
 	import {
@@ -95,6 +98,10 @@
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
+		preloadSnippets?: boolean;
+		loadSnippets?: () => Promise<SnippetsSnapshot>;
+		onSnippets?: (store: SnippetsStore) => void;
+		wsPhase?: WsConnectionPhase;
 		preambleSnapshot?: PreamblesSnapshot;
 		statusBarVisible?: boolean;
 		gitRefreshing?: boolean;
@@ -138,6 +145,10 @@
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
+		preloadSnippets = false,
+		loadSnippets,
+		onSnippets,
+		wsPhase,
 		preambleSnapshot = { revision: 0, preambles: [] },
 		statusBarVisible = false,
 		gitRefreshing = false,
@@ -452,26 +463,42 @@
 	} as never);
 	setNotifications(notifications);
 	setProjectResolution(projectResolution);
-	setSnippets(
-		createSnippetsStore({
-			get: async () => {
-				snippetLoadCount += 1;
-				return {
-					revision: 1,
-					snippets: [
-						{
-							id: 'snippet-review',
-							shortName: 'review',
-							template: snippetTemplate,
-							defaultArguments: snippetDefaultArguments,
-							createdAt: '2026-01-01T00:00:00.000Z',
-							updatedAt: '2026-01-01T00:00:00.000Z',
-						},
-					],
-				};
-			},
-		}),
-	);
+	const ws = untrack(() => (wsPhase !== undefined ? new WsConnection() : null));
+	if (ws) {
+		setWs(ws);
+		$effect(() => {
+			if (wsPhase !== undefined) {
+				ws.isConnected = wsPhase === 'connected';
+				ws.connectionStatus.phase = wsPhase;
+			}
+		});
+	}
+	function reviewSnapshot(): SnippetsSnapshot {
+		return {
+			revision: 1,
+			snippets: [
+				{
+					id: 'snippet-review',
+					shortName: 'review',
+					template: snippetTemplate,
+					defaultArguments: snippetDefaultArguments,
+					createdAt: '2026-01-01T00:00:00.000Z',
+					updatedAt: '2026-01-01T00:00:00.000Z',
+				},
+			],
+		};
+	}
+	const snippetsStore = createSnippetsStore({
+		get: async () => {
+			snippetLoadCount += 1;
+			return loadSnippets ? loadSnippets() : reviewSnapshot();
+		},
+	});
+	if (untrack(() => preloadSnippets)) {
+		snippetsStore.applySnapshot(untrack(reviewSnapshot));
+	}
+	untrack(() => onSnippets?.(snippetsStore));
+	setSnippets(snippetsStore);
 	const preambles = createPreamblesStore();
 	preambles.applySnapshot(untrack(() => preambleSnapshot));
 	setPreambles(preambles);
@@ -485,6 +512,7 @@
 		unsubscribeSidebarRecenter();
 		chatDrafts.destroy();
 		projectResolution.destroy();
+		ws?.disconnect();
 	});
 	const shortcutWorkspace = {
 		focusOwner: { kind: 'surface' as const, surfaceId: CANONICAL_CHAT_SURFACE_ID },
