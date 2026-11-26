@@ -85,6 +85,7 @@ export function createAppShellSidebarNavigation(options: AppShellSidebarNavigati
 	};
 	setWorkflowNavigation({
 		openRun: openRunFromWorkflow,
+		openNewWorkflow: openNewWorkflowFromWorkflow,
 		openChat: (chatId, source) => void openWorkflowChat(chatId, source),
 	});
 
@@ -148,6 +149,12 @@ export function createAppShellSidebarNavigation(options: AppShellSidebarNavigati
 		if (!isCurrentWorkflowSource(source)) return;
 		const windowId = workspace.windowOf(source.id) ?? workspace.currentWindowId;
 		openWorkflowSurface(() => workspace.openWorkflowRun(runId, windowId));
+	}
+
+	function openNewWorkflowFromWorkflow(source: WorkflowSurfaceDescriptor): void {
+		if (!isCurrentWorkflowSource(source)) return;
+		const windowId = workspace.windowOf(source.id) ?? workspace.currentWindowId;
+		openWorkflowSurface(() => workspace.openNewWorkflow(null, windowId));
 	}
 
 	async function openWorkflowChat(

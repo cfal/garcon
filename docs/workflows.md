@@ -43,9 +43,7 @@ For typed inputs, keyed verifier instances, a join, and a decision on the summar
 
 Moving the Studio tab or opening it from another chat preserves the current draft and its executor. Closing the tab keeps unsaved edits but releases an unchanged draft. If a launch finishes while the tab is closed, reopen **New Workflow** and use **Open started run** to see it without launching again. Drafts are not persisted across a browser reload.
 
-A file path or matching name does not identify a published definition. **Publish new definition** from a freshly opened file creates revision 1. To update an existing definition later, select its published revision under **New run** and choose **Edit definition**.
-
-**Test run** really executes the draft, in a separate run without publishing. **Publish** creates a revision without running anything. Editing, moving, or deleting the source file does not change a published revision or an existing run. Only run definitions you trust: [Garcon does not sandbox agents or Shell commands](security.md).
+A file path or matching name does not identify a published definition. **Publish new definition** from a freshly opened file creates revision 1. To update an existing definition later, select its published revision under **New run** and choose **Edit selected definition**, or use **Open in editor** from a run. Under **New run**, use the **Revision** selector to inspect or launch earlier revisions, or **Delete definition** to remove it from future launches without deleting past runs. Editing, moving, or deleting the source file does not change a published revision or an existing run. Only run definitions you trust: [Garcon does not sandbox agents or Shell commands](security.md).
 
 ## YAML v1
 

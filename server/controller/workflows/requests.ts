@@ -3,8 +3,9 @@ import { encodeWorkflowValue } from '../../../common/workflow-value.js';
 import { isExecutorId } from '../../../common/executors.js';
 import { isRecord, stableJsonStringify, type JsonObject, type JsonValue } from '../../../common/json.js';
 import type {
-  WorkflowActor, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowArchiveRequest, WorkflowDecisionRequest, WorkflowExecutionContext,
-  WorkflowLocation, WorkflowPageRequest, WorkflowPublishRequest, WorkflowRetryRequest, WorkflowStartRequest, WorkflowStopRequest, WorkflowTestRequest,
+  WorkflowActor, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowArchiveRequest, WorkflowDecisionRequest,
+  WorkflowDeleteDefinitionRequest, WorkflowExecutionContext, WorkflowLocation, WorkflowPageRequest, WorkflowPublishRequest,
+  WorkflowRetryRequest, WorkflowStartRequest, WorkflowStopRequest, WorkflowTestRequest,
 } from '../../../common/workflow-runs.js';
 import { workflowInvalid, workflowLimit } from './errors.js';
 import { WORKFLOW_LIMITS } from './limits.js';
@@ -110,6 +111,14 @@ export function normalizePublish(value: unknown): WorkflowPublishRequest {
     definitionId: workflowIdentifier(body.definitionId, 'Definition id'),
     expectedRevision: body.expectedRevision === null ? null : revision(body.expectedRevision),
     source: workflowSource(body.source),
+  };
+}
+
+export function normalizeDeleteDefinition(value: unknown): WorkflowDeleteDefinitionRequest {
+  const body = record(value, 'Workflow delete definition', ['definitionId', 'expectedRevision']);
+  return {
+    definitionId: workflowIdentifier(body.definitionId, 'Definition id'),
+    expectedRevision: revision(body.expectedRevision),
   };
 }
 

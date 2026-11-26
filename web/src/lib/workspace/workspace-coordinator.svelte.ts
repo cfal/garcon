@@ -467,8 +467,8 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#deps.singletons.tickets().select(id);
 	}
 
-	openNewWorkflow(context: WorkflowLaunchContext | null): Promise<void> {
-		return this.#tabPlacement.openNewWorkflow(context, this.currentWindowId);
+	openNewWorkflow(context: WorkflowLaunchContext | null, windowId = this.currentWindowId): Promise<void> {
+		return this.#tabPlacement.openNewWorkflow(context, windowId);
 	}
 
 	openWorkflowRun(runId: string, windowId = this.currentWindowId): Promise<void> {

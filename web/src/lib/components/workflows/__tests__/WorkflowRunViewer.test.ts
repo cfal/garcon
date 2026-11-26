@@ -314,4 +314,23 @@ describe('Workflow run viewer', () => {
 			bindings: { result: 'signal' },
 		});
 	});
+
+	it('forwards Open in editor and Run again shortcuts from a run header', async () => {
+		const run = workflowRun();
+		const onOpenEditor = vi.fn();
+		const onRunAgain = vi.fn();
+		render(WorkflowRunViewer, {
+			runId: 'run-a',
+			onOpenChat: vi.fn(),
+			onOpenEditor,
+			onRunAgain,
+		});
+		await fireEvent.click(await screen.findByRole('button', { name: 'Open in editor' }));
+		expect(onOpenEditor).toHaveBeenCalledExactlyOnceWith(run.pinnedRevision, {
+			executorId: 'local',
+			cwd: '/fixture',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Run again' }));
+		expect(onRunAgain).toHaveBeenCalledExactlyOnceWith(run);
+	});
 });

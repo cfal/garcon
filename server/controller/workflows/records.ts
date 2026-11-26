@@ -3,9 +3,9 @@ import type { JsonObject, JsonValue } from '../../../common/json.js';
 import type { WorkflowDefinition, WorkflowInput, WorkflowStep } from '../../../common/workflow-definition.js';
 import type {
   WorkflowActiveChat, WorkflowAttempt, WorkflowDefinitionSummary, WorkflowExecutionContext, WorkflowInstanceStatus,
-  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRunAmendment, WorkflowRunArchive, WorkflowRunDetail,
-  WorkflowRunStatus, WorkflowRunStep, WorkflowRunSummary, WorkflowSignalOccurrence, WorkflowSignalSource,
-  WorkflowStepInstance, WorkflowStepSettings, WorkflowTrigger,
+  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRevisionSummary, WorkflowRunAmendment,
+  WorkflowRunArchive, WorkflowRunDetail, WorkflowRunStatus, WorkflowRunStep, WorkflowRunSummary,
+  WorkflowSignalOccurrence, WorkflowSignalSource, WorkflowStepInstance, WorkflowStepSettings, WorkflowTrigger,
 } from '../../../common/workflow-runs.js';
 import { workflowConflict, workflowInvalid, workflowLimit, workflowNotFound } from './errors.js';
 import { WORKFLOW_LIMITS } from './limits.js';
@@ -105,6 +105,17 @@ export function revisionHead(db: Database, id: string): { latest_revision: numbe
   return db.query<{ latest_revision: number; deleted: number }, [string]>(
     'SELECT latest_revision, deleted FROM workflow_definitions WHERE id = ?',
   ).get(id);
+}
+
+export function listRevisions(db: Database, id: string): readonly WorkflowRevisionSummary[] {
+  const head = revisionHead(db, id);
+  if (!head || head.deleted) throw workflowNotFound('Workflow definition');
+  return db.query<WorkflowRevisionSummary, [string]>(`
+    SELECT definition_id AS definitionId, revision, json_extract(definition_json, '$.name') AS name, published_at AS publishedAt
+    FROM workflow_revisions
+    WHERE definition_id = ?
+    ORDER BY revision DESC
+  `).all(id);
 }
 
 export function listDefinitions(db: Database, request: WorkflowPageRequest): WorkflowPage<WorkflowDefinitionSummary> {

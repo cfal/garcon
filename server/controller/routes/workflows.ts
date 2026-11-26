@@ -9,12 +9,12 @@ import { markRouteResponseHeaders } from '../lib/http-route.js';
 import type { HttpRouteContext, RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import type { WorkflowEngine, WorkflowSettingsResolver } from '../workflows/engine.js';
 import {
-  mergeExecutionContext, normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizePublish, normalizeRetry,
-  normalizeStart, normalizeStop, normalizeTest, workflowIdentifier,
+  mergeExecutionContext, normalizeAddItem, normalizeAddStep, normalizeArchive, normalizeDecision, normalizeDeleteDefinition,
+  normalizePublish, normalizeRetry, normalizeStart, normalizeStop, normalizeTest, workflowIdentifier,
 } from '../workflows/requests.js';
 
 export type WorkflowHttpService = Pick<WorkflowEngine,
-  'publish' | 'listDefinitions' | 'getRevision' | 'testWorkflowDraft' | 'startRun' | 'getRun' |
+  'publish' | 'deleteDefinition' | 'listDefinitions' | 'getRevision' | 'listRevisions' | 'testWorkflowDraft' | 'startRun' | 'getRun' |
   'listRuns' | 'listActiveChats' | 'addItem' | 'addStep' | 'decide' | 'retry' | 'stopRun' | 'archiveRun' | 'replayStartRun' | 'replayTestWorkflowDraft'>;
 
 const bodyLimit = 2 * 1024 * 1024;
@@ -106,6 +106,11 @@ export function createWorkflowRoutes(runtime: { readonly service: WorkflowHttpSe
         const request = normalizePublish(raw);
         return withDefinition(request.source, def => runtime.service.publish(request, def));
       }),
+      DELETE: mutate(raw => {
+        const request = normalizeDeleteDefinition(raw);
+        runtime.service.deleteDefinition(request.definitionId, request.expectedRevision);
+        return Response.json({ deleted: true, definitionId: request.definitionId });
+      }),
     },
     [workflowPaths.revision]: { GET: read(url => {
       const rev = url.searchParams.get('revision');
@@ -115,6 +120,8 @@ export function createWorkflowRoutes(runtime: { readonly service: WorkflowHttpSe
       return runtime.service.getRevision(workflowIdentifier(url.searchParams.get('definitionId'), 'definitionId'),
         rev === null ? undefined : Number(rev));
     }) },
+    [workflowPaths.revisions]: { GET: read(url =>
+      runtime.service.listRevisions(workflowIdentifier(url.searchParams.get('definitionId'), 'definitionId'))) },
     [workflowPaths.runs]: {
       GET: read(url => runtime.service.listRuns(page(url.searchParams))),
       POST: mutate(async (raw, _who, assertCurrent) => {

@@ -3,8 +3,10 @@
 	import Archive from '@lucide/svelte/icons/archive';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import List from '@lucide/svelte/icons/list';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Square from '@lucide/svelte/icons/square';
 	import WorkflowIcon from '@lucide/svelte/icons/workflow';
 	import { Button } from '$lib/components/ui/button';
@@ -21,10 +23,13 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { lazyRenderer } from '$lib/utils/lazy-renderer';
 	import { createRandomId } from '$lib/utils/random-id';
+	import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
 	import type {
 		WorkflowAddItemRequest,
 		WorkflowAddStepRequest,
 		WorkflowInstanceStatus,
+		WorkflowRevision,
+		WorkflowRunDetail,
 	} from '$shared/workflow-runs';
 	import { workflowEdges } from '$lib/workflows/definition/workflow-graph';
 	import { WorkflowRunController } from '$lib/workflows/run/workflow-run-controller.svelte';
@@ -46,10 +51,14 @@
 	let {
 		runId,
 		onOpenChat,
+		onOpenEditor,
+		onRunAgain,
 		visible,
 	}: {
 		runId: string;
 		onOpenChat: (chatId: string) => void;
+		onOpenEditor?: (revision: WorkflowRevision, context: WorkflowLaunchContext | null) => void;
+		onRunAgain?: (run: WorkflowRunDetail) => void;
 		visible: boolean;
 	} = $props();
 
@@ -213,6 +222,26 @@
 				{/if}
 			</div>
 			<div class="flex flex-wrap items-center gap-1">
+				{#if run && onOpenEditor}
+					{@const current = run}
+					<Button
+						size="sm"
+						variant="outline"
+						onclick={() => {
+							const target = current.executionContext.defaultTarget;
+							onOpenEditor(
+								current.pinnedRevision,
+								target ? { executorId: target.executorId, cwd: target.projectPath } : null,
+							);
+						}}><Pencil class="size-4" /> {m.workflow_studio_open_in_editor()}</Button
+					>
+				{/if}
+				{#if run && onRunAgain}
+					{@const current = run}
+					<Button size="sm" variant="outline" onclick={() => onRunAgain(current)}
+						><RotateCcw class="size-4" /> {m.workflow_studio_run_again()}</Button
+					>
+				{/if}
 				{#if run && !workflowRunFinished(run)}
 					<Button size="sm" variant="outline" {disabled} onclick={() => addStep()}
 						><Plus class="size-4" /> {m.workflow_studio_add_step()}</Button

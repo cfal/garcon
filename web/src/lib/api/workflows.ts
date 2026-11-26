@@ -1,10 +1,11 @@
 import { workflowPaths } from '$shared/workflow-http';
 import type {
 	WorkflowActiveChat, WorkflowAddItemRequest, WorkflowAddStepRequest, WorkflowArchiveRequest, WorkflowDecisionRequest,
-	WorkflowDefinitionSummary, WorkflowPage, WorkflowPageRequest, WorkflowPublishRequest, WorkflowRetryRequest,
-	WorkflowRevision, WorkflowRunDetail, WorkflowRunSummary, WorkflowStartRequest, WorkflowStopRequest, WorkflowTestRequest,
+	WorkflowDefinitionSummary, WorkflowDeleteDefinitionRequest, WorkflowPage, WorkflowPageRequest, WorkflowPublishRequest,
+	WorkflowRetryRequest, WorkflowRevision, WorkflowRevisionSummary, WorkflowRunDetail, WorkflowRunSummary,
+	WorkflowStartRequest, WorkflowStopRequest, WorkflowTestRequest,
 } from '$shared/workflow-runs';
-import { apiGet, apiPost } from './client.js';
+import { apiDelete, apiGet, apiPost } from './client.js';
 
 const changes = new EventTarget();
 export function subscribeWorkflowChanges(listener: () => void): () => void {
@@ -38,6 +39,17 @@ export async function getWorkflowRevision(definitionId: string, revision?: numbe
 	}
 	return result;
 }
+export async function listWorkflowRevisions(
+	definitionId: string,
+	options?: ReadOptions,
+): Promise<{ readonly items: readonly WorkflowRevisionSummary[] }> {
+	const result = await apiGet<{ items: readonly WorkflowRevisionSummary[] }>(
+		`${workflowPaths.revisions}?${new URLSearchParams({ definitionId })}`,
+		options,
+	);
+	if (!Array.isArray(result?.items)) throw new Error('Invalid workflow revisions response.');
+	return result;
+}
 export async function getWorkflowRun(runId: string, options?: ReadOptions): Promise<WorkflowRunDetail> {
 	const result = await apiGet<WorkflowRunDetail>(`${workflowPaths.run}?${new URLSearchParams({ runId })}`, options);
 	if (result?.id !== runId || !Array.isArray(result.steps)) throw new Error('Invalid workflow run response.');
@@ -50,6 +62,13 @@ async function mutation<T>(path: string, request: unknown): Promise<T> {
 	return result;
 }
 export const publishWorkflowDefinition = (request: WorkflowPublishRequest) => mutation<WorkflowRevision>(workflowPaths.definitions, request);
+export async function deleteWorkflowDefinition(
+	request: WorkflowDeleteDefinitionRequest,
+): Promise<{ readonly deleted: true; readonly definitionId: string }> {
+	const result = await apiDelete<{ deleted: true; definitionId: string }>(workflowPaths.definitions, request);
+	changes.dispatchEvent(new Event('change'));
+	return result;
+}
 export const startWorkflowRun = (request: WorkflowStartRequest) => mutation<WorkflowRunDetail>(workflowPaths.runs, request);
 export const testWorkflowDraft = (request: WorkflowTestRequest) => mutation<WorkflowRunDetail>(workflowPaths.testDraft, request);
 export const decideWorkflow = (request: WorkflowDecisionRequest) => mutation<WorkflowRunDetail>(workflowPaths.decide, request);

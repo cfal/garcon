@@ -8,8 +8,8 @@ import {
 } from '../../../common/workflow-definition.js';
 import type {
   WorkflowActiveChat, WorkflowActor, WorkflowAgentSettings, WorkflowDefinitionSummary, WorkflowExecutionContext,
-  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRunAmendment, WorkflowRunArchive, WorkflowRunDetail,
-  WorkflowRunSummary, WorkflowSignalOccurrence,
+  WorkflowLocation, WorkflowPage, WorkflowPageRequest, WorkflowRevision, WorkflowRevisionSummary, WorkflowRunAmendment,
+  WorkflowRunArchive, WorkflowRunDetail, WorkflowRunSummary, WorkflowSignalOccurrence,
 } from '../../../common/workflow-runs.js';
 import { DomainError } from '../../common/domain-error.js';
 import { diagnosticErrorCode } from '../../common/errors.js';
@@ -21,7 +21,7 @@ import { workflowConflict, workflowInvalid, workflowNotFound, workflowLimit } fr
 import { WorkflowGraph, type CapturedStep } from './graph.js';
 import { WORKFLOW_LIMITS } from './limits.js';
 import {
-  listActiveChats, listDefinitions, listRuns, pinnedRevision, priorOperation, referencesTarget, replayLaunch, requireInstance,
+  listActiveChats, listDefinitions, listRevisions, listRuns, pinnedRevision, priorOperation, referencesTarget, replayLaunch, requireInstance,
   requireRun, requireStep, requireUnarchivedRun, revisionByNumber, revisionHead, runDetail, runSteps, runSummary, saveOperation,
   signalById, signalOccurrence, type AttemptRow, type InstanceRow,
 } from './records.js';
@@ -190,6 +190,11 @@ export class WorkflowEngine {
       if (!result) throw workflowNotFound('Workflow revision');
       return result;
     });
+  }
+
+  listRevisions(definitionId: string): { readonly items: readonly WorkflowRevisionSummary[] } {
+    const id = workflowIdentifier(definitionId, 'Definition id');
+    return { items: this.#store.read(db => listRevisions(db, id)) };
   }
 
   replayStartRun(raw: unknown): WorkflowRunSummary | null {

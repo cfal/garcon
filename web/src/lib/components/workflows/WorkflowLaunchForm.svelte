@@ -21,21 +21,51 @@
 		context,
 		draftRun,
 		disabled = false,
+		initialValues = null,
 		onLaunch,
 	}: {
 		definition: WorkflowDefinition;
 		context: WorkflowLaunchContext | null;
 		draftRun: boolean;
 		disabled?: boolean;
+		initialValues?: {
+			readonly inputs: JsonObject;
+			readonly executionContext: WorkflowExecutionContext;
+		} | null;
 		onLaunch: (inputs: JsonObject, executionContext: WorkflowExecutionContext) => Promise<void>;
 	} = $props();
 
 	const executors = getExecutors();
 	const id = $props.id();
-	let fields = $state<Record<string, string>>({});
-	let executorId = $state(untrack(() => context?.executorId ?? 'local'));
+	let fields = $state<Record<string, string>>(
+		untrack(() => {
+			if (!initialValues) return {};
+			const entries: [string, string][] = [];
+			for (const [key, input] of Object.entries(definition.inputs)) {
+				if (Object.hasOwn(initialValues.inputs, key)) {
+					entries.push([key, workflowInputText(initialValues.inputs[key], input.type)]);
+				}
+			}
+			return Object.fromEntries(entries);
+		}),
+	);
+	let executorId = $state(
+		untrack(
+			() => initialValues?.executionContext.defaultTarget?.executorId ?? context?.executorId ?? 'local',
+		),
+	);
 	let paths = $state<Record<string, string>>(
-		untrack(() => (context ? { [context.executorId]: context.cwd } : {})),
+		untrack(() => {
+			if (initialValues) {
+				const seeded: Record<string, string> = {
+					...(initialValues.executionContext.projectPaths ?? {}),
+				};
+				const target = initialValues.executionContext.defaultTarget;
+				if (target) seeded[target.executorId] = target.projectPath;
+				return seeded;
+			}
+			return context ? { [context.executorId]: context.cwd } : {};
+		}),
 	);
 	let pathPicker = $state<string | null>(null);
 	let checking = $state(false);

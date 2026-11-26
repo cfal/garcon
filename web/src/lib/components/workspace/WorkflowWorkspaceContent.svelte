@@ -12,12 +12,14 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
+	import { getWorkflowStudioSession } from '$lib/workflows/definition/workflow-studio-session.svelte';
 	import { getWorkflowNavigation } from '$lib/workflows/navigation/workflow-navigation-context';
 	import type { WorkflowSurfaceDescriptor } from '$lib/workspace/surface-types';
 
 	let { surface, visible }: { surface: WorkflowSurfaceDescriptor; visible: boolean } = $props();
 	const source = untrack(() => surface);
 	const navigation = getWorkflowNavigation();
+	const session = getWorkflowStudioSession();
 	let destroyed = false;
 	onDestroy(() => {
 		destroyed = true;
@@ -46,6 +48,16 @@
 		<WorkflowRunViewer
 			runId={source.runId}
 			{visible}
+			onOpenEditor={(revision, context) => {
+				if (destroyed) return;
+				session.openRevisionInEditor(revision, context);
+				navigation.openNewWorkflow(source);
+			}}
+			onRunAgain={(run) => {
+				if (destroyed) return;
+				session.seedRunAgain(run);
+				navigation.openNewWorkflow(source);
+			}}
 			onOpenChat={(chatId) => {
 				if (!destroyed) navigation.openChat(chatId, source);
 			}}

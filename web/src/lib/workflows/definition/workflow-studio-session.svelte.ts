@@ -6,18 +6,37 @@ import {
 	startWorkflowRun,
 	testWorkflowDraft,
 } from '$lib/api/workflows';
+import type { JsonObject } from '$shared/json';
 import type {
+	WorkflowExecutionContext,
 	WorkflowPublishRequest,
+	WorkflowRevision,
+	WorkflowRunDetail,
 	WorkflowStartRequest,
 	WorkflowTestRequest,
 } from '$shared/workflow-runs';
 import * as m from '$lib/paraglide/messages.js';
 import { isUnconfirmedWorkflowMutation } from '../workflow-mutation';
 import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
-import type { WorkflowDraftState } from './workflow-draft-state.svelte';
+import { WorkflowDraftState } from './workflow-draft-state.svelte';
 
 type Launch = WorkflowStartRequest | WorkflowTestRequest;
 type Observer = { launched(id: string): void; published(): void };
+
+export type StudioLaunchSeed = {
+	readonly key: string;
+	readonly inputs: JsonObject;
+	readonly executionContext: WorkflowExecutionContext;
+};
+
+export type StudioNavigationRequest =
+	| {
+			readonly id: number;
+			readonly kind: 'editor';
+			readonly revision: WorkflowRevision;
+			readonly context: WorkflowLaunchContext | null;
+	  }
+	| { readonly id: number; readonly kind: 'run-again'; readonly run: WorkflowRunDetail };
 
 class WorkflowStudioSession {
 	current = $state.raw<{ draft: WorkflowDraftState; context: WorkflowLaunchContext | null } | null>(
@@ -32,6 +51,8 @@ class WorkflowStudioSession {
 		request: WorkflowPublishRequest;
 		draft: WorkflowDraftState;
 	} | null>(null);
+	navigationRequest = $state.raw<StudioNavigationRequest | null>(null);
+	#nextRequestId = 0;
 	#observer: Observer | null = null;
 
 	get locked(): boolean {
@@ -130,6 +151,22 @@ class WorkflowStudioSession {
 	replace(draft: WorkflowDraftState, context: WorkflowLaunchContext | null): void {
 		this.clear();
 		this.current = { draft, context };
+	}
+
+	openRevisionInEditor(revision: WorkflowRevision, context: WorkflowLaunchContext | null): void {
+		const id = ++this.#nextRequestId;
+		if (!this.locked && !this.current?.draft.dirty) {
+			this.replace(new WorkflowDraftState(revision.source, { definition: revision }), context);
+		}
+		this.navigationRequest = { id, kind: 'editor', revision, context };
+	}
+
+	seedRunAgain(run: WorkflowRunDetail): void {
+		this.navigationRequest = { id: ++this.#nextRequestId, kind: 'run-again', run };
+	}
+
+	consumeNavigationRequest(id: number): void {
+		if (this.navigationRequest?.id === id) this.navigationRequest = null;
 	}
 
 	clear(): void {

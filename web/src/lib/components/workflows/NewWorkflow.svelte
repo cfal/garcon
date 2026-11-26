@@ -5,11 +5,14 @@
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
+		deleteWorkflowDefinition,
 		getWorkflowRevision,
 		listWorkflowDefinitionsPage,
+		listWorkflowRevisions,
 		listWorkflowRunsPage,
 	} from '$lib/api/workflows';
 	import type { JsonObject } from '$shared/json';
@@ -17,10 +20,14 @@
 		WorkflowDefinitionSummary,
 		WorkflowExecutionContext,
 		WorkflowRevision,
+		WorkflowRevisionSummary,
 		WorkflowRunSummary,
 	} from '$shared/workflow-runs';
 	import { WorkflowDraftState } from '$lib/workflows/definition/workflow-draft-state.svelte';
-	import { getWorkflowStudioSession } from '$lib/workflows/definition/workflow-studio-session.svelte';
+	import {
+		getWorkflowStudioSession,
+		type StudioLaunchSeed,
+	} from '$lib/workflows/definition/workflow-studio-session.svelte';
 	import type { WorkflowFileState } from '$lib/workflows/definition/workflow-file-state.svelte';
 	import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
 	import { nativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region';
@@ -53,20 +60,84 @@
 	let recentRuns = $state.raw<readonly WorkflowRunSummary[]>([]);
 	let chosen = $state('');
 	let revision = $state.raw<WorkflowRevision | null>(null);
+	let revisions = $state.raw<readonly WorkflowRevisionSummary[]>([]);
+	let launchSeed = $state.raw<StudioLaunchSeed | null>(null);
 	let draft = $derived(session.current?.draft ?? null);
 	let testSource = $state('');
 	let chooser = $state<SourceMode | null>(null);
 	let replace = $state.raw<(() => void) | null>(null);
+	let deleteOpen = $state(false);
+	let deleting = $state(false);
 	let loadError = $state<string | null>(null);
 	let revisionError = $state<string | null>(null);
+	let deleteError = $state<string | null>(null);
 	let recentError = $state<string | null>(null);
 	let loading = $state(false);
 	let loadingRevision = $state(false);
 	let lifetime: AbortController | null = null;
 	let revisionRead: AbortController | null = null;
 	let recentRead = 0;
-	const locked = $derived(session.locked);
+	const locked = $derived(session.locked || deleting);
+	const latestSummary = $derived(
+		revision?.definitionId ? definitions.find((entry) => entry.id === revision?.definitionId) : null,
+	);
+	const deleteRevision = $derived(
+		latestSummary?.revision ?? revisions[0]?.revision ?? revision?.revision ?? null,
+	);
 	const id = $props.id();
+
+	$effect(() => {
+		const req = session.navigationRequest;
+		if (!req) return;
+		untrack(() => {
+			session.consumeNavigationRequest(req.id);
+			if (req.kind === 'editor') {
+				if (session.current?.draft.source === req.revision.source && !session.current.draft.dirty) {
+					page = 'editor';
+					return;
+				}
+				changeDraft(() =>
+					installDraft(
+						new WorkflowDraftState(req.revision.source, { definition: req.revision }),
+						req.context,
+					),
+				);
+				return;
+			}
+			const run = req.run;
+			launchSeed = {
+				key: `${run.id}:${req.id}`,
+				inputs: run.inputs,
+				executionContext: run.executionContext,
+			};
+			if (run.definitionId !== null && run.revision !== null) {
+				const defId = run.definitionId;
+				const revNum = run.revision;
+				revisionRead?.abort();
+				revisionRead = null;
+				loadingRevision = false;
+				revisionError = null;
+				deleteError = null;
+				chosen = `${defId}:${revNum}`;
+				revision = run.pinnedRevision;
+				revisions = [];
+				page = 'launch';
+				void listWorkflowRevisions(defId, { signal: lifetime?.signal })
+					.then((listed) => {
+						if (revision?.definitionId === defId) revisions = listed.items;
+					})
+					.catch(() => {});
+			} else {
+				const target = run.executionContext.defaultTarget;
+				const runContext = target ? { executorId: target.executorId, cwd: target.projectPath } : null;
+				changeDraft(() => {
+					installDraft(new WorkflowDraftState(run.pinnedRevision.source), runContext);
+					testSource = run.pinnedRevision.source;
+					page = 'test';
+				});
+			}
+		});
+	});
 
 	onMount(() => {
 		lifetime = new AbortController();
@@ -135,20 +206,31 @@
 	async function select(key: string) {
 		if (locked) return;
 		const summary = definitions.find((entry) => optionKey(entry) === key);
+		const separator = key.lastIndexOf(':');
+		const definitionId = summary?.id ?? (separator > 0 ? key.slice(0, separator) : '');
+		const targetRevision =
+			summary?.revision ?? (separator > 0 ? Number(key.slice(separator + 1)) : Number.NaN);
 		chosen = key;
+		launchSeed = null;
 		revisionRead?.abort();
 		revision = null;
+		revisions = [];
 		revisionError = null;
+		deleteError = null;
 		loadingRevision = false;
-		if (!summary) return;
+		if (!definitionId || !Number.isSafeInteger(targetRevision) || targetRevision < 1) return;
 		const read = new AbortController();
 		revisionRead = read;
 		loadingRevision = true;
 		try {
-			const result = await getWorkflowRevision(summary.id, summary.revision, {
-				signal: read.signal,
-			});
-			if (!read.signal.aborted && revisionRead === read) revision = result;
+			const [result, history] = await Promise.all([
+				getWorkflowRevision(definitionId, targetRevision, { signal: read.signal }),
+				listWorkflowRevisions(definitionId, { signal: read.signal }).catch(() => null),
+			]);
+			if (!read.signal.aborted && revisionRead === read) {
+				revision = result;
+				revisions = history?.items ?? [];
+			}
 		} catch (error) {
 			if (!read.signal.aborted) revisionError = failure(error);
 		} finally {
@@ -159,8 +241,30 @@
 		}
 	}
 
-	function installDraft(next: WorkflowDraftState) {
-		session.replace(next, context);
+	async function deleteSelectedDefinition() {
+		const definitionId = revision?.definitionId;
+		if (!definitionId || deleteRevision === null || deleting || locked) return;
+		deleting = true;
+		deleteError = null;
+		deleteOpen = false;
+		try {
+			await deleteWorkflowDefinition({ definitionId, expectedRevision: deleteRevision });
+			if (revision?.definitionId === definitionId) {
+				chosen = '';
+				revision = null;
+				revisions = [];
+				launchSeed = null;
+			}
+			await loadDefinitions();
+		} catch (error) {
+			deleteError = failure(error);
+		} finally {
+			deleting = false;
+		}
+	}
+
+	function installDraft(next: WorkflowDraftState, draftContext: WorkflowLaunchContext | null = context) {
+		session.replace(next, draftContext);
 		chooser = null;
 		page = 'editor';
 	}
@@ -331,13 +435,16 @@
 				<p class="wrap-anywhere text-sm text-muted-foreground">
 					{m.workflow_studio_test_independent()}
 				</p>
-				<WorkflowLaunchForm
-					definition={draft.result.definition}
-					context={draftContext}
-					draftRun
-					disabled={locked}
-					onLaunch={launch}
-				/>
+				{#key launchSeed?.key ?? ''}
+					<WorkflowLaunchForm
+						definition={draft.result.definition}
+						context={draftContext}
+						initialValues={launchSeed}
+						draftRun
+						disabled={locked}
+						onLaunch={launch}
+					/>
+				{/key}
 			</div>
 		</div>
 	{:else}
@@ -412,18 +519,57 @@
 							</p>{/if}
 					</div>
 					{#if revision}
+						{#if revisions.length && revision.definitionId}
+							{@const defId = revision.definitionId}
+							<div class="space-y-1">
+								<label for={`${id}-revision`} class="block text-sm font-medium"
+									>{m.workflow_studio_revision_history()}</label
+								>
+								<select
+									id={`${id}-revision`}
+									class="workflow-field text-base"
+									value={String(revision.revision ?? '')}
+									disabled={locked}
+									onchange={(event) => void select(`${defId}:${event.currentTarget.value}`)}
+								>
+									{#each revisions as entry, index (entry.revision)}
+										<option value={String(entry.revision)}
+											>{index === 0
+												? m.workflow_studio_revision_latest({ revision: entry.revision })
+												: m.workflow_studio_revision({ revision: entry.revision })}</option
+										>
+									{/each}
+								</select>
+							</div>
+						{/if}
 						{#if revision.definition.description}<p
 								class="wrap-anywhere text-sm text-muted-foreground"
 							>
 								{revision.definition.description}
 							</p>{/if}
-						<Button size="sm" variant="outline" disabled={locked} onclick={editPublished}
-							>{m.workflow_studio_edit_definition()}</Button
-						>
-						{#key revision}
+						<div class="flex flex-wrap items-center gap-2">
+							<Button size="sm" variant="outline" disabled={locked} onclick={editPublished}
+								>{m.workflow_studio_edit_definition()}</Button
+							>
+							{#if revision.definitionId && deleteRevision !== null}
+								<Button
+									size="sm"
+									variant="ghost"
+									class="text-destructive"
+									disabled={locked}
+									onclick={() => (deleteOpen = true)}
+									><Trash2 class="size-4" /> {m.workflow_studio_delete_definition()}</Button
+								>
+							{/if}
+						</div>
+						{#if deleteError}
+							<p role="alert" class="wrap-anywhere text-sm text-destructive">{deleteError}</p>
+						{/if}
+						{#key `${revision.definitionId}:${revision.revision}:${launchSeed?.key ?? ''}`}
 							<WorkflowLaunchForm
 								definition={revision.definition}
 								{context}
+								initialValues={launchSeed}
 								draftRun={false}
 								disabled={locked}
 								onLaunch={launch}
@@ -477,6 +623,32 @@
 			onClose={() => (chooser = null)}
 		/>
 	{/key}
+{/if}
+{#if deleteOpen && revision && deleteRevision !== null}
+	<Dialog.Root
+		open
+		onOpenChange={(open) => {
+			if (!open) deleteOpen = false;
+		}}
+	>
+		<Dialog.Content>
+			<Dialog.Header>
+				<Dialog.Title>{m.workflow_studio_delete_definition()}</Dialog.Title>
+				<Dialog.Description
+					>{m.workflow_studio_delete_confirm({
+						name: revision.definition.name,
+						revision: deleteRevision,
+					})}</Dialog.Description
+				>
+			</Dialog.Header>
+			<div class="flex flex-wrap justify-end gap-2">
+				<Button variant="ghost" onclick={() => (deleteOpen = false)}>{m.common_cancel()}</Button>
+				<Button variant="destructive" disabled={locked} onclick={deleteSelectedDefinition}
+					>{m.workflow_studio_delete_definition()}</Button
+				>
+			</div>
+		</Dialog.Content>
+	</Dialog.Root>
 {/if}
 {#if replace}
 	<Dialog.Root

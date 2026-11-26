@@ -90,6 +90,18 @@ export interface WorkflowDefinitionSummary {
   readonly inputs: Readonly<Record<string, WorkflowInput>>;
 }
 
+export interface WorkflowRevisionSummary {
+  readonly definitionId: string;
+  readonly revision: number;
+  readonly name: string;
+  readonly publishedAt: string;
+}
+
+export interface WorkflowDeleteDefinitionRequest {
+  readonly definitionId: string;
+  readonly expectedRevision: number;
+}
+
 export interface WorkflowRevision {
   readonly definitionId: string | null;
   readonly revision: number | null;

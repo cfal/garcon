@@ -197,3 +197,35 @@ test('workflow stop endpoint cancels pending runs idempotently and rejects confl
   expect((await post(workflowPaths.stop, stopPayload)).status).toBe(200);
   expect((await post(workflowPaths.stop, { ...stopPayload, instanceId })).status).toBe(409);
 });
+
+test('revisions endpoint lists history descending and DELETE definitions soft-deletes cleanly', async () => {
+  const { routes, publish } = fixture();
+  await publish(null);
+  await publish(1, source.replace('Review', 'Review v2'));
+
+  const listReq = new Request(new URL(`${workflowPaths.revisions}?definitionId=review`, 'http://localhost'), { method: 'GET' });
+  const listRes = await routes[workflowPaths.revisions]!.GET!(listReq, new URL(listReq.url), undefined, local);
+  expect(listRes.status).toBe(200);
+  expect((await listRes.json() as { items: unknown[] }).items).toMatchObject([
+    { definitionId: 'review', revision: 2, name: 'Review v2' },
+    { definitionId: 'review', revision: 1, name: 'Review' },
+  ]);
+
+  const badDelete = new Request(new URL(workflowPaths.definitions, 'http://localhost'), {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ definitionId: 'review', expectedRevision: 1 }),
+  });
+  expect((await routes[workflowPaths.definitions]!.DELETE!(badDelete, new URL(badDelete.url), undefined, local)).status).toBe(409);
+
+  const okDelete = new Request(new URL(workflowPaths.definitions, 'http://localhost'), {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ definitionId: 'review', expectedRevision: 2 }),
+  });
+  const delRes = await routes[workflowPaths.definitions]!.DELETE!(okDelete, new URL(okDelete.url), undefined, local);
+  expect(delRes.status).toBe(200);
+  expect(await delRes.json()).toEqual({ deleted: true, definitionId: 'review' });
+  const afterList = await routes[workflowPaths.revisions]!.GET!(listReq, new URL(listReq.url), undefined, local);
+  expect(afterList.status).toBe(404);
+});

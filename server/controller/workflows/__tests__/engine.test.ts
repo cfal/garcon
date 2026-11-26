@@ -1064,3 +1064,19 @@ steps:
   }
   expect(step(service, runId, 'echo_env').instances[0]?.bindings).toEqual({ payload: hostile });
 });
+
+test('lists published revisions descending and soft-deletes definitions with expected revision checks', () => {
+  const { service } = workspace()(new ControlledRunner());
+  const first = 'version: 1\nname: Rev one\nsteps:\n  - { id: work, kind: command, command: pwd }\n';
+  const second = 'version: 1\nname: Rev two\nsteps:\n  - { id: work, kind: command, command: ls }\n';
+  publish(service, first, 'rev-def', null);
+  publish(service, second, 'rev-def', 1);
+  expect(service.listRevisions('rev-def').items).toMatchObject([
+    { definitionId: 'rev-def', revision: 2, name: 'Rev two' },
+    { definitionId: 'rev-def', revision: 1, name: 'Rev one' },
+  ]);
+  expect(() => service.deleteDefinition('rev-def', 1)).toThrow('changed');
+  service.deleteDefinition('rev-def', 2);
+  expect(service.listDefinitions().items.find(item => item.id === 'rev-def')).toBeUndefined();
+  expect(() => service.listRevisions('rev-def')).toThrow('Workflow definition');
+});

@@ -14,9 +14,11 @@ import WorkflowDefinitionEditor from '../WorkflowDefinitionEditor.svelte';
 vi.mock('$lib/api/workflows', () => ({
 	listWorkflowDefinitionsPage: vi.fn(),
 	listWorkflowRunsPage: vi.fn(),
+	listWorkflowRevisions: vi.fn(),
 	getWorkflowRevision: vi.fn(),
 	startWorkflowRun: vi.fn(),
 	publishWorkflowDefinition: vi.fn(),
+	deleteWorkflowDefinition: vi.fn(),
 	testWorkflowDraft: vi.fn(),
 }));
 
@@ -60,7 +62,21 @@ beforeEach(() => {
 		nextCursor: null,
 	});
 	vi.mocked(api.listWorkflowRunsPage).mockResolvedValue({ items: [], nextCursor: null });
+	vi.mocked(api.listWorkflowRevisions).mockResolvedValue({
+		items: [
+			{
+				definitionId: 'review-def',
+				revision: 3,
+				name: revision.definition.name,
+				publishedAt: revision.publishedAt!,
+			},
+		],
+	});
 	vi.mocked(api.getWorkflowRevision).mockResolvedValue(revision);
+	vi.mocked(api.deleteWorkflowDefinition).mockResolvedValue({
+		deleted: true,
+		definitionId: 'review-def',
+	});
 	vi.mocked(api.startWorkflowRun).mockResolvedValue(workflowRun());
 });
 
@@ -602,4 +618,62 @@ steps:
 			],
 		});
 	}, 20_000);
+
+	it('switches between historical revisions and confirms before deleting a published definition', async () => {
+		const latest = workflowRevision();
+		const olderSource = latest.source.replace('Review a report', 'Review v2 report');
+		const older = {
+			...latest,
+			revision: 2,
+			source: olderSource,
+			definition: parseWorkflowDefinition(olderSource).definition!,
+		};
+		vi.mocked(api.listWorkflowRevisions).mockResolvedValue({
+			items: [
+				{
+					definitionId: 'review-def',
+					revision: 3,
+					name: 'Review a report',
+					publishedAt: latest.publishedAt!,
+				},
+				{
+					definitionId: 'review-def',
+					revision: 2,
+					name: 'Review v2 report',
+					publishedAt: latest.publishedAt!,
+				},
+			],
+		});
+		vi.mocked(api.getWorkflowRevision)
+			.mockResolvedValueOnce(latest)
+			.mockResolvedValueOnce(older);
+
+		render(NewWorkflowTestHost, { onRunStarted: vi.fn() });
+		await screen.findByRole('option', { name: 'Review a report · Revision 3' });
+		await fireEvent.change(screen.getByLabelText('Definition'), {
+			target: { value: 'review-def:3' },
+		});
+		const history = await screen.findByLabelText<HTMLSelectElement>('Revision');
+		expect(Array.from(history.options, (option) => option.value)).toEqual(['3', '2']);
+		await fireEvent.change(history, { target: { value: '2' } });
+		expect(api.getWorkflowRevision).toHaveBeenLastCalledWith(
+			'review-def',
+			2,
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
+		await waitFor(() => expect(history.value).toBe('2'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete definition' }));
+		const dialog = screen.getByRole('dialog', { name: 'Delete definition' });
+		expect(api.deleteWorkflowDefinition).not.toHaveBeenCalled();
+		vi.mocked(api.listWorkflowDefinitionsPage).mockResolvedValueOnce({ items: [], nextCursor: null });
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete definition' }));
+		await waitFor(() =>
+			expect(api.deleteWorkflowDefinition).toHaveBeenCalledWith({
+				definitionId: 'review-def',
+				expectedRevision: 3,
+			}),
+		);
+		expect(await screen.findByText('No published workflow definitions.')).toBeTruthy();
+	});
 });

@@ -3,6 +3,7 @@ const base = '/api/v1/workflows';
 export const workflowPaths = {
   definitions: `${base}/definitions`,
   revision: `${base}/definitions/revision`,
+  revisions: `${base}/definitions/revisions`,
   runs: `${base}/runs`,
   run: `${base}/runs/detail`,
   activeChats: `${base}/runs/active-chats`,
