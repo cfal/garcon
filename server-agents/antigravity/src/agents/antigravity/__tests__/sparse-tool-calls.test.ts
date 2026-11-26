@@ -81,7 +81,7 @@ test('shows a repeated terminal schedule diagnostic alongside metadata without p
   const progress = { output: 'Preparing schedule', attempts: 1 };
   s.start('earlier-output', { ...timer, rawOutput: progress });
   expect(s.patch('earlier-output', { status: 'failed', content }).at(-1)).toEqual(expect.objectContaining({
-    content: { status: 'failed', raw: 'Could not save this schedule', rawOutput: progress }, isError: true,
+    content: { status: 'failed', raw: 'Could not save this schedule', rawOutput: { attempts: 1 } }, isError: true,
   }));
 });
 
@@ -94,8 +94,22 @@ test.each(['schedule', 'enter_plan_mode', 'exit_plan_mode'])('prioritizes explic
   s.start('call', { name, rawInput, rawOutput });
   s.patch('call', { content });
   expect(s.patch('call', { rawOutput, status: 'failed' }).at(-1)).toEqual(expect.objectContaining({
-    content: { raw: 'Operation refused', items: content, status: 'failed' }, isError: true,
+    content: { raw: 'Operation refused', status: 'failed' }, isError: true,
   }));
+});
+
+test('terminal output replaces cached narrative, retaining attachments and annotations on success or failure', () => {
+  const image = { type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } };
+  const annotated = { type: 'content', content: { type: 'text', text: 'Old annotated progress', priority: 1 } };
+  for (const status of ['completed', 'failed']) {
+    const s = session();
+    s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 60, Prompt: 'Check' },
+      content: [textBlock('Earlier progress'), image, annotated] });
+    const row = s.patch('timer', { status, rawOutput: { output: 'Terminal report', attempts: 1 } }).at(-1);
+    expect(row).toMatchObject({ content: { items: [image, { ...annotated, content: { ...annotated.content, text: '' } }],
+      rawOutput: { output: 'Terminal report', attempts: 1 } } });
+    expect(JSON.stringify(row)).not.toContain('progress');
+  }
 });
 
 test('uses explicit completed schedule output before echoed progress and falls back to terminal blocks before cached data', () => {

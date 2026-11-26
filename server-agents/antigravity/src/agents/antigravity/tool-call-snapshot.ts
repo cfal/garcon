@@ -92,18 +92,40 @@ function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['
   return result;
 }
 
+function isPlainAcpText(block: Record<string, unknown>): boolean {
+  const part = toolResultTextPart(block);
+  return block.type === 'content' && part !== null && Object.keys(block).length === 2 && Object.keys(part).length === 2;
+}
+
+function withoutOutputText(raw: unknown): unknown {
+  if (!rawOutputText(raw)) return raw;
+  const { output: _text, ...metadata } = asObject(raw);
+  return metadata;
+}
+
+function retainedBlocksForOutput(blocks: readonly Record<string, unknown>[], output: string): readonly Record<string, unknown>[] {
+  const texts = blocks.map(block => toolResultTextPart(block)?.text).filter(Boolean);
+  if (texts.join('\n').trim() === output) return blocks;
+  return blocks.flatMap(block => {
+    const part = toolResultTextPart(block);
+    if (!part || part.text.trim() === output) return [block];
+    if (isPlainAcpText(block) || (part === block && Object.keys(part).length === 2)) return [];
+    // Keeps annotations and other block metadata without presenting stale progress.
+    const metadata = { ...part, text: '' };
+    return [part === block ? metadata : { ...block, content: metadata }];
+  });
+}
+
 function planOrScheduleResult(timestamp: string, call: TrackedCall, terminal: Record<string, unknown>, status: string): ToolResultMessage {
   const report = (content: ToolResultMessage['content'], primaryTextItems?: number[]) =>
     new ToolResultMessage(timestamp, call.toolCallId, content, status !== 'completed', primaryTextItems);
-  const blocks = call.content ?? [];
-  const mixed = blocks.some(block => {
-    const part = asObject(block.content);
-    return block.type !== 'content' || part.type !== 'text' || typeof part.text !== 'string'
-      || Object.keys(block).length !== 2 || Object.keys(part).length !== 2;
-  });
   const terminalOutput = rawOutputText(terminal.rawOutput).trim();
-  if (!mixed && (terminalOutput || !Array.isArray(terminal.content))) {
-    return report(agentWorkResult(terminalOutput ? { ...call, contentIsNewer: false } : call, status));
+  const hasTerminalBlocks = Array.isArray(terminal.content);
+  const cached = call.content ?? [];
+  const blocks = terminalOutput && !hasTerminalBlocks ? retainedBlocksForOutput(cached, terminalOutput) : cached;
+  const mixed = blocks.some(block => !isPlainAcpText(block));
+  if (!mixed && (terminalOutput || !hasTerminalBlocks)) {
+    return report(agentWorkResult(terminalOutput ? { ...call, content: blocks, contentIsNewer: false } : call, status));
   }
 
   const parts = blocks.map(toolResultTextPart);
@@ -112,17 +134,16 @@ function planOrScheduleResult(timestamp: string, call: TrackedCall, terminal: Re
   // Mixed blocks are an ordered result; flattening the text would detach it from its attachments.
   const result: ToolResultMessage['content'] = mixed ? { items: blocks } : { raw: text };
   if (status !== 'completed') result.status = status;
-  let rawOutput = call.rawOutput;
+  let rawOutput = hasTerminalBlocks && text.trim() && terminal.rawOutput == null ? withoutOutputText(call.rawOutput) : call.rawOutput;
   const output = rawOutputText(rawOutput).trim();
   const aggregateEcho = !!output && output === text.trim();
   const echoedItem = output && !aggregateEcho ? parts.findIndex(part => part?.text.trim() === output) : -1;
   if (aggregateEcho || echoedItem >= 0) {
-    const { output: _echo, ...metadata } = asObject(rawOutput);
-    rawOutput = metadata;
+    rawOutput = withoutOutputText(rawOutput);
   }
   if (isStructuredOutput(rawOutput) || rawOutputText(rawOutput).trim()) result.rawOutput = rawOutput;
   if (!mixed) return report(result);
-  if (aggregateEcho || (!terminalOutput && Array.isArray(terminal.content))) {
+  if (aggregateEcho || (!terminalOutput && hasTerminalBlocks)) {
     const indices = parts.flatMap((part, i) => part?.text ? [i] : []);
     return report(result, indices.length ? indices : undefined);
   }
