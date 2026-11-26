@@ -50,8 +50,8 @@ describe('scripted Claude background settlement', () => {
       const reloaded = await reloadUntilNativeStableAfterPrompt(fixture, chatId, prompt);
       for (const { messages } of [live, reloaded]) {
         expect(messagesOfType(messages, 'schedule-tool-use')).toMatchObject([
-          { toolId: 'toolu_create', request: { action: 'cron', expression: '0 9 1 1 *', prompt: 'Review fixture', recurring: false } },
-          { toolId: 'toolu_list', request: { action: 'list' } },
+          { toolId: 'toolu_create', nativeName: 'CronCreate', request: { action: 'cron', expression: '0 9 1 1 *', prompt: 'Review fixture', recurring: false } },
+          { toolId: 'toolu_list', nativeName: 'CronList', request: { action: 'list' } },
         ]);
         const result = messagesOfType(messages, 'tool-result').find(row => row.toolId === 'toolu_create');
         expect(result).toMatchObject({ isError: false, content: { toolUseResult: { id: expect.any(String), recurring: false } } });
