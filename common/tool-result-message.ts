@@ -17,11 +17,15 @@ export function toolResultTextPart(block: unknown): ToolTextPart | null {
 
 function parsePrimaryTextItems(refs: unknown, items: unknown): number[] | undefined {
   if (!Array.isArray(refs) || !Array.isArray(items) || !refs.length || refs.length > items.length) return undefined;
-  const valid = refs.every((index, i) => {
-    if (!Number.isSafeInteger(index) || index < 0 || index >= items.length) return false;
-    return (i === 0 || index > refs[i - 1]) && toolResultTextPart(items[index]) !== null;
-  });
-  return valid ? refs : undefined;
+  let previous = -1;
+  const indices: number[] = [];
+  for (const index of refs) {
+    if (!Number.isSafeInteger(index) || index <= previous || index >= items.length
+      || toolResultTextPart(items[index]) === null) return undefined;
+    indices.push(index);
+    previous = index;
+  }
+  return indices;
 }
 
 export class ToolResultMessage {

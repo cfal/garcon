@@ -53,7 +53,9 @@ test('invalid primary text references do not discard the stored result', () => {
   const message = new ToolResultMessage(at, 'timer', { items }, true);
   const missingFirst = new Array<number>(2);
   missingFirst[1] = 1;
-  for (const primaryTextItems of [[9], [1, 1], [1, 0], missingFirst]) {
+  const missingLast = new Array<number>(2);
+  missingLast[0] = 0;
+  for (const primaryTextItems of [[9], [1, 1], [1, 0], missingFirst, missingLast]) {
     expect(parseChatMessage({ ...message, primaryTextItems })).toEqual(message);
   }
 });
