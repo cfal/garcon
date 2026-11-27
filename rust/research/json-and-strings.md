@@ -1,7 +1,9 @@
 # JSON and strings
 
 Checked 2026-11-27 against Bun 1.4.5, the original's runtime, and Rust 1.99.1. Every
-result in an "original" column is the output of a Bun 1.4.5 script on that input.
+result in an "original" column is the output of a Bun 1.4.5 script on that input. The
+same scripts on Bun 1.4.3, which CI pins, give the same lines, and the number fixture
+regenerated on 1.4.3 is byte-identical.
 
 ## Where the original uses it
 
