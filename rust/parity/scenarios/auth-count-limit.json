@@ -1,0 +1,666 @@
+{
+  "name": "auth-count-limit",
+  "description": "The auth rate limits, each on a fresh server: ten registrations a minute, ten credential changes a minute shared by both credential routes, thirty logouts a minute counted before the token is verified, and ten sign-ins a minute that also stop a correct one. The allowed requests are accepted-boundary inputs: identifiers at the limit, a trimmed username, and a body of exactly 4096 bytes.",
+  "steps": [
+    {
+      "name": "register-password-8-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "newuser",
+          "password": "12345678"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-password-128-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "newuser",
+          "password": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-64-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-64-accented-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "üüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüü",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-32-emoji",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-trimmed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": " parity ",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-body-4096-bytes",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "body": "{\"username\":\"newuser\",\"password\":\"long-enough-password\",\"padding\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-body-4097-bytes",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "body": "{\"username\":\"newuser\",\"password\":\"long-enough-password\",\"padding\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-empty-object",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {},
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-short-password",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "newuser",
+          "password": "short"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-rate-limited",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "newuser",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-rate-limited-malformed-json",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "body": "{\"unterminated",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "username-change-empty-body-1",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {}
+      }
+    },
+    {
+      "name": "username-change-empty-body-2",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {}
+      }
+    },
+    {
+      "name": "username-change-empty-body-3",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {}
+      }
+    },
+    {
+      "name": "username-change-empty-body-4",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {}
+      }
+    },
+    {
+      "name": "username-change-empty-body-5",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {}
+      }
+    },
+    {
+      "name": "password-change-empty-body-1",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {}
+      }
+    },
+    {
+      "name": "password-change-empty-body-2",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {}
+      }
+    },
+    {
+      "name": "password-change-empty-body-3",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {}
+      }
+    },
+    {
+      "name": "password-change-empty-body-4",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {}
+      }
+    },
+    {
+      "name": "password-change-empty-body-5",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {}
+      }
+    },
+    {
+      "name": "username-change-rate-limited",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}",
+          "username": "renamed"
+        }
+      }
+    },
+    {
+      "name": "password-change-rate-limited",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {
+          "currentPassword": "{{password}}",
+          "newPassword": "another-password-123"
+        }
+      }
+    },
+    {
+      "name": "username-change-without-token",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {},
+        "auth": "none"
+      }
+    },
+    {
+      "name": "password-change-with-forged-token",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {},
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "username-change-without-token-after-limit",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {},
+        "auth": "none"
+      }
+    },
+    {
+      "name": "password-change-with-forged-token-after-limit",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {},
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "user-after-refused-changes",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user"
+      }
+    },
+    {
+      "name": "logout",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout"
+      }
+    },
+    {
+      "name": "logout-without-token-02",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-03",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-04",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-05",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-06",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-07",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-08",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-09",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-10",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-11",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-12",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-13",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-14",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-15",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-16",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-17",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-18",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-19",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-20",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-21",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-22",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-23",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-24",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-25",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-26",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-27",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-28",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-29",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-token-30",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-rate-limited",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout"
+      }
+    },
+    {
+      "name": "user-after-logout",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user"
+      }
+    },
+    {
+      "name": "login-wrong-password-01",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-02",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-03",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-04",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-05",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-06",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-07",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-08",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password-09",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-rate-limited",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "{{password}}"
+        },
+        "auth": "none"
+      }
+    }
+  ],
+  "traps": false
+}
