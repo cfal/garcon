@@ -1,0 +1,847 @@
+{
+  "name": "api-providers-seeded",
+  "description": "API provider and assignment routes over seeded profiles and assignments: stored-credential lookups for test and discovery, update successes with revision conflicts, endpoint patches, key handling, executor reassignment, assign and unassign for the local executor, and delete with acknowledgement.",
+  "server": {
+    "files": {
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "config/api-providers.json": "{\n  \"version\": 2,\n  \"legacyProviderIds\": [],\n  \"apiProviders\": [\n    {\n      \"id\": \"seeded_openai\",\n      \"revision\": 3,\n      \"label\": \"Seeded OpenAI\",\n      \"templateId\": \"custom\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T00:00:00.000Z\",\n      \"endpoints\": [\n        {\n          \"id\": \"seeded_openai_openai\",\n          \"protocol\": \"openai-compatible\",\n          \"baseUrl\": \"https://seeded_openai.example.invalid/v1\",\n          \"apiKey\": \"sk-seeded-1234567890\",\n          \"defaultModel\": \"seeded-model\",\n          \"models\": [\n            {\n              \"value\": \"seeded-model\",\n              \"label\": \"Seeded model\"\n            }\n          ],\n          \"supportsImages\": true,\n          \"modelDiscovery\": \"openai-models\",\n          \"capabilities\": {\n            \"chatCompletions\": true,\n            \"responses\": true\n          }\n        }\n      ]\n    },\n    {\n      \"id\": \"seeded_anthropic\",\n      \"revision\": 3,\n      \"label\": \"Seeded Anthropic\",\n      \"templateId\": \"custom\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T00:00:00.000Z\",\n      \"endpoints\": [\n        {\n          \"id\": \"seeded_anthropic_anthropic\",\n          \"protocol\": \"anthropic-messages\",\n          \"baseUrl\": \"https://seeded_anthropic.example.invalid/v1\",\n          \"apiKey\": \"\",\n          \"defaultModel\": \"seeded-model\",\n          \"models\": [\n            {\n              \"value\": \"seeded-model\",\n              \"label\": \"Seeded model\"\n            }\n          ],\n          \"supportsImages\": false,\n          \"modelDiscovery\": \"anthropic-models\"\n        }\n      ]\n    }\n  ]\n}",
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":4,\"assignments\":{\"local\":[\"seeded_openai\"]}}"
+    }
+  },
+  "steps": [
+    {
+      "name": "management-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-providers"
+      }
+    },
+    {
+      "name": "assignments-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-provider-assignments"
+      }
+    },
+    {
+      "name": "test-with-own-key-ignores-lookup",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "not-a-provider-id"
+        }
+      }
+    },
+    {
+      "name": "test-lookup-without-endpoint",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "https://seeded_openai.example.invalid/v1",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "seeded_openai"
+        }
+      }
+    },
+    {
+      "name": "test-lookup-without-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "https://seeded_openai.example.invalid/v1",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai"
+        }
+      }
+    },
+    {
+      "name": "test-with-stored-key-revision-conflict",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "https://seeded_openai.example.invalid/v1",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 2
+        }
+      }
+    },
+    {
+      "name": "test-with-stored-key-protocol-mismatch",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "https://seeded_openai.example.invalid/v1",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "test-with-stored-key-not-assigned",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "https://seeded_anthropic.example.invalid/v1",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "seeded_anthropic",
+          "endpointId": "seeded_anthropic_anthropic",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "test-with-stored-key-other-origin",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "test-with-stored-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "https://seeded_openai.example.invalid/v1/",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          },
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "models-lookup-revision-conflict",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "https://seeded_openai.example.invalid/v1",
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 2
+        }
+      }
+    },
+    {
+      "name": "models-lookup-endpoint-of-other-profile",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "https://seeded_openai.example.invalid/v1",
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_anthropic_anthropic",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "models-lookup-protocol-mismatch",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "anthropic-messages",
+          "baseUrl": "https://seeded_openai.example.invalid/v1",
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "models-lookup-not-assigned-to-executor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "anthropic-messages",
+          "baseUrl": "https://seeded_anthropic.example.invalid/v1",
+          "apiProviderId": "seeded_anthropic",
+          "endpointId": "seeded_anthropic_anthropic",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "models-lookup-other-origin-with-stored-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9/v1",
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "models-lookup-other-origin-with-own-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9/v1",
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3,
+          "apiKey": "k"
+        }
+      }
+    },
+    {
+      "name": "models-lookup-other-scheme-with-stored-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://seeded_openai.example.invalid/v1",
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "models-lookup-query-executor-invalid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models?executorId=remote",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "https://seeded_openai.example.invalid/v1",
+          "apiProviderId": "seeded_openai",
+          "endpointId": "seeded_openai_openai",
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "update-unknown-profile",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-unknown-profile-revision-only",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "revision": 3
+        }
+      }
+    },
+    {
+      "name": "update-unknown-profile-endpoint",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "endpoint": {
+            "defaultModel": "x"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-revision-conflict",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "revision": 2,
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-revision-conflict-without-profile-change",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "revision": 2
+        }
+      }
+    },
+    {
+      "name": "update-revision-zero",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "revision": 0
+        }
+      }
+    },
+    {
+      "name": "update-unknown-endpoint",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "id": "other_openai",
+            "baseUrl": "https://other.example.invalid"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-endpoint-protocol-change-ignored",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "https://changed.example.invalid/v1"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-label",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "label": "  Renamed OpenAI  "
+        }
+      }
+    },
+    {
+      "name": "update-after-revision-bump-with-old-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "revision": 3,
+          "label": "Stale"
+        }
+      }
+    },
+    {
+      "name": "update-revision-at-current",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "revision": 5,
+          "label": "Renamed OpenAI"
+        }
+      }
+    },
+    {
+      "name": "update-endpoint-capabilities-both-false",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "capabilities": {
+              "chatCompletions": false,
+              "responses": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-endpoint",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "changed.example.invalid/v1/",
+            "defaultModel": "new-default",
+            "models": [
+              {
+                "value": "m2",
+                "label": "M2"
+              }
+            ],
+            "supportsImages": false,
+            "capabilities": {
+              "chatCompletions": false,
+              "responses": true
+            },
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-replaces-api-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "apiKey": "sk-replaced-99"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-empty-api-key-keeps-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "apiKey": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "update-api-key-and-clear-together-clears",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "apiKey": "sk-ignored",
+            "clearApiKey": true
+          }
+        }
+      }
+    },
+    {
+      "name": "update-clears-missing-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "clearApiKey": true
+          }
+        }
+      }
+    },
+    {
+      "name": "update-models-without-default",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "models": [
+              {
+                "value": "m3",
+                "label": "M3"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-models-all-invalid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "models": [
+              {
+                "value": " ",
+                "label": "x"
+              },
+              "junk"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-models-with-protocol",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "capabilities": {
+              "chatCompletions": true,
+              "responses": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-discovery-with-protocol",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "modelDiscovery": "openrouter-models"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-discovery-unknown-for-protocol",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "modelDiscovery": "bogus"
+          }
+        }
+      }
+    },
+    {
+      "name": "management-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-providers"
+      }
+    },
+    {
+      "name": "update-assignment-unknown-executor",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "executorIds": [
+            "33333333-3333-4333-8333-333333333333"
+          ]
+        }
+      }
+    },
+    {
+      "name": "update-reassigns",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "executorIds": []
+        }
+      }
+    },
+    {
+      "name": "assignments-after-reassign",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-provider-assignments"
+      }
+    },
+    {
+      "name": "update-reassigns-back",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "executorIds": [
+            "local"
+          ]
+        }
+      }
+    },
+    {
+      "name": "assignments-after-reassign-back",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-provider-assignments"
+      }
+    },
+    {
+      "name": "assign-without-provider",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?executorId=local",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-provider-id-invalid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=Not_A_Provider",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-provider-id-empty",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-provider-id-too-short",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=ab",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-unknown-provider",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=missing-provider",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-executor-invalid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic&executorId=remote",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-executor-unknown",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic&executorId=33333333-3333-4333-8333-333333333333"
+      }
+    },
+    {
+      "name": "assign-executor-duplicate-parameter",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic&executorId=local&executorId=local",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-executor-check-before-provider",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=missing-provider&executorId=remote",
+        "json": {}
+      }
+    },
+    {
+      "name": "assign-array-body-ignored",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic",
+        "json": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "update-after-assignment",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_openai",
+        "json": {
+          "label": "Renamed OpenAI"
+        }
+      }
+    },
+    {
+      "name": "assignments-after-assign",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-provider-assignments"
+      }
+    },
+    {
+      "name": "assign-again",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic"
+      }
+    },
+    {
+      "name": "unassign-invalid-provider",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=bad id"
+      }
+    },
+    {
+      "name": "unassign-unknown-provider",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=missing-provider"
+      }
+    },
+    {
+      "name": "unassign-executor-invalid",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic&executorId=remote"
+      }
+    },
+    {
+      "name": "unassign-executor-unknown",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic&executorId=33333333-3333-4333-8333-333333333333"
+      }
+    },
+    {
+      "name": "unassign",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic&executorId=local"
+      }
+    },
+    {
+      "name": "unassign-again",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_anthropic"
+      }
+    },
+    {
+      "name": "unassign-last-provider",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-provider-assignments?apiProviderId=seeded_openai"
+      }
+    },
+    {
+      "name": "assignments-at-end",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-provider-assignments"
+      }
+    },
+    {
+      "name": "delete-without-acknowledgement",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers?id=seeded_anthropic"
+      }
+    },
+    {
+      "name": "delete-unknown-profile",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers?id=missing-provider&acknowledgeSharedImpact=true"
+      }
+    },
+    {
+      "name": "delete-profile",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers?id=seeded_anthropic&acknowledgeSharedImpact=true"
+      }
+    },
+    {
+      "name": "management-after-delete",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-providers"
+      }
+    },
+    {
+      "name": "update-deleted-profile",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=seeded_anthropic",
+        "json": {
+          "label": "Back"
+        }
+      }
+    },
+    {
+      "name": "delete-removed-profile",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers?id=seeded_anthropic&acknowledgeSharedImpact=true"
+      }
+    }
+  ],
+  "traps": true
+}

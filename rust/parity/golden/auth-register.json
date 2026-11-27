@@ -1,0 +1,275 @@
+{
+  "scenario": "auth-register",
+  "cases": [
+    {
+      "name": "register-account-configured",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Account already configured",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "register-malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "A complete valid UTF-8 JSON body is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-array-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Unexpected authentication fields.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-extra-field",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Unexpected authentication fields.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-empty-object",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-username-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-username-blank",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username must contain 1-64 characters on one line without controls.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-username-with-line-feed",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username must contain 1-64 characters on one line without controls.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-username-65-characters",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username must contain 1-64 characters on one line without controls.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-username-33-emoji",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username must contain 1-64 characters on one line without controls.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 400
+      },
+      "noise": []
+    }
+  ]
+}

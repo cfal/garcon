@@ -1,0 +1,164 @@
+{
+  "name": "folders-seeded",
+  "description": "Folder routes over a seeded settings file: rename, filter replacement, an empty update, remove, and remove again.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/project-settings.json": "{\n  \"features\": {\n    \"transcriptSearch\": {\n      \"enabled\": false\n    },\n    \"agentCommands\": {\n      \"enabled\": true,\n      \"chatIdDiscovery\": true,\n      \"sendMessage\": true,\n      \"startAgent\": true,\n      \"resumeAgent\": true,\n      \"schedule\": true,\n      \"tickets\": true\n    }\n  },\n  \"ui\": {},\n  \"paths\": {\n    \"recentProjectPaths\": []\n  },\n  \"chatNames\": {},\n  \"remoteSettingsVersion\": 0,\n  \"pinnedChatIds\": [],\n  \"normalChatIds\": [],\n  \"archivedChatIds\": [],\n  \"recentAgentSettings\": [],\n  \"executionDefaults\": {\n    \"global\": {\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"agentSettingsById\": {}\n    },\n    \"byAgent\": {}\n  },\n  \"chatFolders\": [\n    {\n      \"id\": \"folder-bravo\",\n      \"name\": \"Bravo\",\n      \"filter\": {\n        \"textTokens\": [\n          \"bravo\"\n        ],\n        \"tags\": [\n          \"b\"\n        ],\n        \"agents\": [],\n        \"models\": [],\n        \"status\": \"unread\"\n      },\n      \"createdAt\": \"2020-01-03T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"folder-alpha\",\n      \"name\": \"Alpha\",\n      \"filter\": {\n        \"textTokens\": [],\n        \"tags\": [],\n        \"agents\": [\n          \"claude\"\n        ],\n        \"models\": [\n          \"opus\"\n        ]\n      },\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"folder-charlie\",\n      \"name\": \"Charlie\",\n      \"filter\": {\n        \"textTokens\": [],\n        \"tags\": [],\n        \"agents\": [],\n        \"models\": [],\n        \"status\": \"bogus\"\n      },\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\"\n    }\n  ],\n  \"savedChatSearches\": []\n}\n"
+    }
+  },
+  "steps": [
+    {
+      "name": "folders-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/folders"
+      }
+    },
+    {
+      "name": "update-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "missing-folder",
+          "name": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-empty-body-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "missing-folder"
+        }
+      }
+    },
+    {
+      "name": "update-rename",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "folder-bravo",
+          "name": "  Bravo renamed  "
+        }
+      }
+    },
+    {
+      "name": "update-replace-filter",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "folder-bravo",
+          "filter": {
+            "tags": [
+              " b ",
+              "c"
+            ],
+            "status": "active"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-scalar-filter-ignored",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "folder-bravo",
+          "filter": "x",
+          "name": "Bravo renamed"
+        }
+      }
+    },
+    {
+      "name": "update-array-filter-clears-filter",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "folder-bravo",
+          "filter": [
+            "x"
+          ],
+          "name": "Bravo renamed"
+        }
+      }
+    },
+    {
+      "name": "update-null-filter-ignored",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "folder-bravo",
+          "filter": null,
+          "name": "Bravo renamed"
+        }
+      }
+    },
+    {
+      "name": "update-no-fields",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "folder-alpha"
+        }
+      }
+    },
+    {
+      "name": "update-trims-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "  folder-alpha  ",
+          "name": "Alpha renamed"
+        }
+      }
+    },
+    {
+      "name": "folders-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/folders"
+      }
+    },
+    {
+      "name": "remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/folders?id=missing-folder"
+      }
+    },
+    {
+      "name": "remove",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/folders?id=folder-charlie"
+      }
+    },
+    {
+      "name": "folders-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/folders"
+      }
+    },
+    {
+      "name": "remove-again",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/folders?id=folder-charlie"
+      }
+    }
+  ],
+  "traps": true
+}

@@ -1,0 +1,1256 @@
+{
+  "name": "api-providers",
+  "description": "API provider routes with no profiles: management reads, create validation field by field, executor checks, profile creates, update and delete errors, offline endpoint tests and model discovery, and method routing.",
+  "steps": [
+    {
+      "name": "management-empty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-providers"
+      }
+    },
+    {
+      "name": "assignments-empty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-provider-assignments"
+      }
+    },
+    {
+      "name": "create-empty-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {}
+      }
+    },
+    {
+      "name": "create-array-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "create-null-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": null
+      }
+    },
+    {
+      "name": "create-missing-endpoint",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider"
+        }
+      }
+    },
+    {
+      "name": "create-endpoint-scalar",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": "x"
+        }
+      }
+    },
+    {
+      "name": "create-endpoint-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": []
+        }
+      }
+    },
+    {
+      "name": "create-protocol-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-protocol-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-responses",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-template-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-template-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "no-such-template",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-template-of-other-protocol",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "gemini",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-label-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-label-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "  ",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-label-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": 7,
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-base-url-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-base-url-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "  ",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-base-url-unparseable",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-base-url-with-query",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "https://example.invalid/v1?x=1",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-base-url-with-fragment",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "https://example.invalid/v1#f",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-default-model-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-default-model-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": " "
+          }
+        }
+      }
+    },
+    {
+      "name": "create-capabilities-both-false",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1",
+            "capabilities": {
+              "chatCompletions": false,
+              "responses": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-capabilities-flag-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1",
+            "capabilities": {
+              "responses": "yes"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-capabilities-scalar",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1",
+            "capabilities": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-supports-images-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1",
+            "supportsImages": "yes"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-executor-ids-not-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "executorIds": "local",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-executor-ids-duplicate",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "executorIds": [
+            "local",
+            "local"
+          ],
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-executor-id-invalid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "executorIds": [
+            "remote"
+          ],
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-executor-id-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "executorIds": [
+            "33333333-3333-4333-8333-333333333333"
+          ],
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-query-executor-invalid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers?executorId=remote",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-query-executor-duplicate",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers?executorId=local&executorId=local",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-query-executor-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers?executorId=33333333-3333-4333-8333-333333333333",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-without-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-empty-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=",
+        "json": {
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-empty-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {}
+      }
+    },
+    {
+      "name": "update-array-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "update-unknown-profile",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-unknown-profile-revision-only",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "revision": 1
+        }
+      }
+    },
+    {
+      "name": "update-revision-zero",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "revision": 0
+        }
+      }
+    },
+    {
+      "name": "update-revision-fractional",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "revision": 1.5
+        }
+      }
+    },
+    {
+      "name": "update-label-blank",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "label": " "
+        }
+      }
+    },
+    {
+      "name": "update-capabilities-without-protocol",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "endpoint": {
+            "capabilities": {
+              "responses": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-model-discovery-without-protocol",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "endpoint": {
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-api-key-not-string",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "endpoint": {
+            "apiKey": 7
+          }
+        }
+      }
+    },
+    {
+      "name": "update-clear-api-key-not-boolean",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "endpoint": {
+            "clearApiKey": "yes"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-endpoint-base-url-with-query",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "endpoint": {
+            "baseUrl": "https://example.invalid/?x=1"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-executor-ids-invalid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers?id=missing-provider",
+        "json": {
+          "executorIds": "local"
+        }
+      }
+    },
+    {
+      "name": "delete-without-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers"
+      }
+    },
+    {
+      "name": "delete-without-acknowledgement",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers?id=missing-provider"
+      }
+    },
+    {
+      "name": "delete-acknowledgement-not-true",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers?id=missing-provider&acknowledgeSharedImpact=1"
+      }
+    },
+    {
+      "name": "delete-unknown-profile",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/api-providers?id=missing-provider&acknowledgeSharedImpact=true"
+      }
+    },
+    {
+      "name": "test-empty-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {}
+      }
+    },
+    {
+      "name": "test-protocol-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Provider",
+          "endpoint": {
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-template-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "no-such-template",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-query-executor-invalid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test?executorId=remote",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-query-executor-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test?executorId=33333333-3333-4333-8333-333333333333",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-without-model-discovery",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-offline-openai-models",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "openai-models"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-offline-ollama-tags",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "ollama",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "ollama-tags"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-offline-openrouter-models",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "openrouter",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9/v1",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "openrouter-models"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-anthropic-models",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "alibaba-cloud",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "http://127.0.0.1:9",
+            "apiKey": "sk-offline-1234567890",
+            "defaultModel": "m1",
+            "modelDiscovery": "anthropic-models"
+          }
+        }
+      }
+    },
+    {
+      "name": "test-anthropic-without-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/test",
+        "json": {
+          "templateId": "custom",
+          "label": "Offline",
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "models-empty-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {}
+      }
+    },
+    {
+      "name": "models-protocol-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "baseUrl": "http://127.0.0.1:9"
+        }
+      }
+    },
+    {
+      "name": "models-base-url-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible"
+        }
+      }
+    },
+    {
+      "name": "models-lookup-without-endpoint",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9",
+          "apiProviderId": "some-provider"
+        }
+      }
+    },
+    {
+      "name": "models-lookup-without-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9",
+          "apiProviderId": "some-provider",
+          "endpointId": "some-provider_openai"
+        }
+      }
+    },
+    {
+      "name": "models-lookup-revision-zero",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9",
+          "apiProviderId": "some-provider",
+          "endpointId": "some-provider_openai",
+          "revision": 0
+        }
+      }
+    },
+    {
+      "name": "models-lookup-id-not-a-provider-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9",
+          "apiProviderId": "Not A Provider",
+          "endpointId": "some-provider_openai",
+          "revision": 1
+        }
+      }
+    },
+    {
+      "name": "models-lookup-unknown-profile",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9",
+          "apiProviderId": "some-provider",
+          "endpointId": "some-provider_openai",
+          "revision": 1
+        }
+      }
+    },
+    {
+      "name": "models-lookup-query-executor-invalid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models?executorId=remote",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9",
+          "apiProviderId": "some-provider",
+          "endpointId": "some-provider_openai",
+          "revision": 1
+        }
+      }
+    },
+    {
+      "name": "models-offline-openai-models",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9/v1",
+          "apiKey": "k",
+          "modelDiscovery": "openai-models"
+        }
+      }
+    },
+    {
+      "name": "models-offline-default-discovery",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9/v1",
+          "apiKey": "k"
+        }
+      }
+    },
+    {
+      "name": "models-offline-ollama-tags",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "openai-compatible",
+          "baseUrl": "http://127.0.0.1:9",
+          "modelDiscovery": "ollama-tags"
+        }
+      }
+    },
+    {
+      "name": "models-offline-anthropic-models",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers/models",
+        "json": {
+          "protocol": "anthropic-messages",
+          "baseUrl": "http://127.0.0.1:9",
+          "apiKey": "k"
+        }
+      }
+    },
+    {
+      "name": "create-openai-compatible",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "  My OpenAI  ",
+          "executorIds": [
+            "local"
+          ],
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": " api.example.invalid/v1/// ",
+            "apiKey": "sk-test-1234567890",
+            "defaultModel": "default-model",
+            "models": [
+              {
+                "value": "m1",
+                "label": "M1",
+                "supportsImages": true
+              },
+              {
+                "value": " ",
+                "label": "bad"
+              },
+              {
+                "value": "m2"
+              },
+              "junk",
+              {
+                "value": "m3",
+                "label": "M3",
+                "isLocal": true
+              }
+            ],
+            "supportsImages": true,
+            "capabilities": {
+              "responses": true
+            },
+            "modelDiscovery": "openai-models"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-openrouter",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "openrouter",
+          "label": "Router",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "openrouter.example.invalid/api/v1",
+            "apiKey": "sk-or",
+            "defaultModel": "r1"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-anthropic",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "alibaba-cloud",
+          "label": "Anthropic",
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "example.invalid",
+            "defaultModel": "a1",
+            "models": [
+              {
+                "value": "a2",
+                "label": "A2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "create-responses-only",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Responses",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "https://responses.example.invalid",
+            "capabilities": {
+              "chatCompletions": false,
+              "responses": true
+            },
+            "defaultModel": "r1",
+            "modelDiscovery": "none",
+            "apiKey": 7
+          }
+        }
+      }
+    },
+    {
+      "name": "create-base-url-without-scheme-is-prefixed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Ftp",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "ftp://example.invalid",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-anthropic-with-unknown-discovery",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "No discovery",
+          "endpoint": {
+            "protocol": "anthropic-messages",
+            "baseUrl": "https://none.example.invalid",
+            "defaultModel": "a1",
+            "modelDiscovery": "openrouter-models"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-without-assignment",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": "Unassigned",
+          "executorIds": [],
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-from-numeric-label",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-providers",
+        "json": {
+          "templateId": "custom",
+          "label": " 42 ",
+          "endpoint": {
+            "protocol": "openai-compatible",
+            "baseUrl": "http://127.0.0.1:9",
+            "defaultModel": "m1",
+            "modelDiscovery": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "management-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-providers"
+      }
+    },
+    {
+      "name": "assignments-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/api-provider-assignments"
+      }
+    },
+    {
+      "name": "assignments-wrong-method",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/api-provider-assignments",
+        "json": {}
+      }
+    },
+    {
+      "name": "management-wrong-method",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/api-providers",
+        "json": {}
+      }
+    },
+    {
+      "name": "test-wrong-method",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/api-providers/test",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}

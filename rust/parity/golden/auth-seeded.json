@@ -1,0 +1,492 @@
+{
+  "scenario": "auth-seeded",
+  "cases": [
+    {
+      "name": "status-seeded",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "authDisabled": false,
+            "isAuthenticated": false,
+            "needsSetup": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "login-below-session-limit",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true,
+            "token": "{{jwt}}",
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "login-at-session-limit",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Too many active browser sessions. Log out an existing session or wait for it to expire.",
+            "errorCode": "AUTH_BUSY",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "retry-after": "5",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 429
+      },
+      "noise": []
+    },
+    {
+      "name": "user-with-seeded-session-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-with-token-for-unknown-session",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "user-with-token-for-past-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "user-with-expired-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "change-username-at-exhausted-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Credential revision is exhausted.",
+            "errorCode": "AUTH_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "change-password-at-exhausted-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Credential revision is exhausted.",
+            "errorCode": "AUTH_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/password"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "change-username-wrong-password",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Current password is incorrect.",
+            "errorCode": "AUTH_CURRENT_PASSWORD_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "register-over-seeded-account",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Account already configured",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "logout-seeded-session",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-logout",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "login-after-logout",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true,
+            "token": "{{jwt}}",
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "login-at-session-limit-again",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Too many active browser sessions. Log out an existing session or wait for it to expire.",
+            "errorCode": "AUTH_BUSY",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "retry-after": "5",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 429
+      },
+      "noise": []
+    },
+    {
+      "name": "change-password-with-own-session",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Credential revision is exhausted.",
+            "errorCode": "AUTH_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/password"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "login-wrong-password",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid username or password",
+            "errorCode": "AUTH_CREDENTIALS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "status-at-end",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "authDisabled": false,
+            "isAuthenticated": false,
+            "needsSetup": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}

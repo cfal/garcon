@@ -1,0 +1,1884 @@
+{
+  "scenario": "workspace-seeded",
+  "cases": [
+    {
+      "name": "session-name-missing-chat",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "changed": true,
+            "chatId": "1000000000000001",
+            "success": true,
+            "title": "Renamed ü 雪 😀"
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set-again",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "changed": false,
+            "chatId": "1000000000000001",
+            "success": true,
+            "title": "Renamed ü 雪 😀"
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-again-with-padded-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "changed": false,
+            "chatId": "1000000000000001",
+            "success": true,
+            "title": "Renamed ü 雪 😀"
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-rename",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "changed": true,
+            "chatId": "1000000000000001",
+            "success": true,
+            "title": "Second name"
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-whitespace-only",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-clear-with-dash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "changed": true,
+            "chatId": "1000000000000001",
+            "success": true,
+            "title": "-"
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-second-chat",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "changed": true,
+            "chatId": "1000000000000002",
+            "success": true,
+            "title": "Chat B"
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-control-characters-kept",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "changed": true,
+            "chatId": "1000000000000002",
+            "success": true,
+            "title": "a\tb"
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-non-ascii-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [
+              {
+                "activity": {
+                  "createdAt": "{{timestamp}}",
+                  "lastActivityAt": null,
+                  "lastReadAt": null
+                },
+                "activityStatus": null,
+                "agentId": "codex",
+                "agentOwnershipEpoch": "epoch-b",
+                "agentSettings": {
+                  "ownerId": "codex",
+                  "schemaVersion": 1,
+                  "values": {}
+                },
+                "apiProviderId": null,
+                "canReloadFromNativeHistory": false,
+                "id": "1000000000000002",
+                "isActive": false,
+                "isArchived": false,
+                "isPinned": false,
+                "isProcessing": false,
+                "isUnread": false,
+                "lineage": null,
+                "model": null,
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "orderGroup": "normal",
+                "parentChatId": null,
+                "permissionMode": "default",
+                "preview": {
+                  "firstMessage": "a\tb",
+                  "lastMessage": "a\tb"
+                },
+                "processingPhase": null,
+                "projectPath": "/srv/seeded-project",
+                "tags": [
+                  "seeded"
+                ],
+                "thinkingMode": "none",
+                "title": "a\tb"
+              },
+              {
+                "activity": {
+                  "createdAt": "{{timestamp}}",
+                  "lastActivityAt": null,
+                  "lastReadAt": null
+                },
+                "activityStatus": null,
+                "agentId": "claude",
+                "agentOwnershipEpoch": "epoch-a",
+                "agentSettings": {
+                  "ownerId": "claude",
+                  "schemaVersion": 1,
+                  "values": {}
+                },
+                "apiProviderId": null,
+                "canReloadFromNativeHistory": false,
+                "id": "1000000000000001",
+                "isActive": false,
+                "isArchived": false,
+                "isPinned": false,
+                "isProcessing": false,
+                "isUnread": false,
+                "lineage": null,
+                "model": null,
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "orderGroup": "normal",
+                "parentChatId": null,
+                "permissionMode": "default",
+                "preview": {
+                  "firstMessage": "-",
+                  "lastMessage": "-"
+                },
+                "processingPhase": null,
+                "projectPath": "/srv/seeded-project",
+                "tags": [],
+                "thinkingMode": "none",
+                "title": "-"
+              }
+            ],
+            "total": 2
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-chat~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-chat~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-chat~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-chat~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-missing-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set-again~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set-again~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set-again~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-set-again~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-again-with-padded-title~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-again-with-padded-title~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-again-with-padded-title~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-again-with-padded-title~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-rename~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-rename~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-rename~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-rename~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-whitespace-only~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-whitespace-only~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-whitespace-only~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-whitespace-only~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-clear-with-dash~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-clear-with-dash~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-clear-with-dash~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-clear-with-dash~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-second-chat~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-second-chat~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-second-chat~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-second-chat~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-control-characters-kept~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-control-characters-kept~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-control-characters-kept~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-control-characters-kept~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-non-ascii-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-non-ascii-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-non-ascii-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "session-name-non-ascii-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid chat title request",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/session-name"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chats"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chats"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "1461",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chats/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [
+              {
+                "activity": {
+                  "createdAt": "{{timestamp}}",
+                  "lastActivityAt": null,
+                  "lastReadAt": null
+                },
+                "activityStatus": null,
+                "agentId": "codex",
+                "agentOwnershipEpoch": "epoch-b",
+                "agentSettings": {
+                  "ownerId": "codex",
+                  "schemaVersion": 1,
+                  "values": {}
+                },
+                "apiProviderId": null,
+                "canReloadFromNativeHistory": false,
+                "id": "1000000000000002",
+                "isActive": false,
+                "isArchived": false,
+                "isPinned": false,
+                "isProcessing": false,
+                "isUnread": false,
+                "lineage": null,
+                "model": null,
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "orderGroup": "normal",
+                "parentChatId": null,
+                "permissionMode": "default",
+                "preview": {
+                  "firstMessage": "a\tb",
+                  "lastMessage": "a\tb"
+                },
+                "processingPhase": null,
+                "projectPath": "/srv/seeded-project",
+                "tags": [
+                  "seeded"
+                ],
+                "thinkingMode": "none",
+                "title": "a\tb"
+              },
+              {
+                "activity": {
+                  "createdAt": "{{timestamp}}",
+                  "lastActivityAt": null,
+                  "lastReadAt": null
+                },
+                "activityStatus": null,
+                "agentId": "claude",
+                "agentOwnershipEpoch": "epoch-a",
+                "agentSettings": {
+                  "ownerId": "claude",
+                  "schemaVersion": 1,
+                  "values": {}
+                },
+                "apiProviderId": null,
+                "canReloadFromNativeHistory": false,
+                "id": "1000000000000001",
+                "isActive": false,
+                "isArchived": false,
+                "isPinned": false,
+                "isProcessing": false,
+                "isUnread": false,
+                "lineage": null,
+                "model": null,
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "orderGroup": "normal",
+                "parentChatId": null,
+                "permissionMode": "default",
+                "preview": {
+                  "firstMessage": "-",
+                  "lastMessage": "-"
+                },
+                "processingPhase": null,
+                "projectPath": "/srv/seeded-project",
+                "tags": [],
+                "thinkingMode": "none",
+                "title": "-"
+              }
+            ],
+            "total": 2
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chats/../chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chats/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chats/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "chats-after-rename~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [
+              {
+                "activity": {
+                  "createdAt": "{{timestamp}}",
+                  "lastActivityAt": null,
+                  "lastReadAt": null
+                },
+                "activityStatus": null,
+                "agentId": "codex",
+                "agentOwnershipEpoch": "epoch-b",
+                "agentSettings": {
+                  "ownerId": "codex",
+                  "schemaVersion": 1,
+                  "values": {}
+                },
+                "apiProviderId": null,
+                "canReloadFromNativeHistory": false,
+                "id": "1000000000000002",
+                "isActive": false,
+                "isArchived": false,
+                "isPinned": false,
+                "isProcessing": false,
+                "isUnread": false,
+                "lineage": null,
+                "model": null,
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "orderGroup": "normal",
+                "parentChatId": null,
+                "permissionMode": "default",
+                "preview": {
+                  "firstMessage": "a\tb",
+                  "lastMessage": "a\tb"
+                },
+                "processingPhase": null,
+                "projectPath": "/srv/seeded-project",
+                "tags": [
+                  "seeded"
+                ],
+                "thinkingMode": "none",
+                "title": "a\tb"
+              },
+              {
+                "activity": {
+                  "createdAt": "{{timestamp}}",
+                  "lastActivityAt": null,
+                  "lastReadAt": null
+                },
+                "activityStatus": null,
+                "agentId": "claude",
+                "agentOwnershipEpoch": "epoch-a",
+                "agentSettings": {
+                  "ownerId": "claude",
+                  "schemaVersion": 1,
+                  "values": {}
+                },
+                "apiProviderId": null,
+                "canReloadFromNativeHistory": false,
+                "id": "1000000000000001",
+                "isActive": false,
+                "isArchived": false,
+                "isPinned": false,
+                "isProcessing": false,
+                "isUnread": false,
+                "lineage": null,
+                "model": null,
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "orderGroup": "normal",
+                "parentChatId": null,
+                "permissionMode": "default",
+                "preview": {
+                  "firstMessage": "-",
+                  "lastMessage": "-"
+                },
+                "processingPhase": null,
+                "projectPath": "/srv/seeded-project",
+                "tags": [],
+                "thinkingMode": "none",
+                "title": "-"
+              }
+            ],
+            "total": 2
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}
