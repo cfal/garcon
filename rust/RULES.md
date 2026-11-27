@@ -54,8 +54,12 @@ the user corrects how a port behaves, the correction is added under
 - A parser of untrusted input takes `&serde_json::Value` and validates as the
   original does, in the same order. Do not replace it with a derived
   `Deserialize`, which reports different errors and accepts different input.
-- Numbers: a JavaScript `number` is an `f64`, but counts, ordinals, sequence
-  numbers, sizes, and millisecond timestamps are integer types in Rust.
+- Numbers: a JavaScript `number` is an `f64`. A value the original checks
+  with `Number.isSafeInteger` (or a narrower range) is the Rust integer type
+  that covers the range. A value it checks only with `Number.isInteger` is a
+  `garcon_js::Number` validated with `garcon_js::is_integer`: the original
+  accepts 1e21 there and echoes it as `1e+21`, and no Rust integer type does
+  both. Do not pick a wider integer type to make such a case pass.
   `serde_json` writes the `f64` 1.0 as `1.0`, where JavaScript writes `1`: a
   value that can be fractional and
   reaches output is written through `garcon_js::Number`.
@@ -180,8 +184,12 @@ the user corrects how a port behaves, the correction is added under
   a property that is `undefined` is absent, and `undefined` in an array is
   `null`. A function that takes a JavaScript number gets the exact recorded
   number, negative zero, NaN, and the infinities included; a port that takes a
-  JSON value gets negative zero as `-0.0` and NaN and the infinities as `0`,
-  which is all a JSON document can deliver.
+  JSON value gets negative zero as `-0.0`. Every recorded case can be
+  delivered, so N of N has no exceptions: the recorder generates NaN and
+  infinity traps only for an argument that is itself a number, and with
+  `--guard` it keeps a trap variant of a typed argument only when the
+  original's own parser for that type accepts it. A dispatcher never skips a
+  case.
 
 ## Build
 
