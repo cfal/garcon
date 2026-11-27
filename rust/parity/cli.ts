@@ -8,20 +8,26 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { commandBuild, originalBuild, type ServerBuild } from './src/environment.js';
 import { mergeRuns, readGolden, writeGolden } from './src/golden.js';
-import { compareScenario, renderReport, type ScenarioResult } from './src/report.js';
+import { compareScenario, consoleReport, renderReport, type ScenarioResult } from './src/report.js';
 import { runScenario } from './src/runner.js';
 import { loadScenarios } from './src/scenario.js';
+import { unitCli, UNIT_USAGE } from './src/unit/cli.js';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 
 const usage = `Usage:
   bun rust/parity/cli.ts record [--scenario <name>]
   bun rust/parity/cli.ts replay [--build "<command>"] [--label <name>] [--scenario <name>] [--report <path>]
+  bun rust/parity/cli.ts unit record <module.ts> --tests <test file>... [--inputs <file.jsonl>] --out <dir>
+  bun rust/parity/cli.ts unit replay <dir>
 
 record   Runs the original twice per scenario and writes rust/parity/golden/.
 replay   Runs a build (default: the original) against the recordings, writes
          the report when --report is given, and exits non-zero on any
-         mismatch.`;
+         mismatch.
+
+Unit cases (ADR-020):
+${UNIT_USAGE.split('\n').slice(1).join('\n')}`;
 
 async function record(scenarioName: string | undefined): Promise<void> {
   const build = originalBuild();
@@ -46,17 +52,15 @@ async function replay(build: ServerBuild, label: string, scenarioName: string | 
   const measuresFallback = build.label !== 'original';
   const report = renderReport(label, results, measuresFallback);
   if (reportPath) await writeFile(resolve(repoRoot, reportPath), report);
-  const cases = results.flatMap((result) => result.cases);
-  const failing = cases.filter((result) => result.difference);
-  console.log(report.split('\n').slice(0, 6).join('\n'));
-  for (const result of failing.slice(0, 20)) {
-    console.log(`FAIL ${result.scenario}/${result.name} at ${result.difference!.path}: expected ${result.difference!.expected}, got ${result.difference!.actual}`);
-  }
-  return failing.length === 0 && results.every((result) => !result.missingGolden);
+  consoleReport(results, report);
+  return results.every((result) => result.cases.every((entry) => entry.difference === null) && !result.missingGolden);
 }
 
+const args = Bun.argv.slice(2);
+if (args[0] === 'unit') process.exit(await unitCli(args.slice(1), repoRoot));
+
 const { positionals, values } = parseArgs({
-  args: Bun.argv.slice(2),
+  args,
   allowPositionals: true,
   options: {
     scenario: { type: 'string' },

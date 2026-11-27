@@ -72,6 +72,8 @@
     "parity:record": "bun rust/parity/cli.ts record",
     "parity:replay": "bun rust/parity/cli.ts replay",
     "parity:replay:rust": "bun rust/parity/cli.ts replay --build rust/target/release/garcon-server --label garcon-server --report rust/parity/replay-report.md",
+    "parity:unit:record": "bun rust/parity/cli.ts unit record",
+    "parity:unit:replay": "bun rust/parity/cli.ts unit replay",
     "lint": "bun run lint:runtime && bun run --cwd web lint",
     "check": "bun run lint && bun run typecheck",
     "typecheck:tests": "bun scripts/test-debt-gate.ts && bunx tsc -p tsconfig.tests.json",

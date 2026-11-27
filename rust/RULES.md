@@ -56,9 +56,22 @@ the user corrects how a port behaves, the correction is added under
   `Deserialize`, which reports different errors and accepts different input.
 - Numbers: a JavaScript `number` is an `f64`, but counts, ordinals, sequence
   numbers, sizes, and millisecond timestamps are integer types in Rust.
-  `serde_json` writes the `f64` 1.0 as `1.0` and 1e21 as `1e21`, where
-  JavaScript writes `1` and `1e+21`: a value that can be fractional and
+  `serde_json` writes the `f64` 1.0 as `1.0`, where JavaScript writes `1`: a
+  value that can be fractional and
   reaches output is written through `garcon_js::Number`.
+- Read JSON text that comes from outside (files, sockets, child processes,
+  HTTP bodies) with `garcon_js::json::from_str` and `from_slice`, not
+  `serde_json`'s. They replace a lone surrogate escape, which a JavaScript
+  string can hold and a Rust `String` cannot, with U+FFFD instead of failing
+  the whole document.
+- Opaque JSON, a value that came from outside and is written out again (tool
+  input, provider payloads, stored rows), is a `garcon_js::json::Opaque`, not
+  a bare `serde_json::Value`. `Opaque` reads numbers as JavaScript doubles and
+  prints them as JavaScript does; a `Value` prints `1.0` where the original
+  prints `1` and keeps integers beyond 2^53 that the original rounds.
+- Serialize a type that holds a `Number` or an `Opaque` to text (`to_string`,
+  `to_vec`, `to_writer`). `serde_json::to_value` reparses the tokens and loses
+  their formatting.
 - `JSON.stringify(value, null, 2)` is `serde_json::to_string_pretty`. Add a
   trailing newline only where the original does.
 
@@ -132,6 +145,11 @@ the user corrects how a port behaves, the correction is added under
 - Formats on disk are contract: both implementations read each other's files.
   Keep file names, modes (0600 files, 0700 directories), the temporary-name
   and rename sequence of atomic writes, and the JSON layout.
+- The current workspace version is 10 (`workspace/workspace-version.json`,
+  `{"version": 10}`), the only one the port opens (ADR-014). A seeded test
+  workspace carries that file and `workspace/api-provider-assignments.json`;
+  without them the original runs its migration ladder over the seeds or fails
+  to start.
 - SQLite schema text, pragmas and their order, `user_version`, and statements
   are copied verbatim. Short statements run on the core thread, as
   `bun:sqlite` does; long passes run off it.
@@ -169,4 +187,17 @@ the user corrects how a port behaves, the correction is added under
 
 ## Corrections
 
-None yet.
+- 2026-11-27, number formatting. A hand-written shortest-digits routine
+  picked the wrong digit when two shortest forms tie (the original prints
+  `1695883772318900.2` for the bits `0x43181996d75152d1`; the routine printed
+  `...900.3`). A JavaScript number is formatted with the `ryu-js` crate and
+  written as a raw JSON token (`serde_json` feature `raw_value`). Do not write
+  a number-formatting algorithm, and take recorded samples from the original
+  as the test.
+- 2026-11-27, cargo features. `serde_json` features are set once, in
+  `[workspace.dependencies]`, and never in a crate: cargo unifies features
+  across the workspace, so one crate's feature changes how every crate parses
+  and prints. The set is `preserve_order`, `raw_value`, and `float_roundtrip`;
+  without the last, `serde_json` parses 27.7% of random decimal literals one
+  unit in the last place away from `JSON.parse`. `arbitrary_precision` is
+  never enabled.

@@ -1,0 +1,10 @@
+{
+  "module": "common/base-path.ts",
+  "tests": [
+    "common/__tests__/base-path.test.js"
+  ],
+  "inputs": null,
+  "notCaptured": [],
+  "cases": 83,
+  "sha256": "c6d4adba4f94e82fb226cf408423962e5d05644810580b43bd837d02316da705"
+}

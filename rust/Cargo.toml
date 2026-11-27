@@ -19,8 +19,10 @@ async-trait = "0.1"
 bytes = "1"
 futures = "0.3"
 indexmap = { version = "2", features = ["serde"] }
+ryu-js = "1"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }
+sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }

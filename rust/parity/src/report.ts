@@ -57,6 +57,15 @@ function cell(text: string): string {
   return text.replaceAll('|', '\\|').replaceAll('\n', ' ');
 }
 
+// Prints the head of a report and the first difference of each failing case.
+export function consoleReport(results: ScenarioResult[], report: string): void {
+  const failing = results.flatMap((result) => result.cases).filter((result) => result.difference);
+  console.log(report.split('\n').slice(0, 6).join('\n'));
+  for (const result of failing.slice(0, 20)) {
+    console.log(`FAIL ${result.scenario}/${result.name} at ${result.difference!.path}: expected ${result.difference!.expected}, got ${result.difference!.actual}`);
+  }
+}
+
 // Renders a report with no timings or temporary paths, so two replays of the
 // same build write the same file and it can be diffed in CI.
 export function renderReport(label: string, results: ScenarioResult[], measuresFallback: boolean): string {

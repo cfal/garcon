@@ -108,7 +108,7 @@ function stringFingerprint(expected: string, actual: string): string {
   return ` (first difference at offset ${offset}: ${excerpt}; length ${actual.length}, expected ${expected.length})`;
 }
 
-function childPath(path: string, key: string | number): string {
+export function childPath(path: string, key: string | number): string {
   if (typeof key === 'number') return `${path}[${key}]`;
   return /^[A-Za-z_$][\w$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
 }

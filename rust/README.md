@@ -99,6 +99,104 @@ unit, plant a deliberate bug in it (a header, a status, an off-by-one) and
 confirm the replay fails on the expected field; a surviving mutant means a
 scenario is missing.
 
+## Unit cases
+
+A ported function is proven by what the original's own unit tests make it do
+(ADR-020). The recorder runs a module's tests with a preload that replaces the
+module's function exports through `mock.module` from `bun:test`, and writes
+every call down with its arguments and what it returned or threw.
+
+```bash
+bun run parity:unit:record common/chat-id.ts --tests common/__tests__/chat-id.test.js --out rust/garcon-contract/tests/cases/chat-id
+bun run parity:unit:replay rust/garcon-contract/tests/cases/chat-id
+```
+
+A recording is two files. `cases.jsonl` holds one `{ id, fn, args, result,
+origin }` per line; `manifest.json` holds the module, the tests, the SHA-256 of
+the case file, and the calls that were not captured.
+
+- `fn` is the export's name, `Class.method` for a static method, and
+  `new Class` for a constructor call. A function the module calls through its
+  own binding is captured as well, so one test can record several cases. A
+  class's methods reach their own class through its inner name, which is not
+  replaced, so a call made there is not captured.
+- JSON holds most values. What it cannot hold is a marker: `undefined` is
+  `{"$":"undefined"}`; NaN, the infinities, and negative zero are
+  `{"$":"number","value":"NaN"}` and the like; a Date, a Map, a Set, bytes, and
+  a bigint are `date`, `map`, `set`, `bytes`, and `bigint` markers; a thrown
+  Error is `{"$":"error","name","message","properties"}` with its other own
+  properties, and any other thrown value is a `throw` marker.
+- Trap variants follow the recorded calls: each string leaf of a call's
+  arguments is replaced in turn by an empty string, accented text, CJK, an
+  astral emoji, a combining sequence, the dotless i, the Kelvin sign, a
+  no-break space, and a 10,000-unit string, and each number leaf by 0, -0, -1,
+  0.5, 1e21, 1e-7, 2^53, and NaN. A function gets at most 40, spread so that
+  every position has the first trap before any has the second. The `origin`
+  of such a case names the trap and the leaf.
+- Every call is recorded twice, from two runs of the tests and two runs of the
+  trap variants. A result that differs becomes a `[..]` wildcard and is printed
+  as `noise:`; review each one, and prefer a test or an input whose result is
+  stable, since a wildcard lets a port return anything there.
+- A call whose arguments or result cannot be encoded, because they hold a
+  function or an instance of a class, is not recorded. It is printed and kept
+  in the manifest as `not captured`, with the test's `file:line:column`.
+
+`record` then calls the original with every case in a fresh process. It writes
+the two files only when all of them answer as recorded, so a recording never
+contains a result that depends on a test double or on an earlier call the
+recording does not hold. `replay` verifies the manifest's digest first: a case
+file edited by hand fails before anything is called.
+
+Shapes the interception does not reach take an inputs file instead, with
+`--inputs <file.jsonl>` of `{ "fn", "args" }` lines (markers allowed):
+
+- functions that live on instances, since only exports are replaced;
+- functions held in an exported object or registry rather than exported
+  themselves;
+- calls that only ever return an instance or a function, which have nothing to
+  record; give the calls that return a plain value.
+
+A ported crate replays its recording from its tests. `garcon-cases` is a
+dev-dependency:
+
+```toml
+[dev-dependencies]
+garcon-cases.workspace = true
+```
+
+```rust
+use garcon_cases::{CaseError, json_argument, replay};
+use serde_json::json;
+
+#[test]
+fn recorded_cases_match() {
+    replay(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/chat-id"),
+        |function, args| match function {
+            "parseChatId" => Ok(json!(parse_chat_id(json_argument(function, args.first())?))),
+            _ => Err(CaseError::unhandled(function)),
+        },
+    );
+}
+```
+
+`replay` calls the dispatcher with each case's function and arguments, as
+recorded, and compares what it returns with the recorded result: object key
+order is not compared, numbers compare by value, markers match only the same
+marker, and wildcards match as in the scenario replay. A function the
+dispatcher does not handle fails whatever the recording holds. On a difference
+it prints the first one per case with its JSON path, then the distinct
+differences grouped by path, and panics unless every case matches.
+`json_argument` gives a port an argument as plain JSON, `None` where the
+original received `undefined`, and refuses one that holds another marker; such
+an argument is read with `garcon_cases::markers`, which also builds the
+markers a result needs.
+
+The demonstration is `common/base-path.ts`: its recording is in
+`rust/garcon-cases/tests/cases/common/base-path`, and
+`rust/garcon-cases/tests/common_base_path.rs` ports the two functions beside
+the ported unit tests and replays all 83 cases.
+
 ## Shadowing the end-to-end suites
 
 Recorded scenarios only cover the inputs someone wrote down. Following

@@ -10,3 +10,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+serde_json.workspace = true
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile.workspace = true
