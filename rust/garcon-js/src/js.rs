@@ -435,17 +435,31 @@ mod tests {
 
     #[test]
     fn classifies_numbers_as_javascript_does() {
-        for value in [0.0, -0.0, 1.0, -3.0, 9007199254740991.0, 1e15] {
-            assert!(
-                is_integer(value) && is_safe_integer(value) && is_finite_number(value),
-                "{value}"
-            );
+        // `Number.isInteger`, `Number.isSafeInteger`, `Number.isFinite`, as
+        // Bun 1.4.5 answers for each value.
+        for (value, integer, safe, finite) in [
+            (0.0, true, true, true),
+            (-0.0, true, true, true),
+            (1.0, true, true, true),
+            (-3.0, true, true, true),
+            (-9007199254740991.0, true, true, true),
+            (9007199254740991.0, true, true, true),
+            (1e15, true, true, true),
+            // An integer beyond 2^53 is still an integer, but not a safe one.
+            (9007199254740992.0, true, false, true),
+            (1e21, true, false, true),
+            (1e300, true, false, true),
+            (0.5, false, false, true),
+            (1e-7, false, false, true),
+            (5e-324, false, false, true),
+            (f64::NAN, false, false, false),
+            (f64::INFINITY, false, false, false),
+            (f64::NEG_INFINITY, false, false, false),
+        ] {
+            assert_eq!(is_integer(value), integer, "isInteger({value})");
+            assert_eq!(is_safe_integer(value), safe, "isSafeInteger({value})");
+            assert_eq!(is_finite_number(value), finite, "isFinite({value})");
         }
-        for value in [0.5, 1e21, 1e-7, f64::NAN, f64::INFINITY] {
-            assert!(!is_integer(value) && !is_safe_integer(value), "{value}");
-        }
-        assert!(is_integer(9007199254740992.0) && !is_safe_integer(9007199254740992.0));
-        assert!(!is_finite_number(f64::NAN) && !is_finite_number(f64::NEG_INFINITY));
     }
 
     #[test]
