@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
-import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
+import { PREAMBLE_ERROR_CODES, type Preamble, type PreamblesSnapshot } from '$shared/preambles';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import PreamblesSectionTestHost from './PreamblesSectionTestHost.svelte';
 
@@ -747,5 +747,176 @@ describe('PreamblesSection', () => {
 			((await screen.findByRole('button', { name: 'Remove preamble' })) as HTMLButtonElement).disabled,
 		).toBe(false);
 		expect(remove).not.toHaveBeenCalled();
+	});
+
+	it('waits for queued WS invalidations before confirming delete after an invalidation reload', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const second = globalPreamble('second', 'Second conventions', 'Second body.');
+		const unreviewed = {
+			...original,
+			title: 'Unreviewed',
+			updatedAt: '2029-01-05T00:00:00.000Z',
+		};
+		let resolveHeldGet1!: (value: PreamblesSnapshot) => void;
+		let resolveHeldGet2!: (value: PreamblesSnapshot) => void;
+		let resolveReorder!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce({ revision: 1, preambles: [original, second] })
+			.mockRejectedValueOnce(new Error('reconcile failed'))
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((resolve) => { resolveHeldGet1 = resolve; }),
+			)
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((resolve) => { resolveHeldGet2 = resolve; }),
+			);
+		const reorder = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveReorder = resolve;
+				}),
+		);
+		const remove = vi.fn().mockResolvedValue({
+			success: true,
+			snapshot: { revision: 2, preambles: [second] },
+		});
+		let store!: PreamblesStore;
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original, second] },
+			deps: { get, reorder, remove },
+			onStore: (value: PreamblesStore) => {
+				store = value;
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
+		const moving = store.move('second', 'up');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledOnce());
+		await store.refresh();
+		resolveReorder({
+			success: true,
+			snapshot: { revision: 2, preambles: [second, original] },
+		});
+		await moving;
+		expect(store.snapshot).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove preamble' }));
+		await waitFor(() =>
+			expect((screen.getByRole('button', { name: 'Removing...' }) as HTMLButtonElement).disabled).toBe(true),
+		);
+		void store.refreshIfLoaded();
+		resolveHeldGet1({ revision: 1, preambles: [original, second] });
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(4));
+		expect(remove).not.toHaveBeenCalled();
+
+		resolveHeldGet2({ revision: 1, preambles: [unreviewed, second] });
+		expect(await screen.findByText(/Preambles changed in another session/)).toBeTruthy();
+		expect(screen.getByText('Remove "Unreviewed"? This cannot be undone.')).toBeTruthy();
+		expect(remove).not.toHaveBeenCalled();
+	});
+
+	it('blocks confirmRemove if a queued WS refresh fails after reload and forces a fresh retry', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const second = globalPreamble('second', 'Second conventions', 'Second body.');
+		const unreviewed = {
+			...original,
+			title: 'Unreviewed',
+			updatedAt: '2029-01-05T00:00:00.000Z',
+		};
+		let resolveHeldGet1!: (value: PreamblesSnapshot) => void;
+		let resolveReorder!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce({ revision: 1, preambles: [original, second] })
+			.mockRejectedValueOnce(new Error('reconcile failed'))
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((resolve) => { resolveHeldGet1 = resolve; }),
+			)
+			.mockRejectedValueOnce(new Error('queued read failed'))
+			.mockResolvedValueOnce({ revision: 1, preambles: [unreviewed, second] });
+		const reorder = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveReorder = resolve;
+				}),
+		);
+		const remove = vi.fn().mockResolvedValue({
+			success: true,
+			snapshot: { revision: 2, preambles: [second] },
+		});
+		let store!: PreamblesStore;
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original, second] },
+			deps: { get, reorder, remove },
+			onStore: (value: PreamblesStore) => {
+				store = value;
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
+		const moving = store.move('second', 'up');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledOnce());
+		await store.refresh();
+		resolveReorder({
+			success: true,
+			snapshot: { revision: 2, preambles: [second, original] },
+		});
+		await moving;
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove preamble' }));
+		await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+		void store.refreshIfLoaded();
+		resolveHeldGet1({ revision: 1, preambles: [original, second] });
+
+		expect(await screen.findByText('queued read failed')).toBeTruthy();
+		expect(remove).not.toHaveBeenCalled();
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
+		expect(await screen.findByText(/Preambles changed in another session/)).toBeTruthy();
+		expect(screen.getByText('Remove "Unreviewed"? This cannot be undone.')).toBeTruthy();
+		expect(get).toHaveBeenCalledTimes(5);
+		expect(remove).not.toHaveBeenCalled();
+	});
+
+	it('treats same-revision PREAMBLE_NOT_FOUND on remove as already removed and refreshes the catalog', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const notFound = new ApiError(404, 'Preamble not found', PREAMBLE_ERROR_CODES.notFound);
+		const remove = vi.fn().mockRejectedValueOnce(notFound);
+		const get = vi.fn().mockResolvedValueOnce({ revision: 1, preambles: [] });
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get, remove },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
+		expect(await screen.findByText('"Global conventions" was already removed.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Remove Global conventions' })).toBeNull();
+		expect(remove).toHaveBeenCalledOnce();
+		expect(get).toHaveBeenCalledOnce();
+	});
+
+	it('treats same-revision PREAMBLE_NOT_FOUND on edit as already removed and refreshes the catalog', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const notFound = new ApiError(404, 'Preamble not found', PREAMBLE_ERROR_CODES.notFound);
+		const update = vi.fn().mockRejectedValueOnce(notFound);
+		const get = vi.fn().mockResolvedValueOnce({ revision: 1, preambles: [] });
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get, update },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Save Preamble' }));
+
+		expect(await screen.findByText(/"Global conventions" was already removed\./)).toBeTruthy();
+		expect(
+			((await screen.findByRole('button', { name: 'Save Preamble' })) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(screen.queryByRole('button', { name: 'Edit Global conventions' })).toBeNull();
+		expect(update).toHaveBeenCalledOnce();
+		expect(get).toHaveBeenCalledOnce();
 	});
 });

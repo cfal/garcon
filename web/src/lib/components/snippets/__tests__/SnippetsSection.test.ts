@@ -565,4 +565,74 @@ describe('SnippetsSection', () => {
 		);
 		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('0');
 	});
+
+	it('drains WS invalidations queued during held-dialog reload before saving or removing', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+		await fireEvent.click(screen.getByTestId('invalidate-with-unchanged-server'));
+		await waitFor(() => expect(screen.queryByText('review')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+		await waitFor(() =>
+			expect((screen.getByRole('button', { name: 'Removing...' }) as HTMLButtonElement).disabled).toBe(true),
+		);
+		await fireEvent.click(screen.getByTestId('queue-ws-drift'));
+		await fireEvent.click(screen.getByTestId('release-held-get'));
+
+		expect(await screen.findByText(/Snippets changed in another session/)).toBeTruthy();
+		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('0');
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).textContent).toContain(
+			'Remove /snippet review_ws_drifted?',
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review_ws_drifted' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'Draft during queued failure' } });
+		await fireEvent.click(screen.getByTestId('invalidate-with-unchanged-server'));
+		await waitFor(() => expect(screen.queryByText('review_ws_drifted')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() =>
+			expect((screen.getByRole('button', { name: 'Saving...' }) as HTMLButtonElement).disabled).toBe(true),
+		);
+		await fireEvent.click(screen.getByTestId('queue-ws-failure'));
+		await fireEvent.click(screen.getByTestId('release-held-get'));
+
+		expect(await screen.findByText(/follow-up load failed/)).toBeTruthy();
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('0');
+	});
+
+	it('treats same-revision SNIPPET_NOT_FOUND on edit as already removed and refreshes the catalog', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Snippet text' }), {
+			target: { value: 'Draft for missing snippet' },
+		});
+		await fireEvent.click(screen.getByTestId('server-remove-same-revision'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(await screen.findByText(/\/snippet review was already removed\./)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Edit Snippet' }).isConnected).toBe(true);
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove review' })).toBeNull());
+	});
+
+	it('treats same-revision SNIPPET_NOT_FOUND on remove as already removed and refreshes the catalog', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+		await fireEvent.click(screen.getByTestId('server-remove-same-revision'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(await screen.findByText('/snippet review was already removed.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Remove review' })).toBeNull();
+	});
 });

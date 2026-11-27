@@ -4,11 +4,34 @@ import { ApiError } from '$lib/api/client.js';
 import { createSnippet, getSnippets, removeSnippet, updateSnippet } from '$lib/api/snippets.js';
 import {
 	SNIPPET_ERROR_CODES,
+	type Snippet,
 	type SnippetDefinitionInput,
 	type SnippetsSnapshot,
 } from '$shared/snippets';
 
 export type SnippetsStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export function snippetsMatch(left: Snippet, right: Snippet): boolean {
+	return (
+		left.id === right.id &&
+		left.shortName === right.shortName &&
+		left.template === right.template &&
+		left.defaultArguments === right.defaultArguments &&
+		left.createdAt === right.createdAt &&
+		left.updatedAt === right.updatedAt
+	);
+}
+
+function snippetSnapshotsMatch(left: SnippetsSnapshot, right: SnippetsSnapshot): boolean {
+	return (
+		left.revision === right.revision &&
+		left.snippets.length === right.snippets.length &&
+		left.snippets.every((entry, index) => {
+			const other = right.snippets[index];
+			return other !== undefined && snippetsMatch(entry, other);
+		})
+	);
+}
 
 export interface SnippetsStoreDeps {
 	get?: typeof getSnippets;
@@ -41,6 +64,21 @@ export class SnippetsStore {
 
 	async ensureLoaded(): Promise<SnippetsSnapshot> {
 		return this.snapshot ?? this.refresh();
+	}
+
+	async ensureSnapshotForWrite(): Promise<SnippetsSnapshot> {
+		if (!this.snapshot || !this.#lastRefreshSucceeded) {
+			await this.refresh();
+		} else if (!this.#loadPromise && !this.#refreshLoop.pending) {
+			return this.snapshot;
+		}
+		while (this.#loadPromise || this.#refreshLoop.pending) {
+			await (this.#refreshLoop.pending ?? this.#loadPromise);
+		}
+		if (!this.#lastRefreshSucceeded || !this.snapshot) {
+			throw new Error(this.error ?? 'Failed to load snippets');
+		}
+		return this.snapshot;
 	}
 
 	async refresh(): Promise<SnippetsSnapshot> {
@@ -104,7 +142,7 @@ export class SnippetsStore {
 			const result = await create({ expectedRevision: current.revision, snippet: definition });
 			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration, installGeneration);
 		} catch (error) {
-			await this.#refreshAfterConflict(error);
+			await this.#refreshAfterStaleError(error);
 			throw error;
 		}
 	}
@@ -126,7 +164,7 @@ export class SnippetsStore {
 			});
 			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration, installGeneration);
 		} catch (error) {
-			await this.#refreshAfterConflict(error);
+			await this.#refreshAfterStaleError(error);
 			throw error;
 		}
 	}
@@ -140,7 +178,7 @@ export class SnippetsStore {
 			const result = await remove({ expectedRevision, id });
 			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration, installGeneration);
 		} catch (error) {
-			await this.#refreshAfterConflict(error);
+			await this.#refreshAfterStaleError(error);
 			throw error;
 		}
 	}
@@ -162,17 +200,13 @@ export class SnippetsStore {
 			if (!this.#lastRefreshSucceeded) {
 				if (
 					this.#installGeneration !== installGeneration &&
-					this.#confirmed &&
-					this.#confirmed.revision >= nextSnapshot.revision
+					this.#confirmed !== null &&
+					snippetSnapshotsMatch(this.#confirmed, nextSnapshot)
 				) {
 					return this.snapshot ?? this.#confirmed;
 				}
 				// Do not keep a potentially pre-restore snapshot eligible for local expansion after reconciliation fails.
-				this.snapshot = null;
-				this.#confirmed = null;
-				this.status = 'error';
-				this.error ??= 'Failed to load snippets';
-				this.#installGeneration += 1;
+				this.#invalidateSnapshot('Failed to load snippets');
 				return nextSnapshot;
 			}
 			return this.snapshot ?? this.#confirmed ?? nextSnapshot;
@@ -190,13 +224,29 @@ export class SnippetsStore {
 		return nextSnapshot;
 	}
 
+	#invalidateSnapshot(fallbackMessage: string): void {
+		this.snapshot = null;
+		this.#confirmed = null;
+		this.status = 'error';
+		this.error ??= fallbackMessage;
+		this.#installGeneration += 1;
+	}
+
 	async #requireSnapshot(): Promise<SnippetsSnapshot> {
 		return this.#confirmed ?? this.ensureLoaded();
 	}
 
-	async #refreshAfterConflict(error: unknown): Promise<void> {
-		if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.revisionConflict) {
+	async #refreshAfterStaleError(error: unknown): Promise<void> {
+		if (!(error instanceof ApiError)) return;
+		if (error.errorCode === SNIPPET_ERROR_CODES.revisionConflict) {
 			await this.refreshIfLoaded();
+			return;
+		}
+		if (error.errorCode === SNIPPET_ERROR_CODES.notFound) {
+			await this.refreshIfLoaded();
+			if (!this.#lastRefreshSucceeded) {
+				this.#invalidateSnapshot('Failed to load snippets');
+			}
 		}
 	}
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import { PreamblesStore } from '../preambles-store.svelte';
-import type { Preamble, PreamblesSnapshot } from '$shared/preambles';
+import { PREAMBLE_ERROR_CODES, type Preamble, type PreamblesSnapshot } from '$shared/preambles';
 
 function preamble(id: string): Preamble {
 	return {
@@ -540,5 +540,105 @@ describe('PreamblesStore', () => {
 		expect(store.hasLoaded).toBe(true);
 		expect(store.snapshot).toEqual(snapshot(2, []));
 		expect(store.status).toBe('ready');
+	});
+
+	it('invalidates when an overlapping GET returned a contradictory snapshot at the ack revision and reconciliation fails', async () => {
+		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		const remove = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveRemove = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(2, ['a']))
+			.mockRejectedValueOnce(new Error('reconcile failed'));
+		const store = new PreamblesStore({ get, remove });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const removing = store.remove('a', 1);
+		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
+		await store.refreshIfLoaded();
+
+		resolveRemove({ success: true, snapshot: snapshot(2, []) });
+		await expect(removing).resolves.toEqual(snapshot(2, []));
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.hasLoaded).toBe(false);
+		expect(store.snapshot).toBeNull();
+		expect(store.preambles).toEqual([]);
+		expect(store.status).toBe('error');
+	});
+
+	it('drains queued invalidations in ensureSnapshotForWrite and blocks write if the final read fails', async () => {
+		let resolveFirstGet!: (value: PreamblesSnapshot) => void;
+		let resolveDrainGet!: (value: PreamblesSnapshot) => void;
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((resolve) => { resolveFirstGet = resolve; }),
+			)
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((resolve) => { resolveDrainGet = resolve; }),
+			);
+		const store = new PreamblesStore({ get });
+
+		const firstReady = store.ensureSnapshotForWrite();
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+		void store.refreshIfLoaded();
+		resolveFirstGet(snapshot(1, ['stale']));
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+		resolveDrainGet(snapshot(1, ['drifted']));
+		await expect(firstReady).resolves.toEqual(snapshot(1, ['drifted']));
+		await expect(store.ensureSnapshotForWrite()).resolves.toEqual(snapshot(1, ['drifted']));
+
+		let resolveThirdGet!: (value: PreamblesSnapshot) => void;
+		const nextStore = new PreamblesStore({
+			get: vi
+				.fn()
+				.mockImplementationOnce(
+					() => new Promise<PreamblesSnapshot>((resolve) => { resolveThirdGet = resolve; }),
+				)
+				.mockRejectedValueOnce(new Error('drain failed'))
+				.mockResolvedValueOnce(snapshot(1, ['recovered'])),
+		});
+		const blockedReady = nextStore.ensureSnapshotForWrite().catch((error) => error);
+		await vi.waitFor(() => expect(nextStore.status).toBe('loading'));
+		void nextStore.refreshIfLoaded();
+		resolveThirdGet(snapshot(1, ['first']));
+		const blockedResult = await blockedReady;
+		expect(blockedResult).toBeInstanceOf(Error);
+		expect((blockedResult as Error).message).toBe('drain failed');
+
+		await expect(nextStore.ensureSnapshotForWrite()).resolves.toEqual(snapshot(1, ['recovered']));
+	});
+
+	it('refreshes on PREAMBLE_NOT_FOUND and invalidates if the refresh fails', async () => {
+		const notFound = new ApiError(404, 'Preamble not found', PREAMBLE_ERROR_CODES.notFound);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(1, []))
+			.mockRejectedValueOnce(new Error('refresh unavailable'));
+		const remove = vi.fn().mockRejectedValue(notFound);
+		const update = vi.fn().mockRejectedValue(notFound);
+		const store = new PreamblesStore({ get, remove, update });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		await expect(store.remove('a', 1)).rejects.toBe(notFound);
+		expect(store.snapshot).toEqual(snapshot(1, []));
+		expect(store.status).toBe('ready');
+
+		store.applySnapshot(snapshot(2, ['b']));
+		await expect(
+			store.update(
+				'b',
+				{ enabled: true, title: 'B', content: 'Body', scope: { type: 'global' } },
+				2,
+			),
+		).rejects.toBe(notFound);
+		expect(store.hasLoaded).toBe(false);
+		expect(store.snapshot).toBeNull();
+		expect(store.status).toBe('error');
 	});
 });

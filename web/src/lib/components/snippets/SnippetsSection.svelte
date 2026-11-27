@@ -9,6 +9,7 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { getSnippets } from '$lib/context';
 	import { searchSnippets } from '$lib/snippets/search-snippets.js';
+	import { snippetsMatch } from '$lib/snippets/snippets-store.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		SNIPPET_ERROR_CODES,
@@ -28,18 +29,7 @@
 	type SnippetFormTarget =
 		| { kind: 'closed' }
 		| { kind: 'create' }
-		| { kind: 'edit'; snippet: Snippet; baseline: Snippet; revision: number };
-
-	function snippetsMatch(left: Snippet, right: Snippet): boolean {
-		return (
-			left.id === right.id &&
-			left.shortName === right.shortName &&
-			left.template === right.template &&
-			left.defaultArguments === right.defaultArguments &&
-			left.createdAt === right.createdAt &&
-			left.updatedAt === right.updatedAt
-		);
-	}
+		| { kind: 'edit'; snippet: Snippet; baseline: Snippet };
 
 	let { active }: Props = $props();
 	const snippets = getSnippets();
@@ -48,7 +38,7 @@
 		searchSnippets(snippets.snippets, query, (snippet) => snippet.template),
 	);
 	let form = $state<SnippetFormTarget>({ kind: 'closed' });
-	let removeTarget = $state<{ snippet: Snippet; revision: number } | null>(null);
+	let removeTarget = $state<Snippet | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
 	let operationError = $state<string | null>(null);
@@ -70,10 +60,9 @@
 	}
 
 	function openEdit(snippet: Snippet): void {
-		const revision = snippets.snapshot?.revision;
-		if (operationLocked || revision === undefined) return;
+		if (operationLocked || snippets.snapshot === null) return;
 		operationError = null;
-		form = { kind: 'edit', snippet, baseline: snippet, revision };
+		form = { kind: 'edit', snippet, baseline: snippet };
 	}
 
 	function closeForm(): void {
@@ -81,11 +70,10 @@
 	}
 
 	function openRemove(snippet: Snippet): void {
-		const revision = snippets.snapshot?.revision;
-		if (operationLocked || revision === undefined) return;
+		if (operationLocked || snippets.snapshot === null) return;
 		operationError = null;
 		removeError = null;
-		removeTarget = { snippet, revision };
+		removeTarget = snippet;
 	}
 
 	function closeRemove(): void {
@@ -99,28 +87,25 @@
 		}
 		if (form.kind === 'edit') {
 			const targetId = form.snippet.id;
-			if (snippets.snapshot === null) {
-				await snippets.ensureLoaded();
-			}
+			const snapshot = await snippets.ensureSnapshotForWrite();
 			if (form.kind !== 'edit' || form.snippet.id !== targetId) return;
-			const snapshot = snippets.snapshot;
-			if (!snapshot) {
-				throw new Error(m.snippets_changed_before_write());
-			}
 			const current = snapshot.snippets.find((entry) => entry.id === targetId);
 			if (!current) {
 				throw new Error(m.snippets_already_removed({ name: form.baseline.shortName }));
 			}
 			if (!snippetsMatch(form.baseline, current)) {
 				form.baseline = current;
-				form.revision = snapshot.revision;
 				throw new Error(m.snippets_changed_before_write());
 			}
-			form.revision = snapshot.revision;
 			try {
 				await snippets.update(targetId, definition, snapshot.revision);
 			} catch (error) {
-				// Update baseline and revision in place so an explicit retry uses the refreshed catalog without resetting the draft.
+				if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.notFound) {
+					throw new Error(m.snippets_already_removed({ name: form.baseline.shortName }), {
+						cause: error,
+					});
+				}
+				// Update baseline in place so an explicit retry uses the refreshed catalog without resetting the draft.
 				if (
 					form.kind === 'edit' &&
 					form.snippet.id === targetId &&
@@ -128,7 +113,6 @@
 					error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
 					snippets.snapshot !== null
 				) {
-					form.revision = snippets.snapshot.revision;
 					const refreshed = snippets.snapshot.snippets.find(
 						(entry) => entry.id === targetId,
 					);
@@ -147,47 +131,43 @@
 		removing = true;
 		removeError = null;
 		try {
-			if (snippets.snapshot === null) {
-				await snippets.ensureLoaded();
-			}
-			if (!removeTarget || removeTarget.snippet.id !== target.snippet.id) return;
-			const snapshot = snippets.snapshot;
-			if (!snapshot) {
-				removeError = m.snippets_remove_error({ detail: m.snippets_changed_before_write() });
-				return;
-			}
-			const current = snapshot.snippets.find((entry) => entry.id === target.snippet.id);
+			const snapshot = await snippets.ensureSnapshotForWrite();
+			if (!removeTarget || removeTarget.id !== target.id) return;
+			const current = snapshot.snippets.find((entry) => entry.id === target.id);
 			if (!current) {
 				closeRemove();
-				operationError = m.snippets_already_removed({ name: target.snippet.shortName });
+				operationError = m.snippets_already_removed({ name: target.shortName });
 				return;
 			}
-			if (!snippetsMatch(target.snippet, current)) {
-				removeTarget = { snippet: current, revision: snapshot.revision };
+			if (!snippetsMatch(target, current)) {
+				removeTarget = current;
 				removeError = m.snippets_remove_error({ detail: m.snippets_changed_before_write() });
 				return;
 			}
-			if (removeTarget.revision !== snapshot.revision) {
-				removeTarget = { snippet: current, revision: snapshot.revision };
-			}
-			await snippets.remove(target.snippet.id, snapshot.revision);
+			await snippets.remove(target.id, snapshot.revision);
 			closeRemove();
 		} catch (error) {
+			if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.notFound) {
+				const removedName = removeTarget?.shortName ?? target.shortName;
+				closeRemove();
+				operationError = m.snippets_already_removed({ name: removedName });
+				return;
+			}
 			if (
 				removeTarget &&
 				error instanceof ApiError &&
 				error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
 				snippets.snapshot !== null
 			) {
-				const targetId = removeTarget.snippet.id;
+				const targetId = removeTarget.id;
 				const refreshed = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
 				if (!refreshed) {
-					const removedName = removeTarget.snippet.shortName;
+					const removedName = removeTarget.shortName;
 					closeRemove();
 					operationError = m.snippets_already_removed({ name: removedName });
 					return;
 				}
-				removeTarget = { snippet: refreshed, revision: snippets.snapshot.revision };
+				removeTarget = refreshed;
 			}
 			removeError = m.snippets_remove_error({ detail: errorDetail(error) });
 		} finally {
@@ -299,7 +279,7 @@
 {#if removeTarget}
 	<SnippetRemoveDialog
 		open
-		snippet={removeTarget.snippet}
+		snippet={removeTarget}
 		{removing}
 		disabled={operationLocked}
 		error={removeError}

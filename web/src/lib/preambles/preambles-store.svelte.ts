@@ -10,11 +10,56 @@ import {
 } from '$lib/api/preambles.js';
 import {
 	PREAMBLE_ERROR_CODES,
+	type Preamble,
 	type PreambleDefinitionInput,
 	type PreamblesSnapshot,
 } from '$shared/preambles';
 
 export type PreamblesStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+function scopesMatch(left: Preamble['scope'], right: Preamble['scope']): boolean {
+	if (left.type !== right.type) return false;
+	if (left.type === 'global' || right.type === 'global') return true;
+	if (left.rules.length !== right.rules.length) return false;
+	return left.rules.every((rule, index) => {
+		const other = right.rules[index];
+		return (
+			other !== undefined &&
+			(rule.executorId ?? null) === (other.executorId ?? null) &&
+			rule.projectPath === other.projectPath &&
+			rule.includeNested === other.includeNested
+		);
+	});
+}
+
+export function preamblesMatch(left: Preamble, right: Preamble): boolean {
+	return (
+		left.id === right.id &&
+		left.enabled === right.enabled &&
+		left.title === right.title &&
+		(left.snippetShortName ?? undefined) === (right.snippetShortName ?? undefined) &&
+		left.content === right.content &&
+		left.createdAt === right.createdAt &&
+		left.updatedAt === right.updatedAt &&
+		scopesMatch(left.scope, right.scope) &&
+		left.agentIds.length === right.agentIds.length &&
+		left.agentIds.every((id, index) => id === right.agentIds[index]) &&
+		left.tagFilter.mode === right.tagFilter.mode &&
+		left.tagFilter.tags.length === right.tagFilter.tags.length &&
+		left.tagFilter.tags.every((tag, index) => tag === right.tagFilter.tags[index])
+	);
+}
+
+function preambleSnapshotsMatch(left: PreamblesSnapshot, right: PreamblesSnapshot): boolean {
+	return (
+		left.revision === right.revision &&
+		left.preambles.length === right.preambles.length &&
+		left.preambles.every((entry, index) => {
+			const other = right.preambles[index];
+			return other !== undefined && preamblesMatch(entry, other);
+		})
+	);
+}
 
 export interface PreamblesStoreDeps {
 	get?: typeof getPreambles;
@@ -50,6 +95,21 @@ export class PreamblesStore {
 
 	async ensureLoaded(): Promise<PreamblesSnapshot> {
 		return this.snapshot ?? this.refresh();
+	}
+
+	async ensureSnapshotForWrite(): Promise<PreamblesSnapshot> {
+		if (!this.snapshot || !this.#lastRefreshSucceeded) {
+			await this.refresh();
+		} else if (!this.#loadPromise && !this.#refreshLoop.pending) {
+			return this.snapshot;
+		}
+		while (this.#loadPromise || this.#refreshLoop.pending) {
+			await (this.#refreshLoop.pending ?? this.#loadPromise);
+		}
+		if (!this.#lastRefreshSucceeded || !this.snapshot) {
+			throw new Error(this.error ?? 'Failed to load preambles');
+		}
+		return this.snapshot;
 	}
 
 	async refresh(): Promise<PreamblesSnapshot> {
@@ -120,7 +180,7 @@ export class PreamblesStore {
 				installGeneration,
 			);
 		} catch (error) {
-			await this.#refreshAfterConflict(error);
+			await this.#refreshAfterStaleError(error);
 			throw error;
 		}
 	}
@@ -145,7 +205,7 @@ export class PreamblesStore {
 				installGeneration,
 			);
 		} catch (error) {
-			await this.#refreshAfterConflict(error);
+			await this.#refreshAfterStaleError(error);
 			throw error;
 		}
 	}
@@ -165,7 +225,7 @@ export class PreamblesStore {
 				installGeneration,
 			);
 		} catch (error) {
-			await this.#refreshAfterConflict(error);
+			await this.#refreshAfterStaleError(error);
 			throw error;
 		}
 	}
@@ -198,7 +258,7 @@ export class PreamblesStore {
 			);
 		} catch (error) {
 			if (this.#installGeneration === generation) this.snapshot = this.#confirmed;
-			await this.#refreshAfterConflict(error);
+			await this.#refreshAfterStaleError(error);
 			throw error;
 		}
 	}
@@ -220,17 +280,13 @@ export class PreamblesStore {
 			if (!this.#lastRefreshSucceeded) {
 				if (
 					this.#installGeneration !== installGeneration &&
-					this.#confirmed &&
-					this.#confirmed.revision >= next.revision
+					this.#confirmed !== null &&
+					preambleSnapshotsMatch(this.#confirmed, next)
 				) {
 					return this.snapshot ?? this.#confirmed;
 				}
 				// Do not keep a potentially pre-restore snapshot eligible for local expansion after reconciliation fails.
-				this.snapshot = null;
-				this.#confirmed = null;
-				this.status = 'error';
-				this.error ??= 'Failed to load preambles';
-				this.#installGeneration += 1;
+				this.#invalidateSnapshot('Failed to load preambles');
 				return next;
 			}
 			return this.snapshot ?? this.#confirmed ?? next;
@@ -248,17 +304,30 @@ export class PreamblesStore {
 		return next;
 	}
 
+	#invalidateSnapshot(fallbackMessage: string): void {
+		this.snapshot = null;
+		this.#confirmed = null;
+		this.status = 'error';
+		this.error ??= fallbackMessage;
+		this.#installGeneration += 1;
+	}
+
 	async #requireSnapshot(): Promise<PreamblesSnapshot> {
 		return this.#confirmed ?? this.ensureLoaded();
 	}
 
-	async #refreshAfterConflict(error: unknown): Promise<void> {
-		if (
-			!(error instanceof ApiError) ||
-			error.errorCode !== PREAMBLE_ERROR_CODES.revisionConflict
-		)
+	async #refreshAfterStaleError(error: unknown): Promise<void> {
+		if (!(error instanceof ApiError)) return;
+		if (error.errorCode === PREAMBLE_ERROR_CODES.revisionConflict) {
+			await this.refreshIfLoaded();
 			return;
-		await this.refreshIfLoaded();
+		}
+		if (error.errorCode === PREAMBLE_ERROR_CODES.notFound) {
+			await this.refreshIfLoaded();
+			if (!this.#lastRefreshSucceeded) {
+				this.#invalidateSnapshot('Failed to load preambles');
+			}
+		}
 	}
 }
 

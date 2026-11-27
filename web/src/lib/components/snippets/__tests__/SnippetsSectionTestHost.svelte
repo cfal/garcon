@@ -109,6 +109,9 @@
 			if (request.expectedRevision !== current.revision) {
 				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
 			}
+			if (!current.snippets.some((snippet) => snippet.id === request.id)) {
+				throw new ApiError(404, 'Snippet not found', SNIPPET_ERROR_CODES.notFound);
+			}
 			current = {
 				revision: current.revision + 1,
 				snippets: sortSnippetsByShortName(
@@ -126,6 +129,9 @@
 			lastRemoveExpectedRevision = request.expectedRevision;
 			if (request.expectedRevision !== current.revision) {
 				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
+			}
+			if (!current.snippets.some((snippet) => snippet.id === request.id)) {
+				throw new ApiError(404, 'Snippet not found', SNIPPET_ERROR_CODES.notFound);
 			}
 			current = {
 				revision: current.revision + 1,
@@ -195,8 +201,15 @@
 		};
 		void store.refreshInBackground();
 	}
-	async function invalidateAndHoldChangedReload(): Promise<void> {
+	function removeServerSameRevision(): void {
+		current = {
+			...current,
+			snippets: current.snippets.filter((snippet) => snippet.id !== 'one'),
+		};
+	}
+	async function invalidateAndHoldReload(mutateOne: boolean): Promise<void> {
 		const capturedRevision = store.snapshot?.revision ?? current.revision;
+		const previousOne = current.snippets.find((snippet) => snippet.id === 'one');
 		holdNextCreate = true;
 		const waitForCreate = new Promise<void>((resolve) => {
 			createStarted = resolve;
@@ -212,25 +225,47 @@
 		releaseHeldCreate?.();
 		releaseHeldCreate = null;
 		await creating;
-		invalidationCount += 1;
+		if (mutateOne) invalidationCount += 1;
 		current = {
 			revision: capturedRevision,
 			snippets: sortSnippetsByShortName(
 				current.snippets
 					.filter((snippet) => snippet.shortName !== 'temp_trigger')
-					.map((snippet) =>
-						snippet.id === 'one'
-							? {
-									...snippet,
-									shortName: `review_reloaded_${invalidationCount}`,
-									template: `Changed while invalidated ${invalidationCount}`,
-									updatedAt: `2026-01-09T00:00:0${invalidationCount}.000Z`,
-								}
-							: snippet,
-					),
+					.map((snippet) => {
+						if (snippet.id !== 'one') return snippet;
+						if (!mutateOne) return previousOne ?? snippet;
+						return {
+							...snippet,
+							shortName: `review_reloaded_${invalidationCount}`,
+							template: `Changed while invalidated ${invalidationCount}`,
+							updatedAt: `2026-01-09T00:00:0${invalidationCount}.000Z`,
+						};
+					}),
 			),
 		};
 		holdNextGet = true;
+	}
+	function queueWsDrift(): void {
+		current = {
+			...current,
+			snippets: sortSnippetsByShortName(
+				current.snippets.map((snippet) =>
+					snippet.id === 'one'
+						? {
+								...snippet,
+								shortName: 'review_ws_drifted',
+								template: 'Drifted in GET-2',
+								updatedAt: '2026-01-10T00:00:00.000Z',
+							}
+						: snippet,
+				),
+			),
+		};
+		void store.refreshIfLoaded();
+	}
+	function queueWsFailure(): void {
+		failNextGet = true;
+		void store.refreshIfLoaded();
 	}
 	function advanceExternally(): void {
 		current = {
@@ -344,8 +379,20 @@
 <button type="button" onclick={restoreLowerUnrelated} data-testid="external-lower-unchanged">
 	Restore lower unchanged
 </button>
-<button type="button" onclick={() => void invalidateAndHoldChangedReload()} data-testid="invalidate-with-changed-server">
+<button type="button" onclick={removeServerSameRevision} data-testid="server-remove-same-revision">
+	Server remove same revision
+</button>
+<button type="button" onclick={() => void invalidateAndHoldReload(true)} data-testid="invalidate-with-changed-server">
 	Invalidate with changed server
+</button>
+<button type="button" onclick={() => void invalidateAndHoldReload(false)} data-testid="invalidate-with-unchanged-server">
+	Invalidate with unchanged server
+</button>
+<button type="button" onclick={queueWsDrift} data-testid="queue-ws-drift">
+	Queue WS drift
+</button>
+<button type="button" onclick={queueWsFailure} data-testid="queue-ws-failure">
+	Queue WS failure
 </button>
 <button type="button" onclick={() => { releaseHeldGet?.(); releaseHeldGet = null; }} data-testid="release-held-get">
 	Release held get

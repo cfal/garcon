@@ -490,4 +490,101 @@ describe('SnippetsStore', () => {
 		expect(store.snapshot).toEqual(snapshot(2, []));
 		expect(store.status).toBe('ready');
 	});
+
+	it('invalidates when an overlapping GET returned a contradictory snapshot at the ack revision and reconciliation fails', async () => {
+		let resolveRemove!: (value: { success: true; snapshot: SnippetsSnapshot }) => void;
+		const remove = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: SnippetsSnapshot }>((resolve) => {
+					resolveRemove = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(2, ['a']))
+			.mockRejectedValueOnce(new Error('reconcile failed'));
+		const store = new SnippetsStore({ get, remove });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const removing = store.remove('a', 1);
+		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
+		await store.refreshIfLoaded();
+
+		resolveRemove({ success: true, snapshot: snapshot(2, []) });
+		await expect(removing).resolves.toEqual(snapshot(2, []));
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.hasLoaded).toBe(false);
+		expect(store.snapshot).toBeNull();
+		expect(store.snippets).toEqual([]);
+		expect(store.status).toBe('error');
+	});
+
+	it('drains queued invalidations in ensureSnapshotForWrite and blocks write on final read failure', async () => {
+		let resolveFirstGet!: (value: SnippetsSnapshot) => void;
+		let resolveDrainGet!: (value: SnippetsSnapshot) => void;
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() => new Promise<SnippetsSnapshot>((resolve) => { resolveFirstGet = resolve; }),
+			)
+			.mockImplementationOnce(
+				() => new Promise<SnippetsSnapshot>((resolve) => { resolveDrainGet = resolve; }),
+			);
+		const store = new SnippetsStore({ get });
+
+		const firstWriteReady = store.ensureSnapshotForWrite();
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+		void store.refreshIfLoaded();
+		resolveFirstGet(snapshot(1, ['stale']));
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+		resolveDrainGet(snapshot(1, ['drifted']));
+		await expect(firstWriteReady).resolves.toEqual(snapshot(1, ['drifted']));
+		await expect(store.ensureSnapshotForWrite()).resolves.toEqual(snapshot(1, ['drifted']));
+
+		let resolveBlockedFirstGet!: (value: SnippetsSnapshot) => void;
+		const nextStore = new SnippetsStore({
+			get: vi
+				.fn()
+				.mockImplementationOnce(
+					() => new Promise<SnippetsSnapshot>((resolve) => { resolveBlockedFirstGet = resolve; }),
+				)
+				.mockRejectedValueOnce(new Error('drain failed'))
+				.mockResolvedValueOnce(snapshot(1, ['recovered'])),
+		});
+		const blockedWriteReady = nextStore.ensureSnapshotForWrite().catch((error) => error);
+		await vi.waitFor(() => expect(nextStore.status).toBe('loading'));
+		void nextStore.refreshIfLoaded();
+		resolveBlockedFirstGet(snapshot(1, ['first']));
+		const blockedResult = await blockedWriteReady;
+		expect(blockedResult).toBeInstanceOf(Error);
+		expect((blockedResult as Error).message).toBe('drain failed');
+
+		await expect(nextStore.ensureSnapshotForWrite()).resolves.toEqual(snapshot(1, ['recovered']));
+		expect(nextStore.snapshot).toEqual(snapshot(1, ['recovered']));
+	});
+
+	it('refreshes on SNIPPET_NOT_FOUND and invalidates if the refresh fails', async () => {
+		const notFound = new ApiError(404, 'Snippet not found', SNIPPET_ERROR_CODES.notFound);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(1, []))
+			.mockRejectedValueOnce(new Error('refresh unavailable'));
+		const remove = vi.fn().mockRejectedValue(notFound);
+		const update = vi.fn().mockRejectedValue(notFound);
+		const store = new SnippetsStore({ get, remove, update });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		await expect(store.remove('a', 1)).rejects.toBe(notFound);
+		expect(store.snapshot).toEqual(snapshot(1, []));
+		expect(store.status).toBe('ready');
+
+		store.applySnapshot(snapshot(2, ['b']));
+		await expect(
+			store.update('b', { shortName: 'b', template: 'Updated', defaultArguments: '' }, 2),
+		).rejects.toBe(notFound);
+		expect(store.hasLoaded).toBe(false);
+		expect(store.snapshot).toBeNull();
+		expect(store.status).toBe('error');
+	});
 });
