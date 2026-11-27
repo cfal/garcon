@@ -1,0 +1,14 @@
+[package]
+name = "garcon-interface"
+version = "0.0.0"
+description = "The agent integration and execution runtime contracts; ports server-agents/interface."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+garcon-contract.workspace = true
+garcon-js.workspace = true

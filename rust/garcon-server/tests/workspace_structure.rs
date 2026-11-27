@@ -19,7 +19,8 @@ enum Role {
 
 fn role(package: &str) -> Option<Role> {
     match package {
-        "garcon-base" | "garcon-cases" | "garcon-contract" | "garcon-link" => Some(Role::Shared),
+        "garcon-base" | "garcon-cases" | "garcon-contract" | "garcon-interface" | "garcon-js"
+        | "garcon-link" => Some(Role::Shared),
         "garcon-executor" | "garcon-runtime" | "garcon-agents-common" => Some(Role::Executor),
         "garcon-controller" | "garcon-stores" | "garcon-ledger" | "garcon-search"
         | "garcon-chats" | "garcon-execution" | "garcon-http" => Some(Role::Controller),

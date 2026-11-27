@@ -7,7 +7,7 @@ after which the fallback is removed (the lift). The SPA in `web/` stays Svelte.
 Decisions are in [`DECISIONS.md`](DECISIONS.md). A session claims one unit here
 before starting it and marks it done with its gate results.
 
-Plan accepted 2026-11-27 (ADR-012 to ADR-023). A new session reads this file,
+Plan accepted 2026-11-27 (ADR-012 to ADR-024). A new session reads this file,
 then `DECISIONS.md`, `RULES.md`, and `GLOSSARY.md`.
 
 ## Where the port stands
@@ -78,8 +78,9 @@ under the original.
 
 One crate per ownership boundary, mirroring the TypeScript layout so that the
 first pass is a faithful translation and parallel sessions do not share files.
-The crates form three groups (ADR-022): shared (`garcon-base`,
-`garcon-contract`, `garcon-link`), executor (`garcon-runtime`,
+The crates form three groups (ADR-022): shared (`garcon-js`,
+`garcon-contract`, `garcon-interface`, `garcon-base`, `garcon-link`, in that
+dependency order, ADR-024), executor (`garcon-runtime`,
 `garcon-agents-common`, `garcon-agent-*`, `garcon-executor`), and controller
 (the rest except the binaries). `garcon-server/tests/workspace_structure.rs`
 fails on a dependency between the executor and controller groups, and on a
@@ -87,7 +88,9 @@ new crate without a role.
 
 | Crate | Ports | Lines |
 | --- | --- | ---: |
-| `garcon-contract` | Server-side DTOs and parsers from `common/`; `server-agents/interface` contracts | about 12,000 |
+| `garcon-js` | JavaScript semantics the port relies on: number formatting, UTF-16 measures, Node path functions, the clock (no original) | new |
+| `garcon-contract` | Server-side DTOs and parsers from `common/` | about 11,000 |
+| `garcon-interface` | `server-agents/interface/` | 1,400 |
 | `garcon-base` | `server/common/` | 1,300 |
 | `garcon-link` | `@cfal/noise-ws`; `server/remote/transport/` | 4,400 |
 | `garcon-runtime` | `server/runtime/` (git 8,400; gh 1,300; terminals 1,000; files 600; projects 440; hosting 670) | 12,500 |
@@ -112,20 +115,22 @@ unit is done, in addition to the [gate](#gate).
 
 ### Wave 0: foundation
 
-Four sessions: harness (harness-modes, unit-cases, suite-traces,
-known-differences), foundation (base, contract-core), research (port-rules),
-and the link unit of wave 1, which needs none of them. The other wave 1 units
+Six sessions: harness (unit-cases, harness-modes, suite-traces,
+known-differences), foundation (base, contract-core), interface, research
+(port-rules), scenarios (edge-scenarios), and the link unit of wave 1. The other wave 1 units
 wait for base and contract-core.
 
 | Unit | Scope | Oracle | State |
 | --- | --- | --- | --- |
-| harness-modes | `GARCON_TEST_CONTROLLER=rust` and `GARCON_TEST_WORKER=rust` in `integration-tests/support`; native mode answers unported routes with a marked 501 and logs them; a quadrant report built on `compare-junit.ts` | Original still passes its own lanes; a stub native binary fails every chat suite on the marker | open |
-| unit-cases | ADR-020 unit level: a recorder that captures every call the TypeScript unit tests make to a pure module's exports, adds trap inputs, and writes `{fn, args, result}` JSONL from two runs; a Rust test helper that replays it N of N | Recorded and replayed for one `common/` parser; a planted bug fails; an edited case file fails | open |
-| suite-traces | ADR-020 suite level: the integration test client writes every HTTP exchange and every reply to its own WebSocket requests; normalization and wildcards reuse `rust/parity/src`; a comparer reports the first difference per test | The original matches its own trace on a second run for ten varied suites, with every wildcard reviewed | open |
-| known-differences | ADR-015: `rust/parity/known-differences.json` honored by the edge replay and the trace comparer | A listed case passes only with exactly the listed result and fails once it no longer differs | open |
-| base | `garcon-base`: logging, domain errors, keyed lock, JSON file store, private files, workspace lease (same on-disk lock as `proper-lockfile`), path boundary, runtime descriptor | Ported unit tests; a TypeScript process and a Rust process exclude each other on one workspace | open |
-| contract-core | `garcon-contract`: identifiers, error codes, `chat-types`, WebSocket protocol and events, executor and agent contracts. Domain DTOs are added later by the owning lane, one module each | Golden cases for every parser and codec; JSON round trip with the TypeScript encoders | open |
-| port-rules | `GLOSSARY.md` (TypeScript term to Rust name), `RULES.md` (mapping rules and corrections), `research/` notes for each dependency listed under [dependencies](#dependencies) | Reviewed by the manager | open |
+| harness-modes | `GARCON_TEST_CONTROLLER=rust` and `GARCON_TEST_WORKER=rust` in `integration-tests/support`; a quadrant report built on `compare-junit.ts` | Original still passes its own lanes; the launch selection is unit-tested | claimed by harness 2026-11-27 |
+| edge-scenarios | Edge recordings (ADR-020) for every route group of the `edge` and `stores` units, against the original only | Each scenario replays every case under the original; every wildcard reviewed | claimed by scenarios 2026-11-27 |
+| unit-cases | ADR-020 unit level: a recorder that captures every call the TypeScript unit tests make to a pure module's exports, adds trap inputs, and writes `{fn, args, result}` JSONL from two runs; a Rust test helper that replays it N of N | Recorded and replayed for one `common/` parser; a planted bug fails; an edited case file fails | claimed by harness 2026-11-27 |
+| suite-traces | ADR-020 suite level: the integration test client writes every HTTP exchange and every reply to its own WebSocket requests; normalization and wildcards reuse `rust/parity/src`; a comparer reports the first difference per test | The original matches its own trace on a second run for ten varied suites, with every wildcard reviewed | claimed by harness 2026-11-27 |
+| known-differences | ADR-015: `rust/parity/known-differences.json` honored by the edge replay and the trace comparer | A listed case passes only with exactly the listed result and fails once it no longer differs | claimed by harness 2026-11-27 |
+| base | `garcon-js` helpers; `garcon-base`: logging, domain errors, keyed lock, JSON file store, private files, workspace lease (same on-disk lock as `proper-lockfile`), path boundary, runtime descriptor | Ported unit tests; a TypeScript process and a Rust process exclude each other on one workspace | claimed by foundation 2026-11-27 |
+| contract-core | `garcon-contract`: identifiers, error codes, `chat-types`, WebSocket protocol and events, executors, agents, settings | Recorded cases for every parser and codec; JSON round trip with the TypeScript encoders | claimed by foundation 2026-11-27 |
+| interface | `garcon-interface`: the integration and runtime contracts as traits; the `common/` domain modules its signatures need (git, gh, terminal, files, tickets, attachments, API providers, usage, and the rest) in `garcon-contract` | Every type that crosses the executor link serializes to the JSON the original sends; recorded cases for the parsers | claimed by interface 2026-11-27 |
+| port-rules | `GLOSSARY.md` (TypeScript term to Rust name), `RULES.md` (mapping rules and corrections), `research/` notes for each dependency listed under [dependencies](#dependencies) | Reviewed by the manager | claimed by research 2026-11-27 |
 
 ### Wave 1: independent leaves
 
@@ -133,12 +138,12 @@ Parallel. Each needs only wave 0.
 
 | Unit | Scope | Oracle | State |
 | --- | --- | --- | --- |
-| link | Noise PSK WebSocket in both dial directions, sessions, framing, RPC, lanes, reply journal, admission budgets, file, git, terminal, and CLI protocols | noise-ws test vectors; Rust client with TypeScript server and the reverse; ported transport tests | open |
+| link | Noise PSK WebSocket in both dial directions, sessions, framing, RPC, lanes, reply journal, admission budgets, file, git, terminal, and CLI protocols | noise-ws test vectors; Rust client with TypeScript server and the reverse; ported transport tests | claimed by link 2026-11-27 |
 | runtime-projects-files | `ProjectService`, `FilesService`, directory creation | Ported unit tests; golden cases | open |
 | runtime-git | `GitRuntime`: status, diff engine, comparisons, history, worktrees, stashes, review documents; `gh` | Ported unit tests against real repositories from `git-fixture` | open |
 | runtime-terminals | PTY runtime, replay buffer, terminal framing | Ported unit tests with a real shell | open |
 | agents-direct | `garcon-agents-common` execution, producer adapter, direct runtimes and session store; the three direct integrations | Ported unit tests against `fake-openai-server` and `fake-anthropic-server`; the integration conformance kit | open |
-| edge | Arguments and environment, lease, runtime descriptor, router with `wrapRoutes` semantics, auth store, service, tokens and rate limiter, WebSocket upgrade, session, and delivery budget, SPA shell | Parity: `api-session`, `auth-logout`, `settings-shell`, `websocket-session`, `static-assets*` native | open |
+| edge | Arguments and environment, lease, runtime descriptor, the native mode (`GARCON_RS_CONTROLLER=native`) that answers unported routes with a marked 501 and logs them, router with `wrapRoutes` semantics, auth store, service, tokens and rate limiter, WebSocket upgrade, session, and delivery budget, SPA shell | Parity: `api-session`, `auth-logout`, `settings-shell`, `websocket-session`, `static-assets*` native | open |
 | stores | Settings and its sub-stores, snippets, preambles, chat boards, canvases, saved searches, folders, tickets, API providers and assignments, Telegram settings, executor configuration | New parity scenarios per route group on an empty and a seeded workspace; ported unit tests; files written by one implementation read by the other | open |
 | ledger | Store, codec, service, views, staging, paging, anchors, native activity, clear and reload | `docs/transcript-ledger-v5-cts.md`; ported unit tests; ledgers written by one implementation read by the other | open |
 | search | FTS5 schema, indexer, query, worker pair as threads | Ported unit tests; the search corpus fixtures; same index readable by both | open |
@@ -332,12 +337,13 @@ runs.
 | 015 | Accidental behavior becomes a listed difference |
 | 016 | A C toolchain at build time |
 | 017 | One core thread |
-| 018 | One contract crate; the CLI is ported last |
+| 018 | One contract crate; the CLI is ported last (interface placement superseded by 024) |
 | 019 | Targets |
 | 020 | Three levels of recorded behavior |
 | 021 | The manager integrates and commits |
 | 022 | The controller and the executor are separate crate graphs |
 | 023 | Three binaries |
+| 024 | The shared crates mirror the original's packages |
 
 ## Open questions
 

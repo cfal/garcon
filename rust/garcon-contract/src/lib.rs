@@ -1,4 +1,3 @@
-//! Contracts shared by the server, worker, and CLI (ADR-018).
+//! Contracts shared by the server, worker, CLI, and web client (ADR-018).
 //!
-//! Ports `common/` and `server-agents/interface/`, one module per TypeScript
-//! file with the same name.
+//! Ports `common/`, one module per TypeScript file with the same name.

@@ -16,11 +16,24 @@ the user corrects how a port behaves, the correction is added under
 - Nothing speculative: no feature, option, or abstraction the original lacks.
 - Idiomatic cleanup comes after the gate passes, and the gate runs again.
 
+## Crates
+
+- The shared crates mirror the original's packages and depend on each other in
+  one direction (ADR-024): `garcon-js` (helpers), then `garcon-contract`
+  (`common/`), then `garcon-interface` (`server-agents/interface`), then
+  `garcon-base` (`server/common`), then `garcon-link`.
+- A module path is the crate of its package plus the file name in snake case:
+  `common/error-codes.ts` is `garcon_contract::error_codes`,
+  `server/common/domain-error.ts` is `garcon_base::domain_error`.
+- Register a new module in its crate's `lib.rs` (one sorted `pub mod` line,
+  re-reading the file just before the edit) only when the module compiles, so
+  a crate other sessions depend on is never left broken.
+
 ## Errors
 
 - A `throw` becomes an `Err`. `DomainError` and `AgentCallError` keep their
   fields (code, message, status, retryable, kind) in `garcon-base` and
-  `garcon-contract`.
+  `garcon-interface`.
 - Error codes and error text are contract. Copy string literals exactly.
 - No `unwrap`, `expect`, or `panic!` on a path where the original returns or
   throws. For a state the original also treats as impossible, write
@@ -45,7 +58,7 @@ the user corrects how a port behaves, the correction is added under
   numbers, sizes, and millisecond timestamps are integer types in Rust.
   `serde_json` writes the `f64` 1.0 as `1.0` and 1e21 as `1e21`, where
   JavaScript writes `1` and `1e+21`: a value that can be fractional and
-  reaches output is written through `garcon_base::js::Number`.
+  reaches output is written through `garcon_js::Number`.
 - `JSON.stringify(value, null, 2)` is `serde_json::to_string_pretty`. Add a
   trailing newline only where the original does.
 
@@ -53,7 +66,7 @@ the user corrects how a port behaves, the correction is added under
 
 - JavaScript measures strings in UTF-16 code units. Every limit, truncation,
   offset, cursor, or index that comes from `.length`, `.slice`, `.substring`,
-  `.charCodeAt`, or a regex match index uses `garcon_base::utf16`, never
+  `.charCodeAt`, or a regex match index uses `garcon_js::utf16`, never
   `str::len` or byte slicing. `Buffer.byteLength` and `TextEncoder` are UTF-8
   bytes, which is `str::len`.
 - A JavaScript string can hold a lone surrogate and a Rust `String` cannot.
@@ -75,7 +88,7 @@ the user corrects how a port behaves, the correction is added under
   `fancy-regex`. Compile each pattern once in a `LazyLock`.
 - `parseInt` reads a numeric prefix, `Number()` does not, `Math.round` rounds
   half toward positive infinity, and `toFixed` does not round half to even.
-  Use the helpers in `garcon_base::js`, and add one with recorded cases when
+  Use the helpers in `garcon_js`, and add one with recorded cases when
   it is missing.
 
 ## Time and identity
@@ -123,7 +136,7 @@ the user corrects how a port behaves, the correction is added under
   are copied verbatim. Short statements run on the core thread, as
   `bun:sqlite` does; long passes run off it.
 - Node's `path.resolve`, `join`, `normalize`, and `relative` normalize `.` and
-  `..` lexically; `std::path` does not. Use `garcon_base::path`, which mirrors
+  `..` lexically; `std::path` does not. Use `garcon_js::path`, which mirrors
   the POSIX functions.
 
 ## Output

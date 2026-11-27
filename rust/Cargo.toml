@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-executor", "garcon-link", "garcon-server"]
+members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-executor", "garcon-interface", "garcon-js", "garcon-link", "garcon-server"]
 
 [workspace.package]
 edition = "2024"
@@ -12,6 +12,8 @@ garcon-base = { path = "garcon-base" }
 garcon-cases = { path = "garcon-cases" }
 garcon-contract = { path = "garcon-contract" }
 garcon-executor = { path = "garcon-executor" }
+garcon-interface = { path = "garcon-interface" }
+garcon-js = { path = "garcon-js" }
 garcon-link = { path = "garcon-link" }
 async-trait = "0.1"
 bytes = "1"

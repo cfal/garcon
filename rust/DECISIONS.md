@@ -485,3 +485,25 @@ A controller without a Local executor does not exist in the original: its
 behavior is new, cannot be recorded, and is specified and tested as its own
 unit after the core milestone (MAP.md, unit `controller-only`). Until that
 unit is done the third binary is not built.
+
+## ADR-024: The shared crates mirror the original's packages
+
+Status: accepted (2026-11-27)
+
+Context: The plan put `server/common` in `garcon-base` below a
+`garcon-contract` that held both `common/` and the agent interface. In the
+original the dependency runs the other way: `common/` imports nothing,
+`server-agents/interface` imports `common/`, and ten of the 28 `server/common`
+modules import one or both (`domain-error`, `http-error`,
+`executor-disconnect`, and others). The planned layering was a crate cycle.
+
+Decision: One shared crate per original package, depending in the original's
+direction: `garcon-js` (the JavaScript-semantics helpers of RULES.md, which
+have no original), `garcon-contract` (`common/`), `garcon-interface`
+(`server-agents/interface`), `garcon-base` (`server/common`), `garcon-link`.
+A module's path is its package's crate plus its file name in snake case.
+
+Consequences: Supersedes the part of ADR-018 that placed the agent interface
+in `garcon-contract`; the CLI depends on `garcon-contract` and `garcon-js`,
+and may use `garcon-base`. No `server/common` module is split from its
+directory.

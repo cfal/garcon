@@ -1,0 +1,12 @@
+[package]
+name = "garcon-js"
+version = "0.0.0"
+description = "JavaScript semantics the ported code relies on: number formatting, UTF-16 string measures, Node path functions, and the clock."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

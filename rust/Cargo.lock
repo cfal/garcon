@@ -162,6 +162,11 @@ dependencies = [
 [[package]]
 name = "garcon-base"
 version = "0.0.0"
+dependencies = [
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+]
 
 [[package]]
 name = "garcon-bench"
@@ -186,11 +191,23 @@ version = "0.0.0"
 name = "garcon-contract"
 version = "0.0.0"
 dependencies = [
- "garcon-base",
+ "garcon-js",
 ]
 
 [[package]]
 name = "garcon-executor"
+version = "0.0.0"
+
+[[package]]
+name = "garcon-interface"
+version = "0.0.0"
+dependencies = [
+ "garcon-contract",
+ "garcon-js",
+]
+
+[[package]]
+name = "garcon-js"
 version = "0.0.0"
 
 [[package]]
