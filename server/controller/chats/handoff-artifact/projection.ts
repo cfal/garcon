@@ -161,7 +161,12 @@ function projectEntry(
   const { ordinal, message } = entry;
   if (isToolUseMessage(message)) {
     const summary = projectToolUseSummary(message, redactDataUrl);
-    const body = artifactBody(summary.text);
+    const prefix = summary.prefixBeforeLiteral;
+    const header = prefix === undefined ? undefined : artifactBody(prefix);
+    // The bounded literal has already been redacted before JSON escaping.
+    const body = prefix !== undefined && header
+      ? { text: header.text + textSafe(summary.text.slice(prefix.length)), abridged: header.abridged }
+      : artifactBody(summary.text);
     return sourceEntry({
       ordinal,
       turn,
@@ -169,7 +174,7 @@ function projectEntry(
       tag: 'tool-call',
       attributes: [{ name: 'type', value: message.type }],
       body: body.text || null,
-      ...(summary.prefixBeforeLiteral === undefined ? {} : { prefixBeforeLiteral: artifactBody(summary.prefixBeforeLiteral).text }),
+      ...(header === undefined ? {} : { prefixBeforeLiteral: header.text }),
       abridged: summary.abridged || body.abridged,
     });
   }

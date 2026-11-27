@@ -237,20 +237,49 @@ function sanitizeStructuredValue(value: unknown): unknown {
   );
 }
 
+// A bare data URL can itself contain parentheses. In a link, the last unmatched close delimits the destination.
+function linkDestinationEnd(value: string, start: number, end: number): number {
+  let depth = 0;
+  let close = end;
+  for (let i = start; i < end; i++) {
+    if (value[i] === '\\') i++;
+    else if (close < end && value.startsWith('](', i)) break;
+    else if (value[i] === '(') depth++;
+    else if (value[i] === ')') {
+      if (depth) depth--;
+      else close = i;
+    }
+  }
+  return close;
+}
+
 export function redactDataUrl(value: string): string {
   const trimmed = value.trim();
   if (standaloneDataUrl.test(trimmed)) return value.replace(trimmed, DATA_URL_OMISSION);
-  const proseEnd = /[\s"'<>]/g;
-  const linkEnd = /[\s"'<>]|\)(?=!?\[[^\[\]\r\n]*\]\()/g;
+  const proseEnd = /[\s"<>]/g;
+  const quotedEnd = /[\s"'<>]/g;
+  const linkEnd = /[\s<>]|\)(?=!?\[[^\[\]\r\n]*\]\()/g;
   let copied = 0;
   let examined = 0;
   let depth = 0;
+  let linkLimit = 0;
   const parts: string[] = [];
   for (const { index: offset } of value.matchAll(embeddedDataScheme)) {
     if (offset < examined) continue;
-    const delimiter = value.slice(offset - 2, offset) === '](' ? linkEnd : proseEnd;
-    delimiter.lastIndex = offset + 5;
-    examined = delimiter.exec(value)?.index ?? value.length;
+    let opening = offset;
+    while (opening > 0 && /\s/.test(value[opening - 1])) opening--;
+    const link = value.slice(opening - 2, opening) === '](';
+    if (link) {
+      if (offset >= linkLimit) {
+        linkEnd.lastIndex = offset + 5;
+        linkLimit = linkEnd.exec(value)?.index ?? value.length;
+      }
+      examined = value[linkLimit] === ')' ? linkLimit : linkDestinationEnd(value, offset + 5, linkLimit);
+    } else {
+      const delimiter = value[offset - 1] === "'" ? quotedEnd : proseEnd;
+      delimiter.lastIndex = offset + 5;
+      examined = delimiter.exec(value)?.index ?? value.length;
+    }
     const url = value.slice(offset, examined);
     if (!url.includes(',')) continue;
     for (let i = copied; i < offset; i++) {
@@ -259,7 +288,7 @@ export function redactDataUrl(value: string): string {
     }
     parts.push(value.slice(copied, offset), DATA_URL_OMISSION);
     copied = examined;
-    if (!depth) continue;
+    if (link || !depth) continue;
     let end = url.length;
     while (end && '.,;:!?'.includes(url[end - 1])) end--;
     let start = end;

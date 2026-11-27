@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { ScheduleToolUseMessage, UserMessage } from '../../../../../common/chat-types.js';
 import { createCarryoverTranscript } from '../../../../../common/transcript-seed.js';
+import { renderTranscriptExportXml } from '../../transcript-export/xml.js';
 import { foldHandoffArtifactEntries } from '../projection.js';
 import { renderFittedHandoffArtifact } from '../xml.js';
 
@@ -45,9 +46,23 @@ test.each([
   ['Attached (see data:text/plain,body). Continue.', 'Attached (see [data URL omitted from export]). Continue.'],
   ['See [one](data:text/plain,fixture)[two](https://example.test).', 'See [one]([data URL omitted from export])[two](https://example.test).'],
   ['See [report](data:text/plain,PUBLIC)SYNTHETIC_PAYLOAD).', 'See [report]([data URL omitted from export]).'],
+  ["See [one](data:text/plain,prefix'SYNTHETIC_BODY).", 'See [one]([data URL omitted from export]).'],
+  ['[one]( data:text/plain,fixture)[two](https://example.test)', '[one]( [data URL omitted from export])[two](https://example.test)'],
+  ['![preview](data:image/png;base64,AA==)after', '![preview]([data URL omitted from export])after'],
+  ['[one](data:text/plain,part(inner))after', '[one]([data URL omitted from export])after'],
 ])('redacts the complete data URL token in %s', (prompt, redacted) => {
   const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
-  const fold = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message }]);
+  const entries = [{ kind: 'message', ordinal: 1, category: 'tool-calls', message }] as const;
+  const fold = foldHandoffArtifactEntries(entries);
   expect(fold.entries[0].body).toEndWith('Prompt: ' + JSON.stringify(redacted));
+  expect(renderTranscriptExportXml({
+    chat: { id: '1795690000000000', title: 'Fixture', agentId: 'antigravity', model: null }, omitted: [], entries,
+  })).toContain(JSON.stringify(redacted));
   expect(createCarryoverTranscript([message], 0)?.prefix).toContain(prompt);
+});
+
+test.each(['data:x\n," Then continue.', 'see data:a\t,"b'])('does not reinterpret JSON escapes as URL content', prompt => {
+  const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
+  const { entries: [entry] } = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message }]);
+  expect(JSON.parse(entry.body!.slice(entry.prefixBeforeLiteral!.length))).toBe(prompt);
 });
