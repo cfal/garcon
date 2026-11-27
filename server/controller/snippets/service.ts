@@ -2,8 +2,11 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import {
+  SNIPPET_ERROR_CODES,
+  SNIPPET_VALIDATION_ERROR_MESSAGE,
   normalizeExpandSnippetRequest,
   normalizeSnippetDefinitionInput,
+  snippetTemplateUsesProjectPath,
   type CreateSnippetRequest,
   type ExpandSnippetRequest,
   type ExpandSnippetResponse,
@@ -22,7 +25,6 @@ import { SnippetCatalogCommittedUnknownError, SnippetStore } from './store.js';
 import {
   expandScheduledSnippetTemplate,
   expandSnippetTemplate,
-  SnippetExpansionError,
 } from './template.js';
 import type { PreambleStore } from '../preambles/store.js';
 import type {
@@ -142,35 +144,28 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       : this.deps.preambles?.getBySnippetShortName(input.shortName) ?? null;
     if (!snippet && !preamble) {
       throw new SnippetDomainError(
-        'SNIPPET_NOT_FOUND',
+        SNIPPET_ERROR_CODES.notFound,
         `Snippet not found: ${input.shortName}`,
         404,
       );
     }
-    const { contextProjectPath, contextExecutorId, resolvedProjectPath } = await this.#resolveProjectPath(
-      input.context,
-    );
+    const needsProjectPath = snippet !== null && snippetTemplateUsesProjectPath(snippet.template);
+    const { contextProjectPath, contextExecutorId, resolvedProjectPath } =
+      await this.#resolveContext(input.context, needsProjectPath);
     let expandedText: string;
     if (snippet) {
       const argumentsText =
         input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
-      try {
-        expandedText = input.context.type === 'scheduled-prompt'
-          ? expandScheduledSnippetTemplate(snippet.template, {
-              arguments: argumentsText,
-              projectPath: resolvedProjectPath,
-            })
-          : expandSnippetTemplate(snippet.template, {
-              arguments: argumentsText,
-              projectPath: resolvedProjectPath,
-              context: runtimeTemplateValues(input.context.chatId, this.#now()),
-            });
-      } catch (error) {
-        if (error instanceof SnippetExpansionError) {
-          throw new SnippetDomainError(error.code, error.message, 422);
-        }
-        throw error;
-      }
+      expandedText = input.context.type === 'scheduled-prompt'
+        ? expandScheduledSnippetTemplate(snippet.template, {
+            arguments: argumentsText,
+            projectPath: resolvedProjectPath,
+          })
+        : expandSnippetTemplate(snippet.template, {
+            arguments: argumentsText,
+            projectPath: resolvedProjectPath,
+            context: runtimeTemplateValues(input.context.chatId, this.#now()),
+          });
     } else {
       expandedText = input.context.type === 'scheduled-prompt'
         ? preamble!.content
@@ -239,39 +234,53 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     return definition;
   }
 
-  async #resolveProjectPath(input: SnippetExpansionContext): Promise<{
+  async #resolveContext(
+    input: SnippetExpansionContext,
+    needsProjectPath: boolean,
+  ): Promise<{
     contextProjectPath: string;
     contextExecutorId: string;
     resolvedProjectPath: string;
   }> {
     const context = input.type === 'scheduled-prompt' ? input.target : input;
     if (context.type === 'new-chat') {
-      return {
-        contextProjectPath: context.projectPath,
-        contextExecutorId: context.executorId ?? 'local',
-        resolvedProjectPath: await this.deps.projectPaths.resolve(context.projectPath, context.executorId),
-      };
+      const contextExecutorId = context.executorId ?? 'local';
+      const resolvedProjectPath = needsProjectPath
+        ? await this.deps.projectPaths.resolve(context.projectPath, context.executorId)
+        : '';
+      return { contextProjectPath: context.projectPath, contextExecutorId, resolvedProjectPath };
     }
     const chat = this.deps.chats.getChat(context.chatId);
     const contextProjectPath = chat?.projectPath;
     if (!contextProjectPath?.trim()) {
       throw new SnippetDomainError(
-        'SNIPPET_CHAT_NOT_FOUND',
+        SNIPPET_ERROR_CODES.chatNotFound,
         'Chat not found or missing project path',
         404,
       );
     }
     const contextExecutorId = chat?.executorId ?? 'local';
+    if (!needsProjectPath) {
+      return { contextProjectPath, contextExecutorId, resolvedProjectPath: '' };
+    }
     const resolvedProjectPath = await this.deps.projectPaths.resolve(contextProjectPath, contextExecutorId);
     const current = this.deps.chats.getChat(context.chatId);
     if (!current || current.projectPath !== contextProjectPath || (current.executorId ?? 'local') !== contextExecutorId) {
-      throw new SnippetDomainError('SNIPPET_CONTEXT_CHANGED', 'Chat project target changed during expansion', 409);
+      throw new SnippetDomainError(
+        SNIPPET_ERROR_CODES.contextChanged,
+        'Chat project target changed during expansion',
+        409,
+      );
     }
     return { contextProjectPath, contextExecutorId, resolvedProjectPath };
   }
 
   #validationError(): SnippetDomainError {
-    return new SnippetDomainError('SNIPPET_VALIDATION_FAILED', 'Snippet is invalid', 400);
+    return new SnippetDomainError(
+      SNIPPET_ERROR_CODES.validationFailed,
+      SNIPPET_VALIDATION_ERROR_MESSAGE,
+      400,
+    );
   }
 
   #emitInvalidated(reason: SnippetsInvalidationReason): void {

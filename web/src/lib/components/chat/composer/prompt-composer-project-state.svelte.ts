@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ExpandSnippetResponse, SnippetExpansionContext } from '$shared/snippets';
-import { projectTargetKey, type ProjectTarget } from '$shared/project-resolution';
+import type { ProjectTarget } from '$shared/project-resolution';
 import type {
 	ProjectResolutionSnapshot,
 	ProjectResolutionStore,
@@ -91,49 +91,13 @@ export class PromptComposerProjectState {
 			&& response.contextProjectPath === operation.projectPath;
 	}
 
-	async resolveSnippetContext(signal?: AbortSignal): Promise<PromptComposerSnippetContext> {
+	snippetContext(): PromptComposerSnippetContext {
 		const chat = this.deps.selectedChat;
 		const target = this.target;
 		const projectPath = target?.projectPath;
 		const executorId = target?.executorId ?? 'local';
-		if (!chat || !target || !projectPath?.trim()) throw new Error(m.chat_new_chat_errors_project_path_required());
-		signal?.throwIfAborted();
-		const lease = this.deps.projectResolution.retain(target);
-		let released = false;
-		const release = () => {
-			if (released) return;
-			released = true;
-			lease.release();
-		};
-		let rejectAbort: ((reason: unknown) => void) | null = null;
-		const aborted = new Promise<never>((_resolve, reject) => {
-			rejectAbort = reject;
-		});
-		const releaseOnAbort = () => {
-			release();
-			rejectAbort?.(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
-		};
-		signal?.addEventListener('abort', releaseOnAbort, { once: true });
-		try {
-			if (signal?.aborted) releaseOnAbort();
-			await (signal ? Promise.race([lease.resolve(), aborted]) : lease.resolve());
-			signal?.throwIfAborted();
-			if (
-				this.deps.selectedChat?.id !== chat.id ||
-				!this.target || projectTargetKey(this.target) !== projectTargetKey(target)
-			) {
-				throw new Error(m.workspace_project_changed());
-			}
-			if (lease.snapshot.kind !== 'available') {
-				throw new Error(
-					lease.snapshot.kind === 'request-failed'
-						? lease.snapshot.message
-						: m.workspace_project_unavailable(),
-				);
-			}
-		} finally {
-			signal?.removeEventListener('abort', releaseOnAbort);
-			release();
+		if (!chat || !target || !projectPath?.trim()) {
+			throw new Error(m.chat_new_chat_errors_project_path_required());
 		}
 		return {
 			executorId,

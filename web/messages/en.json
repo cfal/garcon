@@ -1216,7 +1216,6 @@
 	"workspace_project_not_directory": "The project path is not a folder.",
 	"workspace_project_outside_base": "The folder is outside the allowed project directory.",
 	"workspace_project_permission_denied": "Garcon cannot access this folder.",
-	"workspace_project_changed": "The chat project changed.",
 	"workspace_choose_project_folder": "Choose folder",
 	"workspace_executor_unavailable": "Executor unavailable",
 	"workspace_executor_unavailable_detail": "{label} is unavailable.",

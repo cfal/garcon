@@ -83,6 +83,8 @@ export const SNIPPET_ERROR_CODES = {
   contextChanged: 'SNIPPET_CONTEXT_CHANGED',
 } as const;
 
+export const SNIPPET_VALIDATION_ERROR_MESSAGE = 'Snippet is invalid';
+
 export type SnippetErrorCode = (typeof SNIPPET_ERROR_CODES)[keyof typeof SNIPPET_ERROR_CODES];
 
 export interface Snippet {

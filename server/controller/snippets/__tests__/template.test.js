@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { SNIPPET_EXPANDED_MAX_LENGTH } from '../../../../common/snippets.ts';
+import { SnippetDomainError } from '../errors.ts';
 import { expandScheduledSnippetTemplate, expandSnippetTemplate } from '../template.ts';
 import { renderScheduledPrompt } from '../../../../common/scheduled-prompts.ts';
 import { TEMPLATE_VALIDATION_VALUES, RUNTIME_TEMPLATE_VARIABLES } from '../../../../common/template-tokens.ts';
@@ -118,9 +119,48 @@ describe('scheduled snippet template expansion', () => {
     expect(renderScheduledPrompt(text, { ...TEMPLATE_VALIDATION_VALUES, chat_id: '1787471053739199' })).toBe(`${literal} / /repo/${literal} / 1787471053739199`);
   });
 
-  it('enforces the expansion length bound', () => {
-    expect(() => expandScheduledSnippetTemplate('{{arguments}}{{arguments}}', {
-      arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH), projectPath: '/repo',
-    })).toThrow('Expanded snippet exceeds');
+  it('maps expansion length bounds to SnippetDomainError 422', () => {
+    for (const run of [
+      () =>
+        expandSnippetTemplate('{{arguments}}{{arguments}}', {
+          arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH),
+          projectPath: '/repo',
+          context: TEMPLATE_VALIDATION_VALUES,
+        }),
+      () =>
+        expandScheduledSnippetTemplate('{{arguments}}{{arguments}}', {
+          arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH),
+          projectPath: '/repo',
+        }),
+    ]) {
+      let caught;
+      try {
+        run();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(SnippetDomainError);
+      expect(caught).toMatchObject({
+        code: 'SNIPPET_EXPANSION_TOO_LONG',
+        status: 422,
+      });
+    }
+  });
+
+  it('maps scheduled boundary violations to SnippetDomainError 422', () => {
+    let caught;
+    try {
+      expandScheduledSnippetTemplate('{{arguments}}{{chat_id}}', {
+        arguments: 'report\\',
+        projectPath: '/repo',
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SnippetDomainError);
+    expect(caught).toMatchObject({
+      code: 'SNIPPET_VALIDATION_FAILED',
+      status: 422,
+    });
   });
 });

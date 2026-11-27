@@ -34,26 +34,35 @@ function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	};
 }
 
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((promiseResolve) => {
-		resolve = promiseResolve;
-	});
-	return { promise, resolve };
-}
-
 describe('PromptComposerProjectState', () => {
-	it('preserves snippet path identity and rejects a response for the unspaced sibling', async () => {
+	it('preserves snippet path identity without triggering project resolution', () => {
 		const selectedChat = chat({ projectPath: '/project ' });
-		const projectResolution = new ProjectResolutionStore(async target => ({
-			target, resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		const fetchResolution = vi.fn(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
 		}));
-		const projectState = new PromptComposerProjectState({ selectedChat, completionDemand: false, projectResolution });
+		const projectResolution = new ProjectResolutionStore(fetchResolution);
+		const projectState = new PromptComposerProjectState({
+			selectedChat,
+			completionDemand: false,
+			projectResolution,
+		});
 		try {
-			const operation = await projectState.resolveSnippetContext();
+			const operation = projectState.snippetContext();
 			expect(operation.projectPath).toBe('/project ');
-			expect(projectState.matchesSnippetContext(operation, { contextExecutorId: 'local', contextProjectPath: '/project ' })).toBe(true);
-			expect(projectState.matchesSnippetContext(operation, { contextExecutorId: 'local', contextProjectPath: '/project' })).toBe(false);
+			expect(fetchResolution).not.toHaveBeenCalled();
+			expect(
+				projectState.matchesSnippetContext(operation, {
+					contextExecutorId: 'local',
+					contextProjectPath: '/project ',
+				}),
+			).toBe(true);
+			expect(
+				projectState.matchesSnippetContext(operation, {
+					contextExecutorId: 'local',
+					contextProjectPath: '/project',
+				}),
+			).toBe(false);
 		} finally {
 			projectState.destroy();
 			projectResolution.destroy();
@@ -64,7 +73,10 @@ describe('PromptComposerProjectState', () => {
 		'uses the pending same-executor folder for completions and snippets on %s',
 		async (executorId) => {
 			const selectedChat = chat({ executorId });
-			let executionTarget = { executorId: executorId ?? 'local', projectPath: '/confirmed-folder' };
+			let executionTarget = {
+				executorId: executorId ?? 'local',
+				projectPath: '/confirmed-folder',
+			};
 			const fetchResolution = vi.fn(async (target: ProjectTarget) => ({
 				target,
 				resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
@@ -72,7 +84,9 @@ describe('PromptComposerProjectState', () => {
 			const projectResolution = new ProjectResolutionStore(fetchResolution);
 			const projectState = new PromptComposerProjectState({
 				selectedChat,
-				get executionTarget() { return executionTarget; },
+				get executionTarget() {
+					return executionTarget;
+				},
 				completionDemand: false,
 				projectResolution,
 			});
@@ -82,7 +96,7 @@ describe('PromptComposerProjectState', () => {
 				expect(projectState.target).toEqual(target);
 				await lease.resolve();
 				expect(projectState.completionProjectPath).toBe('/confirmed-folder');
-				expect(await projectState.resolveSnippetContext()).toEqual({
+				expect(projectState.snippetContext()).toEqual({
 					executorId: executionTarget.executorId,
 					chatId: selectedChat.id,
 					projectPath: '/confirmed-folder',
@@ -90,7 +104,10 @@ describe('PromptComposerProjectState', () => {
 				});
 				executionTarget = { ...executionTarget, projectPath: selectedChat.projectPath };
 				expect(projectState.target).toEqual({
-					kind: 'chat', chatId: selectedChat.id, executorId, projectPath: selectedChat.projectPath,
+					kind: 'chat',
+					chatId: selectedChat.id,
+					executorId,
+					projectPath: selectedChat.projectPath,
 				});
 			} finally {
 				lease.release();
@@ -104,44 +121,29 @@ describe('PromptComposerProjectState', () => {
 		const projectResolution = new ProjectResolutionStore();
 		let selectedChat = chat();
 		const projectState = new PromptComposerProjectState({
-			get selectedChat() { return selectedChat; }, completionDemand: false, projectResolution,
-		});
-		const operation = { executorId: 'local', chatId: 'chat-1', projectPath: '/project-a', context: { type: 'chat' as const, chatId: 'chat-1' } };
-		const response = { contextExecutorId: 'local', contextProjectPath: '/project-a' };
-		expect(projectState.matchesSnippetContext(operation, response)).toBe(true);
-		selectedChat = chat({ executorId: '11111111-1111-4111-8111-111111111111' });
-		expect(projectState.matchesSnippetContext(operation, response)).toBe(false);
-		selectedChat = chat();
-		expect(projectState.matchesSnippetContext(operation, { ...response, contextExecutorId: '11111111-1111-4111-8111-111111111111' })).toBe(false);
-		projectState.destroy();
-		projectResolution.destroy();
-	});
-
-	it('reports a binding change before classifying its obsolete resolution', async () => {
-		const request = deferred<{
-			target: { kind: 'chat'; chatId: string; projectPath: string };
-			resolution: { kind: 'unavailable'; reason: 'not-found' };
-		}>();
-		const fetchResolution = vi.fn(() => request.promise);
-		const projectResolution = new ProjectResolutionStore(fetchResolution);
-		let selectedChat = chat();
-		const projectState = new PromptComposerProjectState({
 			get selectedChat() {
 				return selectedChat;
 			},
 			completionDemand: false,
 			projectResolution,
 		});
-
-		const resolving = projectState.resolveSnippetContext();
-		selectedChat = chat({ projectPath: '/project-b' });
-		projectResolution.markObsoleteChatTargets('chat-1', '/project-b');
-		request.resolve({
-			target: { kind: 'chat', chatId: 'chat-1', projectPath: '/project-a' },
-			resolution: { kind: 'unavailable', reason: 'not-found' },
-		});
-
-		await expect(resolving).rejects.toThrow('The chat project changed.');
+		const operation = {
+			executorId: 'local',
+			chatId: 'chat-1',
+			projectPath: '/project-a',
+			context: { type: 'chat' as const, chatId: 'chat-1' },
+		};
+		const response = { contextExecutorId: 'local', contextProjectPath: '/project-a' };
+		expect(projectState.matchesSnippetContext(operation, response)).toBe(true);
+		selectedChat = chat({ executorId: '11111111-1111-4111-8111-111111111111' });
+		expect(projectState.matchesSnippetContext(operation, response)).toBe(false);
+		selectedChat = chat();
+		expect(
+			projectState.matchesSnippetContext(operation, {
+				...response,
+				contextExecutorId: '11111111-1111-4111-8111-111111111111',
+			}),
+		).toBe(false);
 		projectState.destroy();
 		projectResolution.destroy();
 	});
