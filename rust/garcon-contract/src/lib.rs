@@ -8,3 +8,4 @@ pub mod executor_path;
 pub mod executors;
 pub mod git_error;
 pub mod json;
+pub mod terminal;

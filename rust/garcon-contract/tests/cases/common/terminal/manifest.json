@@ -1,0 +1,10 @@
+{
+  "module": "common/terminal.ts",
+  "tests": [
+    "server/runtime/terminals/__tests__/terminal-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/terminal.jsonl",
+  "notCaptured": [],
+  "cases": 912,
+  "sha256": "ebf649e6df9d4f1ae59cd5fb5e850fb87936cba112a1492d13dc6b24a23bc1f1"
+}
