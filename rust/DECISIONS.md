@@ -507,3 +507,29 @@ Consequences: Supersedes the part of ADR-018 that placed the agent interface
 in `garcon-contract`; the CLI depends on `garcon-contract` and `garcon-js`,
 and may use `garcon-base`. No `server/common` module is split from its
 directory.
+
+## ADR-025: Each session works in its own worktree
+
+Status: accepted (2026-11-27)
+
+Context: Sessions sharing one worktree (ADR-021) saw each other's
+half-written files: a commit captured a test that another session had just
+added and that failed, a crate two sessions wrote into could be left
+uncompilable for both, and concurrent git commands collided on the index.
+Holding a session still until its work was committed cost it time.
+
+Decision: Each session has a worktree `.worktrees/rust-server-<label>` on a
+branch `rust-server-<label>` created from `rust-server`, and commits its own
+work there when a part is complete and green. The worktree of `rust-server`
+is the integration tree: only the manager edits it, merges a reported commit
+into it after running the gate on the merge, and pushes `rust-server` to
+origin after each merge. A session takes integrated work in with
+`git merge rust-server` and never pushes, rebases, or touches another
+worktree.
+
+Consequences: Supersedes the shared worktree of ADR-021; its limit of six
+sessions, their build settings, and the rule that only the manager edits the
+workspace manifest, `garcon-server`, `MAP.md`, and this file stand. Two
+sessions that add modules to one crate both edit its `lib.rs`, and the manager
+resolves that file in the merge. `rust-server` is rebased onto `main` only
+with every session paused.
