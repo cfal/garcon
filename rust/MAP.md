@@ -58,7 +58,7 @@ flowchart LR
         TW[TypeScript worker]
         RW[Rust worker]
     end
-    TC -- "executor link (Noise WS, RPC rev 64)" --> RW
+    TC -- "executor link (Noise WS, RPC)" --> RW
     RC -- "executor link" --> TW
     RC -- "executor link" --> RW
     RC -- "in-process Local" --> RW
