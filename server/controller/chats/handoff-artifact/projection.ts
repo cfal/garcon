@@ -289,12 +289,14 @@ function artifactBody(value: string): { readonly text: string; readonly abridged
 }
 
 function toolSummaryBody(message: ToolUseChatMessage): Pick<HandoffArtifactSourceEntry, 'body' | 'abridged' | 'prefixBeforeLiteral'> {
-  const summary = projectToolUseSummary(message, redactDataUrl);
-  if (message.type === 'schedule-tool-use') {
-    // The summary redacts complete destinations before fitting and JSON-quoting the prompt.
+  if (message.type === 'schedule-tool-use' || message.type === 'antigravity-enter-plan-mode-tool-use'
+      || message.type === 'antigravity-exit-plan-mode-tool-use') {
+    // Native reports can carry Markdown destinations that extend past the summary boundary.
+    const summary = projectToolUseSummary(message, redactDataUrl);
     const prefix = summary.prefixBeforeLiteral;
     return { body: textSafe(summary.text), prefixBeforeLiteral: prefix === undefined ? undefined : textSafe(prefix), abridged: summary.abridged };
   }
+  const summary = projectToolUseSummary(message);
   const body = artifactBody(summary.text);
   return { body: body.text || null, abridged: summary.abridged || body.abridged };
 }

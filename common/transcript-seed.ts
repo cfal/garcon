@@ -633,9 +633,9 @@ export interface ProjectedToolUseSummary {
   readonly prefixBeforeLiteral?: string;
 }
 
-export function projectToolUseSummary(message: ToolUseChatMessage, redactScheduleText?: (value: string) => string): ProjectedToolUseSummary {
+export function projectToolUseSummary(message: ToolUseChatMessage, redact?: (value: string) => string): ProjectedToolUseSummary {
   if (message.type === 'update-plan-tool-use') return summarizePlan(message.todos);
-  if (message.type === 'schedule-tool-use') return summarizeSchedule(message.request, redactScheduleText);
+  if (message.type === 'schedule-tool-use') return summarizeSchedule(message.request, redact);
   if (message.type === 'background-task-tool-use' && message.input !== undefined) {
     // Collapsing whitespace here would change the literal input sent to the task.
     const raw = `${message.action} ${message.taskId ?? ''} Input: ${JSON.stringify(message.input.slice(0, TOOL_SUMMARY_MAX_CHARS))}`;
@@ -643,11 +643,12 @@ export function projectToolUseSummary(message: ToolUseChatMessage, redactSchedul
     return { text, abridged: text !== raw };
   }
   const raw = extractToolDetail(message);
-  const collapsed = boundedCollapse(raw);
+  const safe = redact?.(raw) ?? raw;
+  const collapsed = boundedCollapse(safe);
   const text = truncate(collapsed, TOOL_SUMMARY_MAX_CHARS);
   return {
     text,
-    abridged: raw.length > PROJECTED_BODY_MAX_CHARS || text !== collapsed,
+    abridged: safe !== raw || safe.length > PROJECTED_BODY_MAX_CHARS || text !== collapsed,
   };
 }
 

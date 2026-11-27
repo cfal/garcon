@@ -11,16 +11,20 @@ function headerEnd(value: string, start: number): number {
   return header.test(value) ? header.lastIndex : -1;
 }
 
-function markdownDestinationEnd(value: string, start: number): number | undefined {
+function markdownDestinationEnd(value: string, start: number, tokenEnd: number): number | undefined {
   const angled = value[start - 1] === '<';
-  if (!angled) {
-    let opening = start;
-    while (opening && /\s/.test(value[opening - 1])) opening--;
-    if (value[opening - 2] !== ']' || (value[opening - 1] !== '(' && value[opening - 1] !== ':')) return;
+  if (angled) {
+    let slashes = 0;
+    while (value[start - 2 - slashes] === '\\') slashes++;
+    if (slashes % 2) return;
+    const parsed = parseLinkDestination(value, start - 1, value.length);
+    return parsed.ok ? parsed.pos - 1 : undefined;
   }
-  const parsed = parseLinkDestination(value, angled ? start - 1 : start, value.length);
-  if (!parsed.ok) return;
-  if (angled) return parsed.pos - 1;
+  let opening = start;
+  while (opening && /\s/.test(value[opening - 1])) opening--;
+  if (value[opening - 2] !== ']' || value[opening - 1] !== '(') return;
+  const parsed = parseLinkDestination(value, start, tokenEnd);
+  if (!parsed.ok) return tokenEnd;
 
   // A glued suffix before a second close may be payload, not prose. Never consume an adjacent link.
   const ambiguousSuffix = /\)[^\s()[\]<>"']+\)/y;
@@ -35,6 +39,8 @@ export function redactDataUrl(value: string): string {
 
   const proseEnd = /[\s"<>]/g;
   const quotedEnd = /[\s"'<>]/g;
+  const inlineBoundary = /(?<!\\)[ \t\r\n]/g;
+  let tokenEnd = 0;
   let copied = 0;
   let openParens = 0;
   const parts: string[] = [];
@@ -42,7 +48,12 @@ export function redactDataUrl(value: string): string {
     if (start < copied) continue;
     const payload = headerEnd(value, start);
     if (payload === -1) continue;
-    const linkEnd = markdownDestinationEnd(value, start);
+    // A failed inline parse consumes its token. Adjacent candidates share the same scan bound.
+    if (start >= tokenEnd) {
+      inlineBoundary.lastIndex = payload;
+      tokenEnd = inlineBoundary.exec(value)?.index ?? value.length;
+    }
+    const linkEnd = markdownDestinationEnd(value, start, tokenEnd);
     let end = linkEnd;
     if (end === undefined) {
       const delimiter = value[start - 1] === "'" ? quotedEnd : proseEnd;

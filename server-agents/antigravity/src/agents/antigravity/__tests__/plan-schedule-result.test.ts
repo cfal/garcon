@@ -343,6 +343,19 @@ test('aligns flat and wrapped report text and overlays matching empty annotation
   expect(row.content).toEqual({ items: [first, image, gap, last] });
 });
 
+test('keeps a cached empty annotation separate from distinct terminal annotations', () => {
+  const s = session();
+  const start = textBlock('First');
+  const end = textBlock('Last');
+  const empty = (priority: number) => ({ ...textBlock(''), annotations: { priority } });
+  const cached = empty(1);
+  const next = [empty(2), empty(3)];
+  s.start('timer', { ...timer, content: [start, cached, end] });
+  const row = s.patch('timer', { status: 'completed', content: [start, ...next, end] }).at(-1);
+  assertToolResult(row);
+  expect(row.content.items).toEqual([start, cached, ...next, end]);
+});
+
 test('does not associate independent output with an ambiguous annotated echo', () => {
   const s = session();
   const content = [1, 2].map(priority => ({ ...textBlock('Saved'), priority }));

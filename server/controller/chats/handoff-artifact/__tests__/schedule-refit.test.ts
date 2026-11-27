@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { ScheduleToolUseMessage, UserMessage } from '../../../../../common/chat-types.js';
+import { AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage, ScheduleToolUseMessage, UserMessage } from '../../../../../common/chat-types.js';
 import { createCarryoverTranscript } from '../../../../../common/transcript-seed.js';
 import { renderTranscriptExportMarkdown } from '../../transcript-export/markdown.js';
 import { renderTranscriptExportXml } from '../../transcript-export/xml.js';
-import { xmlText } from '../../transcript-export/values.js';
+import { redactDataUrl, xmlText } from '../../transcript-export/values.js';
 import { foldHandoffArtifactEntries } from '../projection.js';
 import { renderFittedHandoffArtifact } from '../xml.js';
 
@@ -54,10 +54,13 @@ test.each([
   ['[one](data:text/plain,part(inner))after', '[one]([data URL omitted from export])after'],
   ['[review](data:text/plain,part(inner)[tag](value)BODY)', '[review]([data URL omitted from export])'],
   ['[review](<data:text/plain,prefix BODY>)', '[review](<[data URL omitted from export]>)'],
+  ['[review](data:text/plain,prefix\u00a0BODY)', '[review]([data URL omitted from export])'],
   ['([one](data:text/plain,x)) and data:text/plain,body)', '([one]([data URL omitted from export])) and [data URL omitted from export]'],
   ['[one](data:text/plain,x),[two](https://x.test)[three](https://y.test)', '[one]([data URL omitted from export]),[two](https://x.test)[three](https://y.test)'],
   ['[one](data:text/plain,x)(note)[two](https://x.test)', '[one]([data URL omitted from export])(note)[two](https://x.test)'],
   ['[one](data:nocomma);[two](https://x.test/a,b)[three](https://y.test)', '[one](data:nocomma);[two](https://x.test/a,b)[three](https://y.test)'],
+  ['[ref]: data:text/plain,PUBLIC)PAYLOAD', '[ref]: [data URL omitted from export]'],
+  ['items[0]: data:text/plain,PUBLIC)PAYLOAD', 'items[0]: [data URL omitted from export]'],
   ['Received data:0x12,0x34.', 'Received data:0x12,0x34.'],
   ['Return `data:${mimeType};base64,${base64}` unchanged.', 'Return `data:${mimeType};base64,${base64}` unchanged.'],
 ])('redacts the complete data URL token in %s', (prompt, redacted) => {
@@ -73,6 +76,15 @@ test.each([
   expect(createCarryoverTranscript([message], 0)?.prefix).toContain(xmlText(prompt));
 });
 
+test('bounds failed data URL destination scans on a long malformed field', () => {
+  const start = performance.now();
+  for (const fragment of ['\\<data:, ', '[x]:data:,"', '[x](data:,("']) {
+    const value = fragment.repeat(20_000) + '(';
+    expect(redactDataUrl(value)).not.toContain('data:,');
+  }
+  expect(performance.now() - start).toBeLessThan(1500);
+});
+
 test('redacts the complete destination before fitting a long prompt', () => {
   const prompt = '[file](<data:text/plain,first BODY' + ' secret'.repeat(150) + '>) done';
   const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
@@ -81,6 +93,12 @@ test('redacts the complete destination before fitting a long prompt', () => {
   const option = new ScheduleToolUseMessage('', 'cron', { action: 'cron', expression: prompt, prompt: 'Check' });
   const fold = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message: option }]);
   expect(fold.entries[0].body).toBe('Request cron: [file](<[data URL omitted from export]>) done Prompt: "Check"');
+  for (const plan of [new AntigravityEnterPlanModeToolUseMessage('', 'plan', prompt), new AntigravityExitPlanModeToolUseMessage('', 'plan', prompt)]) {
+    const { entries: [entry] } = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message: plan }]);
+    expect(entry.body).toBe('[file](<[data URL omitted from export]>) done');
+    expect(entry.abridged).toBe(true);
+    expect(createCarryoverTranscript([plan], 0)?.prefix).toContain('first BODY');
+  }
 });
 
 test.each(['data:x\n," Then continue.', 'see data:a\t,"b'])('does not reinterpret JSON escapes as URL content', prompt => {

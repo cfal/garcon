@@ -54,7 +54,7 @@ function alignTerminalBlocks(cached: readonly Block[], terminal: readonly Block[
     }
     const before = toolResultTextPart(block);
     if (!before?.text) {
-      if (before && toolResultTextPart(terminal[next])?.text === '') result.push(overlayText(block, terminal[next++]));
+      if (before && isDeepStrictEqual(block, terminal[next])) result.push(terminal[next++]);
       else if (!plainText(block)) result.push(block);
       continue;
     }
