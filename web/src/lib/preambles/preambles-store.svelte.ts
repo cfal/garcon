@@ -87,7 +87,7 @@ export class PreamblesStore {
 	}
 
 	async create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
-		const current = await this.#requireSnapshot();
+		const current = this.#confirmed ?? (await this.ensureLoaded());
 		try {
 			const create = this.deps.create ?? createPreamble;
 			return this.applySnapshot(
@@ -107,7 +107,7 @@ export class PreamblesStore {
 		definition: PreambleDefinitionInput,
 		expectedRevision: number,
 	): Promise<PreamblesSnapshot> {
-		await this.#requireSnapshot();
+		if (!this.#confirmed) await this.ensureLoaded();
 		try {
 			const update = this.deps.update ?? updatePreamble;
 			return this.applySnapshot(
@@ -124,7 +124,7 @@ export class PreamblesStore {
 	}
 
 	async remove(id: string, expectedRevision: number): Promise<PreamblesSnapshot> {
-		await this.#requireSnapshot();
+		if (!this.#confirmed) await this.ensureLoaded();
 		try {
 			const remove = this.deps.remove ?? removePreamble;
 			return this.applySnapshot(
@@ -146,7 +146,9 @@ export class PreamblesStore {
 	}
 
 	async #runMove(id: string, direction: 'up' | 'down'): Promise<void> {
-		const current = await this.#requireSnapshot();
+		if (!this.#confirmed) await this.ensureLoaded();
+		const current = this.#confirmed;
+		if (!current) return;
 		const index = current.preambles.findIndex((preamble) => preamble.id === id);
 		const target = direction === 'up' ? index - 1 : index + 1;
 		if (index < 0 || target < 0 || target >= current.preambles.length) return;
@@ -177,10 +179,6 @@ export class PreamblesStore {
 		this.status = 'ready';
 		this.error = null;
 		return next;
-	}
-
-	async #requireSnapshot(): Promise<PreamblesSnapshot> {
-		return this.#confirmed ?? this.ensureLoaded();
 	}
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {

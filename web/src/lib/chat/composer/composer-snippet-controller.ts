@@ -5,6 +5,7 @@ import type { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-pale
 import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
 import {
 	findLoadedSelectableSnippetByShortName,
+	hasLoadedShortNameConflict,
 	isSelectedSnippetStaleInLoadedCatalog,
 	tryExpandSelectableSnippetLocally,
 	type PreambleCatalogLookup,
@@ -150,8 +151,7 @@ export class ComposerSnippetController<Prepared> {
 				invocation.kind === 'palette' &&
 				isSelectedSnippetStaleInLoadedCatalog(invocation.snippet, this.options)
 			) {
-				await this.#notifyAndSettle(m.snippets_changed_before_expansion());
-				return 'cancelled';
+				return await this.#cancelStaleSelection(invocation.snippet);
 			}
 			if (this.options.hasProjectPath()) {
 				const localItem =
@@ -176,6 +176,12 @@ export class ComposerSnippetController<Prepared> {
 					}
 				}
 			}
+			if (
+				invocation.kind === 'slash' &&
+				hasLoadedShortNameConflict(invocation.shortName, this.options)
+			) {
+				this.#refreshSources(['snippet', 'preamble']);
+			}
 			const { requestContext, prepared } = this.options.buildServerContext();
 			const shortName =
 				invocation.kind === 'palette' ? invocation.snippet.shortName : invocation.shortName;
@@ -193,8 +199,7 @@ export class ComposerSnippetController<Prepared> {
 					return 'cancelled';
 				}
 				if (isSelectedSnippetStaleInLoadedCatalog(invocation.snippet, this.options)) {
-					await this.#notifyAndSettle(m.snippets_changed_before_expansion());
-					return 'cancelled';
+					return await this.#cancelStaleSelection(invocation.snippet);
 				}
 			}
 			if (
@@ -228,5 +233,13 @@ export class ComposerSnippetController<Prepared> {
 	async #notifyAndSettle(message: string): Promise<void> {
 		this.options.notifications.error(message);
 		await this.options.onSettled();
+	}
+
+	async #cancelStaleSelection(snippet: SelectableSnippet): Promise<'cancelled'> {
+		if (hasLoadedShortNameConflict(snippet.shortName, this.options)) {
+			this.#refreshSources(['snippet', 'preamble']);
+		}
+		await this.#notifyAndSettle(m.snippets_changed_before_expansion());
+		return 'cancelled';
 	}
 }

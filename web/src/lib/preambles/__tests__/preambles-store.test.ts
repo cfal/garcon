@@ -352,4 +352,62 @@ describe('PreamblesStore', () => {
 		expect(store.snapshot).toEqual(snapshot(1, []));
 		expect(store.status).toBe('ready');
 	});
+
+	it('preserves a newer GET snapshot when a concurrent failed move overlaps it', async () => {
+		const networkError = new Error('network failed');
+		let resolveGet1!: (value: PreamblesSnapshot) => void;
+		let resolveGet2!: (value: PreamblesSnapshot) => void;
+		let rejectReorder1!: (error: Error) => void;
+		let rejectReorder2!: (error: Error) => void;
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<PreamblesSnapshot>((resolve) => {
+						resolveGet1 = resolve;
+					}),
+			)
+			.mockImplementationOnce(
+				() =>
+					new Promise<PreamblesSnapshot>((resolve) => {
+						resolveGet2 = resolve;
+					}),
+			);
+		const reorder = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<{ success: true; snapshot: PreamblesSnapshot }>((_resolve, reject) => {
+						rejectReorder1 = reject;
+					}),
+			)
+			.mockImplementationOnce(
+				() =>
+					new Promise<{ success: true; snapshot: PreamblesSnapshot }>((_resolve, reject) => {
+						rejectReorder2 = reject;
+					}),
+			);
+		const store = new PreamblesStore({ get, reorder });
+		store.applySnapshot(snapshot(3, ['a', 'b']));
+
+		// Case 1: GET settles on the synchronous turn of move() before reorder settles.
+		const refreshing1 = store.refresh();
+		const moving1 = store.move('b', 'up');
+		resolveGet1(snapshot(4, ['a', 'b', 'c']));
+		await refreshing1;
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
+		rejectReorder1(networkError);
+		await expect(moving1).rejects.toBe(networkError);
+		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b', 'c']));
+
+		// Case 2: GET settles while reorder is already in flight before reorder fails.
+		const moving2 = store.move('b', 'up');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(2));
+		const refreshing2 = store.refresh();
+		resolveGet2(snapshot(5, ['a', 'b', 'c', 'd']));
+		await refreshing2;
+		rejectReorder2(networkError);
+		await expect(moving2).rejects.toBe(networkError);
+		expect(store.snapshot).toEqual(snapshot(5, ['a', 'b', 'c', 'd']));
+	});
 });

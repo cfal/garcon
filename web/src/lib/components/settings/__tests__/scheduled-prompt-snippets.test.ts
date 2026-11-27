@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ScheduledPromptSnippets } from '../scheduled-prompt-snippets.svelte';
 import { expandSnippet } from '$lib/api/snippets.js';
-import { selectableSnippets } from '$lib/snippets/selectable-snippet.js';
+import { preambleToSelectable, selectableSnippets } from '$lib/snippets/selectable-snippet.js';
 
 vi.mock('$lib/api/snippets.js', () => ({ expandSnippet: vi.fn() }));
 const expand = vi.mocked(expandSnippet);
@@ -323,5 +323,57 @@ describe('scheduled prompt snippets', () => {
 		expect(controller.error).toContain('changed');
 		expect(expand).not.toHaveBeenCalled();
 		expect(onInsert).not.toHaveBeenCalled();
+	});
+
+	it('cancels palette insertion and reconciles both catalogs on cross-catalog short-name conflict', async () => {
+		if (localItem.source !== 'snippet') throw new Error('expected snippet item');
+		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
+		const onInsert = vi.fn(async () => {});
+		const onSourceChanged = vi.fn();
+		const conflictingPreamble = {
+			id: '00000000-0000-4000-8000-000000000077',
+			enabled: false,
+			title: 'Conflicting',
+			snippetShortName: localItem.shortName,
+			content: 'New preamble content',
+			scope: { type: 'global' as const },
+			agentIds: [],
+			tagFilter: { mode: 'any' as const, tags: [] },
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		};
+		const controller = new ScheduledPromptSnippets({
+			snippets: { hasLoaded: true, snippets: [localItem.snippet] },
+			preambles: { hasLoaded: true, preambles: [conflictingPreamble] },
+			get prompt() {
+				return input.prompt;
+			},
+			get interactionKey() {
+				return input.key;
+			},
+			get context() {
+				return {
+					type: 'scheduled-prompt' as const,
+					target: { type: 'new-chat' as const, projectPath: '/repo' },
+				};
+			},
+			onInsert,
+			onPendingChange: vi.fn(),
+			onSourceChanged,
+		});
+
+		for (const candidate of [
+			localItem,
+			preambleToSelectable(conflictingPreamble)!,
+		]) {
+			onSourceChanged.mockClear();
+			controller.open(7, 15);
+			expect(await controller.insert(candidate, 'API')).toBe('cancelled');
+			expect(controller.error).toContain('changed');
+			expect(onSourceChanged).toHaveBeenCalledWith('snippet');
+			expect(onSourceChanged).toHaveBeenCalledWith('preamble');
+			expect(expand).not.toHaveBeenCalled();
+			expect(onInsert).not.toHaveBeenCalled();
+		}
 	});
 });

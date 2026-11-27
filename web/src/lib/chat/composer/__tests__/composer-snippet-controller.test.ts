@@ -436,4 +436,55 @@ describe('ComposerSnippetController', () => {
 		expect(env.notifyError).toHaveBeenCalledWith('That snippet changed. Select it again.');
 		expect(env.palette.dismiss).toHaveBeenCalledTimes(1);
 	});
+
+	it('falls back to server and refreshes both catalogs when a short name appears in both client caches', async () => {
+		const duplicatePreamble: Preamble = {
+			...preamble,
+			id: '00000000-0000-4000-8000-000000000099',
+			snippetShortName: snippet.shortName,
+			content: 'Reassigned {{chat_id}}',
+		};
+		const preamblesRefresh = vi.fn(async () => {});
+		const env = setup({
+			preambles: {
+				hasLoaded: true,
+				preambles: [preamble, duplicatePreamble],
+				refreshIfLoaded: preamblesRefresh,
+			},
+		});
+
+		env.setText(`/s ${snippet.shortName}`);
+		mockExpandSnippet.mockResolvedValueOnce({
+			success: true,
+			source: 'preamble',
+			sourceId: duplicatePreamble.id,
+			sourceUpdatedAt: duplicatePreamble.updatedAt,
+			shortName: snippet.shortName,
+			contextExecutorId: 'local',
+			contextProjectPath: '/repo',
+			expandedText: 'Reassigned chat-1',
+		});
+		await env.controller.expandInvocation({
+			kind: 'valid',
+			shortName: snippet.shortName,
+			arguments: { type: 'default' },
+		});
+		expect(mockExpandSnippet).toHaveBeenCalledTimes(1);
+		expect(env.refreshSnippets).toHaveBeenCalledTimes(1);
+		expect(preamblesRefresh).toHaveBeenCalledTimes(1);
+		expect(env.onExpanded).toHaveBeenLastCalledWith('Reassigned chat-1', 'Reassigned chat-1'.length);
+
+		for (const selected of [
+			snippetToSelectable(snippet),
+			preambleToSelectable(duplicatePreamble)!,
+		]) {
+			const callsBefore = mockExpandSnippet.mock.calls.length;
+			const snippetRefreshesBefore = env.refreshSnippets.mock.calls.length;
+			const preambleRefreshesBefore = preamblesRefresh.mock.calls.length;
+			expect(await env.controller.insertFromPalette(env.palette, selected, '')).toBe('cancelled');
+			expect(mockExpandSnippet).toHaveBeenCalledTimes(callsBefore);
+			expect(env.refreshSnippets).toHaveBeenCalledTimes(snippetRefreshesBefore + 1);
+			expect(preamblesRefresh).toHaveBeenCalledTimes(preambleRefreshesBefore + 1);
+		}
+	});
 });

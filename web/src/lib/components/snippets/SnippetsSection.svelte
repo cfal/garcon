@@ -37,6 +37,7 @@
 		searchSnippets(snippets.snippets, query, (snippet) => snippet.template),
 	);
 	let form = $state<SnippetFormTarget>({ kind: 'closed' });
+	let editRemoved = $state(false);
 	let removeTarget = $state<{ snippet: Snippet; revision: number } | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
@@ -54,6 +55,7 @@
 
 	function openCreate(): void {
 		if (operationLocked) return;
+		editRemoved = false;
 		operationError = null;
 		form = { kind: 'create' };
 	}
@@ -61,11 +63,13 @@
 	function openEdit(snippet: Snippet): void {
 		const revision = snippets.snapshot?.revision;
 		if (operationLocked || revision === undefined) return;
+		editRemoved = false;
 		operationError = null;
 		form = { kind: 'edit', snippet, revision };
 	}
 
 	function closeForm(): void {
+		editRemoved = false;
 		form = { kind: 'closed' };
 	}
 
@@ -83,16 +87,21 @@
 	}
 
 	async function save(definition: SnippetDefinitionInput): Promise<void> {
+		if (form.kind === 'edit' && editRemoved) {
+			throw new Error(m.snippets_already_removed({ name: form.snippet.shortName }));
+		}
 		if (operationLocked) {
 			throw new Error(m.snippets_changed_before_write());
 		}
 		if (form.kind === 'edit') {
 			const targetId = form.snippet.id;
+			const targetShortName = form.snippet.shortName;
 			try {
 				await snippets.update(targetId, definition, form.revision);
 			} catch (error) {
 				if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.notFound) {
-					throw new Error(m.snippets_already_removed({ name: form.snippet.shortName }), {
+					if (form.kind === 'edit' && form.snippet.id === targetId) editRemoved = true;
+					throw new Error(m.snippets_already_removed({ name: targetShortName }), {
 						cause: error,
 					});
 				}
@@ -104,6 +113,13 @@
 					error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
 					snippets.snapshot !== null
 				) {
+					const refreshed = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
+					if (!refreshed) {
+						editRemoved = true;
+						throw new Error(m.snippets_already_removed({ name: targetShortName }), {
+							cause: error,
+						});
+					}
 					form.revision = snippets.snapshot.revision;
 				}
 				throw error;
@@ -245,7 +261,7 @@
 	<SnippetFormDialog
 		open
 		snippet={form.kind === 'edit' ? form.snippet : null}
-		disabled={operationLocked}
+		disabled={operationLocked || editRemoved}
 		onSave={save}
 		onClose={closeForm}
 	/>

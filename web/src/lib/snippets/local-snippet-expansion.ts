@@ -54,6 +54,24 @@ function collectActiveVariables<Variable extends string>(
 	return active;
 }
 
+export function hasLoadedShortNameConflict(
+	shortName: string,
+	options: {
+		readonly snippets?: SnippetCatalogLookup | null;
+		readonly preambles?: PreambleCatalogLookup | null;
+	},
+): boolean {
+	const hasSnippet = Boolean(
+		options.snippets?.hasLoaded &&
+			options.snippets.snippets.some((entry) => entry.shortName === shortName),
+	);
+	const hasPreamble = Boolean(
+		options.preambles?.hasLoaded &&
+			options.preambles.preambles.some((entry) => entry.snippetShortName === shortName),
+	);
+	return hasSnippet && hasPreamble;
+}
+
 export function findLoadedSelectableSnippetByShortName(
 	shortName: string,
 	options: {
@@ -61,16 +79,16 @@ export function findLoadedSelectableSnippetByShortName(
 		readonly preambles: PreambleCatalogLookup;
 	},
 ): SelectableSnippet | null {
-	if (options.snippets.hasLoaded) {
-		const snippet = options.snippets.snippets.find((entry) => entry.shortName === shortName);
-		if (snippet) return snippetToSelectable(snippet);
-	}
-	if (options.preambles.hasLoaded) {
-		const preamble = options.preambles.preambles.find(
-			(entry) => entry.snippetShortName === shortName,
-		);
-		if (preamble) return preambleToSelectable(preamble);
-	}
+	const snippet = options.snippets.hasLoaded
+		? options.snippets.snippets.find((entry) => entry.shortName === shortName)
+		: undefined;
+	const preamble = options.preambles.hasLoaded
+		? options.preambles.preambles.find((entry) => entry.snippetShortName === shortName)
+		: undefined;
+	// Treat cross-catalog duplicates as ambiguous so callers reconcile and defer to server precedence.
+	if (snippet && preamble) return null;
+	if (snippet) return snippetToSelectable(snippet);
+	if (preamble) return preambleToSelectable(preamble);
 	return null;
 }
 

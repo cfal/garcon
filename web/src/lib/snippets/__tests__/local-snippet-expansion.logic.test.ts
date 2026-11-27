@@ -3,6 +3,7 @@ import type { Preamble } from '$shared/preambles';
 import { SNIPPET_ARGUMENTS_MAX_LENGTH, SNIPPET_EXPANDED_MAX_LENGTH, type Snippet } from '$shared/snippets';
 import {
 	findLoadedSelectableSnippetByShortName,
+	hasLoadedShortNameConflict,
 	isSelectedSnippetStaleInLoadedCatalog,
 	tryExpandSelectableSnippetLocally,
 } from '../local-snippet-expansion.js';
@@ -210,6 +211,20 @@ describe('catalog helpers', () => {
 				preambles: { hasLoaded: true, preambles: [preamble] },
 			}),
 		).toBeNull();
+
+		const duplicatePreamble = makePreamble({ snippetShortName: 'alpha' });
+		expect(
+			hasLoadedShortNameConflict('alpha', {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [duplicatePreamble] },
+			}),
+		).toBe(true);
+		expect(
+			findLoadedSelectableSnippetByShortName('alpha', {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [duplicatePreamble] },
+			}),
+		).toBeNull();
 	});
 
 	it('identifies changed sources across same-source and cross-source responses', () => {
@@ -289,6 +304,15 @@ describe('catalog helpers', () => {
 				snippets: { hasLoaded: true, snippets: [{ ...snippet, shortName: 'context' }] },
 				preambles: { hasLoaded: true, preambles: [makePreamble()] },
 			}),
+		).toBe(true);
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(
+				snippetToSelectable({ ...snippet, shortName: 'context' }),
+				{
+					snippets: { hasLoaded: true, snippets: [{ ...snippet, shortName: 'context' }] },
+					preambles: { hasLoaded: true, preambles: [makePreamble()] },
+				},
+			),
 		).toBe(true);
 	});
 });

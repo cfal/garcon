@@ -46,7 +46,7 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     };
     const localReview = await createSnippet('local_review', 'Review {{arguments}} for {{chat_id}}', 'open PRs');
     await createSnippet('path_review', 'Review in {{project_path}}');
-    await createSnippet('date_review', 'Summary on {{current_date}}');
+    const dateReview = await createSnippet('date_review', 'Summary on {{current_date}}');
 
     let preambleSnapshot = await client.get<PreamblesSnapshot>('/api/v1/preambles');
     const createNamedPreamble = async (snippetShortName: string, title: string, content: string) => {
@@ -155,7 +155,7 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     activeSocket.close({ code: 1000, reason: 'Synthetic disconnect' });
     await closed;
 
-    await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
+    const updatedLocal = await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
       expectedRevision: snippetSnapshot.revision,
       id: localReview.id,
       snippet: {
@@ -164,6 +164,7 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
         defaultArguments: 'open PRs',
       },
     });
+    snippetSnapshot = updatedLocal.snapshot;
     await client.put<PreamblesMutationResponse>('/api/v1/preambles', {
       expectedRevision: preambleSnapshot.revision,
       id: localCtx.id,
@@ -244,6 +245,50 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     await scheduledEditor.waitFor({ state: 'detached' });
     await scheduledList.getByRole('button', { name: 'Close', exact: true }).click();
     await scheduledList.waitFor({ state: 'detached' });
+
+    phase('Phase 3: checking HTTP 409 edit retry in Snippets manager');
+    await page.getByRole('button', { name: 'More actions', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Snippets', exact: true }).click();
+    const manager = page.getByRole('dialog', { name: 'Snippets', exact: true });
+    await manager.getByRole('button', { name: 'Edit local_review', exact: true }).click();
+    const editDialog = page.getByRole('dialog', { name: 'Edit Snippet', exact: true });
+    const templateField = editDialog.getByRole('textbox', { name: 'Snippet text', exact: true });
+    await templateField.fill('Conflict retry {{arguments}}');
+
+    const getsBeforeConflict = snippetGetDone;
+    const concurrentUpdate = await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
+      expectedRevision: snippetSnapshot.revision,
+      id: dateReview.id,
+      snippet: {
+        shortName: 'date_review',
+        template: 'Advanced {{current_date}}',
+        defaultArguments: '',
+      },
+    });
+    snippetSnapshot = concurrentUpdate.snapshot;
+    const saveButton = editDialog.getByRole('button', { name: 'Save', exact: true });
+    await browserExpect.poll(() => snippetGetDone > getsBeforeConflict, { timeout: 15_000 }).toBe(true);
+    await browserExpect(saveButton).toBeEnabled();
+
+    await fixture.withExpectedConsoleErrors(
+      [/Failed to load resource: the server responded with a status of 409.*/],
+      async () => {
+        await saveButton.click();
+        await browserExpect(editDialog.getByRole('alert')).toBeVisible();
+        await browserExpect(templateField).toHaveValue('Conflict retry {{arguments}}');
+      },
+    );
+
+    await browserExpect(saveButton).toBeEnabled();
+    await saveButton.click();
+    await editDialog.waitFor({ state: 'detached' });
+    const finalSnapshot = await client.get<SnippetsSnapshot>('/api/v1/snippets');
+    expect(finalSnapshot.snippets.find((entry) => entry.id === localReview.id)?.template).toBe(
+      'Conflict retry {{arguments}}',
+    );
+
+    await manager.getByRole('button', { name: 'Close', exact: true }).click();
+    await manager.waitFor({ state: 'detached' });
     fixture.assertNoBrowserErrors();
   });
 }, 120_000);

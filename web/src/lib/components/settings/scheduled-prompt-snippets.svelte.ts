@@ -5,6 +5,7 @@ import {
 } from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 import {
+	hasLoadedShortNameConflict,
 	isSelectedSnippetStaleInLoadedCatalog,
 	tryExpandSelectableSnippetLocally,
 	type PreambleCatalogLookup,
@@ -73,9 +74,7 @@ export class ScheduledPromptSnippets {
 		let pendingNotified = false;
 		try {
 			if (isSelectedSnippetStaleInLoadedCatalog(snippet, this.options)) {
-				this.error = m.snippets_changed_before_expansion();
-				this.palette.dismiss();
-				return 'cancelled';
+				return this.#cancelStaleSelection(snippet);
 			}
 			const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
 				kind: 'scheduled',
@@ -109,9 +108,7 @@ export class ScheduledPromptSnippets {
 				return 'cancelled';
 			}
 			if (isSelectedSnippetStaleInLoadedCatalog(snippet, this.options)) {
-				this.error = m.snippets_changed_before_expansion();
-				this.palette.dismiss();
-				return 'cancelled';
+				return this.#cancelStaleSelection(snippet);
 			}
 			const target = context.target;
 			if (
@@ -129,5 +126,15 @@ export class ScheduledPromptSnippets {
 		} finally {
 			if (pendingNotified && !this.expansion.pending) this.options.onPendingChange(false);
 		}
+	}
+
+	#cancelStaleSelection(snippet: SelectableSnippet): 'cancelled' {
+		if (hasLoadedShortNameConflict(snippet.shortName, this.options)) {
+			this.options.onSourceChanged('snippet');
+			this.options.onSourceChanged('preamble');
+		}
+		this.error = m.snippets_changed_before_expansion();
+		this.palette.dismiss();
+		return 'cancelled';
 	}
 }
