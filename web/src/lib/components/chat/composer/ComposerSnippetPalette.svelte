@@ -22,7 +22,7 @@
 	} from '$shared/snippets';
 	import ComposerSnippetArgumentsDialog from './ComposerSnippetArgumentsDialog.svelte';
 	import { ComposerSnippetPaletteState } from './composer-snippet-palette-state.svelte.js';
-	import { flushSync } from 'svelte';
+	import { flushSync, untrack } from 'svelte';
 
 	interface Props {
 		open: boolean;
@@ -97,10 +97,11 @@
 	});
 
 	$effect(() => {
-		if (open) {
+		if (!open) return;
+		untrack(() => {
 			void snippets.loadInBackground();
 			void preambles.loadInBackground();
-		}
+		});
 	});
 
 	$effect(() => {

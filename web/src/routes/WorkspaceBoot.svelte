@@ -21,12 +21,12 @@
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-	import { bindCatalogReconnect } from '$lib/snippets/catalog-reconnect.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
 	import { createNavigationStore } from '$lib/stores/navigation.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
+	import { createWsReconnectEffect } from '$lib/ws/reconnect-effect.svelte.js';
 	import { ChatProcessingReconciler } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
@@ -357,7 +357,6 @@
 			} else browserNotificationsRouter.releasePermissions();
 		});
 	});
-	onMount(() => bindCatalogReconnect(ws, [preambles, snippets]));
 	onMount(() =>
 		installNativeConnectionNotification(
 			ws,
@@ -385,24 +384,25 @@
 	browserNotificationsRouter.start();
 	transcriptSearchStatus.start();
 
-	$effect(() => {
-		const connectedAt = ws.connectionStatus.lastConnectedAt;
-		if (!connectedAt) return;
-		untrack(() => void transcriptSearchStatus.refresh());
-		untrack(() => void scheduledPrompts.refreshIfLoaded());
-		untrack(() => pullRequestReviews.invalidate());
-		untrack(() => void executors.refresh());
-		untrack(() => {
+	createWsReconnectEffect(
+		() => ws.connectionStatus,
+		() => {
+			void transcriptSearchStatus.refresh();
+			void scheduledPrompts.refreshIfLoaded();
+			pullRequestReviews.invalidate();
+			void preambles.refreshIfLoaded();
+			void snippets.refreshIfLoaded();
+			void executors.refresh();
 			apiProviders.invalidate();
 			void modelCatalog.refreshIfStale();
-		});
-		// A reconnect also refreshes an already-open chat selection editor;
-		// its dirty draft is preserved by the controller's refresh path.
-		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
-		untrack(() => chatBoardInvalidations.publishReconnect());
-		untrack(() => ticketsInvalidations.publishReconnect());
-		return () => transcriptSearchStatus.cancelRefresh();
-	});
+			// A reconnect also refreshes an already-open chat selection editor;
+			// its dirty draft is preserved by the controller's refresh path.
+			chatPreambleSelectionInvalidationHub.publishReconnect();
+			chatBoardInvalidations.publishReconnect();
+			ticketsInvalidations.publishReconnect();
+			return () => transcriptSearchStatus.cancelRefresh();
+		},
+	);
 
 	onMount(() => {
 		ws.onAuthFailure = (token, code) => {

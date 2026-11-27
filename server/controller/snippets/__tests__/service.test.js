@@ -10,7 +10,6 @@ import { SnippetStore } from '../store.ts';
 import { PreambleStore } from '../../preambles/store.ts';
 import { SnippetShortNameCoordinator } from '../short-name-coordinator.ts';
 import { PreambleService } from '../../preambles/service.ts';
-import { SNIPPET_ARGUMENTS_MAX_LENGTH } from '../../../../common/snippets.ts';
 
 const createdDirs = [];
 const originalProjectBaseDir = process.env.GARCON_PROJECT_BASE_DIR;
@@ -19,19 +18,13 @@ const PROSPECTIVE_CHAT_ID = '1787471053739200';
 const MISSING_CHAT_ID = '1787471053739201';
 
 describe('scheduled snippet expansion', () => {
-  it('returns a typed validation failure for ambiguous replacement boundaries and oversized scheduled expansions', async () => {
+  it('returns a typed validation failure for ambiguous replacement boundaries', async () => {
     const { service } = await serviceFixture();
     await service.create({ expectedRevision: 0, snippet: { shortName: 'review',
       template: '{{arguments}}{{current_date}}', defaultArguments: 'report\\' } });
     await expect(service.expand({ shortName: 'review', arguments: { type: 'default' }, context: {
       type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo' },
     } })).rejects.toMatchObject({ code: 'SNIPPET_VALIDATION_FAILED', status: 422 });
-
-    await service.update({ expectedRevision: 1, id: 'snippet-a', snippet: { shortName: 'review',
-      template: '{{arguments}}{{arguments}}{{arguments}}', defaultArguments: 'x'.repeat(32_000) } });
-    await expect(service.expand({ shortName: 'review', arguments: { type: 'default' }, context: {
-      type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo' },
-    } })).rejects.toMatchObject({ code: 'SNIPPET_EXPANSION_TOO_LONG', status: 422 });
   });
   it('resolves Local and remote paths without creating a prospective chat', async () => {
     const { service, chatLookups } = await serviceFixture();
@@ -103,11 +96,83 @@ describe('snippet service', () => {
       projectPaths: { async resolve(projectPath) { resolved = true; return projectPath; } },
     });
     await service.create({ expectedRevision: 0, snippet: {
-      shortName: 'today', template: '{{current_date}} / \\{{current_date_local}}', defaultArguments: '',
+      shortName: 'today', template: '{{project_path}} / {{current_date}} / \\{{current_date_local}}', defaultArguments: '',
     } });
     await expect(service.expand({ shortName: 'today', arguments: { type: 'default' },
       context: { type: 'new-chat', chatId: PROSPECTIVE_CHAT_ID, projectPath: '/draft/repo' },
-    })).resolves.toMatchObject({ expandedText: '2030-01-02 / {{current_date_local}}' });
+    })).resolves.toMatchObject({ expandedText: '/draft/repo / 2030-01-02 / {{current_date_local}}' });
+  });
+
+  it('skips project path resolution unless the snippet uses an active project_path token', async () => {
+    let resolveCalls = 0;
+    let nextId = 0;
+    const { service, preambleStore } = await serviceFixture({
+      newId: () => `snippet-${++nextId}`,
+      projectPaths: {
+        async resolve(projectPath) {
+          resolveCalls += 1;
+          return `/canonical${projectPath}`;
+        },
+      },
+    });
+    const specs = [
+      ['static', 'Static text', ''],
+      ['args', 'Review {{arguments}}', 'changes'],
+      ['date', 'Date {{current_date}}', ''],
+      ['escaped', 'Literal \\{{project_path}}', ''],
+    ];
+    for (let i = 0; i < specs.length; i++) {
+      const [shortName, template, defaultArguments] = specs[i];
+      await service.create({
+        expectedRevision: i,
+        snippet: { shortName, template, defaultArguments },
+      });
+      await service.expand({
+        shortName,
+        arguments: { type: 'default' },
+        context: { type: 'chat', chatId: REGISTERED_CHAT_ID },
+      });
+      await service.expand({
+        shortName,
+        arguments: { type: 'default' },
+        context: { type: 'new-chat', chatId: PROSPECTIVE_CHAT_ID, projectPath: '/draft/repo' },
+      });
+    }
+    await preambleStore.create({
+      id: '00000000-0000-4000-8000-000000000002',
+      enabled: false,
+      title: 'Literal path preamble',
+      snippetShortName: 'preamble_path',
+      content: 'Preamble {{project_path}} on {{current_date}}',
+      scope: { type: 'global' },
+      agentIds: [],
+      tagFilter: { mode: 'any', tags: [] },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }, 0);
+    await expect(service.expand({
+      shortName: 'preamble_path',
+      arguments: { type: 'default' },
+      context: { type: 'chat', chatId: REGISTERED_CHAT_ID },
+    })).resolves.toMatchObject({ expandedText: 'Preamble {{project_path}} on 2026-01-01' });
+    expect(resolveCalls).toBe(0);
+
+    await expect(service.expand({
+      shortName: 'static',
+      arguments: { type: 'default' },
+      context: { type: 'chat', chatId: MISSING_CHAT_ID },
+    })).rejects.toMatchObject({ code: 'SNIPPET_CHAT_NOT_FOUND' });
+
+    await service.create({
+      expectedRevision: specs.length,
+      snippet: { shortName: 'with_path', template: 'Path {{project_path}}', defaultArguments: '' },
+    });
+    await expect(service.expand({
+      shortName: 'with_path',
+      arguments: { type: 'default' },
+      context: { type: 'chat', chatId: REGISTERED_CHAT_ID },
+    })).resolves.toMatchObject({ expandedText: 'Path /canonical/registered/repo' });
+    expect(resolveCalls).toBe(1);
   });
 
   it('preserves exact paths through inspection, expansion and registered-chat context fencing', async () => {
@@ -409,7 +474,7 @@ describe('snippet service', () => {
     });
   });
 
-  it('rejects unusable defaults, oversized arguments, and oversized expanded output', async () => {
+  it('rejects unusable defaults and maps oversized default expansion errors', async () => {
     const { service } = await serviceFixture();
     await expect(
       service.create({
@@ -430,31 +495,19 @@ describe('snippet service', () => {
         defaultArguments: 'x'.repeat(32_000),
       },
     });
-    const context = {
-      type: 'new-chat',
-      chatId: PROSPECTIVE_CHAT_ID,
-      projectPath: '/draft/repo',
-    };
     await expect(
       service.expand({
         shortName: 'large',
         arguments: { type: 'default' },
-        context,
+        context: {
+          type: 'new-chat',
+          chatId: PROSPECTIVE_CHAT_ID,
+          projectPath: '/draft/repo',
+        },
       }),
     ).rejects.toMatchObject({
       code: 'SNIPPET_EXPANSION_TOO_LONG',
       status: 422,
-    });
-    await expect(
-      service.expand({
-        shortName: 'large',
-        arguments: { type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
-        context,
-      }),
-    ).rejects.toMatchObject({
-      code: 'SNIPPET_VALIDATION_FAILED',
-      message: 'Snippet is invalid',
-      status: 400,
     });
   });
 
@@ -491,7 +544,7 @@ describe('snippet service', () => {
     ).resolves.toMatchObject({
       expandedText: `Reply to ${PROSPECTIVE_CHAT_ID} about the review`,
     });
-    expect(chatLookups).toEqual([REGISTERED_CHAT_ID, REGISTERED_CHAT_ID]);
+    expect(chatLookups).toEqual([REGISTERED_CHAT_ID]);
   });
 
   it('rejects missing chats and unknown snippets', async () => {

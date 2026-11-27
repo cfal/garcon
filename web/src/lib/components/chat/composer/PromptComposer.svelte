@@ -27,7 +27,6 @@
 		getTransientLayers,
 		getWorkspaceShortcuts,
 		getProjectResolution,
-		getOptionalWs,
 	} from '$lib/context';
 	import {
 		chatAttachmentAccept,
@@ -133,7 +132,6 @@
 	const transientLayers = getTransientLayers();
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
-	const ws = getOptionalWs();
 	const ui = new PromptComposerUiState();
 	const formattedDraft = $derived(
 		ui.formattedDraft?.source === composerState.inputText ? ui.formattedDraft : null,
@@ -181,7 +179,6 @@
 		snippets,
 		preambles,
 		notifications,
-		isWsConnected: () => ws?.isConnected === true,
 		getExecutionKey: () => executionKey,
 		isConversationInput: () => conversationInput,
 		isTransformPending: (): boolean => promptTransformPending,
@@ -190,8 +187,8 @@
 			textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd } : null,
 		hasProjectPath: () => Boolean(projectState.target?.projectPath.trim()),
 		getLocalChatId: () => sessions.selectedChat?.id ?? '',
-		prepareServerContext: async (signal) => {
-			const operation = await projectState.resolveSnippetContext(signal);
+		buildServerContext: () => {
+			const operation = projectState.snippetContext();
 			return { requestContext: operation.context, prepared: operation };
 		},
 		matchesServerContext: (prepared, response) =>

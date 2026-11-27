@@ -6,10 +6,10 @@ import {
   normalizeExpandSnippetRequest,
 } from '../snippets.js';
 import {
-  expandScheduledSnippetTemplate,
-  expandSnippetTemplate,
   ScheduledSnippetBoundaryError,
   SnippetExpansionError,
+  expandScheduledSnippetTemplate,
+  expandSnippetTemplate,
 } from '../snippet-template.js';
 import { TEMPLATE_VALIDATION_VALUES } from '../template-tokens.js';
 
@@ -59,38 +59,48 @@ describe('snippetTemplateUsesChatId', () => {
   });
 });
 
-describe('shared snippet template expansion', () => {
-  it('expands snippet templates and reports oversized expansions with SnippetExpansionError', () => {
+describe('shared snippet templates', () => {
+  it('expands immediate and scheduled templates', () => {
+    const context = { ...TEMPLATE_VALIDATION_VALUES, chat_id: 'chat-a' };
     expect(
-      expandSnippetTemplate('Review {{arguments}} in {{chat_id}} (\\{{current_date}})', {
+      expandSnippetTemplate('Chat {{chat_id}}: {{arguments}} in {{project_path}}', {
         arguments: 'API',
-        projectPath: '',
-        context: { ...TEMPLATE_VALIDATION_VALUES, chat_id: 'chat-1' },
+        projectPath: '/repo',
+        context,
       }),
-    ).toBe('Review API in chat-1 ({{current_date}})');
+    ).toBe('Chat chat-a: API in /repo');
+    expect(
+      expandScheduledSnippetTemplate('{{arguments}} for {{chat_id}} \\{{chat_id}}', {
+        arguments: '{{chat_id}}',
+        projectPath: '/repo',
+      }),
+    ).toBe('\\{{chat_id}} for {{chat_id}} \\{{chat_id}}');
+  });
 
+  it('throws typed expansion-too-long and scheduled-boundary errors', () => {
     expect(() =>
       expandSnippetTemplate('{{arguments}}{{arguments}}', {
         arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH),
-        projectPath: '',
+        projectPath: '/repo',
         context: TEMPLATE_VALIDATION_VALUES,
       }),
-    ).toThrow(SnippetExpansionError);
-  });
-
-  it('expands scheduled snippet templates and reports deferred boundary errors', () => {
-    expect(
-      expandScheduledSnippetTemplate('Review {{arguments}} on {{current_date}}', {
-        arguments: '{{chat_id}}',
-        projectPath: '',
+    ).toThrow(
+      expect.objectContaining({
+        constructor: SnippetExpansionError,
+        code: 'SNIPPET_EXPANSION_TOO_LONG',
       }),
-    ).toBe('Review \\{{chat_id}} on {{current_date}}');
+    );
 
     expect(() =>
-      expandScheduledSnippetTemplate('{{arguments}}{{current_date}}', {
+      expandScheduledSnippetTemplate('{{arguments}}{{chat_id}}', {
         arguments: 'report\\',
-        projectPath: '',
+        projectPath: '/repo',
       }),
-    ).toThrow(ScheduledSnippetBoundaryError);
+    ).toThrow(
+      expect.objectContaining({
+        constructor: ScheduledSnippetBoundaryError,
+        code: 'SNIPPET_VALIDATION_FAILED',
+      }),
+    );
   });
 });

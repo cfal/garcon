@@ -16,7 +16,6 @@ import type { PreambleSelectionPreviewResponse } from '$lib/api/chat-preambles';
 import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import type { PreamblesSnapshot } from '$shared/preambles';
-import type { WsConnectionPhase } from '$lib/ws/connection.svelte.js';
 import { localExecutor, remoteExecutor, localScope } from '$lib/executors/__tests__/fixtures';
 import { ModelCatalogStore, type ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import { nativeCatalogAgent } from '../../../../../test/model-catalog';
@@ -165,8 +164,6 @@ async function renderSubmittableForm(
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
-		preloadSnippets?: boolean;
-		wsPhase?: WsConnectionPhase;
 		preambleSnapshot?: PreamblesSnapshot;
 	} = {},
 ): Promise<HTMLTextAreaElement> {
@@ -1331,7 +1328,7 @@ describe('NewChatForm', () => {
 		);
 	});
 
-	it('inserts a named preamble into a new-chat draft locally without server calls', async () => {
+	it('inserts a named preamble into a new-chat draft', async () => {
 		stubMatchMedia(false);
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat, {
@@ -1357,19 +1354,13 @@ describe('NewChatForm', () => {
 		await fireEvent.click(await screen.findByRole('option', { name: /^manual\b/ }));
 
 		await waitFor(() =>
-			expect(messageInput.value).toBe(`Before Literal {{arguments}} for ${PROSPECTIVE_CHAT_ID} after`),
+			expect(messageInput.value).toBe(
+				`Before Literal {{arguments}} for ${PROSPECTIVE_CHAT_ID} after`,
+			),
 		);
 		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 		expect(onStartChat).not.toHaveBeenCalled();
-
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
-		expect(onStartChat).toHaveBeenCalledWith(
-			expect.objectContaining({
-				firstMessage: `Before Literal {{arguments}} for ${PROSPECTIVE_CHAT_ID} after`,
-			}),
-			PROSPECTIVE_CHAT_ID,
-		);
 	});
 
 	it('mints the prospective ID lazily and retains it with the draft on a new open request', async () => {
@@ -1519,11 +1510,21 @@ describe('NewChatForm', () => {
 		);
 	});
 
-	it('opens from an inline trigger and replaces the captured span locally in the first message', async () => {
+	it('opens from an inline trigger and replaces the captured span in the first message', async () => {
 		stubMatchMedia(false);
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'EXPANDED',
+		});
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat, {
-			snippetTemplate: 'Expanded review',
+			snippetTemplate: 'Expanded {{project_path}}',
 		});
 		const source = 'Before ;;review after';
 
@@ -1534,83 +1535,22 @@ describe('NewChatForm', () => {
 		expect(search.value).toBe('review');
 		await fireEvent.click(screen.getByRole('option', { name: /^review\b/ }));
 
-		await waitFor(() => expect(messageInput.value).toBe('Before Expanded review after'));
-		expect(messageInput.selectionStart).toBe('Before Expanded review'.length);
+		await waitFor(() => expect(messageInput.value).toBe('Before EXPANDED after'));
+		expect(messageInput.selectionStart).toBe('Before EXPANDED'.length);
 		expect(onStartChat).not.toHaveBeenCalled();
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(clientChatId.createClientChatId).not.toHaveBeenCalled();
-	});
-
-	it('expands /s locally in new-chat drafts when WS is connected and reuses the prospective chat ID on submit', async () => {
-		stubMatchMedia(false);
-		const onStartChat = vi.fn();
-		const messageInput = await renderSubmittableForm(onStartChat, {
-			snippetTemplate: 'Review {{arguments}} for {{chat_id}}',
-			snippetDefaultArguments: 'open PRs',
-			preloadSnippets: true,
-			wsPhase: 'connected',
-		});
-
-		await fireEvent.input(messageInput, { target: { value: '/s review' } });
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
-		await waitFor(() =>
-			expect(messageInput.value).toBe(`Review open PRs for ${PROSPECTIVE_CHAT_ID}`),
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
+			{
+				shortName: 'review',
+				arguments: { type: 'value', value: '' },
+				context: {
+					type: 'new-chat',
+					executorId: 'local',
+					chatId: PROSPECTIVE_CHAT_ID,
+					projectPath: '/workspace/project',
+				},
+			},
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(onStartChat).not.toHaveBeenCalled();
-
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
-		expect(onStartChat).toHaveBeenCalledWith(
-			expect.objectContaining({ firstMessage: `Review open PRs for ${PROSPECTIVE_CHAT_ID}` }),
-			PROSPECTIVE_CHAT_ID,
-		);
-	});
-
-	it('falls back to the server for /s with controller date tokens even when catalog is fresh', async () => {
-		stubMatchMedia(false);
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: 'snippet-review',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'review',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'Daily notes 2026-01-01',
-		});
-		const messageInput = await renderSubmittableForm(vi.fn(), {
-			snippetTemplate: 'Daily notes {{current_date_local}}',
-			preloadSnippets: true,
-			wsPhase: 'connected',
-		});
-
-		await fireEvent.input(messageInput, { target: { value: '/s review' } });
-		await fireEvent.keyDown(messageInput, { key: 'Enter' });
-		await waitFor(() => expect(messageInput.value).toBe('Daily notes 2026-01-01'));
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
-	});
-
-	it('reopens arguments with preserved draft when local new-chat expansion exceeds the output limit', async () => {
-		stubMatchMedia(false);
-		const messageInput = await renderSubmittableForm(vi.fn(), {
-			snippetTemplate: '{{arguments}}{{arguments}}{{arguments}}',
-		});
-		await fireEvent.input(messageInput, { target: { value: 'Keep draft' } });
-		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
-		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
-		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
-		const argumentsInput = await screen.findByRole('textbox', { name: 'Arguments' });
-		const largeArgs = 'x'.repeat(30_000);
-		await fireEvent.input(argumentsInput, { target: { value: largeArgs } });
-		await fireEvent.keyDown(argumentsInput, { key: 'Enter' });
-
-		await screen.findByText(/Expanded snippet exceeds 64000 characters/);
-		const reopened = (await screen.findByRole('textbox', {
-			name: 'Arguments',
-		})) as HTMLTextAreaElement;
-		expect(reopened.value).toBe(largeArgs);
-		expect(messageInput.value).toBe('Keep draft');
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
 	it.each(['conversation', 'literal'] as const)('inserts an explicit snippet into a new %s draft', async (executionPolicy) => {
@@ -2039,6 +1979,42 @@ describe('NewChatForm', () => {
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(messageInput.value).toBe('/snippet review cancel this');
+	});
+
+	it('expands eligible palette and slash snippets locally using the prospective chat ID', async () => {
+		stubMatchMedia(false);
+		vi.mocked(clientChatId.createClientChatId)
+			.mockReset()
+			.mockReturnValueOnce(PROSPECTIVE_CHAT_ID)
+			.mockReturnValueOnce(RESEEDED_CHAT_ID);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat, {
+			snippetTemplate: 'Draft {{arguments}} for {{chat_id}}',
+			snippetDefaultArguments: 'plan',
+		});
+		await inputAtCaret(messageInput, ';;review', 8);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+		await fireEvent.keyDown(await screen.findByRole('textbox', { name: 'Arguments' }), {
+			key: 'Enter',
+		});
+
+		await waitFor(() =>
+			expect(messageInput.value).toBe(`Draft plan for ${PROSPECTIVE_CHAT_ID}`),
+		);
+		await fireEvent.input(messageInput, { target: { value: '/s review next' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		await waitFor(() =>
+			expect(messageInput.value).toBe(`Draft next for ${PROSPECTIVE_CHAT_ID}`),
+		);
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(onStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({ firstMessage: `Draft next for ${PROSPECTIVE_CHAT_ID}` }),
+			PROSPECTIVE_CHAT_ID,
+		);
 	});
 });
 

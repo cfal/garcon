@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { expect as browserExpect } from 'playwright/test';
 import type { WebSocket as BrowserWebSocket, WebSocketRoute } from 'playwright';
+import { expect as browserExpect } from 'playwright/test';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 import type { SnippetsMutationResponse, SnippetsSnapshot } from '../../../common/snippets.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
@@ -9,40 +9,30 @@ function pathnameOf(url: string): string {
   return new URL(url).pathname;
 }
 
-test('runs local snippet/preamble fast paths, falls back offline, refreshes on WS reconnect, and retries 409 edits', async () => {
+test('expands eligible snippets/preambles locally, skips project preflight on fallbacks, and picks up WS edits', async () => {
   await withChromiumFixture('snippet-expansion-fast-path', async (fixture, phase) => {
-    const { page, context, integration } = fixture;
+    const { page, integration } = fixture;
     const { client } = integration;
 
     let expandCalls = 0;
     let projectResolveCalls = 0;
+    let snippetGetRequests = 0;
+    let preambleGetRequests = 0;
     let snippetGetDone = 0;
     let preambleGetDone = 0;
     page.on('request', (request) => {
       const pathname = pathnameOf(request.url());
       if (pathname === '/api/v1/snippets/expand') expandCalls += 1;
       if (pathname === '/api/v1/projects/resolve') projectResolveCalls += 1;
+      if (request.method() !== 'GET') return;
+      if (pathname === '/api/v1/snippets') snippetGetRequests += 1;
+      if (pathname === '/api/v1/preambles') preambleGetRequests += 1;
     });
     page.on('response', (response) => {
       if (response.request().method() !== 'GET' || !response.ok()) return;
       const pathname = pathnameOf(response.url());
       if (pathname === '/api/v1/snippets') snippetGetDone += 1;
       if (pathname === '/api/v1/preambles') preambleGetDone += 1;
-    });
-
-    let allowReconnect = true;
-    let activeSocket: WebSocketRoute | undefined;
-    let activeBrowserSocket: BrowserWebSocket | undefined;
-    page.on('websocket', (socket) => {
-      if (!socket.isClosed()) activeBrowserSocket = socket;
-    });
-    await context.routeWebSocket('**/ws?*', (socket) => {
-      if (!allowReconnect) {
-        socket.close({ code: 1000, reason: 'Synthetic offline interval' });
-        return;
-      }
-      activeSocket = socket;
-      socket.connectToServer();
     });
 
     let snippetSnapshot = await client.get<SnippetsSnapshot>('/api/v1/snippets');
@@ -71,8 +61,9 @@ test('runs local snippet/preamble fast paths, falls back offline, refreshes on W
         },
       });
       preambleSnapshot = response.snapshot;
+      return preambleSnapshot.preambles.find((entry) => entry.snippetShortName === snippetShortName)!;
     };
-    await createNamedPreamble(
+    const localCtx = await createNamedPreamble(
       'local_ctx',
       'Local context',
       'Static context for {{chat_id}} with literal {{arguments}}',
@@ -92,13 +83,29 @@ test('runs local snippet/preamble fast paths, falls back offline, refreshes on W
     });
     await client.waitForTurnTerminal(chatId, turn.turnId);
 
-    phase('Phase 1: checking immediate composer local fast paths and server fallbacks');
+    phase('Phase 1: checking immediate composer fast paths, fallbacks without project resolve, and reconnect recovery');
+    let activeSocket: WebSocketRoute | undefined;
+    let browserSocket: BrowserWebSocket | undefined;
+    let allowConnect = true;
+    page.on('websocket', (socket) => {
+      browserSocket = socket;
+    });
+    await page.routeWebSocket(/\/ws(?:\?|$)/, (socket) => {
+      if (!allowConnect) {
+        socket.close({ code: 1000, reason: 'Synthetic offline interval' });
+        return;
+      }
+      activeSocket = socket;
+      socket.connectToServer();
+    });
     await page.goto(`${integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`);
     const composer = page.getByPlaceholder('Reply...', { exact: true });
     await browserExpect(composer).toBeVisible();
-    await browserExpect
-      .poll(() => Boolean(activeSocket && activeBrowserSocket && !activeBrowserSocket.isClosed()))
-      .toBe(true);
+    const runSlashCommand = async (command: string, expectedValue: string | RegExp) => {
+      await composer.fill(command);
+      await composer.press('Enter');
+      await browserExpect(composer).toHaveValue(expectedValue);
+    };
 
     await composer.pressSequentially(';;');
     const palette = page.getByRole('dialog', { name: 'Insert Snippet', exact: true });
@@ -121,38 +128,29 @@ test('runs local snippet/preamble fast paths, falls back offline, refreshes on W
     expect(expandCalls).toBe(0);
     expect(projectResolveCalls).toBe(0);
 
-    await composer.fill('/s local_ctx');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(
-      `Static context for ${chatId} with literal {{arguments}}`,
-    );
+    await runSlashCommand('/s local_ctx', `Static context for ${chatId} with literal {{arguments}}`);
     expect(expandCalls).toBe(0);
     expect(projectResolveCalls).toBe(0);
 
-    await composer.fill('/s path_review');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(`Review in ${integration.executionDirs.project}`);
+    await runSlashCommand('/s path_review', `Review in ${integration.executionDirs.project}`);
     expect(expandCalls).toBe(1);
+    expect(projectResolveCalls).toBe(0);
 
-    await composer.fill('/s manual_ctx');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(
-      new RegExp(`^Context for ${chatId} on \\d{4}-\\d{2}-\\d{2}$`),
-    );
+    await runSlashCommand('/s manual_ctx', new RegExp(`^Context for ${chatId} on \\d{4}-\\d{2}-\\d{2}$`));
     expect(expandCalls).toBe(2);
+    expect(projectResolveCalls).toBe(0);
 
-    phase('Phase 2: checking offline fallback and WebSocket reconnect catalog refresh');
-    allowReconnect = false;
-    const closedSocket = activeBrowserSocket!;
-    const wsClosed = new Promise<void>((resolve) => {
-      if (closedSocket.isClosed()) resolve();
-      else closedSocket.once('close', () => resolve());
-    });
-    activeSocket!.close({ code: 1000, reason: 'Synthetic offline interval' });
-    await wsClosed;
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    if (!activeSocket || !browserSocket) throw new Error('Browser socket did not connect');
+    allowConnect = false;
+    snippetGetRequests = 0;
+    preambleGetRequests = 0;
+    snippetGetDone = 0;
+    preambleGetDone = 0;
+    const closed = new Promise<void>((resolve) => browserSocket!.once('close', () => resolve()));
+    activeSocket.close({ code: 1000, reason: 'Synthetic disconnect' });
+    await closed;
 
-    const updatedOnline = await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
+    const updatedLocal = await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
       expectedRevision: snippetSnapshot.revision,
       id: localReview.id,
       snippet: {
@@ -161,29 +159,46 @@ test('runs local snippet/preamble fast paths, falls back offline, refreshes on W
         defaultArguments: 'open PRs',
       },
     });
-    snippetSnapshot = updatedOnline.snapshot;
+    snippetSnapshot = updatedLocal.snapshot;
+    await client.put<PreamblesMutationResponse>('/api/v1/preambles', {
+      expectedRevision: preambleSnapshot.revision,
+      id: localCtx.id,
+      preamble: {
+        enabled: false,
+        title: 'Local context',
+        snippetShortName: 'local_ctx',
+        content: 'Reconnected context for {{chat_id}}',
+        scope: { type: 'global' },
+      },
+    });
+    expect(snippetGetRequests).toBe(0);
+    expect(preambleGetRequests).toBe(0);
+    expect(snippetGetDone).toBe(0);
+    expect(preambleGetDone).toBe(0);
 
-    expandCalls = 0;
-    snippetGetDone = 0;
-    preambleGetDone = 0;
-    await composer.fill('/s local_review');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(`Updated open PRs for ${chatId}`);
-    expect(expandCalls).toBe(1);
+    allowConnect = true;
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await browserExpect.poll(() => snippetGetDone >= 1 && preambleGetDone >= 1, { timeout: 15_000 }).toBe(true);
 
-    allowReconnect = true;
-    await browserExpect.poll(() => snippetGetDone >= 1 && preambleGetDone >= 1).toBe(true);
-    await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 100)));
+    await composer.fill('');
+    await composer.pressSequentially(';;');
+    await browserExpect(palette.getByRole('option', { name: /^local_review\b/ })).toContainText(
+      'Updated {{arguments}} for {{chat_id}}',
+    );
+    await browserExpect(palette.getByRole('option', { name: /^local_ctx\b/ })).toContainText(
+      'Reconnected context for {{chat_id}}',
+    );
+    await palette.getByRole('button', { name: 'Close', exact: true }).click();
+    await palette.waitFor({ state: 'detached' });
 
     expandCalls = 0;
     projectResolveCalls = 0;
-    await composer.fill('/s local_review');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(`Updated open PRs for ${chatId}`);
+    await runSlashCommand('/s local_review', `Updated open PRs for ${chatId}`);
+    await runSlashCommand('/s local_ctx', `Reconnected context for ${chatId}`);
     expect(expandCalls).toBe(0);
     expect(projectResolveCalls).toBe(0);
 
-    phase('Phase 3: checking scheduled prompt local expansion vs project_path fallback');
+    phase('Phase 2: checking scheduled prompt local expansion vs project_path fallback');
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     const scheduledList = page.getByRole('dialog', { name: 'Scheduled Prompts', exact: true });
@@ -222,7 +237,7 @@ test('runs local snippet/preamble fast paths, falls back offline, refreshes on W
     await scheduledList.getByRole('button', { name: 'Close', exact: true }).click();
     await scheduledList.waitFor({ state: 'detached' });
 
-    phase('Phase 4: checking captured revision 409 recovery in Snippets manager');
+    phase('Phase 3: checking HTTP 409 edit retry in Snippets manager');
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Snippets', exact: true }).click();
     const manager = page.getByRole('dialog', { name: 'Snippets', exact: true });
@@ -231,7 +246,8 @@ test('runs local snippet/preamble fast paths, falls back offline, refreshes on W
     const templateField = editDialog.getByRole('textbox', { name: 'Snippet text', exact: true });
     await templateField.fill('Conflict retry {{arguments}}');
 
-    const concurrentUpdate = await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
+    const getsBeforeConflict = snippetGetDone;
+    await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
       expectedRevision: snippetSnapshot.revision,
       id: dateReview.id,
       snippet: {
@@ -240,18 +256,27 @@ test('runs local snippet/preamble fast paths, falls back offline, refreshes on W
         defaultArguments: '',
       },
     });
-    snippetSnapshot = concurrentUpdate.snapshot;
+    const saveButton = editDialog.getByRole('button', { name: 'Save', exact: true });
+    await browserExpect.poll(() => snippetGetDone > getsBeforeConflict, { timeout: 15_000 }).toBe(true);
+    await browserExpect(saveButton).toBeEnabled();
 
     await fixture.withExpectedConsoleErrors(
       [/Failed to load resource: the server responded with a status of 409.*/],
       async () => {
-        await editDialog.getByRole('button', { name: 'Save', exact: true }).click();
+        const conflictResponsePromise = page.waitForResponse(
+          (response) =>
+            response.request().method() === 'PUT' && pathnameOf(response.url()) === '/api/v1/snippets',
+        );
+        await saveButton.click();
+        const conflictResponse = await conflictResponsePromise;
+        expect(conflictResponse.status()).toBe(409);
         await browserExpect(editDialog.getByRole('alert')).toBeVisible();
         await browserExpect(templateField).toHaveValue('Conflict retry {{arguments}}');
       },
     );
 
-    await editDialog.getByRole('button', { name: 'Save', exact: true }).click();
+    await browserExpect(saveButton).toBeEnabled();
+    await saveButton.click();
     await editDialog.waitFor({ state: 'detached' });
     const finalSnapshot = await client.get<SnippetsSnapshot>('/api/v1/snippets');
     expect(finalSnapshot.snippets.find((entry) => entry.id === localReview.id)?.template).toBe(

@@ -1,21 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PREAMBLE_COMBINED_MAX_LENGTH, type Preamble } from '$shared/preambles';
+import type { Preamble } from '$shared/preambles';
+import { SNIPPET_ARGUMENTS_MAX_LENGTH, SNIPPET_EXPANDED_MAX_LENGTH, type Snippet } from '$shared/snippets';
 import {
-	SNIPPET_ARGUMENTS_MAX_LENGTH,
-	SNIPPET_EXPANDED_MAX_LENGTH,
-	SNIPPET_VALIDATION_ERROR_MESSAGE,
-	type Snippet,
-	type SnippetsSnapshot,
-} from '$shared/snippets';
-import { SnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-import { preambleToSelectable, snippetToSelectable } from '$lib/snippets/selectable-snippet.js';
-import {
-	findFreshSelectableSnippetByShortName,
-	inspectSelectableSnippetInCatalog,
+	findLoadedSelectableSnippetByShortName,
+	hasLoadedShortNameConflict,
+	isSelectedSnippetStaleInLoadedCatalog,
+	staleSelectionRefreshSources,
 	tryExpandSelectableSnippetLocally,
-	type PreambleCatalogLookup,
-	type SnippetCatalogLookup,
-} from '$lib/snippets/local-snippet-expansion.js';
+} from '../local-snippet-expansion.js';
+import {
+	mismatchedSnippetSources,
+	preambleToSelectable,
+	snippetToSelectable,
+} from '../selectable-snippet.js';
 
 function makeSnippet(overrides: Partial<Snippet> = {}): Snippet {
 	return {
@@ -35,7 +32,7 @@ function makePreamble(overrides: Partial<Preamble> = {}): Preamble {
 		enabled: false,
 		title: 'Manual context',
 		snippetShortName: 'context',
-		content: 'Chat {{chat_id}} / {{arguments}} / {{project_path}} / \\{{chat_id}}',
+		content: 'Context {{chat_id}}',
 		scope: { type: 'global' },
 		agentIds: [],
 		tagFilter: { mode: 'any', tags: [] },
@@ -45,312 +42,49 @@ function makePreamble(overrides: Partial<Preamble> = {}): Preamble {
 	};
 }
 
-function snippetCatalog(overrides: Partial<SnippetCatalogLookup> = {}): SnippetCatalogLookup {
-	return {
-		hasLoaded: true,
-		hasFreshSnapshot: true,
-		snippets: [makeSnippet()],
-		...overrides,
-	};
-}
-
-function preambleCatalog(overrides: Partial<PreambleCatalogLookup> = {}): PreambleCatalogLookup {
-	return {
-		hasLoaded: true,
-		hasFreshSnapshot: true,
-		preambles: [makePreamble()],
-		...overrides,
-	};
-}
-
-describe('findFreshSelectableSnippetByShortName', () => {
-	it('finds snippets and named preambles when WS is connected and catalogs are fresh', () => {
-		expect(
-			findFreshSelectableSnippetByShortName('review', {
-				wsConnected: true,
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog(),
+describe('tryExpandSelectableSnippetLocally', () => {
+	it('expands immediate snippets with defaults, explicit arguments, escaped tokens, and lazy chat_id', () => {
+		const getChatId = vi.fn(() => 'chat-123');
+		const snippet = snippetToSelectable(
+			makeSnippet({
+				template: 'Chat {{chat_id}}: {{arguments}} (\\{{project_path}} \\{{current_date}})',
+				defaultArguments: 'staged',
 			}),
-		).toMatchObject({ source: 'snippet', shortName: 'review' });
+		);
 
 		expect(
-			findFreshSelectableSnippetByShortName('context', {
-				wsConnected: true,
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog(),
-			}),
-		).toMatchObject({ source: 'preamble', shortName: 'context' });
-	});
-
-	it('returns null when WS is disconnected or when the matching catalog is not fresh', () => {
-		expect(
-			findFreshSelectableSnippetByShortName('review', {
-				wsConnected: false,
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog(),
-			}),
-		).toBeNull();
-
-		expect(
-			findFreshSelectableSnippetByShortName('review', {
-				wsConnected: true,
-				snippets: snippetCatalog({ hasFreshSnapshot: false }),
-				preambles: preambleCatalog(),
-			}),
-		).toBeNull();
-		expect(
-			findFreshSelectableSnippetByShortName('context', {
-				wsConnected: true,
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasFreshSnapshot: false }),
-			}),
-		).toBeNull();
-	});
-
-	it('resolves from one fresh catalog even when the other catalog has not loaded', () => {
-		expect(
-			findFreshSelectableSnippetByShortName('review', {
-				wsConnected: true,
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasFreshSnapshot: false }),
-			}),
-		).toMatchObject({ source: 'snippet', shortName: 'review' });
-
-		expect(
-			findFreshSelectableSnippetByShortName('missing', {
-				wsConnected: true,
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasFreshSnapshot: false }),
-			}),
-		).toBeNull();
-	});
-
-	it('blocks live-store lookup while a refresh GET is in flight and resumes once settled', async () => {
-		const retryRead = Promise.withResolvers<SnippetsSnapshot>();
-		const snippetsStore = new SnippetsStore({
-			get: vi.fn<() => Promise<SnippetsSnapshot>>().mockReturnValueOnce(retryRead.promise),
-		});
-		snippetsStore.applySnapshot({
-			revision: 3,
-			snippets: [makeSnippet({ shortName: 'probe', template: 'Old probe' })],
-		});
-		const liveStores = {
-			wsConnected: true,
-			snippets: snippetsStore,
-			preambles: { hasLoaded: true, hasFreshSnapshot: true, preambles: [] },
-		};
-
-		const refreshing = snippetsStore.refresh();
-		expect(findFreshSelectableSnippetByShortName('probe', liveStores)).toBeNull();
-
-		retryRead.resolve({
-			revision: 3,
-			snippets: [makeSnippet({ shortName: 'probe', template: 'Updated probe' })],
-		});
-		await refreshing;
-		expect(findFreshSelectableSnippetByShortName('probe', liveStores)).toMatchObject({
-			source: 'snippet',
-			body: 'Updated probe',
-		});
-	});
-});
-
-describe('inspectSelectableSnippetInCatalog', () => {
-	it('returns unavailable when the owning catalog is absent or unloaded', () => {
-		const snippet = snippetToSelectable(makeSnippet());
-		const preamble = preambleToSelectable(makePreamble())!;
-
-		expect(
-			inspectSelectableSnippetInCatalog(snippet, { snippets: null, preambles: preambleCatalog() }),
-		).toBe('unavailable');
-		expect(
-			inspectSelectableSnippetInCatalog(snippet, {
-				snippets: snippetCatalog({ hasLoaded: false, hasFreshSnapshot: false }),
-				preambles: preambleCatalog(),
-			}),
-		).toBe('unavailable');
-		expect(
-			inspectSelectableSnippetInCatalog(preamble, { snippets: snippetCatalog(), preambles: null }),
-		).toBe('unavailable');
-		expect(
-			inspectSelectableSnippetInCatalog(preamble, {
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasLoaded: false, hasFreshSnapshot: false }),
-			}),
-		).toBe('unavailable');
-	});
-
-	it('returns matched when fresh and unchanged, and unavailable when nonfresh but unchanged', () => {
-		const snippet = snippetToSelectable(makeSnippet());
-		const preamble = preambleToSelectable(makePreamble())!;
-
-		expect(
-			inspectSelectableSnippetInCatalog(snippet, {
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasFreshSnapshot: false }),
-			}),
-		).toBe('matched');
-		expect(
-			inspectSelectableSnippetInCatalog(snippet, {
-				snippets: snippetCatalog({ hasFreshSnapshot: false }),
-				preambles: preambleCatalog(),
-			}),
-		).toBe('unavailable');
-		expect(
-			inspectSelectableSnippetInCatalog(preamble, {
-				snippets: snippetCatalog({ hasFreshSnapshot: false }),
-				preambles: preambleCatalog(),
-			}),
-		).toBe('matched');
-		expect(
-			inspectSelectableSnippetInCatalog(preamble, {
-				snippets: snippetCatalog(),
-				preambles: preambleCatalog({ hasFreshSnapshot: false }),
-			}),
-		).toBe('unavailable');
-	});
-
-	it.each([false, true])(
-		'returns changed for mismatched or missing entries even when hasFreshSnapshot=%s',
-		(hasFreshSnapshot) => {
-			const originalSnippet = makeSnippet();
-			const originalPreamble = makePreamble();
-			const capturedSnippet = snippetToSelectable(originalSnippet);
-			const capturedPreamble = preambleToSelectable(originalPreamble)!;
-
-			for (const snippets of [
-				snippetCatalog({ hasFreshSnapshot, snippets: [] }),
-				snippetCatalog({
-					hasFreshSnapshot,
-					snippets: [makeSnippet({ shortName: 'renamed' })],
-				}),
-				snippetCatalog({
-					hasFreshSnapshot,
-					snippets: [makeSnippet({ updatedAt: '2026-01-02T00:00:00.000Z' })],
-				}),
-				snippetCatalog({
-					hasFreshSnapshot,
-					snippets: [makeSnippet({ template: 'Different {{arguments}}' })],
-				}),
-				snippetCatalog({
-					hasFreshSnapshot,
-					snippets: [makeSnippet({ defaultArguments: 'other defaults' })],
-				}),
-			]) {
-				expect(
-					inspectSelectableSnippetInCatalog(capturedSnippet, {
-						snippets,
-						preambles: preambleCatalog(),
-					}),
-				).toBe('changed');
-			}
-
-			for (const preambles of [
-				preambleCatalog({ hasFreshSnapshot, preambles: [] }),
-				preambleCatalog({
-					hasFreshSnapshot,
-					preambles: [makePreamble({ snippetShortName: 'other_name' })],
-				}),
-				preambleCatalog({
-					hasFreshSnapshot,
-					preambles: [makePreamble({ updatedAt: '2026-01-02T00:00:00.000Z' })],
-				}),
-				preambleCatalog({
-					hasFreshSnapshot,
-					preambles: [makePreamble({ content: 'Updated preamble content' })],
-				}),
-			]) {
-				expect(
-					inspectSelectableSnippetInCatalog(capturedPreamble, {
-						snippets: snippetCatalog(),
-						preambles,
-					}),
-				).toBe('changed');
-			}
-		},
-	);
-});
-
-describe('tryExpandSelectableSnippetLocally (immediate mode)', () => {
-	it('expands static, argument, chat_id, and escaped tokens locally without calling getChatId unnecessarily', () => {
-		const getChatId = vi.fn(() => '1787471053739199');
-
-		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(
-					makeSnippet({
-						template: 'Review {{arguments}} (\\{{project_path}}, \\{{current_date}}, \\{{current_date_local}})',
-						defaultArguments: 'staged diff',
-					}),
-				),
-				{ type: 'default' },
-				{ kind: 'immediate', getChatId },
-			),
+			tryExpandSelectableSnippetLocally(snippet, { type: 'default' }, { kind: 'immediate', getChatId }),
 		).toEqual({
 			kind: 'expanded',
-			expandedText: 'Review staged diff ({{project_path}}, {{current_date}}, {{current_date_local}})',
-		});
-		expect(getChatId).not.toHaveBeenCalled();
-
-		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet({ template: 'Chat {{chat_id}}: {{arguments}}' })),
-				{ type: 'value', value: 'API\ncontracts' },
-				{ kind: 'immediate', getChatId },
-			),
-		).toEqual({
-			kind: 'expanded',
-			expandedText: 'Chat 1787471053739199: API\ncontracts',
+			expandedText: 'Chat chat-123: staged ({{project_path}} {{current_date}})',
 		});
 		expect(getChatId).toHaveBeenCalledTimes(1);
 
 		expect(
 			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet({ template: 'Review {{arguments}}', defaultArguments: 'saved default' })),
-				{ type: 'value', value: '' },
+				snippet,
+				{ type: 'value', value: 'custom' },
 				{ kind: 'immediate', getChatId },
 			),
 		).toEqual({
 			kind: 'expanded',
-			expandedText: 'Review ',
+			expandedText: 'Chat chat-123: custom ({{project_path}} {{current_date}})',
 		});
 
+		const noChatId = snippetToSelectable(makeSnippet({ template: 'Plain {{arguments}}' }));
 		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet({ template: 'Review [{{arguments}}]', defaultArguments: 'saved default' })),
-				{ type: 'value', value: '  ' },
-				{ kind: 'immediate', getChatId },
-			),
-		).toEqual({
-			kind: 'expanded',
-			expandedText: 'Review [  ]',
-		});
-
-		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet({ template: 'Echo {{arguments}}' })),
-				{ type: 'value', value: '{{project_path}} {{current_date}} {{chat_id}}' },
-				{ kind: 'immediate', getChatId },
-			),
-		).toEqual({
-			kind: 'expanded',
-			expandedText: 'Echo {{project_path}} {{current_date}} {{chat_id}}',
-		});
-		expect(getChatId).toHaveBeenCalledTimes(1);
+			tryExpandSelectableSnippetLocally(noChatId, { type: 'default' }, { kind: 'immediate', getChatId }),
+		).toEqual({ kind: 'expanded', expandedText: 'Plain changes' });
+		expect(getChatId).toHaveBeenCalledTimes(2);
 	});
 
-	it('falls back to the server for active project_path or date tokens in snippets', () => {
-		const getChatId = vi.fn(() => '1787471053739199');
-		for (const template of [
-			'Repo {{project_path}}',
-			'Today {{current_date}}',
-			'Local {{current_date_local}}',
-			'\\{{project_path}} and {{project_path}}',
-		]) {
+	it('falls back in immediate mode for active project_path or date tokens', () => {
+		const getChatId = vi.fn(() => 'chat-123');
+		for (const template of ['In {{project_path}}', 'On {{current_date}}', 'Local {{current_date_local}}']) {
 			expect(
 				tryExpandSelectableSnippetLocally(
 					snippetToSelectable(makeSnippet({ template })),
-					{ type: 'default' },
+					{ type: 'value', value: '' },
 					{ kind: 'immediate', getChatId },
 				),
 			).toEqual({ kind: 'fallback' });
@@ -358,159 +92,311 @@ describe('tryExpandSelectableSnippetLocally (immediate mode)', () => {
 		expect(getChatId).not.toHaveBeenCalled();
 	});
 
-	it('expands preambles with preamble token semantics and falls back only for active date tokens', () => {
-		const getChatId = vi.fn(() => '1787471053739199');
-		const preamble = preambleToSelectable(makePreamble())!;
+	it('expands scheduled snippets locally for dates and deferred chat_id while falling back for project_path', () => {
+		const item = snippetToSelectable(
+			makeSnippet({
+				template: 'Run {{arguments}} on {{current_date}} for {{chat_id}} and \\{{chat_id}}',
+			}),
+		);
+		expect(
+			tryExpandSelectableSnippetLocally(
+				item,
+				{ type: 'value', value: '{{chat_id}}' },
+				{ kind: 'scheduled' },
+			),
+		).toEqual({
+			kind: 'expanded',
+			expandedText: 'Run \\{{chat_id}} on {{current_date}} for {{chat_id}} and \\{{chat_id}}',
+		});
 
 		expect(
 			tryExpandSelectableSnippetLocally(
-				preamble,
+				snippetToSelectable(makeSnippet({ template: 'Path {{project_path}}' })),
+				{ type: 'value', value: '' },
+				{ kind: 'scheduled' },
+			),
+		).toEqual({ kind: 'fallback' });
+	});
+
+	it('returns local validation and length errors matching server semantics', () => {
+		const item = snippetToSelectable(makeSnippet({ template: '{{arguments}}{{chat_id}}' }));
+		expect(
+			tryExpandSelectableSnippetLocally(
+				item,
+				{ type: 'value', value: 'report\\' },
+				{ kind: 'scheduled' },
+			),
+		).toMatchObject({
+			kind: 'error',
+			message: expect.stringContaining('Add a separator'),
+		});
+
+		expect(
+			tryExpandSelectableSnippetLocally(
+				item,
+				{ type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
+				{ kind: 'scheduled' },
+			),
+		).toEqual({ kind: 'error', message: 'Snippet is invalid' });
+
+		const oversized = snippetToSelectable(makeSnippet({ template: '{{arguments}}{{arguments}}{{arguments}}' }));
+		expect(
+			tryExpandSelectableSnippetLocally(
+				oversized,
+				{ type: 'value', value: 'x'.repeat(Math.floor(SNIPPET_EXPANDED_MAX_LENGTH / 2)) },
+				{ kind: 'immediate', getChatId: () => 'chat-1' },
+			),
+		).toEqual({
+			kind: 'error',
+			message: `Expanded snippet exceeds ${SNIPPET_EXPANDED_MAX_LENGTH} characters`,
+		});
+	});
+
+	it('expands named preambles with preamble semantics and falls back only on active immediate dates', () => {
+		const getChatId = vi.fn(() => 'chat-999');
+		const literalPreamble = preambleToSelectable(
+			makePreamble({
+				content: 'Chat {{chat_id}} / {{arguments}} / {{project_path}} / \\{{current_date}}',
+			}),
+		)!;
+		expect(
+			tryExpandSelectableSnippetLocally(
+				literalPreamble,
 				{ type: 'value', value: 'ignored' },
 				{ kind: 'immediate', getChatId },
 			),
 		).toEqual({
 			kind: 'expanded',
-			expandedText: 'Chat 1787471053739199 / {{arguments}} / {{project_path}} / {{chat_id}}',
+			expandedText: 'Chat chat-999 / {{arguments}} / {{project_path}} / {{current_date}}',
 		});
-		expect(getChatId).toHaveBeenCalledTimes(1);
-
-		for (const content of ['Date {{current_date}}', 'Local {{current_date_local}}']) {
-			expect(
-				tryExpandSelectableSnippetLocally(
-					preambleToSelectable(makePreamble({ content }))!,
-					{ type: 'default' },
-					{ kind: 'immediate', getChatId },
-				),
-			).toEqual({ kind: 'fallback' });
-		}
-		expect(getChatId).toHaveBeenCalledTimes(1);
-
 		expect(
 			tryExpandSelectableSnippetLocally(
-				preambleToSelectable(
-					makePreamble({ content: 'Escaped \\{{current_date}} / \\{{current_date_local}}' }),
-				)!,
-				{ type: 'default' },
-				{ kind: 'immediate', getChatId },
+				literalPreamble,
+				{ type: 'value', value: 'ignored' },
+				{ kind: 'scheduled' },
 			),
-		).toEqual({
-			kind: 'expanded',
-			expandedText: 'Escaped {{current_date}} / {{current_date_local}}',
-		});
-		expect(getChatId).toHaveBeenCalledTimes(1);
-	});
+		).toEqual({ kind: 'expanded', expandedText: literalPreamble.body });
 
-	it('enforces argument and expanded output bounds locally for snippets and preambles', () => {
-		const getChatId = vi.fn(() => '1787471053739199');
-		const preamble = preambleToSelectable(makePreamble({ content: 'Static context' }))!;
-		for (const item of [snippetToSelectable(makeSnippet()), preamble]) {
-			for (const mode of [{ kind: 'immediate', getChatId }, { kind: 'scheduled' }] as const) {
-				expect(
-					tryExpandSelectableSnippetLocally(
-						item,
-						{ type: 'value', value: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH + 1) },
-						mode,
-					),
-				).toEqual({
-					kind: 'error',
-					message: SNIPPET_VALIDATION_ERROR_MESSAGE,
-				});
-			}
-		}
-
+		const datedPreamble = preambleToSelectable(makePreamble({ content: 'Today {{current_date}}' }))!;
 		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(
-					makeSnippet({
-						template: '{{arguments}}{{arguments}}{{arguments}}',
-						defaultArguments: 'x'.repeat(SNIPPET_ARGUMENTS_MAX_LENGTH),
-					}),
-				),
-				{ type: 'default' },
-				{ kind: 'immediate', getChatId },
-			),
-		).toEqual({
-			kind: 'error',
-			message: `Expanded snippet exceeds ${SNIPPET_EXPANDED_MAX_LENGTH} characters`,
-		});
-
-		const overflowingPreamble = preambleToSelectable(
-			makePreamble({ content: '{{chat_id}}'.repeat(3_000) }),
-		)!;
+			tryExpandSelectableSnippetLocally(datedPreamble, { type: 'default' }, { kind: 'immediate', getChatId }),
+		).toEqual({ kind: 'fallback' });
 		expect(
-			tryExpandSelectableSnippetLocally(
-				overflowingPreamble,
-				{ type: 'default' },
-				{ kind: 'immediate', getChatId: () => 'x'.repeat(30) },
-			),
-		).toEqual({
-			kind: 'error',
-			message: `Expanded template exceeds ${PREAMBLE_COMBINED_MAX_LENGTH} characters`,
-		});
+			tryExpandSelectableSnippetLocally(datedPreamble, { type: 'default' }, { kind: 'scheduled' }),
+		).toEqual({ kind: 'expanded', expandedText: 'Today {{current_date}}' });
 	});
 });
 
-describe('tryExpandSelectableSnippetLocally (scheduled mode)', () => {
-	it('defers chat_id and date tokens while escaping token-shaped arguments and unescaping project_path', () => {
+describe('catalog helpers', () => {
+	it('finds loaded snippets and named preambles by short name', () => {
+		const snippet = makeSnippet({ shortName: 'alpha' });
+		const preamble = makePreamble({ snippetShortName: 'beta' });
+
 		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(
-					makeSnippet({
-						template:
-							'Review {{arguments}} for {{chat_id}} on {{current_date}} / {{current_date_local}} (\\{{current_date}}, \\{{project_path}})',
-					}),
-				),
-				{ type: 'value', value: '{{chat_id}} and \\{{current_date}}' },
-				{ kind: 'scheduled' },
-			),
-		).toEqual({
-			kind: 'expanded',
-			expandedText:
-				'Review \\{{chat_id}} and \\\\{{current_date}} for {{chat_id}} on {{current_date}} / {{current_date_local}} (\\{{current_date}}, {{project_path}})',
-		});
+			findLoadedSelectableSnippetByShortName('alpha', {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [preamble] },
+			}),
+		).toMatchObject({ source: 'snippet', id: snippet.id });
+
+		expect(
+			findLoadedSelectableSnippetByShortName('beta', {
+				snippets: { hasLoaded: false, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [preamble] },
+			}),
+		).toMatchObject({ source: 'preamble', id: preamble.id });
+
+		expect(
+			findLoadedSelectableSnippetByShortName('alpha', {
+				snippets: { hasLoaded: false, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [preamble] },
+			}),
+		).toBeNull();
+
+		const duplicatePreamble = makePreamble({ snippetShortName: 'alpha' });
+		expect(
+			hasLoadedShortNameConflict('alpha', {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [duplicatePreamble] },
+			}),
+		).toBe(true);
+		expect(
+			findLoadedSelectableSnippetByShortName('alpha', {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [duplicatePreamble] },
+			}),
+		).toBeNull();
 	});
 
-	it('returns named preambles verbatim even when they include date tokens', () => {
-		const content = 'Chat {{chat_id}} / {{current_date}} / {{current_date_local}} / \\{{chat_id}}';
+	it('identifies changed sources across same-source and cross-source responses', () => {
+		const item = snippetToSelectable(makeSnippet());
 		expect(
-			tryExpandSelectableSnippetLocally(
-				preambleToSelectable(makePreamble({ content }))!,
-				{ type: 'default' },
-				{ kind: 'scheduled' },
-			),
-		).toEqual({ kind: 'expanded', expandedText: content });
+			mismatchedSnippetSources(item, {
+				source: 'snippet',
+				sourceId: item.id,
+				sourceUpdatedAt: item.updatedAt,
+			}),
+		).toEqual([]);
+		expect(
+			mismatchedSnippetSources(item, {
+				source: 'snippet',
+				sourceId: item.id,
+				sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
+			}),
+		).toEqual(['snippet']);
+		expect(
+			mismatchedSnippetSources(item, {
+				source: 'preamble',
+				sourceId: 'other',
+				sourceUpdatedAt: item.updatedAt,
+			}),
+		).toEqual(['snippet', 'preamble']);
 	});
 
-	it('falls back only for active project_path and enforces boundaries and output bounds locally', () => {
-		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet({ template: 'In {{project_path}} on {{current_date}}' })),
-				{ type: 'default' },
-				{ kind: 'scheduled' },
-			),
-		).toEqual({ kind: 'fallback' });
+	it('detects when a selected palette item is deleted or changed in loaded catalogs', () => {
+		const snippet = makeSnippet();
+		const selected = snippetToSelectable(snippet);
+		const selectedPreamble = preambleToSelectable(makePreamble())!;
 
 		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet({ template: '{{arguments}}{{current_date}}' })),
-				{ type: 'value', value: 'report\\' },
-				{ kind: 'scheduled' },
-			),
-		).toEqual({
-			kind: 'error',
-			message:
-				'Scheduled snippet replacements must not create or escape adjacent template variables. Add a separator.',
-		});
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(false);
 
 		expect(
-			tryExpandSelectableSnippetLocally(
-				snippetToSelectable(makeSnippet({ template: '{{arguments}}{{arguments}}' })),
-				{ type: 'value', value: '{{chat_id}}'.repeat(2_909) },
-				{ kind: 'scheduled' },
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: false, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(true);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: null,
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(false);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selectedPreamble, {
+				snippets: { hasLoaded: true, snippets: [] },
+				preambles: null,
+			}),
+		).toBe(false);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: true, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(true);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: true, snippets: [{ ...snippet, defaultArguments: 'other' }] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(true);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selectedPreamble, {
+				snippets: { hasLoaded: true, snippets: [{ ...snippet, shortName: 'context' }] },
+				preambles: { hasLoaded: true, preambles: [makePreamble()] },
+			}),
+		).toBe(true);
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(
+				snippetToSelectable({ ...snippet, shortName: 'context' }),
+				{
+					snippets: { hasLoaded: true, snippets: [{ ...snippet, shortName: 'context' }] },
+					preambles: { hasLoaded: true, preambles: [makePreamble()] },
+				},
 			),
-		).toEqual({
-			kind: 'error',
-			message: `Expanded snippet exceeds ${SNIPPET_EXPANDED_MAX_LENGTH} characters`,
-		});
+		).toBe(true);
+	});
+
+	it('orders cross-catalog conflicts before same-source mismatches in staleSelectionRefreshSources', () => {
+		const snippet = makeSnippet();
+		const selected = snippetToSelectable(snippet);
+		const matchingResponse = {
+			source: 'snippet' as const,
+			sourceId: selected.id,
+			sourceUpdatedAt: selected.updatedAt,
+		};
+
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBeNull();
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: { hasLoaded: true, preambles: [] },
+				},
+				matchingResponse,
+			),
+		).toBeNull();
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: null,
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBeNull();
+
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: { hasLoaded: false, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toEqual([]);
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: { hasLoaded: true, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toEqual([]);
+
+		// Same-source server update plus an ambiguous preamble refreshes both catalogs.
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: {
+						hasLoaded: true,
+						preambles: [makePreamble({ snippetShortName: snippet.shortName })],
+					},
+				},
+				{ ...matchingResponse, sourceUpdatedAt: '2026-01-02T00:00:00.000Z' },
+			),
+		).toEqual(['snippet', 'preamble']);
+
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: { hasLoaded: true, preambles: [] },
+				},
+				{ ...matchingResponse, sourceUpdatedAt: '2026-01-02T00:00:00.000Z' },
+			),
+		).toEqual(['snippet']);
+
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: { hasLoaded: true, preambles: [] },
+				},
+				{ source: 'preamble', sourceId: 'other', sourceUpdatedAt: selected.updatedAt },
+			),
+		).toEqual(['snippet', 'preamble']);
 	});
 });

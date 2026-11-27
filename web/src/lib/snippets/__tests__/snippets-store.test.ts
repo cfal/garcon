@@ -20,6 +20,51 @@ function snapshot(revision: number, ids: string[]): SnippetsSnapshot {
 }
 
 describe('SnippetsStore', () => {
+	it('honors queued invalidation after a failed refresh', async () => {
+		let rejectRead!: (error: Error) => void;
+		const get = vi.fn()
+			.mockImplementationOnce(() => new Promise<SnippetsSnapshot>((_, reject) => { rejectRead = reject; }))
+			.mockResolvedValueOnce(snapshot(2, ['a', 'b']));
+		const store = new SnippetsStore({ get });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const first = store.refreshIfLoaded();
+		const second = store.refreshIfLoaded();
+		rejectRead(new Error('disconnected'));
+		await Promise.all([first, second]);
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b']));
+		expect(store.error).toBeNull();
+	});
+
+	it('honors invalidation after a failed initial load', async () => {
+		let rejectRead!: (error: Error) => void;
+		const get = vi.fn()
+			.mockImplementationOnce(() => new Promise<SnippetsSnapshot>((_, reject) => { rejectRead = reject; }))
+			.mockResolvedValueOnce(snapshot(2, ['a']));
+		const store = new SnippetsStore({ get });
+		const failure = new Error('disconnected');
+		const initial = expect(store.ensureLoaded()).rejects.toBe(failure);
+		const invalidated = store.refreshIfLoaded();
+		rejectRead(failure);
+		await initial;
+		await invalidated;
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(2, ['a']));
+	});
+
+	it('does not retry failed reads without another invalidation', async () => {
+		const get = vi.fn().mockRejectedValue(new Error('disconnected'));
+		const store = new SnippetsStore({ get });
+		store.applySnapshot(snapshot(1, ['a']));
+		await store.refreshIfLoaded();
+		expect(get).toHaveBeenCalledTimes(1);
+		expect(store.snapshot).toEqual(snapshot(1, ['a']));
+		expect(store.error).toBe('disconnected');
+	});
+
 	it('loads lazily and applies canonical mutation snapshots', async () => {
 		const get = vi.fn().mockResolvedValue(snapshot(0, []));
 		const create = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(1, ['a']) });
@@ -36,72 +81,44 @@ describe('SnippetsStore', () => {
 		expect(store.snapshot).toEqual(snapshot(1, ['a']));
 	});
 
-	it('forwards captured expectedRevision on update and remove even when store snapshot advances', async () => {
-		const update = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(4, ['a']) });
-		const remove = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(5, []) });
-		const store = new SnippetsStore({ update, remove });
-		store.applySnapshot(snapshot(3, ['a']));
-
-		const definition = { shortName: 'a', template: 'Updated a', defaultArguments: '' };
-		await store.update('a', definition, 2);
-		expect(update).toHaveBeenCalledExactlyOnceWith({
-			expectedRevision: 2,
-			id: 'a',
-			snippet: definition,
-		});
-		expect(store.snapshot).toEqual(snapshot(4, ['a']));
-
-		await store.remove('a', 3);
-		expect(remove).toHaveBeenCalledExactlyOnceWith({
-			expectedRevision: 3,
-			id: 'a',
-		});
-		expect(store.snapshot).toEqual(snapshot(5, []));
-	});
-
-	it('refreshes on revision conflicts for create, update, and remove while preserving the rejection', async () => {
+	it('refreshes after a revision conflict and preserves the original rejection', async () => {
 		const conflict = new ApiError(409, 'revision conflict', SNIPPET_ERROR_CODES.revisionConflict);
-		const get = vi
-			.fn<() => Promise<SnippetsSnapshot>>()
-			.mockResolvedValueOnce(snapshot(3, ['a', 'b']))
-			.mockResolvedValueOnce(snapshot(4, ['a', 'b']))
-			.mockResolvedValueOnce(snapshot(5, ['a']));
+		const get = vi.fn().mockResolvedValue(snapshot(3, ['a', 'b']));
 		const create = vi.fn().mockRejectedValue(conflict);
-		const update = vi.fn().mockRejectedValue(conflict);
-		const remove = vi.fn().mockRejectedValue(conflict);
-		const store = new SnippetsStore({ get, create, update, remove });
+		const store = new SnippetsStore({ get, create });
 		store.applySnapshot(snapshot(2, ['a']));
 
 		await expect(
 			store.create({ shortName: 'b', template: 'Template b', defaultArguments: '' }),
 		).rejects.toBe(conflict);
+
 		expect(get).toHaveBeenCalledTimes(1);
 		expect(store.snapshot).toEqual(snapshot(3, ['a', 'b']));
-
-		await expect(
-			store.update('a', { shortName: 'a', template: 'Updated', defaultArguments: '' }, 2),
-		).rejects.toBe(conflict);
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
-
-		await expect(store.remove('a', 3)).rejects.toBe(conflict);
-		expect(get).toHaveBeenCalledTimes(3);
-		expect(store.snapshot).toEqual(snapshot(5, ['a']));
 	});
 
-	it('heals to a restored lower revision after a mutation hits a 409 revision conflict', async () => {
+	it('starts a fresh refresh when conflict recovery joined an older request', async () => {
+		const first = Promise.withResolvers<SnippetsSnapshot>();
+		const second = Promise.withResolvers<SnippetsSnapshot>();
+		const get = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
 		const conflict = new ApiError(409, 'revision conflict', SNIPPET_ERROR_CODES.revisionConflict);
-		const get = vi.fn().mockResolvedValueOnce(snapshot(1, ['restored']));
-		const create = vi.fn().mockRejectedValueOnce(conflict);
-		const store = new SnippetsStore({ get, create });
-		store.applySnapshot(snapshot(3, ['probe']));
+		const store = new SnippetsStore({ get, create: vi.fn().mockRejectedValue(conflict) });
+		store.applySnapshot(snapshot(1, ['a']));
+		const refreshIfLoaded = vi.spyOn(store, 'refreshIfLoaded');
+		const olderRefresh = store.refresh();
+		const creating = store.create({
+			shortName: 'b',
+			template: 'Template b',
+			defaultArguments: '',
+		});
 
-		await expect(
-			store.create({ shortName: 'snippet-b', template: 'Template b', defaultArguments: '' }),
-		).rejects.toBe(conflict);
+		await vi.waitFor(() => expect(refreshIfLoaded).toHaveBeenCalledOnce());
+		first.resolve(snapshot(1, ['a']));
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+		second.resolve(snapshot(2, ['a', 'b']));
 
-		expect(store.snapshot).toEqual(snapshot(1, ['restored']));
-		expect(store.hasFreshSnapshot).toBe(true);
+		await olderRefresh;
+		await expect(creating).rejects.toBe(conflict);
+		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b']));
 	});
 
 	it('does not refresh for non-revision conflicts', async () => {
@@ -115,5 +132,127 @@ describe('SnippetsStore', () => {
 		).rejects.toBe(conflict);
 
 		expect(get).not.toHaveBeenCalled();
+	});
+
+	it('refreshes again when invalidated during an in-flight refresh', async () => {
+		const resolvers: Array<(value: SnippetsSnapshot) => void> = [];
+		const get = vi.fn(() => new Promise<SnippetsSnapshot>((resolve) => resolvers.push(resolve)));
+		const store = new SnippetsStore({ get });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const first = store.refreshIfLoaded();
+		const second = store.refreshIfLoaded();
+		resolvers[0](snapshot(2, ['a']));
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+		resolvers[1](snapshot(3, ['a', 'b']));
+		await Promise.all([first, second]);
+
+		expect(store.snapshot).toEqual(snapshot(3, ['a', 'b']));
+	});
+
+	it('refreshes after an invalidation during the initial load', async () => {
+		const resolvers: Array<(value: SnippetsSnapshot) => void> = [];
+		const get = vi.fn(() => new Promise<SnippetsSnapshot>((resolve) => resolvers.push(resolve)));
+		const store = new SnippetsStore({ get });
+
+		const initial = store.ensureLoaded();
+		const invalidated = store.refreshIfLoaded();
+		resolvers[0](snapshot(1, ['a']));
+		await initial;
+		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+		resolvers[1](snapshot(2, ['a', 'b']));
+		await invalidated;
+
+		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b']));
+	});
+
+	it('does not replace a newer snapshot with a stale response', () => {
+		const store = new SnippetsStore();
+		store.applySnapshot(snapshot(4, ['a', 'b']));
+
+		store.applySnapshot(snapshot(3, ['a']));
+
+		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
+	});
+
+	it('ignores a stale overtaken refresh and preserves newer state when an overtaken refresh fails', async () => {
+		let resolveRead!: (value: SnippetsSnapshot) => void;
+		let rejectRead!: (error: Error) => void;
+		const get = vi
+			.fn()
+			.mockImplementationOnce(() => new Promise<SnippetsSnapshot>((resolve) => { resolveRead = resolve; }))
+			.mockImplementationOnce(
+				() => new Promise<SnippetsSnapshot>((_resolve, reject) => { rejectRead = reject; }),
+			);
+		const store = new SnippetsStore({ get });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const firstRefresh = store.refresh();
+		store.applySnapshot(snapshot(3, ['a', 'c']));
+		resolveRead(snapshot(2, ['a', 'b']));
+		await expect(firstRefresh).resolves.toEqual(snapshot(3, ['a', 'c']));
+		expect(store.snapshot).toEqual(snapshot(3, ['a', 'c']));
+
+		const failingRefresh = store.refresh().catch((error) => error);
+		store.applySnapshot(snapshot(4, ['a', 'c', 'd']));
+		const readError = new Error('network blip');
+		rejectRead(readError);
+		expect(await failingRefresh).toBe(readError);
+		expect(store.snapshot).toEqual(snapshot(4, ['a', 'c', 'd']));
+		expect(store.error).toBeNull();
+		expect(store.status).toBe('ready');
+	});
+
+	it('performs a fresh read when conflict recovery joins a failing in-flight refresh', async () => {
+		const initial = Promise.withResolvers<SnippetsSnapshot>();
+		const readFailure = new Error('temporary failure');
+		const conflict = new ApiError(409, 'revision conflict', SNIPPET_ERROR_CODES.revisionConflict);
+		const get = vi
+			.fn()
+			.mockReturnValueOnce(initial.promise)
+			.mockResolvedValueOnce(snapshot(3, ['a', 'b']));
+		const store = new SnippetsStore({ get, create: vi.fn().mockRejectedValue(conflict) });
+		store.applySnapshot(snapshot(1, ['a']));
+		const refreshIfLoaded = vi.spyOn(store, 'refreshIfLoaded');
+
+		const olderRefresh = store.refresh().catch((error) => error);
+		const creating = store.create({
+			shortName: 'b',
+			template: 'Template b',
+			defaultArguments: '',
+		});
+		await vi.waitFor(() => expect(refreshIfLoaded).toHaveBeenCalledOnce());
+		initial.reject(readFailure);
+
+		expect(await olderRefresh).toBe(readFailure);
+		await expect(creating).rejects.toBe(conflict);
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(3, ['a', 'b']));
+	});
+
+	it('forwards caller-supplied expectedRevision on update and remove', async () => {
+		const update = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(6, ['a']) });
+		const remove = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(7, []) });
+		const store = new SnippetsStore({ update, remove });
+		store.applySnapshot(snapshot(5, ['a']));
+
+		await store.update('a', { shortName: 'a', template: 'Updated', defaultArguments: '' }, 2);
+		await store.remove('a', 3);
+
+		expect(update).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 2, id: 'a' }));
+		expect(remove).toHaveBeenCalledWith({ expectedRevision: 3, id: 'a' });
+	});
+
+	it('refreshes on SNIPPET_NOT_FOUND while preserving the original error', async () => {
+		const notFound = new ApiError(404, 'Snippet not found', SNIPPET_ERROR_CODES.notFound);
+		const get = vi.fn().mockResolvedValueOnce(snapshot(1, []));
+		const remove = vi.fn().mockRejectedValueOnce(notFound);
+		const store = new SnippetsStore({ get, remove });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		await expect(store.remove('a', 1)).rejects.toBe(notFound);
+		expect(get).toHaveBeenCalledOnce();
+		expect(store.snapshot).toEqual(snapshot(1, []));
+		expect(store.status).toBe('ready');
 	});
 });

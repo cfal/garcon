@@ -47,7 +47,6 @@
 		getTransientLayers,
 		getWorkspaceLayout,
 		getOptionalWorkspaceShortcuts,
-		getOptionalWs,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
@@ -86,7 +85,6 @@
 	const transientLayers = getTransientLayers();
 	const workspaceLayout = getWorkspaceLayout();
 	const workspaceShortcuts = getOptionalWorkspaceShortcuts();
-	const ws = getOptionalWs();
 	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
 	const promptDraft = new NewChatPromptDraft(getNewChatPromptDrafts());
 	const form: NewChatFormState = new NewChatFormState({
@@ -126,7 +124,6 @@
 		snippets,
 		preambles,
 		notifications,
-		isWsConnected: () => ws?.isConnected === true,
 		getExecutionKey: () => executionKey,
 		isConversationInput: () => conversationInput,
 		isTransformPending: (): boolean => promptTransformPending,
@@ -136,7 +133,7 @@
 		hasProjectPath: () => Boolean(form.nonblankPath),
 		getLocalChatId: () => promptDraft.ensureProspectiveChatId(),
 		onMissingProjectPath: () => notifications.error(m.chat_new_chat_errors_project_path_required()),
-		prepareServerContext: () => {
+		buildServerContext: () => {
 			const projectPath = form.nonblankPath;
 			const executorId = form.executorId;
 			return {

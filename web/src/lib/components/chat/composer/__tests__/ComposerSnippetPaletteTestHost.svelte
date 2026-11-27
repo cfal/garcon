@@ -20,6 +20,7 @@
 	interface Props {
 		count?: number;
 		failLoads?: boolean;
+		failPreambleRefreshes?: boolean;
 		deferSnippetLoad?: boolean;
 		firstTemplate?: string;
 		firstDefaultArguments?: string;
@@ -31,11 +32,16 @@
 		keyboardHeight?: number;
 		preambleShortName?: string;
 		preambleContent?: string;
+		onStores?: (stores: {
+			snippets: ReturnType<typeof createSnippetsStore>;
+			preambles: ReturnType<typeof createPreamblesStore>;
+		}) => void;
 	}
 
 	let {
 		count = 12,
 		failLoads = false,
+		failPreambleRefreshes = false,
 		deferSnippetLoad = false,
 		firstTemplate,
 		firstDefaultArguments = '',
@@ -47,6 +53,7 @@
 		keyboardHeight = 0,
 		preambleShortName,
 		preambleContent = 'Preamble {{arguments}} for {{chat_id}}',
+		onStores,
 	}: Props = $props();
 
 	let open = $state(true);
@@ -96,9 +103,14 @@
 		},
 	});
 	setSnippets(snippetStore);
-	setPreambles(
-		createPreamblesStore({
-			get: async () => ({
+	let preambleLoadCount = 0;
+	const preambleStore = createPreamblesStore({
+		get: async () => {
+			preambleLoadCount += 1;
+			if (failPreambleRefreshes && preambleLoadCount > 1) {
+				throw new Error('preamble refresh offline');
+			}
+			return {
 				revision: preambleShortName ? 1 : 0,
 				preambles: preambleShortName
 					? [
@@ -116,9 +128,11 @@
 							},
 						]
 					: [],
-			}),
-		}),
-	);
+			};
+		},
+	});
+	setPreambles(preambleStore);
+	untrack(() => onStores?.({ snippets: snippetStore, preambles: preambleStore }));
 	const mainInert = $derived(transientLayers.makesMainInert);
 </script>
 

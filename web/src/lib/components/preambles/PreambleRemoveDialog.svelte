@@ -8,6 +8,7 @@
 		open: boolean;
 		preamble: Preamble | null;
 		removing?: boolean;
+		disabled?: boolean;
 		error?: string | null;
 		onConfirm: () => void;
 		onClose: () => void;
@@ -17,6 +18,7 @@
 		open,
 		preamble,
 		removing = false,
+		disabled = false,
 		error = null,
 		onConfirm,
 		onClose,
@@ -38,7 +40,7 @@
 			<Button variant="secondary" onclick={onClose} disabled={removing}>
 				{m.preambles_cancel()}
 			</Button>
-			<Button variant="destructive" onclick={onConfirm} disabled={removing || !preamble}>
+			<Button variant="destructive" onclick={onConfirm} disabled={disabled || removing || !preamble}>
 				{removing ? m.preambles_removing() : m.preambles_remove()}
 			</Button>
 		</Dialog.Footer>

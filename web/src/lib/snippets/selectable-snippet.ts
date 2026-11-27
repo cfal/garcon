@@ -26,7 +26,9 @@ export type SelectableSnippet =
 			preamble: Preamble;
 	  };
 
-export function snippetToSelectable(snippet: Snippet): Extract<SelectableSnippet, { source: 'snippet' }> {
+export function snippetToSelectable(
+	snippet: Snippet,
+): Extract<SelectableSnippet, { source: 'snippet' }> {
 	return {
 		source: 'snippet',
 		key: `snippet:${snippet.id}`,
@@ -82,4 +84,12 @@ export function matchesSelectableSnippetExpansion(
 		response.sourceId === item.id &&
 		response.sourceUpdatedAt === item.updatedAt
 	);
+}
+
+export function mismatchedSnippetSources(
+	item: SelectableSnippet,
+	response: Pick<ExpandSnippetResponse, 'source' | 'sourceId' | 'sourceUpdatedAt'>,
+): SelectableSnippet['source'][] {
+	if (matchesSelectableSnippetExpansion(item, response)) return [];
+	return response.source === item.source ? [item.source] : [item.source, response.source];
 }

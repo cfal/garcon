@@ -21,6 +21,8 @@ const snippet = { id: 'synthetic-snippet', shortName: 'command', template: 'prin
 let deps: ReturnType<typeof createExecutorStartupFixture>;
 let sessions: ChatSessionsStore;
 let settings: LocalSettingsStore;
+let snippets: ReturnType<typeof createSnippetsStore>;
+let preambles: ReturnType<typeof createPreamblesStore>;
 vi.mock('$lib/context', async (original) => ({
 	...await original<typeof import('$lib/context')>(),
 	getModelCatalog: () => deps.modelCatalog,
@@ -29,8 +31,8 @@ vi.mock('$lib/context', async (original) => ({
 	getLocalSettings: () => settings,
 	getChatSessions: () => sessions,
 	getAppShell: () => new AppShellStore(),
-	getSnippets: () => createSnippetsStore({ get: async () => ({ revision: 1, snippets: [snippet] }) }),
-	getPreambles: () => createPreamblesStore({ get: async () => ({ revision: 0, preambles: [] }) }),
+	getSnippets: () => snippets,
+	getPreambles: () => preambles,
 }));
 vi.mock('../ScheduledNewChatComposer.svelte', async () => import('./ScheduledPromptDialogTestStub.svelte'));
 
@@ -44,6 +46,8 @@ function renderExistingSchedule() {
 	deps.remoteSettings.applySnapshot(snapshot);
 	settings = new LocalSettingsStore();
 	sessions = new ChatSessionsStore();
+	snippets = createSnippetsStore({ get: async () => ({ revision: 1, snippets: [snippet] }) });
+	preambles = createPreamblesStore({ get: async () => ({ revision: 0, preambles: [] }) });
 	const chat = {
 		id: '1791420000000010', agentId: 'claude', executorId: remoteExecutor.id,
 		model: 'worker-default', title: 'Synthetic remote chat', projectPath: '/workspace',

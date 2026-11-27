@@ -9,8 +9,6 @@ import {
 	SNIPPET_ARGUMENTS_MAX_LENGTH,
 	SNIPPET_TEMPLATE_VARIABLES,
 	SNIPPET_VALIDATION_ERROR_MESSAGE,
-	type Snippet,
-	type SnippetArgumentsInput,
 } from '$shared/snippets';
 import {
 	matchTemplateTokens,
@@ -19,10 +17,12 @@ import {
 	TemplateExpansionTooLongError,
 } from '$shared/template-tokens';
 import {
+	mismatchedSnippetSources,
 	preambleToSelectable,
 	snippetToSelectable,
 	type SelectableSnippet,
 } from '$lib/snippets/selectable-snippet.js';
+import type { ExpandSnippetResponse, Snippet, SnippetArgumentsInput } from '$shared/snippets';
 
 export type LocalSnippetExpansionMode =
 	| { readonly kind: 'immediate'; getChatId(): string }
@@ -35,22 +35,18 @@ export type LocalSnippetExpansionResult =
 
 export interface SnippetCatalogLookup {
 	readonly hasLoaded: boolean;
-	readonly hasFreshSnapshot: boolean;
 	readonly snippets: readonly Snippet[];
 }
 
 export interface PreambleCatalogLookup {
 	readonly hasLoaded: boolean;
-	readonly hasFreshSnapshot: boolean;
 	readonly preambles: readonly Preamble[];
 }
 
-export interface SelectableSnippetCatalogs {
-	readonly snippets: SnippetCatalogLookup | null;
-	readonly preambles: PreambleCatalogLookup | null;
+export interface SnippetCatalogLookups {
+	readonly snippets?: SnippetCatalogLookup | null;
+	readonly preambles?: PreambleCatalogLookup | null;
 }
-
-export type CatalogSelectableSnippetState = 'matched' | 'changed' | 'unavailable';
 
 function collectActiveVariables<Variable extends string>(
 	template: string,
@@ -63,60 +59,75 @@ function collectActiveVariables<Variable extends string>(
 	return active;
 }
 
-// Inspects the loaded catalog before checking freshness so an in-flight refresh or error
-// cannot mask an already-observed selection mismatch, while a still-matching nonfresh catalog
-// continues to fall back safely to the server.
-export function inspectSelectableSnippetInCatalog(
-	item: SelectableSnippet,
-	catalogs: SelectableSnippetCatalogs,
-): CatalogSelectableSnippetState {
-	if (item.source === 'snippet') {
-		const catalog = catalogs.snippets;
-		if (!catalog || !catalog.hasLoaded) return 'unavailable';
-		const current = catalog.snippets.find((entry) => entry.id === item.id);
-		const matches =
-			current !== undefined &&
-			current.shortName === item.shortName &&
-			current.updatedAt === item.updatedAt &&
-			current.template === item.body &&
-			current.defaultArguments === item.snippet.defaultArguments;
-		if (!matches) return 'changed';
-		return catalog.hasFreshSnapshot ? 'matched' : 'unavailable';
-	}
-	const catalog = catalogs.preambles;
-	if (!catalog || !catalog.hasLoaded) return 'unavailable';
-	const current = catalog.preambles.find((entry) => entry.id === item.id);
-	const matches =
-		current !== undefined &&
-		current.snippetShortName === item.shortName &&
-		current.updatedAt === item.updatedAt &&
-		current.content === item.body;
-	if (!matches) return 'changed';
-	return catalog.hasFreshSnapshot ? 'matched' : 'unavailable';
+export function hasLoadedShortNameConflict(
+	shortName: string,
+	options: SnippetCatalogLookups,
+): boolean {
+	const hasSnippet = Boolean(
+		options.snippets?.hasLoaded &&
+			options.snippets.snippets.some((entry) => entry.shortName === shortName),
+	);
+	const hasPreamble = Boolean(
+		options.preambles?.hasLoaded &&
+			options.preambles.preambles.some((entry) => entry.snippetShortName === shortName),
+	);
+	return hasSnippet && hasPreamble;
 }
 
-// Finds a snippet or named preamble for slash-command fast-path expansion only when the
-// owning catalog holds a settled snapshot backed by a live WebSocket.
-export function findFreshSelectableSnippetByShortName(
+export function findLoadedSelectableSnippetByShortName(
 	shortName: string,
-	options: {
-		readonly wsConnected: boolean;
-		readonly snippets: SnippetCatalogLookup;
-		readonly preambles: PreambleCatalogLookup;
-	},
+	options: SnippetCatalogLookups,
 ): SelectableSnippet | null {
-	if (!options.wsConnected) return null;
-	if (options.snippets.hasFreshSnapshot) {
-		const snippet = options.snippets.snippets.find((entry) => entry.shortName === shortName);
-		if (snippet) return snippetToSelectable(snippet);
-	}
-	if (options.preambles.hasFreshSnapshot) {
-		const preamble = options.preambles.preambles.find(
-			(entry) => entry.snippetShortName === shortName,
-		);
-		if (preamble) return preambleToSelectable(preamble);
-	}
+	const snippet = options.snippets?.hasLoaded
+		? options.snippets.snippets.find((entry) => entry.shortName === shortName)
+		: undefined;
+	const preamble = options.preambles?.hasLoaded
+		? options.preambles.preambles.find((entry) => entry.snippetShortName === shortName)
+		: undefined;
+	// Treat cross-catalog duplicates as ambiguous so callers reconcile and defer to server precedence.
+	if (snippet && preamble) return null;
+	if (snippet) return snippetToSelectable(snippet);
+	if (preamble) return preambleToSelectable(preamble);
 	return null;
+}
+
+export function isSelectedSnippetStaleInLoadedCatalog(
+	selected: SelectableSnippet,
+	options: SnippetCatalogLookups,
+): boolean {
+	const owningCatalog = selected.source === 'snippet' ? options.snippets : options.preambles;
+	if (!owningCatalog) return false;
+	if (!owningCatalog.hasLoaded) return true;
+	const current = findLoadedSelectableSnippetByShortName(selected.shortName, options);
+	if (!current || current.source !== selected.source) return true;
+	if (
+		current.id !== selected.id ||
+		current.updatedAt !== selected.updatedAt ||
+		current.body !== selected.body
+	) {
+		return true;
+	}
+	return (
+		selected.source === 'snippet' &&
+		current.source === 'snippet' &&
+		current.snippet.defaultArguments !== selected.snippet.defaultArguments
+	);
+}
+
+// Returns catalogs to refresh when a palette selection no longer matches loaded catalogs
+// or the server response, or null when current. Cross-catalog conflicts run before mismatch
+// checks so a same-source server response cannot refresh only one catalog.
+export function staleSelectionRefreshSources(
+	selected: SelectableSnippet,
+	catalogs: SnippetCatalogLookups,
+	response?: Pick<ExpandSnippetResponse, 'source' | 'sourceId' | 'sourceUpdatedAt'>,
+): readonly SelectableSnippet['source'][] | null {
+	if (hasLoadedShortNameConflict(selected.shortName, catalogs)) return ['snippet', 'preamble'];
+	if (response) {
+		const mismatched = mismatchedSnippetSources(selected, response);
+		if (mismatched.length > 0) return mismatched;
+	}
+	return isSelectedSnippetStaleInLoadedCatalog(selected, catalogs) ? [] : null;
 }
 
 export function tryExpandSelectableSnippetLocally(

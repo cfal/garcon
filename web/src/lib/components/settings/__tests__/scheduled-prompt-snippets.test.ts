@@ -1,16 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ScheduledPromptSnippets } from '../scheduled-prompt-snippets.svelte';
 import { expandSnippet } from '$lib/api/snippets.js';
-import {
-	preambleToSelectable,
-	snippetToSelectable,
-	type SelectableSnippet,
-} from '$lib/snippets/selectable-snippet.js';
-import type { CatalogSelectableSnippetState } from '$lib/snippets/local-snippet-expansion.js';
+import type { SnippetCatalogLookups } from '$lib/snippets/local-snippet-expansion.js';
+import { preambleToSelectable, snippetToSelectable } from '$lib/snippets/selectable-snippet.js';
+import type { Preamble } from '$shared/preambles';
 
 vi.mock('$lib/api/snippets.js', () => ({ expandSnippet: vi.fn() }));
 const expand = vi.mocked(expandSnippet);
-const item = snippetToSelectable({
+const serverItem = snippetToSelectable({
 	id: 'review',
 	shortName: 'review',
 	template: 'Review {{arguments}} in {{project_path}} {{chat_id}}',
@@ -19,65 +16,43 @@ const item = snippetToSelectable({
 	updatedAt: '2026-01-01T00:00:00.000Z',
 });
 const localItem = snippetToSelectable({
-	id: 'daily',
-	shortName: 'daily',
-	template: 'Review {{arguments}} for {{chat_id}} on {{current_date}} / {{current_date_local}}',
+	id: 'review-local',
+	shortName: 'review-local',
+	template: 'Review {{arguments}} on {{current_date}} for {{chat_id}}',
 	defaultArguments: 'API',
 	createdAt: '2026-01-01T00:00:00.000Z',
 	updatedAt: '2026-01-01T00:00:00.000Z',
 });
-const preambleItem = preambleToSelectable({
+const localPreamble = preambleToSelectable({
 	id: '00000000-0000-4000-8000-000000000001',
-	enabled: true,
-	title: 'Daily context',
-	snippetShortName: 'context',
-	content: 'Chat {{chat_id}} on {{current_date}} / {{current_date_local}}',
+	enabled: false,
+	title: 'Manual',
+	snippetShortName: 'manual',
+	content: 'Preamble {{chat_id}} {{project_path}} {{current_date}}',
 	scope: { type: 'global' },
 	agentIds: [],
 	tagFilter: { mode: 'any', tags: [] },
 	createdAt: '2026-01-01T00:00:00.000Z',
 	updatedAt: '2026-01-01T00:00:00.000Z',
 })!;
-const boundaryItem = snippetToSelectable({
-	id: 'boundary',
-	shortName: 'boundary',
-	template: '{{arguments}}{{current_date}}',
-	defaultArguments: '',
-	createdAt: '2026-01-01T00:00:00.000Z',
-	updatedAt: '2026-01-01T00:00:00.000Z',
-});
 const response = {
 	success: true as const,
 	source: 'snippet' as const,
 	sourceId: 'review',
-	sourceUpdatedAt: item.updatedAt,
+	sourceUpdatedAt: serverItem.updatedAt,
 	shortName: 'review',
 	contextProjectPath: '/repo',
 	contextExecutorId: 'local',
 	expandedText: 'Review API in /repo {{chat_id}}',
 };
 
-function fixture(
-	options: {
-		inspectCatalogItem?: (item: SelectableSnippet) => CatalogSelectableSnippetState;
-		context?: {
-			type: 'scheduled-prompt';
-			target: { type: 'chat'; chatId: string } | { type: 'new-chat'; projectPath: string; executorId?: string | null };
-		} | null;
-	} = {},
-) {
+function fixture(catalogs: SnippetCatalogLookups = {}) {
 	const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
 	const onInsert = vi.fn(async (_text: string, _caret: number) => {});
 	const onPendingChange = vi.fn();
 	const onSourceChanged = vi.fn();
-	const context =
-		options.context === undefined
-			? {
-					type: 'scheduled-prompt' as const,
-					target: { type: 'new-chat' as const, projectPath: '/repo' },
-				}
-			: options.context;
 	const controller = new ScheduledPromptSnippets({
+		...catalogs,
 		get prompt() {
 			return input.prompt;
 		},
@@ -85,9 +60,11 @@ function fixture(
 			return input.key;
 		},
 		get context() {
-			return context;
+			return {
+				type: 'scheduled-prompt' as const,
+				target: { type: 'new-chat' as const, projectPath: '/repo' },
+			};
 		},
-		inspectCatalogItem: options.inspectCatalogItem ?? (() => 'unavailable'),
 		onInsert,
 		onPendingChange,
 		onSourceChanged,
@@ -101,12 +78,41 @@ beforeEach(() => {
 });
 
 describe('scheduled prompt snippets', () => {
-	it('replaces the selection and supplies the caret while blocking save during expansion', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({
-			inspectCatalogItem: () => 'matched',
+	it('expands non-project_path snippets and named preambles locally without pending toggles', async () => {
+		const { controller, onInsert, onPendingChange } = fixture();
+		controller.open(7, 15);
+		expect(await controller.insert(localItem, 'API')).toBe('inserted');
+		expect(onInsert).toHaveBeenCalledWith(
+			'Before Review API on {{current_date}} for {{chat_id}} after',
+			'Before Review API on {{current_date}} for {{chat_id}}'.length,
+		);
+		expect(await controller.insert(localPreamble, '')).toBe('inserted');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onPendingChange).not.toHaveBeenCalled();
+	});
+
+	it('surfaces local scheduled boundary errors without calling expandSnippet', async () => {
+		const { controller, onInsert, onPendingChange } = fixture();
+		const boundaryItem = snippetToSelectable({
+			id: 'boundary',
+			shortName: 'boundary',
+			template: 'Run {{arguments}}{{chat_id}}',
+			defaultArguments: 'API',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
 		});
 		controller.open(7, 15);
-		expect(await controller.insert(item, 'API')).toBe('inserted');
+		expect(await controller.insert(boundaryItem, 'x\\')).toBe('failed');
+		expect(controller.error).toContain('Add a separator');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onPendingChange).not.toHaveBeenCalled();
+		expect(onInsert).not.toHaveBeenCalled();
+	});
+
+	it('replaces the selection and supplies the caret while blocking save during server expansion', async () => {
+		const { controller, onInsert, onPendingChange } = fixture();
+		controller.open(7, 15);
+		expect(await controller.insert(serverItem, 'API')).toBe('inserted');
 		expect(expand.mock.calls[0][0]).toEqual({
 			shortName: 'review',
 			arguments: { type: 'value', value: 'API' },
@@ -119,113 +125,13 @@ describe('scheduled prompt snippets', () => {
 		expect(onPendingChange.mock.calls).toEqual([[true], [false]]);
 	});
 
-	it('expands scheduled snippets without project_path locally without hitting the server', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({
-			inspectCatalogItem: () => 'matched',
-		});
-		controller.open(7, 15);
-		expect(await controller.insert(localItem, '{{chat_id}}')).toBe('inserted');
-		expect(expand).not.toHaveBeenCalled();
-		expect(onPendingChange).not.toHaveBeenCalled();
-		expect(onInsert).toHaveBeenCalledWith(
-			'Before Review \\{{chat_id}} for {{chat_id}} on {{current_date}} / {{current_date_local}} after',
-			'Before Review \\{{chat_id}} for {{chat_id}} on {{current_date}} / {{current_date_local}}'.length,
-		);
-	});
-
-	it('inserts named preambles verbatim locally in scheduled prompts', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({
-			inspectCatalogItem: () => 'matched',
-		});
-		controller.open(7, 15);
-		expect(await controller.insert(preambleItem, '')).toBe('inserted');
-		expect(expand).not.toHaveBeenCalled();
-		expect(onPendingChange).not.toHaveBeenCalled();
-		expect(onInsert).toHaveBeenCalledWith(
-			'Before Chat {{chat_id}} on {{current_date}} / {{current_date_local}} after',
-			'Before Chat {{chat_id}} on {{current_date}} / {{current_date_local}}'.length,
-		);
-	});
-
-	it('rejects a changed selection immediately without calling the server', async () => {
-		const { controller, onInsert } = fixture({
-			inspectCatalogItem: () => 'changed',
-		});
-		controller.open(7, 15);
-		expect(await controller.insert(localItem, 'API')).toBe('cancelled');
-		expect(expand).not.toHaveBeenCalled();
-		expect(onInsert).not.toHaveBeenCalled();
-		expect(controller.error).toContain('changed');
-	});
-
-	it('rejects a server fallback response when the catalog selection becomes changed mid-flight', async () => {
-		const serverCall = Promise.withResolvers<typeof response>();
-		expand.mockReturnValueOnce(serverCall.promise);
-		let state: CatalogSelectableSnippetState = 'matched';
-		const { controller, onInsert } = fixture({
-			inspectCatalogItem: () => state,
-		});
-
-		controller.open(7, 15);
-		const inserting = controller.insert(item, 'API');
-		await vi.waitFor(() => expect(expand).toHaveBeenCalledOnce());
-
-		state = 'changed';
-		serverCall.resolve({ ...response, expandedText: 'Restored /repo' });
-
-		expect(await inserting).toBe('cancelled');
-		expect(onInsert).not.toHaveBeenCalled();
-		expect(controller.error).toContain('changed');
-	});
-
-	it('rejects ambiguous deferred token boundaries locally without calling the server', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({
-			inspectCatalogItem: () => 'matched',
-		});
-		controller.open(7, 15);
-		expect(await controller.insert(boundaryItem, 'report\\')).toBe('failed');
-		expect(expand).not.toHaveBeenCalled();
-		expect(onPendingChange).not.toHaveBeenCalled();
-		expect(onInsert).not.toHaveBeenCalled();
-		expect(controller.error).toContain('Add a separator');
-	});
-
-	it('falls back to the server when catalog inspection reports unavailable', async () => {
-		const { controller, onInsert } = fixture();
-		expand.mockResolvedValueOnce({
-			...response,
-			sourceId: localItem.id,
-			sourceUpdatedAt: localItem.updatedAt,
-			shortName: localItem.shortName,
-			expandedText: 'Server expanded',
-		});
-		controller.open(7, 15);
-		expect(await controller.insert(localItem, 'API')).toBe('inserted');
-		expect(expand).toHaveBeenCalledOnce();
-		expect(onInsert).toHaveBeenCalledWith(
-			'Before Server expanded after',
-			'Before Server expanded'.length,
-		);
-	});
-
-	it('catches unexpected errors thrown during local insertion without toggling pending state', async () => {
-		const { controller, onInsert, onPendingChange } = fixture({
-			inspectCatalogItem: () => 'matched',
-		});
-		onInsert.mockRejectedValueOnce(new Error('insert callback failed'));
-		controller.open(7, 15);
-		expect(await controller.insert(localItem, 'API')).toBe('failed');
-		expect(controller.error).toBe('insert callback failed');
-		expect(onPendingChange).not.toHaveBeenCalled();
-	});
-
 	it('replaces the configured inline trigger while preserving surrounding prose', async () => {
 		const { input, controller, onInsert } = fixture();
 		input.prompt = 'Before ;;review after';
 		controller.detectTrigger(15, ';;');
 		expect(controller.palette.isOpen).toBe(true);
 		expect(controller.palette.initialQuery).toBe('review');
-		expect(await controller.insert(item, '')).toBe('inserted');
+		expect(await controller.insert(serverItem, '')).toBe('inserted');
 		expect(onInsert.mock.calls[0][0]).toBe('Before Review API in /repo {{chat_id}} after');
 	});
 
@@ -236,7 +142,7 @@ describe('scheduled prompt snippets', () => {
 		expect(controller.palette.isOpen).toBe(true);
 		expect(controller.palette.initialQuery).toBe('');
 		input.prompt = 'Before ;; after';
-		expect(await controller.insert(item, '')).toBe('inserted');
+		expect(await controller.insert(serverItem, '')).toBe('inserted');
 		expect(onInsert.mock.calls[0][0]).toBe('Before Review API in /repo {{chat_id}} after');
 	});
 
@@ -245,7 +151,7 @@ describe('scheduled prompt snippets', () => {
 		let resolve!: (value: typeof response) => void;
 		expand.mockImplementation(() => new Promise((done) => (resolve = done)));
 		controller.open(7, 15);
-		const pending = controller.insert(item, 'API');
+		const pending = controller.insert(serverItem, 'API');
 		if (change === 'edit') input.prompt = 'Edited';
 		if (change === 'target') input.key = 'chat:other';
 		if (change === 'close') controller.cancel();
@@ -257,7 +163,7 @@ describe('scheduled prompt snippets', () => {
 	it('keeps text intact and exposes retryable expansion failures', async () => {
 		const { controller, onInsert, onSourceChanged } = fixture();
 		expand.mockRejectedValueOnce(new Error('Path unavailable'));
-		expect(await controller.insert(item, '')).toBe('failed');
+		expect(await controller.insert(serverItem, '')).toBe('failed');
 		expect(controller.error).toBe('Path unavailable');
 		expect(onInsert).not.toHaveBeenCalled();
 		expect(onSourceChanged).not.toHaveBeenCalled();
@@ -270,7 +176,7 @@ describe('scheduled prompt snippets', () => {
 	])('cancels stale identity and refreshes affected catalogs: %j', async (changed) => {
 		const { controller, onInsert, onSourceChanged } = fixture();
 		expand.mockResolvedValueOnce({ ...response, ...changed });
-		expect(await controller.insert(item, '')).toBe('cancelled');
+		expect(await controller.insert(serverItem, '')).toBe('cancelled');
 		expect(controller.error).toContain('changed');
 		expect(onSourceChanged.mock.calls).toEqual(
 			'source' in changed ? [['snippet'], ['preamble']] : [['snippet']],
@@ -278,92 +184,161 @@ describe('scheduled prompt snippets', () => {
 		expect(onInsert).not.toHaveBeenCalled();
 	});
 
-	it('cancels immediately when context is null without inspecting catalog or calling server', async () => {
-		const inspectCatalogItem = vi.fn(() => 'matched' as const);
-		const { controller, onInsert } = fixture({ context: null, inspectCatalogItem });
+	it('cancels stale selections locally when the loaded catalog no longer matches', async () => {
+		let currentSnippets = [localItem.snippet];
+		const { controller, onInsert } = fixture({
+			snippets: {
+				hasLoaded: true,
+				get snippets() {
+					return currentSnippets;
+				},
+			},
+			preambles: { hasLoaded: true, preambles: [] },
+		});
+		controller.open(7, 15);
+		currentSnippets = [];
+
 		expect(await controller.insert(localItem, 'API')).toBe('cancelled');
-		expect(inspectCatalogItem).not.toHaveBeenCalled();
+		expect(controller.error).toContain('changed');
 		expect(expand).not.toHaveBeenCalled();
 		expect(onInsert).not.toHaveBeenCalled();
 	});
 
-	it('expands escaped project_path locally and cancels changed preambles locally', async () => {
-		const escapedPathSnippet = snippetToSelectable({
-			id: 'escaped',
-			shortName: 'escaped',
-			template: 'Keep \\{{project_path}} literal with {{arguments}}',
-			defaultArguments: '',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		});
-		const matchedFixture = fixture({ inspectCatalogItem: () => 'matched' });
-		matchedFixture.controller.open(7, 15);
-		expect(await matchedFixture.controller.insert(escapedPathSnippet, 'args')).toBe('inserted');
-		expect(expand).not.toHaveBeenCalled();
-		expect(matchedFixture.onInsert).toHaveBeenCalledWith(
-			'Before Keep {{project_path}} literal with args after',
-			'Before Keep {{project_path}} literal with args'.length,
-		);
+	it('cancels a delayed server fallback if the loaded catalog updates or deletes the snippet in flight', async () => {
+		for (const mutation of ['updated', 'deleted'] as const) {
+			let currentSnippets = [serverItem.snippet];
+			const { controller, onInsert } = fixture({
+				snippets: {
+					hasLoaded: true,
+					get snippets() {
+						return currentSnippets;
+					},
+				},
+				preambles: { hasLoaded: true, preambles: [] },
+			});
+			let resolve!: (value: typeof response) => void;
+			expand.mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+			controller.open(7, 15);
+			const pending = controller.insert(serverItem, 'API');
+			currentSnippets =
+				mutation === 'updated'
+					? [{ ...serverItem.snippet, updatedAt: '2026-01-03T00:00:00.000Z' }]
+					: [];
+			resolve(response);
 
-		const changedPreambleFixture = fixture({ inspectCatalogItem: () => 'changed' });
-		changedPreambleFixture.controller.open(7, 15);
-		expect(await changedPreambleFixture.controller.insert(preambleItem, '')).toBe('cancelled');
-		expect(expand).not.toHaveBeenCalled();
-		expect(changedPreambleFixture.controller.error).toContain('changed');
+			expect(await pending).toBe('cancelled');
+			expect(controller.error).toContain('changed');
+			expect(onInsert).not.toHaveBeenCalled();
+		}
 	});
 
-	it('discards new-chat server responses whose resolved projectPath or executorId mismatches the target', async () => {
-		const remoteExecutorId = '11111111-1111-4111-8111-111111111111';
-		const pathMismatch = fixture();
-		expand.mockResolvedValueOnce({ ...response, contextProjectPath: '/other-repo' });
-		expect(await pathMismatch.controller.insert(item, 'API')).toBe('cancelled');
-		expect(pathMismatch.onInsert).not.toHaveBeenCalled();
-
-		const executorMismatch = fixture({
-			context: {
-				type: 'scheduled-prompt',
-				target: { type: 'new-chat', projectPath: '/repo', executorId: remoteExecutorId },
-			},
-		});
-		expand.mockResolvedValueOnce({ ...response, contextExecutorId: 'local' });
-		expect(await executorMismatch.controller.insert(item, 'API')).toBe('cancelled');
-		expect(executorMismatch.onInsert).not.toHaveBeenCalled();
-	});
-
-	it('inserts server fallback results for existing-chat targets', async () => {
-		const existingChatFixture = fixture({
-			context: {
-				type: 'scheduled-prompt',
-				target: { type: 'chat', chatId: '1787471053739199' },
-			},
-		});
-		existingChatFixture.controller.open(7, 15);
-		expect(await existingChatFixture.controller.insert(item, 'API')).toBe('inserted');
-		expect(expand).toHaveBeenCalledWith(
-			{
-				shortName: 'review',
-				arguments: { type: 'value', value: 'API' },
-				context: {
-					type: 'scheduled-prompt',
-					target: { type: 'chat', chatId: '1787471053739199' },
+	it('cancels held palette insertion when the owning catalog becomes invalidated', async () => {
+		let snippetsLoaded = true;
+		const { controller, onInsert } = fixture({
+			snippets: {
+				get hasLoaded() {
+					return snippetsLoaded;
+				},
+				get snippets() {
+					return snippetsLoaded ? [localItem.snippet] : [];
 				},
 			},
-			expect.objectContaining({ signal: expect.any(AbortSignal) }),
-		);
-		expect(existingChatFixture.onInsert).toHaveBeenCalledOnce();
+			preambles: { hasLoaded: true, preambles: [] },
+		});
+		controller.open(7, 15);
+		snippetsLoaded = false;
+
+		expect(await controller.insert(localItem, 'API')).toBe('cancelled');
+		expect(controller.error).toContain('changed');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onInsert).not.toHaveBeenCalled();
 	});
 
-	it('returns cancelled without exposing error when server fails after interactionKey changes', async () => {
-		const { input, controller } = fixture();
-		const server = Promise.withResolvers<typeof response>();
-		expand.mockReturnValueOnce(server.promise);
+	it('cancels palette insertion and reconciles both catalogs on cross-catalog short-name conflict', async () => {
+		const conflictingPreamble: Preamble = {
+			id: '00000000-0000-4000-8000-000000000077',
+			enabled: false,
+			title: 'Conflicting',
+			snippetShortName: localItem.shortName,
+			content: 'New preamble content',
+			scope: { type: 'global' },
+			agentIds: [],
+			tagFilter: { mode: 'any', tags: [] },
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		};
+		const { controller, onInsert, onSourceChanged } = fixture({
+			snippets: { hasLoaded: true, snippets: [localItem.snippet] },
+			preambles: { hasLoaded: true, preambles: [conflictingPreamble] },
+		});
 
-		const inserting = controller.insert(item, 'API');
-		await vi.waitFor(() => expect(expand).toHaveBeenCalledOnce());
-		input.key = 'chat:changed';
-		server.reject(new Error('late server failure'));
+		for (const candidate of [
+			localItem,
+			preambleToSelectable(conflictingPreamble)!,
+		]) {
+			onSourceChanged.mockClear();
+			controller.open(7, 15);
+			expect(await controller.insert(candidate, 'API')).toBe('cancelled');
+			expect(controller.error).toContain('changed');
+			expect(onSourceChanged).toHaveBeenCalledWith('snippet');
+			expect(onSourceChanged).toHaveBeenCalledWith('preamble');
+			expect(expand).not.toHaveBeenCalled();
+			expect(onInsert).not.toHaveBeenCalled();
+		}
+	});
 
-		expect(await inserting).toBe('cancelled');
-		expect(controller.error).toBeNull();
+	it('reconciles both catalogs before same-source mismatch when an ambiguous preamble arrives in flight', async () => {
+		let currentPreambles: Preamble[] = [];
+		const { controller, onInsert, onSourceChanged } = fixture({
+			snippets: { hasLoaded: true, snippets: [serverItem.snippet] },
+			preambles: {
+				hasLoaded: true,
+				get preambles() {
+					return currentPreambles;
+				},
+			},
+		});
+		let resolve!: (value: typeof response) => void;
+		expand.mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+		controller.open(7, 15);
+		const pending = controller.insert(serverItem, 'API');
+		currentPreambles = [
+			{
+				id: '00000000-0000-4000-8000-000000000088',
+				enabled: false,
+				title: 'Conflicting',
+				snippetShortName: serverItem.shortName,
+				content: 'New preamble content',
+				scope: { type: 'global' },
+				agentIds: [],
+				tagFilter: { mode: 'any', tags: [] },
+				createdAt: '2026-01-01T00:00:00.000Z',
+				updatedAt: '2026-01-01T00:00:00.000Z',
+			},
+		];
+		resolve({
+			...response,
+			source: 'snippet',
+			sourceId: serverItem.id,
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
+		});
+
+		expect(await pending).toBe('cancelled');
+		expect(controller.error).toContain('changed');
+		expect(onInsert).not.toHaveBeenCalled();
+		expect(onSourceChanged).toHaveBeenCalledWith('snippet');
+		expect(onSourceChanged).toHaveBeenCalledWith('preamble');
+	});
+
+	it.each([
+		{ contextProjectPath: '/other' },
+		{ contextExecutorId: 'remote-1' },
+	])('cancels a server fallback when the response context mismatches: %j', async (mismatch) => {
+		const { controller, onInsert } = fixture();
+		expand.mockResolvedValueOnce({ ...response, ...mismatch });
+		controller.open(7, 15);
+
+		expect(await controller.insert(serverItem, 'API')).toBe('cancelled');
+		expect(onInsert).not.toHaveBeenCalled();
 	});
 });

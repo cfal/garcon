@@ -1,10 +1,10 @@
 import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
-import { matchesSelectableSnippetExpansion } from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 import {
+	staleSelectionRefreshSources,
 	tryExpandSelectableSnippetLocally,
-	type CatalogSelectableSnippetState,
+	type SnippetCatalogLookups,
 } from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import {
@@ -14,11 +14,10 @@ import {
 import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 import * as m from '$lib/paraglide/messages.js';
 
-interface Options {
+interface Options extends SnippetCatalogLookups {
 	get prompt(): string;
 	get context(): ScheduledSnippetExpansionContext | null;
 	get interactionKey(): string;
-	inspectCatalogItem(item: SelectableSnippet): CatalogSelectableSnippetState;
 	onInsert(text: string, caret: number): Promise<void>;
 	onPendingChange(pending: boolean): void;
 	onSourceChanged(source: SelectableSnippet['source']): void;
@@ -67,20 +66,15 @@ export class ScheduledPromptSnippets {
 		this.error = null;
 		let pendingNotified = false;
 		try {
-			const catalogState = this.options.inspectCatalogItem(snippet);
-			if (catalogState === 'changed') {
-				this.error = m.snippets_changed_before_expansion();
-				return 'cancelled';
-			}
-			if (catalogState === 'matched') {
-				const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
-					kind: 'scheduled',
-				});
-				if (local.kind === 'expanded') return await insertExpanded(local.expandedText);
-				if (local.kind === 'error') {
-					this.error = local.message;
-					return 'failed';
-				}
+			const preflightStale = staleSelectionRefreshSources(snippet, this.options);
+			if (preflightStale) return this.#cancelStaleSelection(preflightStale);
+			const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
+				kind: 'scheduled',
+			});
+			if (local.kind === 'expanded') return await insertExpanded(local.expandedText);
+			if (local.kind === 'error') {
+				this.error = local.message;
+				return 'failed';
 			}
 			pendingNotified = true;
 			this.options.onPendingChange(true);
@@ -93,29 +87,19 @@ export class ScheduledPromptSnippets {
 				result.kind !== 'expanded' ||
 				key !== this.options.interactionKey ||
 				source !== this.options.prompt
-			)
-				return 'cancelled';
-			const responseChanged = !matchesSelectableSnippetExpansion(snippet, result.response);
-			if (
-				responseChanged ||
-				this.options.inspectCatalogItem(snippet) === 'changed'
 			) {
-				this.error = m.snippets_changed_before_expansion();
-				if (responseChanged) {
-					this.options.onSourceChanged(snippet.source);
-					if (result.response.source !== snippet.source) {
-						this.options.onSourceChanged(result.response.source);
-					}
-				}
 				return 'cancelled';
 			}
+			const responseStale = staleSelectionRefreshSources(snippet, this.options, result.response);
+			if (responseStale) return this.#cancelStaleSelection(responseStale);
 			const target = context.target;
 			if (
 				target.type === 'new-chat' &&
 				(result.response.contextProjectPath !== target.projectPath ||
 					result.response.contextExecutorId !== (target.executorId ?? 'local'))
-			)
+			) {
 				return 'cancelled';
+			}
 			return await insertExpanded(result.response.expandedText);
 		} catch (error) {
 			if (key !== this.options.interactionKey) return 'cancelled';
@@ -124,5 +108,14 @@ export class ScheduledPromptSnippets {
 		} finally {
 			if (pendingNotified && !this.expansion.pending) this.options.onPendingChange(false);
 		}
+	}
+
+	#cancelStaleSelection(sources: readonly SelectableSnippet['source'][]): 'cancelled' {
+		this.error = m.snippets_changed_before_expansion();
+		this.palette.dismiss();
+		for (const source of sources) {
+			this.options.onSourceChanged(source);
+		}
+		return 'cancelled';
 	}
 }

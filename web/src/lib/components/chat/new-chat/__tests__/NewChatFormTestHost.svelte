@@ -16,9 +16,7 @@
 		setPreambles,
 		setSnippets,
 		setTransientLayers,
-		setWs,
 	} from '$lib/context';
-	import { WsConnection, type WsConnectionPhase } from '$lib/ws/connection.svelte.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
@@ -44,7 +42,7 @@
 		modelValueForSelection,
 		resolveModelSelection,
 	} from '../../../../../test/model-catalog';
-	import { onDestroy, untrack } from 'svelte';
+	import { untrack } from 'svelte';
 	import {
 		ANY_FILE_ATTACHMENT_MIME_TYPE,
 		type FileAttachmentMimeTypes,
@@ -70,8 +68,6 @@
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
-		preloadSnippets?: boolean;
-		wsPhase?: WsConnectionPhase;
 		onStartChat?: (config: NewChatConfig, chatId: ChatId) => void;
 		preambleSnapshot?: PreamblesSnapshot | null;
 		loadPreambles?: () => Promise<PreamblesSnapshot>;
@@ -98,8 +94,6 @@
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
-		preloadSnippets = false,
-		wsPhase,
 		onStartChat = () => {},
 		preambleSnapshot = { revision: 0, preambles: [] },
 		loadPreambles,
@@ -192,42 +186,26 @@
 		return findModelForSelection(modelsForAgent(agentId), model, endpointId);
 	}
 
-	const ws = untrack(() => (wsPhase !== undefined ? new WsConnection() : null));
-	if (ws) {
-		setWs(ws);
-		$effect(() => {
-			if (wsPhase !== undefined) {
-				ws.isConnected = wsPhase === 'connected';
-				ws.connectionStatus.phase = wsPhase;
-			}
-		});
-	}
-	onDestroy(() => ws?.disconnect());
-	function reviewSnapshot() {
-		return {
-			revision: 1,
-			snippets: [
-				{
-					id: 'snippet-review',
-					shortName: 'review',
-					template: snippetTemplate,
-					defaultArguments: snippetDefaultArguments,
-					createdAt: '2026-01-01T00:00:00.000Z',
-					updatedAt: '2026-01-01T00:00:00.000Z',
-				},
-			],
-		};
-	}
-	const snippetsStore = createSnippetsStore({
-		get: async () => {
-			snippetLoadCount += 1;
-			return reviewSnapshot();
-		},
-	});
-	if (untrack(() => preloadSnippets)) {
-		snippetsStore.applySnapshot(untrack(reviewSnapshot));
-	}
-	setSnippets(snippetsStore);
+	setSnippets(
+		createSnippetsStore({
+			get: async () => {
+				snippetLoadCount += 1;
+				return {
+					revision: 1,
+					snippets: [
+						{
+							id: 'snippet-review',
+							shortName: 'review',
+							template: snippetTemplate,
+							defaultArguments: snippetDefaultArguments,
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+						},
+					],
+				};
+			},
+		}),
+	);
 
 	setModelCatalog(untrack(() => catalog) ?? {
 		forExecutor() { return this; },

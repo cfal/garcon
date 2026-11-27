@@ -9,6 +9,7 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { getSnippets } from '$lib/context';
 	import { searchSnippets } from '$lib/snippets/search-snippets.js';
+	import { snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		SNIPPET_ERROR_CODES,
@@ -37,38 +38,41 @@
 		searchSnippets(snippets.snippets, query, (snippet) => snippet.template),
 	);
 	let form = $state<SnippetFormTarget>({ kind: 'closed' });
+	let editRemoved = $state(false);
 	let removeTarget = $state<{ snippet: Snippet; revision: number } | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
+	let operationError = $state<string | null>(null);
 	const operationLocked = $derived(removing || snippets.isRefreshing);
 
 	$effect(() => {
 		if (active) untrack(() => void snippets.loadInBackground());
 	});
 
-	function errorDetail(error: unknown): string {
-		if (error instanceof ApiError) return error.details || error.message;
-		return error instanceof Error ? error.message : String(error);
-	}
-
 	function openCreate(): void {
 		if (operationLocked) return;
+		editRemoved = false;
+		operationError = null;
 		form = { kind: 'create' };
 	}
 
 	function openEdit(snippet: Snippet): void {
 		const revision = snippets.snapshot?.revision;
 		if (operationLocked || revision === undefined) return;
+		editRemoved = false;
+		operationError = null;
 		form = { kind: 'edit', snippet, revision };
 	}
 
 	function closeForm(): void {
+		editRemoved = false;
 		form = { kind: 'closed' };
 	}
 
 	function openRemove(snippet: Snippet): void {
 		const revision = snippets.snapshot?.revision;
 		if (operationLocked || revision === undefined) return;
+		operationError = null;
 		removeError = null;
 		removeTarget = { snippet, revision };
 	}
@@ -78,17 +82,43 @@
 		removeError = null;
 	}
 
+	function rejectRemovedEdit(targetId: string, name: string, cause: ApiError): never {
+		// Fence the flag to the same target so a form retargeted mid-save stays editable.
+		if (form.kind === 'edit' && form.snippet.id === targetId) editRemoved = true;
+		throw new Error(m.snippets_already_removed({ name }), { cause });
+	}
+
+	function reportAlreadyRemoved(name: string): void {
+		closeRemove();
+		operationError = m.snippets_already_removed({ name });
+	}
+
 	async function save(definition: SnippetDefinitionInput): Promise<void> {
+		if (form.kind === 'edit' && editRemoved) {
+			throw new Error(m.snippets_already_removed({ name: form.snippet.shortName }));
+		}
+		if (operationLocked) {
+			throw new Error(m.snippets_changed_before_write());
+		}
 		if (form.kind === 'edit') {
+			const targetId = form.snippet.id;
+			const targetShortName = form.snippet.shortName;
 			try {
-				await snippets.update(form.snippet.id, definition, form.revision);
+				await snippets.update(targetId, definition, form.revision);
 			} catch (error) {
-				// Update revision in place so an explicit retry uses the refreshed catalog without resetting the draft.
+				if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.notFound) {
+					rejectRemovedEdit(targetId, targetShortName, error);
+				}
+				// Advance the target revision in place on 409 so an explicit retry uses the refreshed catalog without resetting the draft.
 				if (
+					form.kind === 'edit' &&
+					form.snippet.id === targetId &&
 					error instanceof ApiError &&
 					error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
 					snippets.snapshot !== null
 				) {
+					const refreshed = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
+					if (!refreshed) rejectRemovedEdit(targetId, targetShortName, error);
 					form.revision = snippets.snapshot.revision;
 				}
 				throw error;
@@ -100,20 +130,33 @@
 
 	async function confirmRemove(): Promise<void> {
 		if (!removeTarget || operationLocked) return;
+		const target = removeTarget;
 		removing = true;
 		removeError = null;
 		try {
-			await snippets.remove(removeTarget.snippet.id, removeTarget.revision);
+			await snippets.remove(target.snippet.id, target.revision);
 			closeRemove();
 		} catch (error) {
+			if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.notFound) {
+				reportAlreadyRemoved(target.snippet.shortName);
+				return;
+			}
 			if (
+				removeTarget &&
 				error instanceof ApiError &&
 				error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
 				snippets.snapshot !== null
 			) {
-				removeTarget.revision = snippets.snapshot.revision;
+				const refreshed = snippets.snapshot.snippets.find(
+					(entry) => entry.id === target.snippet.id,
+				);
+				if (!refreshed) {
+					reportAlreadyRemoved(target.snippet.shortName);
+					return;
+				}
+				removeTarget = { snippet: refreshed, revision: snippets.snapshot.revision };
 			}
-			removeError = m.snippets_remove_error({ detail: errorDetail(error) });
+			removeError = m.snippets_remove_error({ detail: snippetErrorDetail(error) });
 		} finally {
 			removing = false;
 		}
@@ -135,7 +178,10 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={() => void snippets.refreshInBackground()}
+				onclick={() => {
+					operationError = null;
+					void snippets.refreshInBackground();
+				}}
 				disabled={operationLocked}
 				title={m.snippets_refresh()}
 				aria-label={m.snippets_refresh()}
@@ -147,6 +193,11 @@
 
 	<SnippetSearchField bind:value={query} />
 
+	{#if operationError}
+		<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+			{operationError}
+		</p>
+	{/if}
 	{#if snippets.hasLoaded && snippets.snippets.length >= SNIPPET_MAX_COUNT}
 		<p class="text-xs text-muted-foreground">{m.snippets_limit_reached()}</p>
 	{/if}
@@ -207,6 +258,7 @@
 	<SnippetFormDialog
 		open
 		snippet={form.kind === 'edit' ? form.snippet : null}
+		disabled={operationLocked || editRemoved}
 		onSave={save}
 		onClose={closeForm}
 	/>

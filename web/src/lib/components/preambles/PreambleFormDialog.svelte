@@ -32,11 +32,12 @@
 		open: boolean;
 		preamble: Preamble | null;
 		isStale: boolean;
+		disabled?: boolean;
 		onSave: (definition: PreambleDefinitionInput) => Promise<void>;
 		onClose: () => void;
 	}
 
-	let { open, preamble, isStale, onSave, onClose }: Props = $props();
+	let { open, preamble, isStale, disabled = false, onSave, onClose }: Props = $props();
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const modelCatalog = getModelCatalog();
@@ -64,7 +65,7 @@
 	}
 
 	async function save(): Promise<void> {
-		if (isStale) return;
+		if (isStale || disabled) return;
 		const definition = form.buildDefinition();
 		if (!definition || form.saving) return;
 		form.saving = true;
@@ -374,7 +375,7 @@
 			<Button variant="secondary" onclick={closeForm} disabled={form.saving}>
 				{m.preambles_cancel()}
 			</Button>
-			<Button onclick={() => void save()} disabled={!form.canSave || isStale}>
+			<Button onclick={() => void save()} disabled={!form.canSave || isStale || disabled}>
 				{form.saving ? m.preambles_saving() : m.preambles_save()}
 			</Button>
 		</Dialog.Footer>
