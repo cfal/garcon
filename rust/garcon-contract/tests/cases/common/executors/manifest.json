@@ -1,0 +1,10 @@
+{
+  "module": "common/executors.ts",
+  "tests": [
+    "common/__tests__/executors.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/executors.jsonl",
+  "notCaptured": [],
+  "cases": 1064,
+  "sha256": "cdf8b185121d141dfe06ca422366f896cd9bff04b3a01ea75006a133c7cd3238"
+}

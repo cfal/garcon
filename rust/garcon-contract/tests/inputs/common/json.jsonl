@@ -1,0 +1,11 @@
+{"fn":"isRecord","args":[null]}
+{"fn":"isRecord","args":[{}]}
+{"fn":"stableJsonStringify","args":[{"a":1.0,"b":100,"c":[1e21,0.5]}]}
+{"fn":"stableJsonStringify","args":[{"b":1,"1":2,"a":3,"0":4}]}
+{"fn":"stableJsonStringify","args":[null]}
+{"fn":"stableJsonStringify","args":[1.5]}
+{"fn":"stableJsonStringify","args":["é"]}
+{"fn":"stableJsonStringify","args":[{"～":1,"😀":2,"a":3}]}
+{"fn":"stableJsonStringify","args":[{"z":{"y":[{"b":1.5,"a":-0}],"a":null},"a":true}]}
+{"fn":"stableJsonStringify","args":[{"a":{"$":"undefined"}}]}
+{"fn":"stableJsonStringify","args":[{"-1":"minus","5":"five","a":1,"!x":0,"05":"five-zero"}]}

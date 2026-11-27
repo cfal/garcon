@@ -1,0 +1,13 @@
+{"id":"isErrorCode#0","fn":"isErrorCode","args":["VALIDATION_FAILED"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:1"}
+{"id":"isErrorCode#1","fn":"isErrorCode","args":["AUTH_VALIDATION_FAILED"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:2"}
+{"id":"isErrorCode#2","fn":"isErrorCode","args":["PULL_REQUEST_REVIEW_STORAGE_UNAVAILABLE"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:3"}
+{"id":"isErrorCode#3","fn":"isErrorCode","args":["TICKET_INTERNAL_ERROR"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:4"}
+{"id":"isErrorCode#4","fn":"isErrorCode","args":["validation_failed"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:5"}
+{"id":"isErrorCode#5","fn":"isErrorCode","args":["UNKNOWN"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:6"}
+{"id":"isErrorCode#6","fn":"isErrorCode","args":[""],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:7"}
+{"id":"isErrorCode#7","fn":"isErrorCode","args":[null],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:8"}
+{"id":"isErrorCode#8","fn":"isErrorCode","args":[0],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:9"}
+{"id":"isErrorCode#9","fn":"isErrorCode","args":[true],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:10"}
+{"id":"isErrorCode#10","fn":"isErrorCode","args":[],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:11"}
+{"id":"isErrorCode#11","fn":"isErrorCode","args":["VALIDATION_FAILED "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:12"}
+{"id":"isErrorCode#12","fn":"isErrorCode","args":[" VALIDATION_FAILED"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/error-codes.jsonl:13"}

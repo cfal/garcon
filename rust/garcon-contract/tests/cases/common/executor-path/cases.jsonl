@@ -1,0 +1,16 @@
+{"id":"isWithinExecutorPath#0","fn":"isWithinExecutorPath","args":["/work","/work"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:1"}
+{"id":"isWithinExecutorPath#1","fn":"isWithinExecutorPath","args":["/work","/work/src/a.ts"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:2"}
+{"id":"isWithinExecutorPath#2","fn":"isWithinExecutorPath","args":["/work/","/work/src"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:3"}
+{"id":"isWithinExecutorPath#3","fn":"isWithinExecutorPath","args":["/work","/work/"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:4"}
+{"id":"isWithinExecutorPath#4","fn":"isWithinExecutorPath","args":["/","/work/src"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:5"}
+{"id":"isWithinExecutorPath#5","fn":"isWithinExecutorPath","args":["/","/"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:6"}
+{"id":"isWithinExecutorPath#6","fn":"isWithinExecutorPath","args":["/work","/worker"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:7"}
+{"id":"isWithinExecutorPath#7","fn":"isWithinExecutorPath","args":["/work","/other/work"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:8"}
+{"id":"isWithinExecutorPath#8","fn":"isWithinExecutorPath","args":["/work/src","/work"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:9"}
+{"id":"isWithinExecutorPath#9","fn":"isWithinExecutorPath","args":["/work",""],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:10"}
+{"id":"isWithinExecutorPath#10","fn":"isWithinExecutorPath","args":["","/work"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:11"}
+{"id":"isWithinExecutorPath#11","fn":"isWithinExecutorPath","args":["",""],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:12"}
+{"id":"isWithinExecutorPath#12","fn":"isWithinExecutorPath","args":["C:/work","C:/work/src/a.ts"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:13"}
+{"id":"isWithinExecutorPath#13","fn":"isWithinExecutorPath","args":["C:/work","C:/worker"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:14"}
+{"id":"isWithinExecutorPath#14","fn":"isWithinExecutorPath","args":["//host/share","//host/share/dir"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:15"}
+{"id":"isWithinExecutorPath#15","fn":"isWithinExecutorPath","args":["//host/share","//host/shareholder"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/executor-path.jsonl:16"}

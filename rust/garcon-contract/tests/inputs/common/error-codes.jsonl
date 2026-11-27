@@ -1,0 +1,13 @@
+{"fn":"isErrorCode","args":["VALIDATION_FAILED"]}
+{"fn":"isErrorCode","args":["AUTH_VALIDATION_FAILED"]}
+{"fn":"isErrorCode","args":["PULL_REQUEST_REVIEW_STORAGE_UNAVAILABLE"]}
+{"fn":"isErrorCode","args":["TICKET_INTERNAL_ERROR"]}
+{"fn":"isErrorCode","args":["validation_failed"]}
+{"fn":"isErrorCode","args":["UNKNOWN"]}
+{"fn":"isErrorCode","args":[""]}
+{"fn":"isErrorCode","args":[null]}
+{"fn":"isErrorCode","args":[0]}
+{"fn":"isErrorCode","args":[true]}
+{"fn":"isErrorCode","args":[]}
+{"fn":"isErrorCode","args":["VALIDATION_FAILED "]}
+{"fn":"isErrorCode","args":[" VALIDATION_FAILED"]}

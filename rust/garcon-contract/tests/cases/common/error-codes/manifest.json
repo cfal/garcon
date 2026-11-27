@@ -1,0 +1,8 @@
+{
+  "module": "common/error-codes.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/error-codes.jsonl",
+  "notCaptured": [],
+  "cases": 13,
+  "sha256": "7b44d6dcca5929854e49a8ca5d5f215d7686ebbd36028836073a42e6f7b2c2df"
+}
