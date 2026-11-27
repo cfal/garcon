@@ -2,6 +2,7 @@
 // line the harness waits for and answers a few routes with values that change
 // from one start to the next, as the original's do.
 const things = new Map<string, string>();
+const authDisabled = process.argv.includes('--disable-auth');
 
 const server = Bun.serve({
   hostname: '127.0.0.1',
@@ -9,7 +10,14 @@ const server = Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
-    if (path === '/api/v1/auth/login') return Response.json({ token: 'probe-session-token' });
+    if (path === '/api/v1/auth/login') {
+      // As the original, it signs nobody in while authentication is disabled.
+      if (authDisabled) {
+        return Response.json({ success: false, error: 'Authentication is disabled by server configuration', errorCode: 'AUTH_CHANGE_FORBIDDEN', retryable: false }, { status: 403 });
+      }
+      return Response.json({ token: 'probe-session-token' });
+    }
+    if (path === '/api/v1/auth/status') return Response.json({ needsSetup: false, isAuthenticated: authDisabled, authDisabled });
     if (path === '/api/v1/path') {
       return new Response(process.env.PATH ?? '', { headers: { 'Content-Type': 'text/plain' } });
     }
