@@ -7,9 +7,9 @@ export const inlineTranscriptRendering = {
     signal?.throwIfAborted();
     return runTranscriptRenderingTask({ kind: 'render-transcript-export', ...request }, structuredClone(rows));
   },
-  async renderShareSnapshot({ header, rows }, signal) {
+  async renderShareSnapshot({ rows, ...request }, signal) {
     signal?.throwIfAborted();
-    return runTranscriptRenderingTask({ kind: 'render-share-snapshot', header }, structuredClone(rows));
+    return runTranscriptRenderingTask({ kind: 'render-share-snapshot', ...request }, structuredClone(rows));
   },
   async upgradeShareSnapshot(shareToken, format, snapshotPath, signal) {
     signal?.throwIfAborted();

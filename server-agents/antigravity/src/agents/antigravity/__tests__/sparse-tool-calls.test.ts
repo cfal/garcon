@@ -1,26 +1,163 @@
 import { expect, test } from 'bun:test';
-import { AntigravityAcpEventConverter } from '../antigravity-acp-event-converter.ts';
+import { session, textBlock } from './acp-tool-call-fixture.js';
 
 const LIST_TASK = { name: 'manage_task', rawInput: { Action: 'list' } };
 
-function textBlock(text: string) {
-  return { type: 'content', content: { type: 'text', text } };
-}
+test('reports native plan activity with late arguments, but does not reinterpret MCP tools', () => {
+  const s = session();
+  expect(s.start('enter', { name: 'enter_plan_mode', rawInput: { reason: 'Check layout' } })).toEqual([]);
+  expect(s.end())
+    .toMatchObject([{ type: 'antigravity-enter-plan-mode-tool-use', reason: 'Check layout' }]);
+  expect(s.start('exit', { name: 'exit_plan_mode', rawInput: { hint: true } })).toEqual([]);
+  expect(s.patch('exit', { rawInput: { Plan: '    example\n' }, status: 'completed' })).toMatchObject([
+    { type: 'antigravity-exit-plan-mode-tool-use', plan: '    example\n' }, { type: 'tool-result', content: {}, isError: false },
+  ]);
+  expect(s.start('mcp', { name: 'exit_plan_mode', _meta: { is_mcp_tool_call: true },
+    rawInput: { plan: 'Example' }, status: 'completed' })[0]).toMatchObject({ type: 'external-tool-use' });
+});
 
-function session() {
-  const converter = new AntigravityAcpEventConverter();
-  const context = { chatId: 'chat', sessionId: 'session', timestamp: 'now' };
-  function frame(update: Record<string, unknown>) {
-    return converter.fromSessionUpdate({ update }, context);
+test('uses a late MCP address instead of publishing a provisional plan', () => {
+  const s = session();
+  s.start('plan', { name: 'exit_plan_mode', rawInput: { Plan: 'Example' } });
+  const rows = s.patch('plan', { _meta: { is_mcp_tool_call: true }, status: 'completed',
+    rawInput: { server: 'fixture', tool: 'inspect', arguments: { detail: 1 } } });
+  expect(rows.map(row => row.type)).toEqual(['mcp-tool-use', 'tool-result']);
+});
+
+test.each(['enter_plan_mode', 'exit_plan_mode'])('keeps rejected raw arguments on a native %s fallback', name => {
+  const row = session().start('plan', { name, rawInput: ['malformed'], status: 'failed' })[0];
+  expect(row).toMatchObject({ type: 'external-tool-use', name, input: { raw: ['malformed'] } });
+});
+
+test.each([['enter_plan_mode', 'Reason'], ['exit_plan_mode', 'Plan']])('keeps conflicting %s aliases as raw evidence', (name, key) => {
+  const s = session();
+  s.start('plan', { name, rawInput: { [key]: 'First' } });
+  const input = { [key.toLowerCase()]: 'Second' };
+  expect(s.patch('plan', { rawInput: input, status: 'completed' })[0]).toMatchObject({
+    type: 'external-tool-use', name, input: { [key]: 'First', ...input },
+  });
+  const same = { [key]: 'Same', [key.toLowerCase()]: 'Same' };
+  expect(s.start('same', { name, rawInput: same, status: 'completed' })[0].type).not.toBe('external-tool-use');
+});
+
+test('pairs delayed and cron schedule requests with provider results, not Garcon jobs', () => {
+  const s = session();
+  expect(s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 120, TimerCondition: 'sender' } })).toEqual([]);
+  expect(s.patch('timer', { rawInput: { Prompt: '  Check\n' }, rawOutput: { id: 'timer-1' }, status: 'completed' })).toMatchObject([
+    { type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 120, prompt: '  Check\n', timerCondition: 'sender' } },
+    { type: 'tool-result', content: { rawOutput: { id: 'timer-1' } }, isError: false },
+  ]);
+  const cron = { cron_expression: '*/5 * * * *', prompt: 'Check', max_iterations: 1, is_daemon: false };
+  expect(s.start('cron', { name: 'schedule', rawInput: cron })).toEqual([]);
+  expect(s.patch('cron', { rawInput: { ExactTiming: true }, status: 'completed' })[0]).toEqual(expect.objectContaining({
+    type: 'schedule-tool-use', request: { action: 'cron', expression: cron.cron_expression, prompt: 'Check',
+      daemon: false, maxIterations: 1, exactTiming: true },
+  }));
+  const ambiguous = { ...cron, DurationSeconds: 60 };
+  expect(s.start('invalid', { name: 'schedule', rawInput: ambiguous, status: 'failed' })).toMatchObject([
+    { type: 'external-tool-use', input: ambiguous }, { type: 'tool-result', isError: true },
+  ]);
+});
+
+test('keeps a schedule open for a cancellation condition or MCP address until publication', () => {
+  const s = session();
+  const timer = { DurationSeconds: 120, Prompt: 'Check' };
+  expect(s.start('mcp', { name: 'schedule', rawInput: { ...timer, server: 'server' } })).toEqual([]);
+  expect(s.patch('mcp', { rawInput: { tool: 'operation', arguments: { key: 1 } } })).toMatchObject([
+    { type: 'mcp-tool-use', server: 'server', tool: 'operation' },
+  ]);
+  expect(s.start('timer', { name: 'schedule', rawInput: timer })).toEqual([]);
+  expect(s.patch('timer', { rawInput: { TimerCondition: 'sender' } })).toEqual([]);
+  expect(s.end()).toMatchObject([{ type: 'schedule-tool-use', request: { timerCondition: 'sender' } }]);
+});
+
+test('retains the original arguments when a native schedule cannot be represented', () => {
+  const s = session();
+  for (const [index, rawInput] of [
+    { DurationSeconds: -1 }, { DurationSeconds: 1.5 }, { DurationSeconds: 10, ExactTiming: true },
+    { DurationSeconds: 10, TimerCondition: ' ' }, { CronExpression: '  ' },
+    { CronExpression: '* * * * *', MaxIterations: -1 }, { CronExpression: '* * * * *', TimerCondition: 'any' },
+    { DurationSeconds: 120, MaxIterations: 2 },
+  ].entries()) {
+    const input = { ...rawInput, Prompt: 'Check' };
+    expect(s.start(String(index), { name: 'schedule', rawInput: input, status: 'failed' })[0])
+      .toMatchObject({ type: 'external-tool-use', input });
   }
-  return {
-    frame,
-    start: (id: string, data: Record<string, unknown>) => frame({ toolCallId: id, sessionUpdate: 'tool_call', ...data }),
-    patch: (id: string, data: Record<string, unknown>) => frame({ toolCallId: id, sessionUpdate: 'tool_call_update', ...data }),
-    permission: (id: string, data = {}) => converter.permissionToolUse({ toolCallId: id, ...data }, context),
-    end: () => converter.endTurn(context.sessionId, context),
-  };
-}
+});
+
+test('retains explicitly supplied timer defaults and daemon flags accepted by agy', () => {
+  const s = session();
+  for (const daemon of [true, false]) {
+    const rawInput = { DurationSeconds: 1, Prompt: 'Check', IsDaemon: daemon, TimerCondition: '', ExactTiming: false };
+    expect(s.start(String(daemon), { name: 'schedule', rawInput, status: 'completed' })[0])
+      .toMatchObject({ type: 'schedule-tool-use', request: { daemon, timerCondition: '', exactTiming: false } });
+  }
+});
+
+test('distinguishes absent, malformed and corrected schedule arguments across sparse frames', () => {
+  const s = session();
+  const timer = { DurationSeconds: 60, Prompt: 'Check' };
+  for (const [i, rawInput] of [['bad'], 'bad', 0, false, null].entries()) {
+    const expected = { type: 'external-tool-use', name: 'schedule', input: { raw: rawInput } };
+    expect(s.start('direct-' + i, { name: 'schedule', rawInput, status: 'failed' })[0]).toMatchObject(expected);
+    s.start('late-' + i, { name: 'schedule', rawInput: timer });
+    expect(s.patch('late-' + i, { rawInput, status: 'failed' })[0]).toMatchObject(expected);
+    s.start('unnamed-' + i, { rawInput });
+    expect(s.patch('unnamed-' + i, { name: 'schedule', status: 'failed' })[0]).toMatchObject(expected);
+    s.start('empty-' + i, { name: 'schedule', rawInput });
+    expect(s.patch('empty-' + i, { rawInput: {}, status: 'failed' })[0]).toMatchObject(expected);
+  }
+  s.start('corrected', { name: 'schedule', rawInput: 'bad' });
+  expect(s.patch('corrected', { rawInput: timer, status: 'completed' })[0]).toMatchObject({
+    type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 60, prompt: 'Check' },
+  });
+});
+
+test('malformed schedule evidence does not replace ordinary tool arguments or an MCP address', () => {
+  const s = session();
+  expect(s.start('read', { name: 'read_file', rawInput: null, args: { Path: '/fixture/readme' } })[0])
+    .toMatchObject({ type: 'read-tool-use', filePath: '/fixture/readme' });
+  expect(s.start('alias', { name: 'schedule', rawInput: null, args: { DurationSeconds: 2, Prompt: 'Check' }, status: 'completed' })[0])
+    .toMatchObject({ type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 2 } });
+  s.start('late-name', { rawInput: { Path: '/fixture/late' } });
+  s.patch('late-name', { rawInput: 'invalid' });
+  expect(s.patch('late-name', { name: 'read_file', status: 'completed' })[0])
+    .toMatchObject({ type: 'read-tool-use', filePath: '/fixture/late' });
+  s.start('mcp', { name: 'schedule', rawInput: { server: 'fixture' } });
+  s.patch('mcp', { rawInput: ['invalid'] });
+  expect(s.patch('mcp', { rawInput: { tool: 'operation', arguments: { value: 1 } }, status: 'completed' })[0])
+    .toMatchObject({ type: 'mcp-tool-use', server: 'fixture', tool: 'operation', input: { value: 1 } });
+});
+
+test('a substantive schedule correction resumes the accumulated object arguments', () => {
+  const s = session();
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 60 } });
+  s.patch('timer', { rawInput: [] });
+  expect(s.patch('timer', { rawInput: { Prompt: 'Check' }, status: 'completed' })[0]).toMatchObject({
+    type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 60, prompt: 'Check' },
+  });
+});
+
+test('keeps unknown options and conflicting aliases from late frames in the raw schedule fallback', () => {
+  const timer = { DurationSeconds: 30, Prompt: 'Check' };
+  for (const patch of [{ FutureOption: 'fixture' }, { duration_seconds: 60 }]) {
+    const s = session();
+    expect(s.start('timer', { name: 'schedule', rawInput: timer })).toEqual([]);
+    expect(s.patch('timer', { rawInput: patch, status: 'failed' })[0]).toMatchObject({
+      type: 'external-tool-use', input: { ...timer, ...patch },
+    });
+  }
+  expect(session().start('echo', { name: 'schedule', rawInput: { ...timer, duration_seconds: 30 }, status: 'completed' })[0])
+    .toMatchObject({ type: 'schedule-tool-use', request: { action: 'wakeup', delaySeconds: 30, prompt: 'Check' } });
+});
+
+test('retains explicit inactive timer fields and an unlimited iteration count on a cron', () => {
+  const rawInput = { CronExpression: '0 9 * * *', Prompt: 'Check', DurationSeconds: 0, TimerCondition: '', MaxIterations: 0 };
+  expect(session().start('cron', { name: 'schedule', rawInput, status: 'completed' })[0]).toMatchObject({
+    type: 'schedule-tool-use', request: { action: 'cron', expression: rawInput.CronExpression, prompt: 'Check',
+      delaySeconds: 0, timerCondition: '', maxIterations: 0 },
+  });
+});
 
 test('uses late identity and partial arguments without duplicating either tool row', () => {
   const s = session();

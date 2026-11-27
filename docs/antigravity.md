@@ -179,11 +179,15 @@ For `run_command`, ACP `completed` means the invocation finished, not that the c
 | `manage_task` | `background-task-tool-use`: list tasks, check status, request stop (`kill`), or send input to a task |
 | `update_steps` (also identified by the native title `Run update_steps`) | `update-plan-tool-use`: step titles and statuses; `done` becomes `completed`, while `skipped` and `failed` remain distinct |
 | `send_message` | `agent-message-tool-use`: recipient and literal message body |
+| `schedule` | `schedule-tool-use`: a delayed wakeup with its prompt and optional cancellation condition, or a cron request with its iteration limit, daemon setting and exact-timing (no jitter) option. The schedule belongs to agy, not Garcon's scheduled prompts. |
+| `enter_plan_mode`, `exit_plan_mode` | Informational Antigravity rows: the reason for entering and the Markdown plan on exit. Neither changes Garcon's permission mode nor asks for approval. |
 | MCP calls (`rawInput.server` + `rawInput.tool`) | `mcp-tool-use` |
 | Any other named agy tool, such as `ask_question` or `run_workflow` | `external-tool-use` with namespace `antigravity` |
 | A call without an identifiable tool | `unknown-tool-use` |
 
 A background task row describes an operation, not the state of the task. For example, a successful `kill` call is not proof that the process exited. When ACP supplies no output, Garcon does not reconstruct it from native history. Previously stored rows retain their original representation.
+
+For schedules and plan transitions, nonblank terminal text supersedes cached progress. If neither terminal field has text, the report uses the preceding snapshot. Terminal attachments replace cached attachments in the order supplied; text-only updates retain cached attachments. A unique match across whole text blocks lets the ledger store a report once and retain aligned annotations. An ambiguous match never attaches output to a guessed block. Search reads the sole report before attachments or metadata; formatting alone does not change which report is newer.
 
 ACP can split a call's name, arguments, and result across frames. Garcon correlates them by call ID and settles the result with the terminal status. An unresolved call can wait across buffered text and other incomplete calls. It publishes with the available evidence before a later tool row or result, at turn end, or at the pending-call limit. An MCP envelope takes precedence over a native tool label; if its arguments are missing, the call can still accept them on a later frame. Published rows are not revised.
 

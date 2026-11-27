@@ -1,5 +1,7 @@
 import {
   AgentMessageToolUseMessage,
+  AntigravityEnterPlanModeToolUseMessage,
+  AntigravityExitPlanModeToolUseMessage,
   BashToolUseMessage,
   BackgroundTaskToolUseMessage,
   EditToolUseMessage,
@@ -9,6 +11,7 @@ import {
   ListToolUseMessage,
   McpToolUseMessage,
   ReadToolUseMessage,
+  ScheduleToolUseMessage,
   TaskToolUseMessage,
   UnknownToolUseMessage,
   UpdatePlanToolUseMessage,
@@ -18,6 +21,7 @@ import {
   type ToolUseChatMessage,
   type PlanStep,
 } from '@garcon/common/chat-types';
+import { isRecord } from '@garcon/common/json';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
 
 export const ANTIGRAVITY_TOOL_NAMESPACE = 'antigravity';
@@ -30,6 +34,7 @@ export interface AntigravityToolCall {
   readonly isMcp: boolean;
   readonly kind: string | null;
   readonly input: Record<string, unknown>;
+  readonly rawInput: unknown;
 }
 
 // Tool arguments arrive in PascalCase from 1.5 and snake_case from older builds
@@ -43,6 +48,33 @@ function field(input: Record<string, unknown>, ...names: string[]): unknown {
 
 function stringField(input: Record<string, unknown>, ...names: string[]): string | undefined {
   return asString(field(input, ...names));
+}
+
+function planField(input: Record<string, unknown>, key: 'Reason' | 'Plan'): string | undefined {
+  const alias = key.toLowerCase();
+  if (Object.hasOwn(input, key) && Object.hasOwn(input, alias) && input[key] !== input[alias]) return undefined;
+  return stringField(input, key, alias);
+}
+
+const SCHEDULE_KEYS: Readonly<Record<string, string>> = {
+  DurationSeconds: 'delaySeconds', duration_seconds: 'delaySeconds',
+  CronExpression: 'expression', cron_expression: 'expression',
+  Prompt: 'prompt', prompt: 'prompt',
+  TimerCondition: 'timerCondition', timer_condition: 'timerCondition',
+  IsDaemon: 'daemon', is_daemon: 'daemon',
+  MaxIterations: 'maxIterations', max_iterations: 'maxIterations',
+  ExactTiming: 'exactTiming', exact_timing: 'exactTiming',
+};
+
+function scheduleArguments(input: Record<string, unknown>): Record<string, unknown> | null {
+  const args: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!Object.hasOwn(SCHEDULE_KEYS, key)) return null;
+    const name = SCHEDULE_KEYS[key];
+    if (Object.hasOwn(args, name) && args[name] !== value) return null;
+    args[name] = value;
+  }
+  return args;
 }
 
 export function antigravityMcpArguments(input: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -81,27 +113,37 @@ export function antigravityToolCall(raw: Record<string, unknown>): AntigravityTo
   const isMcp = asObject(raw._meta).is_mcp_tool_call === true;
   if (isMcp || (raw.kind && raw.kind !== 'other')) planTitle = 'excluded';
   else if (raw.title === 'Run update_steps') planTitle = 'matched';
+  const rawInput = raw.args === undefined ? raw.rawInput : raw.rawInput ?? raw.args;
   return {
     toolCallId,
     name: asString(raw.name) ?? null,
     planTitle,
     isMcp,
     kind: asString(raw.kind) ?? null,
-    input: asObject(raw.rawInput ?? raw.args),
+    input: asObject(rawInput),
+    rawInput,
   };
+}
+
+export function reportsPlanOrSchedule(name: string | null): boolean {
+  return name === 'schedule' || name === 'enter_plan_mode' || name === 'exit_plan_mode';
 }
 
 export function convertAntigravityToolUse(
   timestamp: string,
   call: AntigravityToolCall,
 ): ToolUseChatMessage {
-  const { toolCallId: id, input } = call;
+  const { toolCallId: id } = call;
+  let input = call.input;
   const mcpServer = asString(input.server);
   const mcpTool = asString(input.tool);
   if (mcpServer && mcpTool) {
     return new McpToolUseMessage(timestamp, id, mcpServer, mcpTool, antigravityMcpArguments(input) ?? {});
   }
   const name = antigravityToolName(call);
+  if (!call.isMcp && reportsPlanOrSchedule(name) && call.rawInput !== undefined) {
+    input = isRecord(call.rawInput) ? call.rawInput : { raw: call.rawInput };
+  }
   switch (call.isMcp && name !== 'call_mcp_tool' ? null : name) {
     case 'run_command': {
       const command = stringField(input, 'CommandLine', 'command_line', 'commandLine', 'command');
@@ -178,6 +220,26 @@ export function convertAntigravityToolUse(
       const query = stringField(input, 'query', 'Query');
       if (query === undefined) break;
       return new WebSearchToolUseMessage(timestamp, id, query);
+    }
+    case 'schedule': {
+      const args = scheduleArguments(input);
+      if (!args) break;
+      const { delaySeconds } = args;
+      // Agy treats the inactive mode's zero/empty fields as unset. The row retains explicit defaults.
+      const action = typeof delaySeconds === 'number' && Number.isInteger(delaySeconds) && delaySeconds > 0 ? 'wakeup' : 'cron';
+      const row = ScheduleToolUseMessage.fromRequest(timestamp, id, { action, ...args });
+      if (row) return row;
+      break;
+    }
+    case 'enter_plan_mode': {
+      const reason = planField(input, 'Reason');
+      if (reason !== undefined) return new AntigravityEnterPlanModeToolUseMessage(timestamp, id, reason);
+      break;
+    }
+    case 'exit_plan_mode': {
+      const plan = planField(input, 'Plan');
+      if (plan !== undefined) return new AntigravityExitPlanModeToolUseMessage(timestamp, id, plan);
+      break;
     }
     case 'update_steps': {
       const steps = antigravityPlanSteps(input.steps);

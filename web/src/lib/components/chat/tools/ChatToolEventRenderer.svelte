@@ -6,7 +6,7 @@
 		getToolDisplayLabel,
 		getToolDisplayPayload,
 	} from '$lib/chat/tools/tool-display-registry.js';
-	import { resolveDisplayRule, resolveToolResultDisplayRule } from '$lib/chat/tools/tool-display-policy.js';
+	import { resolveDisplayRule, resolveToolResultDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 	import type {
 		ToolInputDisplayRule,
 		ToolResultDisplayRule,
@@ -100,6 +100,7 @@
 
 	let shouldRenderCollapsedAsInline = $derived.by(() => {
 		if (!displayConfig || displayConfig.mode !== 'collapsible') return false;
+		if (mode === 'input' && config.input.inlineWhen?.(parsedData)) return true;
 		if (displayConfig.contentKind !== 'diff') return false;
 		if (!contentProps.diffUnavailable) return false;
 		const files = (contentProps.files as string[] | undefined) || [];
@@ -107,6 +108,7 @@
 	});
 
 	let collapsedInlineFilePath = $derived.by(() => {
+		if (displayConfig?.contentKind !== 'diff') return '';
 		const files = (contentProps.files as string[] | undefined) || [];
 		return files[0] || '';
 	});
@@ -162,6 +164,10 @@
 	});
 
 	let inputAnchorId = $derived(mode === 'input' ? `tool-input-${toolId}` : undefined);
+	const jumpTargetId = $derived.by(() => {
+		if (mode !== 'input' || config.input.action !== 'jumpToResult' || !toolResult) return undefined;
+		return shouldRenderToolResult(config, toolResult, toolMessage) ? resultAnchorId : undefined;
+	});
 	const disclosureKind: ConversationDisclosureKind = $derived(
 		mode === 'input' ? 'tool-input' : 'tool-result',
 	);
@@ -181,7 +187,6 @@
 			{@const cfg = displayConfig as ToolInputDisplayRule}
 			<ChatToolInlineEvent
 				{toolName}
-				{toolResult}
 				label={inlineLabel}
 				value={inlineValue}
 				secondary={inlineSecondary}
@@ -192,13 +197,12 @@
 				wrapText={cfg.wrapText}
 				language={inlineLanguage}
 				colorScheme={cfg.colorScheme}
-				resultId={mode === 'input' ? resultAnchorId : undefined}
+				resultId={jumpTargetId}
 			/>
 		{:else if displayConfig.mode === 'collapsible'}
 			{#if shouldRenderCollapsedAsInline}
 				<ChatToolInlineEvent
 					{toolName}
-					{toolResult}
 					label={toolName}
 					value={collapsedInlineFilePath || collapsibleTitle}
 					action={collapsedInlineFilePath && onFileOpen ? 'openFile' : 'none'}

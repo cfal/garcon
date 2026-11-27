@@ -2,11 +2,13 @@
 // Known provider-specific tools must arrive here as typed messages.
 
 import { coerceTodoItems, type ToolUseChatMessage } from '$shared/chat-types';
+import { hasSchedulePrompt, toolScheduleDetails, toolScheduleTitle, type ToolScheduleRequest } from '$shared/tool-schedule';
 import * as m from '$lib/paraglide/messages.js';
 import type { ToolDisplayRule, ToolResultDisplayRule } from '$lib/chat/tools/tool-display-contract.js';
 import { AMP_TOOL_DISPLAY_RULES } from './amp-tool-display-rules.js';
 import { CODEX_TOOL_DISPLAY_RULES } from './codex-tool-display-rules.js';
 import {
+	completeReportProps,
 	diffProps,
 	extractContentString,
 	fileTitlePresenter,
@@ -18,10 +20,12 @@ import {
 type ToolDisplayRegistry = Record<string, ToolDisplayRule>;
 
 const REPORTED_RESULT_RULE: ToolResultDisplayRule = {
+	reportsStatus: true,
 	mode: 'collapsible',
 	contentKind: 'text',
 	getContentProps: reportedResultProps,
 };
+const COMPLETE_REPORT_RULE: ToolResultDisplayRule = { ...REPORTED_RESULT_RULE, getContentProps: completeReportProps };
 
 function filesFoundTitle(count: number): string {
 	return count === 1 ? m.chat_tool_file_found() : m.chat_tool_files_found({ count });
@@ -57,11 +61,14 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'todo-read-tool-use': 'TodoRead',
 	'task-tool-use': 'Task',
 	'background-task-tool-use': 'Background task',
+	'schedule-tool-use': 'Schedule',
 	'agent-message-tool-use': 'Agent message',
 	'codex-subagent-tool-use': 'Subagent',
 	'update-plan-tool-use': 'UpdatePlan',
 	'write-stdin-tool-use': 'WriteStdin',
 	'enter-plan-mode-tool-use': 'EnterPlanMode',
+	'antigravity-enter-plan-mode-tool-use': 'Plan mode',
+	'antigravity-exit-plan-mode-tool-use': 'Plan mode',
 	'exit-plan-mode-tool-use': 'ExitPlanMode',
 	'ask-user-question-tool-use': 'Question',
 	'cursor-create-plan-tool-use': 'Plan',
@@ -185,7 +192,7 @@ function parametersToolRule(label: string): ToolDisplayRule {
 			mode: 'collapsible',
 			defaultOpen: false,
 			contentKind: 'text',
-			getContentProps: (result) => ({ content: extractContentString(result?.content), format: 'plain' }),
+			getContentProps: completeReportProps,
 		},
 	};
 }
@@ -482,6 +489,16 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: REPORTED_RESULT_RULE,
 	},
 
+	'schedule-tool-use': {
+		input: {
+			mode: 'collapsible', contentKind: 'text',
+			title: ({ request }) => toolScheduleTitle(request as ToolScheduleRequest),
+			inlineWhen: ({ request }) => !hasSchedulePrompt(request as ToolScheduleRequest),
+			getContentProps: ({ request }) => ({ content: toolScheduleDetails(request as ToolScheduleRequest) }),
+		},
+		result: COMPLETE_REPORT_RULE,
+	},
+
 	'background-task-tool-use': {
 		input: {
 			mode: 'inline',
@@ -562,6 +579,23 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 
 	'exit-plan-mode-tool-use': EXIT_PLAN_MODE_RULE,
 
+	'antigravity-enter-plan-mode-tool-use': {
+		input: {
+			mode: 'collapsible', title: 'Enter plan mode', contentKind: 'text',
+			inlineWhen: ({ reason }) => typeof reason === 'string' && !reason.trim(),
+			getContentProps: ({ reason }) => ({ content: reason }),
+		},
+		result: COMPLETE_REPORT_RULE,
+	},
+	'antigravity-exit-plan-mode-tool-use': {
+		input: {
+			mode: 'collapsible', title: () => m.chat_tool_implementation_plan(), defaultOpen: true,
+			inlineWhen: ({ plan }) => typeof plan === 'string' && !plan.trim(),
+			contentKind: 'markdown', getContentProps: ({ plan }) => ({ content: plan }),
+		},
+		result: COMPLETE_REPORT_RULE,
+	},
+
 	'ask-user-question-tool-use': {
 		input: {
 			mode: 'hidden',
@@ -607,11 +641,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 				todos: input.todos,
 			}),
 		},
-		result: {
-			mode: 'collapsible',
-			contentKind: 'successMessage',
-			getMessage: () => m.chat_tool_plan_updated(),
-		},
+		result: REPORTED_RESULT_RULE,
 	},
 
 	...AMP_TOOL_DISPLAY_RULES,
@@ -655,10 +685,7 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		result: {
 			mode: 'collapsible',
 			contentKind: 'text',
-			getContentProps: (result) => ({
-				content: extractContentString(result?.content),
-				format: 'plain',
-			}),
+			getContentProps: completeReportProps,
 		},
 	},
 

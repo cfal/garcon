@@ -4,6 +4,8 @@ import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
 import type { ConversationDisclosureStatePort } from '../../transcript/ConversationFeedItemState.svelte.js';
 import {
 	AgentMessageToolUseMessage,
+	AntigravityEnterPlanModeToolUseMessage,
+	AntigravityExitPlanModeToolUseMessage,
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,
 	AmpTaskListToolUseMessage,
@@ -16,10 +18,13 @@ import {
 	ExecToolUseMessage,
 	WaitToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	ExternalToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
 	PiToolSearchToolUseMessage,
 	ReadToolUseMessage,
+	ScheduleToolUseMessage,
+	TodoReadToolUseMessage,
 	UnknownToolUseMessage,
 	UpdatePlanToolUseMessage,
 	WebFetchToolUseMessage,
@@ -34,6 +39,118 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('does not serialize a closed tool input until the reader opens it', async () => {
+		const toJSON = vi.fn(() => ({ example: 1 }));
+		render(ChatToolEventRenderer, {
+			toolMessage: new ExternalToolUseMessage('', 'call', 'example', { toJSON }), mode: 'input',
+		});
+		expect(toJSON).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button'));
+		expect(toJSON).toHaveBeenCalled();
+	});
+
+	it('keeps the wakeup prompt and cancellation condition behind a readable title', async () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new ScheduleToolUseMessage('', 'timer', {
+				action: 'wakeup', delaySeconds: 240, prompt: 'Check progress', timerCondition: 'sender',
+			}), mode: 'input',
+		});
+		expect(screen.queryByText(/Check progress/)).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /Request wakeup in 4 minutes/ }));
+		expect(screen.getByText(/Prompt: Check progress/).textContent).toContain('Cancel on message from: sender');
+	});
+
+	it('shows an unlimited cron request and both parts of its reported failure', () => {
+		const toolMessage = new ScheduleToolUseMessage('', 'cron', {
+			action: 'cron', expression: '0 9 * * *', prompt: 'Check', maxIterations: 0,
+		});
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+		expect(screen.getByText(/Maximum iterations: unlimited/)).toBeTruthy();
+		render(ChatToolEventRenderer, { toolMessage, mode: 'result', autoExpandTools: true,
+			toolResult: { isError: true, content: { status: 'failed', raw: 'Could not save this schedule', rawOutput: { attempts: 1 } } } });
+		expect(screen.getByText(/Could not save this schedule/).textContent).toContain('"attempts": 1');
+	});
+
+	it('shows a stop-loop request without an empty disclosure and keeps actual result metadata', () => {
+		const toolMessage = new ScheduleToolUseMessage('', 'stop', { action: 'stop-loop' });
+		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
+		expect(screen.getByText('Stop loop wakeups')).toBeTruthy();
+		expect(screen.queryByRole('button')).toBeNull();
+		render(ChatToolEventRenderer, {
+			toolMessage, mode: 'result', autoExpandTools: true,
+			toolResult: { content: { raw: 'Stopped', toolUseResult: { cancelledWakeups: 0 } } },
+		});
+		expect(screen.getByText(/Stopped/).textContent).toContain('"cancelledWakeups": 0');
+	});
+	it.each([{ items: [] }, { raw: '  ' }, { items: [{ type: 'text', text: '' }] }])('shows structured schedule metadata without the empty envelope %j', body => {
+		const toolUseResult = { cancelledWakeups: 0 };
+		render(ChatToolEventRenderer, {
+			toolMessage: new ScheduleToolUseMessage('', 'stop', { action: 'stop-loop' }), mode: 'result', autoExpandTools: true,
+			toolResult: { content: { ...body, toolUseResult } },
+		});
+		expect(screen.getByText(/cancelledWakeups/).textContent).toBe(JSON.stringify(toolUseResult, null, 2));
+	});
+
+	it('keeps mixed schedule result blocks inspectable alongside the native metadata', () => {
+		const items = [{ type: 'text', text: 'Listed' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }];
+		render(ChatToolEventRenderer, { toolMessage: new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			mode: 'result', autoExpandTools: true, toolResult: { content: { items, toolUseResult: { count: 1 } } } });
+		const body = screen.getByText(/Listed/).textContent;
+		expect(body).toContain(JSON.stringify({ items }, null, 2));
+		expect(body).toContain('"count": 1');
+	});
+
+	it('expands the reason for an Antigravity plan and renders the exit plan as Markdown', async () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new AntigravityEnterPlanModeToolUseMessage('', 'enter', 'Check layout'), mode: 'input',
+		});
+		expect(screen.queryByText('Check layout')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /Enter plan mode/i }));
+		expect(screen.getByText('Check layout')).toBeTruthy();
+		render(ChatToolEventRenderer, {
+			toolMessage: new AntigravityExitPlanModeToolUseMessage('', 'exit', '## Layout changes'), mode: 'input',
+		});
+		expect(await screen.findByRole('heading', { name: 'Layout changes' })).toBeTruthy();
+	});
+
+	it.each([new AntigravityEnterPlanModeToolUseMessage('', 'enter', ' \n'), new AntigravityExitPlanModeToolUseMessage('', 'exit', '')])(
+		'keeps a blank informational plan transition inline: $type', toolMessage => {
+			const { container } = render(ChatToolEventRenderer, { toolMessage, mode: 'input', autoExpandTools: true });
+			expect(container.textContent?.trim()).toBeTruthy();
+			expect(container.querySelector('button')).toBeNull();
+		});
+
+	it.each([false, true])('keeps structured schedule evidence in both success and failure disclosures (%s)', isError => {
+		const items = [{ type: 'text', text: 'Listed' }];
+		const content = { items, count: 0, toolUseResult: { jobs: [] } };
+		render(ChatToolEventRenderer, { toolMessage: new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			mode: 'result', autoExpandTools: true, toolResult: { content, isError } });
+		const shown = screen.getByText(/Listed/).textContent;
+		expect(shown).toContain('"count": 0');
+		expect(shown).toContain('"jobs": []');
+	});
+
+	it('shows ordered terminal schedule blocks and metadata together', () => {
+		const items = [{ type: 'content', content: { type: 'text', text: 'Checking' } },
+			{ type: 'content', content: { type: 'image', data: 'AA==', mimeType: 'image/png' } },
+			{ type: 'content', content: { type: 'text', text: 'Operation refused' } }];
+		render(ChatToolEventRenderer, { toolMessage: new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			mode: 'result', autoExpandTools: true, toolResult: { content: { status: 'failed', items, rawOutput: { attempts: 1 } }, isError: true } });
+		const shown = screen.getByText(/Operation refused/).textContent!;
+		expect(JSON.parse(shown)).toMatchObject({ items, rawOutput: { attempts: 1 } });
+	});
+
+	it.each([
+		[new ExternalToolUseMessage('', 'raw', 'schedule', { future: true }, 'antigravity'),
+			{ raw: 'Terminal diagnostic', rawOutput: { attempts: 1 } }, 'Terminal diagnostic', '"attempts": 1'],
+		[new UnknownToolUseMessage('', 'raw', 'ScheduleWakeup', { stop: true, reason: 'Complete' }),
+			{ raw: 'Stopped', toolUseResult: { cancelledWakeups: 0 } }, 'Stopped', '"cancelledWakeups": 0'],
+		[new ScheduleToolUseMessage('', 'list', { action: 'list' }),
+			{ raw: 'Listed', status: 'partial' }, 'Listed', '"status": "partial"'],
+	] as const)('keeps companion fields in the visible report for $0.type', (toolMessage, content, text, detail) => {
+		render(ChatToolEventRenderer, { toolMessage, mode: 'result', autoExpandTools: true, toolResult: { content } });
+		expect(screen.getByText(new RegExp(text)).textContent).toContain(detail);
+	});
 	it('shows a stop request and target without a blank disclosure for an empty success', () => {
 		const toolMessage = new BackgroundTaskToolUseMessage('', 'stop', 'stop', 'job-1');
 		render(ChatToolEventRenderer, { toolMessage, mode: 'input' });
@@ -60,6 +177,23 @@ describe('ChatToolEventRenderer', () => {
 		render(ChatToolEventRenderer, { toolMessage: new UpdatePlanToolUseMessage('', 'plan', []), mode: 'result',
 			autoExpandTools: true, toolResult: { content: { raw: 'Only one change was accepted' }, isError: false } });
 		expect(screen.getByText('Only one change was accepted')).toBeTruthy();
+	});
+
+	it.each([
+		new ExternalToolUseMessage('', 'old', 'custom', {}),
+		new UpdatePlanToolUseMessage('', 'plan', []),
+		new TodoReadToolUseMessage('', 'ack'),
+	])('omits the result disclosure for an empty successful $type', (toolMessage) => {
+		const { container } = render(ChatToolEventRenderer, {
+			toolMessage, mode: 'result', toolResult: { content: {}, isError: false },
+		});
+		expect(container.childElementCount).toBe(0);
+	});
+
+	it('renders a reported empty TodoRead list as a result', () => {
+		render(ChatToolEventRenderer, { toolMessage: new TodoReadToolUseMessage('', 'list'), mode: 'result',
+			autoExpandTools: true, toolResult: { content: { items: [] } } });
+		expect(screen.getByText('No items')).toBeTruthy();
 	});
 
 	it('prefers the primary failure diagnostic over supplementary progress blocks', () => {
@@ -678,6 +812,13 @@ describe('ChatToolEventRenderer', () => {
 });
 
 describe('tool result and jump behavior', () => {
+	it('does not offer a jump to a suppressed result', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new WebSearchToolUseMessage('', 'search', 'example'), mode: 'input',
+			toolResult: { content: { raw: '  ' } }, resultAnchorId: 'hidden-result',
+		});
+		expect(screen.queryByLabelText('Jump to results')).toBeNull();
+	});
 	it('renders jump-to-results link for Glob when toolResult is present', () => {
 		const toolResult = {
 			content: { filenames: ['a.ts', 'b.ts'], numFiles: 2 },

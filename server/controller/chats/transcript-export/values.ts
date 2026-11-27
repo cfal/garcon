@@ -3,6 +3,9 @@ import type {
   ChatMessage,
   UserMessagePresentation,
 } from '../../../../common/chat-types.js';
+import { isRecord } from '../../../../common/json.js';
+import { redactDataUrl } from './data-url-redaction.js';
+export { redactDataUrl } from './data-url-redaction.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   isPreambleApplicationNoticeDetail,
@@ -24,9 +27,7 @@ export interface TranscriptExportImage {
 
 const xmlIllegalCharacters = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g;
 const utf8Encoder = new TextEncoder();
-const DATA_URL_OMISSION = '[data URL omitted from export]';
 const IMAGE_BODY_OMISSION = '[image body omitted from export]';
-const embeddedDataUrl = /(?<![A-Za-z0-9_])(?<![A-Za-z0-9_][.+-])data:(?:[A-Za-z0-9][\w.+-]*\/[\w.+-]+)?(?:;[\w.+=-]+)*,[^\s"'<>)]*/gi;
 
 export function textSafe(value: string): string {
   return value.toWellFormed().replace(
@@ -219,39 +220,22 @@ function sanitizeStructuredValue(value: unknown): unknown {
   if (typeof value === 'string') return redactDataUrl(value);
   if (Array.isArray(value)) return value.map(sanitizeStructuredValue);
   if (!isRecord(value)) return value;
-  const imageSource = isRecord(value.source) ? value.source : null;
-  if (
-    value.type === 'image'
-    && imageSource?.type === 'base64'
-    && typeof imageSource.data === 'string'
-  ) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [
-        key,
-        key === 'source'
-          ? Object.fromEntries(
-            Object.entries(imageSource).map(([sourceKey, sourceValue]) => [
-              sourceKey,
-              sourceKey === 'data'
-                ? IMAGE_BODY_OMISSION
-                : sanitizeStructuredValue(sourceValue),
-            ]),
-          )
-          : sanitizeStructuredValue(child),
-      ]),
-    );
+  return Object.fromEntries(Object.entries(value).map(([key, child]) =>
+    [key, sanitizeStructuredValue(omitImageBody(value.type, key, child))]));
+}
+
+function omitImageBody(blockType: unknown, key: string, value: unknown): unknown {
+  if (blockType === 'image') {
+    if (key === 'data' && typeof value === 'string') return IMAGE_BODY_OMISSION;
+    if (key === 'source' && isRecord(value) && value.type === 'base64' && typeof value.data === 'string') {
+      return { ...value, data: IMAGE_BODY_OMISSION };
+    }
   }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, child]) => [key, sanitizeStructuredValue(child)]),
-  );
-}
-
-export function redactDataUrl(value: string): string {
-  return value.replace(embeddedDataUrl, DATA_URL_OMISSION);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (blockType === 'resource' && key === 'resource' && isRecord(value) && typeof value.blob === 'string'
+    && typeof value.mimeType === 'string' && /^image\//i.test(value.mimeType)) {
+    return { ...value, blob: IMAGE_BODY_OMISSION };
+  }
+  return value;
 }
 
 function imageMetadata(image: ChatImage): TranscriptExportImage {

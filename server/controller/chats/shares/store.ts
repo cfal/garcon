@@ -72,7 +72,7 @@ export interface SharedChatMessages {
   readonly messages: readonly string[];
 }
 
-export type SharePublication = Omit<ShareSnapshotHeader, 'shareToken' | 'messageCount'>;
+export type SharePublication = Omit<ShareSnapshotHeader, 'shareToken' | 'messageCount' | 'frozenMessageCount'> & { readonly contentStartOrdinal?: number };
 
 interface CachedShareMessages {
   readonly shared: SharedChatMessages;
@@ -259,8 +259,9 @@ export class ShareStore implements IShareStore {
     return this.#chatLocks.runExclusive(chatId, async () => {
       this.#assertAvailable();
       const token = this.#chatIdIndex.get(chatId) ?? crypto.randomBytes(24).toString('base64url');
+      const { contentStartOrdinal, ...header } = publication;
       const rendered = await this.#rendering.renderShareSnapshot(
-        { header: { ...publication, shareToken: token }, rows },
+        { header: { ...header, shareToken: token }, rows, contentStartOrdinal },
         signal,
       );
       this.#assertAvailable();

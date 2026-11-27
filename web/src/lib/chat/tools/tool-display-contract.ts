@@ -37,6 +37,7 @@ export interface ToolInputDisplayRule {
 		border?: string;
 	};
 	title?: string | ((input: ToolPayload) => string);
+	inlineWhen?: (input: ToolPayload) => boolean;
 	defaultOpen?: boolean;
 	contentKind?: ToolContentKind;
 	getContentProps?: (
@@ -48,6 +49,7 @@ export interface ToolInputDisplayRule {
 
 export interface ToolResultDisplayRule {
 	hidden?: boolean;
+	reportsStatus?: boolean;
 	hideOnSuccess?: boolean;
 	mode?: Extract<ToolDisplayMode, 'inline' | 'collapsible'> | 'special';
 	title?: string | ((result: ToolPayload) => string);

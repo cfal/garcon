@@ -1,7 +1,53 @@
 import { expect, test } from 'bun:test';
+import { AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage, ScheduleToolUseMessage } from '../../../../../common/chat-types.ts';
 import { AgentMessageToolUseMessage, BackgroundTaskToolUseMessage, UpdatePlanToolUseMessage } from '../../../../../common/chat-types.ts';
 import { projectToolUseSummary } from '../../../../../common/transcript-seed.ts';
 import { renderSharedChatText } from '../transcript.ts';
+
+test('shares and bounded handoffs distinguish reported plans and schedule requests from approvals', () => {
+  const messages = [
+    new AntigravityEnterPlanModeToolUseMessage('now', 'enter', 'Check layout'),
+    new AntigravityExitPlanModeToolUseMessage('now', 'exit', '# Layout\n\n    example'),
+    new ScheduleToolUseMessage('now', 'schedule', { action: 'cron', expression: '0 9 * * *', recurring: false, prompt: 'Review', durable: false }),
+  ];
+  const shared = renderSharedChatText({ messages, agentId: 'antigravity', model: 'synthetic', chatId: 'chat',
+    shareToken: 'share', sharedAt: 'now', title: 'Work', projectPath: '/work' });
+  for (const detail of ['Check layout', '# Layout\n\n    example', 'Request one-time cron: 0 9 * * *\nPersistence requested: false\nPrompt: Review']) {
+    expect(shared).toContain(detail);
+  }
+  expect(messages.map(message => projectToolUseSummary(message).text)).toEqual([
+    'Check layout', '# Layout example', 'Request one-time cron: 0 9 * * * Persistence requested: false Prompt: "Review"',
+  ]);
+});
+
+test('a long prompt does not displace scheduling options from a bounded handoff', () => {
+  const cron = new ScheduleToolUseMessage('now', 'cron', { action: 'cron', expression: '0 9 * * *',
+    prompt: 'Check '.repeat(100), daemon: true, maxIterations: 1, exactTiming: true });
+  const summary = projectToolUseSummary(cron);
+  expect(summary.abridged).toBe(true);
+  expect(summary.text).toContain('Request cron: 0 9 * * * Maximum iterations: 1 Continue after task ends: true Exact timing: true');
+});
+
+test('bounded handoffs quote literal prompts and truncate only at a complete escape', () => {
+  const summary = (prompt: string) => projectToolUseSummary(new ScheduleToolUseMessage('now', 'timer',
+    { action: 'wakeup', delaySeconds: 1, prompt }));
+  const prompt = '  x  y\n    "later"\t';
+  const prefix = 'Request wakeup in 1 second Prompt: ';
+  expect(summary(prompt)).toMatchObject({ text: prefix + JSON.stringify(prompt), abridged: false });
+  const truncated = summary(prompt.repeat(100));
+  expect(truncated.abridged).toBe(true);
+  expect(truncated.text.endsWith('"...')).toBe(true);
+  const retained: string = JSON.parse(truncated.text.slice(prefix.length, -3));
+  expect(prompt.repeat(100).startsWith(retained)).toBe(true);
+});
+
+test('distinguishes a truly empty prompt from one whose first character cannot fit', () => {
+  const summarize = (prompt: string) => projectToolUseSummary(new ScheduleToolUseMessage('now', 'timer',
+    { action: 'wakeup', delaySeconds: 1, reason: 'x'.repeat(154), prompt }));
+  expect(summarize('').text).toEndWith('Prompt: ""');
+  expect(summarize('Check').text).toEndWith('Prompt:...');
+  expect(summarize('Check').abridged).toBe(true);
+});
 
 test('handoffs and shares retain task intent, agent destinations, and unsuccessful plan steps', () => {
   const task = new BackgroundTaskToolUseMessage('now', 'call', 'stop', 'job');

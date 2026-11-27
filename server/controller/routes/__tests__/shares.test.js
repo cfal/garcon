@@ -406,7 +406,7 @@ describe('public share responses', () => {
         { getChat: mock(() => ({ agentId: 'shell', model: 'sh', projectPath: sentinel })) },
         { getChatName: mock(() => null), getUiSettings: mock(() => ({})), getRemoteSettingsVersion: mock(() => 0) },
         { getChatMetadata: mock(() => null) },
-        storedSnapshotReader(async () => ({ rows, transcriptViewId: 'view-1', lastOrdinal: rows.length })),
+        storedSnapshotReader(async () => ({ rows, transcriptViewId: 'view-1', lastOrdinal: rows.length, contentStartOrdinal: 2 })),
       );
       const created = await (await routes['/api/v1/chats/share'].POST(new Request('http://localhost/api/v1/chats/share', {
         method: 'POST',
@@ -427,7 +427,8 @@ describe('public share responses', () => {
       ];
       for (const body of bodies) expect(body).not.toContain(sentinel);
       const { snapshot } = JSON.parse(json);
-      expect(Object.keys(snapshot).sort()).toEqual(['agentId', 'messages', 'model', 'shareToken', 'sharedAt', 'title']);
+      expect(snapshot.frozenMessageCount).toBe(1);
+      expect(Object.keys(snapshot).sort()).toEqual(['agentId', 'frozenMessageCount', 'messages', 'model', 'shareToken', 'sharedAt', 'title']);
       expect(snapshot.messages.map((message) => message.type)).toEqual(
         ['user-message', 'command-output', 'command-result', 'assistant-message'],
       );

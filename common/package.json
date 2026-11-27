@@ -42,6 +42,7 @@
     "./chat-search": "./chat-search.ts",
     "./chat-title-contracts": "./chat-title-contracts.ts",
     "./chat-types": "./chat-types.ts",
+    "./tool-result-content": "./tool-result-content.ts",
     "./chat-view": "./chat-view.ts",
     "./client-chat-id": "./client-chat-id.ts",
     "./cli-presentation": "./cli-presentation.ts",

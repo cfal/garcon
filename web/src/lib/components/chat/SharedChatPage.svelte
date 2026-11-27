@@ -4,8 +4,7 @@
 	import { onMount, tick } from 'svelte';
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { ApiError } from '$lib/api/client.js';
-	import { parseChatMessage } from '$shared/chat-types';
-	import type { ChatMessage } from '$shared/chat-types';
+	import type { GetSharedChatResponse, SharedChatMessagePage } from '$shared/share-types';
 	import {
 		UserMessage,
 		AssistantMessage,
@@ -19,11 +18,10 @@
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import MessageRenderFallback from '$lib/components/chat/transcript/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
+	import { parseSharedMessages, projectSharedMessages, type SharedMessageEntry } from './shared-message-projection.js';
 	import ChatEventCard from '$lib/components/chat/transcript/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
 	import CommandStatusRow from '$lib/components/chat/transcript/rows/CommandStatusRow.svelte';
-	import { projectCommandOutput } from '$shared/command-output-projection.js';
-	import { commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 	import CliPresentationHeader from '$lib/components/chat/transcript/rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from '$lib/components/chat/transcript/rows/CollapsibleBody.svelte';
 	import UserMessageAttachments from '$lib/components/chat/transcript/UserMessageAttachments.svelte';
@@ -46,22 +44,11 @@
 	const appTitle = getAppTitle();
 	const localSettings = getLocalSettings();
 
-	interface SharedMessageEntry {
-		index: number;
-		message: ChatMessage;
-	}
-
 	type SharedViewError = 'not-found' | 'load-failed';
 
 	let messages = $state.raw<SharedMessageEntry[]>([]);
-	const renderedMessages = $derived.by(() => {
-		const output = projectCommandOutput(messages.map(entry => entry.message));
-		return messages.map((entry, index) => {
-			const message = output.get(index);
-			return message ? { ...entry, message } : entry;
-		}).filter(entry => entry.message.type !== 'command-result'
-			|| commandResultPresentation(entry.message.result) !== 'hidden');
-	});
+	let frozenMessageCount = $state(0);
+	const renderedMessages = $derived(projectSharedMessages(messages, frozenMessageCount));
 	let title = $state('');
 	let agentId = $state('');
 	let sharedAt = $state('');
@@ -73,18 +60,42 @@
 	let totalMessages = $state(0);
 	let snapshotVersion = $state<string | null>(null);
 	let thinkingStates = $state<Record<number, boolean>>({});
+	let header: HTMLElement;
+	let feed = $state<HTMLDivElement>();
 
-	function parseMessages(rawMessages: unknown[], startIndex: number): SharedMessageEntry[] {
-		return rawMessages
-			.map((raw: unknown, offset): SharedMessageEntry | null => {
-				try {
-					const message = parseChatMessage(raw as Record<string, unknown>);
-					return message ? { index: startIndex + offset, message } : null;
-				} catch {
-					return null;
-				}
-			})
-			.filter((entry): entry is SharedMessageEntry => entry !== null);
+	function readingAnchor(): Element | null {
+		if (!feed) return null;
+		const rows = feed.children;
+		const top = header.getBoundingClientRect().bottom;
+		let low = 0;
+		let high = rows.length;
+		while (low < high) {
+			const mid = Math.floor((low + high) / 2);
+			if (rows[mid].getBoundingClientRect().bottom <= top) low = mid + 1;
+			else high = mid;
+		}
+		for (let i = low; i < rows.length; i++) {
+			const row = rows[i];
+			const rect = row.getBoundingClientRect();
+			if (rect.top >= window.innerHeight) break;
+			if (rect.height > 0 && row.matches('.chat-message')) return row;
+		}
+		return null;
+	}
+
+	function applyPage(page: SharedChatMessagePage) {
+		nextBefore = page.nextBefore;
+		totalMessages = page.totalMessages;
+		snapshotVersion = page.snapshotVersion;
+	}
+
+	function replaceSnapshot({ snapshot, page }: GetSharedChatResponse) {
+		title = snapshot.title;
+		agentId = snapshot.agentId;
+		sharedAt = snapshot.sharedAt;
+		frozenMessageCount = snapshot.frozenMessageCount ?? 0;
+		messages = parseSharedMessages(snapshot.messages ?? [], page.start);
+		applyPage(page);
 	}
 
 	async function loadSharedSnapshot(): Promise<void> {
@@ -97,15 +108,7 @@
 		isLoading = true;
 		loadError = null;
 		try {
-			const resp = await getSharedChat(token);
-			const snapshot = resp.snapshot;
-			title = snapshot.title;
-			agentId = snapshot.agentId;
-			sharedAt = snapshot.sharedAt;
-			messages = parseMessages(snapshot.messages ?? [], resp.page.start);
-			totalMessages = resp.page.totalMessages;
-			nextBefore = resp.page.nextBefore;
-			snapshotVersion = resp.page.snapshotVersion;
+			replaceSnapshot(await getSharedChat(token));
 		} catch (error) {
 			loadError = error instanceof ApiError && error.status === 404 ? 'not-found' : 'load-failed';
 			isLoading = false;
@@ -127,31 +130,27 @@
 		olderPageError = false;
 		try {
 			const resp = await getSharedChat(token, nextBefore, snapshotVersion);
-			const olderMessages = parseMessages(resp.snapshot.messages ?? [], resp.page.start);
 			if (resp.page.reset || resp.page.snapshotVersion !== snapshotVersion) {
-				const snapshot = resp.snapshot;
-				title = snapshot.title;
-				agentId = snapshot.agentId;
-				sharedAt = snapshot.sharedAt;
-				messages = olderMessages;
-				totalMessages = resp.page.totalMessages;
-				nextBefore = resp.page.nextBefore;
-				snapshotVersion = resp.page.snapshotVersion;
+				replaceSnapshot(resp);
 				await tick();
 				window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
 				return;
 			}
+			const olderMessages = parseSharedMessages(resp.snapshot.messages ?? [], resp.page.start);
 			// Capture the live viewport immediately before prepending. The reader may
 			// scroll while the request is in flight.
+			const anchor = readingAnchor();
+			const anchorTop = anchor?.getBoundingClientRect().top;
 			const previousHeight = document.documentElement.scrollHeight;
 			const previousScrollY = window.scrollY;
 			messages = [...olderMessages, ...messages];
-			nextBefore = resp.page.nextBefore;
-			totalMessages = resp.page.totalMessages;
-			snapshotVersion = resp.page.snapshotVersion;
+			applyPage(resp.page);
 			await tick();
-			const addedHeight = document.documentElement.scrollHeight - previousHeight;
-			window.scrollTo({ top: previousScrollY + addedHeight, behavior: 'instant' });
+			// Pairing can reveal results below the reader as well as rows above them.
+			const top = anchor?.isConnected && anchorTop !== undefined
+				? window.scrollY + anchor.getBoundingClientRect().top - anchorTop
+				: previousScrollY + document.documentElement.scrollHeight - previousHeight;
+			window.scrollTo({ top, behavior: 'instant' });
 		} catch {
 			olderPageError = true;
 		} finally {
@@ -183,7 +182,7 @@
 </svelte:head>
 
 <div class="shared-chat-page min-h-dvh bg-background text-foreground flex flex-col">
-	<header class={cn(
+	<header bind:this={header} class={cn(
 		'sticky top-0 z-10 border-b border-border',
 		localSettings.overlayBackdropEffects ? 'bg-background/95 backdrop-blur' : 'bg-background',
 	)}>
@@ -254,7 +253,7 @@
 				</div>
 			</div>
 		{:else}
-			<div class="space-y-1" data-chat-feed-content>
+			<div bind:this={feed} class="space-y-1" data-chat-feed-content>
 				{#if nextBefore !== null || olderPageError}
 					<div class="flex items-center gap-2 py-2 text-xs text-muted-foreground">
 						<div class="h-px flex-1 bg-border/70"></div>
@@ -388,6 +387,9 @@
 								</ChatEventCard>
 							{:else if isToolUseMessage(message)}
 								<ChatToolEventRenderer toolMessage={message} mode="input" autoExpandTools={false} />
+							{:else if message.type === 'tool-result' && entry.pairedTool}
+								<ChatToolEventRenderer toolMessage={entry.pairedTool} mode="result"
+									toolResult={{ content: message.content, isError: message.isError }} resultAnchorId={`shared-result-${entry.index}`} />
 							{:else if message instanceof CliRowMessage}
 								<CliRow {message} />
 							{:else if message instanceof TranscriptNoticeMessage}

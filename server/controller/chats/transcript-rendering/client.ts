@@ -1,15 +1,16 @@
 import type { StoredLedgerRow } from '../../ledger/codec.js';
 import { TaskWorker } from '../../lib/task-worker.js';
-import type { ShareSnapshotHeader } from '../shares/snapshot-format.js';
 import type { TranscriptExportDocumentRequest } from '../transcript-export/document.js';
 import type {
   RenderedShareSnapshot,
   ShareSnapshotFormat,
+  ShareSnapshotRenderRequest,
   TranscriptRenderingResults,
   TranscriptRenderingTask,
 } from './tasks.js';
 
 const WORKER_SOURCE_URL = new URL('./worker-main.ts', import.meta.url);
+type ShareSnapshotInput = ShareSnapshotRenderRequest & { readonly rows: readonly StoredLedgerRow[] };
 
 export interface TranscriptRendering {
   renderTranscriptExport(
@@ -17,10 +18,7 @@ export interface TranscriptRendering {
     signal?: AbortSignal,
   ): Promise<Uint8Array<ArrayBuffer>>;
   renderShareSnapshot(
-    input: {
-      readonly header: Omit<ShareSnapshotHeader, 'messageCount'>;
-      readonly rows: readonly StoredLedgerRow[];
-    },
+    input: ShareSnapshotInput,
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot>;
   // Renders the snapshot stored at a path again with the current renderer; null when it
@@ -50,13 +48,10 @@ export class TranscriptRenderingWorker implements TranscriptRendering {
   }
 
   renderShareSnapshot(
-    { header, rows }: {
-      readonly header: Omit<ShareSnapshotHeader, 'messageCount'>;
-      readonly rows: readonly StoredLedgerRow[];
-    },
+    { header, rows, contentStartOrdinal }: ShareSnapshotInput,
     signal?: AbortSignal,
   ): Promise<RenderedShareSnapshot> {
-    return this.#worker.run({ kind: 'render-share-snapshot', header }, rows, signal);
+    return this.#worker.run({ kind: 'render-share-snapshot', header, contentStartOrdinal }, rows, signal);
   }
 
   upgradeShareSnapshot(

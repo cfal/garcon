@@ -5,6 +5,7 @@ import {
 import {
   isToolUseMessage,
   type ChatMessage,
+  type ToolUseChatMessage,
 } from '../../../../common/chat-types.js';
 import { isHandoffSummaryNoticeDetail } from '../../../../common/transcript-notice-details.js';
 import {
@@ -160,16 +161,13 @@ function projectEntry(
 ): HandoffArtifactSourceEntry | null {
   const { ordinal, message } = entry;
   if (isToolUseMessage(message)) {
-    const summary = projectToolUseSummary(message);
-    const body = artifactBody(summary.text);
     return sourceEntry({
       ordinal,
       turn,
       level: projectionPriorityLevel(message.type),
       tag: 'tool-call',
       attributes: [{ name: 'type', value: message.type }],
-      body: body.text || null,
-      abridged: summary.abridged || body.abridged,
+      ...toolSummaryBody(message),
     });
   }
   switch (message.type) {
@@ -274,14 +272,8 @@ function projectEntry(
   }
 }
 
-function sourceEntry(input: {
-  readonly ordinal: number;
-  readonly level: number;
-  readonly turn: number;
-  readonly tag: HandoffArtifactSourceEntry['tag'];
+function sourceEntry(input: Omit<HandoffArtifactSourceEntry, 'attributes'> & {
   readonly attributes?: readonly HandoffArtifactAttribute[];
-  readonly body: string | null;
-  readonly abridged: boolean;
 }): HandoffArtifactSourceEntry {
   return { ...input, attributes: input.attributes ?? [] };
 }
@@ -294,6 +286,19 @@ function artifactBody(value: string): { readonly text: string; readonly abridged
     text: capped.text,
     abridged: redacted !== value || capped.abridged,
   };
+}
+
+function toolSummaryBody(message: ToolUseChatMessage): Pick<HandoffArtifactSourceEntry, 'body' | 'abridged' | 'prefixBeforeLiteral'> {
+  if (message.type === 'schedule-tool-use' || message.type === 'antigravity-enter-plan-mode-tool-use'
+      || message.type === 'antigravity-exit-plan-mode-tool-use') {
+    // Native reports can carry Markdown destinations that extend past the summary boundary.
+    const summary = projectToolUseSummary(message, redactDataUrl);
+    const prefix = summary.prefixBeforeLiteral;
+    return { body: textSafe(summary.text) || null, prefixBeforeLiteral: prefix === undefined ? undefined : textSafe(prefix), abridged: summary.abridged };
+  }
+  const summary = projectToolUseSummary(message);
+  const body = artifactBody(summary.text);
+  return { body: body.text || null, abridged: summary.abridged || body.abridged };
 }
 
 function codeUnitSafePrefix(
@@ -323,7 +328,7 @@ function refitHandoffArtifactEntry(
   if (source.body === null) return '';
   const suffix = '...';
   if (cost(renderHandoffArtifactEntry(source, suffix, true)) > maximumCost) return '';
-  const codePoints = Array.from(source.body);
+  const codePoints = Array.from(source.prefixBeforeLiteral ?? source.body);
   let low = 0;
   let high = codePoints.length;
   while (low < high) {

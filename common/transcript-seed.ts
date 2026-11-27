@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { hasSchedulePrompt, toolScheduleTitle, toolScheduleOptions, type ToolScheduleRequest } from './tool-schedule.js';
 import type { ChatMessage, PlanStep, TodoItem, ToolUseChatMessage } from './chat-types.js';
 import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
@@ -204,7 +205,7 @@ function prepareCarryoverProjection(
   ].join('\n');
   const closing = '  </transcript>\n</carried-context>\n\n';
   const summaryElement = options.summary
-    ? fitElement('    <summary>', options.summary.trim(), '</summary>', Number.POSITIVE_INFINITY)
+    ? renderElement('    <summary>', options.summary.trim(), '</summary>')
     : '';
   const lead = summaryElement ? `${summaryElement}\n` : '';
   const turns = groupIntoTurns(projected);
@@ -262,13 +263,14 @@ function renderTurn(turn: readonly ChatMessage[], turnIndex: number): ProjectedE
         continue;
       }
     }
-    const text = renderMessageElement(message);
+    const text = renderMessageElement(message, renderElement);
     if (text) {
       entries.push({
         level: projectionPriorityLevel(message.type),
         turn: turnIndex,
         text,
-        refit: (maximumCost, cost) => refitMessageElement(message, maximumCost, cost),
+        refit: (maximumCost, cost) => renderMessageElement(message, (open, content, close, prefix) =>
+          fitElementWithinCost(open, content, close, maximumCost, cost, prefix)),
       });
     }
   }
@@ -286,7 +288,7 @@ function aggregateEntry(name: string, content: string, level: number, turn: numb
   return {
     level,
     turn,
-    text: fitElement(open, content, close, Number.POSITIVE_INFINITY),
+    text: renderElement(open, content, close),
     refit: (maximumCost, cost) => fitElementWithinCost(
       open,
       content,
@@ -488,65 +490,28 @@ export function boundProjectedMessage(message: ChatMessage): ChatMessage {
   return message;
 }
 
-function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_INFINITY): string {
-  if (isToolUseMessage(message)) {
-    const detail = toolSummary(message);
-    return fitElement(
-      '    <assistant><tool-use>',
-      detail ? `${toolName(message)}: ${detail}` : toolName(message),
-      '</tool-use></assistant>',
-      maximum,
-    );
-  }
-  switch (message.type) {
-    case 'user-message':
-      return fitElement(userElementOpen(message), userElementContent(message), '</user>', maximum);
-    case 'assistant-message':
-      return fitElement('    <assistant>', boundedCollapse(message.content), '</assistant>', maximum);
-    case 'command-output':
-    case 'command-result':
-      return fitElement('    <execution-output>', commandContent(message), '</execution-output>', maximum);
-    default:
-      return '';
-  }
-}
-
-function refitMessageElement(
+function renderMessageElement(
   message: ChatMessage,
-  maximumCost: number,
-  cost: (text: string) => number,
+  render: (open: string, content: string, close: string, refitPrefix?: string) => string,
 ): string {
   if (isToolUseMessage(message)) {
-    const detail = toolSummary(message);
-    return fitElementWithinCost(
+    const { text, prefixBeforeLiteral } = projectToolUseSummary(message);
+    const name = toolName(message);
+    return render(
       '    <assistant><tool-use>',
-      detail ? `${toolName(message)}: ${detail}` : toolName(message),
+      text ? `${name}: ${text}` : name,
       '</tool-use></assistant>',
-      maximumCost,
-      cost,
+      prefixBeforeLiteral === undefined ? undefined : `${name}: ${prefixBeforeLiteral}`,
     );
   }
   switch (message.type) {
     case 'user-message':
-      return fitElementWithinCost(
-        userElementOpen(message),
-        userElementContent(message),
-        '</user>',
-        maximumCost,
-        cost,
-      );
+      return render(userElementOpen(message), userElementContent(message), '</user>');
     case 'assistant-message':
-      return fitElementWithinCost(
-        '    <assistant>',
-        boundedCollapse(message.content),
-        '</assistant>',
-        maximumCost,
-        cost,
-      );
+      return render('    <assistant>', boundedCollapse(message.content), '</assistant>');
     case 'command-output':
     case 'command-result':
-      return fitElementWithinCost('    <execution-output>', commandContent(message),
-        '</execution-output>', maximumCost, cost);
+      return render('    <execution-output>', commandContent(message), '</execution-output>');
     default:
       return '';
   }
@@ -601,13 +566,13 @@ function fitElementWithinCost(
   close: string,
   maximumCost: number,
   cost: (text: string) => number,
+  refitPrefix = content,
 ): string {
-  const escaped = escapeXml(content);
-  const full = `${open}${escaped}${close}`;
+  const full = renderElement(open, content, close);
   if (cost(full) <= maximumCost) return full;
   const suffix = '...';
   if (cost(`${open}${suffix}${close}`) > maximumCost) return '';
-  const codePoints = Array.from(content);
+  const codePoints = Array.from(refitPrefix);
   let low = 0;
   let high = codePoints.length;
   while (low < high) {
@@ -621,6 +586,10 @@ function fitElementWithinCost(
 
 function codeUnitEntryCost(text: string): number {
   return text.length + 1;
+}
+
+function renderElement(open: string, content: string, close: string): string {
+  return `${open}${escapeXml(content)}${close}`;
 }
 
 function escapeXml(value: string): string {
@@ -660,10 +629,13 @@ function toolName(message: ToolUseChatMessage): string {
 export interface ProjectedToolUseSummary {
   readonly text: string;
   readonly abridged: boolean;
+  // A tighter document budget may omit the literal, but must never cut its escaping.
+  readonly prefixBeforeLiteral?: string;
 }
 
-export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToolUseSummary {
+export function projectToolUseSummary(message: ToolUseChatMessage, redact?: (value: string) => string): ProjectedToolUseSummary {
   if (message.type === 'update-plan-tool-use') return summarizePlan(message.todos);
+  if (message.type === 'schedule-tool-use') return summarizeSchedule(message.request, redact);
   if (message.type === 'background-task-tool-use' && message.input !== undefined) {
     // Collapsing whitespace here would change the literal input sent to the task.
     const raw = `${message.action} ${message.taskId ?? ''} Input: ${JSON.stringify(message.input.slice(0, TOOL_SUMMARY_MAX_CHARS))}`;
@@ -671,16 +643,40 @@ export function projectToolUseSummary(message: ToolUseChatMessage): ProjectedToo
     return { text, abridged: text !== raw };
   }
   const raw = extractToolDetail(message);
-  const collapsed = boundedCollapse(raw);
+  const safe = redact?.(raw) ?? raw;
+  const collapsed = boundedCollapse(safe);
   const text = truncate(collapsed, TOOL_SUMMARY_MAX_CHARS);
   return {
     text,
-    abridged: raw.length > PROJECTED_BODY_MAX_CHARS || text !== collapsed,
+    abridged: safe !== raw || safe.length > PROJECTED_BODY_MAX_CHARS || text !== collapsed,
   };
 }
 
-function toolSummary(message: ToolUseChatMessage): string {
-  return projectToolUseSummary(message).text;
+function summarizeSchedule(request: ToolScheduleRequest, redact?: (value: string) => string): ProjectedToolUseSummary {
+  const title = toolScheduleTitle(request);
+  if (!hasSchedulePrompt(request)) {
+    const text = truncate(redact?.(title) ?? title, TOOL_SUMMARY_MAX_CHARS);
+    return { text, abridged: text !== title };
+  }
+  const header = [title, ...toolScheduleOptions(request), 'Prompt:'].join(' ');
+  const safeHeader = redact?.(header) ?? header;
+  const prefix = boundedCollapse(safeHeader);
+  const literalBudget = TOOL_SUMMARY_MAX_CHARS - prefix.length - ' ""'.length;
+  if (safeHeader.length > PROJECTED_BODY_MAX_CHARS || literalBudget < 0) {
+    return { text: prefix.slice(0, TOOL_SUMMARY_MAX_CHARS) + '...', abridged: true };
+  }
+  const prompt = redact?.(request.prompt) ?? request.prompt;
+  // Stops at a complete escaped character so the retained prefix is a readable literal.
+  let literal = '';
+  for (const char of prompt) {
+    const escaped = JSON.stringify(char).slice(1, -1);
+    if (literal.length + escaped.length > literalBudget) {
+      const fitted = literal ? `${prefix} "${literal}"...` : prefix + '...';
+      return { text: fitted, abridged: true, prefixBeforeLiteral: prefix };
+    }
+    literal += escaped;
+  }
+  return { text: `${prefix} "${literal}"`, abridged: safeHeader !== header || prompt !== request.prompt, prefixBeforeLiteral: prefix };
 }
 
 // Frozen alongside `stringifyLegacyToolResult` and for the same reason: the
@@ -734,6 +730,8 @@ function extractToolDetail(message: ToolUseChatMessage): string {
     case 'web-fetch-tool-use': return message.url;
     case 'task-tool-use': return message.description || message.prompt || message.subagentType || '';
     case 'codex-subagent-tool-use': return message.action;
+    case 'antigravity-enter-plan-mode-tool-use': return message.reason;
+    case 'antigravity-exit-plan-mode-tool-use': return message.plan;
     case 'background-task-tool-use': return [message.action, message.taskId].filter(Boolean).join(' ');
     case 'agent-message-tool-use': return `To ${message.recipient}: ${message.message}`;
     case 'todo-write-tool-use': return summarizeTodos(message.todos);

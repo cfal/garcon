@@ -3,7 +3,9 @@
 // these shapes, and the frontend renders them directly.
 
 import { isRecord } from './json.js';
-import { parseAsyncQuestionSet, type AsyncQuestionSet, type AsyncQuestionReply } from './async-user-questions.js';
+import { ToolResultMessage } from './tool-result-message.js';
+import { parseToolScheduleRequest, type ToolScheduleRequest } from './tool-schedule.js';
+import { parseAsyncQuestionSet, type AsyncQuestionSet } from './async-user-questions.js';
 import { normalizeAskUserQuestionDecisionResponse, type AskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 import {
   commandOutcomeText, isCommandOutputData,
@@ -14,6 +16,7 @@ import {
   asAllowedPrompts, asAskUserQuestions, asChatImages, asCodexSubagentInputItems,
   asOptionalBoolean, asOptionalChanges, asOptionalNumber, asOptionalString, asOptionalStringArray,
   asRecord, asStringArray, parseChatMessageMetadata, str,
+  type AskUserQuestionPrompt, type ChatImage, type ChatMessageMetadata,
 } from './chat-message-coercion.js';
 import {
   asCursorPlanPhases, asCursorPlanTodos, coercePlanSteps, coerceTodoItems,
@@ -38,13 +41,9 @@ import {
 export { parseUserMessagePresentation } from './user-message-presentation.js';
 export type { UserMessagePresentation } from './user-message-presentation.js';
 export { coerceTodoItems } from './chat-plan.js';
+export { ToolResultMessage };
+export type { AskUserQuestionOption, AskUserQuestionPrompt, ChatImage, ChatMessageMetadata } from './chat-message-coercion.js';
 export type { CursorPlanPhase, CursorPlanTodo, CursorPlanTodoStatus, PlanStep, TodoItem, TodoStatus } from './chat-plan.js';
-
-export interface ChatImage {
-  data: string;
-  name: string;
-  mimeType?: string;
-}
 
 export { CHAT_STOP_OUTCOMES, isAbortAcknowledged, isStopSatisfied } from './chat-stop.js';
 export type { ChatStopIntent, ChatStopOutcome } from './chat-stop.js';
@@ -55,16 +54,6 @@ export type ChatProcessingPhase = typeof CHAT_PROCESSING_PHASES[number];
 export interface ChatProcessingEntry {
   chatId: string;
   phase: ChatProcessingPhase;
-}
-
-export interface ChatMessageMetadata {
-  questionReply?: AsyncQuestionReply;
-  contentMode?: 'literal';
-  contentFormat?: 'plain' | 'markdown';
-  clientRequestId?: string;
-  clientMessageId?: string;
-  upstreamRequestId?: string;
-  turnId?: string;
 }
 
 export class UserMessage {
@@ -407,16 +396,6 @@ export class CodexSubagentToolUseMessage {
   ) {}
 }
 
-export class UpdatePlanToolUseMessage {
-  readonly type = 'update-plan-tool-use' as const;
-
-  constructor(
-    public timestamp: string,
-    public toolId: string,
-    public todos?: PlanStep[],
-  ) {}
-}
-
 export class WriteStdinToolUseMessage {
   readonly type = 'write-stdin-tool-use' as const;
 
@@ -424,6 +403,26 @@ export class WriteStdinToolUseMessage {
     public timestamp: string,
     public toolId: string,
     public input: Record<string, unknown>,
+  ) {}
+}
+
+export class ScheduleToolUseMessage {
+  readonly type = 'schedule-tool-use' as const;
+  constructor(public timestamp: string, public toolId: string, public request: ToolScheduleRequest, public nativeName?: string) {}
+
+  static fromRequest(timestamp: string, toolId: string, value: unknown, nativeName?: string) {
+    const request = parseToolScheduleRequest(value);
+    return request ? new ScheduleToolUseMessage(timestamp, toolId, request, nativeName) : null;
+  }
+}
+
+export class UpdatePlanToolUseMessage {
+  readonly type = 'update-plan-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public todos?: PlanStep[],
   ) {}
 }
 
@@ -436,6 +435,17 @@ export class EnterPlanModeToolUseMessage {
   ) {}
 }
 
+// Antigravity reports its own planning activity; these calls do not request a Garcon mode change.
+export class AntigravityEnterPlanModeToolUseMessage {
+  readonly type = 'antigravity-enter-plan-mode-tool-use' as const;
+  constructor(public timestamp: string, public toolId: string, public reason: string) {}
+}
+
+export class AntigravityExitPlanModeToolUseMessage {
+  readonly type = 'antigravity-exit-plan-mode-tool-use' as const;
+  constructor(public timestamp: string, public toolId: string, public plan: string) {}
+}
+
 export class ExitPlanModeToolUseMessage {
   readonly type = 'exit-plan-mode-tool-use' as const;
 
@@ -445,24 +455,6 @@ export class ExitPlanModeToolUseMessage {
     public plan: string,
     public allowedPrompts?: Array<{ tool: string; prompt: string }>,
   ) {}
-}
-
-export interface AskUserQuestionOption {
-  id: string;
-  label: string;
-  description?: string;
-  preview?: string;
-}
-
-export interface AskUserQuestionPrompt {
-  id: string;
-  prompt: string;
-  options: AskUserQuestionOption[];
-  header?: string;
-  allowMultiple?: boolean;
-  allowFreeText?: boolean;
-  allowNotes?: boolean;
-  isSecret?: boolean;
 }
 
 export class AskUserQuestionToolUseMessage {
@@ -680,11 +672,6 @@ export class UnknownToolUseMessage {
   ) {}
 }
 
-export class ToolResultMessage {
-  readonly type = 'tool-result' as const;
-  constructor(public timestamp: string, public toolId: string, public content: Record<string, unknown>, public isError: boolean) {}
-}
-
 export class ErrorMessage {
   readonly type = 'error' as const;
   constructor(public timestamp: string, public content: string) {}
@@ -812,6 +799,9 @@ export type ToolUseChatMessage =
   | UpdatePlanToolUseMessage
   | WriteStdinToolUseMessage
   | EnterPlanModeToolUseMessage
+  | ScheduleToolUseMessage
+  | AntigravityEnterPlanModeToolUseMessage
+  | AntigravityExitPlanModeToolUseMessage
   | ExitPlanModeToolUseMessage
   | AskUserQuestionToolUseMessage
   | CursorCreatePlanToolUseMessage
@@ -1041,6 +1031,14 @@ const TOOL_USE_MESSAGE_PARSERS = {
   'enter-plan-mode-tool-use': (data) =>
     new EnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId)),
 
+  'schedule-tool-use': (data) =>
+    ScheduleToolUseMessage.fromRequest(str(data.timestamp), str(data.toolId), data.request, asOptionalString(data.nativeName)),
+
+  'antigravity-enter-plan-mode-tool-use': (data) => typeof data.reason === 'string'
+    ? new AntigravityEnterPlanModeToolUseMessage(str(data.timestamp), str(data.toolId), data.reason) : null,
+  'antigravity-exit-plan-mode-tool-use': (data) => typeof data.plan === 'string'
+    ? new AntigravityExitPlanModeToolUseMessage(str(data.timestamp), str(data.toolId), data.plan) : null,
+
   'exit-plan-mode-tool-use': (data) => {
     const plan = asOptionalString(data.plan);
     if (plan === undefined) return null;
@@ -1236,7 +1234,7 @@ export function parseChatMessage(data: unknown): ChatMessage | null {
       return new ThinkingMessage(str(data.timestamp), str(data.content));
 
     case 'tool-result':
-      return new ToolResultMessage(str(data.timestamp), str(data.toolId), (data.content ?? {}) as Record<string, unknown>, Boolean(data.isError));
+      return ToolResultMessage.fromData(data);
     case 'error':
       return new ErrorMessage(str(data.timestamp), str(data.content));
     case 'transcript-notice': {

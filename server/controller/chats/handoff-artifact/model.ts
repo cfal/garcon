@@ -21,6 +21,7 @@ export interface HandoffArtifactSourceEntry {
   readonly tag: 'user' | 'assistant' | 'command-output' | 'command-result' | 'compaction' | 'tool-call' | 'handoff' | 'notice';
   readonly attributes: readonly HandoffArtifactAttribute[];
   readonly body: string | null;
+  readonly prefixBeforeLiteral?: string;
   readonly abridged: boolean;
 }
 

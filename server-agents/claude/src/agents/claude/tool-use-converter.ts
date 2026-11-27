@@ -4,6 +4,7 @@
 import {
   BashToolUseMessage,
   BackgroundTaskToolUseMessage,
+  ScheduleToolUseMessage,
   ReadToolUseMessage,
   EditToolUseMessage,
   WriteToolUseMessage,
@@ -27,6 +28,7 @@ import {
   type ToolUseChatMessage,
 } from '@garcon/common/chat-types';
 import { normalizeTodoItems } from '@garcon/server-agent-common/shared/normalize-util';
+import { isRecord } from '@garcon/common/json';
 
 function asObject(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -118,6 +120,41 @@ function canonicalize(raw: unknown): string {
   return raw.trim().toLowerCase().replace(/[\s_\-]+/g, '');
 }
 
+function cronBoolean(value: unknown): unknown {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
+}
+
+type ScheduleTool = 'schedulewakeup' | 'croncreate' | 'cronlist' | 'crondelete';
+
+function scheduleRequest(key: ScheduleTool, input: Record<string, unknown>): Record<string, unknown> | null {
+  const hasOnly = (...fields: string[]) => Object.keys(input).every(field => fields.includes(field));
+  switch (key) {
+    case 'schedulewakeup': {
+      // The stop operation ignores sibling arguments; only the raw row can preserve them.
+      if (input.stop === true) return hasOnly('stop') ? { action: 'stop-loop' } : null;
+      if (!hasOnly('stop', 'delaySeconds', 'prompt', 'reason', 'noop')
+        || (input.stop !== undefined && input.stop !== false) || typeof input.reason !== 'string') return null;
+      // Claude accepts signed decimal strings and reports the clamped delay in the result.
+      let delaySeconds = input.delaySeconds;
+      if (typeof delaySeconds === 'string' && /^[-+]?\d+(\.\d+)?$/.test(delaySeconds.trim())) delaySeconds = Number(delaySeconds);
+      return { action: 'wakeup', delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop };
+    }
+    case 'croncreate':
+      if (!hasOnly('cron', 'prompt', 'recurring', 'durable')) return null;
+      return {
+        action: 'cron', expression: input.cron, prompt: input.prompt,
+        recurring: input.recurring === undefined ? true : cronBoolean(input.recurring),
+        durable: cronBoolean(input.durable),
+      };
+    case 'cronlist':
+      return hasOnly() ? { action: 'list' } : null;
+    case 'crondelete':
+      return hasOnly('id') ? { action: 'delete', jobId: input.id } : null;
+  }
+}
+
 /**
  * Converts a Claude CLI tool_use part to a concrete ToolUseMessage.
  * Returns UnknownToolUseMessage for unrecognized or malformed payloads.
@@ -130,6 +167,16 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
   const key = canonicalize(rawName);
 
   switch (key) {
+    case 'schedulewakeup':
+    case 'croncreate':
+    case 'cronlist':
+    case 'crondelete': {
+      if (rawPart.input !== undefined && !isRecord(rawPart.input)) {
+        return new UnknownToolUseMessage(ts, toolId, rawName, { raw: rawPart.input });
+      }
+      return ScheduleToolUseMessage.fromRequest(ts, toolId, scheduleRequest(key, input), rawName)
+        ?? new UnknownToolUseMessage(ts, toolId, rawName, input);
+    }
     case 'toolsearch':
       return new ClaudeToolSearchToolUseMessage(ts, toolId, asString(input.query) ?? '', asNumber(input.max_results));
 

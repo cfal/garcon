@@ -17,6 +17,7 @@ import {
 } from '../../../../common/chat-types.ts';
 import type { CliPresentationStyle } from '../../../../common/cli-presentation.ts';
 import type { SharedChatSnapshot } from '../../../../common/share-types.ts';
+import { describeToolSchedule } from '../../../../common/tool-schedule.ts';
 import {
   isPreambleApplicationNoticeDetail,
   isPreambleSelectionChangedNoticeDetail,
@@ -123,6 +124,8 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
         message.input === undefined ? undefined : `Input: ${JSON.stringify(message.input)}`].filter(Boolean).join('\n') };
     case 'agent-message-tool-use':
       return { role: 'Tool Call', content: `Message to ${message.recipient}\n${message.message}` };
+    case 'schedule-tool-use':
+      return { role: 'Tool Call', content: describeToolSchedule(message.request) };
     case 'task-tool-use': {
       const lines = ['Run subtask'];
       if (message.subagentType) lines.push(`Agent: ${message.subagentType}`);
@@ -136,6 +139,10 @@ function formatToolUseMessage(message: ToolUseChatMessage): { role: string; cont
       return { role: 'Tool Call', content: `Write to running process\n${stringifyStructured(message.input)}` };
     case 'enter-plan-mode-tool-use':
       return { role: 'Plan Mode', content: 'Entered plan mode.' };
+    case 'antigravity-enter-plan-mode-tool-use':
+      return { role: 'Plan Mode', content: `Enter plan mode\n${message.reason}` };
+    case 'antigravity-exit-plan-mode-tool-use':
+      return { role: 'Plan Mode', content: `Implementation plan\n${message.plan}` };
     case 'exit-plan-mode-tool-use':
       return { role: 'Plan Mode', content: `Exited plan mode\n${message.plan}` };
     case 'amp-finder-tool-use':

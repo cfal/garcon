@@ -27,7 +27,6 @@
 			border?: string;
 		};
 		resultId?: string;
-		toolResult?: Record<string, unknown>;
 	}
 
 	const DEFAULT_SCHEME = {
@@ -50,7 +49,6 @@
 		language,
 		colorScheme = DEFAULT_SCHEME,
 		resultId,
-		toolResult,
 	}: OneLineDisplayProps = $props();
 
 	const clipboard = new ChatClipboardFeedback();
@@ -172,9 +170,9 @@
 								</span>
 							</div>
 						</div>
-						{#if toolResult}
+						{#if resultId}
 							<a
-								href={resultId ? `#${resultId}` : undefined}
+								href={`#${resultId}`}
 								class="flex-shrink-0 text-[11px] text-primary hover:text-primary/80 transition-colors flex items-center gap-0.5 mt-0.5"
 								aria-label={m.chat_tool_display_jump_to_results()}
 							>

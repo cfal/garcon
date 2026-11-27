@@ -96,14 +96,14 @@ function markerSearch(
 
 describe('schema v9', () => {
   test('[TLV5-SEARCH.10-SCHEMA-01] recreates stale and malformed derived files', async () => {
-    for (const staleVersion of [7, 8, 9, 3]) {
+    for (const staleVersion of [7, 8, 9, 10, 3]) {
       rmSync(dbPath, { force: true });
       const stale = new Database(dbPath, { create: true });
       stale.exec(`CREATE TABLE stale_marker(value TEXT); PRAGMA user_version = ${staleVersion}`);
       stale.close();
       const opened = await openSearchDatabase(dbPath);
       expect(opened.recreated).toBe(true);
-      expect(opened.db.query('PRAGMA user_version').get()).toEqual({ user_version: 10 });
+      expect(opened.db.query('PRAGMA user_version').get()).toEqual({ user_version: 11 });
       expect(opened.db.query(
         "SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'stale_marker'",
       ).get()).toEqual({ count: 0 });

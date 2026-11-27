@@ -1,10 +1,15 @@
 import { isDeepStrictEqual } from 'node:util';
 import { ToolResultMessage, type ToolUseChatMessage } from '@garcon/common/chat-types';
+import { isRecord } from '@garcon/common/json';
+import { toolResultTextPart } from '@garcon/common/tool-result-content';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
+import { planOrScheduleResult } from './plan-schedule-result.js';
+import { prefersReportContent, rawOutputText } from './report-text.js';
 import {
   antigravityMcpArguments,
   antigravityToolName,
   antigravityToolResultText,
+  reportsPlanOrSchedule,
   type AntigravityToolCall,
 } from './tool-use-converter.js';
 
@@ -12,14 +17,11 @@ export interface TrackedCall extends AntigravityToolCall {
   readonly rawOutput?: unknown;
   readonly content?: readonly Record<string, unknown>[];
   readonly contentIsNewer: boolean;
+  readonly reportContentIsNewer: boolean;
 }
 
 function isAgentWork(name: string | null): boolean {
   return name === 'manage_task' || name === 'update_steps' || name === 'send_message';
-}
-
-function rawOutputText(raw: unknown): string {
-  return asString(raw) ?? asString(asObject(raw).output) ?? '';
 }
 
 function isStructuredOutput(raw: unknown): boolean {
@@ -36,11 +38,10 @@ function withoutOutputEchoes(blocks: readonly Record<string, unknown>[], output:
   if (!output || !blocks.length) return blocks;
   const trimmed = output.trim();
   return blocks.filter(block => {
-    const part = block.type === 'content' ? asObject(block.content) : block;
-    if (part.type !== 'text') return true;
-    const text = asString(part.text);
-    if (text === output) return false;
-    return trimmed === '' || text?.trim() !== trimmed;
+    const part = toolResultTextPart(block);
+    if (!part) return true;
+    if (part.text === output) return false;
+    return trimmed === '' || part.text.trim() !== trimmed;
   });
 }
 
@@ -64,19 +65,21 @@ function prefersContent(previous: TrackedCall | undefined, rawOutput: unknown, c
 }
 
 function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['content'] {
-  const output = rawOutputText(call.rawOutput);
+  const rawOutput = call.rawOutput;
+  const output = rawOutputText(rawOutput);
   const blocks = withoutOutputEchoes(call.content ?? [], output);
   const blockText = joinBlockText(blocks);
   const trimmedOutput = output.trim();
   const trimmedBlocks = blockText.trim();
   const distinct = trimmedOutput !== '' && trimmedBlocks !== '' && trimmedOutput !== trimmedBlocks;
-  const structured = isStructuredOutput(call.rawOutput);
-  let primary: 'output' | 'metadata' | 'content' = 'content';
+  const structured = isStructuredOutput(rawOutput);
+  let primary: 'output' | 'metadata' | 'content';
   if (trimmedOutput && !(distinct && call.contentIsNewer)) primary = 'output';
   else if (structured && !trimmedOutput && !call.contentIsNewer) primary = 'metadata';
+  else primary = 'content';
 
   const result: ToolResultMessage['content'] = status === 'completed' ? {} : { status };
-  if (structured || (distinct && primary === 'content')) result.rawOutput = call.rawOutput;
+  if (structured || (distinct && primary === 'content')) result.rawOutput = rawOutput;
 
   // Keeps separate progress and attachments, not a second copy of the primary text.
   const keepBlockText = primary === 'metadata' || (primary === 'output' && distinct);
@@ -87,11 +90,10 @@ function agentWorkResult(call: TrackedCall, status: string): ToolResultMessage['
   return result;
 }
 
-export function toolCallResult(timestamp: string, call: TrackedCall, terminal: Record<string, unknown>, status: string): ToolResultMessage {
+export function toolCallResult(timestamp: string, call: TrackedCall, terminal: Record<string, unknown>, status: string, previous?: TrackedCall): ToolResultMessage {
   const name = call.isMcp ? null : antigravityToolName(call);
-  if (isAgentWork(name)) {
-    return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status), status !== 'completed');
-  }
+  if (reportsPlanOrSchedule(name)) return planOrScheduleResult(timestamp, call, previous, terminal, status);
+  if (isAgentWork(name)) return new ToolResultMessage(timestamp, call.toolCallId, agentWorkResult(call, status), status !== 'completed');
 
   // Other tools report text from the terminal frame, but a command's exit code can arrive earlier.
   const output = asString(asObject(terminal.rawOutput).output) ?? '';
@@ -107,42 +109,53 @@ export function toolCallResult(timestamp: string, call: TrackedCall, terminal: R
 }
 
 function acceptsPartialInput(name: string | null, input: Record<string, unknown>): boolean {
-  return isAgentWork(name) || name === 'call_mcp_tool' || !!(asString(input.server) || asString(input.tool));
+  return isAgentWork(name) || reportsPlanOrSchedule(name) || name === 'call_mcp_tool' || !!(asString(input.server) || asString(input.tool));
 }
 
-function mergeInput(previous: TrackedCall | undefined, call: AntigravityToolCall, name: string | null) {
-  if (!previous) return call.input;
-  if (!Object.keys(call.input).length) return previous.input;
-  if (!previous.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.input)) {
-    return { ...previous.input, ...call.input };
+function mergeArguments(previous: TrackedCall | undefined, call: AntigravityToolCall, name: string | null) {
+  if (Object.keys(call.input).length) {
+    const partial = previous && (!previous.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.input));
+    const input = partial ? { ...previous.input, ...call.input } : call.input;
+    return { input, rawInput: input };
   }
-  return call.input;
+  const input = previous?.input ?? call.input;
+  // A native fallback retains malformed arguments; an MCP or ordinary tool uses the accumulated object instead.
+  if (!name || reportsPlanOrSchedule(name)) {
+    if (call.rawInput !== undefined && !isRecord(call.rawInput)) return { input, rawInput: call.rawInput };
+    if (previous) return { input, rawInput: previous.rawInput };
+  }
+  return { input, rawInput: input };
 }
 
 export function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
   const name = call.name || previous?.name || null;
-  const input = mergeInput(previous, call, name);
+  const { input, rawInput } = mergeArguments(previous, call, name);
   // ACP patches rawOutput and content independently. A repeated snapshot does not
   // make its text newer. When both change together, rawOutput takes precedence.
   const rawOutput = update?.rawOutput ?? previous?.rawOutput;
   const content = Array.isArray(update?.content)
     ? update.content.map(asObject).filter(block => block.type !== 'diff') : previous?.content;
+  const isMcp = call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool));
   return {
     ...call,
     name,
     kind: call.kind || previous?.kind || null,
-    isMcp: call.isMcp || !!previous?.isMcp || !!(asString(input.server) && asString(input.tool)),
+    isMcp,
     planTitle: previous?.planTitle === 'excluded' ? 'excluded' : call.planTitle ?? previous?.planTitle ?? null,
     input,
+    rawInput,
     rawOutput,
     content,
     contentIsNewer: prefersContent(previous, rawOutput, content),
+    reportContentIsNewer: !isMcp && (!name || reportsPlanOrSchedule(name)) && prefersReportContent(previous, rawOutput, content),
   };
 }
 
 export function needsMoreEvidence(call: TrackedCall, row: ToolUseChatMessage): boolean {
-  if (!Object.keys(call.input).length) return true;
-  if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(call.input);
-  if (call.isMcp || !call.name) return true;
-  return row.type === 'external-tool-use' && acceptsPartialInput(call.name, call.input);
+  const input = call.input;
+  if (!Object.keys(input).length) return true;
+  if (row.type === 'mcp-tool-use') return !antigravityMcpArguments(input);
+  // Plan and schedule identity remains provisional until a pending MCP address can settle.
+  if (call.isMcp || !call.name || reportsPlanOrSchedule(call.name) || asString(input.server) || asString(input.tool)) return true;
+  return row.type === 'external-tool-use' && acceptsPartialInput(call.name, input);
 }

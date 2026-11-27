@@ -3,8 +3,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { HistoricalSearchMessageRow } from './rows.js';
 
-// Rebuilds older projections that indexed routine command completion as searchable text.
-export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 10;
+// Rebuilds older projections that indexed empty success envelopes as searchable text.
+export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 11;
 export const SEARCH_INGEST_TXN_MAX_ROWS = 256;
 export const SEARCH_INGEST_TXN_MAX_BYTES = 1_048_576;
 export const SEARCH_INGEST_ROW_MAX_BYTES = 1_048_576;

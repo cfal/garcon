@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { AntigravityEnterPlanModeToolUseMessage, AntigravityExitPlanModeToolUseMessage, ScheduleToolUseMessage } from '@garcon/common/chat-types';
 import { AgentMessageToolUseMessage, BackgroundTaskToolUseMessage, ToolResultMessage } from '@garcon/common/chat-types';
 import { ClaudeMonitorToolUseMessage, ClaudeToolSearchToolUseMessage, CommandOutputMessage, CommandResultMessage, PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '../message-projector.js';
@@ -11,6 +12,14 @@ const complete: CommandOutcome = {
 };
 
 describe('transcript search message projector', () => {
+  test('indexes reported plans, timer prompts and cancellation conditions', () => {
+    expect(projectSearchMessage(new AntigravityEnterPlanModeToolUseMessage('', 'enter', ''))?.body).toBe('enter_plan_mode');
+    expect(projectSearchMessage(new AntigravityExitPlanModeToolUseMessage('', 'exit', '# Review'))).toMatchObject({ role: 'tool', body: 'exit_plan_mode # Review' });
+    expect(projectSearchMessage(new ScheduleToolUseMessage('', 'list', { action: 'list' }, 'CronList'))?.body).toBe('schedule CronList action list');
+    const row = new ScheduleToolUseMessage('', 'schedule', { action: 'wakeup', delaySeconds: 60, prompt: 'Check build', timerCondition: 'builder' });
+    const body = projectSearchMessage(row)?.body;
+    for (const value of ['schedule', 'wakeup', '60', 'Check build', 'builder']) expect(body).toContain(value);
+  });
   test('reserves result search space for the visible diagnostic regardless of field order', () => {
     const progress = 'working '.repeat(500);
     for (const extra of [{ rawOutput: { output: progress } }, { items: [{ type: 'text', text: progress }] }]) {

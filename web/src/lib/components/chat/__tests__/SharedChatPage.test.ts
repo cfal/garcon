@@ -6,8 +6,9 @@ import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsibl
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
-import { UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
+import { AgentSwitchMessage, BackgroundTaskToolUseMessage, UserMessage, ThinkingMessage, CommandOutputMessage, CommandResultMessage, PermissionExpiredMessage, ScheduleToolUseMessage, ToolResultMessage } from '$shared/chat-types';
 import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+import { AntigravityExitPlanModeToolUseMessage } from '$shared/chat-types';
 
 vi.mock('$lib/api/shares', () => ({
 	getSharedChat: vi.fn(),
@@ -64,6 +65,104 @@ describe('SharedChatPage', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
+	});
+
+	it('reveals a cross-page schedule result without counting it as growth above the reader', async () => {
+		const newest = response(['', '', '', ''], 1, 5);
+		newest.snapshot.messages = [
+			new UserMessage('', 'Reading here'),
+			new ToolResultMessage('', 'cron', { raw: 'Created', toolUseResult: { id: 'synthetic-job' } }, false),
+			new ScheduleToolUseMessage('', 'cron', { action: 'list' }),
+			new ToolResultMessage('', 'cron', { items: [] }, false),
+		];
+		const older = response([''], 0, 5);
+		older.snapshot.messages = [new ScheduleToolUseMessage('', 'cron', { action: 'cron', expression: '* * * * *', prompt: 'Check' })];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(newest).mockResolvedValueOnce(older);
+		render(SharedChatPageTestHost);
+		await screen.findByText('List scheduled jobs');
+		expect(screen.queryByRole('button', { name: /Details/ })).toBeNull();
+		const anchor = screen.getByText('Reading here').closest('.chat-message')!;
+		vi.spyOn(anchor, 'getBoundingClientRect').mockImplementation(() =>
+			new DOMRect(0, document.getElementById('shared-result-2') ? 150 : 100, 200, 40));
+		vi.spyOn(window, 'scrollY', 'get').mockReturnValue(200);
+		vi.spyOn(document.documentElement, 'scrollHeight', 'get').mockReturnValueOnce(1000).mockReturnValue(1100);
+		await fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+		await waitFor(() => expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 250, behavior: 'instant' }));
+		await fireEvent.click(await screen.findByRole('button', { name: /Details/ }));
+		expect(screen.getByText(/synthetic-job/).textContent).toContain('Created');
+	});
+
+	it('does not pair a result from a new binding with an outstanding timer before a handoff', async () => {
+		const page = response([], 0, 6);
+		page.snapshot.messages = [
+			new ScheduleToolUseMessage('', 'done', { action: 'list' }),
+			new ToolResultMessage('', 'done', { raw: 'Earlier schedule result' }, false),
+			new ScheduleToolUseMessage('', 'same', { action: 'wakeup', delaySeconds: 60, prompt: 'Check' }),
+			new AgentSwitchMessage('', 'antigravity', 'antigravity', undefined, undefined, 'local', 'remote'),
+			new BackgroundTaskToolUseMessage('', 'same', 'list'),
+			new ToolResultMessage('', 'same', { raw: 'Unrelated task result' }, false),
+		];
+		page.page.end = 6;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(page);
+		render(SharedChatPageTestHost);
+		await screen.findByText('List scheduled jobs');
+		const details = screen.getAllByRole('button', { name: /Details/ });
+		expect(details).toHaveLength(1);
+		await fireEvent.click(details[0]);
+		expect(screen.getByText('Earlier schedule result')).toBeTruthy();
+	});
+
+	it('shows a failed informational plan result without showing empty successful reports', async () => {
+		const page = response(['', '', '', ''], 0, 4);
+		page.snapshot.messages = [
+			new AntigravityExitPlanModeToolUseMessage('', 'empty', 'First plan'),
+			new ToolResultMessage('', 'empty', {}, false),
+			new AntigravityExitPlanModeToolUseMessage('', 'failed', 'Second plan'),
+			new ToolResultMessage('', 'failed', { raw: 'Plan could not be saved' }, true),
+		];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(page);
+		render(SharedChatPageTestHost);
+		const disclosure = await screen.findByRole('button', { name: /Error/ });
+		await fireEvent.click(disclosure);
+		expect(screen.getByText('Plan could not be saved')).toBeTruthy();
+		expect(document.getElementById('shared-result-1')).toBeNull();
+	});
+
+	it('never attributes a current result to a pending frozen schedule across pages', async () => {
+		const newest = response(['', ''], 1, 3);
+		newest.snapshot.frozenMessageCount = 1;
+		newest.snapshot.messages = [new BackgroundTaskToolUseMessage('', 'reused', 'list'),
+			new ToolResultMessage('', 'reused', { raw: 'Current task list' }, false)];
+		const older = response([''], 0, 3);
+		older.snapshot.frozenMessageCount = 1;
+		older.snapshot.messages = [new ScheduleToolUseMessage('', 'reused', { action: 'list' })];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(newest).mockResolvedValueOnce(older);
+		render(SharedChatPageTestHost);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Load earlier messages' }));
+		await screen.findByText('List scheduled jobs');
+		expect(document.getElementById('shared-result-2')).toBeNull();
+	});
+
+	it('anchors to visible content when an empty permission row precedes a newly paired result', async () => {
+		const newest = response(['', '', ''], 1, 4);
+		newest.snapshot.messages = [
+			new PermissionExpiredMessage('', 'fixture-permission'),
+			new ToolResultMessage('', 'cron', { raw: 'Created' }, false),
+			new UserMessage('', 'Visible message'),
+		];
+		const older = response([''], 0, 4);
+		older.snapshot.messages = [new ScheduleToolUseMessage('', 'cron', { action: 'list' })];
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(newest).mockResolvedValueOnce(older);
+		const { container } = render(SharedChatPageTestHost);
+		const visible = (await screen.findByText('Visible message')).closest('.chat-message')!;
+		const empty = container.querySelector('.chat-message')!;
+		expect(empty).not.toBe(visible);
+		const revealed = () => document.getElementById('shared-result-2') !== null;
+		vi.spyOn(empty, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, revealed() ? 90 : 60, 200, 0));
+		vi.spyOn(visible, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, revealed() ? 180 : 80, 200, 40));
+		vi.spyOn(window, 'scrollY', 'get').mockReturnValue(200);
+		await fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+		await waitFor(() => expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 300, behavior: 'instant' }));
 	});
 
 	it('aligns shared user messages from the local preference without remounting', async () => {

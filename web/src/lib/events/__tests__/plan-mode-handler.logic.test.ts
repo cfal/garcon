@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { handlePlanModeMessages, type PlanModeContext } from '../handlers/plan-mode';
 import {
 	BashToolUseMessage,
+	AntigravityEnterPlanModeToolUseMessage,
+	AntigravityExitPlanModeToolUseMessage,
 	EnterPlanModeToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	type ChatMessage,
@@ -31,6 +33,15 @@ function batch(messages: ChatMessage[], chatId = 'chat-1') {
 }
 
 describe('plan mode handler', () => {
+	it('does not change permissions or request a decision for reported Antigravity plans', () => {
+		const { ctx, read } = makeContext('default');
+		handlePlanModeMessages(batch([
+			new AntigravityEnterPlanModeToolUseMessage('', 'enter', 'Inspect layout'),
+			new AntigravityExitPlanModeToolUseMessage('', 'exit', '# Layout'),
+		]), ctx);
+		expect(ctx.setPermissionMode).not.toHaveBeenCalled();
+		expect(read()).toEqual([]);
+	});
 	it('maps ExitPlanMode tool-use into pending permission request', () => {
 		const { ctx, read } = makeContext();
 		const message = batch([

@@ -8,6 +8,7 @@ import {
 	EditToolUseMessage,
 	ExecToolUseMessage,
 	ExitPlanModeToolUseMessage,
+	ExternalToolUseMessage,
 	GlobToolUseMessage,
 	PermissionCancelledMessage,
 	PermissionExpiredMessage,
@@ -31,6 +32,17 @@ import type { LocalNoticeRow } from '$lib/chat/transcript/local-notice.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 
 const TS = '2026-05-29T00:00:00.000Z';
+
+it('retains use/result pairing when a successful result has no visible body', () => {
+	const tool = new ExternalToolUseMessage(TS, 'custom', 'example', {});
+	for (const [content, layout] of [[{}, 'hidden'], [{ items: [] }, 'hidden'], [{ raw: 'done' }, 'standard']] as const) {
+		const result = new ToolResultMessage(TS, tool.toolId, content, false);
+		const model = buildConversationFeedRenderModel(rows([tool, result]));
+		expect(model.toolResultByUseRowId.get('row-0')).toBe(result);
+		expect(model.toolResultRowIdByUseRowId.get('row-0')).toBe('row-1');
+		expect(conversationFeedItemLayout(model.items[1])).toBe(layout);
+	}
+});
 
 it.each([
 	new BashToolUseMessage(TS, 'invalid', ''),
