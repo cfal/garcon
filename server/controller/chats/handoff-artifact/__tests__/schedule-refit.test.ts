@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
 import { ScheduleToolUseMessage, UserMessage } from '../../../../../common/chat-types.js';
 import { createCarryoverTranscript } from '../../../../../common/transcript-seed.js';
+import { renderTranscriptExportMarkdown } from '../../transcript-export/markdown.js';
 import { renderTranscriptExportXml } from '../../transcript-export/xml.js';
+import { xmlText } from '../../transcript-export/values.js';
 import { foldHandoffArtifactEntries } from '../projection.js';
 import { renderFittedHandoffArtifact } from '../xml.js';
 
@@ -50,15 +52,35 @@ test.each([
   ['[one]( data:text/plain,fixture)[two](https://example.test)', '[one]( [data URL omitted from export])[two](https://example.test)'],
   ['![preview](data:image/png;base64,AA==)after', '![preview]([data URL omitted from export])after'],
   ['[one](data:text/plain,part(inner))after', '[one]([data URL omitted from export])after'],
+  ['[review](data:text/plain,part(inner)[tag](value)BODY)', '[review]([data URL omitted from export])'],
+  ['[review](<data:text/plain,prefix BODY>)', '[review](<[data URL omitted from export]>)'],
+  ['([one](data:text/plain,x)) and data:text/plain,body)', '([one]([data URL omitted from export])) and [data URL omitted from export]'],
+  ['[one](data:text/plain,x),[two](https://x.test)[three](https://y.test)', '[one]([data URL omitted from export]),[two](https://x.test)[three](https://y.test)'],
+  ['[one](data:text/plain,x)(note)[two](https://x.test)', '[one]([data URL omitted from export])(note)[two](https://x.test)'],
+  ['[one](data:nocomma);[two](https://x.test/a,b)[three](https://y.test)', '[one](data:nocomma);[two](https://x.test/a,b)[three](https://y.test)'],
+  ['Received data:0x12,0x34.', 'Received data:0x12,0x34.'],
+  ['Return `data:${mimeType};base64,${base64}` unchanged.', 'Return `data:${mimeType};base64,${base64}` unchanged.'],
 ])('redacts the complete data URL token in %s', (prompt, redacted) => {
   const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
   const entries = [{ kind: 'message', ordinal: 1, category: 'tool-calls', message }] as const;
   const fold = foldHandoffArtifactEntries(entries);
   expect(fold.entries[0].body).toEndWith('Prompt: ' + JSON.stringify(redacted));
-  expect(renderTranscriptExportXml({
+  const model = {
     chat: { id: '1795690000000000', title: 'Fixture', agentId: 'antigravity', model: null }, omitted: [], entries,
-  })).toContain(JSON.stringify(redacted));
-  expect(createCarryoverTranscript([message], 0)?.prefix).toContain(prompt);
+  } as const;
+  expect(renderTranscriptExportXml(model)).toContain(xmlText(JSON.stringify(redacted)));
+  expect(renderTranscriptExportMarkdown(model)).toContain(JSON.stringify(redacted));
+  expect(createCarryoverTranscript([message], 0)?.prefix).toContain(xmlText(prompt));
+});
+
+test('redacts the complete destination before fitting a long prompt', () => {
+  const prompt = '[file](<data:text/plain,first BODY' + ' secret'.repeat(150) + '>) done';
+  const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
+  const { entries: [entry] } = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message }]);
+  expect(entry.body).toEndWith('Prompt: "[file](<[data URL omitted from export]>) done"');
+  const option = new ScheduleToolUseMessage('', 'cron', { action: 'cron', expression: prompt, prompt: 'Check' });
+  const fold = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message: option }]);
+  expect(fold.entries[0].body).toBe('Request cron: [file](<[data URL omitted from export]>) done Prompt: "Check"');
 });
 
 test.each(['data:x\n," Then continue.', 'see data:a\t,"b'])('does not reinterpret JSON escapes as URL content', prompt => {

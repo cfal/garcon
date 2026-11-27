@@ -5,6 +5,7 @@ import {
 import {
   isToolUseMessage,
   type ChatMessage,
+  type ToolUseChatMessage,
 } from '../../../../common/chat-types.js';
 import { isHandoffSummaryNoticeDetail } from '../../../../common/transcript-notice-details.js';
 import {
@@ -12,7 +13,7 @@ import {
   selectPrioritizedProjection,
   type PrioritizedProjectionEntry,
 } from '../../../../common/transcript-projection.js';
-import { isPublicationGapMessage, projectToolUseSummary, type ProjectedToolUseSummary } from '../../../../common/transcript-seed.js';
+import { isPublicationGapMessage, projectToolUseSummary } from '../../../../common/transcript-seed.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   redactDataUrl,
@@ -166,7 +167,7 @@ function projectEntry(
       level: projectionPriorityLevel(message.type),
       tag: 'tool-call',
       attributes: [{ name: 'type', value: message.type }],
-      ...toolSummaryBody(projectToolUseSummary(message, redactDataUrl)),
+      ...toolSummaryBody(message),
     });
   }
   switch (message.type) {
@@ -287,16 +288,15 @@ function artifactBody(value: string): { readonly text: string; readonly abridged
   };
 }
 
-function toolSummaryBody(summary: ProjectedToolUseSummary): Pick<HandoffArtifactSourceEntry, 'body' | 'abridged' | 'prefixBeforeLiteral'> {
-  const prefix = summary.prefixBeforeLiteral;
-  if (prefix === undefined) {
-    const body = artifactBody(summary.text);
-    return { body: body.text || null, abridged: summary.abridged || body.abridged };
+function toolSummaryBody(message: ToolUseChatMessage): Pick<HandoffArtifactSourceEntry, 'body' | 'abridged' | 'prefixBeforeLiteral'> {
+  const summary = projectToolUseSummary(message, redactDataUrl);
+  if (message.type === 'schedule-tool-use') {
+    // The summary redacts complete destinations before fitting and JSON-quoting the prompt.
+    const prefix = summary.prefixBeforeLiteral;
+    return { body: textSafe(summary.text), prefixBeforeLiteral: prefix === undefined ? undefined : textSafe(prefix), abridged: summary.abridged };
   }
-  // Only the header still needs redaction. The bounded literal was redacted before JSON escaping.
-  const header = artifactBody(prefix);
-  const literal = textSafe(summary.text.slice(prefix.length));
-  return { body: header.text + literal, prefixBeforeLiteral: header.text, abridged: summary.abridged || header.abridged };
+  const body = artifactBody(summary.text);
+  return { body: body.text || null, abridged: summary.abridged || body.abridged };
 }
 
 function codeUnitSafePrefix(

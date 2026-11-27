@@ -633,9 +633,9 @@ export interface ProjectedToolUseSummary {
   readonly prefixBeforeLiteral?: string;
 }
 
-export function projectToolUseSummary(message: ToolUseChatMessage, redactSchedulePrompt?: (value: string) => string): ProjectedToolUseSummary {
+export function projectToolUseSummary(message: ToolUseChatMessage, redactScheduleText?: (value: string) => string): ProjectedToolUseSummary {
   if (message.type === 'update-plan-tool-use') return summarizePlan(message.todos);
-  if (message.type === 'schedule-tool-use') return summarizeSchedule(message.request, redactSchedulePrompt);
+  if (message.type === 'schedule-tool-use') return summarizeSchedule(message.request, redactScheduleText);
   if (message.type === 'background-task-tool-use' && message.input !== undefined) {
     // Collapsing whitespace here would change the literal input sent to the task.
     const raw = `${message.action} ${message.taskId ?? ''} Input: ${JSON.stringify(message.input.slice(0, TOOL_SUMMARY_MAX_CHARS))}`;
@@ -651,20 +651,20 @@ export function projectToolUseSummary(message: ToolUseChatMessage, redactSchedul
   };
 }
 
-function summarizeSchedule(request: ToolScheduleRequest, redactPrompt?: (value: string) => string): ProjectedToolUseSummary {
+function summarizeSchedule(request: ToolScheduleRequest, redact?: (value: string) => string): ProjectedToolUseSummary {
   const title = toolScheduleTitle(request);
   if (!hasSchedulePrompt(request)) {
-    return { text: truncate(title, TOOL_SUMMARY_MAX_CHARS), abridged: title.length > TOOL_SUMMARY_MAX_CHARS };
+    const text = truncate(redact?.(title) ?? title, TOOL_SUMMARY_MAX_CHARS);
+    return { text, abridged: text !== title };
   }
   const header = [title, ...toolScheduleOptions(request), 'Prompt:'].join(' ');
-  const prefix = boundedCollapse(header);
+  const safeHeader = redact?.(header) ?? header;
+  const prefix = boundedCollapse(safeHeader);
   const literalBudget = TOOL_SUMMARY_MAX_CHARS - prefix.length - ' ""'.length;
-  if (header.length > PROJECTED_BODY_MAX_CHARS || literalBudget < 0) {
+  if (safeHeader.length > PROJECTED_BODY_MAX_CHARS || literalBudget < 0) {
     return { text: prefix.slice(0, TOOL_SUMMARY_MAX_CHARS) + '...', abridged: true };
   }
-  const shortened = request.prompt.length > TOOL_SUMMARY_MAX_CHARS;
-  const raw = shortened ? request.prompt.slice(0, TOOL_SUMMARY_MAX_CHARS).replace(/[\uD800-\uDBFF]$/u, '') : request.prompt;
-  const prompt = redactPrompt?.(raw) ?? raw;
+  const prompt = redact?.(request.prompt) ?? request.prompt;
   // Stops at a complete escaped character so the retained prefix is a readable literal.
   let literal = '';
   for (const char of prompt) {
@@ -675,7 +675,7 @@ function summarizeSchedule(request: ToolScheduleRequest, redactPrompt?: (value: 
     }
     literal += escaped;
   }
-  return { text: `${prefix} "${literal}"${shortened ? '...' : ''}`, abridged: shortened || prompt !== raw, prefixBeforeLiteral: prefix };
+  return { text: `${prefix} "${literal}"`, abridged: safeHeader !== header || prompt !== request.prompt, prefixBeforeLiteral: prefix };
 }
 
 // Frozen alongside `stringifyLegacyToolResult` and for the same reason: the
