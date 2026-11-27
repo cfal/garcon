@@ -1862,37 +1862,65 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review cancellable');
 	});
 
-	it('lets Escape cancel project resolution before snippet expansion starts', async () => {
-		const pending = deferredProjectResolution();
-		let signal!: AbortSignal;
-		let requestedTarget!: ProjectTarget;
-		const fetchProjectResolution = vi.fn((target: ProjectTarget, requestSignal: AbortSignal) => {
-			signal = requestSignal;
-			requestedTarget = target;
-			return pending.promise;
+	it('does not trigger project resolution during snippet expansion or local fast-path insertion', async () => {
+		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+		}));
+		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
+			success: true,
+			source: 'snippet',
+			sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
+			shortName: 'review',
+			contextExecutorId: 'local',
+			contextProjectPath: '/workspace/project',
+			expandedText: 'Server expanded /workspace/project',
 		});
 		render(PromptComposerTestHost, {
-			selectedChatId: 'chat-snippet-resolution-cancel',
+			selectedChatId: 'chat-no-project-resolve-on-snippet',
 			selectedStatus: 'running',
 			fetchProjectResolution,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		await fireEvent.input(textarea, { target: { value: '/snippet review cancellable' } });
+		await fireEvent.input(textarea, { target: { value: '/snippet review fallback' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
-		await screen.findByRole('button', { name: 'Expanding snippet' });
-		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 
-		await fireEvent.keyDown(textarea, { key: 'Escape' });
-		expect(signal.aborted).toBe(true);
-		pending.resolve({
-			target: requestedTarget,
-			resolution: { kind: 'available', effectiveProjectKey: requestedTarget.projectPath },
+		await waitFor(() => expect(textarea.value).toBe('Server expanded /workspace/project'));
+		expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce();
+		expect(fetchProjectResolution).not.toHaveBeenCalled();
+	});
+
+	it('expands eligible palette and slash snippets locally without server calls', async () => {
+		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
+		}));
+		render(PromptComposerTestHost, {
+			selectedChatId: 'chat-local-fast-path',
+			selectedStatus: 'running',
+			snippetTemplate: 'Review {{arguments}} for {{chat_id}}',
+			snippetDefaultArguments: 'defaults',
+			fetchProjectResolution,
 		});
-		await pending.promise;
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).toBeTruthy());
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await inputAtCaret(textarea, 'Before ;;review after', 'Before ;;review'.length);
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+		await fireEvent.keyDown(await screen.findByRole('textbox', { name: 'Arguments' }), {
+			key: 'Enter',
+		});
 
+		await waitFor(() =>
+			expect(textarea.value).toBe('Before Review defaults for chat-local-fast-path after'),
+		);
+		await fireEvent.input(textarea, { target: { value: '/s review custom' } });
+		await fireEvent.keyDown(textarea, { key: 'Enter' });
+
+		await waitFor(() =>
+			expect(textarea.value).toBe('Review custom for chat-local-fast-path'),
+		);
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(textarea.value).toBe('/snippet review cancellable');
+		expect(fetchProjectResolution).not.toHaveBeenCalled();
 	});
 
 	it('lets another composer control cancel a pending expansion with Escape', async () => {
@@ -1987,7 +2015,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-edit-during-expansion',
 			selectedStatus: 'running',
-			snippetTemplate: 'Expanded review',
+			snippetTemplate: 'Expanded {{project_path}}',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
@@ -2024,7 +2052,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-attachment-during-expansion',
 			selectedStatus: 'running',
-			snippetTemplate: 'Expanded review',
+			snippetTemplate: 'Expanded {{project_path}}',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		await fireEvent.input(textarea, { target: { value: 'Original draft' } });
@@ -2074,7 +2102,7 @@ describe('PromptComposer focus', () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-inline-snippet',
 			selectedStatus: 'running',
-			snippetTemplate: 'Expanded review',
+			snippetTemplate: 'Expanded {{project_path}}',
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		const source = 'Before ;;review after';
@@ -2099,17 +2127,7 @@ describe('PromptComposer focus', () => {
 		);
 	});
 
-	it('inserts a named preamble from the palette without collecting snippet arguments', async () => {
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'preamble',
-			sourceId: '00000000-0000-4000-8000-000000000001',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'manual',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'PREAMBLE',
-		});
+	it('inserts a named preamble from the palette locally without collecting snippet arguments', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-preamble-snippet',
 			selectedStatus: 'running',
@@ -2137,16 +2155,11 @@ describe('PromptComposer focus', () => {
 		expect(option.textContent).toContain('preamble');
 		await fireEvent.click(option);
 
-		await waitFor(() => expect(textarea.value).toBe('Before PREAMBLE after'));
-		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
-		expect(snippetsApi.expandSnippet).toHaveBeenCalledWith(
-			{
-				shortName: 'manual',
-				arguments: { type: 'value', value: '' },
-				context: { type: 'chat', chatId: 'chat-preamble-snippet' },
-			},
-			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		await waitFor(() =>
+			expect(textarea.value).toBe('Before Literal {{arguments}} for chat-preamble-snippet after'),
 		);
+		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
 	it('honors the configured trigger without interrupting IME composition', async () => {
@@ -2692,15 +2705,4 @@ function deferredSnippetExpansion() {
 		resolve = done;
 	});
 	return { promise, resolve };
-}
-
-function deferredProjectResolution() {
-	let resolve!: (value: ProjectResolutionResponse) => void;
-	const promise = new Promise<ProjectResolutionResponse>((done) => {
-		resolve = done;
-	});
-	return {
-		promise,
-		resolve,
-	};
 }

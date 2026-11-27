@@ -11,8 +11,16 @@ const expand = vi.mocked(expandSnippet);
 const snippet: Snippet = {
 	id: 'review',
 	shortName: 'review',
-	template: 'Review {{arguments}}',
+	template: 'Review {{arguments}} in {{project_path}}',
 	defaultArguments: 'API',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+};
+const localSnippet: Snippet = {
+	id: 'local-only',
+	shortName: 'local-only',
+	template: 'Deferred {{arguments}} for {{chat_id}} on {{current_date}}',
+	defaultArguments: 'checks',
 	createdAt: '2026-01-01T00:00:00.000Z',
 	updatedAt: '2026-01-01T00:00:00.000Z',
 };
@@ -27,8 +35,8 @@ const response: ExpandSnippetResponse = {
 	expandedText: 'Review API',
 };
 
-function renderEditor() {
-	const getSnippets = vi.fn(async () => ({ revision: 1, snippets: [snippet] }));
+function renderEditor(items: Snippet[] = [snippet]) {
+	const getSnippets = vi.fn(async () => ({ revision: 1, snippets: items }));
 	const getPreambles = vi.fn(async () => ({ revision: 0, preambles: [] }));
 	const snippets = createSnippetsStore({ get: getSnippets });
 	const preambles = createPreamblesStore({ get: getPreambles });
@@ -36,18 +44,31 @@ function renderEditor() {
 	return { snippets, getSnippets, getPreambles };
 }
 
-async function openArguments() {
+async function openArguments(shortName = 'review') {
 	const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;
 	prompt.setSelectionRange(prompt.value.length, prompt.value.length);
 	await fireEvent.click(screen.getByRole('button', { name: 'Insert Snippet' }));
-	await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
-	return screen.findByRole('dialog', { name: 'Arguments for /snippet review' });
+	await fireEvent.click(await screen.findByRole('option', { name: new RegExp(`^${shortName}`) }));
+	return screen.findByRole('dialog', { name: `Arguments for /snippet ${shortName}` });
 }
 
 beforeEach(() => expand.mockReset());
 afterEach(cleanup);
 
 describe('scheduled prompt snippet interactions', () => {
+	it('inserts eligible snippets locally without calling expandSnippet', async () => {
+		renderEditor([localSnippet]);
+		await openArguments('local-only');
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('prompt-draft').textContent).toBe(
+				'Before Deferred checks for {{chat_id}} on {{current_date}}',
+			),
+		);
+		expect(expand).not.toHaveBeenCalled();
+	});
+
 	it('closes stale arguments and refreshes the changed catalog after a delayed expansion', async () => {
 		const { snippets, getSnippets, getPreambles } = renderEditor();
 		let resolve!: (value: ExpandSnippetResponse) => void;

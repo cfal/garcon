@@ -1,7 +1,10 @@
 import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
-import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
-import { matchesSelectableSnippetExpansion } from '$lib/snippets/selectable-snippet.js';
+import {
+	mismatchedSnippetSources,
+	type SelectableSnippet,
+} from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+import { tryExpandSelectableSnippetLocally } from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import {
 	applySnippetTriggerReplacement,
@@ -52,25 +55,43 @@ export class ScheduledPromptSnippets {
 		const key = this.options.interactionKey;
 		const source = this.options.prompt;
 		const range = this.palette.trigger ?? this.#selection;
+		const argumentsInput = { type: 'value', value: argumentsText } as const;
+		const insertExpanded = async (expandedText: string): Promise<'inserted'> => {
+			const replacement = applySnippetTriggerReplacement(source, range, expandedText);
+			this.palette.complete();
+			await this.options.onInsert(replacement.text, replacement.caret);
+			return 'inserted';
+		};
 		this.error = null;
-		this.options.onPendingChange(true);
+		let pendingNotified = false;
 		try {
+			const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
+				kind: 'scheduled',
+			});
+			if (local.kind === 'expanded') return await insertExpanded(local.expandedText);
+			if (local.kind === 'error') {
+				this.error = local.message;
+				return 'failed';
+			}
+			pendingNotified = true;
+			this.options.onPendingChange(true);
 			const result = await this.expansion.run({
 				shortName: snippet.shortName,
-				arguments: { type: 'value', value: argumentsText },
+				arguments: argumentsInput,
 				context,
 			});
 			if (
 				result.kind !== 'expanded' ||
 				key !== this.options.interactionKey ||
 				source !== this.options.prompt
-			)
+			) {
 				return 'cancelled';
-			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
+			}
+			const staleSources = mismatchedSnippetSources(snippet, result.response);
+			if (staleSources.length > 0) {
 				this.error = m.snippets_changed_before_expansion();
-				this.options.onSourceChanged(snippet.source);
-				if (result.response.source !== snippet.source) {
-					this.options.onSourceChanged(result.response.source);
+				for (const changedSource of staleSources) {
+					this.options.onSourceChanged(changedSource);
 				}
 				return 'cancelled';
 			}
@@ -79,22 +100,16 @@ export class ScheduledPromptSnippets {
 				target.type === 'new-chat' &&
 				(result.response.contextProjectPath !== target.projectPath ||
 					result.response.contextExecutorId !== (target.executorId ?? 'local'))
-			)
+			) {
 				return 'cancelled';
-			const replacement = applySnippetTriggerReplacement(
-				source,
-				range,
-				result.response.expandedText,
-			);
-			this.palette.complete();
-			await this.options.onInsert(replacement.text, replacement.caret);
-			return 'inserted';
+			}
+			return await insertExpanded(result.response.expandedText);
 		} catch (error) {
 			if (key !== this.options.interactionKey) return 'cancelled';
 			this.error = error instanceof Error ? error.message : String(error);
 			return 'failed';
 		} finally {
-			if (!this.expansion.pending) this.options.onPendingChange(false);
+			if (pendingNotified && !this.expansion.pending) this.options.onPendingChange(false);
 		}
 	}
 }

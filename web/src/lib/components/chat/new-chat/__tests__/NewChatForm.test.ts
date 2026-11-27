@@ -1330,16 +1330,6 @@ describe('NewChatForm', () => {
 
 	it('inserts a named preamble into a new-chat draft', async () => {
 		stubMatchMedia(false);
-		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
-			success: true,
-			source: 'preamble',
-			sourceId: '00000000-0000-4000-8000-000000000001',
-			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
-			shortName: 'manual',
-			contextExecutorId: 'local',
-			contextProjectPath: '/workspace/project',
-			expandedText: 'PREAMBLE',
-		});
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat, {
 			preambleSnapshot: {
@@ -1363,8 +1353,13 @@ describe('NewChatForm', () => {
 		await inputAtCaret(messageInput, 'Before ;;manual after', 'Before ;;manual'.length);
 		await fireEvent.click(await screen.findByRole('option', { name: /^manual\b/ }));
 
-		await waitFor(() => expect(messageInput.value).toBe('Before PREAMBLE after'));
+		await waitFor(() =>
+			expect(messageInput.value).toBe(
+				`Before Literal {{arguments}} for ${PROSPECTIVE_CHAT_ID} after`,
+			),
+		);
 		expect(screen.queryByRole('textbox', { name: 'Arguments' })).toBeNull();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 		expect(onStartChat).not.toHaveBeenCalled();
 	});
 
@@ -1529,7 +1524,7 @@ describe('NewChatForm', () => {
 		});
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat, {
-			snippetTemplate: 'Expanded review',
+			snippetTemplate: 'Expanded {{project_path}}',
 		});
 		const source = 'Before ;;review after';
 
@@ -1984,6 +1979,31 @@ describe('NewChatForm', () => {
 		await pending.promise;
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(messageInput.value).toBe('/snippet review cancel this');
+	});
+
+	it('expands eligible palette and slash snippets locally using the prospective chat ID', async () => {
+		stubMatchMedia(false);
+		const onStartChat = vi.fn();
+		const messageInput = await renderSubmittableForm(onStartChat, {
+			snippetTemplate: 'Draft {{arguments}} for {{chat_id}}',
+			snippetDefaultArguments: 'plan',
+		});
+		await fireEvent.input(messageInput, { target: { value: ';;review' } });
+		messageInput.setSelectionRange(8, 8);
+		await fireEvent.input(messageInput, { target: { value: ';;review' } });
+		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
+		await fireEvent.keyDown(await screen.findByRole('textbox', { name: 'Arguments' }), {
+			key: 'Enter',
+		});
+
+		await waitFor(() => expect(messageInput.value).toMatch(/^Draft plan for \d+$/));
+		const prospectiveChatId = messageInput.value.slice('Draft plan for '.length);
+		await fireEvent.input(messageInput, { target: { value: '/s review next' } });
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		await waitFor(() => expect(messageInput.value).toBe(`Draft next for ${prospectiveChatId}`));
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+		expect(onStartChat).not.toHaveBeenCalled();
 	});
 });
 
