@@ -321,6 +321,53 @@ test('retains both cached texts when terminal metadata occupies the output field
   }
 });
 
+test('changing only an echo does not reverse the search priority of a cached report', () => {
+  const s = session();
+  const timer = { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' } };
+  const progress = textBlock('Checking '.repeat(600));
+  const output = 'Operation\nrefused';
+  s.start('format', { ...timer, rawOutput: { output }, content: [progress, textBlock('Operation'), textBlock('refused')] });
+  s.patch('format', { content: [progress, textBlock('Operation '), textBlock('refused')] });
+  const formatted = s.patch('format', { status: 'failed' }).at(-1);
+  if (formatted?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(formatted.primaryTextItems).toBeUndefined();
+  expect(projectSearchMessage(formatted)?.body).toContain('refused');
+
+  s.start('append', { ...timer, rawOutput: progress.content.text });
+  const diagnostic = textBlock('Operation refused');
+  s.patch('append', { content: [diagnostic] });
+  s.patch('append', { content: [progress, diagnostic] });
+  const appended = s.patch('append', { status: 'failed' }).at(-1);
+  if (appended?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(appended.primaryTextItems).toEqual([1]);
+  expect(projectSearchMessage(appended)?.body).toStartWith('Operation refused');
+});
+
+test.each([true, false])('ambiguous multi-block echoes stay unassociated (independent text: %s)', withDiagnostic => {
+  const s = session();
+  const parts = ['Checking '.repeat(400), 'Waiting '.repeat(400)];
+  const rawOutput = { output: parts.join('\n'), attempts: 1 };
+  const echo = parts.map(textBlock);
+  const content = [...echo, ...(withDiagnostic ? [textBlock('Operation refused')] : []), ...echo];
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, rawOutput, content: echo });
+  s.patch('timer', { content });
+  const row = s.patch('timer', { status: 'failed' }).at(-1);
+  if (row?.type !== 'tool-result') throw new Error('Expected a tool result');
+  expect(row.content).toEqual({ status: 'failed', rawOutput, items: content });
+  expect(row.primaryTextItems).toEqual(withDiagnostic ? [2] : undefined);
+  if (withDiagnostic) expect(projectSearchMessage(row)?.body).toStartWith('Operation refused');
+});
+
+test('excludes overlapping echoes from the independent report text', () => {
+  const s = session();
+  const line = textBlock('Checking');
+  const rawOutput = { output: 'Checking\nChecking' };
+  s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 1, Prompt: 'Check' }, rawOutput, content: [line, line] });
+  const items = [line, line, line, textBlock('Operation refused')];
+  const row = s.patch('timer', { status: 'failed', content: items, rawOutput }).at(-1);
+  expect(row).toMatchObject({ primaryTextItems: [3], content: { items, rawOutput } });
+});
+
 test('aligns flat and wrapped report text and overlays matching empty annotations once', () => {
   const s = session();
   const first = { ...textBlock('First'), priority: 1 };
