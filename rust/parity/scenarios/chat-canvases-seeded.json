@@ -1,0 +1,232 @@
+{
+  "name": "chat-canvases-seeded",
+  "description": "Canvas routes over seeded files: a stored canvas is read, updated with and against its revision, and deleted; an unparsable file, a file whose identifier differs from its name, and one with revision zero are reported as corrupt in the list and on read, update, and delete; other files are ignored.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chat-canvases/seeded-canvas.json": "{\n  \"version\": 1,\n  \"id\": \"seeded-canvas\",\n  \"revision\": 5,\n  \"updatedAt\": \"2020-01-02T03:04:05.000Z\",\n  \"content\": {\n    \"title\": \"Seeded canvas\",\n    \"nodes\": [\n      {\n        \"id\": \"box-1\",\n        \"type\": \"box\",\n        \"title\": \"Box\",\n        \"position\": {\n          \"x\": 1,\n          \"y\": 2\n        }\n      },\n      {\n        \"id\": \"n1\",\n        \"type\": \"chat\",\n        \"chatId\": \"1000000000000001\",\n        \"boxId\": \"box-1\",\n        \"position\": {\n          \"x\": 3,\n          \"y\": 4\n        }\n      }\n    ],\n    \"connections\": [\n      {\n        \"id\": \"e1\",\n        \"source\": \"box-1\",\n        \"target\": \"n1\",\n        \"sourceSide\": \"right\",\n        \"targetSide\": \"left\",\n        \"label\": \"leads to\"\n      }\n    ]\n  }\n}\n",
+      "workspace/chat-canvases/broken.json": "{not json",
+      "workspace/chat-canvases/misnamed.json": "{\n  \"version\": 1,\n  \"id\": \"other-id\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Misnamed\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/zero-revision.json": "{\n  \"version\": 1,\n  \"id\": \"zero-revision\",\n  \"revision\": 0,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Zero\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/notes.txt": "ignored",
+      "workspace/chat-canvases/has space.json": "ignored"
+    }
+  },
+  "steps": [
+    {
+      "name": "canvases-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases"
+      }
+    },
+    {
+      "name": "canvas-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases?id=seeded-canvas"
+      }
+    },
+    {
+      "name": "canvas-corrupt",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases?id=broken"
+      }
+    },
+    {
+      "name": "canvas-misnamed",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases?id=misnamed"
+      }
+    },
+    {
+      "name": "canvas-zero-revision",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases?id=zero-revision"
+      }
+    },
+    {
+      "name": "update-seeded-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "seeded-canvas",
+          "expectedRevision": 4,
+          "content": {
+            "title": "Stale",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-seeded-invalid-content",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "seeded-canvas",
+          "expectedRevision": 5,
+          "content": {
+            "title": "Stale",
+            "nodes": "x",
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-seeded",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "seeded-canvas",
+          "expectedRevision": 5,
+          "content": {
+            "title": "Seeded canvas renamed",
+            "nodes": [
+              {
+                "id": "box-1",
+                "type": "box",
+                "title": "Box",
+                "position": {
+                  "x": 1,
+                  "y": 2
+                }
+              }
+            ],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-corrupt",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "broken",
+          "expectedRevision": 1,
+          "content": {
+            "title": "Repaired",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-misnamed",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "misnamed",
+          "expectedRevision": 1,
+          "content": {
+            "title": "Repaired",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-file-that-is-not-a-canvas",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "notes",
+          "expectedRevision": 1,
+          "content": {
+            "title": "x",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "canvases-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases"
+      }
+    },
+    {
+      "name": "delete-corrupt",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "broken",
+          "expectedRevision": 1
+        }
+      }
+    },
+    {
+      "name": "delete-misnamed",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "misnamed",
+          "expectedRevision": 1
+        }
+      }
+    },
+    {
+      "name": "canvases-after-failed-deletes",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases"
+      }
+    },
+    {
+      "name": "delete-seeded-stale-revision",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "seeded-canvas",
+          "expectedRevision": 5
+        }
+      }
+    },
+    {
+      "name": "delete-seeded",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "seeded-canvas",
+          "expectedRevision": 6
+        }
+      }
+    },
+    {
+      "name": "canvases-after-seeded-delete",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases"
+      }
+    },
+    {
+      "name": "canvas-after-delete",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases?id=seeded-canvas"
+      }
+    }
+  ],
+  "traps": true
+}

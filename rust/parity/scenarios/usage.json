@@ -1,0 +1,231 @@
+{
+  "name": "usage",
+  "description": "The usage summary for the local executor over a window relative to the run's day, with every window, day, time zone and executor validation.",
+  "steps": [
+    {
+      "name": "usage-without-window",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage"
+      }
+    },
+    {
+      "name": "usage-missing-until-day",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-missing-time-zone",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}"
+      }
+    },
+    {
+      "name": "usage-duplicated-day",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-empty-day",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay=&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-day-not-a-date",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay=yesterday&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-day-not-zero-padded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay=2000-1-1&untilDay=2000-01-07&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-day-impossible-date",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay=2001-02-29&untilDay=2001-03-01&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-reversed",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{today}}&untilDay={{todayMinus1}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-91-days",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus90}}&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-90-days",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus89}}&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-one-day",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{today}}&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-fixed-and-old",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay=2000-01-01&untilDay=2000-01-07&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-fixed-and-future",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay=2999-01-01&untilDay=2999-01-07&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-ends-two-days-ahead",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{today}}&untilDay={{todayPlus2}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-ends-tomorrow",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{today}}&untilDay={{todayPlus1}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-window-starts-91-days-ago",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus90}}&untilDay={{todayPlus1}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-time-zone-empty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone="
+      }
+    },
+    {
+      "name": "usage-time-zone-unknown",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=Mars%2FOlympus"
+      }
+    },
+    {
+      "name": "usage-time-zone-with-space",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=Not%20A%20Zone"
+      }
+    },
+    {
+      "name": "usage-time-zone-numeric",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=123"
+      }
+    },
+    {
+      "name": "usage-time-zone-too-long",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "usage-executor-invalid",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=UTC&executorId=remote"
+      }
+    },
+    {
+      "name": "usage-executor-unknown",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=UTC&executorId=33333333-3333-4333-8333-333333333333"
+      }
+    },
+    {
+      "name": "usage-executor-duplicated",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=UTC&executorId=local&executorId=local"
+      }
+    },
+    {
+      "name": "usage-executor-local",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=UTC&executorId=local"
+      }
+    },
+    {
+      "name": "usage-seven-days",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-one-day",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{today}}&untilDay={{today}}&timeZone=UTC"
+      }
+    },
+    {
+      "name": "usage-in-new-york",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=America%2FNew_York"
+      }
+    },
+    {
+      "name": "usage-in-kathmandu",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=Asia%2FKathmandu"
+      }
+    },
+    {
+      "name": "usage-with-offset-zone",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/usage?sinceDay={{todayMinus6}}&untilDay={{today}}&timeZone=UTC%2B05:30"
+      }
+    },
+    {
+      "name": "usage-wrong-method",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/usage"
+      }
+    }
+  ],
+  "traps": true
+}

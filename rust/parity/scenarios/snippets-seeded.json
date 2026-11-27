@@ -1,0 +1,591 @@
+{
+  "name": "snippets-seeded",
+  "description": "Snippet routes over a seeded catalog whose file order is not canonical, and over seeded chats whose project folder lies outside the allowed base, is blank, or belongs to an executor that is not connected: load order, expansion from a registered chat that resolves the project path only for a template with an active project_path token, update and remove successes for a known identifier, revision, name and preamble-name conflicts, and a name freed by a remove.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/snippets.json": "{\n  \"version\": 2,\n  \"revision\": 7,\n  \"snippets\": [\n    {\n      \"id\": \"seeded-snippet-0\",\n      \"shortName\": \"a1b\",\n      \"template\": \"Seeded a1b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-1\",\n      \"shortName\": \"a01b\",\n      \"template\": \"Seeded a01b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-2\",\n      \"shortName\": \"a2b\",\n      \"template\": \"Seeded a2b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-3\",\n      \"shortName\": \"a10b\",\n      \"template\": \"Seeded a10b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-4\",\n      \"shortName\": \"a-b\",\n      \"template\": \"Seeded a-b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-5\",\n      \"shortName\": \"a_b\",\n      \"template\": \"Seeded a_b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-6\",\n      \"shortName\": \"ab\",\n      \"template\": \"Seeded ab {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-7\",\n      \"shortName\": \"a1\",\n      \"template\": \"Seeded a1 {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-8\",\n      \"shortName\": \"a-1\",\n      \"template\": \"Seeded a-1 {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-9\",\n      \"shortName\": \"a_1\",\n      \"template\": \"Seeded a_1 {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-10\",\n      \"shortName\": \"a1-\",\n      \"template\": \"Seeded a1- {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-11\",\n      \"shortName\": \"a1_\",\n      \"template\": \"Seeded a1_ {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-12\",\n      \"shortName\": \"a\",\n      \"template\": \"Seeded a {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-13\",\n      \"shortName\": \"a0b\",\n      \"template\": \"Seeded a0b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-14\",\n      \"shortName\": \"a001b\",\n      \"template\": \"Seeded a001b {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-snippet-15\",\n      \"shortName\": \"aa\",\n      \"template\": \"Seeded aa {{arguments}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-with-path\",\n      \"shortName\": \"with-path\",\n      \"template\": \"Path {{project_path}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-static\",\n      \"shortName\": \"static\",\n      \"template\": \"Static text\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-escaped-path\",\n      \"shortName\": \"escaped-path\",\n      \"template\": \"Literal \\\\{{project_path}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"seeded-runtime-tokens\",\n      \"shortName\": \"runtime-tokens\",\n      \"template\": \"Chat {{chat_id}} on {{current_date}} local {{current_date_local}}\",\n      \"defaultArguments\": \"\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    }\n  ]\n}",
+      "workspace/chats.json": "{\n  \"version\": 6,\n  \"sessions\": {\n    \"1000000000000001\": {\n      \"agentId\": \"claude\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-a\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    },\n    \"1000000000000002\": {\n      \"agentId\": \"codex\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-b\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"   \",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    },\n    \"1000000000000003\": {\n      \"agentId\": \"codex\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-c\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null,\n      \"executorId\": \"33333333-3333-4333-8333-333333333333\"\n    }\n  }\n}"
+    }
+  },
+  "steps": [
+    {
+      "name": "snippets-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    },
+    {
+      "name": "expand-chat-project-path-outside-base",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "with-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000001"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-without-project-path-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "static",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000001"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-with-escaped-project-path-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "escaped-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000001"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-scheduled-chat-project-path-outside-base",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "with-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "scheduled-prompt",
+            "target": {
+              "type": "chat",
+              "chatId": "1000000000000001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-scheduled-chat-without-project-path-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "static",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "scheduled-prompt",
+            "target": {
+              "type": "chat",
+              "chatId": "1000000000000001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-with-project-path-token-blank-project-path",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "with-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000002"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-without-project-path-token-blank-project-path",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "static",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000002"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-project-path-on-unknown-executor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "with-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000003"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-without-project-path-token-on-unknown-executor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "static",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000003"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-scheduled-chat-project-path-on-unknown-executor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "with-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "scheduled-prompt",
+            "target": {
+              "type": "chat",
+              "chatId": "1000000000000003"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-missing-chat-without-project-path-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "static",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1999999999999999"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-chat-runtime-tokens",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "runtime-tokens",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000001"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-scheduled-chat-runtime-tokens",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "runtime-tokens",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "scheduled-prompt",
+            "target": {
+              "type": "chat",
+              "chatId": "1000000000000001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-empty-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {}
+      }
+    },
+    {
+      "name": "update-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 7,
+          "id": "missing-id",
+          "snippet": {
+            "shortName": "fresh",
+            "template": "Run fresh",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "update-name-conflict",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 7,
+          "id": "seeded-snippet-0",
+          "snippet": {
+            "shortName": "a2b",
+            "template": "Taken",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "update-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 6,
+          "id": "seeded-snippet-0",
+          "snippet": {
+            "shortName": "fresh",
+            "template": "Stale",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "update-invalid-definition",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 7,
+          "id": "seeded-snippet-0",
+          "snippet": {
+            "shortName": "Fresh",
+            "template": "Run Fresh",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "update-id-is-case-sensitive",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 7,
+          "id": "SEEDED-SNIPPET-0",
+          "snippet": {
+            "shortName": "fresh",
+            "template": "Run fresh",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "preamble-with-snippet-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "Guide",
+            "snippetShortName": "guide",
+            "content": "Guide for {{chat_id}}",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-preamble-name",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 7,
+          "id": "seeded-snippet-0",
+          "snippet": {
+            "shortName": "guide",
+            "template": "Clashes with a preamble",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "create-snippet-named-like-preamble",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 7,
+          "snippet": {
+            "shortName": "guide",
+            "template": "Run guide",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-preamble-source",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "guide",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "new-chat",
+            "chatId": "1000000000000001",
+            "projectPath": "{{projectDir}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-preamble-from-registered-chat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "guide",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000001"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-preamble-from-blank-project-chat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "guide",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "chat",
+            "chatId": "1000000000000002"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-trims-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 7,
+          "id": "  seeded-snippet-0  ",
+          "snippet": {
+            "shortName": "b1",
+            "template": "Renamed in place",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "snippets-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    },
+    {
+      "name": "update-unchanged-content",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 8,
+          "id": "seeded-snippet-0",
+          "snippet": {
+            "shortName": "b1",
+            "template": "Renamed in place",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "snippets-after-unchanged-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    },
+    {
+      "name": "remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 9,
+          "id": "missing-id"
+        }
+      }
+    },
+    {
+      "name": "remove-stale-revision",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 8,
+          "id": "seeded-snippet-1"
+        }
+      }
+    },
+    {
+      "name": "remove-trims-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 9,
+          "id": "  seeded-snippet-1  "
+        }
+      }
+    },
+    {
+      "name": "snippets-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    },
+    {
+      "name": "remove-again",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 10,
+          "id": "seeded-snippet-1"
+        }
+      }
+    },
+    {
+      "name": "remove-blank-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 10,
+          "id": "   "
+        }
+      }
+    },
+    {
+      "name": "update-removed-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 10,
+          "id": "seeded-snippet-1",
+          "snippet": {
+            "shortName": "a01b",
+            "template": "Back",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "create-reuse-removed-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 10,
+          "snippet": {
+            "shortName": "a01b",
+            "template": "Recreated",
+            "defaultArguments": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "snippets-after-recreate",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    }
+  ],
+  "traps": true
+}

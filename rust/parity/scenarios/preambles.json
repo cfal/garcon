@@ -1,0 +1,2258 @@
+{
+  "name": "preambles",
+  "description": "Preamble routes over the bundled catalog: create validation field by field, project-path scope resolution, update, remove and reorder of the bundled identifiers with their revision, snippet-name and not-found conflicts, then creates of custom preambles.",
+  "server": {
+    "files": {
+      "project/a-file.txt": "not a directory\n",
+      "project/sub/.keep": ""
+    }
+  },
+  "steps": [
+    {
+      "name": "preambles-bundled",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "create-missing-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-missing-preamble",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1
+        }
+      }
+    },
+    {
+      "name": "create-extra-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "extra": true
+          }
+        }
+      }
+    },
+    {
+      "name": "create-revision-negative",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": -1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-revision-fractional",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1.5,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-revision-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": "1",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-preamble-scalar",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": "x"
+        }
+      }
+    },
+    {
+      "name": "create-preamble-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": [
+            "x"
+          ]
+        }
+      }
+    },
+    {
+      "name": "create-preamble-null",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": null
+        }
+      }
+    },
+    {
+      "name": "create-title-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-title-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "   ",
+            "content": "Content of    ",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-title-multiline",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "Two\nlines",
+            "content": "Content of Two\nlines",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-title-carriage-return",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "Two\rlines",
+            "content": "Content of Two\rlines",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-title-121-code-points",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "content": "Content of 😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-title-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": 7,
+            "content": "Content of 7",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-enabled-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-enabled-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": "yes",
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-content-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-content-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": " \n\t ",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-content-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": [
+              "x"
+            ],
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-content-with-file-context-separator",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Before\n\nReferenced file contents from @file mentions:\n\nAfter",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-content-with-unknown-field",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "body": "x"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-scalar",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": "global"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": [
+              "global"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-unknown-type",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "workspace"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-type-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {}
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-global-with-extra-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global",
+              "rules": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-project-paths-without-rules",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-project-paths-rules-empty",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-project-paths-rules-scalar",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": "x"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-rule-extra-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false,
+                  "extra": 1
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-rule-include-nested-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-rule-include-nested-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": "no"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-rule-executor-not-an-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false,
+                  "executorId": "remote"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-duplicate-rules",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false
+                },
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-scope-rules-differ-only-by-nesting",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": true
+                },
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-agent-ids-not-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": "claude"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-agent-ids-unknown-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": [
+              "not an agent id"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "create-agent-ids-duplicate",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": [
+              "claude",
+              "claude"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "create-agent-ids-non-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": [
+              7
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "create-agent-ids-null-rejected",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": null
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-scalar",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": "any"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-mode-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": {
+              "mode": "some",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-mode-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": {
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-extra-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": {
+              "mode": "any",
+              "tags": [],
+              "extra": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-tags-not-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": {
+              "mode": "any",
+              "tags": "x"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-tag-not-canonical",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": {
+              "mode": "all",
+              "tags": [
+                "Uppercase"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-tag-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": {
+              "mode": "all",
+              "tags": [
+                1
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-tags-duplicate",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": {
+              "mode": "all",
+              "tags": [
+                "x",
+                "x"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-tag-filter-null-rejected",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "tagFilter": null
+          }
+        }
+      }
+    },
+    {
+      "name": "create-snippet-name-invalid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "Bad Name"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-snippet-name-empty",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "create-snippet-name-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": 7
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-not-found",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-outside-base",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "/etc",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-escapes-base",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/../workspace",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-is-file",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/a-file.txt",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "   ",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": 7,
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-with-stale-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 0,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-second-rule-not-found",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false
+                },
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-unknown-executor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false,
+                  "executorId": "33333333-3333-4333-8333-333333333333"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-second-rule-unknown-executor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false
+                },
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false,
+                  "executorId": "33333333-3333-4333-8333-333333333333"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-missing-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-missing-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-id-not-string",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": 7,
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-id-uppercase",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "5C3A9B1C-F675-4BCA-9A8F-239CD4C38B87",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-id-not-version-4",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "5c3a9b1c-f675-1bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-id-not-a-uuid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "renamed-bundled",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-missing-preamble",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+        }
+      }
+    },
+    {
+      "name": "update-extra-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          },
+          "extra": 1
+        }
+      }
+    },
+    {
+      "name": "update-preamble-with-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            },
+            "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-invalid-definition",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "   ",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-unknown-id-with-invalid-definition",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "0badf00d-0000-4000-8000-000000000000",
+          "preamble": {
+            "enabled": false,
+            "title": "   ",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 0,
+          "id": "0badf00d-0000-4000-8000-000000000000",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "0badf00d-0000-4000-8000-000000000000",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-unknown-id-with-missing-project-path",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "0badf00d-0000-4000-8000-000000000000",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-bundled-preamble",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 1,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": true,
+            "title": "Renamed bundled",
+            "content": "Renamed bundled {{chat_id}} \\{{chat_id}} {{unknown}}",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-bundled-with-snippet-name",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 2,
+          "id": "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+          "preamble": {
+            "enabled": false,
+            "title": "With snippet name",
+            "content": "Content of With snippet name",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "taken"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-to-existing-snippet-name",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 3,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": true,
+            "title": "Renamed bundled",
+            "content": "Content of Renamed bundled",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "taken"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-keeps-own-snippet-name",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 3,
+          "id": "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+          "preamble": {
+            "enabled": false,
+            "title": "Still with snippet name",
+            "content": "Content of Still with snippet name",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "taken"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-scope-to-missing-project-path",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 4,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "Renamed bundled",
+            "content": "Content of Renamed bundled",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-missing-project-path-with-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 3,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "Renamed bundled",
+            "content": "Content of Renamed bundled",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "preambles-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "remove-missing-revision",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+        }
+      }
+    },
+    {
+      "name": "remove-missing-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 4
+        }
+      }
+    },
+    {
+      "name": "remove-id-not-a-uuid",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 4,
+          "id": "renamed-bundled"
+        }
+      }
+    },
+    {
+      "name": "remove-extra-key",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 4,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+          "preamble": {
+            "enabled": false,
+            "title": "X",
+            "content": "Content of X",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 4,
+          "id": "0badf00d-0000-4000-8000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "remove-stale-revision",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 3,
+          "id": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+        }
+      }
+    },
+    {
+      "name": "remove-bundled-preamble",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 4,
+          "id": "5eb1abe3-188b-407f-aa9d-4ca4ed065c66"
+        }
+      }
+    },
+    {
+      "name": "remove-removed-preamble",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 5,
+          "id": "5eb1abe3-188b-407f-aa9d-4ca4ed065c66"
+        }
+      }
+    },
+    {
+      "name": "preambles-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "reorder-missing-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-missing-ids",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5
+        }
+      }
+    },
+    {
+      "name": "reorder-ids-not-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5,
+          "orderedPreambleIds": "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+        }
+      }
+    },
+    {
+      "name": "reorder-id-not-a-uuid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5,
+          "orderedPreambleIds": [
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "not-a-uuid"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-extra-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5,
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3"
+          ],
+          "extra": 1
+        }
+      }
+    },
+    {
+      "name": "reorder-duplicate-ids",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5,
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-with-removed-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5,
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "5eb1abe3-188b-407f-aa9d-4ca4ed065c66"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-incomplete-list",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5,
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 4,
+          "orderedPreambleIds": [
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-bundled-first",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 5,
+          "orderedPreambleIds": [
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87"
+          ]
+        }
+      }
+    },
+    {
+      "name": "preambles-after-reorder",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "create-global",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 6,
+          "preamble": {
+            "enabled": true,
+            "title": "Custom global",
+            "content": "Content of Custom global",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "custom",
+            "agentIds": [
+              "claude",
+              "codex"
+            ],
+            "tagFilter": {
+              "mode": "all",
+              "tags": [
+                "x",
+                "y"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-stale-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 6,
+          "preamble": {
+            "enabled": false,
+            "title": "Stale",
+            "content": "Content of Stale",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-future-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 8,
+          "preamble": {
+            "enabled": false,
+            "title": "Future",
+            "content": "Content of Future",
+            "scope": {
+              "type": "global"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-duplicate-snippet-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 7,
+          "preamble": {
+            "enabled": false,
+            "title": "Again",
+            "content": "Content of Again",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "custom"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-duplicate-snippet-name-with-stale-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 6,
+          "preamble": {
+            "enabled": false,
+            "title": "Again",
+            "content": "Content of Again",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "custom"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-duplicate-bundled-snippet-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 7,
+          "preamble": {
+            "enabled": false,
+            "title": "Again",
+            "content": "Content of Again",
+            "scope": {
+              "type": "global"
+            },
+            "snippetShortName": "taken"
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-with-stale-revision-after-writes",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 6,
+          "preamble": {
+            "enabled": false,
+            "title": "Project scoped",
+            "content": "Content of Project scoped",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/missing",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-not-trimmed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 7,
+          "preamble": {
+            "enabled": false,
+            "title": "Project scoped",
+            "content": "Content of Project scoped",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "  {{projectDir}}///.  ",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-project-path-null-executor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 7,
+          "preamble": {
+            "enabled": false,
+            "title": "Project scoped",
+            "content": "Content of Project scoped",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}",
+                  "includeNested": false,
+                  "executorId": null
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-canonicalized-rules-collapse-to-duplicates",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 8,
+          "preamble": {
+            "enabled": false,
+            "title": "Project scoped",
+            "content": "Content of Project scoped",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/./",
+                  "includeNested": false
+                },
+                {
+                  "projectPath": "{{projectDir}}///.",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "create-canonicalized-project-path",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 8,
+          "preamble": {
+            "enabled": false,
+            "title": "Project scoped",
+            "content": "Content of Project scoped",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "{{projectDir}}/./",
+                  "includeNested": true
+                },
+                {
+                  "projectPath": "{{projectDir}}///sub/.",
+                  "includeNested": false
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "preambles-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "reorder-wrong-method",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 9,
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "5eb1abe3-188b-407f-aa9d-4ca4ed065c66"
+          ]
+        }
+      }
+    },
+    {
+      "name": "preambles-wrong-method",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/preambles",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}

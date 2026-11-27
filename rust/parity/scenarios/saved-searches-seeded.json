@@ -1,0 +1,328 @@
+{
+  "name": "saved-searches-seeded",
+  "description": "Saved search routes over a seeded settings file: update successes for a known identifier, the visibility rule on update, remove, and reorder of the stored order.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/project-settings.json": "{\n  \"features\": {\n    \"transcriptSearch\": {\n      \"enabled\": false\n    },\n    \"agentCommands\": {\n      \"enabled\": true,\n      \"chatIdDiscovery\": true,\n      \"sendMessage\": true,\n      \"startAgent\": true,\n      \"resumeAgent\": true,\n      \"schedule\": true,\n      \"tickets\": true\n    }\n  },\n  \"ui\": {},\n  \"paths\": {\n    \"recentProjectPaths\": []\n  },\n  \"chatNames\": {},\n  \"remoteSettingsVersion\": 0,\n  \"pinnedChatIds\": [],\n  \"normalChatIds\": [],\n  \"archivedChatIds\": [],\n  \"recentAgentSettings\": [],\n  \"executionDefaults\": {\n    \"global\": {\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"agentSettingsById\": {}\n    },\n    \"byAgent\": {}\n  },\n  \"chatFolders\": [],\n  \"savedChatSearches\": [\n    {\n      \"id\": \"search-bravo\",\n      \"title\": \"Bravo\",\n      \"query\": \"status:open bravo\",\n      \"showAsSidebarPill\": true,\n      \"showInSidebarMenu\": false,\n      \"showInSearchDialog\": false,\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"search-alpha\",\n      \"title\": \"Alpha\",\n      \"query\": \"status:open alpha\",\n      \"showAsSidebarPill\": false,\n      \"showInSidebarMenu\": true,\n      \"showInSearchDialog\": true,\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"search-charlie\",\n      \"title\": \"Charlie\",\n      \"query\": \"status:closed\",\n      \"showAsSidebarPill\": true,\n      \"showInSidebarMenu\": false,\n      \"showInSearchDialog\": false,\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T00:00:00.000Z\"\n    }\n  ]\n}\n"
+    }
+  },
+  "steps": [
+    {
+      "name": "saved-searches-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "update-no-fields",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-bravo"
+        }
+      }
+    },
+    {
+      "name": "update-title",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-bravo",
+          "title": "  Bravo renamed  "
+        }
+      }
+    },
+    {
+      "name": "update-clear-title",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-bravo",
+          "title": "   "
+        }
+      }
+    },
+    {
+      "name": "update-query",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-bravo",
+          "query": " tag:renamed "
+        }
+      }
+    },
+    {
+      "name": "update-blank-query",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-bravo",
+          "query": "  "
+        }
+      }
+    },
+    {
+      "name": "update-query-not-string-ignored",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-bravo",
+          "query": 7,
+          "title": "Bravo"
+        }
+      }
+    },
+    {
+      "name": "update-visibility",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-bravo",
+          "showAsSidebarPill": false,
+          "showInSidebarMenu": true
+        }
+      }
+    },
+    {
+      "name": "update-removing-last-visibility",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-charlie",
+          "showAsSidebarPill": false
+        }
+      }
+    },
+    {
+      "name": "update-other-visibility-keeps-rest",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "search-alpha",
+          "showInSidebarMenu": false
+        }
+      }
+    },
+    {
+      "name": "update-trims-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "  search-alpha  ",
+          "title": "Alpha renamed"
+        }
+      }
+    },
+    {
+      "name": "saved-searches-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "reorder-unknown-window",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "search-bravo",
+            "missing-search"
+          ],
+          "newOrder": [
+            "missing-search",
+            "search-bravo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-full-reverse",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "search-bravo",
+            "search-alpha",
+            "search-charlie"
+          ],
+          "newOrder": [
+            "search-charlie",
+            "search-alpha",
+            "search-bravo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "saved-searches-after-reverse",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "reorder-window",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "search-alpha",
+            "search-bravo"
+          ],
+          "newOrder": [
+            "search-bravo",
+            "search-alpha"
+          ]
+        }
+      }
+    },
+    {
+      "name": "saved-searches-after-window",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "reorder-not-contiguous",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "search-charlie",
+            "search-alpha"
+          ],
+          "newOrder": [
+            "search-alpha",
+            "search-charlie"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-reversed-window",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "search-alpha",
+            "search-charlie"
+          ],
+          "newOrder": [
+            "search-charlie",
+            "search-alpha"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-single-entry",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "search-alpha"
+          ],
+          "newOrder": [
+            "search-alpha"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-ignores-non-strings-and-duplicates",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            null,
+            "search-bravo",
+            7,
+            "search-bravo"
+          ],
+          "newOrder": [
+            "search-bravo",
+            "search-bravo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-trims-identifiers",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            " search-bravo "
+          ],
+          "newOrder": [
+            "search-bravo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-new-order-shorter-after-dedup",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "search-bravo",
+            "search-alpha"
+          ],
+          "newOrder": [
+            "search-alpha",
+            "search-bravo",
+            "search-alpha"
+          ]
+        }
+      }
+    },
+    {
+      "name": "saved-searches-after-reorders",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/saved-searches?id=missing-search"
+      }
+    },
+    {
+      "name": "remove-whitespace-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/saved-searches?id=%20%20"
+      }
+    }
+  ],
+  "traps": true
+}

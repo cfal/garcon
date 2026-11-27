@@ -1,0 +1,404 @@
+{
+  "name": "preambles-seeded",
+  "description": "Preamble routes over a seeded catalog: bundled preambles missing from the file are appended, a retired identifier stays retired, rules that did not change are not inspected again while changed ones are, update keeps position, reorder of a known order, and remove.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/preambles.json": "{\n  \"version\": 2,\n  \"revision\": 12,\n  \"preambles\": [\n    {\n      \"id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n      \"enabled\": true,\n      \"title\": \"Second\",\n      \"content\": \"Seeded Second for {{chat_id}}\",\n      \"scope\": {\n        \"type\": \"project-paths\",\n        \"rules\": [\n          {\n            \"projectPath\": \"/srv/app\",\n            \"includeNested\": true\n          },\n          {\n            \"executorId\": \"33333333-3333-4333-8333-333333333333\",\n            \"projectPath\": \"/srv/remote\",\n            \"includeNested\": false\n          }\n        ]\n      },\n      \"agentIds\": [],\n      \"tagFilter\": {\n        \"mode\": \"any\",\n        \"tags\": []\n      },\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T03:04:05.000Z\",\n      \"snippetShortName\": \"seeded\"\n    },\n    {\n      \"id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"enabled\": true,\n      \"title\": \"First\",\n      \"content\": \"Seeded First for {{chat_id}}\",\n      \"scope\": {\n        \"type\": \"global\"\n      },\n      \"agentIds\": [\n        \"claude\",\n        \"codex\"\n      ],\n      \"tagFilter\": {\n        \"mode\": \"all\",\n        \"tags\": [\n          \"x\",\n          \"y\"\n        ]\n      },\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T03:04:05.000Z\"\n    }\n  ],\n  \"retiredPreambleIds\": [\n    \"cccccccc-cccc-4ccc-8ccc-cccccccccccc\"\n  ]\n}"
+    }
+  },
+  "steps": [
+    {
+      "name": "preambles-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "reorder-incomplete-list",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 13,
+          "orderedPreambleIds": [
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-with-retired-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 13,
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "5eb1abe3-188b-407f-aa9d-4ca4ed065c66",
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-custom-order",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles/reorder",
+        "json": {
+          "expectedRevision": 13,
+          "orderedPreambleIds": [
+            "5c3a9b1c-f675-4bca-9a8f-239cd4c38b87",
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "36edcbed-0d64-4d8e-b3df-3f1b1f8602b9",
+            "3462ad70-c497-4009-b11a-79474dfb292a",
+            "d5597052-6f66-4564-b9fa-bd8660725c47",
+            "9b0a6bc3-92fc-4472-9cb9-8481590111f3",
+            "5eb1abe3-188b-407f-aa9d-4ca4ed065c66",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          ]
+        }
+      }
+    },
+    {
+      "name": "update-retired-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 14,
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "preamble": {
+            "enabled": true,
+            "title": "Back",
+            "content": "Seeded Back for {{chat_id}}",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-keeps-unchanged-rules",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 14,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second renamed",
+            "content": "Seeded Second renamed for {{chat_id}}",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "/srv/app",
+                  "includeNested": true
+                },
+                {
+                  "executorId": "33333333-3333-4333-8333-333333333333",
+                  "projectPath": "/srv/remote",
+                  "includeNested": false
+                }
+              ]
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-inspects-changed-rule",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 15,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second renamed",
+            "content": "Seeded Second renamed for {{chat_id}}",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "/srv/app",
+                  "includeNested": true
+                },
+                {
+                  "executorId": "33333333-3333-4333-8333-333333333333",
+                  "projectPath": "/srv/other",
+                  "includeNested": false
+                }
+              ]
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-inspects-rule-with-another-executor",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 15,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second renamed",
+            "content": "Seeded Second renamed for {{chat_id}}",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "/srv/app",
+                  "includeNested": true
+                },
+                {
+                  "projectPath": "/srv/remote",
+                  "includeNested": false
+                }
+              ]
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-inspects-rule-with-another-nesting",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 15,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second renamed",
+            "content": "Seeded Second renamed for {{chat_id}}",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "/srv/app",
+                  "includeNested": true
+                },
+                {
+                  "executorId": "33333333-3333-4333-8333-333333333333",
+                  "projectPath": "/srv/remote",
+                  "includeNested": true
+                }
+              ]
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-rule-order-swapped",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 15,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second renamed",
+            "content": "Seeded Second renamed for {{chat_id}}",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "executorId": "33333333-3333-4333-8333-333333333333",
+                  "projectPath": "/srv/remote",
+                  "includeNested": false
+                },
+                {
+                  "projectPath": "/srv/app",
+                  "includeNested": true
+                }
+              ]
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-to-global",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 16,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second global",
+            "content": "Seeded Second global for {{chat_id}}",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-back-to-project-paths",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 17,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second global",
+            "content": "Seeded Second global for {{chat_id}}",
+            "scope": {
+              "type": "project-paths",
+              "rules": [
+                {
+                  "projectPath": "/srv/app",
+                  "includeNested": true
+                },
+                {
+                  "executorId": "33333333-3333-4333-8333-333333333333",
+                  "projectPath": "/srv/remote",
+                  "includeNested": false
+                }
+              ]
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "update-keeps-position",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 17,
+          "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "preamble": {
+            "enabled": true,
+            "title": "Second renamed again",
+            "content": "Seeded Second renamed again for {{chat_id}}",
+            "scope": {
+              "type": "global"
+            },
+            "agentIds": [],
+            "tagFilter": {
+              "mode": "any",
+              "tags": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "preambles-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    },
+    {
+      "name": "remove-seeded",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 18,
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "remove-retired-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 19,
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        }
+      }
+    },
+    {
+      "name": "remove-removed",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/preambles",
+        "json": {
+          "expectedRevision": 19,
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "preambles-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/preambles"
+      }
+    }
+  ],
+  "traps": true
+}

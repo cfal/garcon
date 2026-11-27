@@ -1,0 +1,3193 @@
+{
+  "scenario": "folders",
+  "cases": [
+    {
+      "name": "folders-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folders": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-missing-name",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-blank-name",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-from-numeric-name",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folder": {
+              "createdAt": "{{timestamp}}",
+              "filter": {
+                "agents": [],
+                "models": [],
+                "tags": [],
+                "textTokens": []
+              },
+              "id": "{{uuid}}",
+              "name": "42"
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-array-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-null-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folder": {
+              "createdAt": "{{timestamp}}",
+              "filter": {
+                "agents": [],
+                "models": [
+                  "m1"
+                ],
+                "status": "active",
+                "tags": [
+                  "x"
+                ],
+                "textTokens": [
+                  "a",
+                  "b",
+                  "a"
+                ]
+              },
+              "id": "{{uuid}}",
+              "name": "Folder A"
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-scalar-filter",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folder": {
+              "createdAt": "{{timestamp}}",
+              "filter": {
+                "agents": [],
+                "models": [],
+                "tags": [],
+                "textTokens": []
+              },
+              "id": "{{uuid}}",
+              "name": "Folder B"
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-unknown-status",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folder": {
+              "createdAt": "{{timestamp}}",
+              "filter": {
+                "agents": [],
+                "models": [],
+                "tags": [],
+                "textTokens": []
+              },
+              "id": "{{uuid}}",
+              "name": "Folder C"
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-without-filter",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folder": {
+              "createdAt": "{{timestamp}}",
+              "filter": {
+                "agents": [],
+                "models": [],
+                "tags": [],
+                "textTokens": []
+              },
+              "id": "{{uuid}}",
+              "name": "Folder D"
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folders": [
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "42"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [
+                    "m1"
+                  ],
+                  "status": "active",
+                  "tags": [
+                    "x"
+                  ],
+                  "textTokens": [
+                    "a",
+                    "b",
+                    "a"
+                  ]
+                },
+                "id": "{{uuid}}",
+                "name": "Folder A"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder B"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder C"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder D"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-missing-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-id-number",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Folder not found: 42",
+            "errorCode": "FOLDER_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-array-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-name",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Folder not found: missing-folder",
+            "errorCode": "FOLDER_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id-no-fields",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Folder not found: missing-folder",
+            "errorCode": "FOLDER_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-without-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id query parameter is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-empty-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id query parameter is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders?id="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-unknown-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Folder not found",
+            "errorCode": "FOLDER_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders?id=missing-folder"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-wrong-method",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "863",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folders": [
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "42"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [
+                    "m1"
+                  ],
+                  "status": "active",
+                  "tags": [
+                    "x"
+                  ],
+                  "textTokens": [
+                    "a",
+                    "b",
+                    "a"
+                  ]
+                },
+                "id": "{{uuid}}",
+                "name": "Folder A"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder B"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder C"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder D"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/../folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-empty~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folders": [
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "42"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [
+                    "m1"
+                  ],
+                  "status": "active",
+                  "tags": [
+                    "x"
+                  ],
+                  "textTokens": [
+                    "a",
+                    "b",
+                    "a"
+                  ]
+                },
+                "id": "{{uuid}}",
+                "name": "Folder A"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder B"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder C"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder D"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-missing-name~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-missing-name~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-missing-name~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-missing-name~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-blank-name~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-blank-name~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-blank-name~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-blank-name~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-from-numeric-name~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-from-numeric-name~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-from-numeric-name~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-from-numeric-name~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-array-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-array-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-array-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-array-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-null-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-null-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-null-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-null-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-scalar-filter~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-scalar-filter~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-scalar-filter~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-scalar-filter~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-unknown-status~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-unknown-status~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-unknown-status~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-with-unknown-status~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-without-filter~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-without-filter~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-without-filter~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-created-without-filter~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "name is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "863",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folders": [
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "42"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [
+                    "m1"
+                  ],
+                  "status": "active",
+                  "tags": [
+                    "x"
+                  ],
+                  "textTokens": [
+                    "a",
+                    "b",
+                    "a"
+                  ]
+                },
+                "id": "{{uuid}}",
+                "name": "Folder A"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder B"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder C"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder D"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/../folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/folders/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-after-create~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "folders": [
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "42"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [
+                    "m1"
+                  ],
+                  "status": "active",
+                  "tags": [
+                    "x"
+                  ],
+                  "textTokens": [
+                    "a",
+                    "b",
+                    "a"
+                  ]
+                },
+                "id": "{{uuid}}",
+                "name": "Folder A"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder B"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder C"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "filter": {
+                  "agents": [],
+                  "models": [],
+                  "tags": [],
+                  "textTokens": []
+                },
+                "id": "{{uuid}}",
+                "name": "Folder D"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/app/folders"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-missing-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-missing-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-missing-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-missing-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-id-number~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-id-number~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-id-number~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-id-number~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-array-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-array-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-array-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-array-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-name~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-name~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-name~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-blank-name~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id-no-fields~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id-no-fields~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id-no-fields~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-update-unknown-id-no-fields~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-without-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-without-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-empty-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders?id="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-empty-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders?id="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-unknown-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders?id=missing-folder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folder-remove-unknown-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/app/folders?id=missing-folder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-wrong-method~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-wrong-method~forged-token",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-wrong-method~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "folders-wrong-method~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/app/folders"
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}
