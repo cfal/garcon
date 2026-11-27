@@ -45,6 +45,8 @@ export interface Scenario {
     files?: Record<string, string>;
     // `none` starts the server without a provisioned account.
     account?: 'provisioned' | 'none';
+    // `disabled` starts the server with authentication disabled.
+    auth?: 'enabled' | 'disabled';
   };
   steps: ScenarioStep[];
   // Generates trap variants for every step; see traps.ts.
@@ -60,6 +62,9 @@ function assertScenario(value: unknown, file: string): asserts value is Scenario
   }
   if (scenario.server?.account !== undefined && scenario.server.account !== 'provisioned' && scenario.server.account !== 'none') {
     throw new Error(`${file}: server.account is "provisioned" or "none"`);
+  }
+  if (scenario.server?.auth !== undefined && scenario.server.auth !== 'enabled' && scenario.server.auth !== 'disabled') {
+    throw new Error(`${file}: server.auth is "enabled" or "disabled"`);
   }
   const names = new Set<string>();
   for (const step of scenario.steps) {

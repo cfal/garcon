@@ -36,6 +36,8 @@ describe('startServer', () => {
   test('provisions an account and takes a session token by default', async () => {
     const server = await start();
     expect(server.token).toBe('probe-session-token');
+    expect(await (await fetch(`${server.baseUrl}/api/v1/auth/status`)).json())
+      .toEqual({ needsSetup: false, isAuthenticated: false, authDisabled: false });
     const stored = JSON.parse(await readFile(join(server.dirs.configDir, 'auth.json'), 'utf8')) as { username?: string };
     expect(stored.username).toBe('parity');
   });
@@ -65,5 +67,21 @@ describe('startServer', () => {
     expect(server.token).toBe('');
     expect(server.credentials).toEqual({ username: 'parity', password: '' });
     await expect(readFile(join(server.dirs.configDir, 'auth.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('starts with authentication disabled when a scenario asks for it, and takes no token', async () => {
+    const server = await start({ account: 'none', auth: 'disabled' });
+    // The sign-in route refuses while authentication is disabled, so there is no token to take.
+    expect(server.token).toBe('');
+    expect(await (await fetch(`${server.baseUrl}/api/v1/auth/status`)).json())
+      .toEqual({ needsSetup: false, isAuthenticated: true, authDisabled: true });
+    const login = await fetch(`${server.baseUrl}/api/v1/auth/login`, { method: 'POST' });
+    expect(login.status).toBe(403);
+    expect(await login.json()).toMatchObject({ errorCode: 'AUTH_CHANGE_FORBIDDEN' });
+    // A scenario that asks for an account still gets one.
+    const provisioned = await start({ auth: 'disabled' });
+    expect(provisioned.token).toBe('');
+    expect(provisioned.credentials.password).not.toBe('');
+    expect(JSON.parse(await readFile(join(provisioned.dirs.configDir, 'auth.json'), 'utf8'))).toMatchObject({ username: 'parity' });
   });
 });

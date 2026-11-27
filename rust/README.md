@@ -58,7 +58,11 @@ credentials. The server is started with the PATH `/usr/bin:/bin`, whatever the
 machine's own, so an agent CLI installed on it does not change a catalog
 response. `"account": "none"` in `server` starts it without a provisioned
 account, for `POST /api/v1/auth/register` and the setup-required states; no
-session token is taken, and `auth: "token"` then sends none. A file seeded
+session token is taken, and `auth: "token"` then sends none. `"auth":
+"disabled"` in `server` starts it with `--disable-auth`, as a user behind
+their own authentication runs it: every request counts as authenticated, no
+session token is taken, and the routes that register, sign in, change
+credentials, or log out answer 403 `AUTH_CHANGE_FORBIDDEN`. A file seeded
 through `server.files` under `config/` or `workspace/` is written with mode
 0600 in a directory of mode 0700, as the original writes its own, so a seeded
 credential file such as `workspace/executors.json` passes the check that
