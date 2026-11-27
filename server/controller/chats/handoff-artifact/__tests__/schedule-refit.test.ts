@@ -60,6 +60,9 @@ test.each([
   ['[one](data:text/plain,x)(note)[two](https://x.test)', '[one]([data URL omitted from export])(note)[two](https://x.test)'],
   ['[one](data:nocomma);[two](https://x.test/a,b)[three](https://y.test)', '[one](data:nocomma);[two](https://x.test/a,b)[three](https://y.test)'],
   ['[ref]: data:text/plain,PUBLIC)PAYLOAD', '[ref]: [data URL omitted from export]'],
+  ['[ref]: data:image/svg+xml,<svg>BODY</svg> "Title"', '[ref]: [data URL omitted from export] "Title"'],
+  ['[ref]: data:image/png;base64,AA==\u00a0BODY', '[ref]: [data URL omitted from export]'],
+  ['Literal [sample\\](data:,x("Keep this"))', 'Literal [sample\\]([data URL omitted from export]"Keep this"))'],
   ['items[0]: data:text/plain,PUBLIC)PAYLOAD', 'items[0]: [data URL omitted from export]'],
   ['Received data:0x12,0x34.', 'Received data:0x12,0x34.'],
   ['Return `data:${mimeType};base64,${base64}` unchanged.', 'Return `data:${mimeType};base64,${base64}` unchanged.'],
@@ -73,7 +76,7 @@ test.each([
   } as const;
   expect(renderTranscriptExportXml(model)).toContain(xmlText(JSON.stringify(redacted)));
   expect(renderTranscriptExportMarkdown(model)).toContain(JSON.stringify(redacted));
-  expect(createCarryoverTranscript([message], 0)?.prefix).toContain(xmlText(prompt));
+  expect(createCarryoverTranscript([message], 0)?.prefix).toContain(xmlText(JSON.stringify(prompt)));
 });
 
 test('bounds failed data URL destination scans on a long malformed field', () => {
@@ -105,4 +108,11 @@ test.each(['data:x\n," Then continue.', 'see data:a\t,"b'])('does not reinterpre
   const message = new ScheduleToolUseMessage('', 'timer', { action: 'wakeup', delaySeconds: 1, prompt });
   const { entries: [entry] } = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message }]);
   expect(JSON.parse(entry.body!.slice(entry.prefixBeforeLiteral!.length))).toBe(prompt);
+});
+
+test('blank plan transitions do not spend handoff space on an empty text element', () => {
+  for (const message of [new AntigravityEnterPlanModeToolUseMessage('', 'plan', ''), new AntigravityExitPlanModeToolUseMessage('', 'plan', ' \n')]) {
+    const { entries: [entry] } = foldHandoffArtifactEntries([{ kind: 'message', ordinal: 1, category: 'tool-calls', message }]);
+    expect(entry.body).toBeNull();
+  }
 });

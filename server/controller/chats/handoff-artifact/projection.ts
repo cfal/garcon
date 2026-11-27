@@ -294,7 +294,7 @@ function toolSummaryBody(message: ToolUseChatMessage): Pick<HandoffArtifactSourc
     // Native reports can carry Markdown destinations that extend past the summary boundary.
     const summary = projectToolUseSummary(message, redactDataUrl);
     const prefix = summary.prefixBeforeLiteral;
-    return { body: textSafe(summary.text), prefixBeforeLiteral: prefix === undefined ? undefined : textSafe(prefix), abridged: summary.abridged };
+    return { body: textSafe(summary.text) || null, prefixBeforeLiteral: prefix === undefined ? undefined : textSafe(prefix), abridged: summary.abridged };
   }
   const summary = projectToolUseSummary(message);
   const body = artifactBody(summary.text);

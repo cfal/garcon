@@ -11,18 +11,25 @@ function headerEnd(value: string, start: number): number {
   return header.test(value) ? header.lastIndex : -1;
 }
 
+function isEscaped(value: string, index: number): boolean {
+  let before = index;
+  while (value[before - 1] === '\\') before--;
+  return (index - before) % 2 === 1;
+}
+
 function markdownDestinationEnd(value: string, start: number, tokenEnd: number): number | undefined {
   const angled = value[start - 1] === '<';
   if (angled) {
-    let slashes = 0;
-    while (value[start - 2 - slashes] === '\\') slashes++;
-    if (slashes % 2) return;
+    if (isEscaped(value, start - 1)) return;
     const parsed = parseLinkDestination(value, start - 1, value.length);
     return parsed.ok ? parsed.pos - 1 : undefined;
   }
   let opening = start;
   while (opening && /\s/.test(value[opening - 1])) opening--;
-  if (value[opening - 2] !== ']' || value[opening - 1] !== '(') return;
+  if (value[opening - 2] !== ']' || isEscaped(value, opening - 2)) return;
+  // A reference has no enclosing ')'. Quotes, angle brackets and nonbreaking spaces can be URL bytes.
+  if (value[opening - 1] === ':') return tokenEnd;
+  if (value[opening - 1] !== '(') return;
   const parsed = parseLinkDestination(value, start, tokenEnd);
   if (!parsed.ok) return tokenEnd;
 
