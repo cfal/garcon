@@ -1,0 +1,355 @@
+{
+  "name": "auth-setup",
+  "description": "Auth routes with no account: the setup-required status, refused sign-in, credential changes and logout, the remaining registration validation, the first registration, the conflict for every later one, and the registered credentials signing in.",
+  "server": {
+    "account": "none"
+  },
+  "steps": [
+    {
+      "name": "status-needs-setup",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/status",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "user-without-account",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "user-with-forged-token",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "login-without-account",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "parity",
+          "password": "whatever-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "username-change-without-account",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "whatever-password",
+          "username": "renamed"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "username-change-with-forged-token",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "whatever-password",
+          "username": "renamed"
+        },
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "password-change-without-account",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/password",
+        "json": {
+          "currentPassword": "whatever-password",
+          "newPassword": "another-password-123"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-without-account",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-with-forged-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "register-wrong-method",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/register",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-lone-surrogate",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "\ud800arity",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-with-c1-control",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "body": "{\"username\":\"bad\\u0085name\",\"password\":\"long-enough-password\"}",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-missing-password",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "parity"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-password-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "parity",
+          "password": 42
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-password-7-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "parity",
+          "password": "1234567"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "  parity  ",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "status-after-setup",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/status",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "user-without-token",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "user-with-registered-token",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{register.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "register-again",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "other",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-same-account-again",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "parity",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-password",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "parity",
+          "password": "wrong-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-with-padded-username",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": " parity ",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "parity",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "user-with-login-token",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "rename-username",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "long-enough-password",
+          "username": "renamed"
+        },
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "login-with-old-username",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "parity",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-with-new-username",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "renamed",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "user-after-logout",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{rename-username.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "user-with-other-session",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login-with-new-username.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "status-at-end",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/status",
+        "auth": "none"
+      }
+    }
+  ],
+  "traps": false
+}
