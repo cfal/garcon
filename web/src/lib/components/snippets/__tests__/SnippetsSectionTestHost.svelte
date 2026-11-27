@@ -44,9 +44,26 @@
 	let rejectSave: ((error: Error) => void) | null = null;
 	let createCount = $state(0);
 	let updateCount = $state(0);
-	let removeCount = $state(0);
 	let lastUpdateExpectedRevision = $state<number | null>(null);
 	let lastRemoveExpectedRevision = $state<number | null>(null);
+
+	function revise(snippets: Snippet[]): SnippetsSnapshot {
+		current = {
+			revision: current.revision + 1,
+			snippets: sortSnippetsByShortName(snippets),
+		};
+		return current;
+	}
+
+	function assertRevisionAndTarget(expectedRevision: number, id: string): void {
+		if (expectedRevision !== current.revision) {
+			throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
+		}
+		if (!current.snippets.some((snippet) => snippet.id === id)) {
+			throw new ApiError(404, 'Snippet not found', SNIPPET_ERROR_CODES.notFound);
+		}
+	}
+
 	const store = createSnippetsStore({
 		get: async () => {
 			loadCount += 1;
@@ -64,9 +81,9 @@
 					rejectSave = (error) => reject(error);
 				});
 			}
-			current = {
-				revision: current.revision + 1,
-				snippets: sortSnippetsByShortName([
+			return {
+				success: true,
+				snapshot: revise([
 					...current.snippets,
 					entry(
 						`created-${current.revision}`,
@@ -76,20 +93,14 @@
 					),
 				]),
 			};
-			return { success: true, snapshot: current };
 		},
 		update: async (request) => {
 			updateCount += 1;
 			lastUpdateExpectedRevision = request.expectedRevision;
-			if (request.expectedRevision !== current.revision) {
-				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
-			}
-			if (!current.snippets.some((snippet) => snippet.id === request.id)) {
-				throw new ApiError(404, 'Snippet not found', SNIPPET_ERROR_CODES.notFound);
-			}
-			current = {
-				revision: current.revision + 1,
-				snippets: sortSnippetsByShortName(
+			assertRevisionAndTarget(request.expectedRevision, request.id);
+			return {
+				success: true,
+				snapshot: revise(
 					current.snippets.map((snippet) =>
 						snippet.id === request.id
 							? { ...snippet, ...request.snippet, updatedAt: '2026-01-02T00:00:00.000Z' }
@@ -97,58 +108,41 @@
 					),
 				),
 			};
-			return { success: true, snapshot: current };
 		},
 		remove: async (request) => {
-			removeCount += 1;
 			lastRemoveExpectedRevision = request.expectedRevision;
-			if (request.expectedRevision !== current.revision) {
-				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
-			}
-			if (!current.snippets.some((snippet) => snippet.id === request.id)) {
-				throw new ApiError(404, 'Snippet not found', SNIPPET_ERROR_CODES.notFound);
-			}
-			current = {
-				revision: current.revision + 1,
-				snippets: current.snippets.filter((snippet) => snippet.id !== request.id),
+			assertRevisionAndTarget(request.expectedRevision, request.id);
+			return {
+				success: true,
+				snapshot: revise(current.snippets.filter((snippet) => snippet.id !== request.id)),
 			};
-			return { success: true, snapshot: current };
 		},
 	});
 	function editServerOnly(): void {
-		current = {
-			revision: current.revision + 1,
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.id === 'one'
-						? { ...snippet, template: 'Server updated without WS', updatedAt: '2026-01-03T00:00:00.000Z' }
-						: snippet,
-				),
+		revise(
+			current.snippets.map((snippet) =>
+				snippet.id === 'one'
+					? { ...snippet, template: 'Server updated without WS', updatedAt: '2026-01-03T00:00:00.000Z' }
+					: snippet,
 			),
-		};
+		);
 	}
 	function renameServerOnly(): void {
-		current = {
-			revision: current.revision + 1,
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.id === 'one'
-						? {
-								...snippet,
-								shortName: 'review_server_renamed',
-								template: 'Renamed without WS',
-								updatedAt: '2026-01-04T00:00:00.000Z',
-							}
-						: snippet,
-				),
+		revise(
+			current.snippets.map((snippet) =>
+				snippet.id === 'one'
+					? {
+							...snippet,
+							shortName: 'review_server_renamed',
+							template: 'Renamed without WS',
+							updatedAt: '2026-01-04T00:00:00.000Z',
+						}
+					: snippet,
 			),
-		};
+		);
 	}
 	function removeServerOnly(): void {
-		current = {
-			revision: current.revision + 1,
-			snippets: current.snippets.filter((snippet) => snippet.id !== 'one'),
-		};
+		revise(current.snippets.filter((snippet) => snippet.id !== 'one'));
 	}
 	function removeServerSameRevision(): void {
 		current = {
@@ -157,41 +151,32 @@
 		};
 	}
 	function advanceExternally(): void {
-		current = {
-			revision: current.revision + 1,
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.shortName === 'review'
-						? { ...snippet, template: 'Externally updated', updatedAt: '2026-01-03T00:00:00.000Z' }
-						: snippet,
-				),
+		revise(
+			current.snippets.map((snippet) =>
+				snippet.shortName === 'review'
+					? { ...snippet, template: 'Externally updated', updatedAt: '2026-01-03T00:00:00.000Z' }
+					: snippet,
 			),
-		};
+		);
 		void store.refreshInBackground();
 	}
 	function renameExternally(): void {
-		current = {
-			revision: current.revision + 1,
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.shortName === 'review'
-						? {
-								...snippet,
-								shortName: 'review_renamed',
-								template: 'Renamed externally',
-								updatedAt: '2026-01-04T00:00:00.000Z',
-							}
-						: snippet,
-				),
+		revise(
+			current.snippets.map((snippet) =>
+				snippet.shortName === 'review'
+					? {
+							...snippet,
+							shortName: 'review_renamed',
+							template: 'Renamed externally',
+							updatedAt: '2026-01-04T00:00:00.000Z',
+						}
+					: snippet,
 			),
-		};
+		);
 		void store.refreshInBackground();
 	}
 	function removeExternally(): void {
-		current = {
-			revision: current.revision + 1,
-			snippets: current.snippets.filter((snippet) => snippet.shortName !== 'review'),
-		};
+		revise(current.snippets.filter((snippet) => snippet.shortName !== 'review'));
 		void store.refreshInBackground();
 	}
 	setSnippets(store);
@@ -208,7 +193,6 @@
 {/if}
 <div data-testid="snippet-create-count">{createCount}</div>
 <div data-testid="snippet-update-count">{updateCount}</div>
-<div data-testid="snippet-remove-count">{removeCount}</div>
 <div data-testid="last-update-expected-revision">{lastUpdateExpectedRevision ?? ''}</div>
 <div data-testid="last-remove-expected-revision">{lastRemoveExpectedRevision ?? ''}</div>
 <div data-testid="snippet-notifications">

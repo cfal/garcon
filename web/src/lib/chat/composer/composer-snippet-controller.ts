@@ -6,15 +6,12 @@ import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigg
 import {
 	findLoadedSelectableSnippetByShortName,
 	hasLoadedShortNameConflict,
-	isSelectedSnippetStaleInLoadedCatalog,
+	staleSelectionRefreshSources,
 	tryExpandSelectableSnippetLocally,
 	type PreambleCatalogLookup,
 	type SnippetCatalogLookup,
 } from '$lib/snippets/local-snippet-expansion.js';
-import {
-	mismatchedSnippetSources,
-	type SelectableSnippet,
-} from '$lib/snippets/selectable-snippet.js';
+import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 import {
 	SnippetExpansionController,
 	snippetErrorDetail,
@@ -105,6 +102,7 @@ export class ComposerSnippetController<Prepared> {
 			range,
 		});
 		if (result === 'inserted') palette.complete();
+		// Keep the arguments dialog open only when an arguments-bearing snippet fails so the user can edit inputs.
 		else if (
 			result !== 'failed' ||
 			snippet.source !== 'snippet' ||
@@ -130,52 +128,18 @@ export class ComposerSnippetController<Prepared> {
 		const sourceExecutionKey = this.options.getExecutionKey();
 		const sourceText = this.options.getText();
 		this.options.beforeExpand?.();
-		const applyExpanded = (expandedText: string) => {
-			if (invocation.kind === 'palette') {
-				const replacement = applySnippetTriggerReplacement(
-					sourceText,
-					invocation.range,
-					expandedText,
-				);
-				return this.options.onExpanded(replacement.text, replacement.caret);
-			}
-			return this.options.onExpanded(expandedText, expandedText.length);
-		};
 		try {
 			if (!this.options.hasProjectPath() && this.options.onMissingProjectPath) {
 				this.options.onMissingProjectPath();
 				if (invocation.kind === 'palette') await this.options.onSettled();
 				return 'cancelled';
 			}
-			if (
-				invocation.kind === 'palette' &&
-				isSelectedSnippetStaleInLoadedCatalog(invocation.snippet, this.options)
-			) {
-				return await this.#cancelStaleSelection(invocation.snippet);
+			if (invocation.kind === 'palette') {
+				const staleSources = staleSelectionRefreshSources(invocation.snippet, this.options);
+				if (staleSources) return await this.#cancelStaleSelection(staleSources);
 			}
-			if (this.options.hasProjectPath()) {
-				const localItem =
-					invocation.kind === 'palette'
-						? invocation.snippet
-						: findLoadedSelectableSnippetByShortName(invocation.shortName, this.options);
-				if (localItem) {
-					const local = tryExpandSelectableSnippetLocally(
-						localItem,
-						invocation.argumentsInput,
-						{ kind: 'immediate', getChatId: () => this.options.getLocalChatId() },
-					);
-					if (local.kind === 'expanded') {
-						await applyExpanded(local.expandedText);
-						return 'inserted';
-					}
-					if (local.kind === 'error') {
-						await this.#notifyAndSettle(
-							m.snippets_expand_error({ detail: local.message }),
-						);
-						return 'failed';
-					}
-				}
-			}
+			const localResult = await this.#tryExpandLocally(invocation, sourceText);
+			if (localResult !== null) return localResult;
 			if (
 				invocation.kind === 'slash' &&
 				hasLoadedShortNameConflict(invocation.shortName, this.options)
@@ -192,18 +156,12 @@ export class ComposerSnippetController<Prepared> {
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (invocation.kind === 'palette') {
-				if (hasLoadedShortNameConflict(invocation.snippet.shortName, this.options)) {
-					return await this.#cancelStaleSelection(invocation.snippet);
-				}
-				const staleSources = mismatchedSnippetSources(invocation.snippet, result.response);
-				if (staleSources.length > 0) {
-					this.#refreshSources(staleSources);
-					await this.#notifyAndSettle(m.snippets_changed_before_expansion());
-					return 'cancelled';
-				}
-				if (isSelectedSnippetStaleInLoadedCatalog(invocation.snippet, this.options)) {
-					return await this.#cancelStaleSelection(invocation.snippet);
-				}
+				const staleSources = staleSelectionRefreshSources(
+					invocation.snippet,
+					this.options,
+					result.response,
+				);
+				if (staleSources) return await this.#cancelStaleSelection(staleSources);
 			}
 			if (
 				(invocation.kind === 'slash' && !this.options.isConversationInput()) ||
@@ -213,7 +171,7 @@ export class ComposerSnippetController<Prepared> {
 			) {
 				return 'cancelled';
 			}
-			await applyExpanded(result.response.expandedText);
+			await this.#applyExpanded(invocation, sourceText, result.response.expandedText);
 			return 'inserted';
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 404) {
@@ -224,6 +182,47 @@ export class ComposerSnippetController<Prepared> {
 			);
 			return 'failed';
 		}
+	}
+
+	async #tryExpandLocally(
+		invocation: SnippetInvocation,
+		sourceText: string,
+	): Promise<SnippetInsertionResult | null> {
+		if (!this.options.hasProjectPath()) return null;
+		const localItem =
+			invocation.kind === 'palette'
+				? invocation.snippet
+				: findLoadedSelectableSnippetByShortName(invocation.shortName, this.options);
+		if (!localItem) return null;
+		const local = tryExpandSelectableSnippetLocally(localItem, invocation.argumentsInput, {
+			kind: 'immediate',
+			getChatId: () => this.options.getLocalChatId(),
+		});
+		if (local.kind === 'expanded') {
+			await this.#applyExpanded(invocation, sourceText, local.expandedText);
+			return 'inserted';
+		}
+		if (local.kind === 'error') {
+			await this.#notifyAndSettle(m.snippets_expand_error({ detail: local.message }));
+			return 'failed';
+		}
+		return null;
+	}
+
+	#applyExpanded(
+		invocation: SnippetInvocation,
+		sourceText: string,
+		expandedText: string,
+	): Promise<void> | void {
+		if (invocation.kind === 'palette') {
+			const replacement = applySnippetTriggerReplacement(
+				sourceText,
+				invocation.range,
+				expandedText,
+			);
+			return this.options.onExpanded(replacement.text, replacement.caret);
+		}
+		return this.options.onExpanded(expandedText, expandedText.length);
 	}
 
 	#refreshSources(sources: readonly SelectableSnippet['source'][]): void {
@@ -238,10 +237,10 @@ export class ComposerSnippetController<Prepared> {
 		await this.options.onSettled();
 	}
 
-	async #cancelStaleSelection(snippet: SelectableSnippet): Promise<'cancelled'> {
-		if (hasLoadedShortNameConflict(snippet.shortName, this.options)) {
-			this.#refreshSources(['snippet', 'preamble']);
-		}
+	async #cancelStaleSelection(
+		sources: readonly SelectableSnippet['source'][],
+	): Promise<'cancelled'> {
+		this.#refreshSources(sources);
 		await this.#notifyAndSettle(m.snippets_changed_before_expansion());
 		return 'cancelled';
 	}

@@ -7,7 +7,7 @@
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
 	import TemplateVariableMenu from '$lib/components/prompt-editor/TemplateVariableMenu.svelte';
 	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
-	import { ApiError } from '$lib/api/client.js';
+	import { snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { getNotifications, getSnippets, getTransientLayers } from '$lib/context';
 	import {
 		promptEditorSelectionFromTextarea,
@@ -72,11 +72,6 @@
 		};
 	});
 
-	function errorDetail(error: unknown): string {
-		if (error instanceof ApiError) return error.details || error.message;
-		return error instanceof Error ? error.message : String(error);
-	}
-
 	async function save(): Promise<void> {
 		const definition = form.buildDefinition();
 		if (!definition || form.saving || refinementPending || disabled) return;
@@ -86,7 +81,7 @@
 			await onSave(definition);
 			onClose();
 		} catch (error) {
-			form.error = m.snippets_save_error({ detail: errorDetail(error) });
+			form.error = m.snippets_save_error({ detail: snippetErrorDetail(error) });
 		} finally {
 			form.saving = false;
 		}

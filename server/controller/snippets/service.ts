@@ -142,7 +142,8 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     const preamble = snippet
       ? null
       : this.deps.preambles?.getBySnippetShortName(input.shortName) ?? null;
-    if (!snippet && !preamble) {
+    const entry = snippet ?? preamble;
+    if (!entry) {
       throw new SnippetDomainError(
         SNIPPET_ERROR_CODES.notFound,
         `Snippet not found: ${input.shortName}`,
@@ -154,16 +155,14 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       await this.#resolveContext(input.context, needsProjectPath);
     let expandedText: string;
     if (snippet) {
-      const argumentsText =
-        input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
+      const values = {
+        arguments: input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value,
+        projectPath: resolvedProjectPath,
+      };
       expandedText = input.context.type === 'scheduled-prompt'
-        ? expandScheduledSnippetTemplate(snippet.template, {
-            arguments: argumentsText,
-            projectPath: resolvedProjectPath,
-          })
+        ? expandScheduledSnippetTemplate(snippet.template, values)
         : expandSnippetTemplate(snippet.template, {
-            arguments: argumentsText,
-            projectPath: resolvedProjectPath,
+            ...values,
             context: runtimeTemplateValues(input.context.chatId, this.#now()),
           });
     } else {
@@ -174,9 +173,9 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     return {
       success: true,
       source: snippet ? 'snippet' : 'preamble',
-      sourceId: (snippet ?? preamble)!.id,
-      sourceUpdatedAt: (snippet ?? preamble)!.updatedAt,
-      shortName: snippet?.shortName ?? preamble!.snippetShortName!,
+      sourceId: entry.id,
+      sourceUpdatedAt: entry.updatedAt,
+      shortName: input.shortName,
       contextProjectPath,
       contextExecutorId,
       expandedText,

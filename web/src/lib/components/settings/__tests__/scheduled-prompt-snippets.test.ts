@@ -1,54 +1,40 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ScheduledPromptSnippets } from '../scheduled-prompt-snippets.svelte';
 import { expandSnippet } from '$lib/api/snippets.js';
-import { preambleToSelectable, selectableSnippets } from '$lib/snippets/selectable-snippet.js';
+import type { SnippetCatalogLookups } from '$lib/snippets/local-snippet-expansion.js';
+import { preambleToSelectable, snippetToSelectable } from '$lib/snippets/selectable-snippet.js';
 import type { Preamble } from '$shared/preambles';
 
 vi.mock('$lib/api/snippets.js', () => ({ expandSnippet: vi.fn() }));
 const expand = vi.mocked(expandSnippet);
-const serverItem = selectableSnippets(
-	[
-		{
-			id: 'review',
-			shortName: 'review',
-			template: 'Review {{arguments}} in {{project_path}} {{chat_id}}',
-			defaultArguments: 'API',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		},
-	],
-	[],
-)[0];
-const localItem = selectableSnippets(
-	[
-		{
-			id: 'review-local',
-			shortName: 'review-local',
-			template: 'Review {{arguments}} on {{current_date}} for {{chat_id}}',
-			defaultArguments: 'API',
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		},
-	],
-	[],
-)[0];
-const localPreamble = selectableSnippets(
-	[],
-	[
-		{
-			id: '00000000-0000-4000-8000-000000000001',
-			enabled: false,
-			title: 'Manual',
-			snippetShortName: 'manual',
-			content: 'Preamble {{chat_id}} {{project_path}} {{current_date}}',
-			scope: { type: 'global' },
-			agentIds: [],
-			tagFilter: { mode: 'any', tags: [] },
-			createdAt: '2026-01-01T00:00:00.000Z',
-			updatedAt: '2026-01-01T00:00:00.000Z',
-		},
-	],
-)[0];
+const serverItem = snippetToSelectable({
+	id: 'review',
+	shortName: 'review',
+	template: 'Review {{arguments}} in {{project_path}} {{chat_id}}',
+	defaultArguments: 'API',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+});
+const localItem = snippetToSelectable({
+	id: 'review-local',
+	shortName: 'review-local',
+	template: 'Review {{arguments}} on {{current_date}} for {{chat_id}}',
+	defaultArguments: 'API',
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+});
+const localPreamble = preambleToSelectable({
+	id: '00000000-0000-4000-8000-000000000001',
+	enabled: false,
+	title: 'Manual',
+	snippetShortName: 'manual',
+	content: 'Preamble {{chat_id}} {{project_path}} {{current_date}}',
+	scope: { type: 'global' },
+	agentIds: [],
+	tagFilter: { mode: 'any', tags: [] },
+	createdAt: '2026-01-01T00:00:00.000Z',
+	updatedAt: '2026-01-01T00:00:00.000Z',
+})!;
 const response = {
 	success: true as const,
 	source: 'snippet' as const,
@@ -60,12 +46,13 @@ const response = {
 	expandedText: 'Review API in /repo {{chat_id}}',
 };
 
-function fixture() {
+function fixture(catalogs: SnippetCatalogLookups = {}) {
 	const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
 	const onInsert = vi.fn(async (_text: string, _caret: number) => {});
 	const onPendingChange = vi.fn();
 	const onSourceChanged = vi.fn();
 	const controller = new ScheduledPromptSnippets({
+		...catalogs,
 		get prompt() {
 			return input.prompt;
 		},
@@ -106,19 +93,14 @@ describe('scheduled prompt snippets', () => {
 
 	it('surfaces local scheduled boundary errors without calling expandSnippet', async () => {
 		const { controller, onInsert, onPendingChange } = fixture();
-		const boundaryItem = selectableSnippets(
-			[
-				{
-					id: 'boundary',
-					shortName: 'boundary',
-					template: 'Run {{arguments}}{{chat_id}}',
-					defaultArguments: 'API',
-					createdAt: '2026-01-01T00:00:00.000Z',
-					updatedAt: '2026-01-01T00:00:00.000Z',
-				},
-			],
-			[],
-		)[0];
+		const boundaryItem = snippetToSelectable({
+			id: 'boundary',
+			shortName: 'boundary',
+			template: 'Run {{arguments}}{{chat_id}}',
+			defaultArguments: 'API',
+			createdAt: '2026-01-01T00:00:00.000Z',
+			updatedAt: '2026-01-01T00:00:00.000Z',
+		});
 		controller.open(7, 15);
 		expect(await controller.insert(boundaryItem, 'x\\')).toBe('failed');
 		expect(controller.error).toContain('Add a separator');
@@ -203,11 +185,8 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('cancels stale selections locally when the loaded catalog no longer matches', async () => {
-		if (localItem.source !== 'snippet') throw new Error('expected snippet item');
-		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
-		const onInsert = vi.fn(async () => {});
 		let currentSnippets = [localItem.snippet];
-		const controller = new ScheduledPromptSnippets({
+		const { controller, onInsert } = fixture({
 			snippets: {
 				hasLoaded: true,
 				get snippets() {
@@ -215,21 +194,6 @@ describe('scheduled prompt snippets', () => {
 				},
 			},
 			preambles: { hasLoaded: true, preambles: [] },
-			get prompt() {
-				return input.prompt;
-			},
-			get interactionKey() {
-				return input.key;
-			},
-			get context() {
-				return {
-					type: 'scheduled-prompt' as const,
-					target: { type: 'new-chat' as const, projectPath: '/repo' },
-				};
-			},
-			onInsert,
-			onPendingChange: vi.fn(),
-			onSourceChanged: vi.fn(),
 		});
 		controller.open(7, 15);
 		currentSnippets = [];
@@ -241,12 +205,9 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('cancels a delayed server fallback if the loaded catalog updates or deletes the snippet in flight', async () => {
-		if (serverItem.source !== 'snippet') throw new Error('expected snippet item');
 		for (const mutation of ['updated', 'deleted'] as const) {
-			const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
-			const onInsert = vi.fn(async () => {});
 			let currentSnippets = [serverItem.snippet];
-			const controller = new ScheduledPromptSnippets({
+			const { controller, onInsert } = fixture({
 				snippets: {
 					hasLoaded: true,
 					get snippets() {
@@ -254,21 +215,6 @@ describe('scheduled prompt snippets', () => {
 					},
 				},
 				preambles: { hasLoaded: true, preambles: [] },
-				get prompt() {
-					return input.prompt;
-				},
-				get interactionKey() {
-					return input.key;
-				},
-				get context() {
-					return {
-						type: 'scheduled-prompt' as const,
-						target: { type: 'new-chat' as const, projectPath: '/repo' },
-					};
-				},
-				onInsert,
-				onPendingChange: vi.fn(),
-				onSourceChanged: vi.fn(),
 			});
 			let resolve!: (value: typeof response) => void;
 			expand.mockImplementationOnce(() => new Promise((done) => (resolve = done)));
@@ -287,11 +233,8 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('cancels held palette insertion when the owning catalog becomes invalidated', async () => {
-		if (localItem.source !== 'snippet') throw new Error('expected snippet item');
-		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
-		const onInsert = vi.fn(async () => {});
 		let snippetsLoaded = true;
-		const controller = new ScheduledPromptSnippets({
+		const { controller, onInsert } = fixture({
 			snippets: {
 				get hasLoaded() {
 					return snippetsLoaded;
@@ -301,21 +244,6 @@ describe('scheduled prompt snippets', () => {
 				},
 			},
 			preambles: { hasLoaded: true, preambles: [] },
-			get prompt() {
-				return input.prompt;
-			},
-			get interactionKey() {
-				return input.key;
-			},
-			get context() {
-				return {
-					type: 'scheduled-prompt' as const,
-					target: { type: 'new-chat' as const, projectPath: '/repo' },
-				};
-			},
-			onInsert,
-			onPendingChange: vi.fn(),
-			onSourceChanged: vi.fn(),
 		});
 		controller.open(7, 15);
 		snippetsLoaded = false;
@@ -327,40 +255,21 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('cancels palette insertion and reconciles both catalogs on cross-catalog short-name conflict', async () => {
-		if (localItem.source !== 'snippet') throw new Error('expected snippet item');
-		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
-		const onInsert = vi.fn(async () => {});
-		const onSourceChanged = vi.fn();
-		const conflictingPreamble = {
+		const conflictingPreamble: Preamble = {
 			id: '00000000-0000-4000-8000-000000000077',
 			enabled: false,
 			title: 'Conflicting',
 			snippetShortName: localItem.shortName,
 			content: 'New preamble content',
-			scope: { type: 'global' as const },
+			scope: { type: 'global' },
 			agentIds: [],
-			tagFilter: { mode: 'any' as const, tags: [] },
+			tagFilter: { mode: 'any', tags: [] },
 			createdAt: '2026-01-01T00:00:00.000Z',
 			updatedAt: '2026-01-01T00:00:00.000Z',
 		};
-		const controller = new ScheduledPromptSnippets({
+		const { controller, onInsert, onSourceChanged } = fixture({
 			snippets: { hasLoaded: true, snippets: [localItem.snippet] },
 			preambles: { hasLoaded: true, preambles: [conflictingPreamble] },
-			get prompt() {
-				return input.prompt;
-			},
-			get interactionKey() {
-				return input.key;
-			},
-			get context() {
-				return {
-					type: 'scheduled-prompt' as const,
-					target: { type: 'new-chat' as const, projectPath: '/repo' },
-				};
-			},
-			onInsert,
-			onPendingChange: vi.fn(),
-			onSourceChanged,
 		});
 
 		for (const candidate of [
@@ -379,12 +288,8 @@ describe('scheduled prompt snippets', () => {
 	});
 
 	it('reconciles both catalogs before same-source mismatch when an ambiguous preamble arrives in flight', async () => {
-		if (serverItem.source !== 'snippet') throw new Error('expected snippet item');
-		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
-		const onInsert = vi.fn(async () => {});
-		const onSourceChanged = vi.fn();
 		let currentPreambles: Preamble[] = [];
-		const controller = new ScheduledPromptSnippets({
+		const { controller, onInsert, onSourceChanged } = fixture({
 			snippets: { hasLoaded: true, snippets: [serverItem.snippet] },
 			preambles: {
 				hasLoaded: true,
@@ -392,21 +297,6 @@ describe('scheduled prompt snippets', () => {
 					return currentPreambles;
 				},
 			},
-			get prompt() {
-				return input.prompt;
-			},
-			get interactionKey() {
-				return input.key;
-			},
-			get context() {
-				return {
-					type: 'scheduled-prompt' as const,
-					target: { type: 'new-chat' as const, projectPath: '/repo' },
-				};
-			},
-			onInsert,
-			onPendingChange: vi.fn(),
-			onSourceChanged,
 		});
 		let resolve!: (value: typeof response) => void;
 		expand.mockImplementationOnce(() => new Promise((done) => (resolve = done)));

@@ -133,34 +133,28 @@ describe('scheduled snippet template expansion', () => {
           projectPath: '/repo',
         }),
     ]) {
-      let caught;
-      try {
-        run();
-      } catch (error) {
-        caught = error;
-      }
-      expect(caught).toBeInstanceOf(SnippetDomainError);
-      expect(caught).toMatchObject({
-        code: 'SNIPPET_EXPANSION_TOO_LONG',
-        status: 422,
-      });
+      expect(run).toThrow(
+        expect.objectContaining({
+          constructor: SnippetDomainError,
+          code: 'SNIPPET_EXPANSION_TOO_LONG',
+          status: 422,
+        }),
+      );
     }
   });
 
   it('maps scheduled boundary violations to SnippetDomainError 422', () => {
-    let caught;
-    try {
+    expect(() =>
       expandScheduledSnippetTemplate('{{arguments}}{{chat_id}}', {
         arguments: 'report\\',
         projectPath: '/repo',
-      });
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(SnippetDomainError);
-    expect(caught).toMatchObject({
-      code: 'SNIPPET_VALIDATION_FAILED',
-      status: 422,
-    });
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        constructor: SnippetDomainError,
+        code: 'SNIPPET_VALIDATION_FAILED',
+        status: 422,
+      }),
+    );
   });
 });

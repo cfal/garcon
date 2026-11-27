@@ -21,6 +21,13 @@ function snapshot(revision: number, ids: string[]): PreamblesSnapshot {
 	return { revision, preambles: ids.map(preamble) };
 }
 
+const editedDefinition = {
+	enabled: true,
+	title: 'Edited preamble a',
+	content: 'Edited content a',
+	scope: { type: 'global' as const },
+};
+
 describe('PreamblesStore', () => {
 	it('publishes invalidations without eagerly loading the catalog', async () => {
 		const get = vi.fn();
@@ -92,18 +99,7 @@ describe('PreamblesStore', () => {
 		const store = new PreamblesStore({ get, update });
 		store.applySnapshot(snapshot(3, ['a']));
 
-		await expect(
-			store.update(
-				'a',
-				{
-					enabled: true,
-					title: 'Edited preamble a',
-					content: 'Edited content a',
-					scope: { type: 'global' },
-				},
-				3,
-			),
-		).rejects.toBe(conflict);
+		await expect(store.update('a', editedDefinition, 3)).rejects.toBe(conflict);
 
 		expect(update).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 3 }));
 		expect(get).toHaveBeenCalledOnce();
@@ -119,16 +115,7 @@ describe('PreamblesStore', () => {
 		store.applySnapshot(snapshot(3, ['a']));
 		const refreshing = store.refresh();
 
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Edited preamble a',
-				content: 'Edited content a',
-				scope: { type: 'global' },
-			},
-			3,
-		);
+		const updating = store.update('a', editedDefinition, 3);
 		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
 		resolvers[0]!(snapshot(3, ['a']));
 		await refreshing;
@@ -157,16 +144,7 @@ describe('PreamblesStore', () => {
 		store.applySnapshot(snapshot(3, ['a']));
 		const refreshing = store.refresh().catch((error) => error);
 
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Edited preamble a',
-				content: 'Edited content a',
-				scope: { type: 'global' },
-			},
-			3,
-		);
+		const updating = store.update('a', editedDefinition, 3);
 		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
 		rejectRefresh(refreshFailure);
 
@@ -193,16 +171,7 @@ describe('PreamblesStore', () => {
 		store.applySnapshot(snapshot(3, ['a']));
 		const refreshing = store.refreshIfLoaded();
 
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Edited preamble a',
-				content: 'Edited content a',
-				scope: { type: 'global' },
-			},
-			3,
-		);
+		const updating = store.update('a', editedDefinition, 3);
 		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
 		rejectRefresh(new Error('refresh unavailable'));
 
@@ -355,48 +324,22 @@ describe('PreamblesStore', () => {
 
 	it('preserves a newer GET snapshot when a concurrent failed move overlaps it', async () => {
 		const networkError = new Error('network failed');
-		let resolveGet1!: (value: PreamblesSnapshot) => void;
-		let resolveGet2!: (value: PreamblesSnapshot) => void;
-		let rejectReorder1!: (error: Error) => void;
-		let rejectReorder2!: (error: Error) => void;
-		const get = vi
-			.fn()
-			.mockImplementationOnce(
-				() =>
-					new Promise<PreamblesSnapshot>((resolve) => {
-						resolveGet1 = resolve;
-					}),
-			)
-			.mockImplementationOnce(
-				() =>
-					new Promise<PreamblesSnapshot>((resolve) => {
-						resolveGet2 = resolve;
-					}),
-			);
-		const reorder = vi
-			.fn()
-			.mockImplementationOnce(
-				() =>
-					new Promise<{ success: true; snapshot: PreamblesSnapshot }>((_resolve, reject) => {
-						rejectReorder1 = reject;
-					}),
-			)
-			.mockImplementationOnce(
-				() =>
-					new Promise<{ success: true; snapshot: PreamblesSnapshot }>((_resolve, reject) => {
-						rejectReorder2 = reject;
-					}),
-			);
+		const get1 = Promise.withResolvers<PreamblesSnapshot>();
+		const get2 = Promise.withResolvers<PreamblesSnapshot>();
+		const reorder1 = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
+		const reorder2 = Promise.withResolvers<{ success: true; snapshot: PreamblesSnapshot }>();
+		const get = vi.fn().mockReturnValueOnce(get1.promise).mockReturnValueOnce(get2.promise);
+		const reorder = vi.fn().mockReturnValueOnce(reorder1.promise).mockReturnValueOnce(reorder2.promise);
 		const store = new PreamblesStore({ get, reorder });
 		store.applySnapshot(snapshot(3, ['a', 'b']));
 
 		// Case 1: GET settles on the synchronous turn of move() before reorder settles.
 		const refreshing1 = store.refresh();
 		const moving1 = store.move('b', 'up');
-		resolveGet1(snapshot(4, ['a', 'b', 'c']));
+		get1.resolve(snapshot(4, ['a', 'b', 'c']));
 		await refreshing1;
 		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
-		rejectReorder1(networkError);
+		reorder1.reject(networkError);
 		await expect(moving1).rejects.toBe(networkError);
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b', 'c']));
 
@@ -404,9 +347,9 @@ describe('PreamblesStore', () => {
 		const moving2 = store.move('b', 'up');
 		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(2));
 		const refreshing2 = store.refresh();
-		resolveGet2(snapshot(5, ['a', 'b', 'c', 'd']));
+		get2.resolve(snapshot(5, ['a', 'b', 'c', 'd']));
 		await refreshing2;
-		rejectReorder2(networkError);
+		reorder2.reject(networkError);
 		await expect(moving2).rejects.toBe(networkError);
 		expect(store.snapshot).toEqual(snapshot(5, ['a', 'b', 'c', 'd']));
 	});

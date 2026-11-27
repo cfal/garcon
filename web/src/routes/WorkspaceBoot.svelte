@@ -387,7 +387,7 @@
 	createWsReconnectEffect(
 		() => ws.connectionStatus,
 		() => {
-			transcriptSearchStatus.refresh();
+			void transcriptSearchStatus.refresh();
 			void scheduledPrompts.refreshIfLoaded();
 			pullRequestReviews.invalidate();
 			void preambles.refreshIfLoaded();

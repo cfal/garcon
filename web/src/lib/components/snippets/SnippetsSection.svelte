@@ -9,6 +9,7 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { getSnippets } from '$lib/context';
 	import { searchSnippets } from '$lib/snippets/search-snippets.js';
+	import { snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		SNIPPET_ERROR_CODES,
@@ -48,11 +49,6 @@
 		if (active) untrack(() => void snippets.loadInBackground());
 	});
 
-	function errorDetail(error: unknown): string {
-		if (error instanceof ApiError) return error.details || error.message;
-		return error instanceof Error ? error.message : String(error);
-	}
-
 	function openCreate(): void {
 		if (operationLocked) return;
 		editRemoved = false;
@@ -86,6 +82,17 @@
 		removeError = null;
 	}
 
+	function rejectRemovedEdit(targetId: string, name: string, cause: ApiError): never {
+		// Fence the flag to the same target so a form retargeted mid-save stays editable.
+		if (form.kind === 'edit' && form.snippet.id === targetId) editRemoved = true;
+		throw new Error(m.snippets_already_removed({ name }), { cause });
+	}
+
+	function reportAlreadyRemoved(name: string): void {
+		closeRemove();
+		operationError = m.snippets_already_removed({ name });
+	}
+
 	async function save(definition: SnippetDefinitionInput): Promise<void> {
 		if (form.kind === 'edit' && editRemoved) {
 			throw new Error(m.snippets_already_removed({ name: form.snippet.shortName }));
@@ -100,10 +107,7 @@
 				await snippets.update(targetId, definition, form.revision);
 			} catch (error) {
 				if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.notFound) {
-					if (form.kind === 'edit' && form.snippet.id === targetId) editRemoved = true;
-					throw new Error(m.snippets_already_removed({ name: targetShortName }), {
-						cause: error,
-					});
+					rejectRemovedEdit(targetId, targetShortName, error);
 				}
 				// Advance the target revision in place on 409 so an explicit retry uses the refreshed catalog without resetting the draft.
 				if (
@@ -114,12 +118,7 @@
 					snippets.snapshot !== null
 				) {
 					const refreshed = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
-					if (!refreshed) {
-						editRemoved = true;
-						throw new Error(m.snippets_already_removed({ name: targetShortName }), {
-							cause: error,
-						});
-					}
+					if (!refreshed) rejectRemovedEdit(targetId, targetShortName, error);
 					form.revision = snippets.snapshot.revision;
 				}
 				throw error;
@@ -139,8 +138,7 @@
 			closeRemove();
 		} catch (error) {
 			if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.notFound) {
-				closeRemove();
-				operationError = m.snippets_already_removed({ name: target.snippet.shortName });
+				reportAlreadyRemoved(target.snippet.shortName);
 				return;
 			}
 			if (
@@ -153,13 +151,12 @@
 					(entry) => entry.id === target.snippet.id,
 				);
 				if (!refreshed) {
-					closeRemove();
-					operationError = m.snippets_already_removed({ name: target.snippet.shortName });
+					reportAlreadyRemoved(target.snippet.shortName);
 					return;
 				}
 				removeTarget = { snippet: refreshed, revision: snippets.snapshot.revision };
 			}
-			removeError = m.snippets_remove_error({ detail: errorDetail(error) });
+			removeError = m.snippets_remove_error({ detail: snippetErrorDetail(error) });
 		} finally {
 			removing = false;
 		}

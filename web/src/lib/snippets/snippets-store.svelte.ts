@@ -76,7 +76,7 @@ export class SnippetsStore {
 	}
 
 	async create(definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
-		const current = await this.#requireSnapshot();
+		const current = await this.ensureLoaded();
 		try {
 			const create = this.deps.create ?? createSnippet;
 			const result = await create({ expectedRevision: current.revision, snippet: definition });
@@ -92,7 +92,7 @@ export class SnippetsStore {
 		definition: SnippetDefinitionInput,
 		expectedRevision: number,
 	): Promise<SnippetsSnapshot> {
-		await this.#requireSnapshot();
+		await this.ensureLoaded();
 		try {
 			const update = this.deps.update ?? updateSnippet;
 			const result = await update({
@@ -108,7 +108,7 @@ export class SnippetsStore {
 	}
 
 	async remove(id: string, expectedRevision: number): Promise<SnippetsSnapshot> {
-		await this.#requireSnapshot();
+		await this.ensureLoaded();
 		try {
 			const remove = this.deps.remove ?? removeSnippet;
 			const result = await remove({ expectedRevision, id });
@@ -125,10 +125,6 @@ export class SnippetsStore {
 		this.status = 'ready';
 		this.error = null;
 		return nextSnapshot;
-	}
-
-	async #requireSnapshot(): Promise<SnippetsSnapshot> {
-		return this.snapshot ?? this.ensureLoaded();
 	}
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {

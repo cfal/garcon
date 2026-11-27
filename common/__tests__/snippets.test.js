@@ -60,7 +60,7 @@ describe('snippetTemplateUsesChatId', () => {
 });
 
 describe('shared snippet templates', () => {
-  it('expands immediate and scheduled templates identically when runtime tokens are resolved', () => {
+  it('expands immediate and scheduled templates', () => {
     const context = { ...TEMPLATE_VALIDATION_VALUES, chat_id: 'chat-a' };
     expect(
       expandSnippetTemplate('Chat {{chat_id}}: {{arguments}} in {{project_path}}', {
@@ -78,29 +78,29 @@ describe('shared snippet templates', () => {
   });
 
   it('throws typed expansion-too-long and scheduled-boundary errors', () => {
-    let oversizedError;
-    try {
+    expect(() =>
       expandSnippetTemplate('{{arguments}}{{arguments}}', {
         arguments: 'x'.repeat(SNIPPET_EXPANDED_MAX_LENGTH),
         projectPath: '/repo',
         context: TEMPLATE_VALIDATION_VALUES,
-      });
-    } catch (error) {
-      oversizedError = error;
-    }
-    expect(oversizedError).toBeInstanceOf(SnippetExpansionError);
-    expect(oversizedError).toMatchObject({ code: 'SNIPPET_EXPANSION_TOO_LONG' });
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        constructor: SnippetExpansionError,
+        code: 'SNIPPET_EXPANSION_TOO_LONG',
+      }),
+    );
 
-    let boundaryError;
-    try {
+    expect(() =>
       expandScheduledSnippetTemplate('{{arguments}}{{chat_id}}', {
         arguments: 'report\\',
         projectPath: '/repo',
-      });
-    } catch (error) {
-      boundaryError = error;
-    }
-    expect(boundaryError).toBeInstanceOf(ScheduledSnippetBoundaryError);
-    expect(boundaryError).toMatchObject({ code: 'SNIPPET_VALIDATION_FAILED' });
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        constructor: ScheduledSnippetBoundaryError,
+        code: 'SNIPPET_VALIDATION_FAILED',
+      }),
+    );
   });
 });

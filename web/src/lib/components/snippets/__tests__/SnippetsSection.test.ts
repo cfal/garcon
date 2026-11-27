@@ -399,35 +399,17 @@ describe('SnippetsSection', () => {
 		expect(await screen.findByText('/snippet review was already removed.')).toBeTruthy();
 	});
 
-	it('treats same-revision SNIPPET_NOT_FOUND on edit as already removed and disables further saves', async () => {
-		render(SnippetsSectionTestHost);
-		await screen.findByText('review');
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
-		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
-		await fireEvent.input(template, {
-			target: { value: 'Draft for missing snippet' },
-		});
-		await fireEvent.click(screen.getByTestId('server-remove-same-revision'));
-		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-		expect(await screen.findByText(/\/snippet review was already removed\./)).toBeTruthy();
-		expect(screen.getByRole('dialog', { name: 'Edit Snippet' }).isConnected).toBe(true);
-		expect(template.value).toBe('Draft for missing snippet');
-		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
-		await fireEvent.keyDown(template, { key: 'Enter', ctrlKey: true });
-		expect(screen.getByTestId('snippet-update-count').textContent).toBe('1');
-		await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove review' })).toBeNull());
-	});
-
-	it('immediately marks edit as already removed and disables Save when 409 refresh reveals deletion', async () => {
+	it.each([
+		{ label: 'same-revision SNIPPET_NOT_FOUND', triggerId: 'server-remove-same-revision' },
+		{ label: '409 refresh revealing deletion', triggerId: 'server-remove-only' },
+	])('marks edit as already removed on $label and disables further saves', async ({ triggerId }) => {
 		render(SnippetsSectionTestHost);
 		await screen.findByText('review');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
 		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
 		await fireEvent.input(template, { target: { value: 'Preserved unsaved draft' } });
-		await fireEvent.click(screen.getByTestId('server-remove-only'));
+		await fireEvent.click(screen.getByTestId(triggerId));
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(await screen.findByText(/\/snippet review was already removed\./)).toBeTruthy();

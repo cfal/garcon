@@ -1,15 +1,10 @@
 import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
-import {
-	mismatchedSnippetSources,
-	type SelectableSnippet,
-} from '$lib/snippets/selectable-snippet.js';
+import type { SelectableSnippet } from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 import {
-	hasLoadedShortNameConflict,
-	isSelectedSnippetStaleInLoadedCatalog,
+	staleSelectionRefreshSources,
 	tryExpandSelectableSnippetLocally,
-	type PreambleCatalogLookup,
-	type SnippetCatalogLookup,
+	type SnippetCatalogLookups,
 } from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import {
@@ -19,9 +14,7 @@ import {
 import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
 import * as m from '$lib/paraglide/messages.js';
 
-interface Options {
-	readonly snippets?: SnippetCatalogLookup | null;
-	readonly preambles?: PreambleCatalogLookup | null;
+interface Options extends SnippetCatalogLookups {
 	get prompt(): string;
 	get context(): ScheduledSnippetExpansionContext | null;
 	get interactionKey(): string;
@@ -73,9 +66,8 @@ export class ScheduledPromptSnippets {
 		this.error = null;
 		let pendingNotified = false;
 		try {
-			if (isSelectedSnippetStaleInLoadedCatalog(snippet, this.options)) {
-				return this.#cancelStaleSelection(snippet);
-			}
+			const preflightStale = staleSelectionRefreshSources(snippet, this.options);
+			if (preflightStale) return this.#cancelStaleSelection(preflightStale);
 			const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
 				kind: 'scheduled',
 			});
@@ -98,21 +90,8 @@ export class ScheduledPromptSnippets {
 			) {
 				return 'cancelled';
 			}
-			if (hasLoadedShortNameConflict(snippet.shortName, this.options)) {
-				return this.#cancelStaleSelection(snippet);
-			}
-			const staleSources = mismatchedSnippetSources(snippet, result.response);
-			if (staleSources.length > 0) {
-				this.error = m.snippets_changed_before_expansion();
-				this.palette.dismiss();
-				for (const changedSource of staleSources) {
-					this.options.onSourceChanged(changedSource);
-				}
-				return 'cancelled';
-			}
-			if (isSelectedSnippetStaleInLoadedCatalog(snippet, this.options)) {
-				return this.#cancelStaleSelection(snippet);
-			}
+			const responseStale = staleSelectionRefreshSources(snippet, this.options, result.response);
+			if (responseStale) return this.#cancelStaleSelection(responseStale);
 			const target = context.target;
 			if (
 				target.type === 'new-chat' &&
@@ -131,13 +110,12 @@ export class ScheduledPromptSnippets {
 		}
 	}
 
-	#cancelStaleSelection(snippet: SelectableSnippet): 'cancelled' {
-		if (hasLoadedShortNameConflict(snippet.shortName, this.options)) {
-			this.options.onSourceChanged('snippet');
-			this.options.onSourceChanged('preamble');
-		}
+	#cancelStaleSelection(sources: readonly SelectableSnippet['source'][]): 'cancelled' {
 		this.error = m.snippets_changed_before_expansion();
 		this.palette.dismiss();
+		for (const source of sources) {
+			this.options.onSourceChanged(source);
+		}
 		return 'cancelled';
 	}
 }

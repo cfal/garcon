@@ -32,7 +32,6 @@
 
 	let { active }: Props = $props();
 	const preambles = getPreambles();
-	const catalogIndexById = $derived(new Map(preambles.preambles.map((item, index) => [item.id, index])));
 	let query = $state('');
 	let form = $state<PreambleFormTarget>({ kind: 'closed' });
 	let removeTarget = $state<{ preamble: Preamble; revision: number } | null>(null);
@@ -41,6 +40,7 @@
 	let catalogMutationBusy = $state(false);
 	let editConflict = $state(false);
 	let operationError = $state<string | null>(null);
+	let operationLocked = $derived(catalogMutationBusy || preambles.isRefreshing);
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
 	let formIsStale = $derived(
@@ -55,7 +55,7 @@
 	});
 
 	function openCreate(): void {
-		if (catalogMutationBusy || preambles.isRefreshing) return;
+		if (operationLocked) return;
 		form = { kind: 'create' };
 		editConflict = false;
 		operationError = null;
@@ -63,7 +63,7 @@
 
 	function openEdit(preamble: Preamble): void {
 		const revision = preambles.snapshot?.revision;
-		if (catalogMutationBusy || preambles.isRefreshing || revision === undefined) return;
+		if (operationLocked || revision === undefined) return;
 		form = { kind: 'edit', preamble, revision };
 		editConflict = false;
 		operationError = null;
@@ -76,7 +76,7 @@
 
 	function openRemove(preamble: Preamble): void {
 		const revision = preambles.snapshot?.revision;
-		if (catalogMutationBusy || preambles.isRefreshing || revision === undefined) return;
+		if (operationLocked || revision === undefined) return;
 		operationError = null;
 		removeError = null;
 		removeTarget = { preamble, revision };
@@ -87,12 +87,17 @@
 		removeError = null;
 	}
 
+	function reportAlreadyRemoved(title: string): void {
+		closeRemove();
+		operationError = m.preambles_already_removed({ title });
+	}
+
 	async function save(definition: PreambleDefinitionInput): Promise<void> {
 		if (form.kind === 'edit' && formIsStale) {
 			editConflict = true;
 			throw new Error(m.preambles_edit_stale());
 		}
-		if (catalogMutationBusy || preambles.isRefreshing) {
+		if (operationLocked) {
 			throw new Error(m.preambles_changed_before_write());
 		}
 		catalogMutationBusy = true;
@@ -120,7 +125,7 @@
 	}
 
 	async function confirmRemove(): Promise<void> {
-		if (!removeTarget || catalogMutationBusy || preambles.isRefreshing) return;
+		if (!removeTarget || operationLocked) return;
 		const target = removeTarget;
 		catalogMutationBusy = true;
 		removing = true;
@@ -130,8 +135,7 @@
 			closeRemove();
 		} catch (error) {
 			if (error instanceof ApiError && error.errorCode === PREAMBLE_ERROR_CODES.notFound) {
-				closeRemove();
-				operationError = m.preambles_already_removed({ title: target.preamble.title });
+				reportAlreadyRemoved(target.preamble.title);
 				return;
 			}
 			if (
@@ -144,8 +148,7 @@
 					(entry) => entry.id === target.preamble.id,
 				);
 				if (!refreshed) {
-					closeRemove();
-					operationError = m.preambles_already_removed({ title: target.preamble.title });
+					reportAlreadyRemoved(target.preamble.title);
 					return;
 				}
 				removeTarget = { preamble: refreshed, revision: preambles.snapshot.revision };
@@ -158,7 +161,7 @@
 	}
 
 	async function move(preamble: Preamble, direction: 'up' | 'down'): Promise<void> {
-		if (catalogMutationBusy || preambles.isRefreshing || normalizedQuery) return;
+		if (operationLocked || normalizedQuery) return;
 		catalogMutationBusy = true;
 		operationError = null;
 		try {
@@ -171,7 +174,7 @@
 	}
 
 	async function setEnabled(preamble: Preamble, enabled: boolean): Promise<void> {
-		if (catalogMutationBusy || preambles.isRefreshing || preamble.enabled === enabled) return;
+		if (operationLocked || preamble.enabled === enabled) return;
 		const revision = preambles.snapshot?.revision;
 		if (revision === undefined) return;
 		catalogMutationBusy = true;
@@ -210,7 +213,7 @@
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<Button
 			onclick={openCreate}
-			disabled={!preambles.hasLoaded || catalogMutationBusy || preambles.isRefreshing}
+			disabled={!preambles.hasLoaded || operationLocked}
 		>
 			<Plus class="mr-2 h-4 w-4" />
 			{m.preambles_add()}
@@ -220,7 +223,7 @@
 				variant="ghost"
 				size="icon-sm"
 				onclick={() => void refresh()}
-				disabled={preambles.isRefreshing || catalogMutationBusy}
+				disabled={operationLocked}
 				title={m.preambles_refresh()}
 				aria-label={m.preambles_refresh()}
 			>
@@ -303,14 +306,13 @@
 		</div>
 	{:else}
 		<div class="space-y-2">
-			{#each visiblePreambles as preamble (preamble.id)}
-				{@const catalogIndex = catalogIndexById.get(preamble.id) ?? -1}
+			{#each visiblePreambles as preamble, index (preamble.id)}
 				<svelte:boundary>
 					<PreambleRow
 						{preamble}
-						index={catalogIndex}
+						{index}
 						total={preambles.preambles.length}
-						disabled={catalogMutationBusy || preambles.isRefreshing}
+						disabled={operationLocked}
 						reorderDisabled={Boolean(normalizedQuery)}
 						onEdit={() => openEdit(preamble)}
 						onRemove={() => openRemove(preamble)}
@@ -334,7 +336,7 @@
 		open
 		preamble={form.kind === 'edit' ? form.preamble : null}
 		isStale={formIsStale}
-		disabled={catalogMutationBusy || preambles.isRefreshing}
+		disabled={operationLocked}
 		onSave={save}
 		onClose={closeForm}
 	/>
@@ -344,7 +346,7 @@
 		open
 		preamble={removeTarget.preamble}
 		{removing}
-		disabled={catalogMutationBusy || preambles.isRefreshing}
+		disabled={operationLocked}
 		error={removeError}
 		onConfirm={() => void confirmRemove()}
 		onClose={closeRemove}

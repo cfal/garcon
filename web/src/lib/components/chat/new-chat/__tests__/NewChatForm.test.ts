@@ -1992,9 +1992,7 @@ describe('NewChatForm', () => {
 			snippetTemplate: 'Draft {{arguments}} for {{chat_id}}',
 			snippetDefaultArguments: 'plan',
 		});
-		await fireEvent.input(messageInput, { target: { value: ';;review' } });
-		messageInput.setSelectionRange(8, 8);
-		await fireEvent.input(messageInput, { target: { value: ';;review' } });
+		await inputAtCaret(messageInput, ';;review', 8);
 		await fireEvent.click(await screen.findByRole('option', { name: /^review\b/ }));
 		await fireEvent.keyDown(await screen.findByRole('textbox', { name: 'Arguments' }), {
 			key: 'Enter',

@@ -5,6 +5,7 @@ import {
 	findLoadedSelectableSnippetByShortName,
 	hasLoadedShortNameConflict,
 	isSelectedSnippetStaleInLoadedCatalog,
+	staleSelectionRefreshSources,
 	tryExpandSelectableSnippetLocally,
 } from '../local-snippet-expansion.js';
 import {
@@ -314,5 +315,88 @@ describe('catalog helpers', () => {
 				},
 			),
 		).toBe(true);
+	});
+
+	it('orders cross-catalog conflicts before same-source mismatches in staleSelectionRefreshSources', () => {
+		const snippet = makeSnippet();
+		const selected = snippetToSelectable(snippet);
+		const matchingResponse = {
+			source: 'snippet' as const,
+			sourceId: selected.id,
+			sourceUpdatedAt: selected.updatedAt,
+		};
+
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBeNull();
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: { hasLoaded: true, preambles: [] },
+				},
+				matchingResponse,
+			),
+		).toBeNull();
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: null,
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBeNull();
+
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: { hasLoaded: false, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toEqual([]);
+		expect(
+			staleSelectionRefreshSources(selected, {
+				snippets: { hasLoaded: true, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toEqual([]);
+
+		// Same-source server update plus an ambiguous preamble refreshes both catalogs.
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: {
+						hasLoaded: true,
+						preambles: [makePreamble({ snippetShortName: snippet.shortName })],
+					},
+				},
+				{ ...matchingResponse, sourceUpdatedAt: '2026-01-02T00:00:00.000Z' },
+			),
+		).toEqual(['snippet', 'preamble']);
+
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: { hasLoaded: true, preambles: [] },
+				},
+				{ ...matchingResponse, sourceUpdatedAt: '2026-01-02T00:00:00.000Z' },
+			),
+		).toEqual(['snippet']);
+
+		expect(
+			staleSelectionRefreshSources(
+				selected,
+				{
+					snippets: { hasLoaded: true, snippets: [snippet] },
+					preambles: { hasLoaded: true, preambles: [] },
+				},
+				{ source: 'preamble', sourceId: 'other', sourceUpdatedAt: selected.updatedAt },
+			),
+		).toEqual(['snippet', 'preamble']);
 	});
 });

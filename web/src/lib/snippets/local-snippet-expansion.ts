@@ -9,8 +9,6 @@ import {
 	SNIPPET_ARGUMENTS_MAX_LENGTH,
 	SNIPPET_TEMPLATE_VARIABLES,
 	SNIPPET_VALIDATION_ERROR_MESSAGE,
-	type Snippet,
-	type SnippetArgumentsInput,
 } from '$shared/snippets';
 import {
 	matchTemplateTokens,
@@ -19,10 +17,12 @@ import {
 	TemplateExpansionTooLongError,
 } from '$shared/template-tokens';
 import {
+	mismatchedSnippetSources,
 	preambleToSelectable,
 	snippetToSelectable,
 	type SelectableSnippet,
 } from '$lib/snippets/selectable-snippet.js';
+import type { ExpandSnippetResponse, Snippet, SnippetArgumentsInput } from '$shared/snippets';
 
 export type LocalSnippetExpansionMode =
 	| { readonly kind: 'immediate'; getChatId(): string }
@@ -43,6 +43,11 @@ export interface PreambleCatalogLookup {
 	readonly preambles: readonly Preamble[];
 }
 
+export interface SnippetCatalogLookups {
+	readonly snippets?: SnippetCatalogLookup | null;
+	readonly preambles?: PreambleCatalogLookup | null;
+}
+
 function collectActiveVariables<Variable extends string>(
 	template: string,
 	allowedVariables: readonly Variable[],
@@ -56,10 +61,7 @@ function collectActiveVariables<Variable extends string>(
 
 export function hasLoadedShortNameConflict(
 	shortName: string,
-	options: {
-		readonly snippets?: SnippetCatalogLookup | null;
-		readonly preambles?: PreambleCatalogLookup | null;
-	},
+	options: SnippetCatalogLookups,
 ): boolean {
 	const hasSnippet = Boolean(
 		options.snippets?.hasLoaded &&
@@ -74,15 +76,12 @@ export function hasLoadedShortNameConflict(
 
 export function findLoadedSelectableSnippetByShortName(
 	shortName: string,
-	options: {
-		readonly snippets: SnippetCatalogLookup;
-		readonly preambles: PreambleCatalogLookup;
-	},
+	options: SnippetCatalogLookups,
 ): SelectableSnippet | null {
-	const snippet = options.snippets.hasLoaded
+	const snippet = options.snippets?.hasLoaded
 		? options.snippets.snippets.find((entry) => entry.shortName === shortName)
 		: undefined;
-	const preamble = options.preambles.hasLoaded
+	const preamble = options.preambles?.hasLoaded
 		? options.preambles.preambles.find((entry) => entry.snippetShortName === shortName)
 		: undefined;
 	// Treat cross-catalog duplicates as ambiguous so callers reconcile and defer to server precedence.
@@ -94,23 +93,16 @@ export function findLoadedSelectableSnippetByShortName(
 
 export function isSelectedSnippetStaleInLoadedCatalog(
 	selected: SelectableSnippet,
-	options: {
-		readonly snippets?: SnippetCatalogLookup | null;
-		readonly preambles?: PreambleCatalogLookup | null;
-	},
+	options: SnippetCatalogLookups,
 ): boolean {
 	const owningCatalog = selected.source === 'snippet' ? options.snippets : options.preambles;
 	if (!owningCatalog) return false;
 	if (!owningCatalog.hasLoaded) return true;
-	const current = findLoadedSelectableSnippetByShortName(selected.shortName, {
-		snippets: options.snippets ?? { hasLoaded: false, snippets: [] },
-		preambles: options.preambles ?? { hasLoaded: false, preambles: [] },
-	});
+	const current = findLoadedSelectableSnippetByShortName(selected.shortName, options);
 	if (!current || current.source !== selected.source) return true;
 	if (
 		current.id !== selected.id ||
 		current.updatedAt !== selected.updatedAt ||
-		current.shortName !== selected.shortName ||
 		current.body !== selected.body
 	) {
 		return true;
@@ -120,6 +112,22 @@ export function isSelectedSnippetStaleInLoadedCatalog(
 		current.source === 'snippet' &&
 		current.snippet.defaultArguments !== selected.snippet.defaultArguments
 	);
+}
+
+// Returns catalogs to refresh when a palette selection no longer matches loaded catalogs
+// or the server response, or null when current. Cross-catalog conflicts run before mismatch
+// checks so a same-source server response cannot refresh only one catalog.
+export function staleSelectionRefreshSources(
+	selected: SelectableSnippet,
+	catalogs: SnippetCatalogLookups,
+	response?: Pick<ExpandSnippetResponse, 'source' | 'sourceId' | 'sourceUpdatedAt'>,
+): readonly SelectableSnippet['source'][] | null {
+	if (hasLoadedShortNameConflict(selected.shortName, catalogs)) return ['snippet', 'preamble'];
+	if (response) {
+		const mismatched = mismatchedSnippetSources(selected, response);
+		if (mismatched.length > 0) return mismatched;
+	}
+	return isSelectedSnippetStaleInLoadedCatalog(selected, catalogs) ? [] : null;
 }
 
 export function tryExpandSelectableSnippetLocally(

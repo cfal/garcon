@@ -90,12 +90,11 @@ export class PreamblesStore {
 		const current = this.#confirmed ?? (await this.ensureLoaded());
 		try {
 			const create = this.deps.create ?? createPreamble;
-			return this.applySnapshot(
-				(await create({
-					expectedRevision: current.revision,
-					preamble: definition,
-				})).snapshot,
-			);
+			const result = await create({
+				expectedRevision: current.revision,
+				preamble: definition,
+			});
+			return this.applySnapshot(result.snapshot);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -110,13 +109,12 @@ export class PreamblesStore {
 		if (!this.#confirmed) await this.ensureLoaded();
 		try {
 			const update = this.deps.update ?? updatePreamble;
-			return this.applySnapshot(
-				(await update({
-					expectedRevision,
-					id,
-					preamble: definition,
-				})).snapshot,
-			);
+			const result = await update({
+				expectedRevision,
+				id,
+				preamble: definition,
+			});
+			return this.applySnapshot(result.snapshot);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -127,12 +125,11 @@ export class PreamblesStore {
 		if (!this.#confirmed) await this.ensureLoaded();
 		try {
 			const remove = this.deps.remove ?? removePreamble;
-			return this.applySnapshot(
-				(await remove({
-					expectedRevision,
-					id,
-				})).snapshot,
-			);
+			const result = await remove({
+				expectedRevision,
+				id,
+			});
+			return this.applySnapshot(result.snapshot);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -157,12 +154,11 @@ export class PreamblesStore {
 		this.snapshot = { ...current, preambles };
 		try {
 			const reorder = this.deps.reorder ?? reorderPreambles;
-			this.applySnapshot(
-				(await reorder({
-					expectedRevision: current.revision,
-					orderedPreambleIds: preambles.map((preamble) => preamble.id),
-				})).snapshot,
-			);
+			const result = await reorder({
+				expectedRevision: current.revision,
+				orderedPreambleIds: preambles.map((preamble) => preamble.id),
+			});
+			this.applySnapshot(result.snapshot);
 		} catch (error) {
 			if (this.#confirmed === current) this.snapshot = this.#confirmed;
 			await this.#refreshAfterConflict(error);
@@ -183,12 +179,12 @@ export class PreamblesStore {
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {
 		if (
-			!(error instanceof ApiError) ||
-			(error.errorCode !== PREAMBLE_ERROR_CODES.revisionConflict &&
-				error.errorCode !== PREAMBLE_ERROR_CODES.notFound)
-		)
-			return;
-		await this.refreshIfLoaded();
+			error instanceof ApiError &&
+			(error.errorCode === PREAMBLE_ERROR_CODES.revisionConflict ||
+				error.errorCode === PREAMBLE_ERROR_CODES.notFound)
+		) {
+			await this.refreshIfLoaded();
+		}
 	}
 }
 

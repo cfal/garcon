@@ -101,6 +101,11 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     await page.goto(`${integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`);
     const composer = page.getByPlaceholder('Reply...', { exact: true });
     await browserExpect(composer).toBeVisible();
+    const runSlashCommand = async (command: string, expectedValue: string | RegExp) => {
+      await composer.fill(command);
+      await composer.press('Enter');
+      await browserExpect(composer).toHaveValue(expectedValue);
+    };
 
     await composer.pressSequentially(';;');
     const palette = page.getByRole('dialog', { name: 'Insert Snippet', exact: true });
@@ -123,25 +128,15 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     expect(expandCalls).toBe(0);
     expect(projectResolveCalls).toBe(0);
 
-    await composer.fill('/s local_ctx');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(
-      `Static context for ${chatId} with literal {{arguments}}`,
-    );
+    await runSlashCommand('/s local_ctx', `Static context for ${chatId} with literal {{arguments}}`);
     expect(expandCalls).toBe(0);
     expect(projectResolveCalls).toBe(0);
 
-    await composer.fill('/s path_review');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(`Review in ${integration.executionDirs.project}`);
+    await runSlashCommand('/s path_review', `Review in ${integration.executionDirs.project}`);
     expect(expandCalls).toBe(1);
     expect(projectResolveCalls).toBe(0);
 
-    await composer.fill('/s manual_ctx');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(
-      new RegExp(`^Context for ${chatId} on \\d{4}-\\d{2}-\\d{2}$`),
-    );
+    await runSlashCommand('/s manual_ctx', new RegExp(`^Context for ${chatId} on \\d{4}-\\d{2}-\\d{2}$`));
     expect(expandCalls).toBe(2);
     expect(projectResolveCalls).toBe(0);
 
@@ -198,12 +193,8 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
 
     expandCalls = 0;
     projectResolveCalls = 0;
-    await composer.fill('/s local_review');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(`Updated open PRs for ${chatId}`);
-    await composer.fill('/s local_ctx');
-    await composer.press('Enter');
-    await browserExpect(composer).toHaveValue(`Reconnected context for ${chatId}`);
+    await runSlashCommand('/s local_review', `Updated open PRs for ${chatId}`);
+    await runSlashCommand('/s local_ctx', `Reconnected context for ${chatId}`);
     expect(expandCalls).toBe(0);
     expect(projectResolveCalls).toBe(0);
 
@@ -256,7 +247,7 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     await templateField.fill('Conflict retry {{arguments}}');
 
     const getsBeforeConflict = snippetGetDone;
-    const concurrentUpdate = await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
+    await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
       expectedRevision: snippetSnapshot.revision,
       id: dateReview.id,
       snippet: {
@@ -265,7 +256,6 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
         defaultArguments: '',
       },
     });
-    snippetSnapshot = concurrentUpdate.snapshot;
     const saveButton = editDialog.getByRole('button', { name: 'Save', exact: true });
     await browserExpect.poll(() => snippetGetDone > getsBeforeConflict, { timeout: 15_000 }).toBe(true);
     await browserExpect(saveButton).toBeEnabled();

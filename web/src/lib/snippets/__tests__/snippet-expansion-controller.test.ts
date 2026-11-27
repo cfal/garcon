@@ -30,7 +30,7 @@ describe('SnippetExpansionController', () => {
 		expect(controller.pendingShortName).toBe('review');
 		resolve(response);
 
-		expect(await running).toEqual({ kind: 'expanded', response, generation: 1 });
+		expect(await running).toEqual({ kind: 'expanded', response });
 		expect(controller.pending).toBe(false);
 		expect(controller.pendingShortName).toBeNull();
 	});

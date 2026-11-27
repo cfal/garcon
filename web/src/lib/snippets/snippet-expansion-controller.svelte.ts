@@ -8,7 +8,7 @@ export function snippetErrorDetail(error: unknown): string {
 }
 
 export type SnippetExpansionResult =
-	| { kind: 'expanded'; response: ExpandSnippetResponse; generation: number }
+	| { kind: 'expanded'; response: ExpandSnippetResponse }
 	| { kind: 'cancelled' };
 
 export interface SnippetExpansionControllerDeps {
@@ -36,7 +36,7 @@ export class SnippetExpansionController {
 			if (controller.signal.aborted || generation !== this.#generation) {
 				return { kind: 'cancelled' };
 			}
-			return { kind: 'expanded', response, generation };
+			return { kind: 'expanded', response };
 		} catch (error) {
 			if (controller.signal.aborted || generation !== this.#generation) {
 				return { kind: 'cancelled' };

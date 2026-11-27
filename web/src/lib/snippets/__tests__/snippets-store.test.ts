@@ -97,11 +97,13 @@ describe('SnippetsStore', () => {
 	});
 
 	it('starts a fresh refresh when conflict recovery joined an older request', async () => {
-		const resolvers: Array<(value: SnippetsSnapshot) => void> = [];
-		const get = vi.fn(() => new Promise<SnippetsSnapshot>((resolve) => resolvers.push(resolve)));
+		const first = Promise.withResolvers<SnippetsSnapshot>();
+		const second = Promise.withResolvers<SnippetsSnapshot>();
+		const get = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
 		const conflict = new ApiError(409, 'revision conflict', SNIPPET_ERROR_CODES.revisionConflict);
 		const store = new SnippetsStore({ get, create: vi.fn().mockRejectedValue(conflict) });
 		store.applySnapshot(snapshot(1, ['a']));
+		const refreshIfLoaded = vi.spyOn(store, 'refreshIfLoaded');
 		const olderRefresh = store.refresh();
 		const creating = store.create({
 			shortName: 'b',
@@ -109,10 +111,10 @@ describe('SnippetsStore', () => {
 			defaultArguments: '',
 		});
 
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-		resolvers[0](snapshot(1, ['a']));
+		await vi.waitFor(() => expect(refreshIfLoaded).toHaveBeenCalledOnce());
+		first.resolve(snapshot(1, ['a']));
 		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-		resolvers[1](snapshot(2, ['a', 'b']));
+		second.resolve(snapshot(2, ['a', 'b']));
 
 		await olderRefresh;
 		await expect(creating).rejects.toBe(conflict);
@@ -202,17 +204,16 @@ describe('SnippetsStore', () => {
 	});
 
 	it('performs a fresh read when conflict recovery joins a failing in-flight refresh', async () => {
-		let rejectInitial!: (error: Error) => void;
+		const initial = Promise.withResolvers<SnippetsSnapshot>();
 		const readFailure = new Error('temporary failure');
 		const conflict = new ApiError(409, 'revision conflict', SNIPPET_ERROR_CODES.revisionConflict);
 		const get = vi
 			.fn()
-			.mockImplementationOnce(
-				() => new Promise<SnippetsSnapshot>((_resolve, reject) => { rejectInitial = reject; }),
-			)
+			.mockReturnValueOnce(initial.promise)
 			.mockResolvedValueOnce(snapshot(3, ['a', 'b']));
 		const store = new SnippetsStore({ get, create: vi.fn().mockRejectedValue(conflict) });
 		store.applySnapshot(snapshot(1, ['a']));
+		const refreshIfLoaded = vi.spyOn(store, 'refreshIfLoaded');
 
 		const olderRefresh = store.refresh().catch((error) => error);
 		const creating = store.create({
@@ -220,8 +221,8 @@ describe('SnippetsStore', () => {
 			template: 'Template b',
 			defaultArguments: '',
 		});
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-		rejectInitial(readFailure);
+		await vi.waitFor(() => expect(refreshIfLoaded).toHaveBeenCalledOnce());
+		initial.reject(readFailure);
 
 		expect(await olderRefresh).toBe(readFailure);
 		await expect(creating).rejects.toBe(conflict);

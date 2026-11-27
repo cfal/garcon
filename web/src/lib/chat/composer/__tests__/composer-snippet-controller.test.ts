@@ -32,6 +32,17 @@ const pathSnippet: Snippet = {
 	template: 'Review {{arguments}} in {{project_path}}',
 };
 
+const pathSnippetResponse: ExpandSnippetResponse = {
+	success: true,
+	source: 'snippet',
+	sourceId: pathSnippet.id,
+	sourceUpdatedAt: pathSnippet.updatedAt,
+	shortName: pathSnippet.shortName,
+	contextExecutorId: 'local',
+	contextProjectPath: '/repo',
+	expandedText: 'Review docs in /repo',
+};
+
 const preamble: Preamble = {
 	id: '00000000-0000-4000-8000-000000000001',
 	enabled: false,
@@ -47,7 +58,6 @@ const preamble: Preamble = {
 
 function setup(overrides: Partial<ComposerSnippetControllerOptions<string>> = {}) {
 	let text = 'Before ;;review after';
-	let selection: { start: number; end: number } | null = { start: 0, end: 0 };
 	let executionKey = 'local\u0000claude';
 	const notifyError = vi.fn();
 	const onExpanded = vi.fn();
@@ -75,7 +85,7 @@ function setup(overrides: Partial<ComposerSnippetControllerOptions<string>> = {}
 		isConversationInput: () => true,
 		isTransformPending: () => false,
 		getText: () => text,
-		getSelection: () => selection,
+		getSelection: () => ({ start: 0, end: 0 }),
 		hasProjectPath: () => true,
 		getLocalChatId: () => 'chat-1',
 		buildServerContext,
@@ -105,9 +115,6 @@ function setup(overrides: Partial<ComposerSnippetControllerOptions<string>> = {}
 		buildServerContext,
 		setText: (next: string) => {
 			text = next;
-		},
-		setSelection: (next: { start: number; end: number } | null) => {
-			selection = next;
 		},
 		setExecutionKey: (next: string) => {
 			executionKey = next;
@@ -175,16 +182,7 @@ describe('ComposerSnippetController', () => {
 
 	it('falls back to server expansion for project_path snippets and unknown slash names', async () => {
 		const env = setup();
-		mockExpandSnippet.mockResolvedValueOnce({
-			success: true,
-			source: 'snippet',
-			sourceId: pathSnippet.id,
-			sourceUpdatedAt: pathSnippet.updatedAt,
-			shortName: pathSnippet.shortName,
-			contextExecutorId: 'local',
-			contextProjectPath: '/repo',
-			expandedText: 'Review docs in /repo',
-		});
+		mockExpandSnippet.mockResolvedValueOnce(pathSnippetResponse);
 
 		const paletteResult = await env.controller.insertFromPalette(
 			env.palette,
@@ -288,16 +286,7 @@ describe('ComposerSnippetController', () => {
 			);
 			if (change === 'text') env.setText('Edited in flight');
 			else env.setExecutionKey('remote\u0000codex');
-			resolve({
-				success: true,
-				source: 'snippet',
-				sourceId: pathSnippet.id,
-				sourceUpdatedAt: pathSnippet.updatedAt,
-				shortName: pathSnippet.shortName,
-				contextExecutorId: 'local',
-				contextProjectPath: '/repo',
-				expandedText: 'stale expansion',
-			});
+			resolve({ ...pathSnippetResponse, expandedText: 'stale expansion' });
 
 			expect(await running).toBe('cancelled');
 			expect(env.onExpanded).not.toHaveBeenCalled();
@@ -328,16 +317,7 @@ describe('ComposerSnippetController', () => {
 				mutation === 'updated'
 					? [snippet, { ...pathSnippet, updatedAt: '2026-01-03T00:00:00.000Z' }]
 					: [snippet];
-			resolve({
-				success: true,
-				source: 'snippet',
-				sourceId: pathSnippet.id,
-				sourceUpdatedAt: pathSnippet.updatedAt,
-				shortName: pathSnippet.shortName,
-				contextExecutorId: 'local',
-				contextProjectPath: '/repo',
-				expandedText: 'stale expansion',
-			});
+			resolve({ ...pathSnippetResponse, expandedText: 'stale expansion' });
 
 			expect(await running).toBe('cancelled');
 			expect(env.onExpanded).not.toHaveBeenCalled();
