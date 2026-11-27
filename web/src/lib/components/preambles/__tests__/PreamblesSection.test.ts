@@ -429,9 +429,28 @@ describe('PreamblesSection', () => {
 		expect(remove).toHaveBeenNthCalledWith(1, { expectedRevision: 1, id: 'global' });
 		expect(await screen.findByText(/Preambles changed/)).toBeTruthy();
 		expect(screen.getByRole('dialog', { name: 'Remove Preamble' }).isConnected).toBe(true);
+		expect(screen.getByText('Remove "Renamed externally"? This cannot be undone.')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove preamble' }));
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
 		expect(remove).toHaveBeenNthCalledWith(2, { expectedRevision: 2, id: 'global' });
+	});
+
+	it('closes the delete confirmation and reports when the preamble was already removed', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const conflict = new ApiError(409, 'Preambles changed', 'PREAMBLE_REVISION_CONFLICT');
+		const remove = vi.fn().mockRejectedValueOnce(conflict);
+		const get = vi.fn().mockResolvedValue({ revision: 2, preambles: [] });
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get, remove },
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
+		expect(await screen.findByText('"Global conventions" was already removed.')).toBeTruthy();
+		expect(remove).toHaveBeenCalledOnce();
 	});
 });

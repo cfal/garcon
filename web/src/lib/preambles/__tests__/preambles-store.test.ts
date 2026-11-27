@@ -272,7 +272,10 @@ describe('PreamblesStore', () => {
 		const firstMove = store.move('c', 'up');
 		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
 		const secondMove = store.move('c', 'up');
+		await Promise.resolve();
+		await Promise.resolve();
 		expect(reorder).toHaveBeenCalledTimes(1);
+		expect(store.preambles.map((entry) => entry.id)).toEqual(['a', 'c', 'b']);
 
 		rejectors[0]!(firstFailure);
 		await expect(firstMove).rejects.toBe(firstFailure);
@@ -283,6 +286,41 @@ describe('PreamblesStore', () => {
 		expect(store.preambles.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
 	});
 
+	it('queues a second move to use the revision and order acknowledged by the first move', async () => {
+		const resolvers: Array<(value: { success: true; snapshot: PreamblesSnapshot }) => void> = [];
+		const reorder = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolvers.push(resolve);
+				}),
+		);
+		const store = new PreamblesStore({ reorder });
+		store.applySnapshot(snapshot(1, ['a', 'b', 'c']));
+
+		const firstMove = store.move('c', 'up');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
+		const secondMove = store.move('c', 'up');
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(reorder).toHaveBeenCalledTimes(1);
+		expect(reorder).toHaveBeenNthCalledWith(1, {
+			expectedRevision: 1,
+			orderedPreambleIds: ['a', 'c', 'b'],
+		});
+
+		resolvers[0]!({ success: true, snapshot: snapshot(2, ['a', 'c', 'b']) });
+		await firstMove;
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(2));
+		expect(reorder).toHaveBeenNthCalledWith(2, {
+			expectedRevision: 2,
+			orderedPreambleIds: ['c', 'a', 'b'],
+		});
+
+		resolvers[1]!({ success: true, snapshot: snapshot(3, ['c', 'a', 'b']) });
+		await secondMove;
+		expect(store.snapshot).toEqual(snapshot(3, ['c', 'a', 'b']));
+	});
+
 	it('forwards caller-supplied expectedRevision on remove', async () => {
 		const remove = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(5, []) });
 		const store = new PreamblesStore({ remove });
@@ -291,5 +329,43 @@ describe('PreamblesStore', () => {
 		await store.remove('a', 2);
 
 		expect(remove).toHaveBeenCalledWith({ expectedRevision: 2, id: 'a' });
+	});
+
+	it('reconciles instead of installing a late pre-restore write acknowledgement after a backwards refresh', async () => {
+		let resolveUpdate!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		const update = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveUpdate = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(2, ['restored']))
+			.mockResolvedValueOnce(snapshot(2, ['restored']));
+		const store = new PreamblesStore({ get, update });
+		store.applySnapshot(snapshot(8, ['a']));
+
+		const updating = store.update(
+			'a',
+			{
+				enabled: true,
+				title: 'Pre-restore edit',
+				content: 'Pre-restore body',
+				scope: { type: 'global' },
+			},
+			8,
+		);
+		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+
+		await store.refresh();
+		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
+
+		resolveUpdate({ success: true, snapshot: snapshot(9, ['pre-restore']) });
+		await updating;
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
+		expect(store.status).toBe('ready');
 	});
 });

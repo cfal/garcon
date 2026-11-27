@@ -25,6 +25,7 @@ export class SnippetsStore {
 	#loadPromise: Promise<SnippetsSnapshot> | null = null;
 	#confirmed: SnippetsSnapshot | null = null;
 	#installGeneration = 0;
+	#resetEpoch = 0;
 	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
 	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
@@ -57,6 +58,9 @@ export class SnippetsStore {
 				) {
 					return this.snapshot ?? this.#confirmed;
 				}
+				if (this.#confirmed && nextSnapshot.revision < this.#confirmed.revision) {
+					this.#resetEpoch += 1;
+				}
 				return this.#installSnapshot(nextSnapshot);
 			})
 			.catch((error) => {
@@ -88,10 +92,11 @@ export class SnippetsStore {
 
 	async create(definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
 		const current = await this.#requireSnapshot();
+		const resetEpoch = this.#resetEpoch;
 		try {
 			const create = this.deps.create ?? createSnippet;
 			const result = await create({ expectedRevision: current.revision, snippet: definition });
-			return this.applySnapshot(result.snapshot);
+			return await this.#applyMutationSnapshot(result.snapshot, resetEpoch);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -104,6 +109,7 @@ export class SnippetsStore {
 		expectedRevision: number,
 	): Promise<SnippetsSnapshot> {
 		await this.#requireSnapshot();
+		const resetEpoch = this.#resetEpoch;
 		try {
 			const update = this.deps.update ?? updateSnippet;
 			const result = await update({
@@ -111,7 +117,7 @@ export class SnippetsStore {
 				id,
 				snippet: definition,
 			});
-			return this.applySnapshot(result.snapshot);
+			return await this.#applyMutationSnapshot(result.snapshot, resetEpoch);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -120,10 +126,11 @@ export class SnippetsStore {
 
 	async remove(id: string, expectedRevision: number): Promise<SnippetsSnapshot> {
 		await this.#requireSnapshot();
+		const resetEpoch = this.#resetEpoch;
 		try {
 			const remove = this.deps.remove ?? removeSnippet;
 			const result = await remove({ expectedRevision, id });
-			return this.applySnapshot(result.snapshot);
+			return await this.#applyMutationSnapshot(result.snapshot, resetEpoch);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -135,6 +142,17 @@ export class SnippetsStore {
 			return this.snapshot ?? this.#confirmed;
 		}
 		return this.#installSnapshot(nextSnapshot);
+	}
+
+	async #applyMutationSnapshot(
+		nextSnapshot: SnippetsSnapshot,
+		resetEpoch: number,
+	): Promise<SnippetsSnapshot> {
+		if (this.#resetEpoch !== resetEpoch) {
+			await this.refreshIfLoaded();
+			return this.snapshot ?? this.#confirmed ?? nextSnapshot;
+		}
+		return this.applySnapshot(nextSnapshot);
 	}
 
 	#installSnapshot(nextSnapshot: SnippetsSnapshot): SnippetsSnapshot {

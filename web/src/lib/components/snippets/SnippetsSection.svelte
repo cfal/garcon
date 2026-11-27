@@ -40,6 +40,7 @@
 	let removeTarget = $state<{ snippet: Snippet; revision: number } | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
+	let operationError = $state<string | null>(null);
 	const operationLocked = $derived(removing || snippets.isRefreshing);
 
 	$effect(() => {
@@ -53,12 +54,14 @@
 
 	function openCreate(): void {
 		if (operationLocked) return;
+		operationError = null;
 		form = { kind: 'create' };
 	}
 
 	function openEdit(snippet: Snippet): void {
 		const revision = snippets.snapshot?.revision;
 		if (operationLocked || revision === undefined) return;
+		operationError = null;
 		form = { kind: 'edit', snippet, revision };
 	}
 
@@ -69,6 +72,7 @@
 	function openRemove(snippet: Snippet): void {
 		const revision = snippets.snapshot?.revision;
 		if (operationLocked || revision === undefined) return;
+		operationError = null;
 		removeError = null;
 		removeTarget = { snippet, revision };
 	}
@@ -111,7 +115,15 @@
 				error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
 				snippets.snapshot !== null
 			) {
-				removeTarget.revision = snippets.snapshot.revision;
+				const targetId = removeTarget.snippet.id;
+				const refreshed = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
+				if (!refreshed) {
+					const removedName = removeTarget.snippet.shortName;
+					closeRemove();
+					operationError = m.snippets_already_removed({ name: removedName });
+					return;
+				}
+				removeTarget = { snippet: refreshed, revision: snippets.snapshot.revision };
 			}
 			removeError = m.snippets_remove_error({ detail: errorDetail(error) });
 		} finally {
@@ -135,7 +147,10 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={() => void snippets.refreshInBackground()}
+				onclick={() => {
+					operationError = null;
+					void snippets.refreshInBackground();
+				}}
 				disabled={operationLocked}
 				title={m.snippets_refresh()}
 				aria-label={m.snippets_refresh()}
@@ -147,6 +162,11 @@
 
 	<SnippetSearchField bind:value={query} />
 
+	{#if operationError}
+		<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+			{operationError}
+		</p>
+	{/if}
 	{#if snippets.hasLoaded && snippets.snippets.length >= SNIPPET_MAX_COUNT}
 		<p class="text-xs text-muted-foreground">{m.snippets_limit_reached()}</p>
 	{/if}

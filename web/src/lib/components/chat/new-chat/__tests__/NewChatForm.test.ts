@@ -1983,6 +1983,10 @@ describe('NewChatForm', () => {
 
 	it('expands eligible palette and slash snippets locally using the prospective chat ID', async () => {
 		stubMatchMedia(false);
+		vi.mocked(clientChatId.createClientChatId)
+			.mockReset()
+			.mockReturnValueOnce(PROSPECTIVE_CHAT_ID)
+			.mockReturnValueOnce(RESEEDED_CHAT_ID);
 		const onStartChat = vi.fn();
 		const messageInput = await renderSubmittableForm(onStartChat, {
 			snippetTemplate: 'Draft {{arguments}} for {{chat_id}}',
@@ -1996,14 +2000,23 @@ describe('NewChatForm', () => {
 			key: 'Enter',
 		});
 
-		await waitFor(() => expect(messageInput.value).toMatch(/^Draft plan for \d+$/));
-		const prospectiveChatId = messageInput.value.slice('Draft plan for '.length);
+		await waitFor(() =>
+			expect(messageInput.value).toBe(`Draft plan for ${PROSPECTIVE_CHAT_ID}`),
+		);
 		await fireEvent.input(messageInput, { target: { value: '/s review next' } });
 		await fireEvent.keyDown(messageInput, { key: 'Enter' });
 
-		await waitFor(() => expect(messageInput.value).toBe(`Draft next for ${prospectiveChatId}`));
+		await waitFor(() =>
+			expect(messageInput.value).toBe(`Draft next for ${PROSPECTIVE_CHAT_ID}`),
+		);
+		await fireEvent.keyDown(messageInput, { key: 'Enter' });
+
+		expect(clientChatId.createClientChatId).toHaveBeenCalledTimes(1);
 		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
-		expect(onStartChat).not.toHaveBeenCalled();
+		expect(onStartChat).toHaveBeenCalledWith(
+			expect.objectContaining({ firstMessage: `Draft next for ${PROSPECTIVE_CHAT_ID}` }),
+			PROSPECTIVE_CHAT_ID,
+		);
 	});
 });
 

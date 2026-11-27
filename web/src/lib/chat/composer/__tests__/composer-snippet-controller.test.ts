@@ -222,11 +222,16 @@ describe('ComposerSnippetController', () => {
 	});
 
 	it('refreshes both affected catalogs when a palette server fallback returns another source', async () => {
-		const env = setup();
-		const selectablePreamble = preambleToSelectable({
-			...preamble,
-			content: 'Today {{current_date}}',
-		})!;
+		const datePreamble = { ...preamble, content: 'Today {{current_date}}' };
+		const refreshPreambles = vi.fn(async () => {});
+		const env = setup({
+			preambles: {
+				hasLoaded: true,
+				preambles: [datePreamble],
+				refreshIfLoaded: refreshPreambles,
+			},
+		});
+		const selectablePreamble = preambleToSelectable(datePreamble)!;
 		mockExpandSnippet.mockResolvedValueOnce({
 			success: true,
 			source: 'snippet',
@@ -240,7 +245,7 @@ describe('ComposerSnippetController', () => {
 
 		const result = await env.controller.insertFromPalette(env.palette, selectablePreamble, '');
 		expect(result).toBe('cancelled');
-		expect(env.refreshPreambles).toHaveBeenCalledTimes(1);
+		expect(refreshPreambles).toHaveBeenCalledTimes(1);
 		expect(env.refreshSnippets).toHaveBeenCalledTimes(1);
 		expect(env.notifyError).toHaveBeenCalled();
 		expect(env.onExpanded).not.toHaveBeenCalled();
@@ -335,5 +340,31 @@ describe('ComposerSnippetController', () => {
 		).toBe('cancelled');
 		expect(detachedEnv.palette.dismiss).toHaveBeenCalledTimes(1);
 		expect(detachedEnv.beforeExpand).not.toHaveBeenCalled();
+	});
+
+	it('cancels palette insertion without expanding when the loaded catalog changed or removed the item', async () => {
+		let loadedSnippets: Snippet[] = [snippet];
+		const env = setup({
+			snippets: {
+				hasLoaded: true,
+				get snippets() {
+					return loadedSnippets;
+				},
+				refreshIfLoaded: vi.fn(async () => {}),
+			},
+		});
+		const selected = snippetToSelectable(snippet);
+		loadedSnippets = [{ ...snippet, template: 'Changed {{arguments}}', updatedAt: '2026-01-02T00:00:00.000Z' }];
+
+		expect(await env.controller.insertFromPalette(env.palette, selected, 'API')).toBe('cancelled');
+		expect(mockExpandSnippet).not.toHaveBeenCalled();
+		expect(env.onExpanded).not.toHaveBeenCalled();
+		expect(env.notifyError).toHaveBeenCalledWith('That snippet changed. Select it again.');
+		expect(env.palette.dismiss).toHaveBeenCalledTimes(1);
+
+		loadedSnippets = [];
+		expect(await env.controller.insertFromPalette(env.palette, selected, 'API')).toBe('cancelled');
+		expect(mockExpandSnippet).not.toHaveBeenCalled();
+		expect(env.onExpanded).not.toHaveBeenCalled();
 	});
 });

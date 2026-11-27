@@ -74,6 +74,35 @@ export function findLoadedSelectableSnippetByShortName(
 	return null;
 }
 
+export function isSelectedSnippetStaleInLoadedCatalog(
+	selected: SelectableSnippet,
+	options: {
+		readonly snippets?: SnippetCatalogLookup | null;
+		readonly preambles?: PreambleCatalogLookup | null;
+	},
+): boolean {
+	const owningCatalog = selected.source === 'snippet' ? options.snippets : options.preambles;
+	if (!owningCatalog?.hasLoaded) return false;
+	const current = findLoadedSelectableSnippetByShortName(selected.shortName, {
+		snippets: options.snippets ?? { hasLoaded: false, snippets: [] },
+		preambles: options.preambles ?? { hasLoaded: false, preambles: [] },
+	});
+	if (!current || current.source !== selected.source) return true;
+	if (
+		current.id !== selected.id ||
+		current.updatedAt !== selected.updatedAt ||
+		current.shortName !== selected.shortName ||
+		current.body !== selected.body
+	) {
+		return true;
+	}
+	return (
+		selected.source === 'snippet' &&
+		current.source === 'snippet' &&
+		current.snippet.defaultArguments !== selected.snippet.defaultArguments
+	);
+}
+
 export function tryExpandSelectableSnippetLocally(
 	item: SelectableSnippet,
 	argumentsInput: SnippetArgumentsInput,

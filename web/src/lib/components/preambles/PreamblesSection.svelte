@@ -77,6 +77,7 @@
 	function openRemove(preamble: Preamble): void {
 		const revision = preambles.snapshot?.revision;
 		if (catalogMutationBusy || preambles.isRefreshing || revision === undefined) return;
+		operationError = null;
 		removeError = null;
 		removeTarget = { preamble, revision };
 	}
@@ -117,13 +118,20 @@
 			await preambles.remove(removeTarget.preamble.id, removeTarget.revision);
 			closeRemove();
 		} catch (error) {
-			// Update revision in place so an explicit retry uses the refreshed catalog after a 409.
 			if (
 				error instanceof ApiError &&
 				error.errorCode === PREAMBLE_ERROR_CODES.revisionConflict &&
 				preambles.snapshot !== null
 			) {
-				removeTarget.revision = preambles.snapshot.revision;
+				const targetId = removeTarget.preamble.id;
+				const refreshed = preambles.snapshot.preambles.find((entry) => entry.id === targetId);
+				if (!refreshed) {
+					const removedTitle = removeTarget.preamble.title;
+					closeRemove();
+					operationError = m.preambles_already_removed({ title: removedTitle });
+					return;
+				}
+				removeTarget = { preamble: refreshed, revision: preambles.snapshot.revision };
 			}
 			removeError = error instanceof Error ? error.message : m.preambles_remove_error();
 		} finally {

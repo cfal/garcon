@@ -5,6 +5,7 @@ import type { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-pale
 import { applySnippetTriggerReplacement } from '$lib/chat/composer/snippet-trigger.js';
 import {
 	findLoadedSelectableSnippetByShortName,
+	isSelectedSnippetStaleInLoadedCatalog,
 	tryExpandSelectableSnippetLocally,
 	type PreambleCatalogLookup,
 	type SnippetCatalogLookup,
@@ -143,6 +144,13 @@ export class ComposerSnippetController<Prepared> {
 			if (!this.options.hasProjectPath() && this.options.onMissingProjectPath) {
 				this.options.onMissingProjectPath();
 				if (invocation.kind === 'palette') await this.options.onSettled();
+				return 'cancelled';
+			}
+			if (
+				invocation.kind === 'palette' &&
+				isSelectedSnippetStaleInLoadedCatalog(invocation.snippet, this.options)
+			) {
+				await this.#notifyAndSettle(m.snippets_changed_before_expansion());
 				return 'cancelled';
 			}
 			if (this.options.hasProjectPath()) {

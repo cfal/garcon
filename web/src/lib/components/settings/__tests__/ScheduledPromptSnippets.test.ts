@@ -135,4 +135,23 @@ describe('scheduled prompt snippet interactions', () => {
 		await fireEvent(prompt, new InputEvent('input', { bubbles: true, isComposing: false }));
 		expect(await screen.findByRole('dialog', { name: 'Insert Snippet' })).toBeTruthy();
 	});
+
+	it('cancels stale arguments locally when the loaded catalog changed or deleted the snippet', async () => {
+		const { snippets } = renderEditor([localSnippet]);
+		await openArguments('local-only');
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Arguments' }), {
+			target: { value: 'draft arguments' },
+		});
+
+		snippets.applySnapshot({
+			revision: 2,
+			snippets: [{ ...localSnippet, template: 'Updated {{arguments}}', updatedAt: '2026-01-02T00:00:00.000Z' }],
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Insert snippet' }));
+
+		expect(await screen.findByText(/That snippet changed/)).toBeTruthy();
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(screen.getByTestId('prompt-draft').textContent).toBe('Before ');
+		expect(expand).not.toHaveBeenCalled();
+	});
 });

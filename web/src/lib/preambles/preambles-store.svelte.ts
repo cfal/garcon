@@ -33,6 +33,7 @@ export class PreamblesStore {
 	#loadPromise: Promise<PreamblesSnapshot> | null = null;
 	#confirmed: PreamblesSnapshot | null = null;
 	#installGeneration = 0;
+	#resetEpoch = 0;
 	#moveQueue: Promise<void> = Promise.resolve();
 	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
@@ -66,6 +67,9 @@ export class PreamblesStore {
 				) {
 					return this.snapshot ?? this.#confirmed;
 				}
+				if (this.#confirmed && next.revision < this.#confirmed.revision) {
+					this.#resetEpoch += 1;
+				}
 				return this.#installSnapshot(next);
 			})
 			.catch((error) => {
@@ -98,12 +102,16 @@ export class PreamblesStore {
 
 	async create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
 		const current = await this.#requireSnapshot();
+		const resetEpoch = this.#resetEpoch;
 		try {
 			const create = this.deps.create ?? createPreamble;
-			return this.applySnapshot((await create({
-				expectedRevision: current.revision,
-				preamble: definition,
-			})).snapshot);
+			return await this.#applyMutationSnapshot(
+				(await create({
+					expectedRevision: current.revision,
+					preamble: definition,
+				})).snapshot,
+				resetEpoch,
+			);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -116,13 +124,17 @@ export class PreamblesStore {
 		expectedRevision: number,
 	): Promise<PreamblesSnapshot> {
 		await this.#requireSnapshot();
+		const resetEpoch = this.#resetEpoch;
 		try {
 			const update = this.deps.update ?? updatePreamble;
-			return this.applySnapshot((await update({
-				expectedRevision,
-				id,
-				preamble: definition,
-			})).snapshot);
+			return await this.#applyMutationSnapshot(
+				(await update({
+					expectedRevision,
+					id,
+					preamble: definition,
+				})).snapshot,
+				resetEpoch,
+			);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -131,12 +143,16 @@ export class PreamblesStore {
 
 	async remove(id: string, expectedRevision: number): Promise<PreamblesSnapshot> {
 		await this.#requireSnapshot();
+		const resetEpoch = this.#resetEpoch;
 		try {
 			const remove = this.deps.remove ?? removePreamble;
-			return this.applySnapshot((await remove({
-				expectedRevision,
-				id,
-			})).snapshot);
+			return await this.#applyMutationSnapshot(
+				(await remove({
+					expectedRevision,
+					id,
+				})).snapshot,
+				resetEpoch,
+			);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -157,13 +173,17 @@ export class PreamblesStore {
 		const preambles = [...current.preambles];
 		[preambles[index], preambles[target]] = [preambles[target], preambles[index]];
 		const generation = this.#installGeneration;
+		const resetEpoch = this.#resetEpoch;
 		this.snapshot = { ...current, preambles };
 		try {
 			const reorder = this.deps.reorder ?? reorderPreambles;
-			this.applySnapshot((await reorder({
-				expectedRevision: current.revision,
-				orderedPreambleIds: preambles.map((preamble) => preamble.id),
-			})).snapshot);
+			await this.#applyMutationSnapshot(
+				(await reorder({
+					expectedRevision: current.revision,
+					orderedPreambleIds: preambles.map((preamble) => preamble.id),
+				})).snapshot,
+				resetEpoch,
+			);
 		} catch (error) {
 			if (this.#installGeneration === generation) this.snapshot = this.#confirmed;
 			await this.#refreshAfterConflict(error);
@@ -176,6 +196,17 @@ export class PreamblesStore {
 			return this.snapshot ?? this.#confirmed;
 		}
 		return this.#installSnapshot(next);
+	}
+
+	async #applyMutationSnapshot(
+		next: PreamblesSnapshot,
+		resetEpoch: number,
+	): Promise<PreamblesSnapshot> {
+		if (this.#resetEpoch !== resetEpoch) {
+			await this.refreshIfLoaded();
+			return this.snapshot ?? this.#confirmed ?? next;
+		}
+		return this.applySnapshot(next);
 	}
 
 	#installSnapshot(next: PreamblesSnapshot): PreamblesSnapshot {

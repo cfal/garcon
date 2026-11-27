@@ -3,6 +3,7 @@ import type { Preamble } from '$shared/preambles';
 import { SNIPPET_ARGUMENTS_MAX_LENGTH, SNIPPET_EXPANDED_MAX_LENGTH, type Snippet } from '$shared/snippets';
 import {
 	findLoadedSelectableSnippetByShortName,
+	isSelectedSnippetStaleInLoadedCatalog,
 	tryExpandSelectableSnippetLocally,
 } from '../local-snippet-expansion.js';
 import {
@@ -234,5 +235,46 @@ describe('catalog helpers', () => {
 				sourceUpdatedAt: item.updatedAt,
 			}),
 		).toEqual(['snippet', 'preamble']);
+	});
+
+	it('detects when a selected palette item is deleted or changed in loaded catalogs', () => {
+		const snippet = makeSnippet();
+		const selected = snippetToSelectable(snippet);
+		const selectedPreamble = preambleToSelectable(makePreamble())!;
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: true, snippets: [snippet] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(false);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: false, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(false);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: true, snippets: [] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(true);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: { hasLoaded: true, snippets: [{ ...snippet, defaultArguments: 'other' }] },
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(true);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selectedPreamble, {
+				snippets: { hasLoaded: true, snippets: [{ ...snippet, shortName: 'context' }] },
+				preambles: { hasLoaded: true, preambles: [makePreamble()] },
+			}),
+		).toBe(true);
 	});
 });

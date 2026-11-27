@@ -254,4 +254,37 @@ describe('SnippetsStore', () => {
 		expect(update).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 2, id: 'a' }));
 		expect(remove).toHaveBeenCalledWith({ expectedRevision: 3, id: 'a' });
 	});
+
+	it('reconciles instead of installing a late pre-restore write acknowledgement after a backwards refresh', async () => {
+		let resolveUpdate!: (value: { success: true; snapshot: SnippetsSnapshot }) => void;
+		const update = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: SnippetsSnapshot }>((resolve) => {
+					resolveUpdate = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(2, ['restored']))
+			.mockResolvedValueOnce(snapshot(2, ['restored']));
+		const store = new SnippetsStore({ get, update });
+		store.applySnapshot(snapshot(8, ['old']));
+
+		const updating = store.update(
+			'old',
+			{ shortName: 'old', template: 'Pre-restore edit', defaultArguments: '' },
+			8,
+		);
+		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+
+		await store.refresh();
+		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
+
+		resolveUpdate({ success: true, snapshot: snapshot(9, ['pre-restore']) });
+		await updating;
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
+		expect(store.status).toBe('ready');
+	});
 });

@@ -294,4 +294,39 @@ describe('SnippetsSection', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
 		expect(screen.queryByRole('button', { name: 'Remove review' })).toBeNull();
 	});
+
+	it('updates the delete confirmation name after a concurrent rename and retries cleanly', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+		expect((await screen.findByRole('dialog', { name: 'Remove Snippet' })).textContent).toContain(
+			'Remove /snippet review?',
+		);
+
+		await fireEvent.click(screen.getByTestId('external-rename'));
+		await screen.findByText('review_renamed');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		expect(await screen.findByText(/Snippets changed/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).textContent).toContain(
+			'Remove /snippet review_renamed?',
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(screen.queryByText('review_renamed')).toBeNull();
+	});
+
+	it('closes the delete confirmation and reports when another client already removed the snippet', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+
+		await fireEvent.click(screen.getByTestId('external-remove'));
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove review' })).toBeNull());
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(await screen.findByText('/snippet review was already removed.')).toBeTruthy();
+	});
 });

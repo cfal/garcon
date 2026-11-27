@@ -114,6 +114,31 @@
 		};
 		void store.refreshInBackground();
 	}
+	function renameExternally(): void {
+		current = {
+			revision: current.revision + 1,
+			snippets: sortSnippetsByShortName(
+				current.snippets.map((snippet) =>
+					snippet.shortName === 'review'
+						? {
+								...snippet,
+								shortName: 'review_renamed',
+								template: 'Renamed externally',
+								updatedAt: '2026-01-04T00:00:00.000Z',
+							}
+						: snippet,
+				),
+			),
+		};
+		void store.refreshInBackground();
+	}
+	function removeExternally(): void {
+		current = {
+			revision: current.revision + 1,
+			snippets: current.snippets.filter((snippet) => snippet.shortName !== 'review'),
+		};
+		void store.refreshInBackground();
+	}
 	setSnippets(store);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
@@ -135,6 +160,12 @@
 </button>
 <button type="button" onclick={advanceExternally} data-testid="external-edit">
 	External edit
+</button>
+<button type="button" onclick={renameExternally} data-testid="external-rename">
+	External rename
+</button>
+<button type="button" onclick={removeExternally} data-testid="external-remove">
+	External remove
 </button>
 <button type="button" onclick={() => releaseRefresh?.()} data-testid="release-refresh">
 	Release refresh

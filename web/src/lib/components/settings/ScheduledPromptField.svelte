@@ -54,6 +54,8 @@
 	const snippetCatalog = untrack(() => (snippetContext !== undefined ? getSnippets() : null));
 	const preambleCatalog = untrack(() => (snippetContext !== undefined ? getPreambles() : null));
 	const snippets = new ScheduledPromptSnippets({
+		snippets: snippetCatalog,
+		preambles: preambleCatalog,
 		get prompt() {
 			return prompt;
 		},

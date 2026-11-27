@@ -200,4 +200,42 @@ describe('scheduled prompt snippets', () => {
 		);
 		expect(onInsert).not.toHaveBeenCalled();
 	});
+
+	it('cancels stale selections locally when the loaded catalog no longer matches', async () => {
+		if (localItem.source !== 'snippet') throw new Error('expected snippet item');
+		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
+		const onInsert = vi.fn(async () => {});
+		let currentSnippets = [localItem.snippet];
+		const controller = new ScheduledPromptSnippets({
+			snippets: {
+				hasLoaded: true,
+				get snippets() {
+					return currentSnippets;
+				},
+			},
+			preambles: { hasLoaded: true, preambles: [] },
+			get prompt() {
+				return input.prompt;
+			},
+			get interactionKey() {
+				return input.key;
+			},
+			get context() {
+				return {
+					type: 'scheduled-prompt' as const,
+					target: { type: 'new-chat' as const, projectPath: '/repo' },
+				};
+			},
+			onInsert,
+			onPendingChange: vi.fn(),
+			onSourceChanged: vi.fn(),
+		});
+		controller.open(7, 15);
+		currentSnippets = [];
+
+		expect(await controller.insert(localItem, 'API')).toBe('cancelled');
+		expect(controller.error).toContain('changed');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onInsert).not.toHaveBeenCalled();
+	});
 });

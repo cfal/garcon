@@ -4,7 +4,12 @@ import {
 	type SelectableSnippet,
 } from '$lib/snippets/selectable-snippet.js';
 import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
-import { tryExpandSelectableSnippetLocally } from '$lib/snippets/local-snippet-expansion.js';
+import {
+	isSelectedSnippetStaleInLoadedCatalog,
+	tryExpandSelectableSnippetLocally,
+	type PreambleCatalogLookup,
+	type SnippetCatalogLookup,
+} from '$lib/snippets/local-snippet-expansion.js';
 import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
 import {
 	applySnippetTriggerReplacement,
@@ -14,6 +19,8 @@ import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertio
 import * as m from '$lib/paraglide/messages.js';
 
 interface Options {
+	readonly snippets?: SnippetCatalogLookup | null;
+	readonly preambles?: PreambleCatalogLookup | null;
 	get prompt(): string;
 	get context(): ScheduledSnippetExpansionContext | null;
 	get interactionKey(): string;
@@ -65,6 +72,11 @@ export class ScheduledPromptSnippets {
 		this.error = null;
 		let pendingNotified = false;
 		try {
+			if (isSelectedSnippetStaleInLoadedCatalog(snippet, this.options)) {
+				this.error = m.snippets_changed_before_expansion();
+				this.palette.dismiss();
+				return 'cancelled';
+			}
 			const local = tryExpandSelectableSnippetLocally(snippet, argumentsInput, {
 				kind: 'scheduled',
 			});
