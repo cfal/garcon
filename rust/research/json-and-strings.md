@@ -5,7 +5,7 @@ result in an "original" column is the output of a Bun 1.4.5 script on that input
 
 ## Where the original uses it
 
-- Compact output: 225 `JSON.stringify(x)` sites, for example
+- Compact output: 226 `JSON.stringify(x)` sites, for example
   `server/controller/ws/utils.ts:14` (`sendWebSocketJson`), and 184 `Response.json(x)`
   sites, for example `server/controller/routes/auth.ts:49`. `Response.json(x)` writes
   the text `JSON.stringify(x)` writes (checked on numbers, escapes, key order,
@@ -21,7 +21,7 @@ result in an "original" column is the output of a Bun 1.4.5 script on that input
   (`Malformed JSON`, or `<name> is not valid JSON`), so parse error text is not
   contract at those edges.
 - Strings: 31 `.sort()` calls without a comparator; code-unit limits such as
-  `server/controller/chats/chat-title.ts:88` (`.slice(0, 120)` on a title).
+  `server/controller/chats/title-generator.ts:88` (`.slice(0, 120)` on a title).
 
 ## Behavior the port must keep
 
