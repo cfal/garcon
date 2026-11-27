@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ScheduledPromptSnippets } from '../scheduled-prompt-snippets.svelte';
 import { expandSnippet } from '$lib/api/snippets.js';
 import { preambleToSelectable, selectableSnippets } from '$lib/snippets/selectable-snippet.js';
+import type { Preamble } from '$shared/preambles';
 
 vi.mock('$lib/api/snippets.js', () => ({ expandSnippet: vi.fn() }));
 const expand = vi.mocked(expandSnippet);
@@ -375,5 +376,67 @@ describe('scheduled prompt snippets', () => {
 			expect(expand).not.toHaveBeenCalled();
 			expect(onInsert).not.toHaveBeenCalled();
 		}
+	});
+
+	it('reconciles both catalogs before same-source mismatch when an ambiguous preamble arrives in flight', async () => {
+		if (serverItem.source !== 'snippet') throw new Error('expected snippet item');
+		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
+		const onInsert = vi.fn(async () => {});
+		const onSourceChanged = vi.fn();
+		let currentPreambles: Preamble[] = [];
+		const controller = new ScheduledPromptSnippets({
+			snippets: { hasLoaded: true, snippets: [serverItem.snippet] },
+			preambles: {
+				hasLoaded: true,
+				get preambles() {
+					return currentPreambles;
+				},
+			},
+			get prompt() {
+				return input.prompt;
+			},
+			get interactionKey() {
+				return input.key;
+			},
+			get context() {
+				return {
+					type: 'scheduled-prompt' as const,
+					target: { type: 'new-chat' as const, projectPath: '/repo' },
+				};
+			},
+			onInsert,
+			onPendingChange: vi.fn(),
+			onSourceChanged,
+		});
+		let resolve!: (value: typeof response) => void;
+		expand.mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+		controller.open(7, 15);
+		const pending = controller.insert(serverItem, 'API');
+		currentPreambles = [
+			{
+				id: '00000000-0000-4000-8000-000000000088',
+				enabled: false,
+				title: 'Conflicting',
+				snippetShortName: serverItem.shortName,
+				content: 'New preamble content',
+				scope: { type: 'global' },
+				agentIds: [],
+				tagFilter: { mode: 'any', tags: [] },
+				createdAt: '2026-01-01T00:00:00.000Z',
+				updatedAt: '2026-01-01T00:00:00.000Z',
+			},
+		];
+		resolve({
+			...response,
+			source: 'snippet',
+			sourceId: serverItem.id,
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
+		});
+
+		expect(await pending).toBe('cancelled');
+		expect(controller.error).toContain('changed');
+		expect(onInsert).not.toHaveBeenCalled();
+		expect(onSourceChanged).toHaveBeenCalledWith('snippet');
+		expect(onSourceChanged).toHaveBeenCalledWith('preamble');
 	});
 });

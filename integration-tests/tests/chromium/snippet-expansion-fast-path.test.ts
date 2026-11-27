@@ -273,7 +273,13 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     await fixture.withExpectedConsoleErrors(
       [/Failed to load resource: the server responded with a status of 409.*/],
       async () => {
+        const conflictResponsePromise = page.waitForResponse(
+          (response) =>
+            response.request().method() === 'PUT' && pathnameOf(response.url()) === '/api/v1/snippets',
+        );
         await saveButton.click();
+        const conflictResponse = await conflictResponsePromise;
+        expect(conflictResponse.status()).toBe(409);
         await browserExpect(editDialog.getByRole('alert')).toBeVisible();
         await browserExpect(templateField).toHaveValue('Conflict retry {{arguments}}');
       },

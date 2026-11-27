@@ -487,4 +487,49 @@ describe('ComposerSnippetController', () => {
 			expect(preamblesRefresh).toHaveBeenCalledTimes(preambleRefreshesBefore + 1);
 		}
 	});
+
+	it('reconciles both catalogs before same-source mismatch if an ambiguous preamble arrives in flight', async () => {
+		let loadedPreambles: Preamble[] = [preamble];
+		const preamblesRefresh = vi.fn(async () => {});
+		const env = setup({
+			preambles: {
+				hasLoaded: true,
+				get preambles() {
+					return loadedPreambles;
+				},
+				refreshIfLoaded: preamblesRefresh,
+			},
+		});
+		let resolve!: (value: ExpandSnippetResponse) => void;
+		mockExpandSnippet.mockReturnValueOnce(new Promise((done) => (resolve = done)));
+
+		const pending = env.controller.insertFromPalette(
+			env.palette,
+			snippetToSelectable(pathSnippet),
+			'docs',
+		);
+		loadedPreambles = [
+			preamble,
+			{
+				...preamble,
+				id: '00000000-0000-4000-8000-000000000088',
+				snippetShortName: pathSnippet.shortName,
+			},
+		];
+		resolve({
+			success: true,
+			source: 'snippet',
+			sourceId: pathSnippet.id,
+			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
+			shortName: pathSnippet.shortName,
+			contextExecutorId: 'local',
+			contextProjectPath: '/repo',
+			expandedText: 'newer same source',
+		});
+
+		expect(await pending).toBe('cancelled');
+		expect(env.onExpanded).not.toHaveBeenCalled();
+		expect(env.refreshSnippets).toHaveBeenCalledTimes(1);
+		expect(preamblesRefresh).toHaveBeenCalledTimes(1);
+	});
 });

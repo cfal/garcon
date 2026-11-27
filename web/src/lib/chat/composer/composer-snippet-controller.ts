@@ -192,6 +192,9 @@ export class ComposerSnippetController<Prepared> {
 			});
 			if (result.kind !== 'expanded') return 'cancelled';
 			if (invocation.kind === 'palette') {
+				if (hasLoadedShortNameConflict(invocation.snippet.shortName, this.options)) {
+					return await this.#cancelStaleSelection(invocation.snippet);
+				}
 				const staleSources = mismatchedSnippetSources(invocation.snippet, result.response);
 				if (staleSources.length > 0) {
 					this.#refreshSources(staleSources);

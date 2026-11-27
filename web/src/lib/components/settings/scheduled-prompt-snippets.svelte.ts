@@ -98,6 +98,9 @@ export class ScheduledPromptSnippets {
 			) {
 				return 'cancelled';
 			}
+			if (hasLoadedShortNameConflict(snippet.shortName, this.options)) {
+				return this.#cancelStaleSelection(snippet);
+			}
 			const staleSources = mismatchedSnippetSources(snippet, result.response);
 			if (staleSources.length > 0) {
 				this.error = m.snippets_changed_before_expansion();
