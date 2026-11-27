@@ -37,6 +37,7 @@
 			left.title === right.title &&
 			left.snippetShortName === right.snippetShortName &&
 			left.content === right.content &&
+			left.createdAt === right.createdAt &&
 			left.updatedAt === right.updatedAt &&
 			JSON.stringify(left.scope) === JSON.stringify(right.scope) &&
 			JSON.stringify(left.agentIds) === JSON.stringify(right.agentIds) &&
@@ -55,6 +56,7 @@
 	let catalogMutationBusy = $state(false);
 	let editConflict = $state(false);
 	let operationError = $state<string | null>(null);
+	let catalogLoading = $derived(preambles.isRefreshing || preambles.status === 'loading');
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
 	let formIsStale = $derived.by(() => {
@@ -73,7 +75,7 @@
 	});
 
 	function openCreate(): void {
-		if (catalogMutationBusy || preambles.isRefreshing) return;
+		if (catalogMutationBusy || catalogLoading) return;
 		form = { kind: 'create' };
 		editConflict = false;
 		operationError = null;
@@ -81,7 +83,7 @@
 
 	function openEdit(preamble: Preamble): void {
 		const revision = preambles.snapshot?.revision;
-		if (catalogMutationBusy || preambles.isRefreshing || revision === undefined) return;
+		if (catalogMutationBusy || catalogLoading || revision === undefined) return;
 		form = { kind: 'edit', preamble, revision };
 		editConflict = false;
 		operationError = null;
@@ -94,7 +96,7 @@
 
 	function openRemove(preamble: Preamble): void {
 		const revision = preambles.snapshot?.revision;
-		if (catalogMutationBusy || preambles.isRefreshing || revision === undefined) return;
+		if (catalogMutationBusy || catalogLoading || revision === undefined) return;
 		operationError = null;
 		removeError = null;
 		removeTarget = { preamble, revision };
@@ -110,13 +112,27 @@
 			editConflict = true;
 			throw new Error(m.preambles_edit_stale());
 		}
-		if (catalogMutationBusy || preambles.isRefreshing) {
+		if (catalogMutationBusy || catalogLoading) {
 			throw new Error(m.preambles_changed_before_write());
 		}
 		catalogMutationBusy = true;
 		try {
 			if (form.kind === 'edit') {
-				await preambles.update(form.preamble.id, definition, form.revision);
+				const targetId = form.preamble.id;
+				if (preambles.snapshot === null) {
+					await preambles.ensureLoaded();
+				}
+				if (form.kind !== 'edit' || form.preamble.id !== targetId) return;
+				const snapshot = preambles.snapshot;
+				if (!snapshot) {
+					throw new Error(m.preambles_changed_before_write());
+				}
+				const current = snapshot.preambles.find((entry) => entry.id === targetId);
+				if (snapshot.revision !== form.revision || !current || !preamblesMatch(form.preamble, current)) {
+					editConflict = true;
+					throw new Error(m.preambles_edit_stale());
+				}
+				await preambles.update(targetId, definition, snapshot.revision);
 			} else if (form.kind === 'create') {
 				await preambles.create(definition);
 			}
@@ -135,30 +151,40 @@
 	}
 
 	async function confirmRemove(): Promise<void> {
-		if (!removeTarget || catalogMutationBusy || preambles.isRefreshing) return;
-		if (preambles.snapshot !== null) {
-			const targetId = removeTarget.preamble.id;
-			const current = preambles.snapshot.preambles.find((entry) => entry.id === targetId);
-			if (!current) {
-				const removedTitle = removeTarget.preamble.title;
-				closeRemove();
-				operationError = m.preambles_already_removed({ title: removedTitle });
-				return;
-			}
-			if (!preamblesMatch(removeTarget.preamble, current)) {
-				removeTarget = { preamble: current, revision: preambles.snapshot.revision };
-				removeError = m.preambles_changed_before_write();
-				return;
-			}
-		}
+		if (!removeTarget || catalogMutationBusy || catalogLoading) return;
+		const target = removeTarget;
 		catalogMutationBusy = true;
 		removing = true;
 		removeError = null;
 		try {
-			await preambles.remove(removeTarget.preamble.id, removeTarget.revision);
+			if (preambles.snapshot === null) {
+				await preambles.ensureLoaded();
+			}
+			if (!removeTarget || removeTarget.preamble.id !== target.preamble.id) return;
+			const snapshot = preambles.snapshot;
+			if (!snapshot) {
+				removeError = m.preambles_changed_before_write();
+				return;
+			}
+			const current = snapshot.preambles.find((entry) => entry.id === target.preamble.id);
+			if (!current) {
+				closeRemove();
+				operationError = m.preambles_already_removed({ title: target.preamble.title });
+				return;
+			}
+			if (!preamblesMatch(target.preamble, current)) {
+				removeTarget = { preamble: current, revision: snapshot.revision };
+				removeError = m.preambles_changed_before_write();
+				return;
+			}
+			if (removeTarget.revision !== snapshot.revision) {
+				removeTarget = { preamble: current, revision: snapshot.revision };
+			}
+			await preambles.remove(target.preamble.id, snapshot.revision);
 			closeRemove();
 		} catch (error) {
 			if (
+				removeTarget &&
 				error instanceof ApiError &&
 				error.errorCode === PREAMBLE_ERROR_CODES.revisionConflict &&
 				preambles.snapshot !== null
@@ -181,7 +207,7 @@
 	}
 
 	async function move(preamble: Preamble, direction: 'up' | 'down'): Promise<void> {
-		if (catalogMutationBusy || preambles.isRefreshing || normalizedQuery) return;
+		if (catalogMutationBusy || catalogLoading || normalizedQuery) return;
 		catalogMutationBusy = true;
 		operationError = null;
 		try {
@@ -194,7 +220,7 @@
 	}
 
 	async function setEnabled(preamble: Preamble, enabled: boolean): Promise<void> {
-		if (catalogMutationBusy || preambles.isRefreshing || preamble.enabled === enabled) return;
+		if (catalogMutationBusy || catalogLoading || preamble.enabled === enabled) return;
 		const revision = preambles.snapshot?.revision;
 		if (revision === undefined) return;
 		catalogMutationBusy = true;
@@ -233,7 +259,7 @@
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<Button
 			onclick={openCreate}
-			disabled={!preambles.hasLoaded || catalogMutationBusy || preambles.isRefreshing}
+			disabled={!preambles.hasLoaded || catalogMutationBusy || catalogLoading}
 		>
 			<Plus class="mr-2 h-4 w-4" />
 			{m.preambles_add()}
@@ -243,7 +269,7 @@
 				variant="ghost"
 				size="icon-sm"
 				onclick={() => void refresh()}
-				disabled={preambles.isRefreshing || catalogMutationBusy}
+				disabled={catalogLoading || catalogMutationBusy}
 				title={m.preambles_refresh()}
 				aria-label={m.preambles_refresh()}
 			>
@@ -333,7 +359,7 @@
 						{preamble}
 						index={catalogIndex}
 						total={preambles.preambles.length}
-						disabled={catalogMutationBusy || preambles.isRefreshing}
+						disabled={catalogMutationBusy || catalogLoading}
 						reorderDisabled={Boolean(normalizedQuery)}
 						onEdit={() => openEdit(preamble)}
 						onRemove={() => openRemove(preamble)}
@@ -357,7 +383,7 @@
 		open
 		preamble={form.kind === 'edit' ? form.preamble : null}
 		isStale={formIsStale}
-		disabled={catalogMutationBusy || preambles.isRefreshing}
+		disabled={catalogMutationBusy || catalogLoading}
 		onSave={save}
 		onClose={closeForm}
 	/>
@@ -367,7 +393,7 @@
 		open
 		preamble={removeTarget.preamble}
 		{removing}
-		disabled={catalogMutationBusy || preambles.isRefreshing}
+		disabled={catalogMutationBusy || catalogLoading}
 		error={removeError}
 		onConfirm={() => void confirmRemove()}
 		onClose={closeRemove}

@@ -70,7 +70,6 @@ export class PreamblesStore {
 					this.#lastRefreshSucceeded = true;
 					return this.snapshot ?? this.#confirmed;
 				}
-				this.#refreshGeneration += 1;
 				return this.#installSnapshot(next);
 			})
 			.catch((error) => {
@@ -84,6 +83,8 @@ export class PreamblesStore {
 				throw error;
 			})
 			.finally(() => {
+				// Advance the read generation on failed GETs too so late write acks reconcile via a fresh read.
+				this.#refreshGeneration += 1;
 				this.isRefreshing = false;
 				this.#loadPromise = null;
 			});
@@ -107,6 +108,7 @@ export class PreamblesStore {
 	async create(definition: PreambleDefinitionInput): Promise<PreamblesSnapshot> {
 		const current = await this.#requireSnapshot();
 		const refreshGeneration = this.#refreshGeneration;
+		const installGeneration = this.#installGeneration;
 		try {
 			const create = this.deps.create ?? createPreamble;
 			return await this.#applyMutationSnapshot(
@@ -115,6 +117,7 @@ export class PreamblesStore {
 					preamble: definition,
 				})).snapshot,
 				refreshGeneration,
+				installGeneration,
 			);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
@@ -129,6 +132,7 @@ export class PreamblesStore {
 	): Promise<PreamblesSnapshot> {
 		await this.#requireSnapshot();
 		const refreshGeneration = this.#refreshGeneration;
+		const installGeneration = this.#installGeneration;
 		try {
 			const update = this.deps.update ?? updatePreamble;
 			return await this.#applyMutationSnapshot(
@@ -138,6 +142,7 @@ export class PreamblesStore {
 					preamble: definition,
 				})).snapshot,
 				refreshGeneration,
+				installGeneration,
 			);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
@@ -148,6 +153,7 @@ export class PreamblesStore {
 	async remove(id: string, expectedRevision: number): Promise<PreamblesSnapshot> {
 		await this.#requireSnapshot();
 		const refreshGeneration = this.#refreshGeneration;
+		const installGeneration = this.#installGeneration;
 		try {
 			const remove = this.deps.remove ?? removePreamble;
 			return await this.#applyMutationSnapshot(
@@ -156,6 +162,7 @@ export class PreamblesStore {
 					id,
 				})).snapshot,
 				refreshGeneration,
+				installGeneration,
 			);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
@@ -187,6 +194,7 @@ export class PreamblesStore {
 					orderedPreambleIds: preambles.map((preamble) => preamble.id),
 				})).snapshot,
 				refreshGeneration,
+				generation,
 			);
 		} catch (error) {
 			if (this.#installGeneration === generation) this.snapshot = this.#confirmed;
@@ -205,10 +213,18 @@ export class PreamblesStore {
 	async #applyMutationSnapshot(
 		next: PreamblesSnapshot,
 		refreshGeneration: number,
+		installGeneration: number,
 	): Promise<PreamblesSnapshot> {
 		if (this.#refreshGeneration !== refreshGeneration || this.#loadPromise !== null) {
 			await this.refreshIfLoaded();
 			if (!this.#lastRefreshSucceeded) {
+				if (
+					this.#installGeneration !== installGeneration &&
+					this.#confirmed &&
+					this.#confirmed.revision >= next.revision
+				) {
+					return this.snapshot ?? this.#confirmed;
+				}
 				// Do not keep a potentially pre-restore snapshot eligible for local expansion after reconciliation fails.
 				this.snapshot = null;
 				this.#confirmed = null;

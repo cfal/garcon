@@ -82,7 +82,8 @@ export function isSelectedSnippetStaleInLoadedCatalog(
 	},
 ): boolean {
 	const owningCatalog = selected.source === 'snippet' ? options.snippets : options.preambles;
-	if (!owningCatalog?.hasLoaded) return false;
+	if (!owningCatalog) return false;
+	if (!owningCatalog.hasLoaded) return true;
 	const current = findLoadedSelectableSnippetByShortName(selected.shortName, {
 		snippets: options.snippets ?? { hasLoaded: false, snippets: [] },
 		preambles: options.preambles ?? { hasLoaded: false, preambles: [] },

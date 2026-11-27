@@ -254,6 +254,20 @@ describe('catalog helpers', () => {
 				snippets: { hasLoaded: false, snippets: [] },
 				preambles: { hasLoaded: true, preambles: [] },
 			}),
+		).toBe(true);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selected, {
+				snippets: null,
+				preambles: { hasLoaded: true, preambles: [] },
+			}),
+		).toBe(false);
+
+		expect(
+			isSelectedSnippetStaleInLoadedCatalog(selectedPreamble, {
+				snippets: { hasLoaded: true, snippets: [] },
+				preambles: null,
+			}),
 		).toBe(false);
 
 		expect(

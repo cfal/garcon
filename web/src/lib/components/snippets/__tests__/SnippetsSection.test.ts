@@ -434,4 +434,135 @@ describe('SnippetsSection', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
 		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('1');
 	});
+
+	it('recovers from true server 409 conflicts on edit and remove by refreshing and retrying', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'Draft saved after 409' } });
+		await fireEvent.click(screen.getByTestId('server-edit-only'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(screen.getByTestId('last-update-expected-revision').textContent).toBe('1'));
+		expect(await screen.findByText(/Snippets changed/)).toBeTruthy();
+		expect(template.value).toBe('Draft saved after 409');
+		expect(screen.getByRole('dialog', { name: 'Edit Snippet' }).isConnected).toBe(true);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(screen.getByTestId('last-update-expected-revision').textContent).toBe('2');
+		expect(await screen.findByText('Draft saved after 409')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+		await fireEvent.click(screen.getByTestId('server-rename-only'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		await waitFor(() => expect(screen.getByTestId('last-remove-expected-revision').textContent).toBe('3'));
+		expect(await screen.findByText(/Snippets changed/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).textContent).toContain(
+			'Remove /snippet review_server_renamed?',
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(screen.getByTestId('last-remove-expected-revision').textContent).toBe('4');
+	});
+
+	it('closes delete confirmation when true server 409 refresh reveals the snippet was removed', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+		await fireEvent.click(screen.getByTestId('server-remove-only'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(screen.getByTestId('last-remove-expected-revision').textContent).toBe('1');
+		expect(await screen.findByText('/snippet review was already removed.')).toBeTruthy();
+	});
+
+	it('adopts the loaded revision on edit and remove when another change moved the catalog without changing the target', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'Draft across forward rev' } });
+		await fireEvent.click(screen.getByTestId('external-unrelated-edit'));
+		await screen.findByText('Other updated');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(screen.getByTestId('last-update-expected-revision').textContent).toBe('2');
+
+		await fireEvent.click(screen.getByTestId('external-unrelated-edit'));
+		await screen.findByText('Other updated');
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Snippet text' }), {
+			target: { value: 'Draft across lower rev' },
+		});
+		await fireEvent.click(screen.getByTestId('external-lower-unchanged'));
+		await screen.findByText('Other restored');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(screen.getByTestId('last-update-expected-revision').textContent).toBe('3');
+
+		await fireEvent.click(screen.getByTestId('external-unrelated-edit'));
+		await screen.findByText('Other updated');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+		await fireEvent.click(screen.getByTestId('external-lower-unchanged'));
+		await screen.findByText('Other restored');
+		await fireEvent.click(screen.getByTestId('server-rename-only'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		await waitFor(() => expect(screen.getByTestId('last-remove-expected-revision').textContent).toBe('4'));
+		expect(await screen.findByText(/Snippets changed/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).textContent).toContain(
+			'Remove /snippet review_server_renamed?',
+		);
+	});
+
+	it('reloads and revalidates an invalidated catalog before saving or removing a held snippet', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'Draft during invalidation' } });
+
+		await fireEvent.click(screen.getByTestId('invalidate-with-changed-server'));
+		await waitFor(() => expect(screen.queryByText('review')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() =>
+			expect((screen.getByRole('button', { name: 'Saving...' }) as HTMLButtonElement).disabled).toBe(true),
+		);
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('0');
+
+		await fireEvent.click(screen.getByTestId('release-held-get'));
+		expect(await screen.findByText(/Snippets changed in another session/)).toBeTruthy();
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('0');
+		expect(template.value).toBe('Draft during invalidation');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review_reloaded_1' }));
+		await fireEvent.click(screen.getByTestId('invalidate-with-changed-server'));
+		await waitFor(() => expect(screen.queryByText('review_reloaded_1')).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+		await waitFor(() =>
+			expect((screen.getByRole('button', { name: 'Removing...' }) as HTMLButtonElement).disabled).toBe(true),
+		);
+		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('0');
+
+		await fireEvent.click(screen.getByTestId('release-held-get'));
+		expect(await screen.findByText(/Snippets changed in another session/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).textContent).toContain(
+			'Remove /snippet review_reloaded_2?',
+		);
+		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('0');
+	});
 });

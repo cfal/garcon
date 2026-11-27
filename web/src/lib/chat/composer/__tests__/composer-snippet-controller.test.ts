@@ -413,4 +413,27 @@ describe('ComposerSnippetController', () => {
 		expect(mockExpandSnippet).not.toHaveBeenCalled();
 		expect(env.onExpanded).not.toHaveBeenCalled();
 	});
+
+	it('cancels held palette insertion without expanding when the owning catalog becomes invalidated', async () => {
+		let snippetsLoaded = true;
+		const env = setup({
+			snippets: {
+				get hasLoaded() {
+					return snippetsLoaded;
+				},
+				get snippets() {
+					return snippetsLoaded ? [snippet] : [];
+				},
+				refreshIfLoaded: vi.fn(async () => {}),
+			},
+		});
+		const selected = snippetToSelectable(snippet);
+		snippetsLoaded = false;
+
+		expect(await env.controller.insertFromPalette(env.palette, selected, 'API')).toBe('cancelled');
+		expect(mockExpandSnippet).not.toHaveBeenCalled();
+		expect(env.onExpanded).not.toHaveBeenCalled();
+		expect(env.notifyError).toHaveBeenCalledWith('That snippet changed. Select it again.');
+		expect(env.palette.dismiss).toHaveBeenCalledTimes(1);
+	});
 });

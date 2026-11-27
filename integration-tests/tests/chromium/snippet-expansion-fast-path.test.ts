@@ -16,12 +16,17 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
 
     let expandCalls = 0;
     let projectResolveCalls = 0;
+    let snippetGetRequests = 0;
+    let preambleGetRequests = 0;
     let snippetGetDone = 0;
     let preambleGetDone = 0;
     page.on('request', (request) => {
       const pathname = pathnameOf(request.url());
       if (pathname === '/api/v1/snippets/expand') expandCalls += 1;
       if (pathname === '/api/v1/projects/resolve') projectResolveCalls += 1;
+      if (request.method() !== 'GET') return;
+      if (pathname === '/api/v1/snippets') snippetGetRequests += 1;
+      if (pathname === '/api/v1/preambles') preambleGetRequests += 1;
     });
     page.on('response', (response) => {
       if (response.request().method() !== 'GET' || !response.ok()) return;
@@ -142,6 +147,8 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
 
     if (!activeSocket || !browserSocket) throw new Error('Browser socket did not connect');
     allowConnect = false;
+    snippetGetRequests = 0;
+    preambleGetRequests = 0;
     snippetGetDone = 0;
     preambleGetDone = 0;
     const closed = new Promise<void>((resolve) => browserSocket!.once('close', () => resolve()));
@@ -168,6 +175,8 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
         scope: { type: 'global' },
       },
     });
+    expect(snippetGetRequests).toBe(0);
+    expect(preambleGetRequests).toBe(0);
     expect(snippetGetDone).toBe(0);
     expect(preambleGetDone).toBe(0);
 

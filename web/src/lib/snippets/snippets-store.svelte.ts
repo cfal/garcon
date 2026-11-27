@@ -61,7 +61,6 @@ export class SnippetsStore {
 					this.#lastRefreshSucceeded = true;
 					return this.snapshot ?? this.#confirmed;
 				}
-				this.#refreshGeneration += 1;
 				return this.#installSnapshot(nextSnapshot);
 			})
 			.catch((error) => {
@@ -75,6 +74,8 @@ export class SnippetsStore {
 				throw error;
 			})
 			.finally(() => {
+				// Advance the read generation on failed GETs too so late write acks reconcile via a fresh read.
+				this.#refreshGeneration += 1;
 				this.isRefreshing = false;
 				this.#loadPromise = null;
 			});
@@ -97,10 +98,11 @@ export class SnippetsStore {
 	async create(definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
 		const current = await this.#requireSnapshot();
 		const refreshGeneration = this.#refreshGeneration;
+		const installGeneration = this.#installGeneration;
 		try {
 			const create = this.deps.create ?? createSnippet;
 			const result = await create({ expectedRevision: current.revision, snippet: definition });
-			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration);
+			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration, installGeneration);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -114,6 +116,7 @@ export class SnippetsStore {
 	): Promise<SnippetsSnapshot> {
 		await this.#requireSnapshot();
 		const refreshGeneration = this.#refreshGeneration;
+		const installGeneration = this.#installGeneration;
 		try {
 			const update = this.deps.update ?? updateSnippet;
 			const result = await update({
@@ -121,7 +124,7 @@ export class SnippetsStore {
 				id,
 				snippet: definition,
 			});
-			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration);
+			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration, installGeneration);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -131,10 +134,11 @@ export class SnippetsStore {
 	async remove(id: string, expectedRevision: number): Promise<SnippetsSnapshot> {
 		await this.#requireSnapshot();
 		const refreshGeneration = this.#refreshGeneration;
+		const installGeneration = this.#installGeneration;
 		try {
 			const remove = this.deps.remove ?? removeSnippet;
 			const result = await remove({ expectedRevision, id });
-			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration);
+			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration, installGeneration);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -151,10 +155,18 @@ export class SnippetsStore {
 	async #applyMutationSnapshot(
 		nextSnapshot: SnippetsSnapshot,
 		refreshGeneration: number,
+		installGeneration: number,
 	): Promise<SnippetsSnapshot> {
 		if (this.#refreshGeneration !== refreshGeneration || this.#loadPromise !== null) {
 			await this.refreshIfLoaded();
 			if (!this.#lastRefreshSucceeded) {
+				if (
+					this.#installGeneration !== installGeneration &&
+					this.#confirmed &&
+					this.#confirmed.revision >= nextSnapshot.revision
+				) {
+					return this.snapshot ?? this.#confirmed;
+				}
 				// Do not keep a potentially pre-restore snapshot eligible for local expansion after reconciliation fails.
 				this.snapshot = null;
 				this.#confirmed = null;

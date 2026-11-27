@@ -479,4 +479,66 @@ describe('PreamblesStore', () => {
 		expect(store.snapshot).toEqual(snapshot(2, []));
 		expect(store.status).toBe('ready');
 	});
+
+	it('reconciles a late pre-restore write acknowledgement after an overlapping GET fails before it settles', async () => {
+		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		let rejectRefresh!: (error: Error) => void;
+		const remove = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveRemove = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((_resolve, reject) => { rejectRefresh = reject; }),
+			)
+			.mockResolvedValueOnce(snapshot(2, ['restored']));
+		const store = new PreamblesStore({ get, remove });
+		store.applySnapshot(snapshot(8, ['a']));
+
+		const refreshing = store.refresh().catch((error) => error);
+		const removing = store.remove('a', 8);
+		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
+
+		const readFailure = new Error('temporary read failure');
+		rejectRefresh(readFailure);
+		expect(await refreshing).toBe(readFailure);
+
+		resolveRemove({ success: true, snapshot: snapshot(9, []) });
+		await expect(removing).resolves.toEqual(snapshot(2, ['restored']));
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.hasLoaded).toBe(true);
+		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
+		expect(store.status).toBe('ready');
+	});
+
+	it('preserves a confirmed post-write snapshot when an overlapping WS GET succeeded and only the follow-up GET fails', async () => {
+		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		const remove = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveRemove = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(2, []))
+			.mockRejectedValueOnce(new Error('follow-up failed'));
+		const store = new PreamblesStore({ get, remove });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const removing = store.remove('a', 1);
+		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
+		await store.refreshIfLoaded();
+
+		resolveRemove({ success: true, snapshot: snapshot(2, []) });
+		await expect(removing).resolves.toEqual(snapshot(2, []));
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.hasLoaded).toBe(true);
+		expect(store.snapshot).toEqual(snapshot(2, []));
+		expect(store.status).toBe('ready');
+	});
 });

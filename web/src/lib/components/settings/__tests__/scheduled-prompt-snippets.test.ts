@@ -284,4 +284,44 @@ describe('scheduled prompt snippets', () => {
 			expect(onInsert).not.toHaveBeenCalled();
 		}
 	});
+
+	it('cancels held palette insertion when the owning catalog becomes invalidated', async () => {
+		if (localItem.source !== 'snippet') throw new Error('expected snippet item');
+		const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
+		const onInsert = vi.fn(async () => {});
+		let snippetsLoaded = true;
+		const controller = new ScheduledPromptSnippets({
+			snippets: {
+				get hasLoaded() {
+					return snippetsLoaded;
+				},
+				get snippets() {
+					return snippetsLoaded ? [localItem.snippet] : [];
+				},
+			},
+			preambles: { hasLoaded: true, preambles: [] },
+			get prompt() {
+				return input.prompt;
+			},
+			get interactionKey() {
+				return input.key;
+			},
+			get context() {
+				return {
+					type: 'scheduled-prompt' as const,
+					target: { type: 'new-chat' as const, projectPath: '/repo' },
+				};
+			},
+			onInsert,
+			onPendingChange: vi.fn(),
+			onSourceChanged: vi.fn(),
+		});
+		controller.open(7, 15);
+		snippetsLoaded = false;
+
+		expect(await controller.insert(localItem, 'API')).toBe('cancelled');
+		expect(controller.error).toContain('changed');
+		expect(expand).not.toHaveBeenCalled();
+		expect(onInsert).not.toHaveBeenCalled();
+	});
 });
