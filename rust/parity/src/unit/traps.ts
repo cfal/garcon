@@ -31,6 +31,8 @@ export const STRING_TRAPS: ReadonlyArray<readonly [string, string]> = [
   ['long', 'x'.repeat(10_000)],
 ];
 
+// NaN and the infinities come last: they replace only an argument that is
+// itself a number (see `topLevel` below).
 export const NUMBER_TRAPS: ReadonlyArray<readonly [string, number]> = [
   ['zero', 0],
   ['negative-zero', -0],
@@ -40,11 +42,18 @@ export const NUMBER_TRAPS: ReadonlyArray<readonly [string, number]> = [
   ['1e-7', 1e-7],
   ['2^53', 2 ** 53],
   ['nan', NaN],
+  ['infinity', Infinity],
+  ['negative-infinity', -Infinity],
 ];
+
+const FIRST_NON_FINITE_TRAP = NUMBER_TRAPS.findIndex(([, value]) => !Number.isFinite(value));
+const TRAP_COUNT = Math.max(STRING_TRAPS.length, NUMBER_TRAPS.length);
 
 export interface Variant {
   args: Json[];
   origin: string;
+  // The argument whose leaf the trap replaces.
+  argument: number;
 }
 
 // A leaf's position: the argument index, then each property or array index
@@ -55,6 +64,8 @@ type LeafType = 'string' | 'number';
 interface Leaf {
   location: Location;
   type: LeafType;
+  // Whether the leaf is the whole argument.
+  topLevel: boolean;
 }
 
 function markerKind(value: { [key: string]: Json }): string | null {
@@ -63,11 +74,11 @@ function markerKind(value: { [key: string]: Json }): string | null {
 
 function collect(value: Json, location: Location, leaves: Leaf[]): void {
   if (typeof value === 'string') {
-    leaves.push({ location, type: 'string' });
+    leaves.push({ location, type: 'string', topLevel: location.length === 1 });
     return;
   }
   if (typeof value === 'number') {
-    leaves.push({ location, type: 'number' });
+    leaves.push(numberLeaf(location));
     return;
   }
   if (Array.isArray(value)) {
@@ -81,8 +92,16 @@ function collect(value: Json, location: Location, leaves: Leaf[]): void {
       if (key !== '$') collect(item, [...location, key], leaves);
     }
   } else if (kind === 'number') {
-    leaves.push({ location, type: 'number' });
+    leaves.push(numberLeaf(location));
   }
+}
+
+// A port receives an argument that is a number as the exact JavaScript
+// number, NaN and the infinities included. A number inside an object or an
+// array reaches it as JSON, which cannot carry them, so only an argument that
+// is itself a number takes those traps.
+function numberLeaf(location: Location): Leaf {
+  return { location, type: 'number', topLevel: location.length === 1 };
 }
 
 // Returns a copy of `args` with the leaf at `location` replaced.
@@ -137,14 +156,14 @@ export function locationPath(location: Location): string {
 // with a later call. `isKnown` skips a variant equal to a case already
 // recorded. The `origin` names the trap, how it meets the leaf, and the leaf.
 export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) => boolean): Variant[] {
-  const positions = new Map<string, { location: Location; calls: Array<{ type: LeafType; args: Json[] }> }>();
+  const positions = new Map<string, { location: Location; calls: Array<{ type: LeafType; topLevel: boolean; args: Json[] }> }>();
   for (const args of calls) {
     const leaves: Leaf[] = [];
     args.forEach((argument, index) => collect(argument, [index], leaves));
-    for (const { location, type } of leaves) {
+    for (const { location, type, topLevel } of leaves) {
       const key = JSON.stringify(location);
       const position = positions.get(key) ?? { location, calls: [] };
-      position.calls.push({ type, args });
+      position.calls.push({ type, topLevel, args });
       positions.set(key, position);
     }
   }
@@ -152,21 +171,26 @@ export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) =
   const callCount = Math.max(0, ...ordered.map((position) => position.calls.length));
   const variants: Variant[] = [];
   for (const placements of STAGES) {
-    for (const [trap, rank] of pairs(STRING_TRAPS.length, callCount)) {
+    for (const [trap, rank] of pairs(TRAP_COUNT, callCount)) {
       for (const { location, calls: atLocation } of ordered) {
         const call = atLocation[rank];
         if (!call) continue;
         const text = call.type === 'string';
         const entry = (text ? STRING_TRAPS : NUMBER_TRAPS)[trap];
-        // A number has no text to embed a trap in.
-        if (!entry || (!text && placements.length > 1)) continue;
+        // A number has no text to embed a trap in, and NaN and the infinities
+        // replace only an argument that is itself a number.
+        if (!entry || (!text && placements.length > 1) || (!text && !call.topLevel && trap >= FIRST_NON_FINITE_TRAP)) continue;
         for (const placement of text ? placements : ['replace' as const]) {
           const leaf = text
             ? trapString(leafAt(call.args, location) as string, entry[1] as string, placement)
             : encodeNumber(entry[1] as number);
           const args = replaceLeaf(call.args, location, leaf);
           if (isKnown(args)) continue;
-          variants.push({ args, origin: `trap:${entry[0]}${placement === 'replace' ? '' : `+${placement}`}@${locationPath(location)}` });
+          variants.push({
+            args,
+            origin: `trap:${entry[0]}${placement === 'replace' ? '' : `+${placement}`}@${locationPath(location)}`,
+            argument: location[0] as number,
+          });
           if (variants.length >= MAX_VARIANTS_PER_FUNCTION) return variants;
         }
       }

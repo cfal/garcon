@@ -86,7 +86,7 @@ describe('recordings on disk', () => {
     { id: 'parse#0', fn: 'parse', args: [''] as Json[], result: '' as Json, origin: 'test' },
     { id: 'parse#1', fn: 'parse', args: ['/x'] as Json[], result: { $: 'error', name: 'Error', message: 'bad', properties: {} } as Json, origin: 'trap:empty@$.args[0]' },
   ];
-  const manifest = { module: 'common/parse.ts', tests: ['common/__tests__/parse.test.js'], inputs: null, notCaptured: [] };
+  const manifest = { module: 'common/parse.ts', tests: ['common/__tests__/parse.test.js'], inputs: null, guards: [], notCaptured: [] };
 
   test('are one JSON line per case and a manifest with the digest of the case file', async () => {
     const directory = await temporary();

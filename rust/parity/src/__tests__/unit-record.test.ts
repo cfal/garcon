@@ -2,12 +2,23 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
-import { writeCases, type CaptureRecord } from '../unit/cases.js';
-import { captureTests, evaluateInputs, recordUnit } from '../unit/record.js';
+import { writeCases, type CaptureRecord, type GuardSpec, type RecordedCase } from '../unit/cases.js';
+import { captureTests, evaluateInputs, mergeEvaluation, recordUnit, type Input } from '../unit/record.js';
 import { replayCases, replayUnit } from '../unit/replay.js';
+import { isTag } from './fixtures/unit/typed.js';
 
 const repoRoot = resolve(import.meta.dir, '../../../..');
 const fixture = (name: string) => `rust/parity/src/__tests__/fixtures/unit/${name}`;
+
+// The trap cases that change argument `argument` of calls to `fn`.
+function trapsOf(cases: RecordedCase[], fn: string, argument: number): RecordedCase[] {
+  return cases.filter((entry) => entry.fn === fn && entry.origin.startsWith('trap:') && entry.origin.includes(`@$.args[${argument}]`));
+}
+
+// Cases without their ids, which shift when cases before them are dropped.
+function withoutIds(cases: RecordedCase[]) {
+  return cases.map(({ id: _id, ...rest }) => rest);
+}
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -108,6 +119,7 @@ describe('recordUnit', () => {
       module: fixture('functions.ts'),
       tests: [callsFile],
       inputs: relative(repoRoot, inputs),
+      guards: [],
       notCaptured: [
         { fn: 'wrap', where: 'result', path: '$.result', type: 'a Thing instance', count: 1, at: `${callsFile}:16:10` },
         { fn: 'new Thing', where: 'result', path: '$.result', type: 'a Thing instance', count: 1, at: `${callsFile}:16:10` },
@@ -187,6 +199,108 @@ describe('recordUnit', () => {
   });
 });
 
+describe('numbers JSON cannot carry', () => {
+  test('replace a number only where it is the whole argument', async () => {
+    const { cases } = await recordUnit({ repoRoot, module: fixture('typed.ts'), tests: [fixture('typed.calls.ts')] });
+    // A port receives `count` as the exact JavaScript number.
+    const nan = { $: 'number', value: 'NaN' };
+    const infinity = { $: 'number', value: 'Infinity' };
+    const negativeInfinity = { $: 'number', value: '-Infinity' };
+    expect(trapsOf(cases, 'triple', 0).map((entry) => [entry.args[0], entry.result]).slice(-3)).toEqual([
+      [nan, nan], [infinity, infinity], [negativeInfinity, negativeInfinity],
+    ]);
+    // A number inside an object reaches a port as JSON, so it keeps to what
+    // JSON holds; negative zero is kept as the marker a port reads as `-0.0`.
+    const nested = trapsOf(cases, 'total', 0);
+    expect(nested.map((entry) => entry.origin.slice(5, entry.origin.indexOf('@')))).toEqual([
+      'zero', 'zero', 'negative-zero', 'negative-zero', 'negative-one', 'negative-one',
+      'half', 'half', '1e21', '1e21', '1e-7', '1e-7', '2^53', '2^53',
+    ]);
+    expect(nested[2].args).toEqual([{ first: { $: 'number', value: '-0' }, second: 2 }]);
+  });
+});
+
+describe('a guard', () => {
+  const typed = fixture('typed.ts');
+  const tests = [fixture('typed.calls.ts')];
+  const record = (guards: GuardSpec[]) => recordUnit({ repoRoot, module: typed, tests, guards });
+  const own = { fn: 'tagOf', argument: 0, guard: 'isTag' };
+
+  test('keeps only the trap variants of its argument that the original accepts, and counts the rest as dropped', async () => {
+    const plain = await record([]);
+    const guarded = await record([own]);
+    // Without the guard 39 variants change argument 0; `isTag` accepts 18.
+    expect(trapsOf(plain.cases, 'tagOf', 0)).toHaveLength(39);
+    const kept = trapsOf(guarded.cases, 'tagOf', 0);
+    expect(kept).toHaveLength(18);
+    for (const entry of kept) expect(isTag(entry.args[0])).toBe(true);
+    // NaN and the infinities are numbers, which the guard rejects.
+    expect(kept.filter((entry) => /:(nan|infinity|negative-infinity)@/.test(entry.origin))).toEqual([]);
+    expect(guarded.manifest.guards).toEqual([{ ...own, dropped: 21, kept: 18 }]);
+    expect(guarded.review[1]).toBe('  guard isTag on tagOf argument 0: dropped 21 of 39 trap variants');
+    expect(plain.manifest.guards).toEqual([]);
+    // A call the tests made stays, also one the guard rejects; so does every
+    // variant of the other argument and of the other functions.
+    expect(guarded.cases.filter((entry) => entry.origin === 'test').map((entry) => entry.args)).toEqual([['ab'], ['a tag longer than eight'], [3, 'none'], [{ first: 1, second: 2 }], [2]]);
+    expect(withoutIds(trapsOf(guarded.cases, 'tagOf', 1))).toEqual(withoutIds(trapsOf(plain.cases, 'tagOf', 1)));
+    expect(withoutIds(guarded.cases.filter((entry) => entry.fn !== 'tagOf'))).toEqual(withoutIds(plain.cases.filter((entry) => entry.fn !== 'tagOf')));
+    const result = await replayCases(guarded.modulePath, guarded.cases, 'typed.ts');
+    expect(result.cases.filter((entry) => entry.difference)).toEqual([]);
+  });
+
+  test('rejects a variant also when the guard throws for it', async () => {
+    // `isShortTag` throws for a number.
+    const guarded = await record([{ ...own, guard: 'isShortTag' }]);
+    expect(guarded.manifest.guards).toEqual([{ ...own, guard: 'isShortTag', dropped: 21, kept: 18 }]);
+    expect(trapsOf(guarded.cases, 'tagOf', 0).every((entry) => typeof entry.args[0] === 'string')).toBe(true);
+  });
+
+  test('can be an export of another file', async () => {
+    const guard = `${fixture('guard.ts')}#isTagOfAtMostEight`;
+    const guarded = await record([{ ...own, guard }]);
+    expect(guarded.manifest.guards).toEqual([{ ...own, guard, dropped: 21, kept: 18 }]);
+  });
+
+  test('is asked before the original is called, and a rejected variant is no call', async () => {
+    const guard = { argument: 0, spec: 'isTag' };
+    expect(await evaluateInputs(resolve(repoRoot, typed), [
+      { fn: 'tagOf', args: [3], guard },
+      { fn: 'tagOf', args: ['ab'], guard },
+      { fn: 'tagOf', args: [3] },
+    ])).toEqual([{ guarded: true }, { result: '<ab>' }, { result: '-' }]);
+  });
+
+  test('must decide the same way in both runs of a variant', () => {
+    const input: Input = { fn: 'tagOf', args: [3], kind: 'trap', origin: 'trap:zero@$.args[0]', guard: { argument: 0, spec: 'isTag' } };
+    expect(mergeEvaluation(input, { guarded: true }, { guarded: true }, 500)).toEqual({ guarded: true, noise: [] });
+    for (const [first, second] of [[{ guarded: true as const }, { result: '-' }], [{ result: '-' }, { guarded: true as const }]] as const) {
+      expect(() => mergeEvaluation(input, first, second, 500))
+        .toThrow('A guard of tagOf did not decide the same way in both runs: tagOf ([3]) [trap:zero@$.args[0]].');
+    }
+    // A guard that stalls in one run is listed like a call that stalls.
+    expect(mergeEvaluation(input, { guarded: true }, { timedOut: true }, 500)).toEqual({
+      noise: [],
+      notCaptured: { fn: 'tagOf', where: 'result', path: '$.result', type: 'no outcome within 500 ms', at: null, count: 1 },
+    });
+  });
+
+  test('is refused when no trap variant of its argument was generated', async () => {
+    for (const guard of [{ ...own, fn: 'nope' }, { ...own, argument: 5 }]) {
+      await expect(record([guard])).rejects.toThrow(`--guard ${guard.fn}:${guard.argument}=isTag: no trap variant of that argument was generated, so the guard decides nothing. Check the function name and the argument index.`);
+    }
+  });
+
+  test('is refused when it is not an exported function', async () => {
+    await expect(record([{ ...own, guard: 'notExported' }])).rejects.toThrow(/The guard is not an exported function: notExported/);
+  });
+
+  test('is refused for a file that is not there, and twice for one argument', async () => {
+    const guard = `${fixture('missing.ts')}#isTag`;
+    await expect(record([{ ...own, guard }])).rejects.toThrow(`--guard tagOf:0=${guard}: not a file: ${fixture('missing.ts')}`);
+    await expect(record([own, { ...own, guard: 'isShortTag' }])).rejects.toThrow('Two guards for argument 0 of tagOf.');
+  });
+});
+
 describe('replayUnit', () => {
   test('reports a result that differs from the recording, at its path', async () => {
     const directory = await temporary();
@@ -194,7 +308,7 @@ describe('replayUnit', () => {
       { id: 'join#0', fn: 'join', args: [['a', 'b']], result: 'a;b', origin: 'test' },
       { id: 'join#1', fn: 'join', args: [['a', 'b']], result: 'a,b', origin: 'test' },
       { id: 'gone#0', fn: 'gone', args: [], result: null, origin: 'test' },
-    ], { module: fixture('functions.ts'), tests: [], inputs: null, notCaptured: [] });
+    ], { module: fixture('functions.ts'), tests: [], inputs: null, guards: [], notCaptured: [] });
     const result = await replayUnit(repoRoot, directory);
     expect(result.cases.map((entry) => [entry.name, entry.difference?.path ?? null, entry.difference?.kind ?? null])).toEqual([
       ['join#0', '$', 'value'],
@@ -207,7 +321,7 @@ describe('replayUnit', () => {
     const directory = await temporary();
     await writeCases(directory, [
       { id: 'join#0', fn: 'join', args: [['a', 'b']], result: 'a,b', origin: 'test' },
-    ], { module: fixture('functions.ts'), tests: [], inputs: null, notCaptured: [] });
+    ], { module: fixture('functions.ts'), tests: [], inputs: null, guards: [], notCaptured: [] });
     await writeFile(join(directory, 'cases.jsonl'), (await Bun.file(join(directory, 'cases.jsonl')).text()).replace('a,b', 'a;b'));
     await expect(replayUnit(repoRoot, directory)).rejects.toThrow('is not the recorded file');
   });
