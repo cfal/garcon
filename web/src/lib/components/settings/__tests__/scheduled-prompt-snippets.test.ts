@@ -329,4 +329,16 @@ describe('scheduled prompt snippets', () => {
 		expect(onSourceChanged).toHaveBeenCalledWith('snippet');
 		expect(onSourceChanged).toHaveBeenCalledWith('preamble');
 	});
+
+	it.each([
+		{ contextProjectPath: '/other' },
+		{ contextExecutorId: 'remote-1' },
+	])('cancels a server fallback when the response context mismatches: %j', async (mismatch) => {
+		const { controller, onInsert } = fixture();
+		expand.mockResolvedValueOnce({ ...response, ...mismatch });
+		controller.open(7, 15);
+
+		expect(await controller.insert(serverItem, 'API')).toBe('cancelled');
+		expect(onInsert).not.toHaveBeenCalled();
+	});
 });

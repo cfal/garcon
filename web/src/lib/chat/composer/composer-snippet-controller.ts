@@ -8,6 +8,7 @@ import {
 	hasLoadedShortNameConflict,
 	staleSelectionRefreshSources,
 	tryExpandSelectableSnippetLocally,
+	type LocalSnippetExpansionResult,
 	type PreambleCatalogLookup,
 	type SnippetCatalogLookup,
 } from '$lib/snippets/local-snippet-expansion.js';
@@ -138,8 +139,15 @@ export class ComposerSnippetController<Prepared> {
 				const staleSources = staleSelectionRefreshSources(invocation.snippet, this.options);
 				if (staleSources) return await this.#cancelStaleSelection(staleSources);
 			}
-			const localResult = await this.#tryExpandLocally(invocation, sourceText);
-			if (localResult !== null) return localResult;
+			const local = this.#resolveLocalExpansion(invocation);
+			if (local?.kind === 'expanded') {
+				await this.#applyExpanded(invocation, sourceText, local.expandedText);
+				return 'inserted';
+			}
+			if (local?.kind === 'error') {
+				await this.#notifyAndSettle(m.snippets_expand_error({ detail: local.message }));
+				return 'failed';
+			}
 			if (
 				invocation.kind === 'slash' &&
 				hasLoadedShortNameConflict(invocation.shortName, this.options)
@@ -184,29 +192,17 @@ export class ComposerSnippetController<Prepared> {
 		}
 	}
 
-	async #tryExpandLocally(
-		invocation: SnippetInvocation,
-		sourceText: string,
-	): Promise<SnippetInsertionResult | null> {
+	#resolveLocalExpansion(invocation: SnippetInvocation): LocalSnippetExpansionResult | null {
 		if (!this.options.hasProjectPath()) return null;
 		const localItem =
 			invocation.kind === 'palette'
 				? invocation.snippet
 				: findLoadedSelectableSnippetByShortName(invocation.shortName, this.options);
 		if (!localItem) return null;
-		const local = tryExpandSelectableSnippetLocally(localItem, invocation.argumentsInput, {
+		return tryExpandSelectableSnippetLocally(localItem, invocation.argumentsInput, {
 			kind: 'immediate',
 			getChatId: () => this.options.getLocalChatId(),
 		});
-		if (local.kind === 'expanded') {
-			await this.#applyExpanded(invocation, sourceText, local.expandedText);
-			return 'inserted';
-		}
-		if (local.kind === 'error') {
-			await this.#notifyAndSettle(m.snippets_expand_error({ detail: local.message }));
-			return 'failed';
-		}
-		return null;
 	}
 
 	#applyExpanded(

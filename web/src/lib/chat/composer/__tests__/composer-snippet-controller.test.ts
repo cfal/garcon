@@ -512,4 +512,39 @@ describe('ComposerSnippetController', () => {
 		expect(env.refreshSnippets).toHaveBeenCalledTimes(1);
 		expect(preamblesRefresh).toHaveBeenCalledTimes(1);
 	});
+
+	it('starts server fallback synchronously so same-turn cancel prevents insertion', async () => {
+		const env = setup();
+		const palettePending = Promise.withResolvers<ExpandSnippetResponse>();
+		mockExpandSnippet.mockReturnValueOnce(palettePending.promise);
+
+		const runningPalette = env.controller.insertFromPalette(
+			env.palette,
+			snippetToSelectable(pathSnippet),
+			'docs',
+		);
+		expect(env.controller.pending).toBe(true);
+		env.controller.cancel();
+		expect(env.controller.pending).toBe(false);
+		palettePending.resolve(pathSnippetResponse);
+
+		expect(await runningPalette).toBe('cancelled');
+		expect(env.onExpanded).not.toHaveBeenCalled();
+
+		env.setText('/s path_review');
+		const slashPending = Promise.withResolvers<ExpandSnippetResponse>();
+		mockExpandSnippet.mockReturnValueOnce(slashPending.promise);
+		const runningSlash = env.controller.expandInvocation({
+			kind: 'valid',
+			shortName: pathSnippet.shortName,
+			arguments: { type: 'default' },
+		});
+		expect(env.controller.pending).toBe(true);
+		env.controller.cancel();
+		expect(env.controller.pending).toBe(false);
+		slashPending.resolve(pathSnippetResponse);
+
+		await runningSlash;
+		expect(env.onExpanded).not.toHaveBeenCalled();
+	});
 });
