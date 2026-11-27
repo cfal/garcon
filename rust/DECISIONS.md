@@ -241,3 +241,247 @@ Consequences: Responses are unchanged, so the scenario replay and shadow
 comparison still match. Large compressed assets are served about 40 to 50
 times faster with about 1% of the CPU (BENCHMARKS.md); the front door holds the
 cached build in memory.
+
+## ADR-012: Port along the executor link and the process boundary
+
+Status: accepted (2026-11-27)
+
+Context: After static assets, every remaining controller domain reads state
+that other in-process consumers cache, so ADR-003 allows no further route to
+move without hand-over glue between the two processes. Two boundaries already
+have a complete contract and black-box coverage: the executor link
+(`ExecutorRpcMethods`, exercised by the two remote lanes of the server suites)
+and the controller's process boundary (the integration fixtures start it by
+command line and drive it over HTTP and WebSocket).
+
+Decision: The worker and the controller are ported as two programs behind
+those boundaries. `garcon-server executor` in native mode is verified under the
+unmodified TypeScript controller. The native controller mode has no fallback,
+answers unported routes with a marked 501, and is verified by the same suites,
+by the parity replay, and against the TypeScript worker on the remote lanes.
+The front door with its fallback stays the default mode until the lift.
+
+Consequences: Supersedes the unit order implied by ADR-001; the front door,
+ADR-003, and the lift criteria stand. Progress is measured per quadrant of
+controller and worker implementation instead of by fallback rate. No state is
+handed between the two controllers at run time.
+
+## ADR-013: Every integration is ported to Rust
+
+Status: accepted (2026-11-27)
+
+Context: The integrations depend on no provider SDK that requires JavaScript:
+they supervise CLIs and speak JSON streams, HTTP, and SSE. Keeping them in
+TypeScript would keep Bun as a runtime dependency after the lift.
+
+Decision: Each integration becomes a crate behind the `AgentIntegration`
+contract, in the order direct, Claude and Codex, Pi, OpenCode, Antigravity,
+shell, then cursor, amp, and factory. Claude, Codex, Pi, OpenCode, and
+Antigravity are verified through their pinned scripted-model suites; cursor,
+amp, and factory have no scripted tier and are verified by ported unit tests
+and recorded converter cases, as best-effort providers are today.
+
+Consequences: Live conformance is added only where a scripted tier cannot
+reach the behavior in question. Codex code mode needs a JavaScript parser
+crate in place of `acorn`.
+
+## ADR-014: Only current-version workspaces
+
+Status: accepted (2026-11-27)
+
+Context: `server/controller/migrations/` (3,300 lines), the legacy history
+import facets, and the `migration.*` RPC methods exist to upgrade workspaces
+written by earlier releases.
+
+Decision: The Rust controller opens a workspace only at the version the last
+TypeScript release writes. An older workspace is refused at startup with a
+message naming that release, which upgrades it when it opens it once.
+`--rollback-carryover-migration` is not ported.
+
+Consequences: The migration ladder is not ported. The version marker, its
+check, and the on-disk formats of the current version are, and both
+implementations must read each other's files.
+
+## ADR-015: Accidental behavior becomes a listed difference
+
+Status: accepted (2026-11-27)
+
+Context: Some recorded behavior follows from Bun and not from design: the
+routing accidents of ADR-004 and the range framing of ADR-005.
+
+Decision: The port does not reproduce them. Each case that then differs is
+listed in `rust/parity/known-differences.json` with its reason and the Rust
+result; the replay passes such a case only with exactly that result, and fails
+once it no longer differs. The list is reviewed by the user at the lift.
+Everything else keeps the bar of ADR-002, including error codes and error
+text.
+
+Consequences: Supersedes the open question in ADR-004 and ADR-005. A new entry
+needs the user's approval; a session never adds one to make a case pass.
+
+## ADR-016: A C toolchain at build time
+
+Status: accepted (2026-11-27)
+
+Context: The ledger, tickets, pull-request reviews, and transcript search use
+SQLite, the search index needs FTS5, and executor links need TLS.
+
+Decision: The workspace may depend on crates that compile C: rusqlite with
+bundled SQLite and FTS5, and a TLS provider.
+
+Consequences: Supersedes the pure-Rust constraint of ADR-008 for these
+dependencies; hyper without a web framework stands. Builds need a C compiler;
+the binary still has no runtime dependency on system libraries beyond libc.
+
+## ADR-017: One core thread
+
+Status: accepted (2026-11-27)
+
+Context: The original's invariants assume one event loop: code between two
+awaits runs to completion, and admission fences, queue transitions, and
+ordered broadcasts depend on that. `bun:sqlite` calls are synchronous on that
+thread, and work proportional to a transcript runs on Workers or in bounded
+steps.
+
+Decision: Controller logic and worker logic each run on one single-threaded
+runtime, with state shared without locks as the original shares it. Blocking
+and transcript-sized work (compression, rendering, token fitting, search,
+long SQLite passes) runs on other threads and returns over channels, where the
+original uses a Worker or `EventLoopSteps`.
+
+Consequences: The first pass is a faithful translation and adds no races the
+original does not have. Throughput is bounded by one core, as it is today;
+revisit in the reshape pass after the lift.
+
+## ADR-018: One contract crate; the CLI is ported last
+
+Status: accepted (2026-11-27)
+
+Context: `common/` is the contract shared by the server, the CLI, the web
+client (100 modules through `$shared`), and the integration tests. `cli/`
+depends on nothing else.
+
+Decision: `garcon-contract` holds the Rust form of every DTO, parser, and
+validator the server, worker, or CLI needs, one module per `common/` module
+with the same name. `garcon-cli` is ported in the last wave and depends on
+`garcon-contract` and `garcon-base` only. Until then the TypeScript CLI runs
+unchanged against the Rust server. `common/` stays where it is as the web
+client's and the integration tests' contract; modules only the server used are
+removed with the original.
+
+Consequences: After the lift the contract exists in two languages. The
+recorded cases of ADR-020 are the guard against drift: both the Rust tests and
+`common/__tests__` run them. The shipped artifact needs no Bun once the CLI
+is ported.
+
+## ADR-019: Targets
+
+Status: accepted (2026-11-27)
+
+Decision: Linux x64 is verified on every unit. Code stays portable: no
+Unix-only API without a `cfg` and a counterpart where the original supports
+Windows. macOS arm64 and Windows x64 are built and smoke-tested in CI at the
+lift, as `build-exe:smoke` does today.
+
+## ADR-020: Three levels of recorded behavior
+
+Status: accepted (2026-11-27)
+
+Context: The port must mirror the original's responses exactly. rust-anything
+proves that by recording the original and replaying the port at each level
+where behavior is observable: the unit's exported functions, and the app's
+edge. Passing tests alone is weaker evidence (ADR-009).
+
+Decision: Behavior is recorded from the original and replayed against the
+port at three levels, with the same rules at each: two recording runs,
+run-to-run differences as reviewed wildcards, a mismatch fixed in the port and
+never in the recording, and ADR-015 for differences that stand.
+
+- Unit cases: for a module of pure functions, every call its TypeScript unit
+  tests make to its exports, plus generated trap inputs, is recorded as
+  `{fn, args, result}` and replayed by the Rust crate's tests.
+- Edge cases: the scenarios of ADR-002 for every route group.
+- Suite traces: the integration test client records every HTTP exchange and
+  every reply to its own WebSocket requests while a suite runs; the trace of
+  the original is the golden for the same suite under the Rust controller.
+  Broadcasts are compared per chat and event type where the original's two
+  runs agree.
+
+The rust-anything CLI itself is not used: its bridge and recorder assume Node
+and cannot seed, authenticate, or isolate Garcon (ADR-002), and Garcon's
+modules import Bun APIs.
+
+Consequences: A unit is not done on green tests alone; its recorded cases must
+match N of N. Recordings are committed and replayed in CI against both
+implementations, so a TypeScript change to recorded behavior fails until it is
+recorded again.
+
+## ADR-021: The manager integrates and commits
+
+Status: accepted (2026-11-27)
+
+Decision: Sessions share one worktree and own disjoint crates. Only the
+manager edits the workspace manifest, `garcon-server`, `MAP.md`, and this
+file, runs full lanes, and commits a unit to `rust-server` when its gate
+passes. Sessions never commit; nothing is pushed. At most six sessions run at
+once, each with `CARGO_BUILD_JOBS=1` and its own target directory.
+
+## ADR-022: The controller and the executor are separate crate graphs
+
+Status: accepted (2026-11-27)
+
+Context: The original instantiates the same `ExecutionRuntime` in two places:
+`ExecutorManager` for the Local executor and `worker.ts` for a remote one. Its
+dependency direction (runtime and remoting never import controller modules) is
+held by a lint test over imports. Local and remote behavior differ by design:
+Local shares the controller's lifetime and has no relay, journal, or reconnect
+states.
+
+Decision: `garcon-executor` is the executor's only public entry.
+`Executor::start` builds the runtime services and integrations around the host
+its owner supplies; `api()` returns the `ExecutionRuntimeApi` handle; `serve`
+adds the RPC server, producer relay, reply journal, and CLI gateway over a
+link. A remote executor is a thin main that parses arguments, starts, and
+serves. The Local executor is the same `start`, called by the binary that
+composes the controller, which passes the handle to `Controller::start`.
+Controller crates never depend on executor crates, nor the reverse; only
+contracts, primitives, and the link are shared. The executor ships two ways
+from one function: the `executor` subcommand of `garcon-server`, which the
+fixtures and documentation use, and the standalone `garcon-executor` binary,
+which contains no controller code.
+
+Local is not routed through the link. That would give one code path, but it
+would change recorded Local behavior (ADR-020); the ported transport
+abstraction keeps it possible after the lift.
+
+Consequences: `garcon-server/tests/workspace_structure.rs` fails when a
+workspace crate has no role, when a dependency crosses the boundary, or when
+the executor's main grows beyond a call into its library. The composition
+root moves out of the binary into `garcon-controller`, so the `garcon-server`
+main is a dispatch between the two at the lift.
+
+## ADR-023: Three binaries
+
+Status: accepted (2026-11-27)
+
+Context: With ADR-022 the controller and the executor are libraries joined
+only by a composing binary, so which roles a binary contains is a choice of
+main function.
+
+Decision: The workspace builds three binaries from thin mains:
+
+- `garcon-server`: the controller with a Local executor, as today. It keeps
+  the `executor` subcommand that the fixtures and documentation use.
+- `garcon-executor`: an executor only, with no controller code.
+- `garcon-controller`: a controller only, with no executor code; every
+  execution target is a remote executor.
+
+`Controller::start` receives the Local executor by injection and never
+constructs one, so the controller-only binary needs no conditional
+compilation.
+
+Consequences: The first two mirror the original and are verified against it.
+A controller without a Local executor does not exist in the original: its
+behavior is new, cannot be recorded, and is specified and tested as its own
+unit after the core milestone (MAP.md, unit `controller-only`). Until that
+unit is done the third binary is not built.

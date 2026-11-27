@@ -1,8 +1,28 @@
 [workspace]
 resolver = "3"
-members = ["garcon-bench", "garcon-server"]
+members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-executor", "garcon-link", "garcon-server"]
 
 [workspace.package]
 edition = "2024"
 license = "GPL-3.0"
 publish = false
+
+[workspace.dependencies]
+garcon-base = { path = "garcon-base" }
+garcon-cases = { path = "garcon-cases" }
+garcon-contract = { path = "garcon-contract" }
+garcon-executor = { path = "garcon-executor" }
+garcon-link = { path = "garcon-link" }
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
+tokio-util = "0.7"
+
+[workspace.lints.clippy]
+await_holding_refcell_ref = "deny"

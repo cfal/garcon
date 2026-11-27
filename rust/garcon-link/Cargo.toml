@@ -1,0 +1,13 @@
+[package]
+name = "garcon-link"
+version = "0.0.0"
+description = "The encrypted executor link; ports @cfal/noise-ws and server/remote/transport."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+

@@ -1,0 +1,13 @@
+[package]
+name = "garcon-base"
+version = "0.0.0"
+description = "Backend primitives shared by the Garcon controller, worker, and CLI; ports server/common."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+

@@ -83,6 +83,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "equivalent"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
+
+[[package]]
 name = "errno"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -106,6 +112,12 @@ checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "zlib-rs",
 ]
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "futures-channel"
@@ -148,6 +160,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-base"
+version = "0.0.0"
+
+[[package]]
 name = "garcon-bench"
 version = "0.0.0"
 dependencies = [
@@ -163,6 +179,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-cases"
+version = "0.0.0"
+
+[[package]]
+name = "garcon-contract"
+version = "0.0.0"
+dependencies = [
+ "garcon-base",
+]
+
+[[package]]
+name = "garcon-executor"
+version = "0.0.0"
+
+[[package]]
+name = "garcon-link"
+version = "0.0.0"
+
+[[package]]
 name = "garcon-server"
 version = "0.0.0"
 dependencies = [
@@ -173,6 +208,7 @@ dependencies = [
  "hyper-util",
  "libc",
  "ruzstd",
+ "serde_json",
  "socket2",
  "tempfile",
  "tokio",
@@ -211,6 +247,12 @@ dependencies = [
  "libc",
  "r-efi 6.0.0",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "735eaa21a6a5ffb2e84362faaeb90c05ba8e19797ca30428478cb6ea3a4921bc"
 
 [[package]]
 name = "hdrhistogram"
@@ -306,6 +348,16 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "indexmap"
+version = "2.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
+dependencies = [
+ "equivalent",
+ "hashbrown",
 ]
 
 [[package]]
@@ -495,6 +547,8 @@ version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
+ "foldhash",
+ "indexmap",
  "itoa",
  "memchr",
  "serde",

@@ -1,0 +1,12 @@
+[package]
+name = "garcon-executor"
+version = "0.0.0"
+description = "The Garcon executor: runtime services, integrations, and the worker that serves them over the executor link."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
