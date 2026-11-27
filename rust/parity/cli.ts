@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { commandBuild, originalBuild, type ServerBuild } from './src/environment.js';
 import { mergeRuns, readGolden, writeGolden } from './src/golden.js';
-import { compareScenario, consoleReport, renderReport, type ScenarioResult } from './src/report.js';
+import { compareScenario, renderReport, replaySummary, type ScenarioResult } from './src/report.js';
 import { runScenario } from './src/runner.js';
 import { loadScenarios } from './src/scenario.js';
 import { unitCli, UNIT_USAGE } from './src/unit/cli.js';
@@ -52,7 +52,7 @@ async function replay(build: ServerBuild, label: string, scenarioName: string | 
   const measuresFallback = build.label !== 'original';
   const report = renderReport(label, results, measuresFallback);
   if (reportPath) await writeFile(resolve(repoRoot, reportPath), report);
-  consoleReport(results, report);
+  console.log(replaySummary(results, report));
   return results.every((result) => result.cases.every((entry) => entry.difference === null) && !result.missingGolden);
 }
 

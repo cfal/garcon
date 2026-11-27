@@ -70,6 +70,12 @@ export function commandBuild(command: string): ServerBuild {
   return { label: command, command: command.split(/\s+/).filter(Boolean) };
 }
 
+// The modes the original gives its own files and directories, so that a
+// seeded file passes the checks the original makes of the ones it wrote:
+// it refuses to start while a credential file is readable by another account.
+const PRIVATE_FILE = 0o600;
+const PRIVATE_DIRECTORY = 0o700;
+
 async function createDirectories(): Promise<ParityDirectories> {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'garcon-parity-')));
   const dirs = {
@@ -79,11 +85,17 @@ async function createDirectories(): Promise<ParityDirectories> {
     projectDir: join(root, 'project'),
     homeDir: join(root, 'home'),
   };
-  await Promise.all([dirs.configDir, dirs.workspaceDir, dirs.projectDir, join(dirs.homeDir, 'tmp')]
-    .map((dir) => mkdir(dir, { recursive: true })));
+  await Promise.all([
+    mkdir(dirs.configDir, { recursive: true, mode: PRIVATE_DIRECTORY }),
+    mkdir(dirs.workspaceDir, { recursive: true, mode: PRIVATE_DIRECTORY }),
+    mkdir(dirs.projectDir, { recursive: true }),
+    mkdir(join(dirs.homeDir, 'tmp'), { recursive: true }),
+  ]);
   return dirs;
 }
 
+// A seed under config/ or workspace/ stands in for a file the original
+// wrote, so it gets that file's modes. A project is the user's own directory.
 async function seedFiles(dirs: ParityDirectories, files: Record<string, string>): Promise<void> {
   for (const [relativePath, contents] of Object.entries(files)) {
     const [root, ...rest] = relativePath.split('/');
@@ -93,8 +105,13 @@ async function seedFiles(dirs: ParityDirectories, files: Record<string, string>)
           : null;
     if (!base || rest.length === 0) throw new Error(`Seed path must start with project/, workspace/, or config/: ${relativePath}`);
     const target = join(base, ...rest);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, contents);
+    if (root === 'project') {
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, contents);
+    } else {
+      await mkdir(dirname(target), { recursive: true, mode: PRIVATE_DIRECTORY });
+      await writeFile(target, contents, { mode: PRIVATE_FILE });
+    }
   }
 }
 

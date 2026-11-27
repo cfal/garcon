@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolve } from 'node:path';
 import { startServer, type ServerBuild, type StartedServer } from '../environment.js';
@@ -38,6 +38,26 @@ describe('startServer', () => {
     expect(server.token).toBe('probe-session-token');
     const stored = JSON.parse(await readFile(join(server.dirs.configDir, 'auth.json'), 'utf8')) as { username?: string };
     expect(stored.username).toBe('parity');
+  });
+
+  test('seeds files under config/ and workspace/ with the modes the original gives its own', async () => {
+    const server = await start({
+      account: 'none',
+      files: {
+        'workspace/executors.json': '{"version":1,"executors":[]}',
+        'workspace/nested/deep/state.json': '{}',
+        'config/extra.json': '{}',
+      },
+    });
+    const mode = async (path: string) => (await stat(path)).mode & 0o777;
+    // The original refuses to start while a credential file is readable by another account.
+    expect(await mode(join(server.dirs.workspaceDir, 'executors.json'))).toBe(0o600);
+    expect(await mode(join(server.dirs.configDir, 'extra.json'))).toBe(0o600);
+    expect(await mode(server.dirs.workspaceDir)).toBe(0o700);
+    expect(await mode(server.dirs.configDir)).toBe(0o700);
+    expect(await mode(join(server.dirs.workspaceDir, 'nested'))).toBe(0o700);
+    expect(await mode(join(server.dirs.workspaceDir, 'nested/deep'))).toBe(0o700);
+    expect(await mode(join(server.dirs.workspaceDir, 'nested/deep/state.json'))).toBe(0o600);
   });
 
   test('starts without an account when a scenario asks for none', async () => {

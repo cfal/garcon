@@ -74,6 +74,27 @@ describe('placeholders of a step', () => {
     expect(placeholderNames(step)).toEqual(['create.body.id', 'create.body.endpoints[0].id', 'boot.body.storeId', 'boot.body.collectionRevision']);
   });
 
+  test('name a step whose name has hyphens, as scenarios name their steps', () => {
+    const ticket = 'ticket-0123456789abcdef';
+    const seeded: ReadonlyMap<string, Capture> = new Map([
+      ['create-first', exchange('POST', '/api/v1/tickets', { kind: 'json', value: { ticket: { id: ticket, revision: 3 }, ok: true } })],
+    ]);
+    const step: ScenarioStep = {
+      name: 'update-first',
+      http: {
+        method: 'PATCH',
+        path: '/api/v1/tickets/{{create-first.body.ticket.id}}?revision={{create-first.body.ticket.revision}}',
+        json: { expectedRevision: '{{create-first.body.ticket.revision}}', note: 'rev {{create-first.body.ticket.revision}}' },
+      },
+    };
+    const resolved = resolvePlaceholders(server, step, seeded, now);
+    expect(expandPlaceholders(step.http!.path!, resolved.values)).toBe(`/api/v1/tickets/${ticket}?revision=3`);
+    expect(expandJson(step.http!.json!, resolved)).toEqual({ expectedRevision: 3, note: 'rev 3' });
+    expect(resolved.carried).toEqual([[ticket, '{{create-first.body.ticket.id}}']]);
+    // Text that only looks like a placeholder is still sent as written.
+    expect(expandPlaceholders('{{not-a-placeholder}}', resolved.values)).toBe('{{not-a-placeholder}}');
+  });
+
   test('keep the values of the server start and the text of a WebSocket step', () => {
     const step: ScenarioStep = {
       name: 'socket',

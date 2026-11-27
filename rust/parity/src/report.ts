@@ -57,13 +57,17 @@ function cell(text: string): string {
   return text.replaceAll('|', '\\|').replaceAll('\n', ' ');
 }
 
-// Prints the head of a report and the first difference of each failing case.
-export function consoleReport(results: ScenarioResult[], report: string): void {
+// What a replay prints: the head of a report, with the scenarios that were
+// never recorded, and the first difference of each of the first failing cases.
+export function replaySummary(results: ScenarioResult[], report: string): string {
   const failing = results.flatMap((result) => result.cases).filter((result) => result.difference);
-  console.log(report.split('\n').slice(0, 6).join('\n'));
+  const lines = report.split('\n');
+  const neverRecorded = lines.findIndex((line) => line.startsWith('Never recorded:'));
+  const shown = lines.slice(0, neverRecorded === -1 ? 6 : neverRecorded + 1);
   for (const result of failing.slice(0, 20)) {
-    console.log(`FAIL ${result.scenario}/${result.name} at ${result.difference!.path}: expected ${result.difference!.expected}, got ${result.difference!.actual}`);
+    shown.push(`FAIL ${result.scenario}/${result.name} at ${result.difference!.path}: expected ${result.difference!.expected}, got ${result.difference!.actual}`);
   }
+  return shown.join('\n');
 }
 
 // Renders a report with no timings or temporary paths, so two replays of the

@@ -7,7 +7,11 @@ import { isObject, type Json } from './wildcard.js';
 // a value of the server start (`token`, `projectDir`, ...), a day relative to
 // the clock, or a value of an earlier step's response.
 
-export const PLACEHOLDER = /\{\{([\w~.[\]]+)\}\}/g;
+// What can stand between the braces. A name of an earlier step's response has
+// the step's name in it, and step names use hyphens.
+const NAME = String.raw`[\w~.\[\]-]+`;
+export const PLACEHOLDER = new RegExp(String.raw`\{\{(${NAME})\}\}`, 'g');
+const WHOLE_VALUE = new RegExp(`^\\{\\{(${NAME})\\}\\}$`);
 
 // `{{<step>.body.<path>}}`: the value at `path` in the JSON body of the
 // response to the step named `<step>`.
@@ -154,7 +158,7 @@ export function expandJson(value: Json, placeholders: Placeholders): Json {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, expandJson(item, placeholders)]));
   }
   if (typeof value !== 'string') return value;
-  const whole = /^\{\{([\w~.[\]]+)\}\}$/.exec(value);
+  const whole = WHOLE_VALUE.exec(value);
   if (whole && whole[1]! in placeholders.typed) return placeholders.typed[whole[1]!];
   return expandPlaceholders(value, placeholders.values);
 }

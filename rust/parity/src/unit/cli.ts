@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { consoleReport } from '../report.js';
+import { replaySummary } from '../report.js';
 import { writeCases } from './cases.js';
 import { recordUnit } from './record.js';
 import { replayCases, replayUnit, renderUnitReport } from './replay.js';
@@ -61,7 +61,7 @@ export async function unitCli(args: string[], repoRoot: string): Promise<number>
       const recording = await recordUnit({ ...options, repoRoot });
       for (const line of recording.review) console.log(line);
       const result = await replayCases(recording.modulePath, recording.cases, recording.manifest.module);
-      consoleReport([result], renderUnitReport(result));
+      console.log(replaySummary([result], renderUnitReport(result)));
       if (!passed(result)) {
         console.error(`The original does not replay this recording; nothing was written to ${options.out}.`);
         return 1;
@@ -71,7 +71,7 @@ export async function unitCli(args: string[], repoRoot: string): Promise<number>
     }
     if (command === 'replay' && rest.length === 1) {
       const result = await replayUnit(repoRoot, rest[0]!);
-      consoleReport([result], renderUnitReport(result));
+      console.log(replaySummary([result], renderUnitReport(result)));
       return passed(result) ? 0 : 1;
     }
   } catch (error) {

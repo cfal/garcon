@@ -2,9 +2,20 @@ import { encodeNumber } from './encode.js';
 import { childPath, isObject, type Json } from '../wildcard.js';
 
 // Trap variants probe the edges a port most often gets wrong in text and
-// number handling. Each replaces one string or number leaf of a recorded
-// call's arguments, keeping everything else.
-export const MAX_VARIANTS_PER_FUNCTION = 40;
+// number handling, each by changing one leaf of a recorded call's arguments
+// and keeping everything else. A number leaf is replaced by a trap number. A
+// string leaf is replaced by a trap string, or keeps its value and has the
+// trap inserted after its first character or appended, so that a trap reaches
+// past a check on how a value has to start.
+export const MAX_VARIANTS_PER_FUNCTION = 60;
+
+// How a trap meets a string leaf: it replaces the leaf, or the leaf keeps its
+// value and the trap is inserted after its first character or appended.
+type Placement = 'replace' | 'after-first' | 'append';
+
+// The replacements of whole leaves come first; the embedded traps fill what is
+// left of the budget.
+const STAGES: ReadonlyArray<readonly Placement[]> = [['replace'], ['after-first', 'append']];
 
 // Written as escapes, so each code point is explicit: the Kelvin sign is
 // U+212A and not the ASCII letter it looks like.
@@ -89,6 +100,29 @@ export function replaceLeaf(args: Json[], location: Location, replacement: Json)
   return rebuild(args as unknown as Json, location) as unknown as Json[];
 }
 
+// The leaf at `location` of a call.
+function leafAt(args: Json[], location: Location): Json {
+  return location.reduce<Json>((value, step) => (value as Record<string | number, Json>)[step!], args as unknown as Json);
+}
+
+// The string a trap gives a leaf that held `original`.
+function trapString(original: string, trap: string, placement: Placement): string {
+  if (placement === 'replace') return trap;
+  if (placement === 'append') return `${original}${trap}`;
+  // An astral character is two code units and stays whole.
+  const first = original.codePointAt(0)! > 0xffff ? 2 : 1;
+  return `${original.slice(0, first)}${trap}${original.slice(first)}`;
+}
+
+// Every trap with every call, near ones first: the first trap with the first
+// call, the second trap with the first call, the first trap with the second
+// call, and so on. No trap or call waits for all of another.
+function* pairs(trapCount: number, callCount: number): Generator<[trap: number, rank: number]> {
+  for (let distance = 0; distance < trapCount + callCount; distance += 1) {
+    for (let rank = 0; rank <= Math.min(distance, callCount - 1); rank += 1) yield [distance - rank, rank];
+  }
+}
+
 export function locationPath(location: Location): string {
   return location.reduce<string>(
     (path, step) => (typeof step === 'number' ? `${path}[${step}]` : childPath(path, step)),
@@ -97,10 +131,11 @@ export function locationPath(location: Location): string {
 }
 
 // Generates at most MAX_VARIANTS_PER_FUNCTION variants of the calls of one
-// function. The budget is spent breadth first: every position gets the first
-// trap before any gets the second, and each position gets it with the first
-// call that has it, so many calls with the same shape do not crowd out the
-// rest. `isKnown` skips a variant equal to a case already recorded.
+// function. The budget is spent breadth first: every position gets a trap with
+// the first call that has it, so many calls with the same shape do not crowd
+// out the rest, and every trap reaches every position before a trap repeats
+// with a later call. `isKnown` skips a variant equal to a case already
+// recorded. The `origin` names the trap, how it meets the leaf, and the leaf.
 export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) => boolean): Variant[] {
   const positions = new Map<string, { location: Location; calls: Array<{ type: LeafType; args: Json[] }> }>();
   for (const args of calls) {
@@ -114,19 +149,26 @@ export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) =
     }
   }
   const ordered = [...positions.values()];
-  const deepest = Math.max(0, ...ordered.map((position) => position.calls.length));
+  const callCount = Math.max(0, ...ordered.map((position) => position.calls.length));
   const variants: Variant[] = [];
-  for (let trap = 0; trap < STRING_TRAPS.length && variants.length < MAX_VARIANTS_PER_FUNCTION; trap += 1) {
-    for (let rank = 0; rank < deepest && variants.length < MAX_VARIANTS_PER_FUNCTION; rank += 1) {
+  for (const placements of STAGES) {
+    for (const [trap, rank] of pairs(STRING_TRAPS.length, callCount)) {
       for (const { location, calls: atLocation } of ordered) {
         const call = atLocation[rank];
         if (!call) continue;
-        const [name, value] = (call.type === 'string' ? STRING_TRAPS : NUMBER_TRAPS)[trap] ?? [];
-        if (name === undefined) continue;
-        const args = replaceLeaf(call.args, location, typeof value === 'number' ? encodeNumber(value) : value);
-        if (isKnown(args)) continue;
-        variants.push({ args, origin: `trap:${name}@${locationPath(location)}` });
-        if (variants.length >= MAX_VARIANTS_PER_FUNCTION) return variants;
+        const text = call.type === 'string';
+        const entry = (text ? STRING_TRAPS : NUMBER_TRAPS)[trap];
+        // A number has no text to embed a trap in.
+        if (!entry || (!text && placements.length > 1)) continue;
+        for (const placement of text ? placements : ['replace' as const]) {
+          const leaf = text
+            ? trapString(leafAt(call.args, location) as string, entry[1] as string, placement)
+            : encodeNumber(entry[1] as number);
+          const args = replaceLeaf(call.args, location, leaf);
+          if (isKnown(args)) continue;
+          variants.push({ args, origin: `trap:${entry[0]}${placement === 'replace' ? '' : `+${placement}`}@${locationPath(location)}` });
+          if (variants.length >= MAX_VARIANTS_PER_FUNCTION) return variants;
+        }
       }
     }
   }

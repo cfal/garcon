@@ -58,8 +58,12 @@ credentials. The server is started with the PATH `/usr/bin:/bin`, whatever the
 machine's own, so an agent CLI installed on it does not change a catalog
 response. `"account": "none"` in `server` starts it without a provisioned
 account, for `POST /api/v1/auth/register` and the setup-required states; no
-session token is taken, and `auth: "token"` then sends none. Scenarios marked
-`traps` also run generated variants of every step: missing and forged
+session token is taken, and `auth: "token"` then sends none. A file seeded
+through `server.files` under `config/` or `workspace/` is written with mode
+0600 in a directory of mode 0700, as the original writes its own, so a seeded
+credential file such as `workspace/executors.json` passes the check that
+refuses one readable by another account. Scenarios marked `traps` also run
+generated variants of every step: missing and forged
 credentials, HEAD, trailing and doubled slashes, dot segments, encoded
 traversal, non-ASCII path segments, and malformed or non-ASCII JSON bodies.
 
@@ -160,13 +164,18 @@ the case file, and the calls that were not captured.
   a bigint are `date`, `map`, `set`, `bytes`, and `bigint` markers; a thrown
   Error is `{"$":"error","name","message","properties"}` with its other own
   properties, and any other thrown value is a `throw` marker.
-- Trap variants follow the recorded calls: each string leaf of a call's
+- Trap variants follow the recorded calls. Each string leaf of a call's
   arguments is replaced in turn by an empty string, accented text, CJK, an
   astral emoji, a combining sequence, the dotless i, the Kelvin sign, a
   no-break space, and a 10,000-unit string, and each number leaf by 0, -0, -1,
-  0.5, 1e21, 1e-7, 2^53, and NaN. A function gets at most 40, spread so that
-  every position has the first trap before any has the second. The `origin`
-  of such a case names the trap and the leaf.
+  0.5, 1e21, 1e-7, 2^53, and NaN. A string leaf that keeps its value then
+  takes the trap after its first character and at its end, so that a trap
+  reaches past a check on how a value has to start: replacing a whole argument
+  with the Kelvin sign never tests `parseBasePath('/K')`. A function gets at
+  most 60, the replacements first, spent so that every position has a trap
+  with the first call that has it before any trap comes back with a later
+  call. The `origin` of such a case names the trap, the leaf, and how the trap
+  meets it: `trap:kelvin+after-first@$.args[0]`.
 - Every call is recorded twice, from two runs of the tests and two runs of the
   trap variants. A result that differs becomes a `[..]` wildcard and is printed
   as `noise:`; review each one, and prefer a test or an input whose result is
@@ -229,7 +238,7 @@ markers a result needs.
 The demonstration is `common/base-path.ts`: its recording is in
 `rust/garcon-cases/tests/cases/common/base-path`, and
 `rust/garcon-cases/tests/common_base_path.rs` ports the two functions beside
-the ported unit tests and replays all 83 cases.
+the ported unit tests and replays all 155 cases.
 
 ## Shadowing the end-to-end suites
 
