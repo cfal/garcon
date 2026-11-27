@@ -19,7 +19,6 @@ interface ExtractionBudget {
   remainingNodes: number;
   seen: Set<object>;
   indexedTextParts?: Set<object>;
-  truncated: boolean;
 }
 
 interface PreferredFields { readonly [key: string]: PreferredFields | null }
@@ -36,64 +35,41 @@ function collapseSearchWhitespace(text: string): string {
 function searchablePrefix(text: string, budget: ExtractionBudget): string {
   // Only searchable text spends the preferred field's budget; never scan beyond the prefix.
   const prefix = text.slice(0, budget.remaining);
-  budget.truncated ||= prefix.length < text.length;
   return collapseSearchWhitespace(prefix);
 }
 
 function appendText(parts: string[], value: unknown, budget: ExtractionBudget): void {
   if (typeof value !== 'string' || value.length === 0 || budget.remaining <= 0) return;
   if (parts.length > 0) {
-    if (budget.remaining === 0) return;
     parts.push(' ');
     budget.remaining -= 1;
   }
   const selected = value.slice(0, budget.remaining);
   parts.push(selected);
   budget.remaining -= selected.length;
-  if (selected.length < value.length) budget.truncated = true;
 }
 
-function joinBounded(limit: number, values: Iterable<unknown>, budget?: ExtractionBudget): string {
-  const target = budget ?? {
-    remaining: limit,
-    remainingNodes: MAX_RECURSIVE_NODES,
-    seen: new Set<object>(),
-    truncated: false,
-  };
+function joinBounded(values: Iterable<unknown>, budget: ExtractionBudget): string {
   const parts: string[] = [];
   for (const value of values) {
-    appendText(parts, value, target);
-    if (target.remaining <= 0) break;
+    appendText(parts, value, budget);
+    if (budget.remaining <= 0) break;
   }
   return parts.join('');
 }
 
 function boundedUnknownText(
   value: unknown,
-  budget: ExtractionBudget = {
-    remaining: MAX_RECURSIVE_CHARS,
-    remainingNodes: MAX_RECURSIVE_NODES,
-    seen: new Set(),
-    truncated: false,
-  },
+  budget: ExtractionBudget,
   depth = 0,
   preferred?: PreferredFields | null,
 ): string {
-  if (budget.remaining <= 0) return '';
-  if (budget.remainingNodes <= 0) {
-    budget.truncated = true;
-    return '';
-  }
+  if (budget.remaining <= 0 || budget.remainingNodes <= 0) return '';
   budget.remainingNodes -= 1;
-  if (value == null) return '';
-  if (depth > MAX_RECURSIVE_DEPTH) {
-    budget.truncated = true;
-    return '';
-  }
+  if (value == null || depth > MAX_RECURSIVE_DEPTH) return '';
   if (typeof value === 'string') {
     const selected = value.slice(0, budget.remaining);
     budget.remaining -= selected.length;
-    if (selected.length < value.length) budget.truncated = true;
     return selected;
   }
   if (typeof value === 'number' || typeof value === 'boolean') {
@@ -113,7 +89,6 @@ function boundedUnknownText(
       const selectedKey = key.slice(0, budget.remaining);
       parts.push(selectedKey);
       budget.remaining -= selectedKey.length;
-      if (selectedKey.length < key.length) budget.truncated = true;
       if (budget.remaining > 0) {
         parts.push(' ');
         budget.remaining -= 1;
@@ -123,11 +98,9 @@ function boundedUnknownText(
     if (child) parts.push(child);
   };
   if (Array.isArray(value)) {
-    let index = 0;
-    for (; index < value.length && budget.remaining > 0 && budget.remainingNodes > 0; index += 1) {
+    for (let index = 0; index < value.length && budget.remaining > 0 && budget.remainingNodes > 0; index += 1) {
       appendChild(null, value[index]);
     }
-    if (index < value.length) budget.truncated = true;
   } else {
     const record = value as Record<string, unknown>;
     if (preferred) {
@@ -145,10 +118,7 @@ function boundedUnknownText(
       if ((preferred && Object.hasOwn(preferred, key)) || !Object.hasOwn(record, key)) continue;
       if (key === 'text' && budget.indexedTextParts?.has(record)) continue;
       appendChild(key, record[key]);
-      if (budget.remaining <= 0 || budget.remainingNodes <= 0) {
-        budget.truncated = true;
-        break;
-      }
+      if (budget.remaining <= 0 || budget.remainingNodes <= 0) break;
     }
   }
   return parts.join('');
@@ -159,12 +129,10 @@ function boundedUnknownForJoin(value: unknown, outerBudget: ExtractionBudget): s
     remaining: Math.min(MAX_RECURSIVE_CHARS, outerBudget.remaining),
     remainingNodes: Math.min(MAX_RECURSIVE_NODES, outerBudget.remainingNodes),
     seen: new Set(),
-    truncated: false,
   };
   const initialNodes = nestedBudget.remainingNodes;
   const text = boundedUnknownText(value, nestedBudget);
   outerBudget.remainingNodes -= initialNodes - nestedBudget.remainingNodes;
-  outerBudget.truncated ||= nestedBudget.truncated;
   return text;
 }
 
@@ -188,7 +156,6 @@ function boundedToolResult(message: ToolResultMessage, budget: ExtractionBudget)
   const content: unknown = message.content;
   if (typeof content === 'string') {
     if (content.length <= MAX_TOOL_RESULT_CHARS) return content;
-    budget.truncated = true;
     return `${content.slice(0, MAX_TOOL_RESULT_HEAD_CHARS)} ${content.slice(-MAX_TOOL_RESULT_TAIL_CHARS)}`;
   }
   // Spends the result budget on the diagnostic before supplementary fields.
@@ -202,20 +169,20 @@ function boundedToolResult(message: ToolResultMessage, budget: ExtractionBudget)
 }
 
 function messageText(message: ChatMessage, budget: ExtractionBudget): string {
-  const joinTool = (...values: unknown[]) => joinBounded(MAX_TOOL_INPUT_CHARS, values, budget);
+  const joinTool = (...values: unknown[]) => joinBounded(values, budget);
   switch (message.type) {
     case 'user-message':
     case 'assistant-message':
     case 'command-output':
     case 'thinking':
-      return joinBounded(MAX_BODY_CHARS, [message.content], budget);
+      return joinBounded([message.content], budget);
     case 'command-result':
-      return isCleanCommandSuccess(message.result) ? '' : joinBounded(MAX_BODY_CHARS, [message.content], budget);
+      return isCleanCommandSuccess(message.result) ? '' : joinBounded([message.content], budget);
     case 'error':
     case 'cli-row':
       return '';
     case 'compaction':
-      return joinBounded(MAX_BODY_CHARS, [message.summary], budget);
+      return joinBounded([message.summary], budget);
     case 'agent-switch':
       return joinTool(message.fromAgentId, message.toAgentId, message.fromModel, message.toModel);
     case 'tool-result':
@@ -271,7 +238,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
       const values = function* () {
         for (const todo of message.todos ?? []) yield `${todo.status} ${todo.content}`;
       };
-      return joinBounded(MAX_TOOL_INPUT_CHARS, values(), budget);
+      return joinBounded(values(), budget);
     }
     case 'task-tool-use':
       return joinTool(message.subagentType, message.description, message.prompt, message.model);
@@ -294,7 +261,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
         yield message.plan;
         for (const entry of message.allowedPrompts ?? []) yield `${entry.tool} ${entry.prompt}`;
       };
-      return joinBounded(MAX_TOOL_INPUT_CHARS, values(), budget);
+      return joinBounded(values(), budget);
     }
     case 'ask-user-question-tool-use':
       return joinTool(message.title, boundedUnknownForJoin(message.questions, budget));
@@ -312,7 +279,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
         yield message.context;
         for (const file of message.files ?? []) yield file;
       };
-      return joinBounded(MAX_TOOL_INPUT_CHARS, values(), budget);
+      return joinBounded(values(), budget);
     }
     case 'amp-skill-tool-use':
       return joinTool(message.name);
@@ -360,32 +327,18 @@ function searchBodyLimit(type: ChatMessage['type']): number {
   return MAX_BODY_CHARS;
 }
 
-function projectOne(message: ChatMessage): {
-  row: SearchMessageRowInput | null;
-  truncated: boolean;
-} {
+export function projectSearchMessage(message: ChatMessage): SearchMessageRowInput | null {
   const budget: ExtractionBudget = {
     remaining: searchBodyLimit(message.type),
     remainingNodes: MAX_RECURSIVE_NODES,
     seen: new Set(),
-    truncated: false,
   };
   const raw = messageText(message, budget);
   const body = collapseSearchWhitespace(raw);
+  if (!body) return null;
   const timestamp = typeof message.timestamp === 'string'
     && Buffer.byteLength(message.timestamp, 'utf8') <= SEARCH_TIMESTAMP_MAX_BYTES
     ? message.timestamp
     : null;
-  return {
-    truncated: budget.truncated,
-    row: body ? {
-      role: roleForMessage(message),
-      timestamp,
-      body,
-    } : null,
-  };
-}
-
-export function projectSearchMessage(message: ChatMessage): SearchMessageRowInput | null {
-  return projectOne(message).row;
+  return { role: roleForMessage(message), timestamp, body };
 }
