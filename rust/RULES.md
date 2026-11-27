@@ -172,7 +172,16 @@ the user corrects how a port behaves, the correction is added under
   snake case. Skip tests that only mock the original's internals. Never weaken
   or delete a test to make it pass.
 - Before reporting a unit done, plant a bug in it and confirm its oracle fails
-  on the expected field.
+  on the expected field. Cargo can keep a build when a source file is
+  rewritten within the same clock tick as the write before it, so a quick
+  plant-and-restore can test a stale binary: touch the file a second later, or
+  check that the test binary was rebuilt.
+- A replay dispatcher reads a recorded argument as the JSON it round-trips to:
+  a property that is `undefined` is absent, and `undefined` in an array is
+  `null`. A function that takes a JavaScript number gets the exact recorded
+  number, negative zero, NaN, and the infinities included; a port that takes a
+  JSON value gets negative zero as `-0.0` and NaN and the infinities as `0`,
+  which is all a JSON document can deliver.
 
 ## Build
 
