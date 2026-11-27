@@ -3,6 +3,7 @@ import { request as httpRequest } from 'node:http';
 import { gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib';
 import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 import type { StartedServer } from './environment.js';
+import { expandJson, expandPlaceholders, type Placeholders } from './placeholders.js';
 import type { HttpStep, RequestAuth, ScenarioStep, WebSocketStep } from './scenario.js';
 import { isObject, type Json } from './wildcard.js';
 
@@ -38,6 +39,9 @@ export type CapturedBody =
   | { kind: 'empty' }
   | { kind: 'json'; value: Json }
   | { kind: 'text'; value: string }
+  // Too large to record whole. It is normalized like any other text and then
+  // kept as a digest.
+  | { kind: 'large-text'; value: string }
   | { kind: 'bytes'; sha256: string; length: number };
 
 export interface CapturedExchange {
@@ -52,6 +56,9 @@ export interface CapturedSocket {
   opened: boolean;
   protocol: string;
   frames: Json[];
+  // How the server closed a connection it had accepted. Null for a refused
+  // upgrade: the client makes up a close code and reason for one, so they are
+  // not the server's behavior.
   close: { code: number; reason: string } | null;
   // The HTTP response to a refused upgrade, which WebSocket clients hide.
   refusal: { status: number; contentType: string | null; body: string } | null;
@@ -79,39 +86,36 @@ function tokenFor(server: StartedServer, auth: RequestAuth): string | null {
   return server.token;
 }
 
-// Expands `{{name}}` placeholders in request paths and bodies.
-function expandPlaceholders(text: string, server: StartedServer): string {
-  const values: Record<string, string> = {
-    username: server.credentials.username,
-    password: server.credentials.password,
-    projectDir: server.dirs.projectDir,
-    workspaceDir: server.dirs.workspaceDir,
-    token: server.token,
-  };
-  return text.replace(/\{\{(\w+)\}\}/g, (match, name: string) => values[name] ?? match);
-}
-
-function requestUrl(server: StartedServer, step: HttpStep | WebSocketStep): string {
+function requestUrl(server: StartedServer, step: HttpStep | WebSocketStep, placeholders: Placeholders): string {
   if ('originPath' in step && step.originPath !== undefined) {
-    return `${server.origin}${expandPlaceholders(step.originPath, server)}`;
+    return `${server.origin}${expandPlaceholders(step.originPath, placeholders.values)}`;
   }
-  const path = expandPlaceholders(step.path ?? '/', server);
+  const path = expandPlaceholders(step.path ?? '/', placeholders.values);
   return `${server.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-function textOrBytes(bytes: Uint8Array, contentType: string): CapturedBody {
-  if (bytes.length === 0) return { kind: 'empty' };
-  const textual = /^(text\/|application\/(json|javascript|manifest\+json|xml)|image\/svg)/.test(contentType);
-  if (textual && bytes.length <= MAX_TEXT_BODY) {
-    const text = new TextDecoder().decode(bytes);
-    if (contentType.includes('json')) {
-      try {
-        return { kind: 'json', value: JSON.parse(text) as Json };
-      } catch { /* Malformed JSON is recorded as text. */ }
-    }
-    return { kind: 'text', value: text };
-  }
+const TEXTUAL = /^(text\/|application\/(json|javascript|manifest\+json|xml)|image\/svg)/;
+
+function digest(bytes: Uint8Array): CapturedBody {
   return { kind: 'bytes', sha256: createHash('sha256').update(bytes).digest('hex'), length: bytes.length };
+}
+
+export function textOrBytes(bytes: Uint8Array, contentType: string): CapturedBody {
+  if (bytes.length === 0) return { kind: 'empty' };
+  if (!TEXTUAL.test(contentType)) return digest(bytes);
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return digest(bytes);
+  }
+  if (bytes.length > MAX_TEXT_BODY) return { kind: 'large-text', value: text };
+  if (contentType.includes('json')) {
+    try {
+      return { kind: 'json', value: JSON.parse(text) as Json };
+    } catch { /* Malformed JSON is recorded as text. */ }
+  }
+  return { kind: 'text', value: text };
 }
 
 function decodeBody(bytes: Uint8Array, encoding: string | null): Uint8Array {
@@ -124,18 +128,18 @@ function decodeBody(bytes: Uint8Array, encoding: string | null): Uint8Array {
   }
 }
 
-async function captureHttp(server: StartedServer, step: HttpStep): Promise<CapturedExchange> {
+async function captureHttp(server: StartedServer, step: HttpStep, placeholders: Placeholders): Promise<CapturedExchange> {
   const auth = step.auth ?? 'token';
   const headers = new Headers();
-  for (const [name, value] of Object.entries(step.headers ?? {})) headers.set(name, expandPlaceholders(value, server));
+  for (const [name, value] of Object.entries(step.headers ?? {})) headers.set(name, expandPlaceholders(value, placeholders.values));
   const token = tokenFor(server, auth);
   if (token) headers.set('Authorization', `Bearer ${token}`);
   let body: string | undefined;
   if (step.json !== undefined) {
-    body = expandPlaceholders(JSON.stringify(step.json), server);
+    body = expandPlaceholders(JSON.stringify(expandJson(step.json, placeholders)), placeholders.values);
     if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   } else if (step.body !== undefined) {
-    body = expandPlaceholders(step.body, server);
+    body = expandPlaceholders(step.body, placeholders.values);
   }
   // Compression is requested explicitly unless the step chooses its own
   // Accept-Encoding; an empty value sends none.
@@ -143,7 +147,7 @@ async function captureHttp(server: StartedServer, step: HttpStep): Promise<Captu
   // Redirects are part of the contract, so they are recorded rather than
   // followed. Bodies are decoded here rather than by fetch, so encoders that
   // produce different bytes for the same content still compare equal.
-  const response = await fetch(requestUrl(server, step), {
+  const response = await fetch(requestUrl(server, step, placeholders), {
     method: step.method,
     headers,
     body,
@@ -208,11 +212,11 @@ function captureRefusal(url: string, protocols: string[]): Promise<CapturedSocke
   });
 }
 
-async function captureWebSocket(server: StartedServer, step: WebSocketStep): Promise<CapturedSocket> {
+async function captureWebSocket(server: StartedServer, step: WebSocketStep, placeholders: Placeholders): Promise<CapturedSocket> {
   const auth = step.auth ?? 'token';
-  const protocols = step.protocols?.map((protocol) => expandPlaceholders(protocol, server))
+  const protocols = step.protocols?.map((protocol) => expandPlaceholders(protocol, placeholders.values))
     ?? webSocketProtocolsForAuth(tokenFor(server, auth));
-  const url = requestUrl(server, step).replace(/^http/, 'ws');
+  const url = requestUrl(server, step, placeholders).replace(/^http/, 'ws');
   const socket = new WebSocket(url, protocols);
   const frames: Json[] = [];
   const requestIds = new Set((step.send ?? []).flatMap((message) =>
@@ -235,7 +239,9 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
     const deadline = setTimeout(finish, 15_000);
     socket.onopen = () => {
       opened = true;
-      for (const message of step.send ?? []) socket.send(expandPlaceholders(JSON.stringify(message), server));
+      for (const message of step.send ?? []) {
+        socket.send(expandPlaceholders(JSON.stringify(expandJson(message, placeholders)), placeholders.values));
+      }
       armQuietTimer();
     };
     socket.onmessage = (event) => {
@@ -262,12 +268,12 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep): Pro
     opened,
     protocol,
     frames: step.frames !== undefined ? frames.slice(0, step.frames) : frames,
-    close,
+    close: opened ? close : null,
     refusal,
   };
 }
 
-export function captureStep(server: StartedServer, step: ScenarioStep): Promise<Capture> {
-  if (step.http) return captureHttp(server, step.http);
-  return captureWebSocket(server, step.ws!);
+export function captureStep(server: StartedServer, step: ScenarioStep, placeholders: Placeholders): Promise<Capture> {
+  if (step.http) return captureHttp(server, step.http, placeholders);
+  return captureWebSocket(server, step.ws!, placeholders);
 }

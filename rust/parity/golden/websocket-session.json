@@ -145,10 +145,7 @@
     {
       "name": "unknown-socket-path",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -170,10 +167,7 @@
     {
       "name": "executor-link-unknown",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -195,10 +189,7 @@
     {
       "name": "connect~unauthenticated",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -220,10 +211,7 @@
     {
       "name": "connect~forged-token",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -245,10 +233,7 @@
     {
       "name": "connect~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -268,10 +253,7 @@
     {
       "name": "ping~unauthenticated",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -293,10 +275,7 @@
     {
       "name": "ping~forged-token",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -318,10 +297,7 @@
     {
       "name": "ping~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -341,10 +317,7 @@
     {
       "name": "reconnect-state-query~unauthenticated",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -366,10 +339,7 @@
     {
       "name": "reconnect-state-query~forged-token",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -391,10 +361,7 @@
     {
       "name": "reconnect-state-query~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -414,10 +381,7 @@
     {
       "name": "subscribe-unknown-chat~unauthenticated",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -439,10 +403,7 @@
     {
       "name": "subscribe-unknown-chat~forged-token",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -464,10 +425,7 @@
     {
       "name": "subscribe-unknown-chat~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -487,10 +445,7 @@
     {
       "name": "malformed-message~unauthenticated",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -512,10 +467,7 @@
     {
       "name": "malformed-message~forged-token",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -537,10 +489,7 @@
     {
       "name": "malformed-message~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -596,10 +545,7 @@
     {
       "name": "auth-only-protocol~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -619,10 +565,7 @@
     {
       "name": "unknown-socket-path~unauthenticated",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -644,10 +587,7 @@
     {
       "name": "unknown-socket-path~forged-token",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -669,10 +609,7 @@
     {
       "name": "unknown-socket-path~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -692,10 +629,7 @@
     {
       "name": "executor-link-unknown~unauthenticated",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -717,10 +651,7 @@
     {
       "name": "executor-link-unknown~forged-token",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",
@@ -742,10 +673,7 @@
     {
       "name": "executor-link-unknown~no-protocol",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",

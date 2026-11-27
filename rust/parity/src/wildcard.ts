@@ -1,9 +1,44 @@
 // Recorded values use the rust-anything wildcard convention: `[..]` inside a
 // string matches any run of characters, and a value that is exactly `[..]`
 // matches any JSON value. Values that differ between two runs of the original
-// become wildcards, so they never fail a replay.
+// become wildcards, so they never fail a replay. When both runs show the same
+// length and alphabet, the wildcard keeps that shape: `[..hex:44]` matches
+// exactly 44 lowercase hexadecimal characters, so a port cannot pass it with
+// another length or alphabet.
 
 export const WILDCARD = '[..]';
+
+// The alphabets a shaped wildcard can name, narrowest first and each
+// contained in the one after it.
+const SHAPES = {
+  digits: /^[0-9]+$/,
+  hex: /^[0-9a-f]+$/,
+  HEX: /^[0-9A-F]+$/,
+  base64url: /^[A-Za-z0-9_-]+$/,
+} as const;
+
+type Shape = keyof typeof SHAPES;
+
+const SHAPE_SETS: Record<Shape, string> = {
+  digits: '[0-9]',
+  hex: '[0-9a-f]',
+  HEX: '[0-9A-F]',
+  base64url: '[A-Za-z0-9_-]',
+};
+
+// The names must stay those of SHAPES.
+const TOKEN_SOURCE = '\\[\\.\\.(?:(digits|hex|HEX|base64url):(\\d+))?\\]';
+const TOKEN = new RegExp(TOKEN_SOURCE, 'g');
+const TOKEN_ANYWHERE = new RegExp(TOKEN_SOURCE);
+
+// The narrowest alphabet that holds both values, or none.
+function sharedShape(left: string, right: string): Shape | null {
+  return (Object.keys(SHAPES) as Shape[]).find((shape) => SHAPES[shape].test(left) && SHAPES[shape].test(right)) ?? null;
+}
+
+export function hasWildcard(value: string): boolean {
+  return TOKEN_ANYWHERE.test(value);
+}
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -47,7 +82,8 @@ function wordBoundary(text: string, index: number): number {
 }
 
 // Keeps the shared prefix and suffix of two differing strings, so an id inside
-// a sentence stays checked everywhere except the word that varied.
+// a sentence stays checked everywhere except the word that varied. Where both
+// runs vary the same way, in length and alphabet, that much is kept too.
 export function mergeStrings(left: string, right: string): string {
   if (left === right) return left;
   const prefix = wordBoundary(left, commonPrefixLength(left, right));
@@ -60,7 +96,11 @@ export function mergeStrings(left: string, right: string): string {
     && WORD_CHARACTER.test(left[suffixStart - 1]) && WORD_CHARACTER.test(left[suffixStart])) {
     suffixStart += 1;
   }
-  return `${left.slice(0, prefix)}${WILDCARD}${left.slice(suffixStart)}`;
+  const leftVariable = left.slice(prefix, suffixStart);
+  const rightVariable = right.slice(prefix, right.length - suffix);
+  const shape = leftVariable.length === rightVariable.length ? sharedShape(leftVariable, rightVariable) : null;
+  const wildcard = shape === null ? WILDCARD : `[..${shape}:${leftVariable.length}]`;
+  return `${left.slice(0, prefix)}${wildcard}${left.slice(suffixStart)}`;
 }
 
 // Merges two recordings of the same case into one expectation, turning every
@@ -86,9 +126,16 @@ function escapeRegExp(text: string): string {
 }
 
 export function stringMatches(pattern: string, actual: string): boolean {
-  if (!pattern.includes(WILDCARD)) return pattern === actual;
-  const source = pattern.split(WILDCARD).map(escapeRegExp).join('[\\s\\S]*?');
-  return new RegExp(`^${source}$`).test(actual);
+  if (!hasWildcard(pattern)) return pattern === actual;
+  let source = '^';
+  let copied = 0;
+  for (const token of pattern.matchAll(TOKEN)) {
+    source += escapeRegExp(pattern.slice(copied, token.index));
+    // A shaped wildcard takes exactly its length of its alphabet; the rest take any run.
+    source += token[1] === undefined ? '[\\s\\S]*?' : `${SHAPE_SETS[token[1] as Shape]}{${token[2]}}`;
+    copied = token.index + token[0].length;
+  }
+  return new RegExp(`${source}${escapeRegExp(pattern.slice(copied))}$`).test(actual);
 }
 
 function describe(value: Json | undefined): string {
@@ -102,7 +149,7 @@ function describe(value: Json | undefined): string {
 // Anthropic describes for its Rust migration). Wildcard patterns have no fixed
 // offsets, so they are not fingerprinted.
 function stringFingerprint(expected: string, actual: string): string {
-  if (expected.includes(WILDCARD) || (expected.length < 120 && actual.length < 120)) return '';
+  if (hasWildcard(expected) || (expected.length < 120 && actual.length < 120)) return '';
   const offset = commonPrefixLength(expected, actual);
   const excerpt = JSON.stringify(actual.slice(Math.max(0, offset - 20), offset + 40));
   return ` (first difference at offset ${offset}: ${excerpt}; length ${actual.length}, expected ${expected.length})`;
@@ -164,7 +211,7 @@ export function firstDifference(expected: Json | undefined, actual: Json | undef
 // reports as noise so a reviewer can decide whether it is really incidental.
 export function wildcardPaths(value: Json, path = '$'): string[] {
   if (value === WILDCARD) return [path];
-  if (typeof value === 'string') return value.includes(WILDCARD) ? [path] : [];
+  if (typeof value === 'string') return hasWildcard(value) ? [path] : [];
   if (Array.isArray(value)) return value.flatMap((item, index) => wildcardPaths(item, childPath(path, index)));
   if (isObject(value)) {
     return Object.keys(value).sort().flatMap((key) => wildcardPaths(value[key], childPath(path, key)));

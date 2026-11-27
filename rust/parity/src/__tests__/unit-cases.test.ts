@@ -41,7 +41,8 @@ describe('mergeCaptured', () => {
       [call(0, 'create', ['x'], { id: 'chat-111', title: 'Chat 111', at: '2026-11-27T10:00:00.000Z' })],
       [call(0, 'create', ['x'], { id: 'chat-222', title: 'Chat 111', at: '2026-11-27T10:05:00.000Z' })],
     );
-    expect(shown(merged)).toEqual([['create', ['x'], { id: 'chat-[..]', title: 'Chat 111', at: '2026-11-27T10:[..]:00.000Z' }]]);
+    // Both runs vary the same way, so each wildcard keeps that shape.
+    expect(shown(merged)).toEqual([['create', ['x'], { id: 'chat-[..digits:3]', title: 'Chat 111', at: '2026-11-27T10:[..digits:2]:00.000Z' }]]);
     expect(merged.noise).toEqual(['create(["x"]): differs between runs at $.result.at, $.result.id']);
   });
 

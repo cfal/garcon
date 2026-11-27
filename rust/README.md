@@ -54,10 +54,14 @@ Unit names for the kill switch are listed in [`MAP.md`](MAP.md).
 
 A scenario is a sequence of HTTP and WebSocket steps run against a fresh server
 in an isolated config, workspace, project, and home directory, with seeded
-credentials. Scenarios marked `traps` also run generated variants of every
-step: missing and forged credentials, HEAD, trailing and doubled slashes, dot
-segments, encoded traversal, non-ASCII path segments, and malformed or
-non-ASCII JSON bodies.
+credentials. The server is started with the PATH `/usr/bin:/bin`, whatever the
+machine's own, so an agent CLI installed on it does not change a catalog
+response. `"account": "none"` in `server` starts it without a provisioned
+account, for `POST /api/v1/auth/register` and the setup-required states; no
+session token is taken, and `auth: "token"` then sends none. Scenarios marked
+`traps` also run generated variants of every step: missing and forged
+credentials, HEAD, trailing and doubled slashes, dot segments, encoded
+traversal, non-ASCII path segments, and malformed or non-ASCII JSON bodies.
 
 ```bash
 bun run parity:record        # run the original twice per scenario, write golden/
@@ -70,21 +74,51 @@ What is compared, per case:
 
 - HTTP: status, the contract headers listed in `parity/src/capture.ts`
   (`Content-Length` only for uncompressed bodies), and the decoded body: JSON
-  structurally, text exactly, binary by SHA-256.
+  structurally, text exactly, binary by SHA-256. A textual body over 64 KB is
+  recorded as `text-digest`, the SHA-256 and byte length of its text after the
+  placeholders below are applied, so a large body that holds a value of the
+  server start is still compared.
 - WebSocket: whether the upgrade succeeded, the negotiated subprotocol, the
   replies to the step's own requests (matched by `clientRequestId`), the close
-  code, and for a refused upgrade the raw HTTP status and body, which WebSocket
-  clients do not expose. Unsolicited broadcasts are not recorded, because their
-  timing is outside the step's control; they need scenarios with a
+  code and reason of a connection the server accepted and then closed, and for
+  a refused upgrade the raw HTTP status and body, which WebSocket clients do
+  not expose. A refused upgrade has no close record: the code and reason a
+  client reports for one are the client's own (Bun 1.4.3 says 1002, 1.4.5 says
+  1006), not the server's. Unsolicited broadcasts are not recorded, because
+  their timing is outside the step's control; they need scenarios with a
   deterministic trigger.
 - Values that belong to one server start (temporary paths, port, session
   token) become placeholders such as `{{projectDir}}`. Timestamps, UUIDs, and
   JWTs become `{{timestamp}}`, `{{uuid}}`, and `{{jwt}}`, so their presence and
   position are still checked.
+- The run's own day becomes `{{today}}`, wherever a response holds it as a
+  whole `YYYY-MM-DD` day, so a golden does not go stale overnight. Other dates
+  stay as recorded.
 - Anything else that differs between the original's two runs becomes a `[..]`
-  wildcard, trimmed to whole words. `record` prints every wildcard it creates;
-  review each one, since order and count differences are exactly what a port
-  can get wrong for real.
+  wildcard, trimmed to whole words. Where both runs vary the same way, in
+  length and alphabet, the wildcard keeps that shape: `[..hex:44]` matches
+  exactly 44 lowercase hexadecimal characters, and `digits`, `HEX`, and
+  `base64url` name the other alphabets. `record` prints every wildcard it
+  creates; review each one, since order and count differences are exactly what
+  a port can get wrong for real.
+
+A request can hold these placeholders, in a path, a query, a header, or a body:
+
+- `{{token}}`, `{{username}}`, `{{password}}`, `{{projectDir}}`, and
+  `{{workspaceDir}}`: values of the server start.
+- `{{today}}`, `{{todayPlus<N>}}`, `{{todayMinus<N>}}`: a calendar day in UTC
+  as `YYYY-MM-DD`, the form `GET /api/v1/usage` takes. A response that holds a
+  day the scenario names shows it under the same placeholder.
+- `{{<step>.body.<path>}}`: the value at `path` in the JSON body of another
+  step's response, for example `{{bootstrap.body.storeId}}` or
+  `{{create.body.endpoints[0].id}}`. It is read from that step's response when
+  the step runs, so the recorded request keeps the placeholder and the golden
+  stays machine independent. A later response that repeats the value shows it
+  under the placeholder too, so the golden checks that an update answers with
+  the same identifier. In a JSON body, a field whose whole value is the
+  placeholder takes the value with its type, so a number stays a number. A
+  value that cannot be had, because the step did not run before or the response
+  has no such path, fails the scenario.
 
 `replay` reports passed and total cases, the share served without falling back
 to the original, a table of distinct differences grouped by field, and the

@@ -1,7 +1,9 @@
 //! Structural comparison of a recorded result with a port's result, with the
 //! rules of `rust/parity/src/wildcard.ts`: object key order is not compared,
 //! and a string that contains `[..]` matches any run of characters in place
-//! of it, while a string that is exactly `[..]` matches any value.
+//! of it, while a string that is exactly `[..]` matches any value. Where both
+//! recording runs varied the same way, a wildcard is written with its shape:
+//! `[..hex:44]` matches exactly 44 lowercase hexadecimal characters.
 
 use serde_json::{Map, Number, Value};
 
@@ -78,34 +80,120 @@ fn is_negative_zero(number: &Number) -> bool {
         .is_some_and(|value| value == 0.0 && value.is_sign_negative())
 }
 
+/// One piece of a pattern: a literal text, a wildcard that takes any run of
+/// characters, or one that takes exactly `length` characters of an alphabet.
+enum Part<'a> {
+    Literal(&'a str),
+    Any,
+    Shaped {
+        alphabet: fn(char) -> bool,
+        length: usize,
+    },
+}
+
+fn alphabet(name: &str) -> Option<fn(char) -> bool> {
+    match name {
+        "digits" => Some(|character: char| character.is_ascii_digit()),
+        "hex" => {
+            Some(|character: char| character.is_ascii_digit() || ('a'..='f').contains(&character))
+        }
+        "HEX" => {
+            Some(|character: char| character.is_ascii_digit() || ('A'..='F').contains(&character))
+        }
+        "base64url" => Some(|character: char| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '-'
+        }),
+        _ => None,
+    }
+}
+
+// The wildcard at the start of `text`, if `text` starts with one: `[..]`, or
+// `[..<alphabet>:<length>]`, followed by the rest of the text. Anything else
+// between the brackets is not a wildcard and stays literal.
+fn wildcard_at<'a>(text: &'a str) -> Option<(Part<'a>, &'a str)> {
+    let inner = text.strip_prefix("[..")?;
+    let end = inner.find(']')?;
+    let part = match &inner[..end] {
+        "" => Part::Any,
+        shaped => {
+            let (name, digits) = shaped.split_once(':')?;
+            Part::Shaped {
+                alphabet: alphabet(name)?,
+                length: digits.parse().ok()?,
+            }
+        }
+    };
+    Some((part, &inner[end + 1..]))
+}
+
+fn has_wildcard(value: &str) -> bool {
+    value
+        .match_indices("[..")
+        .any(|(at, _)| wildcard_at(&value[at..]).is_some())
+}
+
+fn parts(pattern: &str) -> Vec<Part<'_>> {
+    let mut parts = Vec::new();
+    let mut rest = pattern;
+    let mut searched = 0;
+    while let Some(at) = rest[searched..].find("[..") {
+        let start = searched + at;
+        match wildcard_at(&rest[start..]) {
+            Some((part, after)) => {
+                if start > 0 {
+                    parts.push(Part::Literal(&rest[..start]));
+                }
+                parts.push(part);
+                rest = after;
+                searched = 0;
+            }
+            None => searched = start + 3,
+        }
+    }
+    if !rest.is_empty() {
+        parts.push(Part::Literal(rest));
+    }
+    parts
+}
+
+fn matches(parts: &[Part<'_>], actual: &str) -> bool {
+    match parts {
+        [] => actual.is_empty(),
+        [Part::Literal(literal), rest @ ..] => actual
+            .strip_prefix(literal)
+            .is_some_and(|tail| matches(rest, tail)),
+        [Part::Shaped { alphabet, length }, rest @ ..] => {
+            let mut taken = 0;
+            let mut consumed = 0;
+            for character in actual.chars() {
+                if taken == *length {
+                    return matches(rest, &actual[consumed..]);
+                }
+                if !alphabet(character) {
+                    return false;
+                }
+                consumed += character.len_utf8();
+                taken += 1;
+            }
+            taken == *length && matches(rest, &actual[consumed..])
+        }
+        [Part::Any, rest @ ..] => {
+            (0..=actual.len()).any(|at| actual.is_char_boundary(at) && matches(rest, &actual[at..]))
+        }
+    }
+}
+
 fn wildcard_matches(pattern: &str, actual: &str) -> bool {
-    if !pattern.contains(WILDCARD) {
+    if !has_wildcard(pattern) {
         return pattern == actual;
     }
-    let mut parts = pattern.split(WILDCARD);
-    let head = parts.next().unwrap_or_default();
-    let Some(mut rest) = actual.strip_prefix(head) else {
-        return false;
-    };
-    let mut middle: Vec<&str> = parts.collect();
-    let tail = if pattern.ends_with(WILDCARD) {
-        ""
-    } else {
-        middle.pop().unwrap_or_default()
-    };
-    for part in middle {
-        let Some(at) = rest.find(part) else {
-            return false;
-        };
-        rest = &rest[at + part.len()..];
-    }
-    rest.ends_with(tail)
+    matches(&parts(pattern), actual)
 }
 
 /// Every position where a recording has a wildcard, as JSON paths.
 pub fn wildcard_paths(value: &Value, path: &str) -> Vec<String> {
     match value {
-        Value::String(text) if text.contains(WILDCARD) => vec![path.to_owned()],
+        Value::String(text) if has_wildcard(text) => vec![path.to_owned()],
         Value::Array(items) => items
             .iter()
             .enumerate()
@@ -275,6 +363,62 @@ mod tests {
             )
             .path,
             "$.properties.code",
+        );
+    }
+
+    #[test]
+    fn a_shaped_wildcard_takes_exactly_its_length_of_its_alphabet() {
+        let accepted = |value: &str| {
+            difference(
+                json!({ "proof": "[..base64url:43]" }),
+                json!({ "proof": value }),
+            )
+            .is_none()
+        };
+        assert!(accepted(&"A".repeat(43)));
+        assert!(accepted(&"_-_0zZ9".repeat(7)[..43]));
+        assert!(!accepted(&"A".repeat(42)));
+        assert!(!accepted(&"A".repeat(44)));
+        assert!(!accepted(&format!("{}+", "A".repeat(42))));
+
+        assert!(difference(json!("[..hex:4]"), json!("7f3a")).is_none());
+        assert_eq!(found(json!("[..hex:4]"), json!("7F3A")).kind, "value");
+        assert!(difference(json!("[..HEX:4]"), json!("7F3A")).is_none());
+        assert!(difference(json!("[..digits:13]"), json!("1764234905123")).is_none());
+        assert_eq!(found(json!("[..digits:3]"), json!("12")).kind, "value");
+        assert_eq!(found(json!("[..digits:3]"), json!("abc")).kind, "value");
+
+        // Inside a string, and beside an unshaped wildcard.
+        assert!(difference(json!("id-[..hex:4].json"), json!("id-7f3a.json")).is_none());
+        assert!(difference(json!("a[..][..hex:4]z"), json!("anything7f3az")).is_none());
+        assert!(!difference(json!("a[..][..hex:4]z"), json!("anything7f3az!")).is_none());
+
+        // A shaped wildcard still needs a string, where `[..]` takes any value.
+        assert!(difference(json!("[..]"), json!({ "any": "thing" })).is_none());
+        assert_eq!(found(json!("[..digits:3]"), json!(123)).kind, "type");
+        assert_eq!(
+            found(json!("[..base64url:8]"), json!({ "any": "thing" })).kind,
+            "type"
+        );
+    }
+
+    #[test]
+    fn brackets_that_are_not_a_wildcard_stay_literal() {
+        assert!(difference(json!("[..odd]"), json!("[..odd]")).is_none());
+        assert_eq!(found(json!("[..odd]"), json!("x")).kind, "value");
+        assert_eq!(
+            wildcard_paths(&json!({ "a": "x [..digits:2] y", "b": "[..odd]" }), "$"),
+            ["$.a"]
+        );
+    }
+
+    #[test]
+    fn unshaped_wildcards_still_match_any_run() {
+        assert!(difference(json!("a[..]b[..]c"), json!("a-anything-b!c")).is_none());
+        assert!(difference(json!("[..] tail"), json!("head tail")).is_none());
+        assert_eq!(
+            wildcard_paths(&json!({ "a": "x [..hex:2] y", "b": "[..]" }), "$"),
+            ["$.a", "$.b"]
         );
     }
 

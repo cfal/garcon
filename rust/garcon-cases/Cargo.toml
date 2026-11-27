@@ -11,7 +11,7 @@ workspace = true
 
 [dependencies]
 serde_json.workspace = true
-sha2 = "0.10"
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

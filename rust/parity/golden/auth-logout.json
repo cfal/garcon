@@ -79,10 +79,7 @@
     {
       "name": "socket-after-logout",
       "expected": {
-        "close": {
-          "code": 1002,
-          "reason": "Expected 101 status code"
-        },
+        "close": null,
         "frames": [],
         "opened": false,
         "protocol": "",

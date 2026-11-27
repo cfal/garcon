@@ -9,6 +9,9 @@ const READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 60_000;
 // A fixed web build keeps static-asset recordings independent of local builds.
 const WEB_BUILD_FIXTURE = 'rust/parity/fixtures/web-build';
+// The only PATH the server sees. It inherits none, so an agent CLI installed
+// on the recording machine does not change a catalog response.
+const SERVER_PATH = '/usr/bin:/bin';
 
 export interface ParityDirectories {
   root: string;
@@ -51,6 +54,10 @@ export interface ServerOptions {
   webBuildDir?: string;
   // Extra environment for this server, such as a unit kill switch.
   environment?: Record<string, string>;
+  // `none` starts without a provisioned account, for registration and the
+  // setup-required states. No session token is taken, and a request that asks
+  // for one is sent without it.
+  account?: 'provisioned' | 'none';
 }
 
 // The original is the TypeScript controller, started exactly as `bun run
@@ -93,8 +100,11 @@ async function seedFiles(dirs: ParityDirectories, files: Record<string, string>)
 
 export async function startServer(repoRoot: string, build: ServerBuild, options: ServerOptions = {}): Promise<StartedServer> {
   const dirs = await createDirectories();
+  const unprovisioned = options.account === 'none';
   // A fixed username keeps recorded responses that echo it comparable.
-  const credentials = await prepareFixtureAuth(dirs.configDir, 'parity');
+  const credentials = unprovisioned
+    ? { username: 'parity', password: '' }
+    : await prepareFixtureAuth(dirs.configDir, 'parity');
   await seedFiles(dirs, options.files ?? {});
   const fallbackLogPath = join(dirs.root, 'fallback.log');
   await writeFile(fallbackLogPath, '');
@@ -113,7 +123,7 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
     cwd: repoRoot,
     // A fixed time zone and locale keep recordings comparable across machines.
     env: isolatedEnvironment(dirs.homeDir, {
-      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      PATH: SERVER_PATH,
       TZ: 'UTC',
       LANG: 'C.UTF-8',
       ...frontDoorEnvironment(),
@@ -154,7 +164,7 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
       origin: url.origin,
       baseUrl,
       port: url.port,
-      token: await fixtureAuthToken(baseUrl, credentials),
+      token: unprovisioned ? '' : await fixtureAuthToken(baseUrl, credentials),
       credentials,
       dirs,
       fallbackLogPath,

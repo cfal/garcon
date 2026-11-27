@@ -43,6 +43,8 @@ export interface Scenario {
   server?: {
     basePath?: string;
     files?: Record<string, string>;
+    // `none` starts the server without a provisioned account.
+    account?: 'provisioned' | 'none';
   };
   steps: ScenarioStep[];
   // Generates trap variants for every step; see traps.ts.
@@ -55,6 +57,9 @@ function assertScenario(value: unknown, file: string): asserts value is Scenario
   const scenario = value as Partial<Scenario>;
   if (typeof scenario?.name !== 'string' || !Array.isArray(scenario.steps)) {
     throw new Error(`${file}: a scenario needs a name and steps`);
+  }
+  if (scenario.server?.account !== undefined && scenario.server.account !== 'provisioned' && scenario.server.account !== 'none') {
+    throw new Error(`${file}: server.account is "provisioned" or "none"`);
   }
   const names = new Set<string>();
   for (const step of scenario.steps) {
