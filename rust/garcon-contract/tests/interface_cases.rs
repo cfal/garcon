@@ -12,6 +12,11 @@
 mod support;
 
 use garcon_cases::{CaseError, Stats, markers, replay};
+use garcon_contract::file_contracts::{
+    directory_name_problem, is_file_revision, parse_create_directory_request,
+    parse_directory_entry, parse_file_identity_response, parse_file_revision_response,
+    parse_read_text_response, parse_save_text_request, parse_save_text_response,
+};
 use garcon_contract::git_error::{GitServiceError, is_git_service_error_code};
 use garcon_contract::terminal::{
     TerminalErrorCode, TerminalMetadata, TerminalStreamClientMessage, TerminalStreamClientPayload,
@@ -37,6 +42,11 @@ fn assert_all_match(module: &str, stats: Stats) {
 /// A result the original returns as `null` where its parser refuses the value.
 fn optional<T>(value: Option<T>, to_json: impl FnOnce(T) -> Value) -> Value {
     value.map_or(Value::Null, to_json)
+}
+
+/// A result that holds only plain JSON, as the original's `toEqual` sees it.
+fn plain<T: serde::Serialize>(value: Option<T>) -> Value {
+    value.map_or(Value::Null, |value| serde_json::to_value(&value).unwrap())
 }
 
 /// Adds a property the original leaves out when it has no value.
@@ -405,4 +415,63 @@ fn terminal_error_cases_match() {
         dispatch_terminal_error,
     );
     assert_all_match("common/terminal-error.ts", stats);
+}
+fn dispatch_file_contracts(function: &str, args: &[Value]) -> Result<Value, CaseError> {
+    // Each parser takes `unknown`, which reads `undefined` as any other non-record.
+    let argument = |function: &str| support::unknown(function, args.first());
+    match function {
+        "isFileRevision" => {
+            let value = argument(function)?;
+            Ok(json!(is_file_revision(&value)))
+        }
+        "directoryNameProblem" => {
+            // The original takes a typed string.
+            let name = support::text(function, args.first())?
+                .ok_or_else(|| CaseError::unhandled(function))?;
+            Ok(optional(directory_name_problem(name), |problem| {
+                json!(problem)
+            }))
+        }
+        "parseFileRevisionResponse" => {
+            let value = argument(function)?;
+            Ok(plain(parse_file_revision_response(&value)))
+        }
+        "parseReadTextResponse" => {
+            let value = argument(function)?;
+            Ok(plain(parse_read_text_response(&value)))
+        }
+        "parseSaveTextRequest" => {
+            let value = argument(function)?;
+            Ok(plain(parse_save_text_request(&value)))
+        }
+        "parseCreateDirectoryRequest" => {
+            let value = argument(function)?;
+            Ok(plain(parse_create_directory_request(&value)))
+        }
+        "parseDirectoryEntry" => {
+            let value = argument(function)?;
+            Ok(plain(parse_directory_entry(&value)))
+        }
+        "parseSaveTextResponse" => {
+            let value = argument(function)?;
+            Ok(plain(parse_save_text_response(&value)))
+        }
+        "parseFileIdentityResponse" => {
+            let value = argument(function)?;
+            Ok(plain(parse_file_identity_response(&value)))
+        }
+        _ => Err(CaseError::unhandled(function)),
+    }
+}
+
+#[test]
+fn file_contracts_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/file-contracts"
+        ),
+        dispatch_file_contracts,
+    );
+    assert_all_match("common/file-contracts.ts", stats);
 }

@@ -6,6 +6,7 @@ pub mod chat_id;
 pub mod error_codes;
 pub mod executor_path;
 pub mod executors;
+pub mod file_contracts;
 pub mod git_error;
 pub mod json;
 pub mod terminal;

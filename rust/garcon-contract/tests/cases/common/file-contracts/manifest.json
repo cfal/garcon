@@ -1,0 +1,10 @@
+{
+  "module": "common/file-contracts.ts",
+  "tests": [
+    "common/__tests__/file-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/file-contracts.jsonl",
+  "notCaptured": [],
+  "cases": 706,
+  "sha256": "c70cac35cb4f1f2da186c050bad61ca58572e694ecb54cd439a71fe129d5e609"
+}
