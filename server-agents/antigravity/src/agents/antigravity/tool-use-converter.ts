@@ -50,6 +50,12 @@ function stringField(input: Record<string, unknown>, ...names: string[]): string
   return asString(field(input, ...names));
 }
 
+function planField(input: Record<string, unknown>, key: 'Reason' | 'Plan'): string | undefined {
+  const alias = key.toLowerCase();
+  if (Object.hasOwn(input, key) && Object.hasOwn(input, alias) && input[key] !== input[alias]) return undefined;
+  return stringField(input, key, alias);
+}
+
 const SCHEDULE_KEYS: Readonly<Record<string, string>> = {
   DurationSeconds: 'delaySeconds', duration_seconds: 'delaySeconds',
   CronExpression: 'expression', cron_expression: 'expression',
@@ -226,12 +232,12 @@ export function convertAntigravityToolUse(
       break;
     }
     case 'enter_plan_mode': {
-      const reason = stringField(input, 'Reason', 'reason');
+      const reason = planField(input, 'Reason');
       if (reason !== undefined) return new AntigravityEnterPlanModeToolUseMessage(timestamp, id, reason);
       break;
     }
     case 'exit_plan_mode': {
-      const plan = stringField(input, 'Plan', 'plan');
+      const plan = planField(input, 'Plan');
       if (plan !== undefined) return new AntigravityExitPlanModeToolUseMessage(timestamp, id, plan);
       break;
     }

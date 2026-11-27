@@ -74,7 +74,7 @@ export function uniqueEcho(matches: readonly TextEcho[]): TextEcho | undefined {
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-function independentIndices(blocks: readonly Block[], echoes: readonly TextEcho[]): number[] {
+export function independentTextIndices(blocks: readonly Block[], echoes: readonly TextEcho[]): number[] {
   const indices: number[] = [];
   let run = 0;
   for (const [index, block] of blocks.entries()) {
@@ -86,7 +86,7 @@ function independentIndices(blocks: readonly Block[], echoes: readonly TextEcho[
 }
 
 function narrative(blocks: readonly Block[], echoes: readonly TextEcho[]): string {
-  return independentIndices(blocks, echoes).map(i => blockText(blocks[i]).trim()).join('\n');
+  return independentTextIndices(blocks, echoes).map(i => blockText(blocks[i]).trim()).join('\n');
 }
 
 export function prefersReportContent(previous: TrackedCall | undefined, raw: unknown, blocks: TrackedCall['content']): boolean {
@@ -95,25 +95,18 @@ export function prefersReportContent(previous: TrackedCall | undefined, raw: unk
   const wasNewer = previous?.reportContentIsNewer ?? false;
   if (!blocks || blocks === previous?.content) return wasNewer;
   const before = previous?.content ?? [];
+  // Formatting can change an exact match without changing the reported narrative.
+  if (narrative(before, []) === narrative(blocks, [])) return wasNewer;
   const oldEchoes = textEchoes(before, output);
   const newEchoes = textEchoes(blocks, output);
   const latest = narrative(blocks, newEchoes);
   const prior = narrative(before, oldEchoes);
   if (!latest || latest === prior) return wasNewer;
-  // Formatting can change an exact match without changing the reported narrative.
-  const previouslyEchoed = oldEchoes.length > 0;
-  const nowEchoed = newEchoes.length > 0;
-  if (previouslyEchoed !== nowEchoed && narrative(before, []) === narrative(blocks, [])) return wasNewer;
-  if (nowEchoed && !previouslyEchoed && !prior) return wasNewer;
+  if (newEchoes.length && !oldEchoes.length && !prior) return wasNewer;
   return true;
 }
 
-export function primaryTextIndices(blocks: readonly Block[], echoes: readonly TextEcho[] = [], preferIndependent = false): number[] {
-  if (preferIndependent) {
-    const independent = independentIndices(blocks, echoes);
-    if (independent.length || echoes.length > 1) return independent;
-  }
-  const match = uniqueEcho(echoes);
+export function primaryTextIndices(blocks: readonly Block[], match?: TextEcho): number[] {
   const indices = blocks.flatMap((block, i) => blockText(block).trim() ? [i] : []);
   return match ? indices.filter(i => i >= match.first && i <= match.last) : indices;
 }

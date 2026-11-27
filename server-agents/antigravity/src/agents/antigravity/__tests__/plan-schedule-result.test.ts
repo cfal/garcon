@@ -212,6 +212,36 @@ test('a replacement image keeps the exact cached report within the relay budget'
   expect(Buffer.byteLength(JSON.stringify(row))).toBeLessThan(large.length + 1024);
 });
 
+test('the terminal attachment order wins without erasing uniquely aligned annotations', () => {
+  const s = session();
+  const annotated = { type: 'content', content: { type: 'text', text: 'Saved', annotations: { priority: 1 } } };
+  const replacement = { type: 'image', data: 'AQ==' };
+  s.start('timer', { ...timer, content: [annotated, image] });
+  const row = s.patch('timer', { status: 'completed', rawOutput: { output: 'Saved' },
+    content: [replacement, textBlock('Saved')] }).at(-1);
+  assertToolResult(row);
+  expect(row.content).toEqual({ items: [replacement, annotated] });
+  expect(row.primaryTextItems).toEqual([1]);
+});
+
+test.each([false, true])('indexes the only report before large attachments (explicit terminal: %s)', explicit => {
+  const s = session();
+  const diagnostic = 'Operation refused';
+  const content = [{ type: 'image', data: 'A'.repeat(5000) }, textBlock(diagnostic)];
+  if (explicit) {
+    s.start('timer', { ...timer, rawOutput: { output: diagnostic } });
+    s.patch('timer', { content: [textBlock('Step 1')] });
+    content.push(textBlock(diagnostic));
+  } else {
+    s.start('timer', { ...timer, content });
+  }
+  const row = s.patch('timer', { status: 'failed', ...(explicit ? { content } : {}) }).at(-1);
+  assertToolResult(row);
+  expect(row.content.items).toEqual(content);
+  expect(row.primaryTextItems).toEqual(explicit ? [1, 2] : [1]);
+  expect(projectSearchMessage(row)?.body).toStartWith(diagnostic);
+});
+
 test('indexes diagnostics by changed narrative rather than echo segmentation, metadata or blank blocks', () => {
   const progress = 'Checking '.repeat(600);
   const diagnostic = 'Operation refused';
@@ -257,6 +287,14 @@ test('changing only an echo does not reverse the search priority of a cached rep
   assertToolResult(formatted);
   expect(formatted.primaryTextItems).toBeUndefined();
   expect(projectSearchMessage(formatted)?.body).toContain('refused');
+
+  const echo = [textBlock('Operation'), textBlock('refused')];
+  s.start('repeated', { ...timer, rawOutput: { output }, content: [progress, ...echo, ...echo] });
+  s.patch('repeated', { content: [progress, textBlock('Operation '), echo[1], ...echo] });
+  const repeated = s.patch('repeated', { status: 'failed' }).at(-1);
+  assertToolResult(repeated);
+  expect(repeated.primaryTextItems).toEqual([3, 4]);
+  expect(projectSearchMessage(repeated)?.body).toContain('refused');
 
   s.start('append', { ...timer, rawOutput: progress.content.text });
   const diagnostic = textBlock('Operation refused');
@@ -389,5 +427,5 @@ test.each(['Saved', ' '])('keeps cached images when terminal text carries annota
   const row = s.patch('timer', { status: 'completed', content: [annotated] }).at(-1);
   assertToolResult(row);
   expect(row.content.items).toEqual(text.trim() ? [image, annotated] : [cached, image, annotated]);
-  expect(row.primaryTextItems).toEqual(text.trim() ? [1] : undefined);
+  expect(row.primaryTextItems).toEqual(text.trim() ? [1] : [0]);
 });

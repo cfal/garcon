@@ -29,6 +29,17 @@ test.each(['enter_plan_mode', 'exit_plan_mode'])('keeps rejected raw arguments o
   expect(row).toMatchObject({ type: 'external-tool-use', name, input: { raw: ['malformed'] } });
 });
 
+test.each([['enter_plan_mode', 'Reason'], ['exit_plan_mode', 'Plan']])('keeps conflicting %s aliases as raw evidence', (name, key) => {
+  const s = session();
+  s.start('plan', { name, rawInput: { [key]: 'First' } });
+  const input = { [key.toLowerCase()]: 'Second' };
+  expect(s.patch('plan', { rawInput: input, status: 'completed' })[0]).toMatchObject({
+    type: 'external-tool-use', name, input: { [key]: 'First', ...input },
+  });
+  const same = { [key]: 'Same', [key.toLowerCase()]: 'Same' };
+  expect(s.start('same', { name, rawInput: same, status: 'completed' })[0].type).not.toBe('external-tool-use');
+});
+
 test('pairs delayed and cron schedule requests with provider results, not Garcon jobs', () => {
   const s = session();
   expect(s.start('timer', { name: 'schedule', rawInput: { DurationSeconds: 120, TimerCondition: 'sender' } })).toEqual([]);

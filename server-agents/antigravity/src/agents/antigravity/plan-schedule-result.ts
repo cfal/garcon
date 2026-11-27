@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { ToolResultMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
 import { plainToolResultTextPart, toolResultTextPart } from '@garcon/common/tool-result-content';
-import { blockText, joinedReportText, primaryTextIndices, rawOutputText, textEchoes, uniqueEcho, type TextEcho } from './report-text.js';
+import { blockText, independentTextIndices, joinedReportText, primaryTextIndices, rawOutputText, textEchoes, uniqueEcho, type TextEcho } from './report-text.js';
 import type { TrackedCall } from './tool-call-snapshot.js';
 
 type Block = Record<string, unknown>;
@@ -75,17 +75,17 @@ function alignTerminalBlocks(cached: readonly Block[], terminal: readonly Block[
 
 function reportBlocks(cached: readonly Block[], terminal: readonly Block[], terminalText: string, output: string): readonly Block[] {
   if (terminal.length && isDeepStrictEqual(cached, terminal)) return terminal;
+  // A supplied attachment list replaces the old one, but not annotations on retained text.
+  if (terminal.some(block => !toolResultTextPart(block))) cached = cached.filter(block => toolResultTextPart(block));
   if (terminalText) {
-    if (cached.every(plainText) || terminal.some(block => !toolResultTextPart(block))) return terminal;
+    if (cached.every(plainText)) return terminal;
     const echo = uniqueEcho(textEchoes(cached, terminalText));
     const aligned = echo ? alignTerminalBlocks(cached, terminal, echo) : undefined;
     return aligned ?? [...cached.flatMap(withoutBlockText), ...terminal];
   }
   const retained = output ? cachedBlocksForText(cached, output) : cached;
   if (terminal.every(plainText)) return retained.length ? retained : terminal;
-  // Only a supplied attachment list supersedes cached attachments, not annotations on text.
-  const replacesAttachments = terminal.some(block => !toolResultTextPart(block));
-  return [...(replacesAttachments ? retained.filter(block => toolResultTextPart(block)) : retained), ...terminal];
+  return [...retained, ...terminal];
 }
 
 function metadata(raw: unknown): unknown {
@@ -127,21 +127,18 @@ export function planOrScheduleResult(
   const useCache = !frameText && !frameOutput;
   const blocksOnly = !!frameText && !frameOutput;
   // A changed, nonblank output already wins over simultaneous content in prefersReportContent.
-  const terminalPrefersBlocks = !!frameText && call.reportContentIsNewer;
-  const preferBlocks = useCache ? previous?.reportContentIsNewer === true : terminalPrefersBlocks;
+  const preferBlocks = useCache ? previous?.reportContentIsNewer === true : !!frameText && call.reportContentIsNewer;
+  const separateOutput = !echo && !blocksOnly && !!output;
   const keepOrderedBlocks = (echo && text.trim() !== output)
-    || (echoes.length > 1 && preferBlocks)
-    || (frameOutput && terminalPrefersBlocks)
+    || (preferBlocks && (echoes.length > 1 || frameOutput))
     || blocks.some(block => block.type !== 'content' || !plainText(block));
   const body: Body = status === 'completed' ? {} : { status };
   let primary: number[] = [];
   if (keepOrderedBlocks) {
     body.items = blocks;
-    storeOutput(body, echo || blocksOnly ? undefined : raw, fields, 'with-blocks');
-    const rankCachedText = useCache && (output ? preferBlocks : fields !== undefined);
-    if (echo || blocksOnly || terminalPrefersBlocks || rankCachedText) {
-      primary = primaryTextIndices(blocks, echoes, preferBlocks);
-    }
+    storeOutput(body, separateOutput ? raw : undefined, fields, 'with-blocks');
+    if (preferBlocks) primary = independentTextIndices(blocks, echoes);
+    if (!primary.length && !separateOutput) primary = primaryTextIndices(blocks, echo);
   } else if (frameOutput || (useCache && output && !preferBlocks)) {
     storeOutput(body, raw, fields, 'standalone');
     if (!echo && text.trim()) body.items = blocks;
