@@ -413,17 +413,12 @@ describe('PreamblesSection', () => {
 			.mockRejectedValueOnce(conflict)
 			.mockResolvedValueOnce({ success: true, snapshot: { revision: 2, preambles: [] } });
 		const get = vi.fn().mockResolvedValue({ revision: 2, preambles: [updated] });
-		let store!: PreamblesStore;
 		render(PreamblesSectionTestHost, {
 			snapshot: { revision: 1, preambles: [original] },
 			deps: { get, remove },
-			onStore: (value: PreamblesStore) => {
-				store = value;
-			},
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
-		store.applySnapshot({ revision: 2, preambles: [updated] });
 		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
 
 		expect(remove).toHaveBeenNthCalledWith(1, { expectedRevision: 1, id: 'global' });
@@ -502,6 +497,89 @@ describe('PreamblesSection', () => {
 		expect(screen.getByText('Remove "Restored conventions"? This cannot be undone.')).toBeTruthy();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Remove preamble' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
+		expect(remove).toHaveBeenCalledWith({ expectedRevision: 1, id: 'global' });
+	});
+
+	it('refreshes the delete confirmation target before deleting after a backwards restore', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const restored = { ...original, title: 'Restored lower title', updatedAt: '2029-01-02T00:00:00.000Z' };
+		const get = vi.fn().mockResolvedValue({ revision: 7, preambles: [restored] });
+		const remove = vi.fn().mockResolvedValue({ success: true, snapshot: { revision: 8, preambles: [] } });
+		let store!: PreamblesStore;
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 8, preambles: [original] },
+			deps: { get, remove },
+			onStore: (value: PreamblesStore) => {
+				store = value;
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
+		await store.refresh();
+		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
+
+		expect(remove).not.toHaveBeenCalled();
+		expect(await screen.findByText(/Preambles changed in another session/)).toBeTruthy();
+		expect(screen.getByText('Remove "Restored lower title"? This cannot be undone.')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove preamble' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
+		expect(remove).toHaveBeenCalledWith({ expectedRevision: 7, id: 'global' });
+	});
+
+	it('blocks edit saves and delete confirmations while preambles are refreshing', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		let resolveRefresh!: (value: PreamblesSnapshot) => void;
+		const get = vi.fn(
+			() =>
+				new Promise<PreamblesSnapshot>((resolve) => {
+					resolveRefresh = resolve;
+				}),
+		);
+		const update = vi.fn().mockResolvedValue({
+			success: true,
+			snapshot: { revision: 2, preambles: [original] },
+		});
+		const remove = vi.fn().mockResolvedValue({
+			success: true,
+			snapshot: { revision: 2, preambles: [] },
+		});
+		let store!: PreamblesStore;
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get, update, remove },
+			onStore: (value: PreamblesStore) => {
+				store = value;
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+		const contentInput = await screen.findByRole('textbox', { name: 'Preamble text' });
+		const pendingEditRefresh = store.refresh();
+		const saveButton = screen.getByRole('button', { name: 'Save Preamble' }) as HTMLButtonElement;
+		await waitFor(() => expect(saveButton.disabled).toBe(true));
+
+		await fireEvent.keyDown(contentInput, { key: 'Enter', ctrlKey: true });
+		expect(update).not.toHaveBeenCalled();
+
+		resolveRefresh({ revision: 1, preambles: [original] });
+		await pendingEditRefresh;
+		await waitFor(() => expect(saveButton.disabled).toBe(false));
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Preamble' })).toBeNull());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
+		const pendingRemoveRefresh = store.refresh();
+		const removeButton = (await screen.findByRole('button', {
+			name: 'Remove preamble',
+		})) as HTMLButtonElement;
+		await waitFor(() => expect(removeButton.disabled).toBe(true));
+
+		resolveRefresh({ revision: 1, preambles: [original] });
+		await pendingRemoveRefresh;
+		await waitFor(() => expect(removeButton.disabled).toBe(false));
+		await fireEvent.click(removeButton);
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
 		expect(remove).toHaveBeenCalledWith({ expectedRevision: 1, id: 'global' });
 	});

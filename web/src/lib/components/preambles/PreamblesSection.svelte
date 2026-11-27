@@ -110,6 +110,9 @@
 			editConflict = true;
 			throw new Error(m.preambles_edit_stale());
 		}
+		if (catalogMutationBusy || preambles.isRefreshing) {
+			throw new Error(m.preambles_changed_before_write());
+		}
 		catalogMutationBusy = true;
 		try {
 			if (form.kind === 'edit') {
@@ -132,8 +135,8 @@
 	}
 
 	async function confirmRemove(): Promise<void> {
-		if (!removeTarget || catalogMutationBusy) return;
-		if (preambles.snapshot !== null && preambles.snapshot.revision === removeTarget.revision) {
+		if (!removeTarget || catalogMutationBusy || preambles.isRefreshing) return;
+		if (preambles.snapshot !== null) {
 			const targetId = removeTarget.preamble.id;
 			const current = preambles.snapshot.preambles.find((entry) => entry.id === targetId);
 			if (!current) {
@@ -178,7 +181,7 @@
 	}
 
 	async function move(preamble: Preamble, direction: 'up' | 'down'): Promise<void> {
-		if (catalogMutationBusy || normalizedQuery) return;
+		if (catalogMutationBusy || preambles.isRefreshing || normalizedQuery) return;
 		catalogMutationBusy = true;
 		operationError = null;
 		try {
@@ -191,7 +194,7 @@
 	}
 
 	async function setEnabled(preamble: Preamble, enabled: boolean): Promise<void> {
-		if (catalogMutationBusy || preamble.enabled === enabled) return;
+		if (catalogMutationBusy || preambles.isRefreshing || preamble.enabled === enabled) return;
 		const revision = preambles.snapshot?.revision;
 		if (revision === undefined) return;
 		catalogMutationBusy = true;
@@ -354,6 +357,7 @@
 		open
 		preamble={form.kind === 'edit' ? form.preamble : null}
 		isStale={formIsStale}
+		disabled={catalogMutationBusy || preambles.isRefreshing}
 		onSave={save}
 		onClose={closeForm}
 	/>
@@ -363,6 +367,7 @@
 		open
 		preamble={removeTarget.preamble}
 		{removing}
+		disabled={catalogMutationBusy || preambles.isRefreshing}
 		error={removeError}
 		onConfirm={() => void confirmRemove()}
 		onClose={closeRemove}

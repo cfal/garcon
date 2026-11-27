@@ -26,6 +26,7 @@ export class SnippetsStore {
 	#confirmed: SnippetsSnapshot | null = null;
 	#installGeneration = 0;
 	#refreshGeneration = 0;
+	#lastRefreshSucceeded = false;
 	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
 	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
@@ -47,6 +48,7 @@ export class SnippetsStore {
 		if (!this.snapshot) this.status = 'loading';
 		else this.isRefreshing = true;
 		this.error = null;
+		this.#lastRefreshSucceeded = false;
 		const generation = this.#installGeneration;
 		const get = this.deps.get ?? getSnippets;
 		this.#loadPromise = get()
@@ -56,6 +58,7 @@ export class SnippetsStore {
 					this.#confirmed &&
 					nextSnapshot.revision <= this.#confirmed.revision
 				) {
+					this.#lastRefreshSucceeded = true;
 					return this.snapshot ?? this.#confirmed;
 				}
 				this.#refreshGeneration += 1;
@@ -63,8 +66,11 @@ export class SnippetsStore {
 			})
 			.catch((error) => {
 				if (this.#installGeneration === generation) {
+					this.#lastRefreshSucceeded = false;
 					this.error = error instanceof Error ? error.message : 'Failed to load snippets';
 					if (!this.snapshot) this.status = 'error';
+				} else {
+					this.#lastRefreshSucceeded = true;
 				}
 				throw error;
 			})
@@ -148,6 +154,15 @@ export class SnippetsStore {
 	): Promise<SnippetsSnapshot> {
 		if (this.#refreshGeneration !== refreshGeneration || this.#loadPromise !== null) {
 			await this.refreshIfLoaded();
+			if (!this.#lastRefreshSucceeded) {
+				// Do not keep a potentially pre-restore snapshot eligible for local expansion after reconciliation fails.
+				this.snapshot = null;
+				this.#confirmed = null;
+				this.status = 'error';
+				this.error ??= 'Failed to load snippets';
+				this.#installGeneration += 1;
+				return nextSnapshot;
+			}
 			return this.snapshot ?? this.#confirmed ?? nextSnapshot;
 		}
 		return this.applySnapshot(nextSnapshot);
@@ -159,6 +174,7 @@ export class SnippetsStore {
 		this.status = 'ready';
 		this.error = null;
 		this.#installGeneration += 1;
+		this.#lastRefreshSucceeded = true;
 		return nextSnapshot;
 	}
 

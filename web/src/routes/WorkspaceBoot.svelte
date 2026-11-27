@@ -26,6 +26,7 @@
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
+	import { createWsReconnectEffect } from '$lib/ws/reconnect-effect.svelte.js';
 	import { ChatProcessingReconciler } from '$lib/ws/chat-processing-reconciler.svelte.js';
 	import { createReadReceiptOutbox } from '$lib/chat/sessions/read-receipt-outbox.svelte.js';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
@@ -383,27 +384,25 @@
 	browserNotificationsRouter.start();
 	transcriptSearchStatus.start();
 
-	const lastConnectedAt = $derived(ws.connectionStatus.lastConnectedAt);
-
-	$effect(() => {
-		if (!lastConnectedAt) return;
-		untrack(() => void transcriptSearchStatus.refresh());
-		untrack(() => void scheduledPrompts.refreshIfLoaded());
-		untrack(() => pullRequestReviews.invalidate());
-		untrack(() => void preambles.refreshIfLoaded());
-		untrack(() => void snippets.refreshIfLoaded());
-		untrack(() => void executors.refresh());
-		untrack(() => {
+	createWsReconnectEffect(
+		() => ws.connectionStatus,
+		() => {
+			transcriptSearchStatus.refresh();
+			void scheduledPrompts.refreshIfLoaded();
+			pullRequestReviews.invalidate();
+			void preambles.refreshIfLoaded();
+			void snippets.refreshIfLoaded();
+			void executors.refresh();
 			apiProviders.invalidate();
 			void modelCatalog.refreshIfStale();
-		});
-		// A reconnect also refreshes an already-open chat selection editor;
-		// its dirty draft is preserved by the controller's refresh path.
-		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
-		untrack(() => chatBoardInvalidations.publishReconnect());
-		untrack(() => ticketsInvalidations.publishReconnect());
-		return () => transcriptSearchStatus.cancelRefresh();
-	});
+			// A reconnect also refreshes an already-open chat selection editor;
+			// its dirty draft is preserved by the controller's refresh path.
+			chatPreambleSelectionInvalidationHub.publishReconnect();
+			chatBoardInvalidations.publishReconnect();
+			ticketsInvalidations.publishReconnect();
+			return () => transcriptSearchStatus.cancelRefresh();
+		},
+	);
 
 	onMount(() => {
 		ws.onAuthFailure = (token, code) => {

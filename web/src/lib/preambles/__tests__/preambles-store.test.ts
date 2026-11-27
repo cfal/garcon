@@ -444,4 +444,39 @@ describe('PreamblesStore', () => {
 		expect(get).toHaveBeenCalledTimes(2);
 		expect(store.snapshot).toEqual(snapshot(8, ['restored']));
 	});
+
+	it('invalidates the snapshot for local expansion when post-write reconciliation fails, then recovers on next demand', async () => {
+		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
+		const remove = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
+					resolveRemove = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(1, ['a']))
+			.mockRejectedValueOnce(new Error('network down'))
+			.mockResolvedValueOnce(snapshot(2, []));
+		const store = new PreamblesStore({ get, remove });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const removing = store.remove('a', 1);
+		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
+		await store.refresh();
+
+		resolveRemove({ success: true, snapshot: snapshot(2, []) });
+		await expect(removing).resolves.toEqual(snapshot(2, []));
+
+		expect(store.hasLoaded).toBe(false);
+		expect(store.snapshot).toBeNull();
+		expect(store.preambles).toEqual([]);
+		expect(store.status).toBe('error');
+
+		await store.ensureLoaded();
+		expect(get).toHaveBeenCalledTimes(3);
+		expect(store.hasLoaded).toBe(true);
+		expect(store.snapshot).toEqual(snapshot(2, []));
+		expect(store.status).toBe('ready');
+	});
 });

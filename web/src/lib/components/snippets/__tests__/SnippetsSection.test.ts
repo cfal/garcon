@@ -371,4 +371,67 @@ describe('SnippetsSection', () => {
 		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('1');
 		expect(screen.queryByText('review_restored')).toBeNull();
 	});
+
+	it('blocks edit form submission via button or shortcut while snippets refresh', async () => {
+		render(SnippetsSectionTestHost, { blockRefresh: true });
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' });
+		await fireEvent.input(template, { target: { value: 'Edited during refresh' } });
+
+		await fireEvent.click(screen.getByTestId('begin-refresh'));
+		const saveButton = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+		await waitFor(() => expect(saveButton.disabled).toBe(true));
+
+		await fireEvent.keyDown(template, { key: 'Enter', ctrlKey: true });
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('0');
+		expect(screen.getByRole('dialog', { name: 'Edit Snippet' }).isConnected).toBe(true);
+
+		await fireEvent.click(screen.getByTestId('release-refresh'));
+		await waitFor(() => expect(saveButton.disabled).toBe(false));
+		await fireEvent.click(saveButton);
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('1');
+	});
+
+	it('requires explicit retry without calling update or remove after a backwards restore changes the target', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByTestId('external-edit'));
+		await screen.findByText('Externally updated');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'Draft across backwards restore' } });
+
+		await fireEvent.click(screen.getByTestId('external-restore-lower-revision'));
+		await screen.findByText('Restored lower revision');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('0');
+		expect(await screen.findByText(/Snippets changed in another session/)).toBeTruthy();
+		expect(template.value).toBe('Draft across backwards restore');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('1');
+
+		await fireEvent.click(screen.getByTestId('external-edit'));
+		await screen.findByText('Externally updated');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+
+		await fireEvent.click(screen.getByTestId('external-restore-lower-revision'));
+		await screen.findByText('Restored lower revision');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('0');
+		expect(await screen.findByText(/Snippets changed in another session/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).textContent).toContain(
+			'Remove /snippet review_restored?',
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('1');
+	});
 });

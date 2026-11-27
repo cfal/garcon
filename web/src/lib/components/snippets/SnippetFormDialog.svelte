@@ -29,11 +29,12 @@
 	interface Props {
 		open: boolean;
 		snippet: Snippet | null;
+		disabled?: boolean;
 		onSave: (definition: SnippetDefinitionInput) => Promise<void>;
 		onClose: () => void;
 	}
 
-	let { open, snippet, onSave, onClose }: Props = $props();
+	let { open, snippet, disabled = false, onSave, onClose }: Props = $props();
 	const snippets = getSnippets();
 	const notifications = getNotifications();
 	const transientLayers = getTransientLayers();
@@ -78,7 +79,7 @@
 
 	async function save(): Promise<void> {
 		const definition = form.buildDefinition();
-		if (!definition || form.saving || refinementPending) return;
+		if (!definition || form.saving || refinementPending || disabled) return;
 		form.saving = true;
 		form.error = null;
 		try {
@@ -245,7 +246,7 @@
 			<Button variant="secondary" onclick={closeForm} disabled={form.saving}>
 				{m.snippets_cancel()}
 			</Button>
-			<Button onclick={() => void save()} disabled={!form.canSave || refinementPending}>
+			<Button onclick={() => void save()} disabled={!form.canSave || refinementPending || disabled}>
 				{form.saving ? m.snippets_saving() : m.snippets_save()}
 			</Button>
 		</Dialog.Footer>

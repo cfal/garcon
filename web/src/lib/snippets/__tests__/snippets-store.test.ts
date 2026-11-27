@@ -353,4 +353,75 @@ describe('SnippetsStore', () => {
 		expect(get).toHaveBeenCalledTimes(2);
 		expect(store.snapshot).toEqual(snapshot(8, ['restored']));
 	});
+
+	it('invalidates the snapshot for local expansion when post-write reconciliation fails, then recovers on next demand', async () => {
+		let resolveRemove!: (value: { success: true; snapshot: SnippetsSnapshot }) => void;
+		const remove = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: SnippetsSnapshot }>((resolve) => {
+					resolveRemove = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(1, ['a']))
+			.mockRejectedValueOnce(new Error('network down'))
+			.mockResolvedValueOnce(snapshot(2, []));
+		const store = new SnippetsStore({ get, remove });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const removing = store.remove('a', 1);
+		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
+		await store.refresh();
+
+		resolveRemove({ success: true, snapshot: snapshot(2, []) });
+		await expect(removing).resolves.toEqual(snapshot(2, []));
+
+		expect(store.hasLoaded).toBe(false);
+		expect(store.snapshot).toBeNull();
+		expect(store.snippets).toEqual([]);
+		expect(store.status).toBe('error');
+
+		await store.ensureLoaded();
+		expect(get).toHaveBeenCalledTimes(3);
+		expect(store.hasLoaded).toBe(true);
+		expect(store.snapshot).toEqual(snapshot(2, []));
+		expect(store.status).toBe('ready');
+	});
+
+	it('invalidates when a write ack overlaps an in-flight GET whose follow-up read fails', async () => {
+		let resolveRemove!: (value: { success: true; snapshot: SnippetsSnapshot }) => void;
+		let resolveInitialRefresh!: (value: SnippetsSnapshot) => void;
+		const remove = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: SnippetsSnapshot }>((resolve) => {
+					resolveRemove = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() => new Promise<SnippetsSnapshot>((resolve) => { resolveInitialRefresh = resolve; }),
+			)
+			.mockRejectedValueOnce(new Error('follow-up failed'));
+		const store = new SnippetsStore({ get, remove });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const refreshing = store.refresh();
+		const removing = store.remove('a', 1);
+		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
+
+		resolveRemove({ success: true, snapshot: snapshot(2, []) });
+		await Promise.resolve();
+		await Promise.resolve();
+		resolveInitialRefresh(snapshot(1, ['a']));
+
+		await refreshing;
+		await expect(removing).resolves.toEqual(snapshot(2, []));
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.hasLoaded).toBe(false);
+		expect(store.snapshot).toBeNull();
+		expect(store.snippets).toEqual([]);
+		expect(store.status).toBe('error');
+	});
 });

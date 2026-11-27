@@ -34,6 +34,7 @@ export class PreamblesStore {
 	#confirmed: PreamblesSnapshot | null = null;
 	#installGeneration = 0;
 	#refreshGeneration = 0;
+	#lastRefreshSucceeded = false;
 	#moveQueue: Promise<void> = Promise.resolve();
 	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
@@ -56,6 +57,7 @@ export class PreamblesStore {
 		if (!this.snapshot) this.status = 'loading';
 		else this.isRefreshing = true;
 		this.error = null;
+		this.#lastRefreshSucceeded = false;
 		const generation = this.#installGeneration;
 		const get = this.deps.get ?? getPreambles;
 		this.#loadPromise = get()
@@ -65,6 +67,7 @@ export class PreamblesStore {
 					this.#confirmed &&
 					next.revision <= this.#confirmed.revision
 				) {
+					this.#lastRefreshSucceeded = true;
 					return this.snapshot ?? this.#confirmed;
 				}
 				this.#refreshGeneration += 1;
@@ -72,8 +75,11 @@ export class PreamblesStore {
 			})
 			.catch((error) => {
 				if (this.#installGeneration === generation) {
+					this.#lastRefreshSucceeded = false;
 					this.error = error instanceof Error ? error.message : 'Failed to load preambles';
 					if (!this.snapshot) this.status = 'error';
+				} else {
+					this.#lastRefreshSucceeded = true;
 				}
 				throw error;
 			})
@@ -202,6 +208,15 @@ export class PreamblesStore {
 	): Promise<PreamblesSnapshot> {
 		if (this.#refreshGeneration !== refreshGeneration || this.#loadPromise !== null) {
 			await this.refreshIfLoaded();
+			if (!this.#lastRefreshSucceeded) {
+				// Do not keep a potentially pre-restore snapshot eligible for local expansion after reconciliation fails.
+				this.snapshot = null;
+				this.#confirmed = null;
+				this.status = 'error';
+				this.error ??= 'Failed to load preambles';
+				this.#installGeneration += 1;
+				return next;
+			}
 			return this.snapshot ?? this.#confirmed ?? next;
 		}
 		return this.applySnapshot(next);
@@ -213,6 +228,7 @@ export class PreamblesStore {
 		this.status = 'ready';
 		this.error = null;
 		this.#installGeneration += 1;
+		this.#lastRefreshSucceeded = true;
 		return next;
 	}
 

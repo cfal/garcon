@@ -161,6 +161,24 @@
 		};
 		void store.refreshInBackground();
 	}
+	function restoreLowerRevision(): void {
+		current = {
+			revision: Math.max(0, current.revision - 1),
+			snippets: sortSnippetsByShortName(
+				current.snippets.map((snippet) =>
+					snippet.id === 'one'
+						? {
+								...snippet,
+								shortName: 'review_restored',
+								template: 'Restored lower revision',
+								updatedAt: '2026-01-06T00:00:00.000Z',
+							}
+						: snippet,
+				),
+			),
+		};
+		void store.refreshInBackground();
+	}
 	setSnippets(store);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
@@ -193,6 +211,9 @@
 </button>
 <button type="button" onclick={restoreSameRevision} data-testid="external-restore-same-revision">
 	Restore same revision
+</button>
+<button type="button" onclick={restoreLowerRevision} data-testid="external-restore-lower-revision">
+	Restore lower revision
 </button>
 <button type="button" onclick={() => releaseRefresh?.()} data-testid="release-refresh">
 	Release refresh

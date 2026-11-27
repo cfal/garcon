@@ -93,15 +93,19 @@
 	}
 
 	async function save(definition: SnippetDefinitionInput): Promise<void> {
+		if (operationLocked) {
+			throw new Error(m.snippets_changed_before_write());
+		}
 		if (form.kind === 'edit') {
 			const targetId = form.snippet.id;
-			if (snippets.snapshot !== null && snippets.snapshot.revision === form.revision) {
+			if (snippets.snapshot !== null) {
 				const current = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
 				if (!current) {
 					throw new Error(m.snippets_already_removed({ name: form.baseline.shortName }));
 				}
 				if (!snippetsMatch(form.baseline, current)) {
 					form.baseline = current;
+					form.revision = snippets.snapshot.revision;
 					throw new Error(m.snippets_changed_before_write());
 				}
 			}
@@ -129,7 +133,7 @@
 
 	async function confirmRemove(): Promise<void> {
 		if (!removeTarget || operationLocked) return;
-		if (snippets.snapshot !== null && snippets.snapshot.revision === removeTarget.revision) {
+		if (snippets.snapshot !== null) {
 			const targetId = removeTarget.snippet.id;
 			const current = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
 			if (!current) {
@@ -267,6 +271,7 @@
 	<SnippetFormDialog
 		open
 		snippet={form.kind === 'edit' ? form.snippet : null}
+		disabled={operationLocked}
 		onSave={save}
 		onClose={closeForm}
 	/>

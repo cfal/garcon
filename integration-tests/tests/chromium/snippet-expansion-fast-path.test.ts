@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import type { WebSocket as BrowserWebSocket, WebSocketRoute } from 'playwright';
 import { expect as browserExpect } from 'playwright/test';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 import type { SnippetsMutationResponse, SnippetsSnapshot } from '../../../common/snippets.js';
@@ -55,8 +56,9 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
         },
       });
       preambleSnapshot = response.snapshot;
+      return preambleSnapshot.preambles.find((entry) => entry.snippetShortName === snippetShortName)!;
     };
-    await createNamedPreamble(
+    const localCtx = await createNamedPreamble(
       'local_ctx',
       'Local context',
       'Static context for {{chat_id}} with literal {{arguments}}',
@@ -76,7 +78,21 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     });
     await client.waitForTurnTerminal(chatId, turn.turnId);
 
-    phase('Phase 1: checking immediate composer fast paths, fallbacks without project resolve, and WS updates');
+    phase('Phase 1: checking immediate composer fast paths, fallbacks without project resolve, and reconnect recovery');
+    let activeSocket: WebSocketRoute | undefined;
+    let browserSocket: BrowserWebSocket | undefined;
+    let allowConnect = true;
+    page.on('websocket', (socket) => {
+      browserSocket = socket;
+    });
+    await page.routeWebSocket(/\/ws(?:\?|$)/, (socket) => {
+      if (!allowConnect) {
+        socket.close({ code: 1000, reason: 'Synthetic offline interval' });
+        return;
+      }
+      activeSocket = socket;
+      socket.connectToServer();
+    });
     await page.goto(`${integration.garcon.baseUrl}/chat/${encodeURIComponent(chatId)}`);
     const composer = page.getByPlaceholder('Reply...', { exact: true });
     await browserExpect(composer).toBeVisible();
@@ -124,6 +140,14 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     expect(expandCalls).toBe(2);
     expect(projectResolveCalls).toBe(0);
 
+    if (!activeSocket || !browserSocket) throw new Error('Browser socket did not connect');
+    allowConnect = false;
+    snippetGetDone = 0;
+    preambleGetDone = 0;
+    const closed = new Promise<void>((resolve) => browserSocket!.once('close', () => resolve()));
+    activeSocket.close({ code: 1000, reason: 'Synthetic disconnect' });
+    await closed;
+
     await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
       expectedRevision: snippetSnapshot.revision,
       id: localReview.id,
@@ -133,10 +157,31 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
         defaultArguments: 'open PRs',
       },
     });
+    await client.put<PreamblesMutationResponse>('/api/v1/preambles', {
+      expectedRevision: preambleSnapshot.revision,
+      id: localCtx.id,
+      preamble: {
+        enabled: false,
+        title: 'Local context',
+        snippetShortName: 'local_ctx',
+        content: 'Reconnected context for {{chat_id}}',
+        scope: { type: 'global' },
+      },
+    });
+    expect(snippetGetDone).toBe(0);
+    expect(preambleGetDone).toBe(0);
+
+    allowConnect = true;
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await browserExpect.poll(() => snippetGetDone >= 1 && preambleGetDone >= 1, { timeout: 15_000 }).toBe(true);
+
     await composer.fill('');
     await composer.pressSequentially(';;');
     await browserExpect(palette.getByRole('option', { name: /^local_review\b/ })).toContainText(
       'Updated {{arguments}} for {{chat_id}}',
+    );
+    await browserExpect(palette.getByRole('option', { name: /^local_ctx\b/ })).toContainText(
+      'Reconnected context for {{chat_id}}',
     );
     await palette.getByRole('button', { name: 'Close', exact: true }).click();
     await palette.waitFor({ state: 'detached' });
@@ -146,6 +191,9 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     await composer.fill('/s local_review');
     await composer.press('Enter');
     await browserExpect(composer).toHaveValue(`Updated open PRs for ${chatId}`);
+    await composer.fill('/s local_ctx');
+    await composer.press('Enter');
+    await browserExpect(composer).toHaveValue(`Reconnected context for ${chatId}`);
     expect(expandCalls).toBe(0);
     expect(projectResolveCalls).toBe(0);
 
