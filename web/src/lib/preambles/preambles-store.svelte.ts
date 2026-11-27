@@ -31,8 +31,10 @@ export class PreamblesStore {
 	isRefreshing = $state(false);
 	invalidationVersion = $state(0);
 	#loadPromise: Promise<PreamblesSnapshot> | null = null;
+	#confirmed: PreamblesSnapshot | null = null;
+	#installGeneration = 0;
+	#moveQueue: Promise<void> = Promise.resolve();
 	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
-	#localRevision = 0;
 
 	constructor(private readonly deps: PreamblesStoreDeps = {}) {}
 
@@ -45,21 +47,32 @@ export class PreamblesStore {
 	}
 
 	async ensureLoaded(): Promise<PreamblesSnapshot> {
-		return this.snapshot ?? this.refresh({ initial: true });
+		return this.snapshot ?? this.refresh();
 	}
 
-	async refresh(options: { initial?: boolean } = {}): Promise<PreamblesSnapshot> {
+	async refresh(): Promise<PreamblesSnapshot> {
 		if (this.#loadPromise) return this.#loadPromise;
-		const initial = options.initial === true || !this.snapshot;
-		if (initial) this.status = 'loading';
+		if (!this.snapshot) this.status = 'loading';
 		else this.isRefreshing = true;
 		this.error = null;
+		const generation = this.#installGeneration;
 		const get = this.deps.get ?? getPreambles;
 		this.#loadPromise = get()
-			.then((next) => this.applySnapshot(next))
+			.then((next) => {
+				if (
+					this.#installGeneration !== generation &&
+					this.#confirmed &&
+					next.revision <= this.#confirmed.revision
+				) {
+					return this.snapshot ?? this.#confirmed;
+				}
+				return this.#installSnapshot(next);
+			})
 			.catch((error) => {
-				this.error = error instanceof Error ? error.message : 'Failed to load preambles';
-				if (!this.snapshot) this.status = 'error';
+				if (this.#installGeneration === generation) {
+					this.error = error instanceof Error ? error.message : 'Failed to load preambles';
+					if (!this.snapshot) this.status = 'error';
+				}
 				throw error;
 			})
 			.finally(() => {
@@ -116,12 +129,12 @@ export class PreamblesStore {
 		}
 	}
 
-	async remove(id: string): Promise<PreamblesSnapshot> {
-		const current = await this.#requireSnapshot();
+	async remove(id: string, expectedRevision: number): Promise<PreamblesSnapshot> {
+		await this.#requireSnapshot();
 		try {
 			const remove = this.deps.remove ?? removePreamble;
 			return this.applySnapshot((await remove({
-				expectedRevision: current.revision,
+				expectedRevision,
 				id,
 			})).snapshot);
 		} catch (error) {
@@ -130,15 +143,20 @@ export class PreamblesStore {
 		}
 	}
 
-	async move(id: string, direction: 'up' | 'down'): Promise<void> {
+	move(id: string, direction: 'up' | 'down'): Promise<void> {
+		const run = this.#moveQueue.then(() => this.#runMove(id, direction));
+		this.#moveQueue = run.catch(() => undefined);
+		return run;
+	}
+
+	async #runMove(id: string, direction: 'up' | 'down'): Promise<void> {
 		const current = await this.#requireSnapshot();
 		const index = current.preambles.findIndex((preamble) => preamble.id === id);
 		const target = direction === 'up' ? index - 1 : index + 1;
 		if (index < 0 || target < 0 || target >= current.preambles.length) return;
 		const preambles = [...current.preambles];
 		[preambles[index], preambles[target]] = [preambles[target], preambles[index]];
-		const optimisticMarker = this.#localRevision + 1;
-		this.#localRevision = optimisticMarker;
+		const generation = this.#installGeneration;
 		this.snapshot = { ...current, preambles };
 		try {
 			const reorder = this.deps.reorder ?? reorderPreambles;
@@ -147,23 +165,30 @@ export class PreamblesStore {
 				orderedPreambleIds: preambles.map((preamble) => preamble.id),
 			})).snapshot);
 		} catch (error) {
-			if (this.#localRevision === optimisticMarker) this.snapshot = current;
+			if (this.#installGeneration === generation) this.snapshot = this.#confirmed;
 			await this.#refreshAfterConflict(error);
 			throw error;
 		}
 	}
 
 	applySnapshot(next: PreamblesSnapshot): PreamblesSnapshot {
-		if (this.snapshot && next.revision < this.snapshot.revision) return this.snapshot;
+		if (this.#confirmed && next.revision < this.#confirmed.revision) {
+			return this.snapshot ?? this.#confirmed;
+		}
+		return this.#installSnapshot(next);
+	}
+
+	#installSnapshot(next: PreamblesSnapshot): PreamblesSnapshot {
 		this.snapshot = next;
+		this.#confirmed = next;
 		this.status = 'ready';
 		this.error = null;
-		this.#localRevision += 1;
+		this.#installGeneration += 1;
 		return next;
 	}
 
 	async #requireSnapshot(): Promise<PreamblesSnapshot> {
-		return this.snapshot ?? this.ensureLoaded();
+		return this.#confirmed ?? this.ensureLoaded();
 	}
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {

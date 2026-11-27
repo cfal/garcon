@@ -91,7 +91,10 @@ export class ComposerSnippetController<Prepared> {
 		argumentsText: string,
 	): Promise<SnippetInsertionResult> {
 		const selection = this.options.getSelection();
-		if (this.options.isTransformPending() || !selection) return 'cancelled';
+		if (this.options.isTransformPending() || !selection) {
+			palette.dismiss();
+			return 'cancelled';
+		}
 		const range = palette.trigger ?? { start: selection.start, end: selection.end };
 		const result = await this.#execute({
 			kind: 'palette',

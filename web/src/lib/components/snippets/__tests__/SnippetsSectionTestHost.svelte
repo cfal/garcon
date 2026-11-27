@@ -1,11 +1,17 @@
 <script lang="ts">
 	import SnippetsSection from '../SnippetsSection.svelte';
+	import { ApiError } from '$lib/api/client.js';
 	import { setNotifications, setSnippets, setTransientLayers } from '$lib/context';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte.js';
-	import { sortSnippetsByShortName, type Snippet, type SnippetsSnapshot } from '$shared/snippets';
+	import {
+		SNIPPET_ERROR_CODES,
+		sortSnippetsByShortName,
+		type Snippet,
+		type SnippetsSnapshot,
+	} from '$shared/snippets';
 
 	interface Props {
 		blockRefresh?: boolean;
@@ -69,6 +75,9 @@
 			return { success: true, snapshot: current };
 		},
 		update: async (request) => {
+			if (request.expectedRevision !== current.revision) {
+				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
+			}
 			current = {
 				revision: current.revision + 1,
 				snippets: sortSnippetsByShortName(
@@ -82,6 +91,9 @@
 			return { success: true, snapshot: current };
 		},
 		remove: async (request) => {
+			if (request.expectedRevision !== current.revision) {
+				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
+			}
 			current = {
 				revision: current.revision + 1,
 				snippets: current.snippets.filter((snippet) => snippet.id !== request.id),
@@ -89,6 +101,19 @@
 			return { success: true, snapshot: current };
 		},
 	});
+	function advanceExternally(): void {
+		current = {
+			revision: current.revision + 1,
+			snippets: sortSnippetsByShortName(
+				current.snippets.map((snippet) =>
+					snippet.shortName === 'review'
+						? { ...snippet, template: 'Externally updated', updatedAt: '2026-01-03T00:00:00.000Z' }
+						: snippet,
+				),
+			),
+		};
+		void store.refreshInBackground();
+	}
 	setSnippets(store);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
@@ -107,6 +132,9 @@
 </div>
 <button type="button" onclick={() => void store.refresh()} data-testid="begin-refresh">
 	Begin refresh
+</button>
+<button type="button" onclick={advanceExternally} data-testid="external-edit">
+	External edit
 </button>
 <button type="button" onclick={() => releaseRefresh?.()} data-testid="release-refresh">
 	Release refresh

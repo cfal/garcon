@@ -257,4 +257,41 @@ describe('SnippetsSection', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Snippet' })).toBeNull());
 	});
+
+	it('preserves the draft and requires explicit retry when another client updates before save', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'My unsaved draft' } });
+
+		await fireEvent.click(screen.getByTestId('external-edit'));
+		await screen.findByText('Externally updated');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(await screen.findByText(/Snippets changed/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Edit Snippet' }).isConnected).toBe(true);
+		expect(template.value).toBe('My unsaved draft');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(await screen.findByText('My unsaved draft')).toBeTruthy();
+	});
+
+	it('rejects removing a snippet that changed while the dialog was open and allows explicit retry', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+
+		await fireEvent.click(screen.getByTestId('external-edit'));
+		await screen.findByText('Externally updated');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		expect(await screen.findByText(/Snippets changed/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).isConnected).toBe(true);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(screen.queryByRole('button', { name: 'Remove review' })).toBeNull();
+	});
 });

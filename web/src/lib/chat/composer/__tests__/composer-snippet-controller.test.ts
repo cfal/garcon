@@ -152,6 +152,17 @@ describe('ComposerSnippetController', () => {
 			'Review open PRs for chat-1'.length,
 		);
 
+		env.setText('/s review ');
+		await env.controller.expandInvocation({
+			kind: 'valid',
+			shortName: 'review',
+			arguments: { type: 'value', value: '' },
+		});
+		expect(env.onExpanded).toHaveBeenLastCalledWith(
+			'Review  for chat-1',
+			'Review  for chat-1'.length,
+		);
+
 		env.setText('/s ctx');
 		await env.controller.expandInvocation({
 			kind: 'valid',
@@ -298,5 +309,31 @@ describe('ComposerSnippetController', () => {
 		expect(onMissingProjectPath).toHaveBeenCalledTimes(1);
 		expect(env.onSettled).toHaveBeenCalledTimes(1);
 		expect(mockExpandSnippet).not.toHaveBeenCalled();
+	});
+
+	it('dismisses the palette when insertion cancels early before execution', async () => {
+		const pendingEnv = setup({ isTransformPending: () => true });
+		expect(
+			await pendingEnv.controller.insertFromPalette(
+				pendingEnv.palette,
+				snippetToSelectable(snippet),
+				'API',
+			),
+		).toBe('cancelled');
+		expect(pendingEnv.palette.dismiss).toHaveBeenCalledTimes(1);
+		expect(pendingEnv.palette.complete).not.toHaveBeenCalled();
+		expect(pendingEnv.beforeExpand).not.toHaveBeenCalled();
+		expect(pendingEnv.onExpanded).not.toHaveBeenCalled();
+
+		const detachedEnv = setup({ getSelection: () => null });
+		expect(
+			await detachedEnv.controller.insertFromPalette(
+				detachedEnv.palette,
+				snippetToSelectable(snippet),
+				'API',
+			),
+		).toBe('cancelled');
+		expect(detachedEnv.palette.dismiss).toHaveBeenCalledTimes(1);
+		expect(detachedEnv.beforeExpand).not.toHaveBeenCalled();
 	});
 });

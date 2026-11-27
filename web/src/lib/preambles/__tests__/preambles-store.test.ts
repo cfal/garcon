@@ -234,4 +234,62 @@ describe('PreamblesStore', () => {
 		store.applySnapshot(snapshot(3, ['a']));
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
 	});
+
+	it('installs an authoritative lower-revision refresh and ignores overtaken refreshes', async () => {
+		let resolveOvertaken!: (value: PreamblesSnapshot) => void;
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(1, ['a']))
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((resolve) => { resolveOvertaken = resolve; }),
+			);
+		const store = new PreamblesStore({ get });
+		store.applySnapshot(snapshot(3, ['a', 'b']));
+
+		await store.refresh();
+		expect(store.snapshot).toEqual(snapshot(1, ['a']));
+
+		const overtaken = store.refresh();
+		store.applySnapshot(snapshot(4, ['a', 'b', 'c']));
+		resolveOvertaken(snapshot(2, ['a', 'b']));
+		await expect(overtaken).resolves.toEqual(snapshot(4, ['a', 'b', 'c']));
+		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b', 'c']));
+	});
+
+	it('serializes concurrent failed reorders back to the confirmed order', async () => {
+		const rejectors: Array<(error: Error) => void> = [];
+		const firstFailure = new Error('first failed');
+		const secondFailure = new Error('second failed');
+		const reorder = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((_resolve, reject) => {
+					rejectors.push(reject);
+				}),
+		);
+		const store = new PreamblesStore({ reorder });
+		store.applySnapshot(snapshot(1, ['a', 'b', 'c']));
+
+		const firstMove = store.move('c', 'up');
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
+		const secondMove = store.move('c', 'up');
+		expect(reorder).toHaveBeenCalledTimes(1);
+
+		rejectors[0]!(firstFailure);
+		await expect(firstMove).rejects.toBe(firstFailure);
+		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(2));
+		rejectors[1]!(secondFailure);
+		await expect(secondMove).rejects.toBe(secondFailure);
+
+		expect(store.preambles.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+	});
+
+	it('forwards caller-supplied expectedRevision on remove', async () => {
+		const remove = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(5, []) });
+		const store = new PreamblesStore({ remove });
+		store.applySnapshot(snapshot(4, ['a']));
+
+		await store.remove('a', 2);
+
+		expect(remove).toHaveBeenCalledWith({ expectedRevision: 2, id: 'a' });
+	});
 });

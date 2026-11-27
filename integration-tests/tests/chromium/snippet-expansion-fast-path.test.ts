@@ -124,7 +124,6 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
     expect(expandCalls).toBe(2);
     expect(projectResolveCalls).toBe(0);
 
-    snippetGetDone = 0;
     await client.put<SnippetsMutationResponse>('/api/v1/snippets', {
       expectedRevision: snippetSnapshot.revision,
       id: localReview.id,
@@ -134,8 +133,13 @@ test('expands eligible snippets/preambles locally, skips project preflight on fa
         defaultArguments: 'open PRs',
       },
     });
-    await browserExpect.poll(() => snippetGetDone >= 1).toBe(true);
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    await composer.fill('');
+    await composer.pressSequentially(';;');
+    await browserExpect(palette.getByRole('option', { name: /^local_review\b/ })).toContainText(
+      'Updated {{arguments}} for {{chat_id}}',
+    );
+    await palette.getByRole('button', { name: 'Close', exact: true }).click();
+    await palette.waitFor({ state: 'detached' });
 
     expandCalls = 0;
     projectResolveCalls = 0;

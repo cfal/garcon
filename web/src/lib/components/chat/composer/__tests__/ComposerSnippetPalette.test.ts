@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import ComposerSnippetPaletteTestHost from './ComposerSnippetPaletteTestHost.svelte';
 
 describe('ComposerSnippetPalette', () => {
@@ -580,6 +581,28 @@ describe('ComposerSnippetPalette', () => {
 		await waitFor(() => expect(screen.getByTestId('load-count').textContent).toBe('2'));
 		expect(screen.getByTestId('palette-open').textContent).toBe('true');
 		expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+	});
+
+	it('keeps an already-loaded catalog ready when retrying a partial failure fails again', async () => {
+		let capturedPreambles!: PreamblesStore;
+		render(ComposerSnippetPaletteTestHost, {
+			failLoads: true,
+			failPreambleRefreshes: true,
+			onStores: ({ preambles }) => {
+				capturedPreambles = preambles;
+			},
+		});
+
+		await screen.findByRole('button', { name: 'Retry' });
+		await waitFor(() => expect(capturedPreambles.hasLoaded).toBe(true));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+		await waitFor(() => expect(screen.getByTestId('load-count').textContent).toBe('2'));
+		await waitFor(() => expect(capturedPreambles.isRefreshing).toBe(false));
+		expect(capturedPreambles.hasLoaded).toBe(true);
+		expect(capturedPreambles.status).toBe('ready');
+		expect(capturedPreambles.error).toBe('preamble refresh offline');
 	});
 
 	it('shows the empty states', async () => {

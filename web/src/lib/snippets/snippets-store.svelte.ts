@@ -23,6 +23,8 @@ export class SnippetsStore {
 	error = $state<string | null>(null);
 	isRefreshing = $state(false);
 	#loadPromise: Promise<SnippetsSnapshot> | null = null;
+	#confirmed: SnippetsSnapshot | null = null;
+	#installGeneration = 0;
 	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
 	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
@@ -36,21 +38,32 @@ export class SnippetsStore {
 	}
 
 	async ensureLoaded(): Promise<SnippetsSnapshot> {
-		return this.snapshot ?? this.refresh({ initial: true });
+		return this.snapshot ?? this.refresh();
 	}
 
-	async refresh(options: { initial?: boolean } = {}): Promise<SnippetsSnapshot> {
+	async refresh(): Promise<SnippetsSnapshot> {
 		if (this.#loadPromise) return this.#loadPromise;
-		const initial = options.initial === true || !this.snapshot;
-		if (initial) this.status = 'loading';
+		if (!this.snapshot) this.status = 'loading';
 		else this.isRefreshing = true;
 		this.error = null;
+		const generation = this.#installGeneration;
 		const get = this.deps.get ?? getSnippets;
 		this.#loadPromise = get()
-			.then((nextSnapshot) => this.applySnapshot(nextSnapshot))
+			.then((nextSnapshot) => {
+				if (
+					this.#installGeneration !== generation &&
+					this.#confirmed &&
+					nextSnapshot.revision <= this.#confirmed.revision
+				) {
+					return this.snapshot ?? this.#confirmed;
+				}
+				return this.#installSnapshot(nextSnapshot);
+			})
 			.catch((error) => {
-				this.error = error instanceof Error ? error.message : 'Failed to load snippets';
-				if (!this.snapshot) this.status = 'error';
+				if (this.#installGeneration === generation) {
+					this.error = error instanceof Error ? error.message : 'Failed to load snippets';
+					if (!this.snapshot) this.status = 'error';
+				}
 				throw error;
 			})
 			.finally(() => {
@@ -85,12 +98,16 @@ export class SnippetsStore {
 		}
 	}
 
-	async update(id: string, definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
-		const current = await this.#requireSnapshot();
+	async update(
+		id: string,
+		definition: SnippetDefinitionInput,
+		expectedRevision: number,
+	): Promise<SnippetsSnapshot> {
+		await this.#requireSnapshot();
 		try {
 			const update = this.deps.update ?? updateSnippet;
 			const result = await update({
-				expectedRevision: current.revision,
+				expectedRevision,
 				id,
 				snippet: definition,
 			});
@@ -101,11 +118,11 @@ export class SnippetsStore {
 		}
 	}
 
-	async remove(id: string): Promise<SnippetsSnapshot> {
-		const current = await this.#requireSnapshot();
+	async remove(id: string, expectedRevision: number): Promise<SnippetsSnapshot> {
+		await this.#requireSnapshot();
 		try {
 			const remove = this.deps.remove ?? removeSnippet;
-			const result = await remove({ expectedRevision: current.revision, id });
+			const result = await remove({ expectedRevision, id });
 			return this.applySnapshot(result.snapshot);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
@@ -114,26 +131,28 @@ export class SnippetsStore {
 	}
 
 	applySnapshot(nextSnapshot: SnippetsSnapshot): SnippetsSnapshot {
-		if (this.snapshot && nextSnapshot.revision < this.snapshot.revision) return this.snapshot;
+		if (this.#confirmed && nextSnapshot.revision < this.#confirmed.revision) {
+			return this.snapshot ?? this.#confirmed;
+		}
+		return this.#installSnapshot(nextSnapshot);
+	}
+
+	#installSnapshot(nextSnapshot: SnippetsSnapshot): SnippetsSnapshot {
 		this.snapshot = nextSnapshot;
+		this.#confirmed = nextSnapshot;
 		this.status = 'ready';
 		this.error = null;
+		this.#installGeneration += 1;
 		return nextSnapshot;
 	}
 
 	async #requireSnapshot(): Promise<SnippetsSnapshot> {
-		return this.snapshot ?? this.ensureLoaded();
+		return this.#confirmed ?? this.ensureLoaded();
 	}
 
 	async #refreshAfterConflict(error: unknown): Promise<void> {
 		if (error instanceof ApiError && error.errorCode === SNIPPET_ERROR_CODES.revisionConflict) {
-			const joinedExistingLoad = this.#loadPromise !== null;
-			try {
-				await this.refresh();
-				if (joinedExistingLoad) await this.refresh();
-			} catch {
-				// The original conflict remains the actionable error.
-			}
+			await this.refreshIfLoaded();
 		}
 	}
 }
