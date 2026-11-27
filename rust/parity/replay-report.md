@@ -2,8 +2,8 @@
 
 Build: `garcon-server`
 
-Passed: 9992/9992 cases
-Served without falling back to the original: 120/9992 (fallback rate 98.8%)
+Passed: 10141/10141 cases
+Served without falling back to the original: 120/10141 (fallback rate 98.8%)
 
 ## Scenarios
 
@@ -12,10 +12,14 @@ Served without falling back to the original: 120/9992 (fallback rate 98.8%)
 | api-providers-seeded | 371/371 | 0/371 |
 | api-providers | 458/458 | 0/458 |
 | api-session | 196/196 | 0/196 |
+| auth-count-limit | 71/71 | 0/71 |
+| auth-credentials | 28/28 | 0/28 |
 | auth-login | 19/19 | 0/19 |
 | auth-logout | 4/4 | 0/4 |
 | auth-password | 13/13 | 0/13 |
 | auth-register | 10/10 | 0/10 |
+| auth-seeded | 18/18 | 0/18 |
+| auth-setup | 32/32 | 0/32 |
 | auth-username | 14/14 | 0/14 |
 | chat-boards-count-limit | 43/43 | 0/43 |
 | chat-boards-seeded | 142/142 | 0/142 |
