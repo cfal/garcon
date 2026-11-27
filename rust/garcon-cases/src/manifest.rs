@@ -36,6 +36,10 @@ fn short(digest: &str) -> &str {
     &digest[..digest.len().min(12)]
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "case files hold markers, not JavaScript values, and this crate depends on no workspace crate"
+)]
 fn parse_case(line: &str) -> Result<RecordedCase, String> {
     let value: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
     let Some(entries) = value.as_object() else {
@@ -67,6 +71,10 @@ fn parse_case(line: &str) -> Result<RecordedCase, String> {
 
 /// Reads a recording and fails when the case file is not the one the manifest
 /// was written for.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the manifest is written by the recorder, and this crate depends on no workspace crate"
+)]
 pub fn read(directory: &Path) -> Result<Recording, String> {
     let cases_path = directory.join("cases.jsonl");
     let cases = read_file(&cases_path)?;

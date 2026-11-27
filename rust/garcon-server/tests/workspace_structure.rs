@@ -46,6 +46,10 @@ fn workspace_root() -> &'static Path {
         .expect("the crate lives in the workspace")
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "cargo metadata is not outside JSON, and the binary crate has no JSON dependency of its own"
+)]
 fn metadata() -> Value {
     let output = Command::new(env!("CARGO"))
         .args([

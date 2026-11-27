@@ -1,0 +1,7 @@
+# Outside JSON is read through garcon_js::json, which reads it as JSON.parse
+# does (rust/RULES.md, "JSON").
+disallowed-methods = [
+    { path = "serde_json::from_str", reason = "read JSON text with garcon_js::json::from_str" },
+    { path = "serde_json::from_slice", reason = "read JSON bytes with garcon_js::json::from_slice" },
+    { path = "serde_json::from_reader", reason = "read the bytes, then use garcon_js::json::from_slice" },
+]
