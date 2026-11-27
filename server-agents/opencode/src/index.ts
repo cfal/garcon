@@ -65,6 +65,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   static readonly apiVersion = 5 as const;
   readonly descriptor = OPENCODE_DESCRIPTOR;
   readonly literalExecution = null;
+  readonly liveTurnRows = null;
   readonly readiness = null;
   // Attachments ride as data-URL file parts, and OpenCode decodes only
   // text/plain into prompt text; other text types would reach the model as

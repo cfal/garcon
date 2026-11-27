@@ -71,6 +71,7 @@ export class CodexExecution implements AgentRuntimeExecution {
     };
     const started = await this.runtime.startSession({
       ...runtimeRequest,
+      captureLiveOrigin: request.captureLiveOrigin,
       onSessionActivated: (session) => void emitStarted(session),
     });
     const early = holder.session;

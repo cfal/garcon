@@ -4,7 +4,7 @@ import type { CodexExecutionRequest, CodexThreadConfiguration } from '../runtime
 import { codexServiceTier, type CodexServiceTier } from '../service-tier.js';
 import type { CodexSkillDiscovery } from '../slash-command-discovery.js';
 import type { NativePathDiscoveryRefreshLimiterOptions } from './native-path-discovery-refresh.js';
-import type { CodexOperation } from './operation-routes.js';
+import type { CodexOperation, CodexTurnFailure } from './operation-routes.js';
 import type { CodexAppServerClient, CodexAppServerClientOptions } from './client.js';
 import type {
   JsonRpcNotification,
@@ -21,7 +21,7 @@ export type RunningStatus = (
   'running' | 'interrupting' | 'completing' | 'completed' | 'failed' | 'aborted'
 );
 export type FinishSessionOptions = {
-  failedMessage?: string;
+  failure?: CodexTurnFailure;
   aborted?: boolean;
   emitFinishedOnAbort?: boolean;
 };

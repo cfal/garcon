@@ -14,10 +14,12 @@
 	import type { SidebarChatListProjection } from '../../sidebar/display/sidebar-row-model';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import type { SidebarWorkflowControls } from './sidebar-workflow-controls';
 
 	interface SidebarChatListProps {
 		actions: SidebarRowActions;
 		reorder: SidebarOrderController;
+		workflowControls?: SidebarWorkflowControls;
 		viewportRef?: HTMLElement | null;
 		viewportHeight: number;
 		projection: SidebarChatListProjection;
@@ -39,6 +41,7 @@
 	let {
 		actions,
 		reorder,
+		workflowControls,
 		viewportRef = null,
 		viewportHeight,
 		projection,
@@ -57,7 +60,7 @@
 		onSortChatOrder,
 	}: SidebarChatListProps = $props();
 	let isFiltered = $derived(searchFilter.trim().length > 0);
-	let showChats = $derived(!isLoading && projection.rowModel.matchingChatIds.length > 0);
+	let showRows = $derived(projection.rowModel.matchingChatIds.length > 0 || projection.rowModel.rows.length > 0);
 </script>
 
 {#if isLoading}
@@ -76,7 +79,7 @@
 			<p class="text-sm text-muted-foreground">{m.sidebar_chats_fetching_chats()}</p>
 		</div>
 	</div>
-{:else if !showChats && !isFiltered}
+{:else if !showRows && !isFiltered}
 	<div class="px-4 py-12 text-center md:py-8">
 		<div
 			class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3"
@@ -93,7 +96,7 @@
 			</Button>
 		{/if}
 	</div>
-{:else if !showChats}
+{:else if !showRows}
 	<div class="px-4 py-12 text-center md:py-8">
 		<div
 			class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted md:mb-3"
@@ -120,6 +123,7 @@
 		{isMultiSelectMode}
 		{isMultiSelected}
 		{reorder}
+		{workflowControls}
 		onPersistReorder={(request) => reorder.submit(request)}
 		{actions}
 		{newWindowEdges}

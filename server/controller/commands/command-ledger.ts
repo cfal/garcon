@@ -1,10 +1,12 @@
 import crypto from 'crypto';
 import type { AgentFinalResponse } from '@garcon/server-agent-interface';
+import type { AgentTurnOutputCompleteness } from '../../../common/agent-turn-receipt.js';
 import type { ChatStopOutcome } from '../../../common/chat-types.js';
 import type { SteerDeliveryOutcome } from '../../../common/chat-command-contracts.ts';
 import type { NativeForkCleanup } from '../agents/session-types.js';
 
 export type CommandLedgerStatus =
+  | 'reserved'
   | 'accepted'
   | 'scheduled'
   | 'running'
@@ -19,7 +21,7 @@ export interface ForkPreparationState {
 }
 
 export type CommandTurnResult =
-  | { readonly availability: 'available'; readonly text: string; readonly bytes: number }
+  | { readonly availability: 'available'; readonly text: string; readonly bytes: number; readonly completeness?: AgentTurnOutputCompleteness }
   | { readonly availability: 'unavailable';
       readonly reason: 'no-final-response' | 'too-large' | 'retention-pressure' | 'expired' };
 
@@ -270,7 +272,8 @@ export class CommandLedger {
       if (this.#resultBytes + bytes > this.#totalTurnResultByteLimit) {
         record.turnResult = { availability: 'unavailable', reason: 'retention-pressure' };
       } else {
-        record.turnResult = { availability: 'available', text: response.text, bytes };
+        record.turnResult = { availability: 'available', text: response.text, bytes,
+          ...(response.completeness ? { completeness: response.completeness } : {}) };
         this.#resultBytes += bytes;
       }
     }
@@ -394,10 +397,27 @@ export class CommandLedger {
   }
 
   async accept(input: LedgerAcceptInput): Promise<LedgerAcceptResult> {
+    return this.#admit(input, 'accepted');
+  }
+
+  reserveStart(input: Omit<LedgerAcceptInput, 'commandType'> & { turnId: string }): LedgerAcceptResult {
+    return this.#admit({ ...input, commandType: 'chat-start' }, 'reserved');
+  }
+
+  consumeStartReservation(key: string, turnId: string): CommandLedgerRecord | null {
+    const record = this.#records.get(key);
+    if (record?.status !== 'reserved' || record.turnId !== turnId) return null;
+    record.status = 'accepted';
+    record.updatedAt = new Date().toISOString();
+    return cloneRecord(record);
+  }
+
+  #admit(input: LedgerAcceptInput, status: 'accepted' | 'reserved'): LedgerAcceptResult {
     const key = commandLedgerKey(input.commandType, input.chatId, input.clientRequestId);
     const payloadHash = commandPayloadHash(input.payload);
     const existing = this.#records.get(key);
     if (existing) {
+      if (status === 'reserved' || existing.status === 'reserved') return { kind: 'conflict', record: cloneRecord(existing) };
       if (existing.payloadHash !== payloadHash) return { kind: 'conflict', record: cloneRecord(existing) };
       if (existing.status === 'failed' && existing.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE) {
         this.#removeTurnIndex(existing);
@@ -463,7 +483,7 @@ export class CommandLedger {
       clientRequestId: input.clientRequestId,
       payloadHash,
       payload: compactCommandPayload(input.payload),
-      status: 'accepted',
+      status,
       acceptedAt: now,
       updatedAt: now,
       turnId: input.turnId,

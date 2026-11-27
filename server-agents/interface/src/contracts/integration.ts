@@ -38,6 +38,7 @@ export interface AgentIntegration {
   readonly attachments: AgentAttachments | null;
   readonly execution: AgentExecutionV5;
   readonly producers: AgentProducers;
+  readonly liveTurnRows: { readonly scope: 'fresh-start' } | null;
   readonly permissions: AgentPermissions;
   readonly catalog: AgentCatalog;
   readonly settings: AgentSettings;

@@ -56,6 +56,7 @@ export class ClaudeExecution implements AgentRuntimeExecution {
       images: request.attachments,
       envOverrides,
       operation: runtimeOperation(request.runId, publish),
+      captureLiveOrigin: request.captureLiveOrigin,
       onSessionActivated: () => undefined,
     };
     const established = {

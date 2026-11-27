@@ -48,6 +48,7 @@ export interface CodexRuntimeOperation extends AgentRuntimeOperation {
 }
 
 export interface CodexStartRequest extends CodexExecutionRequest {
+  readonly captureLiveOrigin?: true;
   // Invoked as soon as the thread is activated, before the first turn runs.
   // A blocking runtime can settle the whole turn inside startSession, so the
   // caller needs the session identity ahead of that resolution.

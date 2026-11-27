@@ -8,6 +8,7 @@ import type {
   AgentEstablishedSession,
   AgentStartRequestV5,
   AgentExecutionAdmission,
+  AgentRunFailureCertainty,
   AgentSteerRequest,
 } from '@garcon/server-agent-interface';
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
@@ -66,6 +67,14 @@ export function runtimeOperation(
   publish: AgentRuntimePublisher,
 ): AgentRuntimeOperation {
   return Object.freeze({ runId, publish });
+}
+
+export function runtimeFailure(runId: string, message: string, certainty?: AgentRunFailureCertainty) {
+  return {
+    type: 'run-ended', runId, outcome: 'failed',
+    error: { code: certainty ? 'PROVIDER_FAILURE' : 'OUTCOME_UNKNOWN', message },
+    ...(certainty ? { failureCertainty: certainty } : {}),
+  } satisfies ProviderRunEndedEvent;
 }
 
 export interface AgentRuntimeExecution {

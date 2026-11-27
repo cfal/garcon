@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canonicalWorkspaceSnapshot } from '../canonical-layout';
 import { reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import {
-	nextRetainedSingletonPresentationKeys,
+	nextRetainedPortablePresentationKeys,
 	renderedPortablePresentations,
 	visibleChatPresentations,
 	fullscreenHiddenChatPresentations,
@@ -136,7 +136,7 @@ describe('visiblePortablePresentations', () => {
 			},
 		]);
 		const gitVisible = visiblePortablePresentations(gitActive, false);
-		const retained = nextRetainedSingletonPresentationKeys(gitActive, false, gitVisible, new Set());
+		const retained = nextRetainedPortablePresentationKeys(gitActive, false, gitVisible, new Set());
 		expect([...retained]).toEqual(['window-main:singleton:git', 'window-files:singleton:files']);
 
 		const chatActive = reduceWorkspaceLayout(gitActive, [
@@ -147,7 +147,7 @@ describe('visiblePortablePresentations', () => {
 			},
 		]);
 		const chatVisible = visiblePortablePresentations(chatActive, false);
-		const nextRetained = nextRetainedSingletonPresentationKeys(
+		const nextRetained = nextRetainedPortablePresentationKeys(
 			chatActive,
 			false,
 			chatVisible,
@@ -170,10 +170,10 @@ describe('visiblePortablePresentations', () => {
 		]);
 	});
 
-	it('drops retained renderers for destroyed windows and never retains on mobile', () => {
+	it('drops retained singleton renderers on mobile', () => {
 		const snapshot = layoutWithGitWindow();
 		const visible = visiblePortablePresentations(snapshot, false);
-		const retained = nextRetainedSingletonPresentationKeys(snapshot, false, visible, new Set());
+		const retained = nextRetainedPortablePresentationKeys(snapshot, false, visible, new Set());
 		expect([...retained].sort()).toEqual([
 			'window-2:singleton:git',
 			'window-files:singleton:files',
@@ -184,8 +184,26 @@ describe('visiblePortablePresentations', () => {
 		]);
 		const fullscreenVisible = visiblePortablePresentations(fullscreen, false);
 		expect(
-			nextRetainedSingletonPresentationKeys(fullscreen, false, fullscreenVisible, retained),
+			nextRetainedPortablePresentationKeys(fullscreen, false, fullscreenVisible, retained),
 		).toEqual(new Set(['window-2:singleton:git', 'window-files:singleton:files']));
-		expect(nextRetainedSingletonPresentationKeys(snapshot, true, visible, retained).size).toBe(0);
+		expect(nextRetainedPortablePresentationKeys(snapshot, true, visible, retained).size).toBe(0);
+	});
+
+	it('retains a visited mobile run while a worker chat is visible, but releases it on close', () => {
+		const runActive = reduceWorkspaceLayout(canonicalWorkspaceSnapshot(), [
+			{ type: 'register-surface', surface: { id: 'workflow-run', type: 'workflow-run', runId: 'run-1' }, windowId: 'window-main' },
+			{ type: 'set-mobile-presentation', activeId: 'workflow-run', returnStack: [] },
+		]);
+		const runVisible = visiblePortablePresentations(runActive, true);
+		const retained = nextRetainedPortablePresentationKeys(runActive, true, runVisible, new Set());
+		const chatActive = reduceWorkspaceLayout(runActive, [
+			{ type: 'set-mobile-presentation', activeId: 'chat-view:window-main', returnStack: [] },
+		]);
+		const chatVisible = visiblePortablePresentations(chatActive, true);
+		expect(renderedPortablePresentations(chatActive, true, chatVisible, retained)).toMatchObject([
+			{ surfaceId: 'workflow-run', presentation: 'mobile', visible: false },
+		]);
+		const closed = reduceWorkspaceLayout(chatActive, [{ type: 'remove-surface', surfaceId: 'workflow-run' }]);
+		expect(nextRetainedPortablePresentationKeys(closed, true, chatVisible, retained).size).toBe(0);
 	});
 });

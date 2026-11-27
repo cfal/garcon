@@ -39,6 +39,7 @@ export interface SidebarScrollTarget {
 	projectCollapseKey?: string;
 	executorCollapseKey?: string;
 	sectionKey?: string;
+	workflowRunId?: string;
 }
 
 // Resolves a chat to a scroll anchor: its own row when mounted, otherwise the
@@ -54,6 +55,11 @@ export function sidebarScrollTargetForChat(
 	);
 	const branchRow = rows[branchIndex];
 	if (branchRow?.type === 'chat') return { index: branchIndex, chatId: branchRow.chat.id };
+	const runIndex = rows.findIndex(
+		(row) => row.type === 'workflow-run' && row.isCollapsed && row.containsChat(chatId),
+	);
+	const run = rows[runIndex];
+	if (run?.type === 'workflow-run') return { index: runIndex, workflowRunId: run.run.id };
 
 	const projectHeaderIndex = rows.findIndex(
 		(row) => row.type === 'project-header' && row.isCollapsed && row.containsChat(chatId),
@@ -97,6 +103,14 @@ export function mountedElementForScrollTarget(
 			target.chatId,
 		);
 	}
+	if (target.workflowRunId) {
+		return findMountedElement(
+			viewport,
+			'[data-sidebar-workflow-run]',
+			'sidebarWorkflowRun',
+			target.workflowRunId,
+		);
+	}
 	if (target.projectCollapseKey) {
 		return findMountedElement(
 			viewport,
@@ -131,6 +145,7 @@ function findMountedElement(
 		| 'sidebarVirtualRow'
 		| 'sidebarProjectCollapseKey'
 		| 'sidebarExecutorCollapseKey'
+		| 'sidebarWorkflowRun'
 		| 'sidebarSectionKey',
 	value: string,
 ): HTMLElement | null {

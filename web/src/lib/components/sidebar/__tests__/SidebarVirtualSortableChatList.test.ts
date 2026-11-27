@@ -31,9 +31,61 @@ import { migrateSidebarGrouping } from '$lib/sidebar/display/sidebar-preferences
 import type { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import type { SidebarWorkflowControls } from '../sidebar-workflow-controls';
 
 const rowHeight = 88;
 let originalElementsFromPoint: typeof document.elementsFromPoint | undefined;
+
+it('opens workflow runs and their worker chats independently from the virtual sidebar', async () => {
+	const onChatSelect = vi.fn();
+	const workflowControls = {
+		selectedRunId: 'workflow-1', fetching: false, failed: false,
+		openRun: vi.fn(), toggleRun: vi.fn(), loadMore: vi.fn(), retry: vi.fn(),
+	} satisfies SidebarWorkflowControls;
+	const rows = buildSidebarRowModel(projectionInput([chat('worker', { title: 'Worker chat' })], {
+		workflows: {
+			runs: [{ id: 'workflow-1', name: 'Review', status: 'attention' }],
+			runIdByChatId: new Map([['worker', 'workflow-1']]),
+			collapsedRunIds: new Set(), moreRuns: true, moreActiveChats: false,
+		},
+	})).rows;
+	render(SidebarVirtualSortableChatListHost, { rows, workflowControls, onChatSelect, rowHeight });
+	const run = await screen.findByRole('button', { name: 'Review Needs attention' });
+	expect(run.getAttribute('aria-current')).toBe('page');
+	await fireEvent.click(run);
+	expect(workflowControls.openRun).toHaveBeenCalledWith('workflow-1');
+	await fireEvent.click(screen.getByRole('button', { name: 'Chats for Review' }));
+	expect(workflowControls.toggleRun).toHaveBeenCalledWith('workflow-1');
+	await fireEvent.click(screen.getByRole('button', { name: /Worker chat/ }));
+	expect(onChatSelect).toHaveBeenCalledWith('worker');
+	await fireEvent.click(screen.getByRole('button', { name: 'More workflow runs' }));
+	expect(workflowControls.loadMore).toHaveBeenCalledWith('runs');
+});
+
+it('keeps an archived workflow run openable without active chats', async () => {
+	const openRun = vi.fn();
+	const workflowControls = {
+		selectedRunId: null,
+		fetching: false,
+		failed: false,
+		openRun,
+		toggleRun: vi.fn(),
+		loadMore: vi.fn(),
+		retry: vi.fn(),
+	} satisfies SidebarWorkflowControls;
+	const rows = buildSidebarRowModel(projectionInput([], {
+		workflows: {
+			runs: [{ id: 'archived-run', name: 'Archived review', status: 'archived' }],
+			runIdByChatId: new Map(),
+			collapsedRunIds: new Set(),
+			moreRuns: false,
+			moreActiveChats: false,
+		},
+	})).rows;
+	render(SidebarVirtualSortableChatListHost, { rows, workflowControls, rowHeight });
+	await fireEvent.click(await screen.findByRole('button', { name: 'Archived review Archived' }));
+	expect(openRun).toHaveBeenCalledWith('archived-run');
+});
 
 function touchAt(identifier: number, clientX: number, clientY: number) {
 	return {

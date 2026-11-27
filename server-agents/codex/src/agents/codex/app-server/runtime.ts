@@ -7,6 +7,7 @@ import {
   publishPermissionRequested,
   publishRows,
   type CodexOperation,
+  type CodexTurnFailure,
 } from './operation-routes.js';
 import {
   AgentIntegrationError,
@@ -119,8 +120,12 @@ export class CodexAppServerRuntime {
   #sessions = new Map<string, RunningCodexSession>();
   #sources = new Map<CodexAppServerClient, RunningCodexSession>();
   #latestSourceByChat = new Map<string, RunningCodexSession>();
+  readonly #submittedOperations = new WeakSet<CodexOperation>();
   #terminalOperations = new WeakSet<CodexOperation>();
   #finalResponses = new WeakMap<CodexOperation, AgentFinalResponse>();
+  readonly #liveStartTurns = new WeakMap<RunningCodexSession, { readonly operation: CodexOperation; readonly turnId: string }>();
+  readonly #preparingLiveStarts = new WeakSet<RunningCodexSession>();
+  readonly #startReceiptBuffers = new WeakMap<CodexAppServerClient, { bytes: number; overflow: boolean }>();
   #steerTargets = new WeakMap<AgentSteerTarget, {
     session: RunningCodexSession;
     turnId: string;
@@ -197,10 +202,10 @@ export class CodexAppServerRuntime {
   }
 
   async #startRequestedTurn(
-    client: CodexAppServerClient,
     session: RunningCodexSession,
     request: CodexStartRequest | CodexResumeRequest,
     operation: CodexOperation,
+    captureLiveOrigin = false,
   ): Promise<void> {
     const attachments = await writeAttachmentsToTempFiles(request.images);
     session.cleanupAttachments = attachments.cleanup;
@@ -210,8 +215,7 @@ export class CodexAppServerRuntime {
       throw new Error('Codex session ended before starting the turn');
     }
     const turnAttemptGeneration = session.turnAttemptGeneration;
-    session.nextTurnOperation = operation;
-    const turn = await client.startTurn(buildTurnStartParams({
+    await this.#submitTurn(session, operation, buildTurnStartParams({
       threadId: session.threadId,
       command: request.command,
       imagePaths: attachments.imagePaths,
@@ -223,9 +227,40 @@ export class CodexAppServerRuntime {
       speed: request.speed,
       clientMessageId: request.clientMessageId,
       skills,
-    }));
-    if (!this.#canApplyTurnAttempt(session, turnAttemptGeneration)) return;
-    adoptTurn(session, turn.turn.id, operation);
+    }), () => this.#canApplyTurnAttempt(session, turnAttemptGeneration)
+      && (!captureLiveOrigin || !request.executionAdmission?.signal.aborted), captureLiveOrigin);
+  }
+
+  async #submitTurn(
+    session: RunningCodexSession, operation: CodexOperation, params: Record<string, unknown>,
+    canApply: () => boolean, pinOrigin: boolean,
+  ): Promise<void> {
+    const client = session.client;
+    session.nextTurnOperation = operation;
+    // The request reply names the submitted turn. A preceding turn/started is not proof.
+    // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server/src/request_processors/turn_processor.rs#L745-L801
+    const buffer = pinOrigin ? { bytes: 0, overflow: false } : null;
+    if (buffer) {
+      this.#startReceiptBuffers.set(client, buffer);
+      this.#bufferingClients.add(client);
+    }
+    try {
+      // A lost reply cannot prove that the native request did not arrive.
+      this.#submittedOperations.add(operation);
+      const { turn } = await client.startTurn(params);
+      if (buffer?.overflow) throw new Error('Codex output exceeded the buffer before the submitted turn could be identified.');
+      if (!canApply()) {
+        if (buffer) void client.interruptTurn(session.threadId, turn.id).catch(() => undefined);
+        return;
+      }
+      if (buffer) this.#liveStartTurns.set(session, { operation, turnId: turn.id });
+      adoptTurn(session, turn.id, operation);
+    } finally {
+      if (buffer) {
+        this.#startReceiptBuffers.delete(client);
+        this.#releaseBufferedClientEvents(client);
+      }
+    }
   }
 
   captureSteerTarget(agentSessionId: string): AgentSteerTarget | null {
@@ -284,11 +319,16 @@ export class CodexAppServerRuntime {
         operation,
       });
       activeSession = session;
+      if (request.captureLiveOrigin) this.#preparingLiveStarts.add(session);
       this.#releaseBufferedClientEvents(client);
       assertCodexExecutionOpen(request);
       request.onSessionActivated?.({ agentSessionId: threadId, nativePath: started.thread.path });
       if (request.executionAdmission) await markCodexExecutionStarted(request);
-      await this.#startRequestedTurn(client, session, request, operation);
+      try {
+        await this.#startRequestedTurn(session, request, operation, request.captureLiveOrigin);
+      } finally {
+        this.#preparingLiveStarts.delete(session);
+      }
 
       const nativePath = await waitForMaterializedThread(started.thread, {
         timeoutMs: this.#materializationTimeoutMs,
@@ -302,14 +342,14 @@ export class CodexAppServerRuntime {
       if (activeSession) {
         this.#finishSession(
           activeSession,
-          admissionClosed ? { aborted: true } : { failedMessage: message },
+          admissionClosed ? { aborted: true } : { failure: this.#launchFailure(operation, message) },
           operation,
         );
         if (admissionClosed) await this.#supersedeSource(activeSession);
       } else {
         this.#discardBufferedClientEvents(client);
         if (!admissionClosed) {
-          publishFailed(this.#logger, request.chatId, message, operation);
+          publishFailed(this.#logger, request.chatId, this.#launchFailure(operation, message), operation);
         }
         await this.#shutdownClient(client);
       }
@@ -340,7 +380,7 @@ export class CodexAppServerRuntime {
           }
           recordExplicitReasoningEffort(session, request);
           if (request.executionAdmission) await markCodexExecutionStarted(request);
-          await this.#startRequestedTurn(client, session, request, operation);
+          await this.#startRequestedTurn(session, request, operation);
           if (session.activeTurnId && !hasTerminalPendingFinish(session)) {
             session.pendingFinish = null;
           }
@@ -361,13 +401,13 @@ export class CodexAppServerRuntime {
         if (bufferedClient) this.#discardBufferedClientEvents(bufferedClient);
         this.#finishSession(
           activeSession,
-          admissionClosed ? { aborted: true } : { failedMessage: message },
+          admissionClosed ? { aborted: true } : { failure: this.#launchFailure(operation, message) },
           operation,
         );
         if (admissionClosed) await this.#supersedeSource(activeSession);
       } else {
         if (!admissionClosed) {
-          publishFailed(this.#logger, request.chatId, message, operation);
+          publishFailed(this.#logger, request.chatId, this.#launchFailure(operation, message), operation);
         }
       }
       if (activationFailure) await activationFailure.shutdown;
@@ -400,6 +440,7 @@ export class CodexAppServerRuntime {
       if (bufferedClient) this.#releaseBufferedClientEvents(bufferedClient);
       if (request.executionAdmission) await markCodexExecutionStarted(request);
       session.nextTurnOperation = operation;
+      this.#submittedOperations.add(operation);
       await client.compactThread(session.threadId);
     } catch (error) {
       const activationFailure = error instanceof CodexSessionActivationFailure ? error : null;
@@ -410,12 +451,12 @@ export class CodexAppServerRuntime {
         if (bufferedClient) this.#discardBufferedClientEvents(bufferedClient);
         this.#finishSession(
           activeSession,
-          admissionClosed ? { aborted: true } : { failedMessage: message },
+          admissionClosed ? { aborted: true } : { failure: this.#launchFailure(operation, message) },
           operation,
         );
       } else {
         if (!admissionClosed) {
-          publishFailed(this.#logger, request.chatId, message, operation);
+          publishFailed(this.#logger, request.chatId, this.#launchFailure(operation, message), operation);
         }
       }
       if (activationFailure) await activationFailure.shutdown;
@@ -800,8 +841,8 @@ export class CodexAppServerRuntime {
       interruptAcknowledgement: null,
       terminalWaiters: new Set(),
       liveCodeModeResultToolIds: new Map(),
-      turnItems: new CodexTurnItemLedger((turnId, messages) => (
-        publishRows(this.#logger, chatId, messages, turnRoutes.get(turnId))
+      turnItems: new CodexTurnItemLedger((turnId, messages, live) => (
+        publishRows(this.#logger, chatId, messages, turnRoutes.get(turnId), live && this.#liveStartTurns.get(session)?.turnId === turnId)
       )),
       turnRoutes,
       admittedRoute: { model: confirmedThreadSettings.model, serviceTier },
@@ -1118,6 +1159,17 @@ export class CodexAppServerRuntime {
 
   #bufferClientEvent(client: CodexAppServerClient, event: BufferedClientEvent): void {
     const buffered = this.#bufferedClientEvents.get(client) ?? [];
+    const startBuffer = this.#startReceiptBuffers.get(client);
+    if (startBuffer) {
+      if (startBuffer.overflow) return;
+      startBuffer.bytes += Buffer.byteLength(JSON.stringify(event));
+      if (startBuffer.bytes > 4 * 1024 * 1024 || buffered.length >= 512) {
+        startBuffer.overflow = true;
+        this.#discardBufferedClientEvents(client);
+        void this.#shutdownClient(client);
+        return;
+      }
+    }
     buffered.push(event);
     this.#bufferedClientEvents.set(client, buffered);
   }
@@ -1221,20 +1273,23 @@ export class CodexAppServerRuntime {
       });
       this.#finishSession(
         session,
-        { failedMessage: 'Codex automatic turn blocked after an ambiguous settings update' },
+        { failure: { message: 'Codex automatic turn blocked after an ambiguous settings update' } },
         operation,
       );
       return;
     }
+    if (this.#preparingLiveStarts.has(session)
+      || (!session.nextTurnOperation && session.activeTurnId === this.#liveStartTurns.get(session)?.turnId)) return;
     const operation = session.nextTurnOperation ?? session.sourceOperation;
     if (!adoptTurn(session, params.turn.id, operation)) return;
+    this.#submittedOperations.add(operation);
     if (session.status !== 'interrupting') session.status = 'running';
   }
 
   #handleItemCompleted(client: CodexAppServerClient, params: ItemCompletedNotification): void {
     const session = sourceForClientTurn(this.#sources, client, params.threadId, params.turnId);
     if (!session) return;
-    session.turnItems.emit(params.turnId, params.item);
+    session.turnItems.emit(params.turnId, params.item, !session.terminalTurnIds.has(params.turnId));
   }
 
   #handleRawResponseItemCompleted(client: CodexAppServerClient, params: RawResponseItemCompletedNotification): void {
@@ -1286,7 +1341,7 @@ export class CodexAppServerRuntime {
       ) return;
       this.#finishSession(
         session,
-        { failedMessage: humanizeCodexAppServerError(error) },
+        { failure: { message: humanizeCodexAppServerError(error) } },
         operation,
       );
     });
@@ -1301,27 +1356,25 @@ export class CodexAppServerRuntime {
     session.turnAttemptGeneration += 1;
     session.liveCodeModeResultToolIds.clear();
     session.lastTurnOperation = operation;
-    for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item);
+    for (const item of params.turn.items) session.turnItems.emit(params.turn.id, item, true);
     if (params.turn.status === 'failed') {
       const pendingCapacityFailure = session.pendingCapacityFailure?.turnId === params.turn.id
         ? session.pendingCapacityFailure
         : null;
       session.pendingCapacityFailure = null;
-      const failedMessage = pendingCapacityFailure?.message
+      const message = pendingCapacityFailure?.message
         ?? params.turn.error?.message
         ?? 'Codex turn failed';
       if (pendingCapacityFailure || isCapacityError(params.turn.error)) {
         if (await this.#retryCapacityFailure(session, operation)) return;
-        this.#finishSession(session, { failedMessage }, operation);
-        return;
       }
-      this.#finishSession(session, { failedMessage }, operation);
+      this.#finishSession(session, { failure: { message, certainty: 'definite' } }, operation);
       return;
     }
     if (params.turn.status === 'interrupted' && params.turn.error) {
       session.capacityRetryCount = 0;
       session.pendingCapacityFailure = null;
-      this.#finishSession(session, { failedMessage: params.turn.error.message }, operation);
+      this.#finishSession(session, { failure: { message: params.turn.error.message, certainty: 'definite' } }, operation);
       return;
     }
     const aborted = params.turn.status === 'interrupted' || session.status === 'interrupting';
@@ -1343,16 +1396,19 @@ export class CodexAppServerRuntime {
       [new ErrorMessage(new Date().toISOString(), message)],
       operation,
     );
-    if (params.willRetry) return;
+    if (params.willRetry !== false) return;
+    // Native non-retrying errors affect the named turn's status, unlike transport loss.
+    // https://github.com/openai/codex/blob/d32063f96c2dff1dc96af839b3952abb6acfeda4/codex-rs/app-server/src/bespoke_event_handling.rs#L1059-L1081
+    const failure = { message, certainty: 'definite' } as const;
     if (this.#sessions.get(session.threadId) !== session || session.activeTurnId !== params.turnId) {
-      this.#publishFailedOnce(session, message, operation);
+      this.#publishFailedOnce(session, failure, operation);
       return;
     }
     if (isCapacityError(params.error)) {
       session.pendingCapacityFailure = { turnId: params.turnId, message };
       return;
     }
-    this.#finishSession(session, { failedMessage: message }, operation);
+    this.#finishSession(session, { failure }, operation);
   }
 
   async #retryCapacityFailure(
@@ -1381,14 +1437,12 @@ export class CodexAppServerRuntime {
         if (session.configurationFenced || session.pendingThreadSettings
           || session.confirmedThreadSettings.model !== session.admittedRoute.model
           || session.confirmedThreadSettings.serviceTier !== 'default') return false;
-        session.nextTurnOperation = operation;
-        const turn = await session.client.startTurn({
+        await this.#submitTurn(session, operation, {
           threadId: session.threadId,
           input: [],
           // Replays the admitted tier without changing the thread's selected tier.
           serviceTierForTurn: 'default',
-        });
-        if (isRunningAttempt()) adoptTurn(session, turn.turn.id, operation);
+        }, isRunningAttempt, this.#liveStartTurns.get(session)?.operation === operation);
         return true;
       } finally {
         session.activeDeliveryReservations -= 1;
@@ -1490,14 +1544,15 @@ export class CodexAppServerRuntime {
 
   #handleClientExit(client: CodexAppServerClient, code: number): void {
     const session = this.#sources.get(client);
-    if (session && isActiveSessionStatus(session.status)) {
-      this.#finishSession(
-        session,
-        { failedMessage: `Codex app-server exited with code ${code}` },
-        session.sourceOperation,
-      );
+    if (session && isActiveSessionStatus(session.status) && !session.pendingFinish) {
+      const operation = session.sourceOperation;
+      this.#finishSession(session, { failure: this.#launchFailure(operation, `Codex app-server exited with code ${code}`) }, operation);
     }
-    this.#retireSource(client);
+    this.#retireSource(client, { keepPendingTerminal: true });
+  }
+
+  #launchFailure(operation: CodexOperation, message: string): CodexTurnFailure {
+    return this.#submittedOperations.has(operation) ? { message } : { message, certainty: 'not-started' };
   }
 
   #finishSession(
@@ -1506,17 +1561,16 @@ export class CodexAppServerRuntime {
     operation: CodexOperation | null = null,
   ): void {
     if (this.#sessions.get(session.threadId) !== session) return;
-    if (operation && (opts.aborted || opts.failedMessage)) this.#finalResponses.delete(operation);
+    if (operation && (opts.aborted || opts.failure)) this.#finalResponses.delete(operation);
     if (session.activeDeliveryReservations > 0) {
       session.pendingFinish = mergeFinishOptions(session.pendingFinish, opts);
       session.pendingFinishOperation = operation ?? session.pendingFinishOperation;
       return;
     }
-
     this.#sessions.delete(session.threadId);
     session.idleSince = Date.now();
     this.#threadListCaches.clear();
-    session.status = opts.failedMessage ? 'failed' : opts.aborted ? 'aborted' : 'completed';
+    session.status = opts.failure ? 'failed' : opts.aborted ? 'aborted' : 'completed';
     session.interruptAcknowledgement = null;
     session.activeTurnId = null;
     cancelPendingApprovals(
@@ -1540,8 +1594,8 @@ export class CodexAppServerRuntime {
     );
     void session.cleanupAttachments?.();
 
-    if (opts.failedMessage) {
-      this.#publishFailedOnce(session, opts.failedMessage, operation);
+    if (opts.failure) {
+      this.#publishFailedOnce(session, opts.failure, operation);
     } else if (!opts.aborted || opts.emitFinishedOnAbort) {
       this.#publishFinishedOnce(session, operation);
     }
@@ -1568,7 +1622,7 @@ export class CodexAppServerRuntime {
     ) {
       this.#publishFailedOnce(
         session,
-        params.turn.error?.message ?? 'Codex turn failed',
+        { message: params.turn.error?.message ?? 'Codex turn failed', certainty: 'definite' },
         operation,
       );
       return;
@@ -1589,20 +1643,23 @@ export class CodexAppServerRuntime {
 
   #publishFailedOnce(
     session: RunningCodexSession,
-    message: string,
+    failure: CodexTurnFailure,
     operation: CodexOperation | null,
   ): void {
     if (operation && this.#terminalOperations.has(operation)) return;
     if (operation) this.#terminalOperations.add(operation);
     if (operation) this.#finalResponses.delete(operation);
-    publishFailed(this.#logger, session.chatId, message, operation ?? undefined);
+    publishFailed(this.#logger, session.chatId, failure, operation ?? undefined);
   }
 
-  #retireSource(client: CodexAppServerClient): void {
+  #retireSource(client: CodexAppServerClient, { keepPendingTerminal = false }: { keepPendingTerminal?: boolean } = {}): void {
     const session = this.#sources.get(client);
     if (!session) return;
     this.#sources.delete(client);
-    if (this.#sessions.get(session.threadId) === session) this.#sessions.delete(session.threadId);
+    // Client exit fences publication immediately, but an in-flight delivery still owns terminal settlement.
+    if (this.#sessions.get(session.threadId) === session && !(keepPendingTerminal && session.pendingFinish)) {
+      this.#sessions.delete(session.threadId);
+    }
     if (this.#latestSourceByChat.get(session.chatId) === session) {
       this.#latestSourceByChat.delete(session.chatId);
     }

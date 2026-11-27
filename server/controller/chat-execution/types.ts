@@ -60,6 +60,7 @@ export type UserInputAdmissionOptions = Pick<
   | 'images'
   | 'excludedResendOrdinals'
   | 'questionReply'
+  | 'automation'
 > & {
   commandType?: AgentExecutionCommandType | 'steer';
   createdAt?: string; userMessagePresentation?: UserMessagePresentation;
@@ -292,7 +293,7 @@ export interface AgentTurnRunnerPort {
     prepareDelivery: () => Promise<void>,
     deadline: number | null,
   ): Promise<AgentSteerResult>;
-  abortSession(chatId: string): Promise<boolean>;
+  abortSession(chatId: string, expectedTurnId?: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
 }
 
@@ -415,6 +416,7 @@ export interface ChatExecutionQueries {
 // queue operations that no external consumer needs through a facet.
 export interface ChatExecutionService
   extends ChatExecutionCommands, ChatExecutionLifecycle, ChatExecutionQueries {
+  stopExactTurn(chatId: string, turn: Required<TurnIdentity>): Promise<ChatStopOutcome | 'stale-target'>;
   admitUserInput(
     chatId: string,
     command: string,

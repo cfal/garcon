@@ -6,6 +6,7 @@ import {
 	getWorkspaceCoordinator,
 } from '$lib/context';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
+import { getOptionalWorkflowNavigation } from '$lib/workflows/navigation/workflow-navigation-context';
 import * as m from '$lib/paraglide/messages.js';
 
 export function createWorkspaceSurfaceCatalog(
@@ -16,6 +17,7 @@ export function createWorkspaceSurfaceCatalog(
 	const workspace = getWorkspaceCoordinator();
 	const terminals = getTerminalRegistry();
 	const fileSessions = getFileSessions();
+	const workflowNav = getOptionalWorkflowNavigation();
 
 	const singletonLabels = $derived({
 		git: m.workspace_surface_git(),
@@ -50,6 +52,9 @@ export function createWorkspaceSurfaceCatalog(
 				: m.workspace_surface_file();
 		}
 		if (surface.type === 'terminal-launcher') return m.workspace_surface_terminal();
+		if (surface.type === 'new-workflow') return m.workflow_nav_new();
+		if (surface.type === 'workflow-run')
+			return workflowNav?.runName(surface.runId) || m.workflow_nav_run();
 		return singletonLabels[surface.kind];
 	}
 

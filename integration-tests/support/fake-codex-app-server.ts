@@ -395,6 +395,7 @@ function startStreamingTurn(
   });
 
   awaitTurnRelease(() => {
+    if (process.env.INTEGRATION_CODEX_EXIT_WITHOUT_TERMINAL === '1') process.exit(137);
     const completedAt = new Date().toISOString();
     appendFileSync(
       nativePath,

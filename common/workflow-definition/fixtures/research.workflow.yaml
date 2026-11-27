@@ -1,0 +1,82 @@
+# Use the launch executor and folder, with Codex available. Example topic: garden geometry.
+version: 1
+name: Verify synthetic research
+inputs:
+  topic:
+    type: string
+    description: Subject for the exercise
+
+steps:
+  - id: research
+    name: Research
+    kind: agent
+    agentId: codex
+    permissionMode: default
+    bindings: { topic: inputs.topic }
+    signals:
+      research_started: { payload: none }
+      finding_ready:
+        payload: json
+        delivery: many
+        key: finding_id
+        fields: { finding_id: string, claim: string, evidence: string }
+      report_ready: { payload: text }
+    prompt: |
+      Exercise the research workflow for {{topic}} using the two toy findings below.
+      Do not use tools. Your assistant response must consist only of these four standalone tags:
+
+      <garcon-workflow-emit signal="research.research_started" />
+
+      <garcon-workflow-emit signal="research.finding_ready" content-type="json">{"finding_id":"F-01","claim":"Two rows of two squares have four squares.","evidence":"Count two squares in each row: 2 + 2 = 4."}</garcon-workflow-emit>
+
+      <garcon-workflow-emit signal="research.finding_ready" content-type="json">{"finding_id":"F-02","claim":"A triangle has three sides.","evidence":"A triangle joins three noncollinear vertices with three line segments."}</garcon-workflow-emit>
+
+      <garcon-workflow-emit signal="research.report_ready" content-type="text">Two synthetic findings in geometry.</garcon-workflow-emit>
+
+      End your response immediately after the last tag, without surrounding prose or fences.
+
+  - id: verify
+    name: Verify findings
+    kind: agent
+    agentId: codex
+    permissionMode: default
+    on:
+      kind: each
+      signal: research.finding_ready
+      maxConcurrency: 2
+    bindings:
+      finding_id: signal.finding_id
+      claim: signal.claim
+      evidence: signal.evidence
+    prompt: |
+      Verify finding {{finding_id}} without using tools.
+      Claim: {{claim}}
+      Evidence: {{evidence}}
+      Return the ID, a verdict, and one sentence explaining it.
+
+  - id: summary
+    name: Summarize
+    kind: agent
+    agentId: codex
+    permissionMode: default
+    on:
+      kind: all
+      close: research.turn_completed
+      steps: [verify]
+    bindings: { verifications: all.verify }
+    prompt: |
+      Summarize these verifier responses without using tools: {{verifications}}
+      Mention any unconfirmed findings. If the list is empty, say that no findings arrived.
+
+  - id: decide
+    name: Human decision
+    kind: decision
+    on: { kind: once, signal: summary.turn_completed }
+    bindings: { report: signal }
+    prompt: |
+      {{report}}
+
+      Accept the report or stop here?
+    choices:
+      accept: Accept the report
+      stop: Stop without accepting

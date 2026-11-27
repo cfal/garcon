@@ -26,6 +26,7 @@ export interface ClaudeExecutionRequest {
 }
 
 export interface ClaudeStartRequest extends ClaudeExecutionRequest {
+  readonly captureLiveOrigin?: true;
   readonly agentSessionId: string;
   readonly onSessionActivated?: () => void;
 }

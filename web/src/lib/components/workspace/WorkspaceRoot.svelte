@@ -17,6 +17,7 @@
 	import WorkspaceWindowResizer from './WorkspaceWindowResizer.svelte';
 	import { workspaceWindowTitlebarMetrics } from './workspace-window-chrome.js';
 	import { WorkspaceRootState } from './workspace-root-state.svelte.js';
+	import { provideWorkflowStudioSession } from '$lib/workflows/definition/workflow-studio-session.svelte';
 	import {
 		getChatSessions,
 		getAuth,
@@ -105,6 +106,7 @@
 	} = $props();
 
 	const workspace = getWorkspaceCoordinator();
+	provideWorkflowStudioSession(() => !!workspace.layout.surface('new-workflow'));
 	const hostGeometry = getWorkspaceHostGeometry();
 	const terminals = getTerminalRegistry();
 	const sessions = getChatSessions();
@@ -321,7 +323,7 @@
 			snapshot,
 			isMobile,
 			portablePresentations,
-			rootState.retainedSingletonPresentationKeys,
+			rootState.retainedPortablePresentationKeys,
 		),
 	);
 	const renderedMobilePresentations = $derived(

@@ -2,6 +2,7 @@ import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import type { WorkflowRunStatus } from '$shared/workflow-runs';
 
 export const SINGLE_LINE_CHAT_ROW_HEIGHT = 40;
 export const COMPACT_CHAT_ROW_HEIGHT = 62;
@@ -114,10 +115,39 @@ export interface SidebarVirtualChatRow {
 	section?: SidebarChatSection;
 }
 
+export interface SidebarWorkflowRun {
+	id: string;
+	name: string;
+	status: WorkflowRunStatus | null;
+}
+
+export interface SidebarVirtualWorkflowRunRow {
+	type: 'workflow-run';
+	key: string;
+	depth: number;
+	tree?: never;
+	run: SidebarWorkflowRun;
+	count: number;
+	isCollapsed: boolean;
+	containsChat: (chatId: string) => boolean;
+}
+
+export interface SidebarVirtualWorkflowMoreRow {
+	type: 'workflow-more';
+	key: string;
+	depth: number;
+	tree?: never;
+	page: SidebarWorkflowPageKind;
+}
+
+export type SidebarWorkflowPageKind = 'runs' | 'active-chats';
+
 export type SidebarVirtualRow =
 	| SidebarVirtualExecutorHeaderRow
 	| SidebarVirtualProjectHeaderRow
 	| SidebarVirtualSectionHeaderRow
+	| SidebarVirtualWorkflowRunRow
+	| SidebarVirtualWorkflowMoreRow
 	| SidebarVirtualChatRow;
 
 export type SidebarChatOrderMap = Record<PersistedChatOrderGroup, string[]>;
@@ -154,6 +184,8 @@ export function estimateSidebarVirtualRowSize(
 	if (row?.type === 'section-header') {
 		return SECTION_HEADER_ROW_HEIGHT;
 	}
+	if (row?.type === 'workflow-run') return SINGLE_LINE_CHAT_ROW_HEIGHT;
+	if (row?.type === 'workflow-more') return SECTION_HEADER_ROW_HEIGHT;
 	const pathHeight =
 		showProjectPath && row?.chat.projectPath?.trim() ? PROJECT_PATH_LINE_HEIGHT : 0;
 	const scale = Math.max(1, chatFontScale);

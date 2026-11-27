@@ -87,6 +87,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   static readonly apiVersion = 5 as const;
   readonly descriptor = CODEX_DESCRIPTOR;
   readonly literalExecution = null;
+  readonly liveTurnRows = { scope: 'fresh-start' } as const;
   readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: ANY_FILE_ATTACHMENT_MIME_TYPE,

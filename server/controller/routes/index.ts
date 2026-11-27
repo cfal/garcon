@@ -31,6 +31,8 @@ import { createProjectResolutionRoutes } from './project-resolution.js';
 import { createChatBoardRoutes } from './chat-boards.js';
 import { createTicketRoutes } from './tickets.js';
 import createPullRequestReviewRoutes from './pull-request-reviews.js';
+import { createWorkflowRoutes } from './workflows.js';
+import type { WorkflowRuntime } from '../workflows/setup.js';
 import { createChatTicketSourceRoutes } from './chat-ticket-source.js';
 import type { TicketSourceReader } from '../chats/chat-message-reader.js';
 import type { TicketRuntime } from '../tickets/setup.js';
@@ -107,6 +109,7 @@ export default function createAllRoutes(workspaceDir: string, {
   lastSelectedChat,
   scheduledPrompts,
   pullRequestReviews,
+  workflows,
   snippets,
   preambles,
   chatPreambleSelection,
@@ -151,6 +154,7 @@ export default function createAllRoutes(workspaceDir: string, {
   lastSelectedChat: LastSelectedChatState;
   scheduledPrompts: ScheduledPromptScheduler;
   pullRequestReviews: PullRequestReviewsRuntime;
+  workflows: Pick<WorkflowRuntime, 'service' | 'prepareSettings'>;
   snippets: SnippetService;
   preambles: PreambleService;
   chatPreambleSelection: ChatPreambleSelectionService;
@@ -252,6 +256,7 @@ export default function createAllRoutes(workspaceDir: string, {
     }),
     createScheduledPromptRoutes(scheduledPrompts),
     createPullRequestReviewRoutes(pullRequestReviews),
+    createWorkflowRoutes(workflows),
     createSnippetRoutes(snippets),
     createCanvasRoutes(canvases),
     createPreambleRoutes(preambles),

@@ -4,6 +4,9 @@ import type { ChatExecutionControlOperations } from './chat-execution-control-op
 import type { ExecutionOwnership } from './execution-ownership.js';
 import type { QueueExecutionAttempt } from './execution-attempt.js';
 import type { ChatStopOutcome } from '../../../common/chat-types.js';
+import { createLogger } from '../../common/log.js';
+
+const logger = createLogger('queue');
 
 interface TerminalSettlementDependencies {
   ownership: ExecutionOwnership;
@@ -21,14 +24,22 @@ export async function interruptAgentTurn(
   },
   chatId: string,
 ): Promise<ChatStopOutcome> {
-  const attempt = deps.ownership.attempt(chatId);
-  if (attempt?.hasTerminalCommit) return 'already-idle';
-  const interruption = new Error('Turn interrupted by the user');
-  if (attempt) deps.ownership.abortAdmission(chatId, interruption);
-  const acknowledged = await deps.abortSession(chatId);
-  if (!acknowledged && !attempt) return 'already-idle';
-  if (attempt && deps.ownership.isCurrentAttempt(chatId, attempt)) deps.retire(chatId, attempt, interruption);
-  return 'interrupt-requested';
+  try {
+    const attempt = deps.ownership.attempt(chatId);
+    if (attempt?.hasTerminalCommit) return 'already-idle';
+    const interruption = new Error('Turn interrupted by the user');
+    if (attempt) deps.ownership.abortAdmission(chatId, interruption);
+    const acknowledged = await deps.abortSession(chatId);
+    if (!acknowledged && !attempt) return 'already-idle';
+    if (attempt && deps.ownership.isCurrentAttempt(chatId, attempt)) deps.retire(chatId, attempt, interruption);
+    return 'interrupt-requested';
+  } catch (error) {
+    logger.warn('queue: provider interrupt failed', {
+      chatId,
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
+    return 'failed';
+  }
 }
 
 export async function settleAgentTurn(

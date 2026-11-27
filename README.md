@@ -393,6 +393,10 @@ The installer links the skills for Claude, Codex, Pi, and other compatible agent
 
 Track workspace work without starting a chat: list and board views, comments, relationships, attributed history, and **New chat from ticket**. See the [tickets guide](docs/tickets.md) and [ticket CLI](docs/cli.md#tickets).
 
+## Workflows
+
+Choose **New Workflow** to start a published definition with inputs. Agent and Shell steps run in normal chats on their selected executors. Signals connect steps, keyed signals can start parallel work, and decisions wait for a person. Open the run in the sidebar to inspect its graph, follow a chat, or add work to that run without changing the definition. See the [workflow guide and first-run example](docs/workflows.md).
+
 ## Path-Prefix Deployments
 
 The webapp, API, and WebSockets can share a runtime URL prefix without rebuilding

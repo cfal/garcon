@@ -182,7 +182,7 @@ describe('Shell integration', () => {
   it('reports failed cwd changes and starts a fresh process on resume', async () => {
     const next = join(root, 'next'); await mkdir(next);
     await integration.execution.start({ ...request, prompt: 'export PRIVATE_VALUE=old; cd next; false' });
-    expect(await terminal()).toMatchObject({ outcome: 'failed', workingDirectory: { kind: 'reported', path: next } });
+    expect(await terminal()).toMatchObject({ outcome: 'failed', failureCertainty: 'definite', workingDirectory: { kind: 'reported', path: next } });
     const ref = chat();
     await integration.execution.resume({ ...request, runId: 'run-2', agentSessionId: ref.agentSessionId!, nativeSession: ref.nativeSession,
       projectPath: next, prompt: 'printf "%s" "${PRIVATE_VALUE-fresh}"' });
@@ -210,6 +210,7 @@ describe('Shell integration', () => {
       prompt: 'printf retained; report="$(dirname "${BASH_SOURCE[0]}")/cwd"; rm "$report"; mkfifo "$report"; exit 0' });
     const ended = await terminal();
     expect(ended).toMatchObject({ outcome: 'failed', workingDirectory: { kind: 'unavailable' } });
+    expect(ended).not.toHaveProperty('failureCertainty');
     expect(ended.error?.message).toContain('working directory report is invalid');
     const rows = await history();
     expect(rows.some(row => row.type === 'command-output' && row.content === 'retained')).toBe(true);

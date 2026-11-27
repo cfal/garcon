@@ -191,6 +191,13 @@ new ID and requires restarting its worker. The controller rejects an identity
 mismatch rather than replacing that worker's still-running native work.
 Replacing the socket for the same executor does not stop it.
 
+A failed `run-ended` producer notification may carry `failureCertainty`:
+`not-started` proves the requested native turn did not start and `definite` records an
+exact native failure. Without either, a managed turn does not permit a retry
+based on the notification alone. Native process loss after dispatch without
+terminal evidence uses `OUTCOME_UNKNOWN`; it ends observation, not necessarily
+the work's effects. The certainty marker is live evidence, not transcript data.
+
 Producer notifications resume at the application layer, in the manner of
 XEP-0198 stream management applied to one message kind rather than to transport
 frames. The worker's process-level `ProducerRelay` outlives sessions. It numbers
@@ -237,6 +244,15 @@ already has, so each notification reaches the ledger sink once. A skipped
 number means dropped output and records one notice on the active run: "Some
 agent output could not be delivered from the executor. Reload from native
 history after this turn finishes to recover it."
+
+An integration can advertise exact live rows for fresh starts in its manifest.
+Only a provider emission captured by the originating operation may carry
+`originRunId` on a row batch. The controller uses it for the matching live
+managed attempt at commit; it is not stored or reconstructed from native
+history. Retained frames after a same-process reconnect must still pass the
+original binding, sequence, transcript view and attempt fences. A gap blocks
+confirmation of managed signal intake. The run terminal can independently
+carry Shell's command outcome and mark a retained final response best-effort.
 
 A row batch the controller cannot decode is logged and counts as undelivered
 output; consecutive undecodable batches record one notice with the same text.

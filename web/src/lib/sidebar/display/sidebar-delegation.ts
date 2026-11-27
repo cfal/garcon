@@ -22,12 +22,17 @@ export interface SidebarDelegationForest {
 
 export function buildSidebarDelegationForest(
 	chats: readonly ChatSessionRecord[],
-	options: { nestDelegatedChats: boolean; separateArchivedBranches?: boolean },
+	options: {
+		nestDelegatedChats: boolean;
+		separateArchivedBranches?: boolean;
+		workflowRootIds?: ReadonlySet<string>;
+	},
 ): SidebarDelegationForest {
 	const byId = new Map(chats.map((chat) => [chat.id, chat]));
 	const branches = new Map<string, SidebarBranch>();
 	for (const chat of byId.values()) {
-		const parent = options.nestDelegatedChats ? chat.parentChatId : null;
+		const parent = options.nestDelegatedChats && !options.workflowRootIds?.has(chat.id)
+			? chat.parentChatId : null;
 		branches.set(chat.id, {
 			parentId: parent && byId.has(parent) ? parent : null,
 			children: [],

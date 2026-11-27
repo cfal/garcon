@@ -1,0 +1,71 @@
+import type { Database } from 'bun:sqlite';
+import { join } from 'node:path';
+import { DomainError } from '../../common/domain-error.js';
+import { diagnosticErrorCode } from '../../common/errors.js';
+import { createLogger } from '../../common/log.js';
+import { configureDurableSqlite, openPrivateSqliteDatabase, securePrivateSqliteSidecars } from '../lib/private-sqlite.js';
+import {
+  WORKFLOW_ARCHIVE_MIGRATION, WORKFLOW_ATTEMPT_DIAGNOSTIC_MIGRATION, WORKFLOW_CHAT_CONFIRMATION_MIGRATION,
+  WORKFLOW_SCHEMA, WORKFLOW_SCHEMA_VERSION,
+} from './schema.js';
+
+const logger = createLogger('workflow-store');
+
+function unavailable(): DomainError {
+  return new DomainError('WORKFLOW_STORAGE_UNAVAILABLE', 'Workflow storage is unavailable.', 503);
+}
+
+export class WorkflowStore {
+  #database: Database | null = null;
+
+  constructor(workspaceDir: string, private readonly beforeCommit?: () => void) {
+    const path = join(workspaceDir, 'workflow-runs.sqlite');
+    try {
+      const db = this.#database = openPrivateSqliteDatabase(path);
+      configureDurableSqlite(db);
+      db.transaction(() => {
+        const version = db.query<{ user_version: number }, []>('PRAGMA user_version').get()!.user_version;
+        if (version === WORKFLOW_SCHEMA_VERSION) return;
+        if (version === 0) db.exec(WORKFLOW_SCHEMA);
+        else if (version >= 1 && version <= 3) {
+          if (version === 1) db.exec(WORKFLOW_ARCHIVE_MIGRATION);
+          if (version <= 2) db.exec(WORKFLOW_CHAT_CONFIRMATION_MIGRATION);
+          db.exec(WORKFLOW_ATTEMPT_DIAGNOSTIC_MIGRATION);
+        } else throw new Error('Unsupported workflow database schema.');
+        db.exec(`PRAGMA user_version = ${WORKFLOW_SCHEMA_VERSION}`);
+      }).immediate();
+      securePrivateSqliteSidecars(path);
+    } catch {
+      logger.warn('Workflow storage could not open.');
+      this.close();
+      throw unavailable();
+    }
+  }
+
+  read<T>(operation: (database: Database) => T): T {
+    if (!this.#database) throw unavailable();
+    try {
+      return operation(this.#database);
+    } catch (error) {
+      if (error instanceof DomainError) throw error;
+      logger.warn('Workflow storage fenced.', { errorCode: diagnosticErrorCode(error) });
+      this.close();
+      throw unavailable();
+    }
+  }
+
+  write<T>(operation: (database: Database) => T): T {
+    return this.read(db => db.transaction(() => {
+      const value = operation(db);
+      if (value instanceof Promise) throw new Error('Workflow writes must be synchronous.');
+      this.beforeCommit?.();
+      return value;
+    }).immediate());
+  }
+
+  close(): void {
+    const db = this.#database;
+    this.#database = null;
+    try { db?.close(); } catch { /* Storage remains fenced. */ }
+  }
+}

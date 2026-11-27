@@ -46,7 +46,7 @@
 				{#if row.type === 'executor-header'}<SidebarExecutorHeaderRow {row} preview />
 				{:else if row.type === 'project-header'}<SidebarProjectHeaderRow {row} preview />
 				{:else if row.type === 'section-header'}<SidebarSectionHeaderRow {row} />
-				{:else}
+				{:else if row.type === 'chat'}
 					<div
 						class="flex h-full items-center border-b border-border/50 pr-2"
 						style={`padding-left:${sidebarChatInset(row.depth)}px`}

@@ -64,7 +64,7 @@ function projectOutput(record: CommandLedgerRecord): AgentTurnOutput {
   }
   return {
     availability: 'available',
-    completeness: 'complete',
+    completeness: record.turnResult.completeness ?? 'complete',
     text: record.turnResult.text,
   };
 }

@@ -1,6 +1,6 @@
 import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
 import { isInputFormatByModel } from '@garcon/common/input-format';
-import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
+import { parseCommandOutcome, parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import { parseAgentUsageReport } from '@garcon/common/usage';
 import { parseAgentCliUpdateStatus, type AgentCliUpdateStatus } from '@garcon/common/agent-cli-update';
 import {
@@ -8,6 +8,7 @@ import {
   AgentIntegrationError,
   assertAgentResourceScope,
   isAgentResourceRef,
+  isAgentRunFailureCertainty,
   type AgentHistoryImport,
   type AgentIntegration,
   type AgentImportedTranscriptRow,
@@ -70,6 +71,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly attachments;
   readonly execution: AgentIntegration['execution'];
   readonly producers: AgentIntegration['producers'];
+  readonly liveTurnRows: AgentIntegration['liveTurnRows'];
   readonly permissions: AgentIntegration['permissions'];
   readonly catalog: AgentIntegration['catalog'];
   readonly settings: AgentIntegration['settings'];
@@ -238,6 +240,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       throw new Error('Invalid literal input formats in executor manifest');
     }
     this.literalExecution = manifest.literalExecution;
+    this.liveTurnRows = manifest.capabilities.liveTurnRows === true && !this.literalExecution ? { scope: 'fresh-start' } : null;
     this.readiness = cap.readiness ? { status: (signal) => call('readiness.status', null, { signal }) } : null;
     this.auth = cap.auth ? {
       status: (signal) => call('auth.status', null, { signal }),
@@ -591,10 +594,16 @@ function decodeProducerEvent(
   event: AgentProducerNotification['event'],
   scope: AgentResourceScope,
 ): AgentProducerNotification['event'] {
-  if (event.type === 'run-ended' && event.workingDirectory !== undefined) {
-    const workingDirectory = parseCommandWorkingDirectory(event.workingDirectory);
-    if (!workingDirectory) throw new Error('Invalid completion working directory');
-    return { ...event, workingDirectory };
+  if (event.type === 'run-ended') {
+    if ('failureCertainty' in event && event.failureCertainty !== undefined
+      && (event.outcome !== 'failed' || !isAgentRunFailureCertainty(event.failureCertainty))) {
+      throw new Error('Invalid producer terminal failure certainty');
+    }
+    const workingDirectory = event.workingDirectory === undefined ? undefined : parseCommandWorkingDirectory(event.workingDirectory);
+    if (workingDirectory === null) throw new Error('Invalid completion working directory');
+    const commandOutcome = event.commandOutcome === undefined ? undefined : parseCommandOutcome(event.commandOutcome);
+    if (commandOutcome === null) throw new Error('Invalid command completion outcome');
+    return { ...event, ...(workingDirectory ? { workingDirectory } : {}), ...(commandOutcome ? { commandOutcome } : {}) };
   }
   if (event.type === 'publication-failed') {
     if (!isFailureDetail(event.error)) throw new Error('Invalid producer publication failure');
@@ -606,7 +615,12 @@ function decodeProducerEvent(
     }
     return event;
   }
-  if (event.type === 'rows') return { ...event, rows: decodeRows(event.rows) };
+  if (event.type === 'rows') {
+    if (event.originRunId !== undefined && (typeof event.originRunId !== 'string' || !event.originRunId)) {
+      throw new Error('Invalid producer row origin');
+    }
+    return { ...event, rows: decodeRows(event.rows) };
+  }
   if (event.type === 'permission' && event.lifecycle.kind === 'requested') {
     const tool = decodeMessage(event.lifecycle.requestedTool);
     if (!isToolUseMessage(tool)) throw new Error('Invalid permission tool');

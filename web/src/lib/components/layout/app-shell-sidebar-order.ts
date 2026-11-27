@@ -12,9 +12,12 @@ import {
 } from '$lib/context';
 import { reorderChat, sortChatOrder } from '$lib/api/chats';
 import { SidebarOrderController } from '$lib/sidebar/display/sidebar-order-controller.svelte';
+import type { SidebarRowModelInput } from '$lib/sidebar/display/sidebar-row-model';
 import { sidebarOrderErrorMessage } from '../sidebar/sidebar-order-notifications';
 
-export function createAppShellSidebarOrder(): SidebarOrderController {
+export function createAppShellSidebarOrder(
+	workflows?: SidebarRowModelInput['workflows'],
+): SidebarOrderController {
 	const sessions = getChatSessions();
 	const executors = getExecutors();
 	const localSettings = getLocalSettings();
@@ -51,6 +54,7 @@ export function createAppShellSidebarOrder(): SidebarOrderController {
 				collapsedProjectKeys: projectCollapse.collapsedProjectKeys,
 				expandedDelegationKeys: projectCollapse.expandedDelegationKeys,
 				collapseDelegatedChatsByDefault: localSettings.collapseDelegatedChatsByDefault,
+				workflows,
 			};
 		},
 		write: reorderChat,

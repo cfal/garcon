@@ -1,3 +1,5 @@
+import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
+
 export const TERMINAL_LAUNCHER_ID = 'terminal-launcher' as const;
 export const MAX_MOBILE_RETURN_TARGETS = 32;
 // Bounds visible transcript retention and stays within the restore depth and node budgets.
@@ -61,15 +63,28 @@ export interface ChatViewSurfaceDescriptor {
 	readonly chatId: string | null;
 }
 
+export type WorkflowSurfaceDescriptor =
+	| { id: 'new-workflow'; type: 'new-workflow'; context: WorkflowLaunchContext | null }
+	| { id: 'workflow-run'; type: 'workflow-run'; runId: string };
+
+export const WORKFLOW_SURFACE_IDS = ['new-workflow', 'workflow-run'] as const;
+
 export type SurfaceDescriptor =
 	| ChatViewSurfaceDescriptor
 	| PortableSingletonDescriptor
+	| WorkflowSurfaceDescriptor
 	| { id: string; type: 'terminal'; terminalId: string }
 	| { id: string; type: 'file'; fileSessionId: string }
 	| { id: typeof TERMINAL_LAUNCHER_ID; type: 'terminal-launcher' };
 
 export type ActiveSurfaceKind =
-	PortableSingletonKind | 'chat' | 'terminal' | 'file' | 'terminal-launcher';
+	PortableSingletonKind | Exclude<SurfaceDescriptor['type'], 'singleton'>;
+
+export function isWorkflowSurface(
+	surface: SurfaceDescriptor | null | undefined,
+): surface is WorkflowSurfaceDescriptor {
+	return surface?.type === 'new-workflow' || surface?.type === 'workflow-run';
+}
 
 export interface WorkspaceWindowTabState {
 	readonly order: readonly string[];

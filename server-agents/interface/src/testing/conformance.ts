@@ -18,6 +18,7 @@ const REQUIRED_FACET_METHODS = {
 
 const NULLABLE_FACET_METHODS = {
   literalExecution: [],
+  liveTurnRows: [],
   readiness: ['status'],
   auth: ['status'],
   commands: ['discover'],
@@ -76,6 +77,10 @@ export function validateAgentIntegration(
     'loginStatus',
   ]);
   assertSingleQueryOptions(agentId, integrationRecord.singleQuery);
+  if (integration.liveTurnRows !== null
+    && (integration.liveTurnRows.scope !== 'fresh-start' || integration.literalExecution !== null)) {
+    throw new Error(`Agent integration ${agentId} has an invalid live turn rows capability`);
+  }
   if (integration.literalExecution && (
     !integration.literalExecution.selectionLabel
     || !isInputFormatByModel(integration.literalExecution.inputFormatByModel)

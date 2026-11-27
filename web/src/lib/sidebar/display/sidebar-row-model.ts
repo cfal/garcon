@@ -26,6 +26,7 @@ import type {
 	SidebarVirtualChatRow,
 	SidebarTreeGuide,
 	SidebarTreeScope,
+	SidebarWorkflowRun,
 } from './sidebar-virtual-chat-list';
 
 const sections: SidebarChatSection[] = [
@@ -52,6 +53,13 @@ export interface SidebarRowModelInput extends SidebarCollapseChoices {
 	collapseDelegatedChatsByDefault?: boolean;
 	executorOrder?: readonly string[];
 	isChatOptimisticallyArchived?: (chatId: string) => boolean;
+	workflows?: {
+		runs: readonly SidebarWorkflowRun[];
+		runIdByChatId: ReadonlyMap<string, string>;
+		collapsedRunIds: ReadonlySet<string>;
+		moreRuns: boolean;
+		moreActiveChats: boolean;
+	};
 }
 
 export function buildSidebarChatOrderMap(chats: readonly ChatSessionRecord[]): SidebarChatOrderMap {
@@ -160,6 +168,7 @@ interface ScopeTask {
 	path: SidebarGroupPath;
 	inheritedFields: readonly SidebarGroupingField[];
 	executorGrouped: boolean;
+	workflowRunId?: string;
 }
 
 type ProjectionTask =
@@ -182,7 +191,20 @@ function childTreeScope(
 
 export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowModel {
 	const byId = new Map(input.allChats.map((chat) => [chat.id, chat]));
-	const forest = buildSidebarDelegationForest(input.allChats, input);
+	const workflows = input.workflows;
+	const chatIdsByRun = new Map<string, string[]>();
+	const workflowRootIds = workflows?.runIdByChatId.size ? new Set<string>() : undefined;
+	if (workflows && workflowRootIds) {
+		const runIds = new Set(workflows.runs.map((run) => run.id));
+		for (const [chatId, runId] of workflows.runIdByChatId) {
+			if (!byId.has(chatId) || !runIds.has(runId)) continue;
+			const ids = chatIdsByRun.get(runId) ?? [];
+			ids.push(chatId);
+			chatIdsByRun.set(runId, ids);
+			workflowRootIds.add(chatId);
+		}
+	}
+	const forest = buildSidebarDelegationForest(input.allChats, { ...input, workflowRootIds });
 	const matches = input.matchingChatIds;
 	const filtered = matches !== undefined;
 	const matchCounts = new Map<string, number>();
@@ -272,17 +294,61 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 		}
 		return (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity) || a.localeCompare(b);
 	};
+	const roots = matchingBranches(forest.roots);
 	const tasks: ProjectionTask[] = [
 		{
 			kind: 'scope',
 			parentId: null,
-			ids: matchingBranches(forest.roots),
+			ids: workflowRootIds ? roots.filter((id) => !workflowRootIds.has(id)) : roots,
 			depth: 0,
 			path: [],
 			inheritedFields: [],
 			executorGrouped: false,
 		},
 	];
+	if (workflows) {
+		if (!filtered) {
+			for (const page of ['active-chats', 'runs'] as const) {
+				if (page === 'runs' ? workflows.moreRuns : workflows.moreActiveChats) {
+					tasks.push({
+						kind: 'header',
+						row: { type: 'workflow-more', key: `workflow-more:${page}`, depth: 0, page },
+					});
+				}
+			}
+		}
+		for (let index = workflows.runs.length - 1; index >= 0; index--) {
+			const run = workflows.runs[index];
+			const children = matchingBranches(chatIdsByRun.get(run.id) ?? []);
+			if (filtered && children.length === 0) continue;
+			const isCollapsed = !filtered && workflows.collapsedRunIds.has(run.id);
+			if (!isCollapsed && children.length) {
+				tasks.push({
+					kind: 'scope',
+					parentId: null,
+					ids: children,
+					depth: 1,
+					tree: childTreeScope(0, 1),
+					path: [],
+					inheritedFields: [],
+					executorGrouped: false,
+					workflowRunId: run.id,
+				});
+			}
+			tasks.push({
+				kind: 'header',
+				row: {
+					type: 'workflow-run',
+					key: `workflow-run:${run.id}`,
+					depth: 0,
+					run,
+					count: children.reduce((sum, id) => sum + branchCount(id), 0),
+					isCollapsed,
+					containsChat: (chatId) => children.some((id) => forest.contains(id, chatId)),
+				},
+			});
+		}
+	}
 	while (tasks.length) {
 		const task = tasks.pop()!;
 		if (task.kind === 'header') {
@@ -315,7 +381,7 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			continue;
 		}
 		if (!task.ids.length) continue;
-		const field = fields[task.path.length];
+		const field = task.workflowRunId === undefined ? fields[task.path.length] : undefined;
 		if (field !== undefined) {
 			if (task.inheritedFields.includes(field)) {
 				// Retains structural scope keys without an invisible collapse gate or extra indent.
@@ -394,11 +460,13 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 			continue;
 		}
 		const ordered = [...task.ids].sort(compareChats);
-		const scopes = buildSidebarChatOrderMap(
-			ordered
-				.filter((id) => (!matches || matches.has(id)) && !forest.ambiguousIds.has(id))
-				.map((id) => byId.get(id)!),
-		);
+		const scopes = task.workflowRunId === undefined
+			? buildSidebarChatOrderMap(
+					ordered
+						.filter((id) => (!matches || matches.has(id)) && !forest.ambiguousIds.has(id))
+						.map((id) => byId.get(id)!),
+				)
+			: null;
 		const scopeKeys: Partial<Record<keyof SidebarChatOrderMap, string>> = {};
 		const section = task.path.find(([field]) => field === 'activity')?.[1] as
 			SidebarChatSection | undefined;
@@ -419,14 +487,16 @@ export function buildSidebarRowModel(input: SidebarRowModelInput): SidebarRowMod
 				isPinned: list === 'pinned',
 				isArchived: list === 'archived',
 				executorGrouped: task.executorGrouped,
-				reorderScopeKey: (scopeKeys[list] ??= JSON.stringify([
-					input.nestDelegatedChats,
-					input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
-					task.parentId,
-					list,
-					task.path,
-				])),
-				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : scopes[list],
+				reorderScopeKey: (scopeKeys[list] ??= task.workflowRunId === undefined
+					? JSON.stringify([
+							input.nestDelegatedChats,
+							input.nestDelegatedChats && Boolean(input.separateArchivedBranches),
+							task.parentId,
+							list,
+							task.path,
+						])
+					: `workflow-run:${task.workflowRunId}`),
+				reorderScopeIds: contextOnly || forest.ambiguousIds.has(id) ? [] : (scopes?.[list] ?? []),
 				contextOnly,
 				section,
 				branch: branch.descendants

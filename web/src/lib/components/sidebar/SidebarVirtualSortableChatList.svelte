@@ -9,6 +9,7 @@
 	import SidebarProjectHeaderRow from './SidebarProjectHeaderRow.svelte';
 	import SidebarExecutorHeaderRow from './SidebarExecutorHeaderRow.svelte';
 	import SidebarSectionHeaderRow from './SidebarSectionHeaderRow.svelte';
+	import SidebarWorkflowRunRow from './SidebarWorkflowRunRow.svelte';
 	import SidebarVirtualSortableChatRow from './SidebarVirtualSortableChatRow.svelte';
 	import SidebarTreeGuides from './SidebarTreeGuides.svelte';
 	import {
@@ -54,6 +55,7 @@
 		bindSidebarAutoScroll,
 		bindSidebarDesktopReorder,
 	} from './sidebar-desktop-reorder-controller.js';
+	import type { SidebarWorkflowControls } from './sidebar-workflow-controls';
 
 	interface SidebarVirtualSortableChatListProps {
 		actions: SidebarRowActions;
@@ -70,6 +72,7 @@
 		rowHeight?: number;
 		overscan?: number;
 		reorder: SidebarOrderController;
+		workflowControls?: SidebarWorkflowControls;
 		onPersistReorder: (request: SidebarChatReorderRequest) => void;
 		onSortChatOrder: (sortKey: ChatOrderSortKey) => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
@@ -92,6 +95,7 @@
 		rowHeight,
 		overscan = DEFAULT_CHAT_ROW_OVERSCAN,
 		reorder,
+		workflowControls,
 		onPersistReorder,
 		onSortChatOrder,
 		newWindowEdges,
@@ -585,7 +589,7 @@
 		{/each}
 		{#each renderedItems as { row, virtualItem } (row.key)}
 			{@const containsSelectedChat = Boolean(
-				row.type !== 'chat' &&
+				'containsChat' in row &&
 				row.isCollapsed &&
 				selectedChatId &&
 				row.containsChat(selectedChatId),
@@ -615,7 +619,24 @@
 						{containsSelectedChat}
 						onToggle={isFiltered ? undefined : onToggleProjectCollapsed}
 					/>
-				{:else}
+				{:else if row.type === 'workflow-run' && workflowControls}
+					<SidebarWorkflowRunRow
+						{row}
+						selected={row.run.id === workflowControls.selectedRunId}
+						{containsSelectedChat}
+						onOpen={() => workflowControls?.openRun(row.run.id)}
+						onToggle={isFiltered ? undefined : () => workflowControls?.toggleRun(row.run.id)}
+					/>
+				{:else if row.type === 'workflow-more' && workflowControls}
+					<button
+						type="button"
+						class="h-full w-full pl-6 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
+						disabled={workflowControls.fetching}
+						onclick={() => workflowControls?.loadMore(row.page)}
+					>
+						{row.page === 'runs' ? m.workflow_nav_more_runs() : m.workflow_nav_more_active_chats()}
+					</button>
+				{:else if row.type === 'chat'}
 					<SidebarVirtualSortableChatRow
 						{row}
 						index={virtualItem.index}

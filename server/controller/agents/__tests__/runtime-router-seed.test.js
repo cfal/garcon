@@ -579,7 +579,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(failRun).toHaveBeenCalledWith('chat-1', 'turn-1', {
       code: 'CARRYOVER_COMPACTION_FAILED',
       message: failure.message,
-    });
+    }, 'not-started');
     expect(start).not.toHaveBeenCalled();
     expect(transcript.notices).toEqual([]);
     expect(transcript.activeRunId()).toBeNull();

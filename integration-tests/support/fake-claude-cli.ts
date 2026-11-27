@@ -157,7 +157,7 @@ function handleInput(line: string, nativePath: string, sessionId: string): void 
   if (!input.uuid) throw new Error('Claude stream input requires a command UUID');
 
   const prompt = messageText(input.message.content);
-  const response = `echo:${prompt}`;
+  const response = process.env.CLAUDE_TEST_EMPTY_SUCCESS === '1' ? '' : `echo:${prompt}`;
   const userTimestamp = new Date().toISOString();
   const assistantTimestamp = new Date(Date.now() + 1).toISOString();
   const assistantUuid = randomUUID();

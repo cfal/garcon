@@ -252,7 +252,7 @@ export class ShellExecution {
       const publishedOutput = publishOutput();
       commandLog.append(commandId, message);
       this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
-      const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: outcome.cwd } as const;
+      const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: outcome.cwd, commandOutcome: outcome } as const;
       if (outcome.outcome === 'finished') {
         let text = publishedOutput.find(message => message.channel === 'stdout')?.content ?? '';
         if (output.truncated) {
@@ -261,19 +261,23 @@ export class ShellExecution {
         return {
           ...terminal,
           outcome: 'finished',
-          finalResponse: { type: 'literal-text', text },
+          finalResponse: { type: 'literal-text', text, ...(capture === 'complete' ? {} : { completeness: 'best-effort' }) },
         };
       }
       if (outcome.outcome === 'interrupted') return { ...terminal, outcome: 'interrupted' };
-      return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: message.content } };
+      return {
+        ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: message.content },
+        ...(result.signal !== null || (result.exitCode !== null && result.exitCode !== 0) ? { failureCertainty: 'definite' } : {}),
+      };
     } catch (error) {
       publishOutput();
       let failure = failureDetail(error);
-      if (log && commandRecorded) {
-        const message = new CommandResultMessage(new Date().toISOString(), commandId, {
+      const commandOutcome: CommandOutcome = {
           outcome: invocation.cancellation.signal.aborted ? 'interrupted' : 'failed', exitCode: null, signal: null,
           capture: 'incomplete', cwd: { kind: 'unavailable', reason: String(error).slice(0, 1024) },
-        });
+      };
+      if (log && commandRecorded) {
+        const message = new CommandResultMessage(new Date().toISOString(), commandId, commandOutcome);
         try {
           log.append(commandId, message);
           this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
@@ -283,8 +287,8 @@ export class ShellExecution {
         }
       }
       return invocation.cancellation.signal.aborted
-        ? { type: 'run-ended', runId: request.runId, outcome: 'interrupted' }
-        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failure };
+        ? { type: 'run-ended', runId: request.runId, outcome: 'interrupted', commandOutcome }
+        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failure, commandOutcome };
     } finally {
       log?.close();
       if (log && !('nativeSession' in request) && !sessionPublished) await this.store.remove(invocation.sessionId);

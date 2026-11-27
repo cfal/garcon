@@ -55,19 +55,15 @@
 	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
 	import AppShellChatDialogs from './AppShellChatDialogs.svelte';
 	import SidebarSearchDialogs from '$lib/components/sidebar/search/SidebarSearchDialogs.svelte';
-	import type {
-		SearchResultNavigationPort,
-		SearchResultSelection,
-	} from '$lib/sidebar/search/search-result-navigation-controller.js';
+	import { createAppShellSidebarNavigation } from './app-shell-sidebar-navigation.svelte.js';
 	import { createAppShellSidebarOrder } from './app-shell-sidebar-order';
 	import { createAppShellMobileDrawer } from './app-shell-mobile-drawer.js';
 	import SidebarDisplayDialog from '../sidebar/SidebarDisplayDialog.svelte';
-	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
+	import { isWorkflowSurface, type WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { NewChatPromptDraftStore } from '$lib/chat/new-chat/new-chat-prompt-draft.js';
 	import { AppShellChatNavigationController } from './app-shell-chat-navigation-controller.svelte.js';
-	import type { DrawerComposerSelection } from '$lib/stores/app-shell.svelte.js';
 	import { ChatListAutohideState } from './chat-list-autohide-state.svelte.js';
 
 	const commandRegistry = getWorkbenchCommands();
@@ -89,9 +85,21 @@
 	const chatActionDialogs = new ChatActionDialogsState();
 	let sidebarDisplayOpen = $state(false);
 	let sidebarDisplayReturnFocus = $state<(() => void) | undefined>();
-	const sidebarOrder = createAppShellSidebarOrder();
+	const sidebarNavigation = createAppShellSidebarNavigation({
+		closeMobileSidebar: () => mobileDrawer.close(),
+		get chatNavigation() {
+			return chatNavigation;
+		},
+		get mobileSurface() {
+			return mobileActiveDescriptor;
+		},
+		get sidebarVisible() {
+			return sidebarMounted && !hideChatList && !chatListAutohide.collapsed;
+		},
+	});
+	const sidebarOrder = createAppShellSidebarOrder(sidebarNavigation.workflowIndex);
 	const displayedSidebarChatIds = $derived(sidebarOrder.projection.rowModel.visibleChatIds);
-	const mobileDrawer = createAppShellMobileDrawer(handleChatSelect);
+	const mobileDrawer = createAppShellMobileDrawer(sidebarNavigation.selectChat);
 	const archiveUndo = new ArchiveUndoController(sessions, notifications);
 	$effect(() => archiveUndo.reconcile());
 	const chatActionController = new ChatActionController({
@@ -110,7 +118,7 @@
 		isArchiveMutationPending: (chatId) => sessions.isArchiveMutationPending(chatId),
 		startArchivingChats: (chatIds) => archiveUndo.startArchivingChats(chatIds),
 		startUnarchivingChats: (chatIds) => archiveUndo.startUnarchivingChats(chatIds),
-		onSelectChat: handleChatSelect,
+		onSelectChat: sidebarNavigation.selectChat,
 		onOpenForkedChat: handleOpenForkedChat,
 		onNewChat: handleNewChat,
 		onDeleteChat: handleChatDelete,
@@ -143,8 +151,6 @@
 	let reloadSelectedChatFn: ((chatId: string) => Promise<void>) | null = null;
 	let sidebarPreviewWidth = $state<number | null>(null);
 	const sidebarWidth = $derived(sidebarPreviewWidth ?? localSettings.sidebarWidth);
-	let searchResultNavigation: SearchResultNavigationPort | null = null;
-	let searchSelectionVersion = 0;
 	const workspaceFullscreen = $derived(
 		!isMobile && workspace.layout.snapshot.fullscreenWindowId !== null,
 	);
@@ -184,6 +190,7 @@
 	});
 	const mobileTransientSurface = $derived(
 		mobileActiveDescriptor?.type === 'file' ||
+			isWorkflowSurface(mobileActiveDescriptor) ||
 			(mobileActiveDescriptor?.type === 'singleton' &&
 				(mobileActiveDescriptor.kind === 'commit' ||
 					mobileActiveDescriptor.kind === 'chat-map' ||
@@ -232,7 +239,9 @@
 		},
 	});
 
-	bindAppShellRoute(chatNavigation);
+	bindAppShellRoute(chatNavigation, {
+		hasFocusedWorkflow: () => sidebarNavigation.hasFocusedWorkflow,
+	});
 
 	$effect(() => {
 		const matches = mobileBreakpointMatches;
@@ -296,42 +305,6 @@
 		// before the WS connection opens.
 		void sessions.refreshChats();
 	});
-
-	function handleChatSelect(chatId: string, drawerSelection?: DrawerComposerSelection): void {
-		cancelSearchResultNavigation();
-		void chatNavigation.showChatInCurrentWindow(chatId, { navigate: true, drawerSelection });
-	}
-
-	function cancelSearchResultNavigation(): void {
-		searchSelectionVersion++;
-		searchResultNavigation?.cancel();
-	}
-
-	function handleRegisterSearchNavigation(port: SearchResultNavigationPort): () => void {
-		searchResultNavigation = port;
-		return () => {
-			port.cancel();
-			if (searchResultNavigation === port) {
-				searchSelectionVersion++;
-				searchResultNavigation = null;
-			}
-		};
-	}
-
-	async function handleSearchResultSelect(selection: SearchResultSelection): Promise<void> {
-		cancelSearchResultNavigation();
-		const version = searchSelectionVersion;
-		const port = searchResultNavigation;
-		if (isMobile) mobileDrawer.close();
-		// Completes dialog and drawer focus restoration before navigation owns focus.
-		await tick();
-		if (version !== searchSelectionVersion || port !== searchResultNavigation) return;
-		if (!port) {
-			notifications.error(m.sidebar_search_target_failed());
-			return;
-		}
-		await port.open(selection);
-	}
 
 	function reportWorkspaceOpenError(error: unknown): void {
 		notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
@@ -515,6 +488,7 @@
 	);
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => {
+		sidebarNavigation.destroy();
 		sidebarOrder.destroy();
 		archiveUndo.destroy();
 		chatNavigation.destroy();
@@ -597,12 +571,14 @@
 			sidebarDisplayOpen = true;
 		}}
 		chats={sessions.orderedChats}
-		selectedChatId={sessions.selectedChatId}
+		selectedChatId={sidebarNavigation.selectedSidebarChatId}
 		isLoading={sessions.isLoadingChats}
 		rosterReady={sessions.chatListStatus === 'ready'}
 		{isMobile}
 		{onChatSelect}
 		{...sidebarActions}
+		onNewWorkflow={sidebarNavigation.openNewWorkflow}
+		workflowControls={sidebarNavigation.workflowControls}
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
 		chatListAutohideAvailable={hoverCapability.current}
 		{newWindowEdges}
@@ -670,7 +646,7 @@
 			aria-hidden={desktopChatListHidden}
 			inert={desktopChatListHidden}
 		>
-			{@render sidebarContent(false, handleChatSelect)}
+			{@render sidebarContent(false, sidebarNavigation.selectChat)}
 			{#if !hideChatList}
 				<ResizeHandle
 					edge={dividerEdge}
@@ -730,7 +706,7 @@
 				<WorkspaceRoot
 					{isMobile}
 					onRegisterReload={handleRegisterReload}
-					onRegisterSearchNavigation={handleRegisterSearchNavigation}
+					onRegisterSearchNavigation={sidebarNavigation.registerSearchNavigation}
 					chatActions={workspaceChatActions}
 				/>
 			</div>
@@ -739,13 +715,14 @@
 					activeItem={mobileActiveTab}
 					onTabChange={handleMobileTabChange}
 					onMenuClick={mobileDrawer.toggle}
+					onOpenWorkflow={sidebarNavigation.openMobileWorkflow}
 				/>
 			{/if}
 		</div>
 	</div>
 </div>
 
-<SidebarSearchDialogs chats={sessions.orderedChats} onSelectResult={handleSearchResultSelect} />
+<SidebarSearchDialogs chats={sessions.orderedChats} onSelectResult={sidebarNavigation.selectSearchResult} />
 
 <AppShellChatDialogs {chatActionDialogs} {chatActionController} {isMobile} />
 

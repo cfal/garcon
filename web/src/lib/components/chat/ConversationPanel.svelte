@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import { Button } from '$lib/components/ui/button';
+	import * as m from '$lib/paraglide/messages.js';
+	import { getOptionalWorkflowNavigation } from '$lib/workflows/navigation/workflow-navigation-context';
 	import { getAsyncQuestionController, setAsyncQuestionPanel } from '$lib/chat/conversation/async-question-context.js';
 	import ConversationFeed from './transcript/ConversationFeed.svelte';
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
@@ -79,6 +83,7 @@
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
 	const executors = getExecutors();
+	const workflowNav = getOptionalWorkflowNavigation();
 	const asyncQuestions = getAsyncQuestionController();
 	const questionTarget = $derived({
 		chatId: chat.id,
@@ -119,6 +124,7 @@
 	});
 
 	const chatId = $derived(chat.id);
+	const workflowRun = $derived(workflowNav?.runForChat(chatId));
 	const availabilityNotice = $derived(
 		ownsComposer && composerNotice?.chatId === chatId ? composerNotice : null,
 	);
@@ -327,6 +333,23 @@
 	data-conversation-panel-command-owner={isCommandOwner ? 'true' : undefined}
 	data-conversation-panel-composer-anchor={ownsComposer ? 'true' : undefined}
 >
+	{#if !appShell.isMobile && workflowRun && workflowNav}
+		<div
+			class="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-1"
+			data-workflow-return-bar={workflowRun.id}
+		>
+			<span class="min-w-0 truncate text-xs font-medium text-muted-foreground">
+				{workflowNav.runName(workflowRun.id) || workflowRun.name || m.workflow_nav_run()}
+			</span>
+			<Button
+				size="sm"
+				variant="ghost"
+				class="h-7 shrink-0 gap-1 px-2 text-xs"
+				onclick={() => workflowNav.openRunById(workflowRun.id, surfaceId)}
+				><ArrowLeft class="size-3.5" /> {m.workflow_nav_back_to_run()}</Button
+			>
+		</div>
+	{/if}
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
 			<ConversationFeed

@@ -608,7 +608,7 @@ export class AcceptedInputHandler {
       // A recoverable preamble rejection retains a prepared new-chat, fork, or
       // continuation target so the user can reconfigure and retry.
       const retainPreparedTarget = Boolean(input.preparation)
-        && isRecoverablePreambleAdmissionError(error);
+        && (input.options.automation ? input.options.automation.inputPublished : isRecoverablePreambleAdmissionError(error));
       let retryable = !retainPreparedTarget;
       let preserveForkPreparation = false;
       if (input.preparation && !retainPreparedTarget) {

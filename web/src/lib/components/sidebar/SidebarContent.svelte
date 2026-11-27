@@ -16,10 +16,12 @@
 	import { registerNativeWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
+	import type { SidebarWorkflowControls } from './sidebar-workflow-controls';
 
 	interface SidebarContentProps {
 		actions: SidebarRowActions;
 		reorder: SidebarOrderController;
+		workflowControls?: SidebarWorkflowControls;
 		projection: SidebarChatListProjection;
 		selectedChatId: string | null;
 		isLoading: boolean;
@@ -39,6 +41,7 @@
 	let {
 		actions,
 		reorder,
+		workflowControls,
 		projection,
 		selectedChatId,
 		isLoading,
@@ -148,6 +151,7 @@
 		{actions}
 		{newWindowEdges}
 		{reorder}
+		{workflowControls}
 		{onSortChatOrder}
 	/>
 </ScrollArea>

@@ -74,6 +74,9 @@ The controller owns chats, ledgers, queues, schedules, provider configuration/cr
 - `controller/pull-request-reviews/` owns automatic pull request review: the
   SQLite store, the scanner, the runner that starts and settles review chats,
   and the poster. See [Pull request reviews](./pull-request-reviews.md).
+- `controller/workflows/` owns versioned definitions, captured runs, and signal-driven
+  scheduling in the workspace workflow database. `controller/automation/` observes
+  exact chat turns without persisting the chat queue. See [Workflows](./workflows.md).
 - `runtime/git/review-patch.ts` constructs compact patch bodies;
   `runtime/gh/pull-request-diff.ts` projects GitHub pull-request diffs.
 - Git operation tests live in named suites under `runtime/git/__tests__/`;

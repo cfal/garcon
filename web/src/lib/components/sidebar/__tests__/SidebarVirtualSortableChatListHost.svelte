@@ -21,12 +21,15 @@
 	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import type { ExecutorSnapshot } from '$shared/executors';
+	import type { SidebarWorkflowControls } from '../sidebar-workflow-controls';
 
 	interface SidebarVirtualSortableChatListHostProps {
 		rows: SidebarVirtualRow[];
 		executors?: readonly ExecutorSnapshot[];
 		pendingChatIds?: string[];
 		selectedChatId?: string | null;
+		workflowControls?: SidebarWorkflowControls;
+		onChatSelect?: (chatId: string) => void;
 		isMobile?: boolean;
 		isFiltered?: boolean;
 		displayOptions?: Partial<SidebarDisplayOptions>;
@@ -48,6 +51,8 @@
 		executors,
 		pendingChatIds = [],
 		selectedChatId = null,
+		workflowControls,
+		onChatSelect = () => {},
 		isMobile = false,
 		isFiltered = false,
 		displayOptions: displayOptionsInput = {},
@@ -139,6 +144,7 @@
 		viewportRef={viewportAttached ? viewportOverride ?? viewportRef : null}
 		{viewportHeight}
 		{selectedChatId}
+		{workflowControls}
 		currentTime={new Date('2025-01-01T03:00:00.000Z')}
 		{isMobile}
 		{isFiltered}
@@ -150,7 +156,7 @@
 		{onToggleProjectCollapsed}
 		newWindowEdges={workspaceSplitAdmissions()}
 		actions={{
-			onChatSelect: () => {},
+			onChatSelect,
 			onDeleteChat: () => {},
 			onStartRenameChat: () => {},
 			onTogglePinned: () => {},

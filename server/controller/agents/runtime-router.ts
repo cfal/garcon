@@ -51,6 +51,7 @@ import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
 } from '../ledger/service.js';
+import { dispatchFailureCertainty } from '../ledger/dispatch-failure.js';
 import {
   dispatchFailureDetail,
   executionSetupFailure,
@@ -119,7 +120,7 @@ export class AgentRuntimeRouter {
       const runId = this.#ledger.activeRunId(chatId);
       if (!runId) return;
       this.#abortPublication(chatId, runId);
-      this.#ledger.failRun(chatId, runId, error);
+      this.#ledger.failRun(chatId, runId, error, 'unknown');
     },
     (chatId, lease) => {
       if (this.#producerLeases.get(chatId)?.lease !== lease || lease.closed) return;
@@ -166,6 +167,7 @@ export class AgentRuntimeRouter {
     let executionInvoked = false;
     try {
       assertExecutionAdmissionOpen(opts);
+      opts.managedAdmission?.assertCurrent();
       if (getMaxSessions() > 0 && this.getRunningSessionCount() >= getMaxSessions()) {
         throw new DomainError(
           'SESSION_LIMIT',
@@ -213,6 +215,8 @@ export class AgentRuntimeRouter {
       const sending = { signal: opts.executionAdmission?.signal, dispatchDeadline: opts.dispatchDeadline };
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
+        ...(opts.managedAdmission && integration.liveTurnRows?.scope === 'fresh-start'
+          ? { captureLiveOrigin: true as const } : {}),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, sending),
         prompt: prepared.outboundPrompt,
         submission: prepared.submission,
@@ -221,6 +225,12 @@ export class AgentRuntimeRouter {
       };
       assertExecutionAdmissionOpen(opts);
       this.#endpointResolver.resolveEndpointReference(selection);
+      if (opts.managedAdmission) {
+        opts.managedAdmission.assertCurrent();
+        if ((request.endpoint?.credential?.revision ?? null) !== opts.managedAdmission.providerRevision) {
+          throw new DomainError('API_PROVIDER_CONFIGURATION_CHANGED', 'Provider configuration changed before the managed start', 409);
+        }
+      }
       executionInvoked = true;
       const handle = await this.#launch(chatId, runId, () => integration.execution.start(request, sending));
       if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
@@ -235,7 +245,10 @@ export class AgentRuntimeRouter {
       if (!updated) throw new Error(`Session not initialized: ${chatId}. Call /api/chats/start first.`);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
-      this.#failDefiniteDispatch(chatId, runId, failure);
+      this.#failDefiniteDispatch(chatId, runId, failure, !executionInvoked);
+      if (opts.managedAdmission && !executionInvoked) {
+        throw new AgentCallError('not-dispatched', failure instanceof Error ? failure.message : 'Managed turn setup failed');
+      }
       throw failure;
     }
   }
@@ -462,7 +475,7 @@ export class AgentRuntimeRouter {
         this.#ledger.failRun(chatId, runId, settingUp ? EXECUTOR_DISCONNECTED_BEFORE_START : {
           code: 'OUTCOME_UNKNOWN',
           message: EXECUTOR_DISCONNECTED_MID_TURN,
-        });
+        }, settingUp ? 'not-started' : 'unknown');
       } catch (error) {
         logger.warn('Unable to record executor loss', {
           executorId, chatId, reason: error instanceof Error ? error.message : String(error),
@@ -483,18 +496,19 @@ export class AgentRuntimeRouter {
     }
   }
 
-  #failDefiniteDispatch(chatId: string, runId: string | null, error: unknown): void {
+  #failDefiniteDispatch(chatId: string, runId: string | null, error: unknown, notInvoked = false): void {
     if (!runId) return;
     if (this.#settingUp.get(chatId) === runId) this.#settingUp.delete(chatId);
     this.#pendingAbortRuns.delete(runKey(chatId, runId));
     if (error instanceof AgentCallError && error.outcome === 'unknown') return;
     this.#bindings.forgetRun(runId);
-    this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error));
+    const certainty = notInvoked ? 'not-started' : dispatchFailureCertainty(error);
+    this.#ledger.failRun(chatId, runId, dispatchFailureDetail(error), certainty);
   }
 
-  abortSession(chatId: string): Promise<boolean> {
+  abortSession(chatId: string, expectedTurnId?: string): Promise<boolean> {
     const runId = this.#ledger.activeRunId(chatId);
-    if (!runId) return Promise.resolve(false);
+    if (!runId || expectedTurnId !== undefined && runId !== expectedTurnId) return Promise.resolve(false);
     const active = this.#executionHandles.get(chatId);
     this.#ledger.interruptRun(chatId);
     if (!active || active.runId !== runId) {

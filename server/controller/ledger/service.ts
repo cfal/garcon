@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import type { AnchorScanInput, AnchorScanResult } from './anchor-page.js';
 import { isDeepStrictEqual } from 'node:util';
 import type {
-  AgentFinalResponse,
   AgentPermissionLifecycle,
   AgentPermissionResponseCapability,
   AgentProducerEvent,
@@ -10,6 +9,7 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../../common/agent-execution.js';
+import type { ExecutionFailureCertainty } from '../../../common/automation.js';
 import type { ChatMessage, UserMessage } from '../../../common/chat-types.js';
 import { TranscriptNoticeMessage } from '../../../common/chat-types.js';
 import { isPublicationGapNoticeDetail } from '../../../common/transcript-notice-details.js';
@@ -56,8 +56,7 @@ import { PermissionControlEvents, type PermissionActionabilityChange } from './p
 import { inputDetail } from './input-submission.js';
 export type { PermissionActionabilityChange } from './permission-control-events.js';
 import { ProducerLease } from './producer-lease.js';
-import { projectFinalResponse } from './final-response.js';
-import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
+import { projectProviderTerminal } from './provider-terminal.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
 import { normalizeNotice, type NormalizedTranscriptNotice, type TranscriptNoticeInput } from './notice.js';
@@ -228,10 +227,11 @@ export class TranscriptLedgerService {
     chatId: string,
     runId: string,
     error?: AgentRunFailureDetail,
+    failureCertainty?: ExecutionFailureCertainty,
   ): LedgerRunEndedRow | null {
     if (this.#activeRuns.get(chatId) !== runId) return null;
     this.#activeRuns.delete(chatId);
-    return this.#appendRunEnd(chatId, runId, 'failed', 'core', error);
+    return this.#appendRunEnd(chatId, runId, 'failed', 'core', error, { failureCertainty });
   }
 
   hasMatchingInputSubmission(input: {
@@ -514,7 +514,8 @@ export class TranscriptLedgerService {
       providerMeta: null,
     }]);
     const notice = row as LedgerNoticeRow;
-    this.#notify({ type: 'rows', chatId, viewId, rows: [notice] });
+    const gapRunId = isPublicationGapNoticeDetail(input.detail) ? this.#activeRuns.get(chatId) : undefined;
+    this.#notify({ type: 'rows', chatId, viewId, rows: [notice], ...(gapRunId ? { publicationGapRunId: gapRunId } : {}) });
     return notice;
   }
 
@@ -750,9 +751,14 @@ export class TranscriptLedgerService {
           runId: this.#activeRuns.get(chatId) ?? null,
           committedRows: committed,
         });
-        if (committed.length > 0) {
-          this.#notify({ type: 'rows', chatId, viewId, rows: committed });
-        }
+        if (committed.length === 0) return;
+        const origin = event.originRunId;
+        const liveRows = origin && this.#activeRuns.get(chatId) === origin
+          ? publication.unmodifiedAssistantIndices.map(index => committed[index]).filter(row => row.kind === 'provider-row') : [];
+        this.#notify({
+          type: 'rows', chatId, viewId, rows: committed,
+          ...(origin && liveRows.length > 0 ? { liveAssistantRows: { runId: origin, rows: liveRows } } : {}),
+        });
         return;
       }
       case 'notice': {
@@ -827,15 +833,7 @@ export class TranscriptLedgerService {
       case 'run-ended': {
         if (this.#activeRuns.get(chatId) !== event.runId) return;
         this.#activeRuns.delete(chatId);
-        this.#appendRunEnd(
-          chatId,
-          event.runId,
-          event.outcome,
-          'provider',
-          event.error,
-          event.outcome === 'finished' ? projectFinalResponse(event.finalResponse) : null,
-          parseCommandWorkingDirectory(event.workingDirectory) ?? undefined,
-        );
+        this.#appendRunEnd(chatId, event.runId, event.outcome, 'provider', event.error, projectProviderTerminal(event));
       }
     }
   }
@@ -846,8 +844,8 @@ export class TranscriptLedgerService {
     outcome: LedgerRunEndedRow['outcome'],
     origin: LedgerRunEndedRow['origin'],
     error?: AgentRunFailureDetail,
-    finalResponse: AgentFinalResponse | null = null,
-    workingDirectory?: CommandWorkingDirectory,
+    evidence: Partial<Pick<Extract<TranscriptCommitEvent, { type: 'run-ended' }>,
+      'finalResponse' | 'workingDirectory' | 'commandOutcome' | 'failureCertainty'>> = {},
   ): LedgerRunEndedRow {
     let view: TranscriptView;
     let row: LedgerRow;
@@ -870,7 +868,10 @@ export class TranscriptLedgerService {
     const ended = row as LedgerRunEndedRow;
     this.#clearRunPermissions(chatId, runId);
     for (const listener of this.#runEndCommitListeners) listener(chatId, runId);
-    this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended, finalResponse, workingDirectory });
+    this.#notify({
+      type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended, ...evidence,
+      finalResponse: evidence.finalResponse ?? null,
+    });
     return ended;
   }
 

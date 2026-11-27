@@ -1,4 +1,5 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
+import type { WorkflowLaunchContext } from '$lib/workflows/launch/workflow-locations';
 import type { ForkOpenPlacementPreference } from '$lib/stores/local-settings.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
 import type {
@@ -25,7 +26,7 @@ import {
 	type WorkspaceWindowEdge,
 	type WorkspaceWindowId,
 } from './surface-types.js';
-import { collectWindowNodes, windowIdOfSurface, windowNodeById } from './window-tree.js';
+import { collectWindowNodes, windowNodeById } from './window-tree.js';
 import { reduceWorkspaceLayout } from './workspace-layout.svelte.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
@@ -46,6 +47,7 @@ import type { WorkspaceCommitOptions } from './workspace-commit.js';
 import type { ChatSurfaceTransferPort } from './chat-surface-transfer.js';
 import { WorkspacePresentationController } from './workspace-presentation-controller.svelte.js';
 import { WorkspaceTabMovementService } from './workspace-tab-movement-service.js';
+import { WorkspaceTabPlacementService } from './workspace-tab-placement.js';
 import { WorkspaceWindowDestructionService } from './workspace-window-destruction-service.js';
 import { disposeClosedSurface, prepareSurfaceClose } from './workspace-surface-lifecycle.js';
 import { WorkspaceChatPlacementService } from './workspace-chat-placement.js';
@@ -94,6 +96,7 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 	readonly #fileDialog: FileDialogCoordinator;
 	readonly #terminalPlacement: TerminalPlacementService;
 	readonly #tabMovement: WorkspaceTabMovementService;
+	readonly #tabPlacement: WorkspaceTabPlacementService;
 	readonly #windowDestruction: WorkspaceWindowDestructionService;
 	readonly #chatPlacement: WorkspaceChatPlacementService;
 	closeGuardRequest = $state<{
@@ -121,6 +124,13 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		});
 		const commit = (mutations: WorkspaceMutationPlan, options?: WorkspaceCommitOptions) =>
 			this.#presentation.commit(mutations, options);
+		this.#tabPlacement = new WorkspaceTabPlacementService({
+			presentation: this.#presentation,
+			surfaceReservations: this.#reservedSurfaceIds,
+			windowReservations: this.#reservedWindowIds,
+			resolveWindowId: (snapshot, preferred) => this.#resolveWindowId(snapshot, preferred),
+			cancelDrag: () => deps.workspaceInteractionGate.cancelBeforeInertTransition(),
+		});
 		this.#tabMovement = new WorkspaceTabMovementService({
 			layout: deps.arbiter.layout,
 			surfaceReservations: this.#reservedSurfaceIds,
@@ -457,38 +467,16 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		this.#deps.singletons.tickets().select(id);
 	}
 
-	async openSingletonAsTab(
-		kind: PortableSingletonKind,
-		windowId: WorkspaceWindowId,
-	): Promise<void> {
-		const surfaceId = singletonSurfaceId(kind);
-		if (this.#reservedSurfaceIds.has(surfaceId)) return;
-		if (this.isMobile) {
-			await this.focusMobileSingleton(kind);
-			return;
-		}
-		this.#deps.workspaceInteractionGate.cancelBeforeInertTransition();
-		const current = await this.#presentation.commit((latest) => {
-			if (!windowNodeById(latest.desktopRoot, windowId) || this.#reservedWindowIds.has(windowId)) {
-				return [];
-			}
-			const existingWindowId = windowIdOfSurface(latest.desktopRoot, surfaceId);
-			if (existingWindowId === windowId) {
-				return [{ type: 'activate-window-tab', windowId, surfaceId }];
-			}
-			if (latest.surfaces[surfaceId]) {
-				return [{ type: 'move-tab', surfaceId, destinationWindowId: windowId }];
-			}
-			return [
-				{
-					type: 'register-surface',
-					surface: portableSingletonDescriptor(kind),
-					windowId,
-				},
-				{ type: 'activate-window-tab', windowId, surfaceId },
-			];
-		});
-		if (current && this.layout.surface(surfaceId)) this.#presentation.presentSurface(surfaceId);
+	openNewWorkflow(context: WorkflowLaunchContext | null, windowId = this.currentWindowId): Promise<void> {
+		return this.#tabPlacement.openNewWorkflow(context, windowId);
+	}
+
+	openWorkflowRun(runId: string, windowId = this.currentWindowId): Promise<void> {
+		return this.#tabPlacement.openWorkflowRun(runId, windowId);
+	}
+
+	openSingletonAsTab(kind: PortableSingletonKind, windowId: WorkspaceWindowId): Promise<void> {
+		return this.#tabPlacement.openSingletonAsTab(kind, windowId);
 	}
 
 	async openSingletonInNewWindow(

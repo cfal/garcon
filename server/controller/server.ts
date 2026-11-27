@@ -87,10 +87,7 @@ import { WebSocketAdmissionController } from '../common/websocket-capacity.js';
 import { monitorEventLoopStalls } from '../common/event-loop-stalls.js';
 import { reportSlowSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
-import { ScheduledPromptStore } from './scheduled-prompts/store.js';
-import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
-import { ScheduledPromptDispatcher } from './scheduled-prompts/dispatcher.js';
-import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
+import { initializeScheduledPrompts } from './scheduled-prompts/setup.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
 import { WorkingDirectorySettler } from './projects/working-directory-settlement.js';
@@ -112,6 +109,7 @@ import { createCarriedContext } from './chats/carryover/context.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import { initializePullRequestReviews } from './pull-request-reviews/setup.js';
+import { createControllerWorkflows } from './workflows/composition.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';
 import {
   TranscriptAdoptionService,
@@ -338,7 +336,7 @@ export async function startServer(): Promise<void> {
     if (workspaceMigrations.initialVersion >= 5 && !workspaceMigrations.resumedFromCheckpoint) {
       await finalizeCarryOverMigrationValidation(workspaceDir);
     }
-    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, settings]);
+    const apiProviders = providerPolicy.service(() => [chatRegistry, agentOwnership, scheduledPromptStore, pullRequestReviews, workflows, settings]);
     const modelCatalogResponseCache = new ModelCatalogResponseCache();
     executors.onAvailabilityChanged((executorId) => modelCatalogResponseCache.clear(executorId));
     executors.onChanged(() => {
@@ -635,17 +633,14 @@ export async function startServer(): Promise<void> {
       chatTags: chatBoardRuntime.chatTags,
       chatMutationLock,
     });
-    const scheduledPromptStore = new ScheduledPromptStore(workspaceDir, retainExecutorReferences, retainProviderReferences);
-    const scheduledPrompts = new ScheduledPromptScheduler({
-      inspectProject,
-      retainExecutorReferences,
-      retainProviderReferences,
-      store: scheduledPromptStore,
-      runLog: new ScheduledPromptRunLog(),
-      dispatcher: new ScheduledPromptDispatcher({ commands: chatCommands, chatIds }),
-      chats: chatRegistry,
-      agents: agentRegistry,
-      preambles,
+    const workflows = createControllerWorkflows(workspaceDir, {
+      automation: chatCommands.createAutomation({ serverInstanceId: runtimeState.identity.instanceId, chatIds, execution: queue }),
+      modelCatalog: { agents: agentRegistry, apiProviders }, modelCatalogResponseCache,
+      executors, access, chats: chatRegistry, preambles, settings, retainProviderReferences,
+    });
+    const { scheduledPromptStore, scheduledPrompts } = initializeScheduledPrompts(workspaceDir, {
+      chats: chatRegistry, agents: agentRegistry, commands: chatCommands, chatIds, preambles,
+      inspectProject, retainExecutorReferences, retainProviderReferences,
     });
 
     const pullRequestReviews = initializePullRequestReviews(workspaceDir, {
@@ -733,6 +728,7 @@ export async function startServer(): Promise<void> {
       startDispatchers: async () => {
         await scheduledPrompts.start();
         pullRequestReviews.start();
+        await workflows.start();
       },
     });
     unsubscribeSearchStatus = chatSearch.onStatusChanged((status) => {
@@ -740,7 +736,7 @@ export async function startServer(): Promise<void> {
     });
 
     executors.setGuards(executorConfigGuards({
-      chats: chatRegistry, execution: queue, ownership: agentOwnership,
+      chats: chatRegistry, execution: queue, ownership: agentOwnership, workflows,
     }));
     let configuredExecutors = new Set(executors.config.list().map((executor) => executor.id));
     executors.onChanged(() => {
@@ -780,6 +776,7 @@ export async function startServer(): Promise<void> {
       lastSelectedChat,
       scheduledPrompts,
       pullRequestReviews,
+      workflows,
       snippets,
       preambles,
       chatPreambleSelection,
@@ -899,6 +896,7 @@ export async function startServer(): Promise<void> {
         () => agentCommands.shutdown(),
         () => carryOverGarbageCollector.shutdown(),
         () => { metadataClosed = metadata.close().catch(reportCleanupError); },
+        () => workflows.stop(),
         () => { reservedChatIds = queue.beginShutdown(); },
         () => executors.quiesce(),
         stopObservingProviders,
@@ -959,6 +957,7 @@ export async function startServer(): Promise<void> {
           () => server.stop(true),
           () => tickets.close(),
           () => pullRequestReviews.close(),
+          () => workflows.close(),
           () => removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId),
           () => workspaceLease?.release(),
         ]);

@@ -1,11 +1,15 @@
 import {
+  runtimeFailure,
   runtimeRows,
   type AgentRuntimeEvent,
+  type AgentRuntimeOperation,
 } from '@garcon/server-agent-common/execution/runtime-events';
-import type { AgentLogger } from '@garcon/server-agent-interface';
+import type { AgentLogger, AgentRunFailureCertainty } from '@garcon/server-agent-interface';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
 import type { ClaudeActiveTurn } from './active-turn.js';
 import type { ClaudeRunningSession } from './runtime-state.js';
+
+type SessionRoute = Pick<ClaudeRunningSession, 'id' | 'chatId'>;
 
 export class ClaudeTurnPublisher {
   constructor(private readonly logger: AgentLogger) {}
@@ -15,12 +19,17 @@ export class ClaudeTurnPublisher {
     turn: ClaudeActiveTurn,
     event: AgentRuntimeEvent,
   ): void {
+    this.#publish(session, turn.operation, event);
+  }
+
+  #publish(session: SessionRoute, operation: AgentRuntimeOperation, event: AgentRuntimeEvent): void {
     try {
-      turn.operation.publish(event);
+      operation.publish(event);
     } catch (error) {
       this.logger.warn('Claude publisher rejected an event', {
+        chatId: session.chatId,
         sessionId: session.id.slice(0, 8),
-        runId: turn.operation.runId,
+        runId: operation.runId,
         eventType: event.type,
         error: errorMessage(error),
       });
@@ -31,9 +40,12 @@ export class ClaudeTurnPublisher {
     session: ClaudeRunningSession,
     turn: ClaudeActiveTurn,
     messages: Parameters<typeof runtimeRows>[0],
+    exactOrigin = false,
   ): void {
     if (messages.length === 0) return;
-    this.event(session, turn, { type: 'rows', rows: runtimeRows(messages) });
+    this.event(session, turn, {
+      type: 'rows', rows: runtimeRows(messages), ...(exactOrigin ? { originRunId: turn.operation.runId } : {}),
+    });
   }
 
   finished(session: ClaudeRunningSession, turn: ClaudeActiveTurn): void {
@@ -46,12 +58,7 @@ export class ClaudeTurnPublisher {
     });
   }
 
-  failed(session: ClaudeRunningSession, turn: ClaudeActiveTurn, message: string): void {
-    this.event(session, turn, {
-      type: 'run-ended',
-      runId: turn.operation.runId,
-      outcome: 'failed',
-      error: { code: 'PROVIDER_FAILURE', message },
-    });
+  failed(session: SessionRoute, operation: AgentRuntimeOperation, message: string, certainty?: AgentRunFailureCertainty): void {
+    this.#publish(session, operation, runtimeFailure(operation.runId, message, certainty));
   }
 }

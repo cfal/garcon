@@ -1,0 +1,19 @@
+version: 1
+name: Misspelled finding signal
+steps:
+  - id: research
+    name: Research
+    kind: agent
+    prompt: Emit a toy finding.
+    signals:
+      finding_ready:
+        payload: json
+        delivery: many
+        fields: { finding_id: string }
+        key: finding_id
+  - id: verify
+    kind: agent
+    prompt: Verify the toy finding.
+    on:
+      kind: each
+      signal: research.findng_ready

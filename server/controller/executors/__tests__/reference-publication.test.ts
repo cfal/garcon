@@ -50,7 +50,7 @@ async function fixture() {
   });
   await ownership.initialize();
   manager.setGuards(executorConfigGuards({
-    chats, ownership, execution: { ownsExecution: () => false },
+    chats, ownership, execution: { ownsExecution: () => false }, workflows: { referencesExecutor: () => false },
   }));
   const publish = (kind: Kind, executorId = executor.id): Promise<unknown> => {
     switch (kind) {
@@ -194,9 +194,13 @@ test('saved chats do not prevent removal, but active execution does', async () =
   const { root, manager, executor, chats, ownership } = await fixture();
   const id = await addRemoteChat(chats, root, executor.id);
   let active = true;
-  manager.setGuards(executorConfigGuards({ chats, ownership, execution: { ownsExecution: (chat) => active && chat === id } }));
+  let workflowPending = true;
+  manager.setGuards(executorConfigGuards({ chats, ownership, execution: { ownsExecution: (chat) => active && chat === id },
+    workflows: { referencesExecutor: target => workflowPending && target === executor.id } }));
   await expect(manager.remove(executor.id)).rejects.toMatchObject({ code: 'EXECUTOR_IN_USE' });
   active = false;
+  await expect(manager.remove(executor.id)).rejects.toMatchObject({ code: 'EXECUTOR_IN_USE' });
+  workflowPending = false;
   await manager.remove(executor.id);
   expect(chats.getChat(id)?.executorId).toBe(executor.id);
   expect(manager.isReady(executor.id)).toBe(false);
