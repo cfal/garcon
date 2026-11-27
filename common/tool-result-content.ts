@@ -2,21 +2,21 @@ import { isRecord } from './json.js';
 import { isTextPart, type ToolTextPart } from './tool-result-message.js';
 export { toolResultTextPart } from './tool-result-message.js';
 
-export function isPlainTextPart(part: unknown): part is ToolTextPart {
-  if (!isTextPart(part)) return false;
-  for (const key in part) {
-    if (Object.hasOwn(part, key) && key !== 'type' && key !== 'text') return false;
+function hasOnlyFields(value: Record<string, unknown>, first: string, second?: string): boolean {
+  for (const key in value) {
+    if (Object.hasOwn(value, key) && key !== first && key !== second) return false;
   }
   return true;
+}
+
+export function isPlainTextPart(part: unknown): part is ToolTextPart {
+  return isTextPart(part) && hasOnlyFields(part, 'type', 'text');
 }
 
 export function plainToolResultTextPart(block: unknown): ToolTextPart | null {
   if (isPlainTextPart(block)) return block;
   if (!isRecord(block) || block.type !== 'content' || !isPlainTextPart(block.content)) return null;
-  for (const key in block) {
-    if (Object.hasOwn(block, key) && key !== 'type' && key !== 'content') return null;
-  }
-  return block.content;
+  return hasOnlyFields(block, 'type', 'content') ? block.content : null;
 }
 
 // Search inspects only its indexed prefix; the transcript inspects the full body.
@@ -31,7 +31,7 @@ export function isEmptyToolResult(content: unknown, limits?: { maxChars: number;
     if (key === 'raw' || key === 'rawOutput') {
       let value = content[key];
       if (key === 'rawOutput' && isRecord(value)) {
-        for (const field in value) if (Object.hasOwn(value, field) && field !== 'output') return false;
+        if (!hasOnlyFields(value, 'output')) return false;
         value = value.output;
       }
       if (typeof value !== 'string' || /\S/.test(value.slice(0, maxChars))) return false;

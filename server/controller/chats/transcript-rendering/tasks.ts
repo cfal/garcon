@@ -26,12 +26,17 @@ export interface RenderedShareSnapshot {
 // or the line-delimited form.
 export type ShareSnapshotFormat = 'document' | 'lines';
 
+export interface ShareSnapshotRenderRequest {
+  readonly header: Omit<ShareSnapshotHeader, 'messageCount'>;
+  readonly contentStartOrdinal?: number;
+}
+
 // Task parameters exclude the transcript items, which cross to the Worker separately in
 // bounded batches as stored ledger rows. A share upgrade carries no items: the Worker reads
 // the stored snapshot file itself, so the controller neither decodes nor clones it.
 export type TranscriptRenderingTask =
   | ({ readonly kind: 'render-transcript-export' } & TranscriptExportDocumentRequest)
-  | { readonly kind: 'render-share-snapshot'; readonly header: Omit<ShareSnapshotHeader, 'messageCount'>; readonly contentStartOrdinal?: number }
+  | ({ readonly kind: 'render-share-snapshot' } & ShareSnapshotRenderRequest)
   | {
     readonly kind: 'upgrade-share-snapshot';
     readonly shareToken: string;

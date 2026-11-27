@@ -164,6 +164,10 @@
 	});
 
 	let inputAnchorId = $derived(mode === 'input' ? `tool-input-${toolId}` : undefined);
+	const jumpTargetId = $derived.by(() => {
+		if (mode !== 'input' || config.input.action !== 'jumpToResult' || !toolResult) return undefined;
+		return shouldRenderToolResult(config, toolResult, toolMessage) ? resultAnchorId : undefined;
+	});
 	const disclosureKind: ConversationDisclosureKind = $derived(
 		mode === 'input' ? 'tool-input' : 'tool-result',
 	);
@@ -193,8 +197,7 @@
 				wrapText={cfg.wrapText}
 				language={inlineLanguage}
 				colorScheme={cfg.colorScheme}
-				resultId={mode === 'input' && toolResult && cfg.action === 'jumpToResult' && shouldRenderToolResult(config, toolResult, toolMessage)
-					? resultAnchorId : undefined}
+				resultId={jumpTargetId}
 			/>
 		{:else if displayConfig.mode === 'collapsible'}
 			{#if shouldRenderCollapsedAsInline}

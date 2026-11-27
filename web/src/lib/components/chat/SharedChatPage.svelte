@@ -4,8 +4,7 @@
 	import { onMount, tick } from 'svelte';
 	import { getSharedChat } from '$lib/api/shares.js';
 	import { ApiError } from '$lib/api/client.js';
-	import { parseChatMessage } from '$shared/chat-types';
-	import type { ChatMessage, ToolUseChatMessage } from '$shared/chat-types';
+	import type { GetSharedChatResponse, SharedChatMessagePage } from '$shared/share-types';
 	import {
 		UserMessage,
 		AssistantMessage,
@@ -19,12 +18,10 @@
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import MessageRenderFallback from '$lib/components/chat/transcript/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
-	import { ConversationToolPairing, shouldRenderPairedToolResult } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { parseSharedMessages, projectSharedMessages, type SharedMessageEntry } from './shared-message-projection.js';
 	import ChatEventCard from '$lib/components/chat/transcript/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
 	import CommandStatusRow from '$lib/components/chat/transcript/rows/CommandStatusRow.svelte';
-	import { projectCommandOutput } from '$shared/command-output-projection.js';
-	import { commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 	import CliPresentationHeader from '$lib/components/chat/transcript/rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from '$lib/components/chat/transcript/rows/CollapsibleBody.svelte';
 	import UserMessageAttachments from '$lib/components/chat/transcript/UserMessageAttachments.svelte';
@@ -47,32 +44,11 @@
 	const appTitle = getAppTitle();
 	const localSettings = getLocalSettings();
 
-	interface SharedMessageEntry {
-		index: number;
-		message: ChatMessage;
-	}
-	interface RenderedEntry extends SharedMessageEntry {
-		pairedTool?: ToolUseChatMessage;
-	}
-
 	type SharedViewError = 'not-found' | 'load-failed';
 
 	let messages = $state.raw<SharedMessageEntry[]>([]);
 	let frozenMessageCount = $state(0);
-	const renderedMessages = $derived.by(() => {
-		const output = projectCommandOutput(messages.map(entry => entry.message));
-		const pairs = new ConversationToolPairing().append(messages.map(({ index, message }) =>
-			({ kind: 'message', id: String(index), ordinal: index + 1, message })), frozenMessageCount ? frozenMessageCount + 1 : undefined);
-		return messages.flatMap<RenderedEntry>((entry, index) => {
-			const message = output.get(index) ?? entry.message;
-			if (message.type === 'command-result' && commandResultPresentation(message.result) === 'hidden') return [];
-			if (message.type !== 'tool-result') return [{ ...entry, message }];
-			const tool = pairs.toolUseByResultRowId.get(String(entry.index));
-			if (tool?.type !== 'schedule-tool-use' && tool?.type !== 'antigravity-enter-plan-mode-tool-use'
-				&& tool?.type !== 'antigravity-exit-plan-mode-tool-use') return [];
-			return shouldRenderPairedToolResult(tool, message) ? [{ ...entry, pairedTool: tool }] : [];
-		});
-	});
+	const renderedMessages = $derived(projectSharedMessages(messages, frozenMessageCount));
 	let title = $state('');
 	let agentId = $state('');
 	let sharedAt = $state('');
@@ -107,17 +83,19 @@
 		return null;
 	}
 
-	function parseMessages(rawMessages: unknown[], startIndex: number): SharedMessageEntry[] {
-		return rawMessages
-			.map((raw: unknown, offset): SharedMessageEntry | null => {
-				try {
-					const message = parseChatMessage(raw as Record<string, unknown>);
-					return message ? { index: startIndex + offset, message } : null;
-				} catch {
-					return null;
-				}
-			})
-			.filter((entry): entry is SharedMessageEntry => entry !== null);
+	function applyPage(page: SharedChatMessagePage) {
+		nextBefore = page.nextBefore;
+		totalMessages = page.totalMessages;
+		snapshotVersion = page.snapshotVersion;
+	}
+
+	function replaceSnapshot({ snapshot, page }: GetSharedChatResponse) {
+		title = snapshot.title;
+		agentId = snapshot.agentId;
+		sharedAt = snapshot.sharedAt;
+		frozenMessageCount = snapshot.frozenMessageCount ?? 0;
+		messages = parseSharedMessages(snapshot.messages ?? [], page.start);
+		applyPage(page);
 	}
 
 	async function loadSharedSnapshot(): Promise<void> {
@@ -130,16 +108,7 @@
 		isLoading = true;
 		loadError = null;
 		try {
-			const resp = await getSharedChat(token);
-			const snapshot = resp.snapshot;
-			title = snapshot.title;
-			agentId = snapshot.agentId;
-			sharedAt = snapshot.sharedAt;
-			frozenMessageCount = snapshot.frozenMessageCount ?? 0;
-			messages = parseMessages(snapshot.messages ?? [], resp.page.start);
-			totalMessages = resp.page.totalMessages;
-			nextBefore = resp.page.nextBefore;
-			snapshotVersion = resp.page.snapshotVersion;
+			replaceSnapshot(await getSharedChat(token));
 		} catch (error) {
 			loadError = error instanceof ApiError && error.status === 404 ? 'not-found' : 'load-failed';
 			isLoading = false;
@@ -161,21 +130,13 @@
 		olderPageError = false;
 		try {
 			const resp = await getSharedChat(token, nextBefore, snapshotVersion);
-			const olderMessages = parseMessages(resp.snapshot.messages ?? [], resp.page.start);
 			if (resp.page.reset || resp.page.snapshotVersion !== snapshotVersion) {
-				const snapshot = resp.snapshot;
-				title = snapshot.title;
-				agentId = snapshot.agentId;
-				sharedAt = snapshot.sharedAt;
-				frozenMessageCount = snapshot.frozenMessageCount ?? 0;
-				messages = olderMessages;
-				totalMessages = resp.page.totalMessages;
-				nextBefore = resp.page.nextBefore;
-				snapshotVersion = resp.page.snapshotVersion;
+				replaceSnapshot(resp);
 				await tick();
 				window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
 				return;
 			}
+			const olderMessages = parseSharedMessages(resp.snapshot.messages ?? [], resp.page.start);
 			// Capture the live viewport immediately before prepending. The reader may
 			// scroll while the request is in flight.
 			const anchor = readingAnchor();
@@ -183,9 +144,7 @@
 			const previousHeight = document.documentElement.scrollHeight;
 			const previousScrollY = window.scrollY;
 			messages = [...olderMessages, ...messages];
-			nextBefore = resp.page.nextBefore;
-			totalMessages = resp.page.totalMessages;
-			snapshotVersion = resp.page.snapshotVersion;
+			applyPage(resp.page);
 			await tick();
 			// Pairing can reveal results below the reader as well as rows above them.
 			const top = anchor?.isConnected && anchorTop !== undefined

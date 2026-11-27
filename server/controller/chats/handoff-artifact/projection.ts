@@ -12,7 +12,7 @@ import {
   selectPrioritizedProjection,
   type PrioritizedProjectionEntry,
 } from '../../../../common/transcript-projection.js';
-import { isPublicationGapMessage, projectToolUseSummary } from '../../../../common/transcript-seed.js';
+import { isPublicationGapMessage, projectToolUseSummary, type ProjectedToolUseSummary } from '../../../../common/transcript-seed.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   redactDataUrl,
@@ -160,22 +160,13 @@ function projectEntry(
 ): HandoffArtifactSourceEntry | null {
   const { ordinal, message } = entry;
   if (isToolUseMessage(message)) {
-    const summary = projectToolUseSummary(message, redactDataUrl);
-    const prefix = summary.prefixBeforeLiteral;
-    const header = prefix === undefined ? undefined : artifactBody(prefix);
-    // The bounded literal has already been redacted before JSON escaping.
-    const body = prefix !== undefined && header
-      ? { text: header.text + textSafe(summary.text.slice(prefix.length)), abridged: header.abridged }
-      : artifactBody(summary.text);
     return sourceEntry({
       ordinal,
       turn,
       level: projectionPriorityLevel(message.type),
       tag: 'tool-call',
       attributes: [{ name: 'type', value: message.type }],
-      body: body.text || null,
-      ...(header === undefined ? {} : { prefixBeforeLiteral: header.text }),
-      abridged: summary.abridged || body.abridged,
+      ...toolSummaryBody(projectToolUseSummary(message, redactDataUrl)),
     });
   }
   switch (message.type) {
@@ -294,6 +285,18 @@ function artifactBody(value: string): { readonly text: string; readonly abridged
     text: capped.text,
     abridged: redacted !== value || capped.abridged,
   };
+}
+
+function toolSummaryBody(summary: ProjectedToolUseSummary): Pick<HandoffArtifactSourceEntry, 'body' | 'abridged' | 'prefixBeforeLiteral'> {
+  const prefix = summary.prefixBeforeLiteral;
+  if (prefix === undefined) {
+    const body = artifactBody(summary.text);
+    return { body: body.text || null, abridged: summary.abridged || body.abridged };
+  }
+  // Only the header still needs redaction. The bounded literal was redacted before JSON escaping.
+  const header = artifactBody(prefix);
+  const literal = textSafe(summary.text.slice(prefix.length));
+  return { body: header.text + literal, prefixBeforeLiteral: header.text, abridged: summary.abridged || header.abridged };
 }
 
 function codeUnitSafePrefix(
