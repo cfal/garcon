@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { isObject, wildcardPaths, type Json } from '../wildcard.js';
-import { callKey, mergeCaptured, sameJson, type CaptureRecord, type Case, type Manifest, type NotCaptured, type RecordedCase } from './cases.js';
+import { callKey, mergeCaptured, sameJson, type CaptureRecord, type Case, type Guard, type GuardSpec, type Manifest, type NotCaptured, type RecordedCase } from './cases.js';
 import type { EncodeFailure } from './encode.js';
 import { runWithRecordStream, type StreamRun } from './process.js';
 import { trapVariants } from './traps.js';
@@ -17,11 +17,17 @@ const ROOT_VARIABLE = 'GARCON_UNIT_RECORD_ROOT';
 // A call that has no outcome after this long is given up and listed.
 export const EVALUATE_STALL_MS = 15_000;
 
-// A call to make in a fresh process: a trap variant of a recorded call, or a
-// line of the inputs file.
-export interface Input {
+// A call the evaluator makes. The guard of a trap variant, as the evaluator
+// loads it, holds the call back when it rejects the argument.
+export interface EvaluationInput {
   fn: string;
   args: Json[];
+  guard?: { argument: number; spec: string };
+}
+
+// A call to make in a fresh process: a trap variant of a recorded call, or a
+// line of the inputs file.
+export interface Input extends EvaluationInput {
   kind: 'trap' | 'input';
   // `trap:<name>@<path>`, or `<inputs file>:<line>`.
   origin: string;
@@ -32,7 +38,9 @@ export type Evaluation =
   | { result: Json }
   | { notCaptured: EncodeFailure }
   | { missing: true }
-  | { timedOut: true };
+  | { timedOut: true }
+  // The guard of the trap variant rejected its argument.
+  | { guarded: true };
 
 // A fixed time zone and locale keep recordings comparable across machines.
 function childEnvironment(variables: Record<string, string>): NodeJS.ProcessEnv {
@@ -77,7 +85,7 @@ export async function captureTests(repoRoot: string, modulePath: string, tests: 
 // Calls the module's exports with the inputs, in order, in a fresh process,
 // and returns each outcome. A call that stalls ends its process; the run then
 // resumes with the next input.
-export async function evaluateInputs(modulePath: string, inputs: ReadonlyArray<{ fn: string; args: Json[] }>, stallMs = EVALUATE_STALL_MS): Promise<Evaluation[]> {
+export async function evaluateInputs(modulePath: string, inputs: ReadonlyArray<EvaluationInput>, stallMs = EVALUATE_STALL_MS): Promise<Evaluation[]> {
   const evaluations: Evaluation[] = [];
   while (evaluations.length < inputs.length) {
     const remaining = inputs.length - evaluations.length;
@@ -88,7 +96,7 @@ export async function evaluateInputs(modulePath: string, inputs: ReadonlyArray<{
       stallMs,
       onRecord: (record) => {
         if (!open) return;
-        if (!isObject(record) || !['result', 'notCaptured', 'missing'].some((key) => key in record)) {
+        if (!isObject(record) || !['result', 'notCaptured', 'missing', 'guarded'].some((key) => key in record)) {
           throw new Error('malformed evaluation');
         }
         received.push(record as unknown as Evaluation);
@@ -126,12 +134,15 @@ async function readInputs(repoRoot: string, path: string): Promise<Input[]> {
 interface MergedEvaluation {
   result?: Json;
   notCaptured?: NotCaptured;
+  // The guard of the trap variant rejected it in both runs, so it is not a case.
+  guarded?: true;
   noise: string[];
 }
 
 // Merges the two evaluation runs of one input.
-function mergeEvaluation(input: Input, first: Evaluation, second: Evaluation, stallMs: number): MergedEvaluation {
+export function mergeEvaluation(input: Input, first: Evaluation, second: Evaluation, stallMs: number): MergedEvaluation {
   const label = `${input.fn} (${JSON.stringify(input.args).slice(0, 80)}) [${input.origin}]`;
+  if ('guarded' in first && 'guarded' in second) return { guarded: true, noise: [] };
   if ('timedOut' in first || 'timedOut' in second) {
     return { noise: [], notCaptured: { fn: input.fn, where: 'result', path: '$.result', type: `no outcome within ${stallMs} ms`, at: null, count: 1 } };
   }
@@ -141,6 +152,11 @@ function mergeEvaluation(input: Input, first: Evaluation, second: Evaluation, st
   if ('notCaptured' in first || 'notCaptured' in second) {
     const failure = 'notCaptured' in first ? first.notCaptured : (second as { notCaptured: EncodeFailure }).notCaptured;
     return { noise: [], notCaptured: { fn: input.fn, where: 'result', ...failure, at: null, count: 1 } };
+  }
+  // A guard that decides differently in two runs of the same input would
+  // leave what is recorded to chance.
+  if ('guarded' in first || 'guarded' in second) {
+    throw new Error(`A guard of ${input.fn} did not decide the same way in both runs: ${label}.`);
   }
   const result = sameJson(first.result, second.result);
   return { result, noise: wildcardPaths({ result }, '$').map((path) => `${label}: differs between runs at ${path}`) };
@@ -152,6 +168,9 @@ export interface RecordOptions {
   tests: string[];
   // A JSONL file of `{ "fn", "args" }` lines for calls the tests do not make.
   inputs?: string;
+  // Guards of typed arguments: a trap variant of such an argument is recorded
+  // only when the original's own guard accepts it.
+  guards?: GuardSpec[];
   // How long a call may take before it is given up and listed.
   stallMs?: number;
 }
@@ -161,8 +180,50 @@ export interface Recording {
   cases: RecordedCase[];
   // The manifest without the case count and the digest, which writing adds.
   manifest: Omit<Manifest, 'cases' | 'sha256'>;
-  // The review of the recording: its count, every wildcard, every call not captured.
+  // The review of the recording: its count, what each guard dropped, every
+  // wildcard, every call not captured.
   review: string[];
+}
+
+// A guard while recording: what the evaluator loads, what the manifest shows,
+// and how many trap variants it dropped and kept.
+interface CountedGuard {
+  fn: string;
+  argument: number;
+  spec: string;
+  shown: string;
+  dropped: number;
+  kept: number;
+}
+
+const guardKey = (fn: string, argument: number): string => JSON.stringify([fn, argument]);
+
+// A guard of another file than the recorded module is written `<file>#<export>`.
+function guardParts(guard: string): { file: string | null; name: string } {
+  const hash = guard.indexOf('#');
+  return hash === -1 ? { file: null, name: guard } : { file: guard.slice(0, hash), name: guard.slice(hash + 1) };
+}
+
+async function countedGuards(repoRoot: string, specs: readonly GuardSpec[]): Promise<Map<string, CountedGuard>> {
+  const guards = new Map<string, CountedGuard>();
+  for (const { fn, argument, guard } of specs) {
+    if (guards.has(guardKey(fn, argument))) throw new Error(`Two guards for argument ${argument} of ${fn}.`);
+    const { file, name } = guardParts(guard);
+    const path = file === null ? null : resolve(repoRoot, file);
+    if (path !== null && !(await stat(path).catch(() => null))?.isFile()) {
+      throw new Error(`--guard ${fn}:${argument}=${guard}: not a file: ${file}`);
+    }
+    const shown = path === null ? name : `${shownPath(repoRoot, path)}#${name}`;
+    guards.set(guardKey(fn, argument), { fn, argument, spec: path === null ? name : `${path}#${name}`, shown, dropped: 0, kept: 0 });
+  }
+  return guards;
+}
+
+// A path as a recording shows it: relative to the repository, or absolute
+// when it is outside it.
+function shownPath(repoRoot: string, path: string): string {
+  const shown = relative(repoRoot, path);
+  return shown.startsWith('..') ? path : shown;
 }
 
 // Records a module in memory: the calls its tests make to its exports, from
@@ -174,6 +235,7 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
   if (!(await stat(modulePath).catch(() => null))?.isFile()) {
     throw new Error(`Not a file: ${options.module}`);
   }
+  const guards = await countedGuards(options.repoRoot, options.guards ?? []);
   const observed = mergeCaptured(
     await captureTests(options.repoRoot, modulePath, options.tests),
     await captureTests(options.repoRoot, modulePath, options.tests),
@@ -198,7 +260,11 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
         return false;
       },
     );
-    inputs.push(...variants.map((variant): Input => ({ fn, args: variant.args, kind: 'trap', origin: variant.origin })));
+    // A call the tests made is always a case; only a trap variant asks its guard.
+    inputs.push(...variants.map((variant): Input => {
+      const guard = guards.get(guardKey(fn, variant.argument));
+      return { fn, args: variant.args, kind: 'trap', origin: variant.origin, ...(guard ? { guard: { argument: variant.argument, spec: guard.spec } } : {}) };
+    }));
   }
   for (const input of explicit) {
     if (known.has(callKey(input.fn, input.args))) {
@@ -217,6 +283,11 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
   // counted per function and reason.
   const counted = new Map<string, NotCaptured>();
   for (const entry of evaluated) {
+    if (entry.input.guard) {
+      const guard = guards.get(guardKey(entry.input.fn, entry.input.guard.argument))!;
+      if (entry.guarded) guard.dropped += 1;
+      else guard.kept += 1;
+    }
     noise.push(...entry.noise);
     if (!entry.notCaptured) continue;
     const { at: _at, ...rest } = entry.notCaptured;
@@ -226,6 +297,12 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
     else counted.set(key, { ...rest, at: null });
   }
   notCaptured.push(...counted.values());
+  const manifestGuards: Guard[] = [...guards.values()].map(({ fn, argument, shown, dropped, kept }) => {
+    if (dropped + kept === 0) {
+      throw new Error(`--guard ${fn}:${argument}=${shown}: no trap variant of that argument was generated, so the guard decides nothing. Check the function name and the argument index.`);
+    }
+    return { fn, argument, guard: shown, dropped, kept };
+  });
 
   // Cases are grouped by function, in order of first appearance.
   const recordedInputs = evaluated.filter((entry) => entry.result !== undefined);
@@ -239,10 +316,10 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
     ];
     own.forEach((entry, index) => cases.push({ ...entry, id: `${fn}#${index}` }));
   }
-  const shownModule = relative(options.repoRoot, modulePath);
-  const module = shownModule.startsWith('..') ? modulePath : shownModule;
+  const module = shownPath(options.repoRoot, modulePath);
   const review = [
     `recorded ${module}: ${cases.length} cases (${observed.cases.length} from tests, ${traps} trap variants, ${recordedInputs.length - traps} inputs)`,
+    ...manifestGuards.map((guard) => `  guard ${guard.guard} on ${guard.fn} argument ${guard.argument}: dropped ${guard.dropped} of ${guard.dropped + guard.kept} trap variants`),
     ...noise.map((line) => `  noise: ${line}`),
     ...notCaptured.map((entry) => `  not captured: ${entry.fn} (${entry.where} ${entry.path}: ${entry.type}) x${entry.count}${entry.at ? ` at ${entry.at}` : ''}`),
   ];
@@ -253,6 +330,7 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
       module,
       tests: options.tests,
       inputs: inputsPath ? relative(options.repoRoot, inputsPath) : null,
+      guards: manifestGuards,
       notCaptured,
     },
     review,

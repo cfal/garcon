@@ -38,11 +38,28 @@ export interface RecordedCase extends Case {
   id: string;
 }
 
+// A guard keeps a trap variant of argument `argument` of calls to `fn` only
+// when the original's `guard` accepts the value. The manifest also counts how
+// many variants it dropped and kept, so a reviewer sees what is not recorded.
+export interface Guard {
+  fn: string;
+  argument: number;
+  // An export of the recorded module, or `<file>#<export>`.
+  guard: string;
+  // How many trap variants of that argument the guard rejected, and how many
+  // it let through to the original.
+  dropped: number;
+  kept: number;
+}
+
+export type GuardSpec = Omit<Guard, 'dropped' | 'kept'>;
+
 export interface Manifest {
   // Repository-relative path of the recorded module.
   module: string;
   tests: string[];
   inputs: string | null;
+  guards: Guard[];
   cases: number;
   sha256: string;
   notCaptured: NotCaptured[];
