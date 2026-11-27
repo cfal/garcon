@@ -14,13 +14,14 @@ mod support;
 use garcon_cases::{CaseError, Stats, markers, replay};
 use garcon_contract::git_error::{GitServiceError, is_git_service_error_code};
 use garcon_contract::terminal::{
-    TerminalMetadata, TerminalStreamClientMessage, TerminalStreamClientPayload,
+    TerminalErrorCode, TerminalMetadata, TerminalStreamClientMessage, TerminalStreamClientPayload,
     TerminalStreamServerMessage, TerminalStreamServerPayload, clone_terminal_metadata,
     parse_terminal_create_request, parse_terminal_create_response, parse_terminal_list_response,
     parse_terminal_metadata, parse_terminal_rename_request, parse_terminal_rename_response,
     parse_terminal_stream_client_message, parse_terminal_stream_server_message,
     parse_terminal_terminate_request, parse_terminal_terminate_response, terminal_id_for_message,
 };
+use garcon_contract::terminal_error::TerminalError;
 use garcon_js::Number;
 use serde_json::{Value, json};
 
@@ -363,4 +364,45 @@ fn terminal_cases_match() {
         dispatch_terminal,
     );
     assert_all_match("common/terminal.ts", stats);
+}
+fn dispatch_terminal_error(function: &str, args: &[Value]) -> Result<Value, CaseError> {
+    match function {
+        "new TerminalError" => {
+            let code = typed(function, args, |value| {
+                serde_json::from_value::<TerminalErrorCode>(value.clone()).ok()
+            })?;
+            let message = support::text(function, args.get(1))?
+                .ok_or_else(|| CaseError::unhandled(function))?;
+            let unhandled = || CaseError::unhandled(function);
+            let error = match args.get(2) {
+                // The default status applies only where the original received `undefined`.
+                None => TerminalError::new(code, message),
+                value if value.is_some_and(markers::is_undefined) => {
+                    TerminalError::new(code, message)
+                }
+                Some(value) => TerminalError::with_status(
+                    code,
+                    message,
+                    u16::try_from(value.as_u64().ok_or_else(unhandled)?)
+                        .map_err(|_| unhandled())?,
+                ),
+            };
+            Err(CaseError::new("TerminalError", error.message)
+                .with_property("code", error.code.as_str())
+                .with_property("status", error.status))
+        }
+        _ => Err(CaseError::unhandled(function)),
+    }
+}
+
+#[test]
+fn terminal_error_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/terminal-error"
+        ),
+        dispatch_terminal_error,
+    );
+    assert_all_match("common/terminal-error.ts", stats);
 }

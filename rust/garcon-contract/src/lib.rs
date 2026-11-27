@@ -9,3 +9,4 @@ pub mod executors;
 pub mod git_error;
 pub mod json;
 pub mod terminal;
+pub mod terminal_error;
