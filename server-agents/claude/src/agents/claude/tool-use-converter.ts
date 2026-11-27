@@ -126,42 +126,33 @@ function cronBoolean(value: unknown): unknown {
   return value;
 }
 
-function claudeScheduleToolUse(ts: string, id: string, rawName: string,
-  key: 'schedulewakeup' | 'croncreate' | 'cronlist' | 'crondelete', rawInput: unknown): ToolUseChatMessage {
-  const input = rawInput === undefined ? {} : rawInput;
-  if (!isRecord(input)) return new UnknownToolUseMessage(ts, id, rawName, { raw: input });
+type ScheduleTool = 'schedulewakeup' | 'croncreate' | 'cronlist' | 'crondelete';
+
+function scheduleRequest(key: ScheduleTool, input: Record<string, unknown>): Record<string, unknown> | null {
   const hasOnly = (...fields: string[]) => Object.keys(input).every(field => fields.includes(field));
-  let row: ScheduleToolUseMessage | null = null;
   switch (key) {
     case 'schedulewakeup': {
       // The stop operation ignores sibling arguments; only the raw row can preserve them.
-      if (input.stop === true && hasOnly('stop')) {
-        return new ScheduleToolUseMessage(ts, id, { action: 'stop-loop' }, rawName);
-      }
+      if (input.stop === true) return hasOnly('stop') ? { action: 'stop-loop' } : null;
       if (!hasOnly('stop', 'delaySeconds', 'prompt', 'reason', 'noop')
-        || (input.stop !== undefined && input.stop !== false) || typeof input.reason !== 'string') break;
+        || (input.stop !== undefined && input.stop !== false) || typeof input.reason !== 'string') return null;
       // Claude accepts signed decimal strings and reports the clamped delay in the result.
       let delaySeconds = input.delaySeconds;
       if (typeof delaySeconds === 'string' && /^[-+]?\d+(\.\d+)?$/.test(delaySeconds.trim())) delaySeconds = Number(delaySeconds);
-      row = ScheduleToolUseMessage.fromRequest(ts, id, {
-        action: 'wakeup', delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop,
-      }, rawName);
-      break;
+      return { action: 'wakeup', delaySeconds, prompt: input.prompt, reason: input.reason, noop: input.noop };
     }
     case 'croncreate':
-      if (hasOnly('cron', 'prompt', 'recurring', 'durable')) {
-        row = ScheduleToolUseMessage.fromRequest(ts, id, { action: 'cron', expression: input.cron, prompt: input.prompt,
-          recurring: input.recurring === undefined ? true : cronBoolean(input.recurring), durable: cronBoolean(input.durable) }, rawName);
-      }
-      break;
+      if (!hasOnly('cron', 'prompt', 'recurring', 'durable')) return null;
+      return {
+        action: 'cron', expression: input.cron, prompt: input.prompt,
+        recurring: input.recurring === undefined ? true : cronBoolean(input.recurring),
+        durable: cronBoolean(input.durable),
+      };
     case 'cronlist':
-      if (hasOnly()) return new ScheduleToolUseMessage(ts, id, { action: 'list' }, rawName);
-      break;
+      return hasOnly() ? { action: 'list' } : null;
     case 'crondelete':
-      if (hasOnly('id')) row = ScheduleToolUseMessage.fromRequest(ts, id, { action: 'delete', jobId: input.id }, rawName);
-      break;
+      return hasOnly('id') ? { action: 'delete', jobId: input.id } : null;
   }
-  return row ?? new UnknownToolUseMessage(ts, id, rawName, input);
 }
 
 /**
@@ -179,8 +170,13 @@ export function convertClaudeToolUse(ts: string, part: unknown): ToolUseChatMess
     case 'schedulewakeup':
     case 'croncreate':
     case 'cronlist':
-    case 'crondelete':
-      return claudeScheduleToolUse(ts, toolId, rawName, key, rawPart.input);
+    case 'crondelete': {
+      if (rawPart.input !== undefined && !isRecord(rawPart.input)) {
+        return new UnknownToolUseMessage(ts, toolId, rawName, { raw: rawPart.input });
+      }
+      return ScheduleToolUseMessage.fromRequest(ts, toolId, scheduleRequest(key, input), rawName)
+        ?? new UnknownToolUseMessage(ts, toolId, rawName, input);
+    }
     case 'toolsearch':
       return new ClaudeToolSearchToolUseMessage(ts, toolId, asString(input.query) ?? '', asNumber(input.max_results));
 

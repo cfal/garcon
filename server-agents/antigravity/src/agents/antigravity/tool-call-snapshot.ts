@@ -3,7 +3,8 @@ import { ToolResultMessage, type ToolUseChatMessage } from '@garcon/common/chat-
 import { isRecord } from '@garcon/common/json';
 import { toolResultTextPart } from '@garcon/common/tool-result-content';
 import { asObject, asString } from '@garcon/server-agent-common/acp/event-converter';
-import { planOrScheduleResult, prefersReportContent } from './plan-schedule-result.js';
+import { planOrScheduleResult } from './plan-schedule-result.js';
+import { prefersReportContent, rawOutputText } from './report-text.js';
 import {
   antigravityMcpArguments,
   antigravityToolName,
@@ -20,11 +21,7 @@ export interface TrackedCall extends AntigravityToolCall {
 }
 
 function isAgentWork(name: string | null): boolean {
-  return name === 'manage_task' || name === 'update_steps' || name === 'send_message' || reportsPlanOrSchedule(name);
-}
-
-function rawOutputText(raw: unknown): string {
-  return asString(raw) ?? asString(asObject(raw).output) ?? '';
+  return name === 'manage_task' || name === 'update_steps' || name === 'send_message';
 }
 
 function isStructuredOutput(raw: unknown): boolean {
@@ -112,22 +109,27 @@ export function toolCallResult(timestamp: string, call: TrackedCall, terminal: R
 }
 
 function acceptsPartialInput(name: string | null, input: Record<string, unknown>): boolean {
-  return isAgentWork(name) || name === 'call_mcp_tool' || !!(asString(input.server) || asString(input.tool));
+  return isAgentWork(name) || reportsPlanOrSchedule(name) || name === 'call_mcp_tool' || !!(asString(input.server) || asString(input.tool));
+}
+
+function mergeArguments(previous: TrackedCall | undefined, call: AntigravityToolCall, name: string | null) {
+  if (Object.keys(call.input).length) {
+    const partial = previous && (!previous.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.input));
+    const input = partial ? { ...previous.input, ...call.input } : call.input;
+    return { input, rawInput: input };
+  }
+  const input = previous?.input ?? call.input;
+  // A native fallback retains malformed arguments; an MCP or ordinary tool uses the accumulated object instead.
+  if (!name || reportsPlanOrSchedule(name)) {
+    if (call.rawInput !== undefined && !isRecord(call.rawInput)) return { input, rawInput: call.rawInput };
+    if (previous) return { input, rawInput: previous.rawInput };
+  }
+  return { input, rawInput: input };
 }
 
 export function mergeCall(previous: TrackedCall | undefined, call: AntigravityToolCall, update?: Record<string, unknown>): TrackedCall {
   const name = call.name || previous?.name || null;
-  const partial = !previous?.name || call.isMcp || previous.isMcp || acceptsPartialInput(name, previous.input);
-  const hasArguments = Object.keys(call.input).length > 0;
-  const input = !hasArguments ? previous?.input ?? call.input
-    : previous && partial ? { ...previous.input, ...call.input } : call.input;
-  // Native report fallbacks need the malformed argument itself. Other tools,
-  // including a late MCP identity, still resolve against the last object arguments.
-  let rawInput: unknown = input;
-  if (!hasArguments && (!name || reportsPlanOrSchedule(name))) {
-    if (call.rawInput !== undefined && !isRecord(call.rawInput)) rawInput = call.rawInput;
-    else if (previous) rawInput = previous.rawInput;
-  }
+  const { input, rawInput } = mergeArguments(previous, call, name);
   // ACP patches rawOutput and content independently. A repeated snapshot does not
   // make its text newer. When both change together, rawOutput takes precedence.
   const rawOutput = update?.rawOutput ?? previous?.rawOutput;

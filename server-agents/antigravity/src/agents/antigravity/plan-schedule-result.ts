@@ -2,82 +2,14 @@ import { isDeepStrictEqual } from 'node:util';
 import { ToolResultMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
 import { plainToolResultTextPart, toolResultTextPart } from '@garcon/common/tool-result-content';
+import { blockText, joinedReportText, primaryTextIndices, rawOutputText, textEchoes, uniqueEcho, type TextEcho } from './report-text.js';
 import type { TrackedCall } from './tool-call-snapshot.js';
 
 type Block = Record<string, unknown>;
 type Body = ToolResultMessage['content'];
 
-function plainAcpText(block: Block): boolean {
-  return block.type === 'content' && plainToolResultTextPart(block) !== null;
-}
-
 function plainText(block: Block): boolean {
   return plainToolResultTextPart(block) !== null;
-}
-
-function blockText(block: Block): string {
-  return toolResultTextPart(block)?.text ?? '';
-}
-
-function planReportText(blocks: readonly Block[]): string {
-  return blocks.map(blockText).filter(Boolean).join('\n');
-}
-
-interface TextEcho {
-  readonly first: number;
-  readonly last: number;
-}
-
-// Overlapping candidates can share almost the entire report. A prefix table avoids rechecking it at each block.
-function* overlappingStarts(text: string, pattern: string): Generator<number> {
-  const borders = new Uint32Array(pattern.length);
-  for (let i = 1, n = 0; i < pattern.length; i++) {
-    while (n && pattern[i] !== pattern[n]) n = borders[n - 1];
-    if (pattern[i] === pattern[n]) n++;
-    borders[i] = n;
-  }
-  for (let i = 0, n = 0; i < text.length; i++) {
-    while (n && text[i] !== pattern[n]) n = borders[n - 1];
-    if (text[i] === pattern[n]) n++;
-    if (n === pattern.length) {
-      yield i + 1 - n;
-      n = borders[n - 1];
-    }
-  }
-}
-
-// A report can cross attachments. Only whole text blocks, apart from outer whitespace, can witness its text.
-function textEchoes(blocks: readonly Block[], output: string): TextEcho[] {
-  if (!output) return [];
-  const texts = blocks.map(blockText);
-  const starts = new Map<number, number>();
-  const ends = new Map<number, number>();
-  let offset = 0;
-  for (const [i, text] of texts.entries()) {
-    if (!text) continue;
-    const end = text.trimEnd().length;
-    if (end) {
-      starts.set(offset + text.length - text.trimStart().length, i);
-      ends.set(offset + end, i);
-    }
-    offset += text.length + 1;
-  }
-  const candidates = [...starts.keys()].filter(start => ends.has(start + output.length));
-  if (!candidates.length) return [];
-  const joined = texts.filter(Boolean).join('\n');
-  const overlapping = candidates.some((start, i) => i > 0 && start < candidates[i - 1] + output.length);
-  const occurrences = overlapping ? overlappingStarts(joined, output) : candidates.filter(start => joined.startsWith(output, start));
-  const matches: TextEcho[] = [];
-  for (const start of occurrences) {
-    const first = starts.get(start);
-    const last = ends.get(start + output.length);
-    if (first !== undefined && last !== undefined) matches.push({ first, last });
-  }
-  return matches;
-}
-
-function uniqueEcho(matches: readonly TextEcho[]): TextEcho | undefined {
-  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function withoutBlockText(block: Block): Block[] {
@@ -126,11 +58,12 @@ function alignTerminalBlocks(cached: readonly Block[], terminal: readonly Block[
       else if (!plainText(block)) result.push(block);
       continue;
     }
-    const whitespace = !before.text.trim();
-    while (next < terminal.length && (whitespace ? !blockText(terminal[next]) : !blockText(terminal[next]).trim())) result.push(terminal[next++]);
+    // Interior whitespace is part of a multi-block echo; only its outer edges may be trimmed.
+    const comparable = before.text.trim() ? (text: string) => text.trim() : (text: string) => text;
+    while (next < terminal.length && !comparable(blockText(terminal[next]))) result.push(terminal[next++]);
     const reported = terminal[next++];
     const after = toolResultTextPart(reported);
-    if (!after || (whitespace ? after.text !== before.text : after.text.trim() !== before.text.trim())) return undefined;
+    if (!after || comparable(after.text) !== comparable(before.text)) return undefined;
     result.push(overlayText(block, reported));
   }
   for (; next < terminal.length; next++) {
@@ -142,7 +75,6 @@ function alignTerminalBlocks(cached: readonly Block[], terminal: readonly Block[
 
 function reportBlocks(cached: readonly Block[], terminal: readonly Block[], terminalText: string, output: string): readonly Block[] {
   if (terminal.length && isDeepStrictEqual(cached, terminal)) return terminal;
-  const terminalHasExtras = terminal.some(block => !plainText(block));
   if (terminalText) {
     if (cached.every(plainText) || terminal.some(block => !toolResultTextPart(block))) return terminal;
     const echo = uniqueEcho(textEchoes(cached, terminalText));
@@ -150,15 +82,10 @@ function reportBlocks(cached: readonly Block[], terminal: readonly Block[], term
     return aligned ?? [...cached.flatMap(withoutBlockText), ...terminal];
   }
   const retained = output ? cachedBlocksForText(cached, output) : cached;
-  if (!terminalHasExtras) return retained.length ? retained : terminal;
+  if (terminal.every(plainText)) return retained.length ? retained : terminal;
   // Only a supplied attachment list supersedes cached attachments, not annotations on text.
   const replacesAttachments = terminal.some(block => !toolResultTextPart(block));
   return [...(replacesAttachments ? retained.filter(block => toolResultTextPart(block)) : retained), ...terminal];
-}
-
-function rawText(raw: unknown): string {
-  if (typeof raw === 'string') return raw;
-  return isRecord(raw) && typeof raw.output === 'string' ? raw.output : '';
 }
 
 function metadata(raw: unknown): unknown {
@@ -169,99 +96,66 @@ function metadata(raw: unknown): unknown {
   return Object.keys(fields).length ? fields : undefined;
 }
 
-function reportMetadata(cached: unknown, terminal: unknown): unknown {
-  const before = metadata(cached);
-  const after = metadata(terminal);
-  return isRecord(before) && isRecord(after) ? { ...before, ...after } : after ?? before;
+function mergeMetadata(cached: unknown, terminal: unknown): unknown {
+  return isRecord(cached) && isRecord(terminal) ? { ...cached, ...terminal } : terminal ?? cached;
 }
 
-function storeOutput(body: Body, raw: unknown, fields: unknown, alongsideBlocks: boolean): void {
-  const text = rawText(raw);
+function storeOutput(body: Body, raw: unknown, fields: unknown, placement: 'standalone' | 'with-blocks'): void {
+  const text = rawOutputText(raw);
   if (fields !== undefined) body.rawOutput = fields;
   if (!text.trim()) return;
   if (isRecord(fields) && !Object.hasOwn(fields, 'output')) body.rawOutput = { output: text, ...fields };
-  else if (fields === undefined && alongsideBlocks) body.rawOutput = raw;
+  else if (fields === undefined && placement === 'with-blocks') body.rawOutput = raw;
   else body.raw = text;
-}
-
-function independentIndices(blocks: readonly Block[], echoes: readonly TextEcho[]): number[] {
-  let next = 0;
-  return blocks.flatMap((block, i) => {
-    while (next < echoes.length && echoes[next].last < i) next++;
-    return (next === echoes.length || i < echoes[next].first) && blockText(block).trim() ? [i] : [];
-  });
-}
-
-function narrative(blocks: readonly Block[], echoes: readonly TextEcho[]): string {
-  return independentIndices(blocks, echoes).map(i => blockText(blocks[i]).trim()).join('\n');
-}
-
-export function prefersReportContent(previous: TrackedCall | undefined, raw: unknown, blocks: TrackedCall['content']): boolean {
-  const output = rawText(raw).trim();
-  if (output && output !== rawText(previous?.rawOutput).trim()) return false;
-  const wasNewer = previous?.reportContentIsNewer ?? false;
-  if (!blocks || blocks === previous?.content) return wasNewer;
-  const before = previous?.content ?? [];
-  const oldEchoes = textEchoes(before, output);
-  const newEchoes = textEchoes(blocks, output);
-  const latest = narrative(blocks, newEchoes);
-  const prior = narrative(before, oldEchoes);
-  if (!latest || latest === prior) return wasNewer;
-  // Formatting can change an exact match without changing the reported narrative.
-  if (!!oldEchoes.length !== !!newEchoes.length && narrative(before, []) === narrative(blocks, [])) return wasNewer;
-  return newEchoes.length && !oldEchoes.length && !prior ? wasNewer : true;
-}
-
-function primaryBlocks(blocks: readonly Block[], echoes: readonly TextEcho[] = [], preferIndependent = false): number[] {
-  if (preferIndependent) {
-    const independent = independentIndices(blocks, echoes);
-    if (independent.length || echoes.length > 1) return independent;
-  }
-  const match = uniqueEcho(echoes);
-  const indices = blocks.flatMap((block, i) => blockText(block).trim() ? [i] : []);
-  return match ? indices.filter(i => i >= match.first && i <= match.last) : indices;
 }
 
 export function planOrScheduleResult(
   timestamp: string, call: TrackedCall, previous: TrackedCall | undefined, terminal: Record<string, unknown>, status: string,
 ): ToolResultMessage {
   const frame = Array.isArray(terminal.content) ? call.content ?? [] : [];
-  const frameText = planReportText(frame).trim();
-  const frameOutput = rawText(terminal.rawOutput).trim();
+  const frameText = joinedReportText(frame).trim();
+  const frameOutput = rawOutputText(terminal.rawOutput).trim();
   const cachedOutput = previous?.rawOutput;
   const raw = frameOutput ? terminal.rawOutput : cachedOutput;
-  const output = rawText(raw).trim();
-  const fields = reportMetadata(cachedOutput, terminal.rawOutput);
+  const output = frameOutput || rawOutputText(cachedOutput).trim();
+  const terminalMetadata = metadata(terminal.rawOutput);
+  const fields = mergeMetadata(metadata(cachedOutput), terminalMetadata);
   const blocks = reportBlocks(previous?.content ?? [], frame, frameText, frameOutput);
   const echoes = textEchoes(blocks, output);
   const echo = uniqueEcho(echoes);
-  const text = planReportText(blocks);
-  const newerCachedText = previous?.reportContentIsNewer ?? false;
-  const terminalPrefersBlocks = !!frameText && call.reportContentIsNewer && (!frameOutput || frameOutput === rawText(cachedOutput).trim());
-  const specificEcho = echo !== undefined && text.trim() !== output;
-  const preferCachedBlocks = !frameText && !frameOutput && newerCachedText;
-  const preferIndependent = preferCachedBlocks || terminalPrefersBlocks;
-  const rankCachedText = !frameText && !frameOutput && (output ? preferCachedBlocks : fields !== undefined);
+  const text = joinedReportText(blocks);
+  const useCache = !frameText && !frameOutput;
+  const blocksOnly = !!frameText && !frameOutput;
+  // A changed, nonblank output already wins over simultaneous content in prefersReportContent.
+  const terminalPrefersBlocks = !!frameText && call.reportContentIsNewer;
+  const preferBlocks = useCache ? previous?.reportContentIsNewer === true : terminalPrefersBlocks;
+  const keepOrderedBlocks = (echo && text.trim() !== output)
+    || (echoes.length > 1 && preferBlocks)
+    || (frameOutput && terminalPrefersBlocks)
+    || blocks.some(block => block.type !== 'content' || !plainText(block));
   const body: Body = status === 'completed' ? {} : { status };
   let primary: number[] = [];
-  if (specificEcho || (echoes.length > 1 && preferIndependent) || (terminalPrefersBlocks && frameOutput) || blocks.some(block => !plainAcpText(block))) {
+  if (keepOrderedBlocks) {
     body.items = blocks;
-    storeOutput(body, echo || (frameText && !frameOutput) ? undefined : raw, fields, true);
-    if (echo || (frameText && !frameOutput) || terminalPrefersBlocks || rankCachedText) {
-      primary = primaryBlocks(blocks, echoes, preferIndependent);
+    storeOutput(body, echo || blocksOnly ? undefined : raw, fields, 'with-blocks');
+    const rankCachedText = useCache && (output ? preferBlocks : fields !== undefined);
+    if (echo || blocksOnly || terminalPrefersBlocks || rankCachedText) {
+      primary = primaryTextIndices(blocks, echoes, preferBlocks);
     }
-  } else if (frameOutput || (!frameText && output && !preferCachedBlocks)) {
-    storeOutput(body, raw, fields, false);
+  } else if (frameOutput || (useCache && output && !preferBlocks)) {
+    storeOutput(body, raw, fields, 'standalone');
     if (!echo && text.trim()) body.items = blocks;
   } else {
-    const keepCachedOutput = !frameText && output && !echo;
-    storeOutput(body, keepCachedOutput ? raw : undefined, fields, true);
+    const keepCachedOutput = useCache && output && !echo;
+    storeOutput(body, keepCachedOutput ? raw : undefined, fields, 'with-blocks');
     if (text.trim()) {
-      if (body.raw !== undefined || (!frameText && !output && fields !== undefined && (!preferCachedBlocks || metadata(terminal.rawOutput) !== undefined))) {
+      const metadataIsPrimary = useCache && !output && fields !== undefined && (!preferBlocks || terminalMetadata !== undefined);
+      if (body.raw !== undefined || metadataIsPrimary) {
         body.items = blocks;
-        primary = primaryBlocks(blocks);
+        primary = primaryTextIndices(blocks);
+      } else {
+        body.raw = text;
       }
-      else body.raw = text;
     }
   }
   return new ToolResultMessage(timestamp, call.toolCallId, body, status !== 'completed', primary.length ? primary : undefined);
