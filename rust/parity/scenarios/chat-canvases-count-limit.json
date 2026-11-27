@@ -1,0 +1,198 @@
+{
+  "name": "chat-canvases-count-limit",
+  "description": "Canvas routes over a directory of 100 seeded canvases: list order, create refused at the limit while an identical create stays idempotent, and create after a delete.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chat-canvases/full-canvas-001.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-001\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 1\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-002.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-002\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 2\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-003.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-003\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 3\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-004.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-004\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 4\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-005.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-005\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 5\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-006.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-006\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 6\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-007.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-007\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 7\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-008.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-008\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 8\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-009.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-009\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 9\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-010.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-010\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 10\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-011.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-011\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 11\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-012.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-012\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 12\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-013.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-013\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 13\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-014.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-014\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 14\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-015.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-015\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 15\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-016.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-016\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 16\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-017.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-017\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 17\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-018.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-018\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 18\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-019.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-019\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 19\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-020.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-020\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 20\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-021.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-021\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 21\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-022.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-022\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 22\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-023.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-023\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 23\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-024.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-024\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 24\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-025.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-025\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 25\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-026.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-026\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 26\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-027.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-027\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 27\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-028.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-028\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 28\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-029.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-029\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 29\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-030.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-030\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 30\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-031.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-031\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 31\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-032.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-032\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 32\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-033.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-033\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 33\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-034.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-034\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 34\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-035.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-035\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 35\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-036.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-036\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 36\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-037.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-037\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 37\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-038.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-038\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 38\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-039.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-039\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 39\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-040.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-040\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 40\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-041.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-041\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 41\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-042.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-042\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 42\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-043.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-043\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 43\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-044.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-044\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 44\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-045.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-045\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 45\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-046.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-046\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 46\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-047.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-047\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 47\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-048.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-048\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 48\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-049.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-049\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 49\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-050.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-050\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 50\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-051.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-051\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 51\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-052.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-052\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 52\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-053.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-053\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 53\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-054.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-054\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 54\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-055.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-055\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 55\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-056.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-056\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 56\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-057.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-057\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 57\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-058.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-058\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 58\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-059.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-059\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 59\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-060.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-060\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 60\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-061.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-061\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 61\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-062.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-062\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 62\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-063.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-063\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 63\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-064.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-064\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 64\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-065.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-065\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 65\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-066.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-066\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 66\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-067.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-067\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 67\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-068.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-068\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 68\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-069.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-069\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 69\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-070.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-070\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 70\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-071.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-071\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 71\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-072.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-072\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 72\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-073.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-073\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 73\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-074.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-074\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 74\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-075.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-075\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 75\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-076.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-076\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 76\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-077.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-077\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 77\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-078.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-078\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 78\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-079.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-079\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 79\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-080.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-080\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 80\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-081.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-081\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 81\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-082.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-082\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 82\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-083.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-083\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 83\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-084.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-084\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 84\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-085.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-085\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 85\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-086.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-086\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 86\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-087.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-087\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 87\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-088.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-088\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 88\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-089.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-089\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 89\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-090.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-090\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 90\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-091.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-091\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 91\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-092.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-092\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 92\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-093.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-093\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 93\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-094.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-094\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 94\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-095.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-095\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 95\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-096.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-096\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 96\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-097.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-097\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 97\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-098.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-098\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 98\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-099.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-099\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 99\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n",
+      "workspace/chat-canvases/full-canvas-100.json": "{\n  \"version\": 1,\n  \"id\": \"full-canvas-100\",\n  \"revision\": 1,\n  \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n  \"content\": {\n    \"title\": \"Canvas 100\",\n    \"nodes\": [],\n    \"connections\": []\n  }\n}\n"
+    }
+  },
+  "steps": [
+    {
+      "name": "canvases-full",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases"
+      }
+    },
+    {
+      "name": "create-at-limit",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "overflow",
+          "content": {
+            "title": "Overflow",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "create-existing-at-limit-is-idempotent",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "full-canvas-100",
+          "content": {
+            "title": "Canvas 100",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "create-existing-other-content-at-limit",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "full-canvas-100",
+          "content": {
+            "title": "Other",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "delete-at-limit",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "full-canvas-001",
+          "expectedRevision": 1
+        }
+      }
+    },
+    {
+      "name": "create-after-delete",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-canvases",
+        "json": {
+          "id": "overflow",
+          "content": {
+            "title": "Overflow",
+            "nodes": [],
+            "connections": []
+          }
+        }
+      }
+    },
+    {
+      "name": "canvas-created-after-delete",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-canvases?id=overflow"
+      }
+    }
+  ],
+  "traps": true
+}

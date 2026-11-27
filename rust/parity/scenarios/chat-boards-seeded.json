@@ -1,0 +1,874 @@
+{
+  "name": "chat-boards-seeded",
+  "description": "Chat board routes over a seeded catalog with columns: update successes including name normalization, catalog-level column and name uniqueness, the column count limit, revision conflicts that return the catalog, remove, and reorder.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chat-boards.json": "{\n  \"version\": 1,\n  \"revision\": 9,\n  \"boards\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"name\": \"Board A\",\n      \"columns\": [\n        {\n          \"id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n          \"name\": \"To do\",\n          \"match\": \"all\",\n          \"tags\": [\n            \"todo\"\n          ]\n        },\n        {\n          \"id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n          \"name\": \"Doing\",\n          \"match\": \"any\",\n          \"tags\": [\n            \"doing\",\n            \"review\"\n          ]\n        }\n      ]\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"name\": \"Board B\",\n      \"columns\": []\n    }\n  ]\n}\n"
+    }
+  },
+  "steps": [
+    {
+      "name": "boards-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "update-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 9,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 8,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board A",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              },
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-reorders-columns",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 9,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board A",
+            "columns": [
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              },
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-tags-not-sorted",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 10,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board A",
+            "columns": [
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              },
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo",
+                  "later"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-column-tags-duplicate",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 10,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board A",
+            "columns": [
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              },
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo",
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-adds-a-tag",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 10,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board A",
+            "columns": [
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              },
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "later",
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-normalizes-name-to-nfc",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 11,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "  Board é  ",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              },
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-name-conflicts-with-other-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 12,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": " board b ",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              },
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-name-conflicts-ignoring-width",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 12,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Ｂｏａｒｄ Ｂ",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              },
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing",
+                  "review"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-column-names-conflict-ignoring-case",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 12,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board é",
+            "columns": [
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing"
+                ]
+              },
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "DOING",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-column-names-conflict-ignoring-width",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 12,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board é",
+            "columns": [
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "Doing",
+                "match": "any",
+                "tags": [
+                  "doing"
+                ]
+              },
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "Ｄｏｉｎｇ",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-column-id-used-by-another-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 12,
+          "board": {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "name": "Board B",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "Elsewhere",
+                "match": "all",
+                "tags": [
+                  "x"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-removes-all-columns",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 12,
+          "board": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": "Board é",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-other-board-with-20-columns",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 13,
+          "board": {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "name": "Board B",
+            "columns": [
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000000",
+                "name": "Column 0",
+                "match": "any",
+                "tags": [
+                  "c0"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000001",
+                "name": "Column 1",
+                "match": "any",
+                "tags": [
+                  "c1"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000002",
+                "name": "Column 2",
+                "match": "any",
+                "tags": [
+                  "c2"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000003",
+                "name": "Column 3",
+                "match": "any",
+                "tags": [
+                  "c3"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000004",
+                "name": "Column 4",
+                "match": "any",
+                "tags": [
+                  "c4"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000005",
+                "name": "Column 5",
+                "match": "any",
+                "tags": [
+                  "c5"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000006",
+                "name": "Column 6",
+                "match": "any",
+                "tags": [
+                  "c6"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000007",
+                "name": "Column 7",
+                "match": "any",
+                "tags": [
+                  "c7"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000008",
+                "name": "Column 8",
+                "match": "any",
+                "tags": [
+                  "c8"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000009",
+                "name": "Column 9",
+                "match": "any",
+                "tags": [
+                  "c9"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000a",
+                "name": "Column 10",
+                "match": "any",
+                "tags": [
+                  "c10"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000b",
+                "name": "Column 11",
+                "match": "any",
+                "tags": [
+                  "c11"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000c",
+                "name": "Column 12",
+                "match": "any",
+                "tags": [
+                  "c12"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000d",
+                "name": "Column 13",
+                "match": "any",
+                "tags": [
+                  "c13"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000e",
+                "name": "Column 14",
+                "match": "any",
+                "tags": [
+                  "c14"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000f",
+                "name": "Column 15",
+                "match": "any",
+                "tags": [
+                  "c15"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000010",
+                "name": "Column 16",
+                "match": "any",
+                "tags": [
+                  "c16"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000011",
+                "name": "Column 17",
+                "match": "any",
+                "tags": [
+                  "c17"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000012",
+                "name": "Column 18",
+                "match": "any",
+                "tags": [
+                  "c18"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000013",
+                "name": "Column 19",
+                "match": "any",
+                "tags": [
+                  "c19"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-21-columns",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 14,
+          "board": {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "name": "Board B",
+            "columns": [
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000000",
+                "name": "Column 0",
+                "match": "any",
+                "tags": [
+                  "c0"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000001",
+                "name": "Column 1",
+                "match": "any",
+                "tags": [
+                  "c1"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000002",
+                "name": "Column 2",
+                "match": "any",
+                "tags": [
+                  "c2"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000003",
+                "name": "Column 3",
+                "match": "any",
+                "tags": [
+                  "c3"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000004",
+                "name": "Column 4",
+                "match": "any",
+                "tags": [
+                  "c4"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000005",
+                "name": "Column 5",
+                "match": "any",
+                "tags": [
+                  "c5"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000006",
+                "name": "Column 6",
+                "match": "any",
+                "tags": [
+                  "c6"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000007",
+                "name": "Column 7",
+                "match": "any",
+                "tags": [
+                  "c7"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000008",
+                "name": "Column 8",
+                "match": "any",
+                "tags": [
+                  "c8"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000009",
+                "name": "Column 9",
+                "match": "any",
+                "tags": [
+                  "c9"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000a",
+                "name": "Column 10",
+                "match": "any",
+                "tags": [
+                  "c10"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000b",
+                "name": "Column 11",
+                "match": "any",
+                "tags": [
+                  "c11"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000c",
+                "name": "Column 12",
+                "match": "any",
+                "tags": [
+                  "c12"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000d",
+                "name": "Column 13",
+                "match": "any",
+                "tags": [
+                  "c13"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000e",
+                "name": "Column 14",
+                "match": "any",
+                "tags": [
+                  "c14"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-00000000000f",
+                "name": "Column 15",
+                "match": "any",
+                "tags": [
+                  "c15"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000010",
+                "name": "Column 16",
+                "match": "any",
+                "tags": [
+                  "c16"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000011",
+                "name": "Column 17",
+                "match": "any",
+                "tags": [
+                  "c17"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000012",
+                "name": "Column 18",
+                "match": "any",
+                "tags": [
+                  "c18"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000013",
+                "name": "Column 19",
+                "match": "any",
+                "tags": [
+                  "c19"
+                ]
+              },
+              {
+                "id": "cccccccc-cccc-4ccc-8ccc-000000000014",
+                "name": "Column 20",
+                "match": "any",
+                "tags": [
+                  "c20"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "boards-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 14,
+          "boardId": "0badf00d-0000-4000-8000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "remove-stale-revision",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 13,
+          "boardId": "22222222-2222-4222-8222-222222222222"
+        }
+      }
+    },
+    {
+      "name": "remove-board",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 14,
+          "boardId": "22222222-2222-4222-8222-222222222222"
+        }
+      }
+    },
+    {
+      "name": "remove-removed-board",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 15,
+          "boardId": "22222222-2222-4222-8222-222222222222"
+        }
+      }
+    },
+    {
+      "name": "boards-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "order-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 15,
+          "orderedBoardIds": [
+            "0badf00d-0000-4000-8000-000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "name": "order-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 14,
+          "orderedBoardIds": [
+            "11111111-1111-4111-8111-111111111111"
+          ]
+        }
+      }
+    },
+    {
+      "name": "order-wrong-length",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 15,
+          "orderedBoardIds": []
+        }
+      }
+    },
+    {
+      "name": "order-single-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 15,
+          "orderedBoardIds": [
+            "11111111-1111-4111-8111-111111111111"
+          ]
+        }
+      }
+    }
+  ],
+  "traps": true
+}

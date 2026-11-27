@@ -1,0 +1,509 @@
+{
+  "scenario": "auth-login",
+  "cases": [
+    {
+      "name": "login-no-content-type",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "A JSON body is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "login-empty-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "A JSON body is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "login-null-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Unexpected authentication fields.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "login-missing-username",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "login-missing-password",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Password is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "login-password-129-characters",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Password must be 128 characters or fewer.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "login-unknown-username",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid username or password",
+            "errorCode": "AUTH_CREDENTIALS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "login-content-type-with-charset",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true,
+            "token": "{{jwt}}",
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "login-content-type-uppercase",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true,
+            "token": "{{jwt}}",
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-with-login-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-with-second-login-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "logout",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-logout",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "user-with-second-session-after-logout",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "logout-revoked-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "logout-without-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid session.",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "logout-with-forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid session.",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "logout-empty-object",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid session.",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "login-wrong-method",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}

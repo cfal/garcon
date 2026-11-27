@@ -1,0 +1,376 @@
+{
+  "scenario": "auth-username",
+  "cases": [
+    {
+      "name": "username-extra-field",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Unexpected authentication fields.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-empty-object",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Password is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-current-password-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Password is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-current-password-129-characters",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Password must be 128 characters or fewer.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-new-username-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username is required.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-new-username-blank",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username must contain 1-64 characters on one line without controls.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-new-username-65-characters",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username must contain 1-64 characters on one line without controls.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-new-username-lone-surrogate",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username must contain 1-64 characters on one line without controls.",
+            "errorCode": "AUTH_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-wrong-password",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Current password is incorrect.",
+            "errorCode": "AUTH_CURRENT_PASSWORD_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-unchanged",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Username is unchanged.",
+            "errorCode": "AUTH_NO_CHANGE",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "username-without-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "username-with-forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "username-wrong-method",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-failed-changes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "parity",
+              "username": "parity"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}

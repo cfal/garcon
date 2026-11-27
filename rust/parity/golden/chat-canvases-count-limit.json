@@ -1,0 +1,2915 @@
+{
+  "scenario": "chat-canvases-count-limit",
+  "cases": [
+    {
+      "name": "canvases-full",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "full-canvas-001",
+                "revision": 1,
+                "title": "Canvas 1",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-002",
+                "revision": 1,
+                "title": "Canvas 2",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-003",
+                "revision": 1,
+                "title": "Canvas 3",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-004",
+                "revision": 1,
+                "title": "Canvas 4",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-005",
+                "revision": 1,
+                "title": "Canvas 5",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-006",
+                "revision": 1,
+                "title": "Canvas 6",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-007",
+                "revision": 1,
+                "title": "Canvas 7",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-008",
+                "revision": 1,
+                "title": "Canvas 8",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-009",
+                "revision": 1,
+                "title": "Canvas 9",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-010",
+                "revision": 1,
+                "title": "Canvas 10",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-011",
+                "revision": 1,
+                "title": "Canvas 11",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-012",
+                "revision": 1,
+                "title": "Canvas 12",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-013",
+                "revision": 1,
+                "title": "Canvas 13",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-014",
+                "revision": 1,
+                "title": "Canvas 14",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-015",
+                "revision": 1,
+                "title": "Canvas 15",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-016",
+                "revision": 1,
+                "title": "Canvas 16",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-017",
+                "revision": 1,
+                "title": "Canvas 17",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-018",
+                "revision": 1,
+                "title": "Canvas 18",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-019",
+                "revision": 1,
+                "title": "Canvas 19",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-020",
+                "revision": 1,
+                "title": "Canvas 20",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-021",
+                "revision": 1,
+                "title": "Canvas 21",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-022",
+                "revision": 1,
+                "title": "Canvas 22",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-023",
+                "revision": 1,
+                "title": "Canvas 23",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-024",
+                "revision": 1,
+                "title": "Canvas 24",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-025",
+                "revision": 1,
+                "title": "Canvas 25",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-026",
+                "revision": 1,
+                "title": "Canvas 26",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-027",
+                "revision": 1,
+                "title": "Canvas 27",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-028",
+                "revision": 1,
+                "title": "Canvas 28",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-029",
+                "revision": 1,
+                "title": "Canvas 29",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-030",
+                "revision": 1,
+                "title": "Canvas 30",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-031",
+                "revision": 1,
+                "title": "Canvas 31",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-032",
+                "revision": 1,
+                "title": "Canvas 32",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-033",
+                "revision": 1,
+                "title": "Canvas 33",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-034",
+                "revision": 1,
+                "title": "Canvas 34",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-035",
+                "revision": 1,
+                "title": "Canvas 35",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-036",
+                "revision": 1,
+                "title": "Canvas 36",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-037",
+                "revision": 1,
+                "title": "Canvas 37",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-038",
+                "revision": 1,
+                "title": "Canvas 38",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-039",
+                "revision": 1,
+                "title": "Canvas 39",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-040",
+                "revision": 1,
+                "title": "Canvas 40",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-041",
+                "revision": 1,
+                "title": "Canvas 41",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-042",
+                "revision": 1,
+                "title": "Canvas 42",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-043",
+                "revision": 1,
+                "title": "Canvas 43",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-044",
+                "revision": 1,
+                "title": "Canvas 44",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-045",
+                "revision": 1,
+                "title": "Canvas 45",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-046",
+                "revision": 1,
+                "title": "Canvas 46",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-047",
+                "revision": 1,
+                "title": "Canvas 47",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-048",
+                "revision": 1,
+                "title": "Canvas 48",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-049",
+                "revision": 1,
+                "title": "Canvas 49",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-050",
+                "revision": 1,
+                "title": "Canvas 50",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-051",
+                "revision": 1,
+                "title": "Canvas 51",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-052",
+                "revision": 1,
+                "title": "Canvas 52",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-053",
+                "revision": 1,
+                "title": "Canvas 53",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-054",
+                "revision": 1,
+                "title": "Canvas 54",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-055",
+                "revision": 1,
+                "title": "Canvas 55",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-056",
+                "revision": 1,
+                "title": "Canvas 56",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-057",
+                "revision": 1,
+                "title": "Canvas 57",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-058",
+                "revision": 1,
+                "title": "Canvas 58",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-059",
+                "revision": 1,
+                "title": "Canvas 59",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-060",
+                "revision": 1,
+                "title": "Canvas 60",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-061",
+                "revision": 1,
+                "title": "Canvas 61",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-062",
+                "revision": 1,
+                "title": "Canvas 62",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-063",
+                "revision": 1,
+                "title": "Canvas 63",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-064",
+                "revision": 1,
+                "title": "Canvas 64",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-065",
+                "revision": 1,
+                "title": "Canvas 65",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-066",
+                "revision": 1,
+                "title": "Canvas 66",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-067",
+                "revision": 1,
+                "title": "Canvas 67",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-068",
+                "revision": 1,
+                "title": "Canvas 68",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-069",
+                "revision": 1,
+                "title": "Canvas 69",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-070",
+                "revision": 1,
+                "title": "Canvas 70",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-071",
+                "revision": 1,
+                "title": "Canvas 71",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-072",
+                "revision": 1,
+                "title": "Canvas 72",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-073",
+                "revision": 1,
+                "title": "Canvas 73",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-074",
+                "revision": 1,
+                "title": "Canvas 74",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-075",
+                "revision": 1,
+                "title": "Canvas 75",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-076",
+                "revision": 1,
+                "title": "Canvas 76",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-077",
+                "revision": 1,
+                "title": "Canvas 77",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-078",
+                "revision": 1,
+                "title": "Canvas 78",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-079",
+                "revision": 1,
+                "title": "Canvas 79",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-080",
+                "revision": 1,
+                "title": "Canvas 80",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-081",
+                "revision": 1,
+                "title": "Canvas 81",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-082",
+                "revision": 1,
+                "title": "Canvas 82",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-083",
+                "revision": 1,
+                "title": "Canvas 83",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-084",
+                "revision": 1,
+                "title": "Canvas 84",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-085",
+                "revision": 1,
+                "title": "Canvas 85",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-086",
+                "revision": 1,
+                "title": "Canvas 86",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-087",
+                "revision": 1,
+                "title": "Canvas 87",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-088",
+                "revision": 1,
+                "title": "Canvas 88",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-089",
+                "revision": 1,
+                "title": "Canvas 89",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-090",
+                "revision": 1,
+                "title": "Canvas 90",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-091",
+                "revision": 1,
+                "title": "Canvas 91",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-092",
+                "revision": 1,
+                "title": "Canvas 92",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-093",
+                "revision": 1,
+                "title": "Canvas 93",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-094",
+                "revision": 1,
+                "title": "Canvas 94",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-095",
+                "revision": 1,
+                "title": "Canvas 95",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-096",
+                "revision": 1,
+                "title": "Canvas 96",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-097",
+                "revision": 1,
+                "title": "Canvas 97",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-098",
+                "revision": 1,
+                "title": "Canvas 98",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-099",
+                "revision": 1,
+                "title": "Canvas 99",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-100",
+                "revision": 1,
+                "title": "Canvas 100",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": []
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "A maximum of 100 canvases is allowed",
+            "errorCode": "CANVAS_LIMIT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-at-limit-is-idempotent",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Canvas 100"
+            },
+            "id": "full-canvas-100",
+            "revision": 1,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-other-content-at-limit",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "A canvas with this ID already exists",
+            "errorCode": "CANVAS_EXISTS",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-at-limit",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-delete",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Overflow"
+            },
+            "id": "overflow",
+            "revision": 1,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Overflow"
+            },
+            "id": "overflow",
+            "revision": 1,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=overflow"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "9719",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "overflow",
+                "revision": 1,
+                "title": "Overflow",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-002",
+                "revision": 1,
+                "title": "Canvas 2",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-003",
+                "revision": 1,
+                "title": "Canvas 3",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-004",
+                "revision": 1,
+                "title": "Canvas 4",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-005",
+                "revision": 1,
+                "title": "Canvas 5",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-006",
+                "revision": 1,
+                "title": "Canvas 6",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-007",
+                "revision": 1,
+                "title": "Canvas 7",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-008",
+                "revision": 1,
+                "title": "Canvas 8",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-009",
+                "revision": 1,
+                "title": "Canvas 9",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-010",
+                "revision": 1,
+                "title": "Canvas 10",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-011",
+                "revision": 1,
+                "title": "Canvas 11",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-012",
+                "revision": 1,
+                "title": "Canvas 12",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-013",
+                "revision": 1,
+                "title": "Canvas 13",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-014",
+                "revision": 1,
+                "title": "Canvas 14",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-015",
+                "revision": 1,
+                "title": "Canvas 15",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-016",
+                "revision": 1,
+                "title": "Canvas 16",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-017",
+                "revision": 1,
+                "title": "Canvas 17",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-018",
+                "revision": 1,
+                "title": "Canvas 18",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-019",
+                "revision": 1,
+                "title": "Canvas 19",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-020",
+                "revision": 1,
+                "title": "Canvas 20",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-021",
+                "revision": 1,
+                "title": "Canvas 21",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-022",
+                "revision": 1,
+                "title": "Canvas 22",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-023",
+                "revision": 1,
+                "title": "Canvas 23",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-024",
+                "revision": 1,
+                "title": "Canvas 24",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-025",
+                "revision": 1,
+                "title": "Canvas 25",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-026",
+                "revision": 1,
+                "title": "Canvas 26",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-027",
+                "revision": 1,
+                "title": "Canvas 27",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-028",
+                "revision": 1,
+                "title": "Canvas 28",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-029",
+                "revision": 1,
+                "title": "Canvas 29",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-030",
+                "revision": 1,
+                "title": "Canvas 30",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-031",
+                "revision": 1,
+                "title": "Canvas 31",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-032",
+                "revision": 1,
+                "title": "Canvas 32",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-033",
+                "revision": 1,
+                "title": "Canvas 33",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-034",
+                "revision": 1,
+                "title": "Canvas 34",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-035",
+                "revision": 1,
+                "title": "Canvas 35",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-036",
+                "revision": 1,
+                "title": "Canvas 36",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-037",
+                "revision": 1,
+                "title": "Canvas 37",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-038",
+                "revision": 1,
+                "title": "Canvas 38",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-039",
+                "revision": 1,
+                "title": "Canvas 39",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-040",
+                "revision": 1,
+                "title": "Canvas 40",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-041",
+                "revision": 1,
+                "title": "Canvas 41",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-042",
+                "revision": 1,
+                "title": "Canvas 42",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-043",
+                "revision": 1,
+                "title": "Canvas 43",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-044",
+                "revision": 1,
+                "title": "Canvas 44",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-045",
+                "revision": 1,
+                "title": "Canvas 45",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-046",
+                "revision": 1,
+                "title": "Canvas 46",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-047",
+                "revision": 1,
+                "title": "Canvas 47",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-048",
+                "revision": 1,
+                "title": "Canvas 48",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-049",
+                "revision": 1,
+                "title": "Canvas 49",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-050",
+                "revision": 1,
+                "title": "Canvas 50",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-051",
+                "revision": 1,
+                "title": "Canvas 51",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-052",
+                "revision": 1,
+                "title": "Canvas 52",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-053",
+                "revision": 1,
+                "title": "Canvas 53",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-054",
+                "revision": 1,
+                "title": "Canvas 54",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-055",
+                "revision": 1,
+                "title": "Canvas 55",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-056",
+                "revision": 1,
+                "title": "Canvas 56",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-057",
+                "revision": 1,
+                "title": "Canvas 57",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-058",
+                "revision": 1,
+                "title": "Canvas 58",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-059",
+                "revision": 1,
+                "title": "Canvas 59",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-060",
+                "revision": 1,
+                "title": "Canvas 60",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-061",
+                "revision": 1,
+                "title": "Canvas 61",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-062",
+                "revision": 1,
+                "title": "Canvas 62",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-063",
+                "revision": 1,
+                "title": "Canvas 63",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-064",
+                "revision": 1,
+                "title": "Canvas 64",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-065",
+                "revision": 1,
+                "title": "Canvas 65",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-066",
+                "revision": 1,
+                "title": "Canvas 66",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-067",
+                "revision": 1,
+                "title": "Canvas 67",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-068",
+                "revision": 1,
+                "title": "Canvas 68",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-069",
+                "revision": 1,
+                "title": "Canvas 69",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-070",
+                "revision": 1,
+                "title": "Canvas 70",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-071",
+                "revision": 1,
+                "title": "Canvas 71",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-072",
+                "revision": 1,
+                "title": "Canvas 72",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-073",
+                "revision": 1,
+                "title": "Canvas 73",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-074",
+                "revision": 1,
+                "title": "Canvas 74",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-075",
+                "revision": 1,
+                "title": "Canvas 75",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-076",
+                "revision": 1,
+                "title": "Canvas 76",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-077",
+                "revision": 1,
+                "title": "Canvas 77",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-078",
+                "revision": 1,
+                "title": "Canvas 78",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-079",
+                "revision": 1,
+                "title": "Canvas 79",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-080",
+                "revision": 1,
+                "title": "Canvas 80",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-081",
+                "revision": 1,
+                "title": "Canvas 81",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-082",
+                "revision": 1,
+                "title": "Canvas 82",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-083",
+                "revision": 1,
+                "title": "Canvas 83",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-084",
+                "revision": 1,
+                "title": "Canvas 84",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-085",
+                "revision": 1,
+                "title": "Canvas 85",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-086",
+                "revision": 1,
+                "title": "Canvas 86",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-087",
+                "revision": 1,
+                "title": "Canvas 87",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-088",
+                "revision": 1,
+                "title": "Canvas 88",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-089",
+                "revision": 1,
+                "title": "Canvas 89",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-090",
+                "revision": 1,
+                "title": "Canvas 90",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-091",
+                "revision": 1,
+                "title": "Canvas 91",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-092",
+                "revision": 1,
+                "title": "Canvas 92",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-093",
+                "revision": 1,
+                "title": "Canvas 93",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-094",
+                "revision": 1,
+                "title": "Canvas 94",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-095",
+                "revision": 1,
+                "title": "Canvas 95",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-096",
+                "revision": 1,
+                "title": "Canvas 96",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-097",
+                "revision": 1,
+                "title": "Canvas 97",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-098",
+                "revision": 1,
+                "title": "Canvas 98",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-099",
+                "revision": 1,
+                "title": "Canvas 99",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-100",
+                "revision": 1,
+                "title": "Canvas 100",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": []
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/../chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-full~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "overflow",
+                "revision": 1,
+                "title": "Overflow",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-002",
+                "revision": 1,
+                "title": "Canvas 2",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-003",
+                "revision": 1,
+                "title": "Canvas 3",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-004",
+                "revision": 1,
+                "title": "Canvas 4",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-005",
+                "revision": 1,
+                "title": "Canvas 5",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-006",
+                "revision": 1,
+                "title": "Canvas 6",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-007",
+                "revision": 1,
+                "title": "Canvas 7",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-008",
+                "revision": 1,
+                "title": "Canvas 8",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-009",
+                "revision": 1,
+                "title": "Canvas 9",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-010",
+                "revision": 1,
+                "title": "Canvas 10",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-011",
+                "revision": 1,
+                "title": "Canvas 11",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-012",
+                "revision": 1,
+                "title": "Canvas 12",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-013",
+                "revision": 1,
+                "title": "Canvas 13",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-014",
+                "revision": 1,
+                "title": "Canvas 14",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-015",
+                "revision": 1,
+                "title": "Canvas 15",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-016",
+                "revision": 1,
+                "title": "Canvas 16",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-017",
+                "revision": 1,
+                "title": "Canvas 17",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-018",
+                "revision": 1,
+                "title": "Canvas 18",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-019",
+                "revision": 1,
+                "title": "Canvas 19",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-020",
+                "revision": 1,
+                "title": "Canvas 20",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-021",
+                "revision": 1,
+                "title": "Canvas 21",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-022",
+                "revision": 1,
+                "title": "Canvas 22",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-023",
+                "revision": 1,
+                "title": "Canvas 23",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-024",
+                "revision": 1,
+                "title": "Canvas 24",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-025",
+                "revision": 1,
+                "title": "Canvas 25",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-026",
+                "revision": 1,
+                "title": "Canvas 26",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-027",
+                "revision": 1,
+                "title": "Canvas 27",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-028",
+                "revision": 1,
+                "title": "Canvas 28",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-029",
+                "revision": 1,
+                "title": "Canvas 29",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-030",
+                "revision": 1,
+                "title": "Canvas 30",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-031",
+                "revision": 1,
+                "title": "Canvas 31",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-032",
+                "revision": 1,
+                "title": "Canvas 32",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-033",
+                "revision": 1,
+                "title": "Canvas 33",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-034",
+                "revision": 1,
+                "title": "Canvas 34",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-035",
+                "revision": 1,
+                "title": "Canvas 35",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-036",
+                "revision": 1,
+                "title": "Canvas 36",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-037",
+                "revision": 1,
+                "title": "Canvas 37",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-038",
+                "revision": 1,
+                "title": "Canvas 38",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-039",
+                "revision": 1,
+                "title": "Canvas 39",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-040",
+                "revision": 1,
+                "title": "Canvas 40",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-041",
+                "revision": 1,
+                "title": "Canvas 41",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-042",
+                "revision": 1,
+                "title": "Canvas 42",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-043",
+                "revision": 1,
+                "title": "Canvas 43",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-044",
+                "revision": 1,
+                "title": "Canvas 44",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-045",
+                "revision": 1,
+                "title": "Canvas 45",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-046",
+                "revision": 1,
+                "title": "Canvas 46",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-047",
+                "revision": 1,
+                "title": "Canvas 47",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-048",
+                "revision": 1,
+                "title": "Canvas 48",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-049",
+                "revision": 1,
+                "title": "Canvas 49",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-050",
+                "revision": 1,
+                "title": "Canvas 50",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-051",
+                "revision": 1,
+                "title": "Canvas 51",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-052",
+                "revision": 1,
+                "title": "Canvas 52",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-053",
+                "revision": 1,
+                "title": "Canvas 53",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-054",
+                "revision": 1,
+                "title": "Canvas 54",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-055",
+                "revision": 1,
+                "title": "Canvas 55",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-056",
+                "revision": 1,
+                "title": "Canvas 56",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-057",
+                "revision": 1,
+                "title": "Canvas 57",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-058",
+                "revision": 1,
+                "title": "Canvas 58",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-059",
+                "revision": 1,
+                "title": "Canvas 59",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-060",
+                "revision": 1,
+                "title": "Canvas 60",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-061",
+                "revision": 1,
+                "title": "Canvas 61",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-062",
+                "revision": 1,
+                "title": "Canvas 62",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-063",
+                "revision": 1,
+                "title": "Canvas 63",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-064",
+                "revision": 1,
+                "title": "Canvas 64",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-065",
+                "revision": 1,
+                "title": "Canvas 65",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-066",
+                "revision": 1,
+                "title": "Canvas 66",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-067",
+                "revision": 1,
+                "title": "Canvas 67",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-068",
+                "revision": 1,
+                "title": "Canvas 68",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-069",
+                "revision": 1,
+                "title": "Canvas 69",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-070",
+                "revision": 1,
+                "title": "Canvas 70",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-071",
+                "revision": 1,
+                "title": "Canvas 71",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-072",
+                "revision": 1,
+                "title": "Canvas 72",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-073",
+                "revision": 1,
+                "title": "Canvas 73",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-074",
+                "revision": 1,
+                "title": "Canvas 74",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-075",
+                "revision": 1,
+                "title": "Canvas 75",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-076",
+                "revision": 1,
+                "title": "Canvas 76",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-077",
+                "revision": 1,
+                "title": "Canvas 77",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-078",
+                "revision": 1,
+                "title": "Canvas 78",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-079",
+                "revision": 1,
+                "title": "Canvas 79",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-080",
+                "revision": 1,
+                "title": "Canvas 80",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-081",
+                "revision": 1,
+                "title": "Canvas 81",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-082",
+                "revision": 1,
+                "title": "Canvas 82",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-083",
+                "revision": 1,
+                "title": "Canvas 83",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-084",
+                "revision": 1,
+                "title": "Canvas 84",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-085",
+                "revision": 1,
+                "title": "Canvas 85",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-086",
+                "revision": 1,
+                "title": "Canvas 86",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-087",
+                "revision": 1,
+                "title": "Canvas 87",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-088",
+                "revision": 1,
+                "title": "Canvas 88",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-089",
+                "revision": 1,
+                "title": "Canvas 89",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-090",
+                "revision": 1,
+                "title": "Canvas 90",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-091",
+                "revision": 1,
+                "title": "Canvas 91",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-092",
+                "revision": 1,
+                "title": "Canvas 92",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-093",
+                "revision": 1,
+                "title": "Canvas 93",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-094",
+                "revision": 1,
+                "title": "Canvas 94",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-095",
+                "revision": 1,
+                "title": "Canvas 95",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-096",
+                "revision": 1,
+                "title": "Canvas 96",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-097",
+                "revision": 1,
+                "title": "Canvas 97",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-098",
+                "revision": 1,
+                "title": "Canvas 98",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-099",
+                "revision": 1,
+                "title": "Canvas 99",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "id": "full-canvas-100",
+                "revision": 1,
+                "title": "Canvas 100",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": []
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID is required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-at-limit-is-idempotent~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-at-limit-is-idempotent~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-at-limit-is-idempotent~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-at-limit-is-idempotent~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID is required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-other-content-at-limit~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-other-content-at-limit~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-other-content-at-limit~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-existing-other-content-at-limit~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID is required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-at-limit~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-at-limit~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-at-limit~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-at-limit~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-delete~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-delete~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-delete~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-delete~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID is required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=overflow"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=overflow"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=overflow"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=overflow/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=overflow/../chat-canvases?id=overflow"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=overflow/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=overflow/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-created-after-delete~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Overflow"
+            },
+            "id": "overflow",
+            "revision": 1,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=overflow"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}

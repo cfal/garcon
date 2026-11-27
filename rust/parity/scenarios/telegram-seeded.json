@@ -1,0 +1,88 @@
+{
+  "name": "telegram-seeded",
+  "description": "Telegram routes over a seeded notification file with a token, a linked recipient and an expired link: the public status in the settings snapshot, the expired-link result, starting a link, and clearing recipient and token.",
+  "server": {
+    "files": {
+      "config/notifications.json": "{\n  \"version\": 1,\n  \"telegram\": {\n    \"botToken\": \"123456:seeded-token\",\n    \"botId\": 123456,\n    \"botUsername\": \"Parity_Bot\",\n    \"botFirstName\": \"Parity\",\n    \"recipientUsername\": \"@Someone\",\n    \"recipientDisplayName\": \"Some One\",\n    \"chatId\": \"4242\",\n    \"pendingLinkCode\": \"expired\",\n    \"pendingLinkCreatedAt\": \"2020-01-01T00:00:00.000Z\",\n    \"updateOffset\": 7\n  }\n}"
+    }
+  },
+  "steps": [
+    {
+      "name": "settings-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    },
+    {
+      "name": "resolve-expired-link",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/recipient/resolve",
+        "json": {}
+      }
+    },
+    {
+      "name": "token-blank",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/telegram/token",
+        "json": {
+          "botToken": " "
+        }
+      }
+    },
+    {
+      "name": "clear-recipient",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/telegram/recipient"
+      }
+    },
+    {
+      "name": "settings-after-clear-recipient",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    },
+    {
+      "name": "start-link",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/recipient/link",
+        "json": {}
+      }
+    },
+    {
+      "name": "settings-with-pending-link",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    },
+    {
+      "name": "clear-token",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/telegram/token"
+      }
+    },
+    {
+      "name": "settings-after-clear-token",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    },
+    {
+      "name": "start-link-after-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/recipient/link",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}
