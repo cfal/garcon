@@ -296,7 +296,12 @@ report the remaining mismatches to the manager instead of editing further.
 | auth-logout | 4 | Session revocation over HTTP and WebSocket |
 | websocket-session | 32 | Subprotocol negotiation, ping, reconnect state, request errors, refused upgrades |
 
-Each `stores` and `service-routes` route group adds a scenario. Chat lifecycle,
+The `edge-scenarios` unit has added 38 scenarios for the route groups of the
+`edge` and `stores` units (runtime, workspace, snippets, preambles, saved
+searches, folders, chat boards, chat canvases, chat tags, tickets, API
+providers, executors, scheduled prompts, Telegram, usage, and auth), for 44
+scenarios and 9,992 cases in all; [`parity/replay-report.md`](parity/replay-report.md)
+lists each with its case count. Each `service-routes` route group adds a scenario. Chat lifecycle,
 queueing, permissions, executor links, PTYs, and restart behavior are verified
 by the server suites, which already drive them deterministically with the
 scripted providers; the parity replay covers the HTTP and WebSocket edge those
