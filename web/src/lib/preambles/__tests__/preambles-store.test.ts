@@ -235,25 +235,34 @@ describe('PreamblesStore', () => {
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b']));
 	});
 
-	it('installs an authoritative lower-revision refresh and ignores overtaken refreshes', async () => {
+	it('ignores a stale overtaken refresh and preserves newer state when an overtaken refresh fails', async () => {
 		let resolveOvertaken!: (value: PreamblesSnapshot) => void;
+		let rejectOvertaken!: (error: Error) => void;
 		const get = vi
 			.fn()
-			.mockResolvedValueOnce(snapshot(1, ['a']))
 			.mockImplementationOnce(
 				() => new Promise<PreamblesSnapshot>((resolve) => { resolveOvertaken = resolve; }),
+			)
+			.mockImplementationOnce(
+				() => new Promise<PreamblesSnapshot>((_resolve, reject) => { rejectOvertaken = reject; }),
 			);
 		const store = new PreamblesStore({ get });
-		store.applySnapshot(snapshot(3, ['a', 'b']));
-
-		await store.refresh();
-		expect(store.snapshot).toEqual(snapshot(1, ['a']));
+		store.applySnapshot(snapshot(1, ['a']));
 
 		const overtaken = store.refresh();
 		store.applySnapshot(snapshot(4, ['a', 'b', 'c']));
 		resolveOvertaken(snapshot(2, ['a', 'b']));
 		await expect(overtaken).resolves.toEqual(snapshot(4, ['a', 'b', 'c']));
 		expect(store.snapshot).toEqual(snapshot(4, ['a', 'b', 'c']));
+
+		const failingOvertaken = store.refresh().catch((error) => error);
+		store.applySnapshot(snapshot(5, ['a', 'b', 'c', 'd']));
+		const readError = new Error('network blip');
+		rejectOvertaken(readError);
+		expect(await failingOvertaken).toBe(readError);
+		expect(store.snapshot).toEqual(snapshot(5, ['a', 'b', 'c', 'd']));
+		expect(store.error).toBeNull();
+		expect(store.status).toBe('ready');
 	});
 
 	it('serializes concurrent failed reorders back to the confirmed order', async () => {
@@ -331,314 +340,16 @@ describe('PreamblesStore', () => {
 		expect(remove).toHaveBeenCalledWith({ expectedRevision: 2, id: 'a' });
 	});
 
-	it('reconciles instead of installing a late pre-restore write acknowledgement after a backwards refresh', async () => {
-		let resolveUpdate!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
-		const update = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-					resolveUpdate = resolve;
-				}),
-		);
-		const get = vi
-			.fn()
-			.mockResolvedValueOnce(snapshot(2, ['restored']))
-			.mockResolvedValueOnce(snapshot(2, ['restored']));
-		const store = new PreamblesStore({ get, update });
-		store.applySnapshot(snapshot(8, ['a']));
-
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Pre-restore edit',
-				content: 'Pre-restore body',
-				scope: { type: 'global' },
-			},
-			8,
-		);
-		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-
-		await store.refresh();
-		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
-
-		resolveUpdate({ success: true, snapshot: snapshot(9, ['pre-restore']) });
-		await updating;
-
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
-		expect(store.status).toBe('ready');
-	});
-
-	it('reconciles when a pre-restore write ack arrives before an in-flight restore refresh completes', async () => {
-		let resolveUpdate!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
-		let resolveRefresh!: (value: PreamblesSnapshot) => void;
-		const update = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-					resolveUpdate = resolve;
-				}),
-		);
-		const get = vi
-			.fn()
-			.mockImplementationOnce(
-				() => new Promise<PreamblesSnapshot>((resolve) => { resolveRefresh = resolve; }),
-			)
-			.mockResolvedValueOnce(snapshot(2, ['restored']));
-		const store = new PreamblesStore({ get, update });
-		store.applySnapshot(snapshot(8, ['a']));
-
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Pre-restore edit',
-				content: 'Pre-restore body',
-				scope: { type: 'global' },
-			},
-			8,
-		);
-		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-
-		const refreshing = store.refresh();
-		resolveUpdate({ success: true, snapshot: snapshot(9, ['pre-restore']) });
-		await Promise.resolve();
-		await Promise.resolve();
-		resolveRefresh(snapshot(2, ['restored']));
-
-		await Promise.all([refreshing, updating]);
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
-	});
-
-	it('reconciles when a same-revision restore refresh installs different content before a late write ack', async () => {
-		let resolveUpdate!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
-		const update = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-					resolveUpdate = resolve;
-				}),
-		);
-		const get = vi
-			.fn()
-			.mockResolvedValueOnce(snapshot(8, ['restored']))
-			.mockResolvedValueOnce(snapshot(8, ['restored']));
-		const store = new PreamblesStore({ get, update });
-		store.applySnapshot(snapshot(8, ['a']));
-
-		const updating = store.update(
-			'a',
-			{
-				enabled: true,
-				title: 'Pre-restore edit',
-				content: 'Pre-restore body',
-				scope: { type: 'global' },
-			},
-			8,
-		);
-		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-
-		await store.refresh();
-		resolveUpdate({ success: true, snapshot: snapshot(9, ['pre-restore']) });
-		await updating;
-
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.snapshot).toEqual(snapshot(8, ['restored']));
-	});
-
-	it('invalidates the snapshot for local expansion when post-write reconciliation fails, then recovers on next demand', async () => {
-		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
-		const remove = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-					resolveRemove = resolve;
-				}),
-		);
-		const get = vi
-			.fn()
-			.mockResolvedValueOnce(snapshot(1, ['a']))
-			.mockRejectedValueOnce(new Error('network down'))
-			.mockResolvedValueOnce(snapshot(2, []));
-		const store = new PreamblesStore({ get, remove });
-		store.applySnapshot(snapshot(1, ['a']));
-
-		const removing = store.remove('a', 1);
-		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
-		await store.refresh();
-
-		resolveRemove({ success: true, snapshot: snapshot(2, []) });
-		await expect(removing).resolves.toEqual(snapshot(2, []));
-
-		expect(store.hasLoaded).toBe(false);
-		expect(store.snapshot).toBeNull();
-		expect(store.preambles).toEqual([]);
-		expect(store.status).toBe('error');
-
-		await store.ensureLoaded();
-		expect(get).toHaveBeenCalledTimes(3);
-		expect(store.hasLoaded).toBe(true);
-		expect(store.snapshot).toEqual(snapshot(2, []));
-		expect(store.status).toBe('ready');
-	});
-
-	it('reconciles a late pre-restore write acknowledgement after an overlapping GET fails before it settles', async () => {
-		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
-		let rejectRefresh!: (error: Error) => void;
-		const remove = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-					resolveRemove = resolve;
-				}),
-		);
-		const get = vi
-			.fn()
-			.mockImplementationOnce(
-				() => new Promise<PreamblesSnapshot>((_resolve, reject) => { rejectRefresh = reject; }),
-			)
-			.mockResolvedValueOnce(snapshot(2, ['restored']));
-		const store = new PreamblesStore({ get, remove });
-		store.applySnapshot(snapshot(8, ['a']));
-
-		const refreshing = store.refresh().catch((error) => error);
-		const removing = store.remove('a', 8);
-		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
-
-		const readFailure = new Error('temporary read failure');
-		rejectRefresh(readFailure);
-		expect(await refreshing).toBe(readFailure);
-
-		resolveRemove({ success: true, snapshot: snapshot(9, []) });
-		await expect(removing).resolves.toEqual(snapshot(2, ['restored']));
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.hasLoaded).toBe(true);
-		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
-		expect(store.status).toBe('ready');
-	});
-
-	it('preserves a confirmed post-write snapshot when an overlapping WS GET succeeded and only the follow-up GET fails', async () => {
-		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
-		const remove = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-					resolveRemove = resolve;
-				}),
-		);
-		const get = vi
-			.fn()
-			.mockResolvedValueOnce(snapshot(2, []))
-			.mockRejectedValueOnce(new Error('follow-up failed'));
-		const store = new PreamblesStore({ get, remove });
-		store.applySnapshot(snapshot(1, ['a']));
-
-		const removing = store.remove('a', 1);
-		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
-		await store.refreshIfLoaded();
-
-		resolveRemove({ success: true, snapshot: snapshot(2, []) });
-		await expect(removing).resolves.toEqual(snapshot(2, []));
-
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.hasLoaded).toBe(true);
-		expect(store.snapshot).toEqual(snapshot(2, []));
-		expect(store.status).toBe('ready');
-	});
-
-	it('invalidates when an overlapping GET returned a contradictory snapshot at the ack revision and reconciliation fails', async () => {
-		let resolveRemove!: (value: { success: true; snapshot: PreamblesSnapshot }) => void;
-		const remove = vi.fn(
-			() =>
-				new Promise<{ success: true; snapshot: PreamblesSnapshot }>((resolve) => {
-					resolveRemove = resolve;
-				}),
-		);
-		const get = vi
-			.fn()
-			.mockResolvedValueOnce(snapshot(2, ['a']))
-			.mockRejectedValueOnce(new Error('reconcile failed'));
-		const store = new PreamblesStore({ get, remove });
-		store.applySnapshot(snapshot(1, ['a']));
-
-		const removing = store.remove('a', 1);
-		await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
-		await store.refreshIfLoaded();
-
-		resolveRemove({ success: true, snapshot: snapshot(2, []) });
-		await expect(removing).resolves.toEqual(snapshot(2, []));
-
-		expect(get).toHaveBeenCalledTimes(2);
-		expect(store.hasLoaded).toBe(false);
-		expect(store.snapshot).toBeNull();
-		expect(store.preambles).toEqual([]);
-		expect(store.status).toBe('error');
-	});
-
-	it('drains queued invalidations in ensureSnapshotForWrite and blocks write if the final read fails', async () => {
-		let resolveFirstGet!: (value: PreamblesSnapshot) => void;
-		let resolveDrainGet!: (value: PreamblesSnapshot) => void;
-		const get = vi
-			.fn()
-			.mockImplementationOnce(
-				() => new Promise<PreamblesSnapshot>((resolve) => { resolveFirstGet = resolve; }),
-			)
-			.mockImplementationOnce(
-				() => new Promise<PreamblesSnapshot>((resolve) => { resolveDrainGet = resolve; }),
-			);
-		const store = new PreamblesStore({ get });
-
-		const firstReady = store.ensureSnapshotForWrite();
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-		void store.refreshIfLoaded();
-		resolveFirstGet(snapshot(1, ['stale']));
-		await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-		resolveDrainGet(snapshot(1, ['drifted']));
-		await expect(firstReady).resolves.toEqual(snapshot(1, ['drifted']));
-		await expect(store.ensureSnapshotForWrite()).resolves.toEqual(snapshot(1, ['drifted']));
-
-		let resolveThirdGet!: (value: PreamblesSnapshot) => void;
-		const nextStore = new PreamblesStore({
-			get: vi
-				.fn()
-				.mockImplementationOnce(
-					() => new Promise<PreamblesSnapshot>((resolve) => { resolveThirdGet = resolve; }),
-				)
-				.mockRejectedValueOnce(new Error('drain failed'))
-				.mockResolvedValueOnce(snapshot(1, ['recovered'])),
-		});
-		const blockedReady = nextStore.ensureSnapshotForWrite().catch((error) => error);
-		await vi.waitFor(() => expect(nextStore.status).toBe('loading'));
-		void nextStore.refreshIfLoaded();
-		resolveThirdGet(snapshot(1, ['first']));
-		const blockedResult = await blockedReady;
-		expect(blockedResult).toBeInstanceOf(Error);
-		expect((blockedResult as Error).message).toBe('drain failed');
-
-		await expect(nextStore.ensureSnapshotForWrite()).resolves.toEqual(snapshot(1, ['recovered']));
-	});
-
-	it('refreshes on PREAMBLE_NOT_FOUND and invalidates if the refresh fails', async () => {
+	it('refreshes on PREAMBLE_NOT_FOUND while preserving the original error', async () => {
 		const notFound = new ApiError(404, 'Preamble not found', PREAMBLE_ERROR_CODES.notFound);
-		const get = vi
-			.fn()
-			.mockResolvedValueOnce(snapshot(1, []))
-			.mockRejectedValueOnce(new Error('refresh unavailable'));
-		const remove = vi.fn().mockRejectedValue(notFound);
-		const update = vi.fn().mockRejectedValue(notFound);
-		const store = new PreamblesStore({ get, remove, update });
+		const get = vi.fn().mockResolvedValueOnce(snapshot(1, []));
+		const remove = vi.fn().mockRejectedValueOnce(notFound);
+		const store = new PreamblesStore({ get, remove });
 		store.applySnapshot(snapshot(1, ['a']));
 
 		await expect(store.remove('a', 1)).rejects.toBe(notFound);
+		expect(get).toHaveBeenCalledOnce();
 		expect(store.snapshot).toEqual(snapshot(1, []));
 		expect(store.status).toBe('ready');
-
-		store.applySnapshot(snapshot(2, ['b']));
-		await expect(
-			store.update(
-				'b',
-				{ enabled: true, title: 'B', content: 'Body', scope: { type: 'global' } },
-				2,
-			),
-		).rejects.toBe(notFound);
-		expect(store.hasLoaded).toBe(false);
-		expect(store.snapshot).toBeNull();
-		expect(store.status).toBe('error');
 	});
 });

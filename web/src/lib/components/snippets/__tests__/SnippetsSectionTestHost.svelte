@@ -41,13 +41,6 @@
 	};
 	let loadCount = 0;
 	let releaseRefresh: (() => void) | null = null;
-	let holdNextGet = false;
-	let releaseHeldGet: (() => void) | null = null;
-	let failNextGet = false;
-	let holdNextCreate = false;
-	let createStarted: (() => void) | null = null;
-	let releaseHeldCreate: (() => void) | null = null;
-	let invalidationCount = 0;
 	let rejectSave: ((error: Error) => void) | null = null;
 	let createCount = $state(0);
 	let updateCount = $state(0);
@@ -62,28 +55,10 @@
 					releaseRefresh = resolve;
 				});
 			}
-			if (holdNextGet) {
-				holdNextGet = false;
-				await new Promise<void>((resolve) => {
-					releaseHeldGet = resolve;
-				});
-			}
-			if (failNextGet) {
-				failNextGet = false;
-				throw new Error('follow-up load failed');
-			}
 			return current;
 		},
 		create: async (request) => {
 			createCount += 1;
-			if (holdNextCreate) {
-				holdNextCreate = false;
-				createStarted?.();
-				createStarted = null;
-				await new Promise<void>((resolve) => {
-					releaseHeldCreate = resolve;
-				});
-			}
 			if (blockSave) {
 				await new Promise<void>((_resolve, reject) => {
 					rejectSave = (error) => reject(error);
@@ -175,97 +150,11 @@
 			snippets: current.snippets.filter((snippet) => snippet.id !== 'one'),
 		};
 	}
-	function advanceUnrelated(): void {
-		current = {
-			revision: current.revision + 1,
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.id === 'two'
-						? { ...snippet, template: 'Other updated', updatedAt: '2026-01-05T00:00:00.000Z' }
-						: snippet,
-				),
-			),
-		};
-		void store.refreshInBackground();
-	}
-	function restoreLowerUnrelated(): void {
-		current = {
-			revision: Math.max(0, current.revision - 1),
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.id === 'two'
-						? { ...snippet, template: 'Other restored', updatedAt: '2026-01-06T00:00:00.000Z' }
-						: snippet,
-				),
-			),
-		};
-		void store.refreshInBackground();
-	}
 	function removeServerSameRevision(): void {
 		current = {
 			...current,
 			snippets: current.snippets.filter((snippet) => snippet.id !== 'one'),
 		};
-	}
-	async function invalidateAndHoldReload(mutateOne: boolean): Promise<void> {
-		const capturedRevision = store.snapshot?.revision ?? current.revision;
-		const previousOne = current.snippets.find((snippet) => snippet.id === 'one');
-		holdNextCreate = true;
-		const waitForCreate = new Promise<void>((resolve) => {
-			createStarted = resolve;
-		});
-		const creating = store.create({
-			shortName: 'temp_trigger',
-			template: 'Temp',
-			defaultArguments: '',
-		});
-		await waitForCreate;
-		await store.refresh();
-		failNextGet = true;
-		releaseHeldCreate?.();
-		releaseHeldCreate = null;
-		await creating;
-		if (mutateOne) invalidationCount += 1;
-		current = {
-			revision: capturedRevision,
-			snippets: sortSnippetsByShortName(
-				current.snippets
-					.filter((snippet) => snippet.shortName !== 'temp_trigger')
-					.map((snippet) => {
-						if (snippet.id !== 'one') return snippet;
-						if (!mutateOne) return previousOne ?? snippet;
-						return {
-							...snippet,
-							shortName: `review_reloaded_${invalidationCount}`,
-							template: `Changed while invalidated ${invalidationCount}`,
-							updatedAt: `2026-01-09T00:00:0${invalidationCount}.000Z`,
-						};
-					}),
-			),
-		};
-		holdNextGet = true;
-	}
-	function queueWsDrift(): void {
-		current = {
-			...current,
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.id === 'one'
-						? {
-								...snippet,
-								shortName: 'review_ws_drifted',
-								template: 'Drifted in GET-2',
-								updatedAt: '2026-01-10T00:00:00.000Z',
-							}
-						: snippet,
-				),
-			),
-		};
-		void store.refreshIfLoaded();
-	}
-	function queueWsFailure(): void {
-		failNextGet = true;
-		void store.refreshIfLoaded();
 	}
 	function advanceExternally(): void {
 		current = {
@@ -305,42 +194,6 @@
 		};
 		void store.refreshInBackground();
 	}
-	function restoreSameRevision(): void {
-		current = {
-			revision: current.revision,
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.shortName === 'review'
-						? {
-								...snippet,
-								shortName: 'review_restored',
-								template: 'Restored template',
-								updatedAt: '2026-01-05T00:00:00.000Z',
-							}
-						: snippet,
-				),
-			),
-		};
-		void store.refreshInBackground();
-	}
-	function restoreLowerRevision(): void {
-		current = {
-			revision: Math.max(0, current.revision - 1),
-			snippets: sortSnippetsByShortName(
-				current.snippets.map((snippet) =>
-					snippet.id === 'one'
-						? {
-								...snippet,
-								shortName: 'review_restored',
-								template: 'Restored lower revision',
-								updatedAt: '2026-01-06T00:00:00.000Z',
-							}
-						: snippet,
-				),
-			),
-		};
-		void store.refreshInBackground();
-	}
 	setSnippets(store);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
@@ -373,29 +226,8 @@
 <button type="button" onclick={removeServerOnly} data-testid="server-remove-only">
 	Server remove only
 </button>
-<button type="button" onclick={advanceUnrelated} data-testid="external-unrelated-edit">
-	External unrelated edit
-</button>
-<button type="button" onclick={restoreLowerUnrelated} data-testid="external-lower-unchanged">
-	Restore lower unchanged
-</button>
 <button type="button" onclick={removeServerSameRevision} data-testid="server-remove-same-revision">
 	Server remove same revision
-</button>
-<button type="button" onclick={() => void invalidateAndHoldReload(true)} data-testid="invalidate-with-changed-server">
-	Invalidate with changed server
-</button>
-<button type="button" onclick={() => void invalidateAndHoldReload(false)} data-testid="invalidate-with-unchanged-server">
-	Invalidate with unchanged server
-</button>
-<button type="button" onclick={queueWsDrift} data-testid="queue-ws-drift">
-	Queue WS drift
-</button>
-<button type="button" onclick={queueWsFailure} data-testid="queue-ws-failure">
-	Queue WS failure
-</button>
-<button type="button" onclick={() => { releaseHeldGet?.(); releaseHeldGet = null; }} data-testid="release-held-get">
-	Release held get
 </button>
 <button type="button" onclick={advanceExternally} data-testid="external-edit">
 	External edit
@@ -405,12 +237,6 @@
 </button>
 <button type="button" onclick={removeExternally} data-testid="external-remove">
 	External remove
-</button>
-<button type="button" onclick={restoreSameRevision} data-testid="external-restore-same-revision">
-	Restore same revision
-</button>
-<button type="button" onclick={restoreLowerRevision} data-testid="external-restore-lower-revision">
-	Restore lower revision
 </button>
 <button type="button" onclick={() => releaseRefresh?.()} data-testid="release-refresh">
 	Release refresh

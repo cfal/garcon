@@ -8,10 +8,6 @@ export class CatalogRefresh {
 		private readonly isLoading: () => boolean,
 	) {}
 
-	get pending(): Promise<void> | null {
-		return this.#running;
-	}
-
 	request(): Promise<void> {
 		this.#requested = true;
 		return (this.#running ??= this.#drain());
