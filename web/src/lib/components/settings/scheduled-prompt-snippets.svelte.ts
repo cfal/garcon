@@ -102,9 +102,15 @@ export class ScheduledPromptSnippets {
 			const staleSources = mismatchedSnippetSources(snippet, result.response);
 			if (staleSources.length > 0) {
 				this.error = m.snippets_changed_before_expansion();
+				this.palette.dismiss();
 				for (const changedSource of staleSources) {
 					this.options.onSourceChanged(changedSource);
 				}
+				return 'cancelled';
+			}
+			if (isSelectedSnippetStaleInLoadedCatalog(snippet, this.options)) {
+				this.error = m.snippets_changed_before_expansion();
+				this.palette.dismiss();
 				return 'cancelled';
 			}
 			const target = context.target;

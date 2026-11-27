@@ -238,4 +238,50 @@ describe('scheduled prompt snippets', () => {
 		expect(expand).not.toHaveBeenCalled();
 		expect(onInsert).not.toHaveBeenCalled();
 	});
+
+	it('cancels a delayed server fallback if the loaded catalog updates or deletes the snippet in flight', async () => {
+		if (serverItem.source !== 'snippet') throw new Error('expected snippet item');
+		for (const mutation of ['updated', 'deleted'] as const) {
+			const input = { prompt: 'Before selected after', key: 'new-chat:/repo' };
+			const onInsert = vi.fn(async () => {});
+			let currentSnippets = [serverItem.snippet];
+			const controller = new ScheduledPromptSnippets({
+				snippets: {
+					hasLoaded: true,
+					get snippets() {
+						return currentSnippets;
+					},
+				},
+				preambles: { hasLoaded: true, preambles: [] },
+				get prompt() {
+					return input.prompt;
+				},
+				get interactionKey() {
+					return input.key;
+				},
+				get context() {
+					return {
+						type: 'scheduled-prompt' as const,
+						target: { type: 'new-chat' as const, projectPath: '/repo' },
+					};
+				},
+				onInsert,
+				onPendingChange: vi.fn(),
+				onSourceChanged: vi.fn(),
+			});
+			let resolve!: (value: typeof response) => void;
+			expand.mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+			controller.open(7, 15);
+			const pending = controller.insert(serverItem, 'API');
+			currentSnippets =
+				mutation === 'updated'
+					? [{ ...serverItem.snippet, updatedAt: '2026-01-03T00:00:00.000Z' }]
+					: [];
+			resolve(response);
+
+			expect(await pending).toBe('cancelled');
+			expect(controller.error).toContain('changed');
+			expect(onInsert).not.toHaveBeenCalled();
+		}
+	});
 });

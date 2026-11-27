@@ -287,4 +287,70 @@ describe('SnippetsStore', () => {
 		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
 		expect(store.status).toBe('ready');
 	});
+
+	it('reconciles when a pre-restore write ack arrives before an in-flight restore refresh completes', async () => {
+		let resolveUpdate!: (value: { success: true; snapshot: SnippetsSnapshot }) => void;
+		let resolveRefresh!: (value: SnippetsSnapshot) => void;
+		const update = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: SnippetsSnapshot }>((resolve) => {
+					resolveUpdate = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockImplementationOnce(
+				() => new Promise<SnippetsSnapshot>((resolve) => { resolveRefresh = resolve; }),
+			)
+			.mockResolvedValueOnce(snapshot(2, ['restored']));
+		const store = new SnippetsStore({ get, update });
+		store.applySnapshot(snapshot(8, ['old']));
+
+		const updating = store.update(
+			'old',
+			{ shortName: 'old', template: 'Pre-restore edit', defaultArguments: '' },
+			8,
+		);
+		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+
+		const refreshing = store.refresh();
+		resolveUpdate({ success: true, snapshot: snapshot(9, ['pre-restore']) });
+		await Promise.resolve();
+		await Promise.resolve();
+		resolveRefresh(snapshot(2, ['restored']));
+
+		await Promise.all([refreshing, updating]);
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(2, ['restored']));
+	});
+
+	it('reconciles when a same-revision restore refresh installs different content before a late write ack', async () => {
+		let resolveUpdate!: (value: { success: true; snapshot: SnippetsSnapshot }) => void;
+		const update = vi.fn(
+			() =>
+				new Promise<{ success: true; snapshot: SnippetsSnapshot }>((resolve) => {
+					resolveUpdate = resolve;
+				}),
+		);
+		const get = vi
+			.fn()
+			.mockResolvedValueOnce(snapshot(8, ['restored']))
+			.mockResolvedValueOnce(snapshot(8, ['restored']));
+		const store = new SnippetsStore({ get, update });
+		store.applySnapshot(snapshot(8, ['old']));
+
+		const updating = store.update(
+			'old',
+			{ shortName: 'old', template: 'Pre-restore edit', defaultArguments: '' },
+			8,
+		);
+		await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+
+		await store.refresh();
+		resolveUpdate({ success: true, snapshot: snapshot(9, ['pre-restore']) });
+		await updating;
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(8, ['restored']));
+	});
 });

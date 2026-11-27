@@ -453,4 +453,56 @@ describe('PreamblesSection', () => {
 		expect(await screen.findByText('"Global conventions" was already removed.')).toBeTruthy();
 		expect(remove).toHaveBeenCalledOnce();
 	});
+
+	it('marks an open edit stale if the loaded preamble changes at the same restored revision', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const restored = { ...original, title: 'Restored conventions', updatedAt: '2029-01-02T00:00:00.000Z' };
+		const get = vi.fn().mockResolvedValue({ revision: 1, preambles: [restored] });
+		let store!: PreamblesStore;
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get },
+			onStore: (value: PreamblesStore) => {
+				store = value;
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Global conventions' }));
+		await screen.findByRole('heading', { name: 'Edit Preamble' });
+		await store.refresh();
+
+		await waitFor(() => {
+			expect(screen.getByText(/changed while the editor was open/i)).toBeTruthy();
+			expect(
+				(screen.getByRole('button', { name: 'Save Preamble' }) as HTMLButtonElement).disabled,
+			).toBe(true);
+		});
+	});
+
+	it('updates the delete confirmation instead of deleting when the loaded preamble changed at the same revision', async () => {
+		const original = globalPreamble('global', 'Global conventions', 'Use the shared defaults.');
+		const restored = { ...original, title: 'Restored conventions', updatedAt: '2029-01-02T00:00:00.000Z' };
+		const get = vi.fn().mockResolvedValue({ revision: 1, preambles: [restored] });
+		const remove = vi.fn().mockResolvedValue({ success: true, snapshot: { revision: 2, preambles: [] } });
+		let store!: PreamblesStore;
+		render(PreamblesSectionTestHost, {
+			snapshot: { revision: 1, preambles: [original] },
+			deps: { get, remove },
+			onStore: (value: PreamblesStore) => {
+				store = value;
+			},
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove Global conventions' }));
+		await store.refresh();
+		await fireEvent.click(await screen.findByRole('button', { name: 'Remove preamble' }));
+
+		expect(remove).not.toHaveBeenCalled();
+		expect(await screen.findByText(/Preambles changed in another session/)).toBeTruthy();
+		expect(screen.getByText('Remove "Restored conventions"? This cannot be undone.')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove preamble' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Preamble' })).toBeNull());
+		expect(remove).toHaveBeenCalledWith({ expectedRevision: 1, id: 'global' });
+	});
 });

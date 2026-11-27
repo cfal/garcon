@@ -43,6 +43,8 @@
 	let releaseRefresh: (() => void) | null = null;
 	let rejectSave: ((error: Error) => void) | null = null;
 	let createCount = $state(0);
+	let updateCount = $state(0);
+	let removeCount = $state(0);
 	const store = createSnippetsStore({
 		get: async () => {
 			loadCount += 1;
@@ -75,6 +77,7 @@
 			return { success: true, snapshot: current };
 		},
 		update: async (request) => {
+			updateCount += 1;
 			if (request.expectedRevision !== current.revision) {
 				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
 			}
@@ -91,6 +94,7 @@
 			return { success: true, snapshot: current };
 		},
 		remove: async (request) => {
+			removeCount += 1;
 			if (request.expectedRevision !== current.revision) {
 				throw new ApiError(409, 'Snippets changed', SNIPPET_ERROR_CODES.revisionConflict);
 			}
@@ -139,6 +143,24 @@
 		};
 		void store.refreshInBackground();
 	}
+	function restoreSameRevision(): void {
+		current = {
+			revision: current.revision,
+			snippets: sortSnippetsByShortName(
+				current.snippets.map((snippet) =>
+					snippet.shortName === 'review'
+						? {
+								...snippet,
+								shortName: 'review_restored',
+								template: 'Restored template',
+								updatedAt: '2026-01-05T00:00:00.000Z',
+							}
+						: snippet,
+				),
+			),
+		};
+		void store.refreshInBackground();
+	}
 	setSnippets(store);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
@@ -152,6 +174,8 @@
 	<SnippetsSection active={true} />
 {/if}
 <div data-testid="snippet-create-count">{createCount}</div>
+<div data-testid="snippet-update-count">{updateCount}</div>
+<div data-testid="snippet-remove-count">{removeCount}</div>
 <div data-testid="snippet-notifications">
 	{notifications.items.map((notification) => notification.message).join('\n')}
 </div>
@@ -166,6 +190,9 @@
 </button>
 <button type="button" onclick={removeExternally} data-testid="external-remove">
 	External remove
+</button>
+<button type="button" onclick={restoreSameRevision} data-testid="external-restore-same-revision">
+	Restore same revision
 </button>
 <button type="button" onclick={() => releaseRefresh?.()} data-testid="release-refresh">
 	Release refresh

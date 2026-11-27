@@ -383,9 +383,10 @@
 	browserNotificationsRouter.start();
 	transcriptSearchStatus.start();
 
+	const lastConnectedAt = $derived(ws.connectionStatus.lastConnectedAt);
+
 	$effect(() => {
-		const connectedAt = ws.connectionStatus.lastConnectedAt;
-		if (!connectedAt) return;
+		if (!lastConnectedAt) return;
 		untrack(() => void transcriptSearchStatus.refresh());
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
 		untrack(() => pullRequestReviews.invalidate());

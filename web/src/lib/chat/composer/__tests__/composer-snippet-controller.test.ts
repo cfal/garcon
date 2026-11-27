@@ -274,30 +274,76 @@ describe('ComposerSnippetController', () => {
 		expect(env.refreshPreambles).toHaveBeenCalledTimes(1);
 	});
 
-	it('discards stale server fallback results when text or execution key changes in flight', async () => {
-		const env = setup();
-		let resolve!: (value: ExpandSnippetResponse) => void;
-		mockExpandSnippet.mockReturnValueOnce(new Promise((done) => (resolve = done)));
+	it.each(['text', 'executionKey'] as const)(
+		'discards stale server fallback results when %s changes in flight',
+		async (change) => {
+			const env = setup();
+			let resolve!: (value: ExpandSnippetResponse) => void;
+			mockExpandSnippet.mockReturnValueOnce(new Promise((done) => (resolve = done)));
 
-		const running = env.controller.insertFromPalette(
-			env.palette,
-			snippetToSelectable(pathSnippet),
-			'docs',
-		);
-		env.setText('Edited in flight');
-		resolve({
-			success: true,
-			source: 'snippet',
-			sourceId: pathSnippet.id,
-			sourceUpdatedAt: pathSnippet.updatedAt,
-			shortName: pathSnippet.shortName,
-			contextExecutorId: 'local',
-			contextProjectPath: '/repo',
-			expandedText: 'stale expansion',
-		});
+			const running = env.controller.insertFromPalette(
+				env.palette,
+				snippetToSelectable(pathSnippet),
+				'docs',
+			);
+			if (change === 'text') env.setText('Edited in flight');
+			else env.setExecutionKey('remote\u0000codex');
+			resolve({
+				success: true,
+				source: 'snippet',
+				sourceId: pathSnippet.id,
+				sourceUpdatedAt: pathSnippet.updatedAt,
+				shortName: pathSnippet.shortName,
+				contextExecutorId: 'local',
+				contextProjectPath: '/repo',
+				expandedText: 'stale expansion',
+			});
 
-		expect(await running).toBe('cancelled');
-		expect(env.onExpanded).not.toHaveBeenCalled();
+			expect(await running).toBe('cancelled');
+			expect(env.onExpanded).not.toHaveBeenCalled();
+		},
+	);
+
+	it('cancels a server fallback palette insertion if the loaded catalog changes or deletes the snippet in flight', async () => {
+		for (const mutation of ['updated', 'deleted'] as const) {
+			let loadedSnippets: Snippet[] = [snippet, pathSnippet];
+			const env = setup({
+				snippets: {
+					hasLoaded: true,
+					get snippets() {
+						return loadedSnippets;
+					},
+					refreshIfLoaded: vi.fn(async () => {}),
+				},
+			});
+			let resolve!: (value: ExpandSnippetResponse) => void;
+			mockExpandSnippet.mockReturnValueOnce(new Promise((done) => (resolve = done)));
+
+			const running = env.controller.insertFromPalette(
+				env.palette,
+				snippetToSelectable(pathSnippet),
+				'docs',
+			);
+			loadedSnippets =
+				mutation === 'updated'
+					? [snippet, { ...pathSnippet, updatedAt: '2026-01-03T00:00:00.000Z' }]
+					: [snippet];
+			resolve({
+				success: true,
+				source: 'snippet',
+				sourceId: pathSnippet.id,
+				sourceUpdatedAt: pathSnippet.updatedAt,
+				shortName: pathSnippet.shortName,
+				contextExecutorId: 'local',
+				contextProjectPath: '/repo',
+				expandedText: 'stale expansion',
+			});
+
+			expect(await running).toBe('cancelled');
+			expect(env.onExpanded).not.toHaveBeenCalled();
+			expect(env.notifyError).toHaveBeenCalledWith('That snippet changed. Select it again.');
+			expect(env.palette.dismiss).toHaveBeenCalledTimes(1);
+		}
 	});
 
 	it('handles missing project path with optional callback', async () => {

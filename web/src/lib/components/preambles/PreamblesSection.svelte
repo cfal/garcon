@@ -30,6 +30,20 @@
 		| { kind: 'create' }
 		| { kind: 'edit'; preamble: Preamble; revision: number };
 
+	function preamblesMatch(left: Preamble, right: Preamble): boolean {
+		return (
+			left.id === right.id &&
+			left.enabled === right.enabled &&
+			left.title === right.title &&
+			left.snippetShortName === right.snippetShortName &&
+			left.content === right.content &&
+			left.updatedAt === right.updatedAt &&
+			JSON.stringify(left.scope) === JSON.stringify(right.scope) &&
+			JSON.stringify(left.agentIds) === JSON.stringify(right.agentIds) &&
+			JSON.stringify(left.tagFilter) === JSON.stringify(right.tagFilter)
+		);
+	}
+
 	let { active }: Props = $props();
 	const preambles = getPreambles();
 	const catalogIndexById = $derived(new Map(preambles.preambles.map((item, index) => [item.id, index])));
@@ -43,11 +57,15 @@
 	let operationError = $state<string | null>(null);
 	let normalizedQuery = $derived(query.trim());
 	let visiblePreambles = $derived(filterPreambles(preambles.preambles, query));
-	let formIsStale = $derived(
-		form.kind === 'edit' &&
-			(editConflict ||
-				(preambles.snapshot !== null && preambles.snapshot.revision !== form.revision)),
-	);
+	let formIsStale = $derived.by(() => {
+		if (form.kind !== 'edit') return false;
+		if (editConflict) return true;
+		if (preambles.snapshot === null) return false;
+		if (preambles.snapshot.revision !== form.revision) return true;
+		const targetId = form.preamble.id;
+		const current = preambles.snapshot.preambles.find((entry) => entry.id === targetId);
+		return !current || !preamblesMatch(form.preamble, current);
+	});
 
 	$effect(() => {
 		if (!active) return;
@@ -88,6 +106,10 @@
 	}
 
 	async function save(definition: PreambleDefinitionInput): Promise<void> {
+		if (form.kind === 'edit' && formIsStale) {
+			editConflict = true;
+			throw new Error(m.preambles_edit_stale());
+		}
 		catalogMutationBusy = true;
 		try {
 			if (form.kind === 'edit') {
@@ -111,6 +133,21 @@
 
 	async function confirmRemove(): Promise<void> {
 		if (!removeTarget || catalogMutationBusy) return;
+		if (preambles.snapshot !== null && preambles.snapshot.revision === removeTarget.revision) {
+			const targetId = removeTarget.preamble.id;
+			const current = preambles.snapshot.preambles.find((entry) => entry.id === targetId);
+			if (!current) {
+				const removedTitle = removeTarget.preamble.title;
+				closeRemove();
+				operationError = m.preambles_already_removed({ title: removedTitle });
+				return;
+			}
+			if (!preamblesMatch(removeTarget.preamble, current)) {
+				removeTarget = { preamble: current, revision: preambles.snapshot.revision };
+				removeError = m.preambles_changed_before_write();
+				return;
+			}
+		}
 		catalogMutationBusy = true;
 		removing = true;
 		removeError = null;

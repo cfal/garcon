@@ -329,4 +329,46 @@ describe('SnippetsSection', () => {
 		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
 		expect(await screen.findByText('/snippet review was already removed.')).toBeTruthy();
 	});
+
+	it('requires explicit retry without calling update when the loaded snippet changes at the same revision', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit review' }));
+		const template = screen.getByRole('textbox', { name: 'Snippet text' }) as HTMLTextAreaElement;
+		await fireEvent.input(template, { target: { value: 'My draft edit' } });
+
+		await fireEvent.click(screen.getByTestId('external-restore-same-revision'));
+		await screen.findByText('Restored template');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('0');
+		expect(await screen.findByText(/Snippets changed in another session/)).toBeTruthy();
+		expect(template.value).toBe('My draft edit');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Snippet' })).toBeNull());
+		expect(screen.getByTestId('snippet-update-count').textContent).toBe('1');
+		expect(await screen.findByText('My draft edit')).toBeTruthy();
+	});
+
+	it('refreshes the delete target without calling remove when the loaded snippet changes at the same revision', async () => {
+		render(SnippetsSectionTestHost);
+		await screen.findByText('review');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove review' }));
+
+		await fireEvent.click(screen.getByTestId('external-restore-same-revision'));
+		await screen.findByText('Restored template');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('0');
+		expect(await screen.findByText(/Snippets changed in another session/)).toBeTruthy();
+		expect(screen.getByRole('dialog', { name: 'Remove Snippet' }).textContent).toContain(
+			'Remove /snippet review_restored?',
+		);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove Snippet' })).toBeNull());
+		expect(screen.getByTestId('snippet-remove-count').textContent).toBe('1');
+		expect(screen.queryByText('review_restored')).toBeNull();
+	});
 });

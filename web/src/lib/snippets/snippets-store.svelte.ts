@@ -25,7 +25,7 @@ export class SnippetsStore {
 	#loadPromise: Promise<SnippetsSnapshot> | null = null;
 	#confirmed: SnippetsSnapshot | null = null;
 	#installGeneration = 0;
-	#resetEpoch = 0;
+	#refreshGeneration = 0;
 	readonly #refreshLoop = new CatalogRefresh(() => this.refresh(), () => this.#loadPromise !== null);
 
 	constructor(private readonly deps: SnippetsStoreDeps = {}) {}
@@ -58,9 +58,7 @@ export class SnippetsStore {
 				) {
 					return this.snapshot ?? this.#confirmed;
 				}
-				if (this.#confirmed && nextSnapshot.revision < this.#confirmed.revision) {
-					this.#resetEpoch += 1;
-				}
+				this.#refreshGeneration += 1;
 				return this.#installSnapshot(nextSnapshot);
 			})
 			.catch((error) => {
@@ -92,11 +90,11 @@ export class SnippetsStore {
 
 	async create(definition: SnippetDefinitionInput): Promise<SnippetsSnapshot> {
 		const current = await this.#requireSnapshot();
-		const resetEpoch = this.#resetEpoch;
+		const refreshGeneration = this.#refreshGeneration;
 		try {
 			const create = this.deps.create ?? createSnippet;
 			const result = await create({ expectedRevision: current.revision, snippet: definition });
-			return await this.#applyMutationSnapshot(result.snapshot, resetEpoch);
+			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -109,7 +107,7 @@ export class SnippetsStore {
 		expectedRevision: number,
 	): Promise<SnippetsSnapshot> {
 		await this.#requireSnapshot();
-		const resetEpoch = this.#resetEpoch;
+		const refreshGeneration = this.#refreshGeneration;
 		try {
 			const update = this.deps.update ?? updateSnippet;
 			const result = await update({
@@ -117,7 +115,7 @@ export class SnippetsStore {
 				id,
 				snippet: definition,
 			});
-			return await this.#applyMutationSnapshot(result.snapshot, resetEpoch);
+			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -126,11 +124,11 @@ export class SnippetsStore {
 
 	async remove(id: string, expectedRevision: number): Promise<SnippetsSnapshot> {
 		await this.#requireSnapshot();
-		const resetEpoch = this.#resetEpoch;
+		const refreshGeneration = this.#refreshGeneration;
 		try {
 			const remove = this.deps.remove ?? removeSnippet;
 			const result = await remove({ expectedRevision, id });
-			return await this.#applyMutationSnapshot(result.snapshot, resetEpoch);
+			return await this.#applyMutationSnapshot(result.snapshot, refreshGeneration);
 		} catch (error) {
 			await this.#refreshAfterConflict(error);
 			throw error;
@@ -146,9 +144,9 @@ export class SnippetsStore {
 
 	async #applyMutationSnapshot(
 		nextSnapshot: SnippetsSnapshot,
-		resetEpoch: number,
+		refreshGeneration: number,
 	): Promise<SnippetsSnapshot> {
-		if (this.#resetEpoch !== resetEpoch) {
+		if (this.#refreshGeneration !== refreshGeneration || this.#loadPromise !== null) {
 			await this.refreshIfLoaded();
 			return this.snapshot ?? this.#confirmed ?? nextSnapshot;
 		}

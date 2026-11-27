@@ -192,6 +192,10 @@ export class ComposerSnippetController<Prepared> {
 					await this.#notifyAndSettle(m.snippets_changed_before_expansion());
 					return 'cancelled';
 				}
+				if (isSelectedSnippetStaleInLoadedCatalog(invocation.snippet, this.options)) {
+					await this.#notifyAndSettle(m.snippets_changed_before_expansion());
+					return 'cancelled';
+				}
 			}
 			if (
 				(invocation.kind === 'slash' && !this.options.isConversationInput()) ||

@@ -28,7 +28,17 @@
 	type SnippetFormTarget =
 		| { kind: 'closed' }
 		| { kind: 'create' }
-		| { kind: 'edit'; snippet: Snippet; revision: number };
+		| { kind: 'edit'; snippet: Snippet; baseline: Snippet; revision: number };
+
+	function snippetsMatch(left: Snippet, right: Snippet): boolean {
+		return (
+			left.id === right.id &&
+			left.shortName === right.shortName &&
+			left.template === right.template &&
+			left.defaultArguments === right.defaultArguments &&
+			left.updatedAt === right.updatedAt
+		);
+	}
 
 	let { active }: Props = $props();
 	const snippets = getSnippets();
@@ -62,7 +72,7 @@
 		const revision = snippets.snapshot?.revision;
 		if (operationLocked || revision === undefined) return;
 		operationError = null;
-		form = { kind: 'edit', snippet, revision };
+		form = { kind: 'edit', snippet, baseline: snippet, revision };
 	}
 
 	function closeForm(): void {
@@ -84,16 +94,31 @@
 
 	async function save(definition: SnippetDefinitionInput): Promise<void> {
 		if (form.kind === 'edit') {
+			const targetId = form.snippet.id;
+			if (snippets.snapshot !== null && snippets.snapshot.revision === form.revision) {
+				const current = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
+				if (!current) {
+					throw new Error(m.snippets_already_removed({ name: form.baseline.shortName }));
+				}
+				if (!snippetsMatch(form.baseline, current)) {
+					form.baseline = current;
+					throw new Error(m.snippets_changed_before_write());
+				}
+			}
 			try {
-				await snippets.update(form.snippet.id, definition, form.revision);
+				await snippets.update(targetId, definition, form.revision);
 			} catch (error) {
-				// Update revision in place so an explicit retry uses the refreshed catalog without resetting the draft.
+				// Update baseline and revision in place so an explicit retry uses the refreshed catalog without resetting the draft.
 				if (
 					error instanceof ApiError &&
 					error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
 					snippets.snapshot !== null
 				) {
 					form.revision = snippets.snapshot.revision;
+					const refreshed = snippets.snapshot.snippets.find(
+						(entry) => entry.id === targetId,
+					);
+					if (refreshed) form.baseline = refreshed;
 				}
 				throw error;
 			}
@@ -104,6 +129,21 @@
 
 	async function confirmRemove(): Promise<void> {
 		if (!removeTarget || operationLocked) return;
+		if (snippets.snapshot !== null && snippets.snapshot.revision === removeTarget.revision) {
+			const targetId = removeTarget.snippet.id;
+			const current = snippets.snapshot.snippets.find((entry) => entry.id === targetId);
+			if (!current) {
+				const removedName = removeTarget.snippet.shortName;
+				closeRemove();
+				operationError = m.snippets_already_removed({ name: removedName });
+				return;
+			}
+			if (!snippetsMatch(removeTarget.snippet, current)) {
+				removeTarget = { snippet: current, revision: snippets.snapshot.revision };
+				removeError = m.snippets_remove_error({ detail: m.snippets_changed_before_write() });
+				return;
+			}
+		}
 		removing = true;
 		removeError = null;
 		try {
