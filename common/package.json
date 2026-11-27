@@ -86,6 +86,7 @@
     "./settings": "./settings.ts",
     "./share-types": "./share-types.ts",
     "./slash-commands": "./slash-commands.ts",
+    "./snippet-template": "./snippet-template.ts",
     "./snippets": "./snippets.ts",
     "./start-selection": "./start-selection.ts",
     "./tags": "./tags.ts",

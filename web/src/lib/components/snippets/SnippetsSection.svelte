@@ -10,7 +10,12 @@
 	import { getSnippets } from '$lib/context';
 	import { searchSnippets } from '$lib/snippets/search-snippets.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import { SNIPPET_MAX_COUNT, type Snippet, type SnippetDefinitionInput } from '$shared/snippets';
+	import {
+		SNIPPET_ERROR_CODES,
+		SNIPPET_MAX_COUNT,
+		type Snippet,
+		type SnippetDefinitionInput,
+	} from '$shared/snippets';
 	import SnippetFormDialog from './SnippetFormDialog.svelte';
 	import SnippetRemoveDialog from './SnippetRemoveDialog.svelte';
 	import SnippetRow from './SnippetRow.svelte';
@@ -20,15 +25,19 @@
 		active: boolean;
 	}
 
+	type SnippetFormTarget =
+		| { kind: 'closed' }
+		| { kind: 'create' }
+		| { kind: 'edit'; snippet: Snippet; revision: number };
+
 	let { active }: Props = $props();
 	const snippets = getSnippets();
 	let query = $state('');
 	const filteredSnippets = $derived(
 		searchSnippets(snippets.snippets, query, (snippet) => snippet.template),
 	);
-	let formOpen = $state(false);
-	let editingSnippet = $state<Snippet | null>(null);
-	let removeSnippet = $state<Snippet | null>(null);
+	let form = $state<SnippetFormTarget>({ kind: 'closed' });
+	let removeTarget = $state<{ snippet: Snippet; revision: number } | null>(null);
 	let removing = $state(false);
 	let removeError = $state<string | null>(null);
 	const operationLocked = $derived(removing || snippets.isRefreshing);
@@ -44,29 +53,66 @@
 
 	function openCreate(): void {
 		if (operationLocked) return;
-		editingSnippet = null;
-		formOpen = true;
+		form = { kind: 'create' };
 	}
 
 	function openEdit(snippet: Snippet): void {
-		if (operationLocked) return;
-		editingSnippet = snippet;
-		formOpen = true;
+		const revision = snippets.snapshot?.revision;
+		if (operationLocked || revision === undefined) return;
+		form = { kind: 'edit', snippet, revision };
+	}
+
+	function closeForm(): void {
+		form = { kind: 'closed' };
+	}
+
+	function openRemove(snippet: Snippet): void {
+		const revision = snippets.snapshot?.revision;
+		if (operationLocked || revision === undefined) return;
+		removeError = null;
+		removeTarget = { snippet, revision };
+	}
+
+	function closeRemove(): void {
+		removeTarget = null;
+		removeError = null;
 	}
 
 	async function save(definition: SnippetDefinitionInput): Promise<void> {
-		if (editingSnippet) await snippets.update(editingSnippet.id, definition);
-		else await snippets.create(definition);
+		if (form.kind === 'edit') {
+			try {
+				await snippets.update(form.snippet.id, definition, form.revision);
+			} catch (error) {
+				// Update revision in place so an explicit retry uses the refreshed catalog without resetting the draft.
+				if (
+					error instanceof ApiError &&
+					error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
+					snippets.snapshot !== null
+				) {
+					form.revision = snippets.snapshot.revision;
+				}
+				throw error;
+			}
+		} else if (form.kind === 'create') {
+			await snippets.create(definition);
+		}
 	}
 
 	async function confirmRemove(): Promise<void> {
-		if (!removeSnippet || operationLocked) return;
+		if (!removeTarget || operationLocked) return;
 		removing = true;
 		removeError = null;
 		try {
-			await snippets.remove(removeSnippet.id);
-			removeSnippet = null;
+			await snippets.remove(removeTarget.snippet.id, removeTarget.revision);
+			closeRemove();
 		} catch (error) {
+			if (
+				error instanceof ApiError &&
+				error.errorCode === SNIPPET_ERROR_CODES.revisionConflict &&
+				snippets.snapshot !== null
+			) {
+				removeTarget.revision = snippets.snapshot.revision;
+			}
 			removeError = m.snippets_remove_error({ detail: errorDetail(error) });
 		} finally {
 			removing = false;
@@ -144,10 +190,7 @@
 						{snippet}
 						disabled={operationLocked}
 						onEdit={() => openEdit(snippet)}
-						onRemove={() => {
-							removeError = null;
-							removeSnippet = snippet;
-						}}
+						onRemove={() => openRemove(snippet)}
 					/>
 					{#snippet failed()}
 						<div class="rounded-md border border-destructive/50 p-3 text-sm text-destructive">
@@ -160,22 +203,22 @@
 	{/if}
 </div>
 
-{#if formOpen}
+{#if form.kind !== 'closed'}
 	<SnippetFormDialog
 		open
-		snippet={editingSnippet}
+		snippet={form.kind === 'edit' ? form.snippet : null}
 		onSave={save}
-		onClose={() => (formOpen = false)}
+		onClose={closeForm}
 	/>
 {/if}
-{#if removeSnippet}
+{#if removeTarget}
 	<SnippetRemoveDialog
 		open
-		snippet={removeSnippet}
+		snippet={removeTarget.snippet}
 		{removing}
 		disabled={operationLocked}
 		error={removeError}
 		onConfirm={() => void confirmRemove()}
-		onClose={() => (removeSnippet = null)}
+		onClose={closeRemove}
 	/>
 {/if}
