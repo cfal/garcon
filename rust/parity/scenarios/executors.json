@@ -1,16 +1,16 @@
 {
   "name": "executors",
-  "description": "Executor configuration routes with only the local executor: the list, create validation field by field for both directions, labels, address and credential checks, successful executor-connects creates, and update, connection and remove for a created executor.",
+  "description": "Executor configuration routes with only the local executor: the list, create validation field by field for both directions, labels, address and credential checks, the public address taken from the Host header, an address that expands past the connection URL limit, successful executor-connects creates, and update, connection and remove for a created executor.",
   "steps": [
     {
-      "name": "executorsLocalOnly",
+      "name": "executors-local-only",
       "http": {
         "method": "GET",
         "path": "/api/v1/executors"
       }
     },
     {
-      "name": "createEmptyBody",
+      "name": "create-empty-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -18,7 +18,7 @@
       }
     },
     {
-      "name": "createArrayBody",
+      "name": "create-array-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -28,7 +28,7 @@
       }
     },
     {
-      "name": "createNullBody",
+      "name": "create-null-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -36,7 +36,7 @@
       }
     },
     {
-      "name": "createLabelMissing",
+      "name": "create-label-missing",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -46,7 +46,7 @@
       }
     },
     {
-      "name": "createLabelBlank",
+      "name": "create-label-blank",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -57,7 +57,7 @@
       }
     },
     {
-      "name": "createLabel101Characters",
+      "name": "create-label-101-characters",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -68,7 +68,7 @@
       }
     },
     {
-      "name": "createLabelNotString",
+      "name": "create-label-not-string",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -79,7 +79,7 @@
       }
     },
     {
-      "name": "createDirectionMissing",
+      "name": "create-direction-missing",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -89,7 +89,7 @@
       }
     },
     {
-      "name": "createDirectionUnknown",
+      "name": "create-direction-unknown",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -100,7 +100,7 @@
       }
     },
     {
-      "name": "createUnknownKey",
+      "name": "create-unknown-key",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -112,7 +112,7 @@
       }
     },
     {
-      "name": "createFlagsNotBoolean",
+      "name": "create-flags-not-boolean",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -124,7 +124,7 @@
       }
     },
     {
-      "name": "createManagementFlagNotBoolean",
+      "name": "create-management-flag-not-boolean",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -136,7 +136,7 @@
       }
     },
     {
-      "name": "createNoTlsNotBoolean",
+      "name": "create-no-tls-not-boolean",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -148,7 +148,7 @@
       }
     },
     {
-      "name": "createLabelReserved",
+      "name": "create-label-reserved",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -159,7 +159,7 @@
       }
     },
     {
-      "name": "createLabelReservedUpperCase",
+      "name": "create-label-reserved-upper-case",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -170,7 +170,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlTooLong",
+      "name": "create-advertised-url-too-long",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -182,7 +182,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlNotAUrl",
+      "name": "create-advertised-url-not-a-url",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -194,7 +194,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlWithoutTls",
+      "name": "create-advertised-url-without-tls",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -206,7 +206,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlNotWebsocket",
+      "name": "create-advertised-url-not-websocket",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -218,7 +218,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlUnspecifiedAddress",
+      "name": "create-advertised-url-unspecified-address",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -230,7 +230,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlUnspecifiedIpv6Address",
+      "name": "create-advertised-url-unspecified-ipv6-address",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -242,7 +242,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlWithFragment",
+      "name": "create-advertised-url-with-fragment",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -254,7 +254,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlWithCredentials",
+      "name": "create-advertised-url-with-credentials",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -266,7 +266,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlWithAllowUnverifiedTls",
+      "name": "create-advertised-url-with-allow-unverified-tls",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -279,7 +279,7 @@
       }
     },
     {
-      "name": "createAdvertisedUrlEmpty",
+      "name": "create-advertised-url-empty",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -291,7 +291,91 @@
       }
     },
     {
-      "name": "createBothDirectionsFields",
+      "name": "create-without-advertised-url-and-reserved-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "example.com:8080"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-unspecified-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "0.0.0.0:8080"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-host-with-a-space",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "bad host"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-host-without-a-port-range",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "host:99999"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-non-ascii-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "bücher.example"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-host-with-credentials",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "user:pass@host"
+        }
+      }
+    },
+    {
+      "name": "create-both-directions-fields",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -304,7 +388,7 @@
       }
     },
     {
-      "name": "createControllerConnectsWithoutUrl",
+      "name": "create-controller-connects-without-url",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -315,7 +399,7 @@
       }
     },
     {
-      "name": "createControllerConnectsUrlNotWebsocket",
+      "name": "create-controller-connects-url-not-websocket",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -327,7 +411,7 @@
       }
     },
     {
-      "name": "createControllerConnectsUrlWithCredentials",
+      "name": "create-controller-connects-url-with-credentials",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -339,7 +423,7 @@
       }
     },
     {
-      "name": "createControllerConnectsWithoutSecret",
+      "name": "create-controller-connects-without-secret",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -351,7 +435,7 @@
       }
     },
     {
-      "name": "createControllerConnectsSecretTooShort",
+      "name": "create-controller-connects-secret-too-short",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -363,7 +447,7 @@
       }
     },
     {
-      "name": "createControllerConnectsSecretWithInvalidBase64",
+      "name": "create-controller-connects-secret-with-invalid-base64",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -375,7 +459,7 @@
       }
     },
     {
-      "name": "createControllerConnectsExtraFragmentKey",
+      "name": "create-controller-connects-extra-fragment-key",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -387,7 +471,7 @@
       }
     },
     {
-      "name": "createControllerConnectsUrlTooLong",
+      "name": "create-controller-connects-url-too-long",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -399,7 +483,7 @@
       }
     },
     {
-      "name": "patchLocal",
+      "name": "patch-local",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/local",
@@ -409,14 +493,14 @@
       }
     },
     {
-      "name": "deleteLocal",
+      "name": "delete-local",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/executors/local"
       }
     },
     {
-      "name": "patchIdentifierNotAUuid",
+      "name": "patch-identifier-not-a-uuid",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/remote",
@@ -426,14 +510,14 @@
       }
     },
     {
-      "name": "deleteIdentifierNotAUuid",
+      "name": "delete-identifier-not-a-uuid",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/executors/remote"
       }
     },
     {
-      "name": "patchEmptyBody",
+      "name": "patch-empty-body",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -441,7 +525,7 @@
       }
     },
     {
-      "name": "patchUnknownKey",
+      "name": "patch-unknown-key",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -451,7 +535,7 @@
       }
     },
     {
-      "name": "patchLabelBlank",
+      "name": "patch-label-blank",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -461,7 +545,7 @@
       }
     },
     {
-      "name": "patchEnabledNotBoolean",
+      "name": "patch-enabled-not-boolean",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -471,7 +555,7 @@
       }
     },
     {
-      "name": "patchConnectionWithoutNoTls",
+      "name": "patch-connection-without-no-tls",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -483,7 +567,7 @@
       }
     },
     {
-      "name": "patchConnectionDirectionUnknown",
+      "name": "patch-connection-direction-unknown",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -496,7 +580,7 @@
       }
     },
     {
-      "name": "patchConnectionExecutorConnectsWithBypass",
+      "name": "patch-connection-executor-connects-with-bypass",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -510,7 +594,97 @@
       }
     },
     {
-      "name": "patchConnectionUrlNotAUrl",
+      "name": "patch-connection-scalar",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "patch-connection-without-direction",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "connectionUrl": "wss://executor.example.invalid",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-unknown-key",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "noTls": false,
+            "rename": "x"
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-allow-unverified-tls-not-boolean",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "controller-connects",
+            "connectionUrl": "wss://executor.example.invalid/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": false,
+            "allowUnverifiedTls": "yes"
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-url-empty",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-url-too-long",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-label-101-characters",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "patch-unknown-executor-connection-url-not-a-url",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -524,7 +698,7 @@
       }
     },
     {
-      "name": "patchConnectionUrlWithoutTls",
+      "name": "patch-unknown-executor-connection-url-without-tls",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -538,7 +712,7 @@
       }
     },
     {
-      "name": "patchUnknownExecutor",
+      "name": "patch-unknown-executor",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -548,7 +722,7 @@
       }
     },
     {
-      "name": "patchUnknownExecutorConnection",
+      "name": "patch-unknown-executor-connection",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
@@ -562,42 +736,42 @@
       }
     },
     {
-      "name": "deleteUnknownExecutor",
+      "name": "delete-unknown-executor",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000"
       }
     },
     {
-      "name": "connectionLocal",
+      "name": "connection-local",
       "http": {
         "method": "GET",
         "path": "/api/v1/executors/local/connection"
       }
     },
     {
-      "name": "connectionIdentifierNotAUuid",
+      "name": "connection-identifier-not-a-uuid",
       "http": {
         "method": "GET",
         "path": "/api/v1/executors/remote/connection"
       }
     },
     {
-      "name": "connectionUnknownExecutor",
+      "name": "connection-unknown-executor",
       "http": {
         "method": "GET",
         "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000/connection"
       }
     },
     {
-      "name": "connectionIdentifierTooShort",
+      "name": "connection-identifier-too-short",
       "http": {
         "method": "GET",
         "path": "/api/v1/executors/x/connection"
       }
     },
     {
-      "name": "createExecutorConnects",
+      "name": "create-executor-connects",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -611,7 +785,7 @@
       }
     },
     {
-      "name": "createDuplicateLabel",
+      "name": "create-duplicate-label",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -622,7 +796,7 @@
       }
     },
     {
-      "name": "createExecutorConnectsWithoutTls",
+      "name": "create-executor-connects-without-tls",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -635,7 +809,7 @@
       }
     },
     {
-      "name": "createExecutorConnectsWithoutAdvertisedUrl",
+      "name": "create-executor-connects-without-advertised-url",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -646,7 +820,7 @@
       }
     },
     {
-      "name": "createExecutorConnectsIpv6Address",
+      "name": "create-executor-connects-ipv6-address",
       "http": {
         "method": "POST",
         "path": "/api/v1/executors",
@@ -665,38 +839,38 @@
       }
     },
     {
-      "name": "patchCreatedEmptyBody",
+      "name": "patch-created-empty-body",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {}
       }
     },
     {
-      "name": "patchCreatedDuplicateLabel",
+      "name": "patch-created-duplicate-label",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "label": " executor two "
         }
       }
     },
     {
-      "name": "patchCreatedReservedLabel",
+      "name": "patch-created-reserved-label",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "label": "Local"
         }
       }
     },
     {
-      "name": "patchCreatedDirectionChangeWithoutUrl",
+      "name": "patch-created-direction-change-without-url",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "connection": {
             "direction": "controller-connects",
@@ -706,10 +880,10 @@
       }
     },
     {
-      "name": "patchCreatedAddressWithTlsBypass",
+      "name": "patch-created-address-with-tls-bypass",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "connection": {
             "direction": "executor-connects",
@@ -721,10 +895,10 @@
       }
     },
     {
-      "name": "patchCreatedCredentialCheckedBeforeAddress",
+      "name": "patch-created-credential-checked-before-address",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "connection": {
             "direction": "executor-connects",
@@ -735,10 +909,10 @@
       }
     },
     {
-      "name": "patchCreatedConnectionUrlNotAUrl",
+      "name": "patch-created-connection-url-not-a-url",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "connection": {
             "direction": "executor-connects",
@@ -749,30 +923,30 @@
       }
     },
     {
-      "name": "patchCreatedSameLabel",
+      "name": "patch-created-same-label",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "label": "  executor one  "
         }
       }
     },
     {
-      "name": "patchCreatedRename",
+      "name": "patch-created-rename",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "label": "  Executor Uno  "
         }
       }
     },
     {
-      "name": "patchCreatedFlags",
+      "name": "patch-created-flags",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "allowControllerCli": false,
           "allowExecutorManagement": false
@@ -780,10 +954,10 @@
       }
     },
     {
-      "name": "patchCreatedAddress",
+      "name": "patch-created-address",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "connection": {
             "direction": "executor-connects",
@@ -797,14 +971,44 @@
       "name": "connection-created",
       "http": {
         "method": "GET",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}/connection"
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}/connection"
       }
     },
     {
       "name": "connection-created-without-advertised-url",
       "http": {
         "method": "GET",
-        "path": "/api/v1/executors/{{createExecutorConnectsWithoutAdvertisedUrl.body.id}}/connection"
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection"
+      }
+    },
+    {
+      "name": "connection-without-advertised-url-and-reserved-host",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection",
+        "headers": {
+          "Host": "example.com:8080"
+        }
+      }
+    },
+    {
+      "name": "connection-without-advertised-url-from-upper-case-host",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection",
+        "headers": {
+          "Host": "EXECUTOR.example.invalid"
+        }
+      }
+    },
+    {
+      "name": "connection-without-advertised-url-and-host-with-a-space",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection",
+        "headers": {
+          "Host": "bad host"
+        }
       }
     },
     {
@@ -815,10 +1019,10 @@
       }
     },
     {
-      "name": "patchCreatedDisable",
+      "name": "patch-created-disable",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "enabled": false
         }
@@ -835,14 +1039,14 @@
       "name": "connection-created-disabled",
       "http": {
         "method": "GET",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}/connection"
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}/connection"
       }
     },
     {
-      "name": "deleteCreated",
+      "name": "delete-created",
       "http": {
         "method": "DELETE",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}"
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}"
       }
     },
     {
@@ -853,34 +1057,34 @@
       }
     },
     {
-      "name": "deleteCreatedAgain",
+      "name": "delete-created-again",
       "http": {
         "method": "DELETE",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}"
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}"
       }
     },
     {
       "name": "connection-removed",
       "http": {
         "method": "GET",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}/connection"
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}/connection"
       }
     },
     {
-      "name": "patchRemoved",
+      "name": "patch-removed",
       "http": {
         "method": "PATCH",
-        "path": "/api/v1/executors/{{createExecutorConnects.body.id}}",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
         "json": {
           "label": "Back"
         }
       }
     },
     {
-      "name": "deleteSecondCreated",
+      "name": "delete-second-created",
       "http": {
         "method": "DELETE",
-        "path": "/api/v1/executors/{{createExecutorConnectsWithoutTls.body.id}}"
+        "path": "/api/v1/executors/{{create-executor-connects-without-tls.body.id}}"
       }
     },
     {
@@ -891,7 +1095,80 @@
       }
     },
     {
-      "name": "executorsWrongMethod",
+      "name": "create-advertised-url-expanding-to-4096-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Expander One",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://e.example.invalid/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-expanding-to-4097-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Expander Two",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://e.example.invalid/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-from-upper-case-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Host Upper",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "EXECUTOR.example.invalid"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-from-ipv6-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Host IPv6",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "[::1]:8080"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-from-host-with-trailing-dot",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Host Dot",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "executor.example.invalid."
+        }
+      }
+    },
+    {
+      "name": "executors-after-creates-from-host",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "executors-wrong-method",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/executors",

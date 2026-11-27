@@ -1,0 +1,454 @@
+{
+  "name": "executors-seeded",
+  "description": "Executor configuration routes over three seeded executors, one disabled and one without TLS: unknown identifiers; label updates with the duplicate, reserved and freed names; flag updates; disabling and enabling; address updates, where a full connection URL carries the secret that replaces the executor's own; the connection URL with an advertised address, without one, and without TLS; and remove.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/executors.json": "{\n  \"version\": 1,\n  \"executors\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"label\": \"Executor One\",\n      \"enabled\": true,\n      \"noTls\": false,\n      \"allowControllerCli\": true,\n      \"allowExecutorManagement\": true,\n      \"allowUnverifiedTls\": false,\n      \"secret\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ\",\n      \"connection\": {\n        \"kind\": \"executor-connects\",\n        \"advertisedUrl\": \"wss://executor-one.example.invalid/link\"\n      }\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"label\": \"Executor Two\",\n      \"enabled\": false,\n      \"noTls\": false,\n      \"allowControllerCli\": false,\n      \"allowExecutorManagement\": false,\n      \"allowUnverifiedTls\": false,\n      \"secret\": \"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAQ\",\n      \"connection\": {\n        \"kind\": \"executor-connects\",\n        \"advertisedUrl\": null\n      }\n    },\n    {\n      \"id\": \"33333333-3333-4333-8333-333333333333\",\n      \"label\": \"Executor Three\",\n      \"enabled\": true,\n      \"noTls\": true,\n      \"allowControllerCli\": false,\n      \"allowExecutorManagement\": false,\n      \"allowUnverifiedTls\": false,\n      \"secret\": \"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCQ\",\n      \"connection\": {\n        \"kind\": \"executor-connects\",\n        \"advertisedUrl\": \"ws://executor-three.example.invalid/link\"\n      }\n    }\n  ]\n}"
+    }
+  },
+  "steps": [
+    {
+      "name": "executors-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "patch-unknown-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "patch-unknown-executor-empty-body",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {}
+      }
+    },
+    {
+      "name": "patch-unknown-executor-address",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "remove-unknown-executor",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000"
+      }
+    },
+    {
+      "name": "connection-unknown-executor",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000/connection"
+      }
+    },
+    {
+      "name": "patch-duplicate-label",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "label": " executor two "
+        }
+      }
+    },
+    {
+      "name": "patch-duplicate-label-of-disabled-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "label": "EXECUTOR THREE"
+        }
+      }
+    },
+    {
+      "name": "patch-reserved-label",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "label": " local "
+        }
+      }
+    },
+    {
+      "name": "patch-same-label",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "label": "  Executor One  "
+        }
+      }
+    },
+    {
+      "name": "patch-rename",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "label": "  Executor Uno  "
+        }
+      }
+    },
+    {
+      "name": "executors-after-rename",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "patch-reuse-freed-label",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/22222222-2222-4222-8222-222222222222",
+        "json": {
+          "label": "executor one"
+        }
+      }
+    },
+    {
+      "name": "patch-flags",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "allowControllerCli": false,
+          "allowExecutorManagement": false
+        }
+      }
+    },
+    {
+      "name": "patch-enable-enabled-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "patch-disable",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "name": "executors-after-disable",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "patch-enable",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "patch-enable-disabled-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/22222222-2222-4222-8222-222222222222",
+        "json": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "executors-after-enable",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "patch-direction-change-without-url",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "controller-connects",
+            "noTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-without-secret",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other/",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-with-secret-of-another-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other/#secret=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAQ",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-with-secret-of-this-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-with-tls-bypass",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other",
+            "noTls": false,
+            "allowUnverifiedTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-without-tls",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "ws://uno.example.invalid/other/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-unspecified",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://0.0.0.0/other/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-not-a-url",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "not a url",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address-secret-not-canonical",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other/#secret=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-address",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "executors-after-address-change",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "connection-with-advertised-url",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/11111111-1111-4111-8111-111111111111/connection"
+      }
+    },
+    {
+      "name": "connection-without-advertised-url",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/22222222-2222-4222-8222-222222222222/connection"
+      }
+    },
+    {
+      "name": "connection-without-tls",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/33333333-3333-4333-8333-333333333333/connection"
+      }
+    },
+    {
+      "name": "connection-local",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/local/connection"
+      }
+    },
+    {
+      "name": "patch-address-of-executor-without-advertised-url",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/22222222-2222-4222-8222-222222222222",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "ws://dos.example.invalid/other/#secret=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAQ",
+            "noTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "connection-after-advertising-an-address",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/22222222-2222-4222-8222-222222222222/connection"
+      }
+    },
+    {
+      "name": "remove-executor",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/33333333-3333-4333-8333-333333333333"
+      }
+    },
+    {
+      "name": "executors-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "remove-removed-executor",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/33333333-3333-4333-8333-333333333333"
+      }
+    },
+    {
+      "name": "connection-removed-executor",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/33333333-3333-4333-8333-333333333333/connection"
+      }
+    },
+    {
+      "name": "patch-removed-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/33333333-3333-4333-8333-333333333333",
+        "json": {
+          "label": "Back"
+        }
+      }
+    },
+    {
+      "name": "remove-local",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/local"
+      }
+    },
+    {
+      "name": "remove-second-executor",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "name": "executors-at-end",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    }
+  ],
+  "traps": true
+}

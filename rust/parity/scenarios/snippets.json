@@ -426,7 +426,7 @@
       }
     },
     {
-      "name": "create-omega-ignoring-extra-fields",
+      "name": "create-omega",
       "http": {
         "method": "POST",
         "path": "/api/v1/snippets",
@@ -1917,6 +1917,47 @@
             "projectPath": "{{projectDir}}"
           }
         }
+      }
+    },
+    {
+      "name": "update-created-omega",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 11,
+          "id": "{{create-omega.body.snapshot.snippets[0].id}}",
+          "snippet": {
+            "shortName": "omega",
+            "template": "Omega {{arguments}} edited",
+            "defaultArguments": "omega-default"
+          }
+        }
+      }
+    },
+    {
+      "name": "snippets-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
+      }
+    },
+    {
+      "name": "remove-created-omega",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/snippets",
+        "json": {
+          "expectedRevision": 12,
+          "id": "{{create-omega.body.snapshot.snippets[0].id}}"
+        }
+      }
+    },
+    {
+      "name": "snippets-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/snippets"
       }
     },
     {

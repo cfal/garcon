@@ -10,7 +10,7 @@
   },
   "steps": [
     {
-      "name": "createPrompt32001Rejected",
+      "name": "create-prompt-32001-rejected",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -43,7 +43,7 @@
       }
     },
     {
-      "name": "createPromptExpandingPastLimitRejected",
+      "name": "create-prompt-expanding-past-limit-rejected",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -76,7 +76,7 @@
       }
     },
     {
-      "name": "createName121CodePointsRejected",
+      "name": "create-name-121-code-points-rejected",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -110,7 +110,7 @@
       }
     },
     {
-      "name": "createTitleTemplate4097BytesRejected",
+      "name": "create-title-template-4097-bytes-rejected",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -144,7 +144,7 @@
       }
     },
     {
-      "name": "createTitleTemplate4096BytesAccepted",
+      "name": "create-title-template-4096-bytes-accepted",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -178,7 +178,7 @@
       }
     },
     {
-      "name": "createName120CodePointsAccepted",
+      "name": "create-name-120-code-points-accepted",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -212,7 +212,7 @@
       }
     },
     {
-      "name": "createPromptExpandingToLimitAccepted",
+      "name": "create-prompt-expanding-to-limit-accepted",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -245,7 +245,7 @@
       }
     },
     {
-      "name": "createPromptAtLimitAccepted",
+      "name": "create-prompt-at-limit-accepted",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -278,14 +278,14 @@
       }
     },
     {
-      "name": "promptsWithLargePrompt",
+      "name": "prompts-with-large-prompt",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "renderExpandedToLimit",
+      "name": "render-expanded-to-limit",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -296,7 +296,7 @@
       }
     },
     {
-      "name": "renderPromptAtLimit",
+      "name": "render-prompt-at-limit",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",

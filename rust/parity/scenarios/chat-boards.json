@@ -1,6 +1,6 @@
 {
   "name": "chat-boards",
-  "description": "Chat board routes on an empty workspace: reads, create validation field by field, name normalization at the length limit, revision conflicts with the returned catalog, unknown board identifiers, and every reorder rejection.",
+  "description": "Chat board routes on an empty workspace: reads, create validation field by field, name normalization at the length limit, revision conflicts with the returned catalog, unknown board identifiers, every reorder rejection, and an update, a reorder, and a remove of the created boards by the identifiers their creates answered with.",
   "steps": [
     {
       "name": "boards-empty",
@@ -867,6 +867,106 @@
         "json": {
           "expectedRevision": 1,
           "orderedBoardIds": []
+        }
+      }
+    },
+    {
+      "name": "update-created-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "{{create-second.body.boardId}}",
+            "name": "Board two",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "boards-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "update-created-board-with-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "{{create-second.body.boardId}}",
+            "name": "Board two again",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "order-created-boards",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 3,
+          "orderedBoardIds": [
+            "{{create-second.body.boardId}}",
+            "{{create-name-80-code-points.body.boardId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "boards-after-order",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "remove-created-board",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 4,
+          "boardId": "{{create-second.body.boardId}}"
+        }
+      }
+    },
+    {
+      "name": "boards-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "update-removed-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 5,
+          "board": {
+            "id": "{{create-second.body.boardId}}",
+            "name": "Board two",
+            "columns": []
+          }
         }
       }
     },

@@ -10,7 +10,7 @@
   },
   "steps": [
     {
-      "name": "promptsEmpty",
+      "name": "prompts-empty",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
@@ -28,7 +28,7 @@
       }
     },
     {
-      "name": "renderWithToday",
+      "name": "render-with-today",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -39,7 +39,7 @@
       }
     },
     {
-      "name": "renderWithEscapedToken",
+      "name": "render-with-escaped-token",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -50,7 +50,7 @@
       }
     },
     {
-      "name": "renderTrimsNothing",
+      "name": "render-trims-nothing",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -61,7 +61,7 @@
       }
     },
     {
-      "name": "renderMissingChatId",
+      "name": "render-missing-chat-id",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -71,7 +71,7 @@
       }
     },
     {
-      "name": "renderChatIdNot16Digits",
+      "name": "render-chat-id-not-16-digits",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -82,7 +82,7 @@
       }
     },
     {
-      "name": "renderMissingPrompt",
+      "name": "render-missing-prompt",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -92,7 +92,7 @@
       }
     },
     {
-      "name": "renderBlankPrompt",
+      "name": "render-blank-prompt",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -103,7 +103,7 @@
       }
     },
     {
-      "name": "renderPromptNotString",
+      "name": "render-prompt-not-string",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -114,7 +114,7 @@
       }
     },
     {
-      "name": "renderExtraField",
+      "name": "render-extra-field",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -126,7 +126,7 @@
       }
     },
     {
-      "name": "renderArrayBody",
+      "name": "render-array-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -136,7 +136,7 @@
       }
     },
     {
-      "name": "renderExpandedOneOverLimit",
+      "name": "render-expanded-one-over-limit",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -147,7 +147,7 @@
       }
     },
     {
-      "name": "renderPromptOneOverLimit",
+      "name": "render-prompt-one-over-limit",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/render",
@@ -158,7 +158,7 @@
       }
     },
     {
-      "name": "createMissingRevision",
+      "name": "create-missing-revision",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -168,7 +168,7 @@
       }
     },
     {
-      "name": "createMissingPrompt",
+      "name": "create-missing-prompt",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -178,7 +178,7 @@
       }
     },
     {
-      "name": "createRevisionNegative",
+      "name": "create-revision-negative",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -211,7 +211,7 @@
       }
     },
     {
-      "name": "createRevisionFractional",
+      "name": "create-revision-fractional",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -244,7 +244,7 @@
       }
     },
     {
-      "name": "createRevisionString",
+      "name": "create-revision-string",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -277,7 +277,7 @@
       }
     },
     {
-      "name": "createArrayBody",
+      "name": "create-array-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -287,7 +287,7 @@
       }
     },
     {
-      "name": "createNullBody",
+      "name": "create-null-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -295,7 +295,7 @@
       }
     },
     {
-      "name": "createNameNotString",
+      "name": "create-name-not-string",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -329,7 +329,7 @@
       }
     },
     {
-      "name": "createNameWithControl",
+      "name": "create-name-with-control",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -363,7 +363,7 @@
       }
     },
     {
-      "name": "createName121CodePoints",
+      "name": "create-name-121-code-points",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -397,7 +397,7 @@
       }
     },
     {
-      "name": "createScheduleMissing",
+      "name": "create-schedule-missing",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -426,7 +426,7 @@
       }
     },
     {
-      "name": "createScheduleScalar",
+      "name": "create-schedule-scalar",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -456,7 +456,7 @@
       }
     },
     {
-      "name": "createScheduleTypeUnknown",
+      "name": "create-schedule-type-unknown",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -489,7 +489,7 @@
       }
     },
     {
-      "name": "createOnceWithoutRunAt",
+      "name": "create-once-without-run-at",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -521,7 +521,7 @@
       }
     },
     {
-      "name": "createRunAtWithoutMilliseconds",
+      "name": "create-run-at-without-milliseconds",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -554,7 +554,7 @@
       }
     },
     {
-      "name": "createRunAtNotMinuteAligned",
+      "name": "create-run-at-not-minute-aligned",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -587,7 +587,7 @@
       }
     },
     {
-      "name": "createRunAtDateOnly",
+      "name": "create-run-at-date-only",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -620,7 +620,7 @@
       }
     },
     {
-      "name": "createRunAtNotAString",
+      "name": "create-run-at-not-a-string",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -653,7 +653,7 @@
       }
     },
     {
-      "name": "createRecurringWithoutInterval",
+      "name": "create-recurring-without-interval",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -687,7 +687,7 @@
       }
     },
     {
-      "name": "createRecurringIntervalZero",
+      "name": "create-recurring-interval-zero",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -722,7 +722,7 @@
       }
     },
     {
-      "name": "createRecurringIntervalFractional",
+      "name": "create-recurring-interval-fractional",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -757,7 +757,7 @@
       }
     },
     {
-      "name": "createRecurringIntervalOverMax",
+      "name": "create-recurring-interval-over-max",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -792,7 +792,7 @@
       }
     },
     {
-      "name": "createRecurringEndBeforeFirstRun",
+      "name": "create-recurring-end-before-first-run",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -827,7 +827,7 @@
       }
     },
     {
-      "name": "createRecurringEndNotAligned",
+      "name": "create-recurring-end-not-aligned",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -862,7 +862,7 @@
       }
     },
     {
-      "name": "createRecurringWithLegacyHours",
+      "name": "create-recurring-with-legacy-hours",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -897,7 +897,7 @@
       }
     },
     {
-      "name": "createRecurringWithoutEnd",
+      "name": "create-recurring-without-end",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -931,7 +931,7 @@
       }
     },
     {
-      "name": "createTargetMissing",
+      "name": "create-target-missing",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -948,7 +948,7 @@
       }
     },
     {
-      "name": "createTargetTypeUnknown",
+      "name": "create-target-type-unknown",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -968,7 +968,7 @@
       }
     },
     {
-      "name": "createNewChatWithoutAgent",
+      "name": "create-new-chat-without-agent",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1000,7 +1000,7 @@
       }
     },
     {
-      "name": "createNewChatExecutorInvalid",
+      "name": "create-new-chat-executor-invalid",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1034,7 +1034,7 @@
       }
     },
     {
-      "name": "createNewChatProjectPathBlank",
+      "name": "create-new-chat-project-path-blank",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1067,7 +1067,7 @@
       }
     },
     {
-      "name": "createNewChatModelBlank",
+      "name": "create-new-chat-model-blank",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1100,7 +1100,7 @@
       }
     },
     {
-      "name": "createNewChatPermissionModeInvalid",
+      "name": "create-new-chat-permission-mode-invalid",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1133,7 +1133,7 @@
       }
     },
     {
-      "name": "createNewChatThinkingModeInvalid",
+      "name": "create-new-chat-thinking-mode-invalid",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1166,7 +1166,7 @@
       }
     },
     {
-      "name": "createNewChatTagsNotArray",
+      "name": "create-new-chat-tags-not-array",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1199,7 +1199,7 @@
       }
     },
     {
-      "name": "createNewChatPreambleChoiceMissing",
+      "name": "create-new-chat-preamble-choice-missing",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1229,7 +1229,7 @@
       }
     },
     {
-      "name": "createNewChatPreambleChoiceInvalid",
+      "name": "create-new-chat-preamble-choice-invalid",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1262,7 +1262,7 @@
       }
     },
     {
-      "name": "createNewChatTitleTemplateMultiLine",
+      "name": "create-new-chat-title-template-multi-line",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1296,7 +1296,7 @@
       }
     },
     {
-      "name": "createNewChatTitleTemplateTooLong",
+      "name": "create-new-chat-title-template-too-long",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1330,7 +1330,7 @@
       }
     },
     {
-      "name": "createExistingChatWithoutChat",
+      "name": "create-existing-chat-without-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1351,7 +1351,7 @@
       }
     },
     {
-      "name": "createExistingChatBusyBehaviorInvalid",
+      "name": "create-existing-chat-busy-behavior-invalid",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1373,7 +1373,7 @@
       }
     },
     {
-      "name": "createExistingChatWithNewChatFields",
+      "name": "create-existing-chat-with-new-chat-fields",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1398,7 +1398,7 @@
       }
     },
     {
-      "name": "createExistingChatSelectionMissingAgent",
+      "name": "create-existing-chat-selection-missing-agent",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1424,7 +1424,7 @@
       }
     },
     {
-      "name": "promptBlank",
+      "name": "prompt-blank",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1457,7 +1457,7 @@
       }
     },
     {
-      "name": "promptNotString",
+      "name": "prompt-not-string",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1490,7 +1490,7 @@
       }
     },
     {
-      "name": "promptTooLong",
+      "name": "prompt-too-long",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1523,7 +1523,7 @@
       }
     },
     {
-      "name": "promptExpandsPastLimit",
+      "name": "prompt-expands-past-limit",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1556,7 +1556,7 @@
       }
     },
     {
-      "name": "createUnknownAgent",
+      "name": "create-unknown-agent",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1589,7 +1589,7 @@
       }
     },
     {
-      "name": "createUnsupportedPermissionMode",
+      "name": "create-unsupported-permission-mode",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1622,7 +1622,7 @@
       }
     },
     {
-      "name": "createUnsupportedThinkingMode",
+      "name": "create-unsupported-thinking-mode",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1655,7 +1655,7 @@
       }
     },
     {
-      "name": "createProjectPathNotFound",
+      "name": "create-project-path-not-found",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1688,7 +1688,7 @@
       }
     },
     {
-      "name": "createProjectPathOutsideBase",
+      "name": "create-project-path-outside-base",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1721,7 +1721,7 @@
       }
     },
     {
-      "name": "createProjectPathUnknownExecutor",
+      "name": "create-project-path-unknown-executor",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1755,7 +1755,7 @@
       }
     },
     {
-      "name": "createExistingChatMissing",
+      "name": "create-existing-chat-missing",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1777,7 +1777,7 @@
       }
     },
     {
-      "name": "createExistingChatSelectionChanged",
+      "name": "create-existing-chat-selection-changed",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1804,7 +1804,7 @@
       }
     },
     {
-      "name": "createExistingChatSelectionEpochChanged",
+      "name": "create-existing-chat-selection-epoch-changed",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1831,7 +1831,7 @@
       }
     },
     {
-      "name": "createFirstRunInThePast",
+      "name": "create-first-run-in-the-past",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1864,7 +1864,7 @@
       }
     },
     {
-      "name": "createLeadingSlashCommand",
+      "name": "create-leading-slash-command",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1897,7 +1897,7 @@
       }
     },
     {
-      "name": "createFirst",
+      "name": "create-first",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1931,14 +1931,14 @@
       }
     },
     {
-      "name": "promptsAfterCreate",
+      "name": "prompts-after-create",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "createStaleRevision",
+      "name": "create-stale-revision",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -1971,7 +1971,7 @@
       }
     },
     {
-      "name": "createFutureRevision",
+      "name": "create-future-revision",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2004,7 +2004,7 @@
       }
     },
     {
-      "name": "createSecond",
+      "name": "create-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2040,7 +2040,7 @@
       }
     },
     {
-      "name": "createThird",
+      "name": "create-third",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2062,7 +2062,7 @@
       }
     },
     {
-      "name": "createFourth",
+      "name": "create-fourth",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2098,7 +2098,7 @@
       }
     },
     {
-      "name": "createFifth",
+      "name": "create-fifth",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2136,7 +2136,7 @@
       }
     },
     {
-      "name": "createSixth",
+      "name": "create-sixth",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2171,7 +2171,7 @@
       }
     },
     {
-      "name": "createWithUnknownApiProvider",
+      "name": "create-with-unknown-api-provider",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2204,7 +2204,7 @@
       }
     },
     {
-      "name": "createEighth",
+      "name": "create-eighth",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2240,7 +2240,7 @@
       }
     },
     {
-      "name": "createNinth",
+      "name": "create-ninth",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts",
@@ -2276,14 +2276,14 @@
       }
     },
     {
-      "name": "promptsAfterCreates",
+      "name": "prompts-after-creates",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "updateEmptyBody",
+      "name": "update-empty-body",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -2291,7 +2291,7 @@
       }
     },
     {
-      "name": "updateMissingId",
+      "name": "update-missing-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -2324,7 +2324,7 @@
       }
     },
     {
-      "name": "updateBlankId",
+      "name": "update-blank-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -2358,7 +2358,7 @@
       }
     },
     {
-      "name": "updateUnknownId",
+      "name": "update-unknown-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -2392,7 +2392,7 @@
       }
     },
     {
-      "name": "updateStaleRevisionUnknownId",
+      "name": "update-stale-revision-unknown-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -2426,7 +2426,7 @@
       }
     },
     {
-      "name": "updateInvalidDefinitionUnknownId",
+      "name": "update-invalid-definition-unknown-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -2460,13 +2460,13 @@
       }
     },
     {
-      "name": "updateStaleRevision",
+      "name": "update-stale-revision",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 0,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2494,13 +2494,13 @@
       }
     },
     {
-      "name": "updateInvalidDefinition",
+      "name": "update-invalid-definition",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 8,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2528,13 +2528,13 @@
       }
     },
     {
-      "name": "updateFirst",
+      "name": "update-first",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 8,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2563,13 +2563,13 @@
       }
     },
     {
-      "name": "updateFirstAgainWithOldRevision",
+      "name": "update-first-again-with-old-revision",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 0,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2597,13 +2597,13 @@
       }
     },
     {
-      "name": "updateFirstToRecurring",
+      "name": "update-first-to-recurring",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 9,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "recurring",
@@ -2633,13 +2633,13 @@
       }
     },
     {
-      "name": "updateFirstToExistingChat",
+      "name": "update-first-to-existing-chat",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 10,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2656,13 +2656,13 @@
       }
     },
     {
-      "name": "updateFirstToMissingChat",
+      "name": "update-first-to-missing-chat",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 11,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2679,13 +2679,13 @@
       }
     },
     {
-      "name": "updateThirdWithStaleSelection",
+      "name": "update-third-with-stale-selection",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 11,
-          "id": "{{createThird.body.scheduledPrompt.id}}",
+          "id": "{{create-third.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2707,13 +2707,13 @@
       }
     },
     {
-      "name": "updateThirdToOtherChat",
+      "name": "update-third-to-other-chat",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 11,
-          "id": "{{createThird.body.scheduledPrompt.id}}",
+          "id": "{{create-third.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2730,13 +2730,13 @@
       }
     },
     {
-      "name": "updateThirdKeepsGuardedSelection",
+      "name": "update-third-keeps-guarded-selection",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 12,
-          "id": "{{createThird.body.scheduledPrompt.id}}",
+          "id": "{{create-third.body.scheduledPrompt.id}}",
           "scheduledPrompt": {
             "schedule": {
               "type": "once",
@@ -2753,14 +2753,14 @@
       }
     },
     {
-      "name": "promptsAfterUpdate",
+      "name": "prompts-after-update",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "enabledEmptyBody",
+      "name": "enabled-empty-body",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -2768,7 +2768,7 @@
       }
     },
     {
-      "name": "enabledMissingId",
+      "name": "enabled-missing-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -2779,19 +2779,19 @@
       }
     },
     {
-      "name": "enabledNotBoolean",
+      "name": "enabled-not-boolean",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
         "json": {
           "expectedRevision": 13,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "enabled": "no"
         }
       }
     },
     {
-      "name": "enabledUnknownId",
+      "name": "enabled-unknown-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -2803,74 +2803,74 @@
       }
     },
     {
-      "name": "enabledStaleRevision",
+      "name": "enabled-stale-revision",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
         "json": {
           "expectedRevision": 0,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "enabled": false
         }
       }
     },
     {
-      "name": "enabledDisableFirst",
+      "name": "enabled-disable-first",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
         "json": {
           "expectedRevision": 13,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "enabled": false
         }
       }
     },
     {
-      "name": "enabledEnableFirst",
+      "name": "enabled-enable-first",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
         "json": {
           "expectedRevision": 14,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "enabled": true
         }
       }
     },
     {
-      "name": "enabledDisableFirstAgain",
+      "name": "enabled-disable-first-again",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
         "json": {
           "expectedRevision": 15,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "enabled": false
         }
       }
     },
     {
-      "name": "enabledDisableFirstUnchanged",
+      "name": "enabled-disable-first-unchanged",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
         "json": {
           "expectedRevision": 16,
-          "id": "{{createFirst.body.scheduledPrompt.id}}",
+          "id": "{{create-first.body.scheduledPrompt.id}}",
           "enabled": false
         }
       }
     },
     {
-      "name": "promptsAfterEnable",
+      "name": "prompts-after-enable",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "removeEmptyBody",
+      "name": "remove-empty-body",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/scheduled-prompts",
@@ -2878,7 +2878,7 @@
       }
     },
     {
-      "name": "removeMissingId",
+      "name": "remove-missing-id",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/scheduled-prompts",
@@ -2888,7 +2888,7 @@
       }
     },
     {
-      "name": "removeUnknownId",
+      "name": "remove-unknown-id",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/scheduled-prompts",
@@ -2899,47 +2899,47 @@
       }
     },
     {
-      "name": "removeStaleRevision",
+      "name": "remove-stale-revision",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 0,
-          "id": "{{createFirst.body.scheduledPrompt.id}}"
+          "id": "{{create-first.body.scheduledPrompt.id}}"
         }
       }
     },
     {
-      "name": "removeSecond",
+      "name": "remove-second",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 17,
-          "id": "{{createSecond.body.scheduledPrompt.id}}"
+          "id": "{{create-second.body.scheduledPrompt.id}}"
         }
       }
     },
     {
-      "name": "removeSecondAgain",
+      "name": "remove-second-again",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/scheduled-prompts",
         "json": {
           "expectedRevision": 18,
-          "id": "{{createSecond.body.scheduledPrompt.id}}"
+          "id": "{{create-second.body.scheduledPrompt.id}}"
         }
       }
     },
     {
-      "name": "promptsAfterRemove",
+      "name": "prompts-after-remove",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "reorderEmptyBody",
+      "name": "reorder-empty-body",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/reorder",
@@ -2947,105 +2947,105 @@
       }
     },
     {
-      "name": "reorderIdsNotArray",
+      "name": "reorder-ids-not-array",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/reorder",
         "json": {
           "expectedRevision": 18,
-          "orderedPromptIds": "{{createFirst.body.scheduledPrompt.id}}"
+          "orderedPromptIds": "{{create-first.body.scheduledPrompt.id}}"
         }
       }
     },
     {
-      "name": "reorderEntryNotString",
+      "name": "reorder-entry-not-string",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/reorder",
         "json": {
           "expectedRevision": 18,
           "orderedPromptIds": [
-            "{{createFirst.body.scheduledPrompt.id}}",
+            "{{create-first.body.scheduledPrompt.id}}",
             7,
-            "{{createThird.body.scheduledPrompt.id}}",
-            "{{createFourth.body.scheduledPrompt.id}}",
-            "{{createFifth.body.scheduledPrompt.id}}",
-            "{{createSixth.body.scheduledPrompt.id}}",
-            "{{createEighth.body.scheduledPrompt.id}}",
-            "{{createNinth.body.scheduledPrompt.id}}"
+            "{{create-third.body.scheduledPrompt.id}}",
+            "{{create-fourth.body.scheduledPrompt.id}}",
+            "{{create-fifth.body.scheduledPrompt.id}}",
+            "{{create-sixth.body.scheduledPrompt.id}}",
+            "{{create-eighth.body.scheduledPrompt.id}}",
+            "{{create-ninth.body.scheduledPrompt.id}}"
           ]
         }
       }
     },
     {
-      "name": "reorderMissingOne",
+      "name": "reorder-missing-one",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/reorder",
         "json": {
           "expectedRevision": 18,
           "orderedPromptIds": [
-            "{{createFirst.body.scheduledPrompt.id}}",
-            "{{createThird.body.scheduledPrompt.id}}",
-            "{{createFourth.body.scheduledPrompt.id}}"
+            "{{create-first.body.scheduledPrompt.id}}",
+            "{{create-third.body.scheduledPrompt.id}}",
+            "{{create-fourth.body.scheduledPrompt.id}}"
           ]
         }
       }
     },
     {
-      "name": "reorderUnknownId",
+      "name": "reorder-unknown-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/reorder",
         "json": {
           "expectedRevision": 18,
           "orderedPromptIds": [
-            "{{createFirst.body.scheduledPrompt.id}}",
-            "{{createThird.body.scheduledPrompt.id}}",
-            "{{createFourth.body.scheduledPrompt.id}}",
-            "{{createFifth.body.scheduledPrompt.id}}",
-            "{{createSixth.body.scheduledPrompt.id}}",
-            "{{createEighth.body.scheduledPrompt.id}}",
-            "{{createNinth.body.scheduledPrompt.id}}",
+            "{{create-first.body.scheduledPrompt.id}}",
+            "{{create-third.body.scheduledPrompt.id}}",
+            "{{create-fourth.body.scheduledPrompt.id}}",
+            "{{create-fifth.body.scheduledPrompt.id}}",
+            "{{create-sixth.body.scheduledPrompt.id}}",
+            "{{create-eighth.body.scheduledPrompt.id}}",
+            "{{create-ninth.body.scheduledPrompt.id}}",
             "33333333-3333-4333-8333-333333333333"
           ]
         }
       }
     },
     {
-      "name": "reorderDuplicateEntry",
+      "name": "reorder-duplicate-entry",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/reorder",
         "json": {
           "expectedRevision": 18,
           "orderedPromptIds": [
-            "{{createFirst.body.scheduledPrompt.id}}",
-            "{{createThird.body.scheduledPrompt.id}}",
-            "{{createFourth.body.scheduledPrompt.id}}",
-            "{{createFifth.body.scheduledPrompt.id}}",
-            "{{createSixth.body.scheduledPrompt.id}}",
-            "{{createEighth.body.scheduledPrompt.id}}",
-            "{{createFifth.body.scheduledPrompt.id}}"
+            "{{create-first.body.scheduledPrompt.id}}",
+            "{{create-third.body.scheduledPrompt.id}}",
+            "{{create-fourth.body.scheduledPrompt.id}}",
+            "{{create-fifth.body.scheduledPrompt.id}}",
+            "{{create-sixth.body.scheduledPrompt.id}}",
+            "{{create-eighth.body.scheduledPrompt.id}}",
+            "{{create-fifth.body.scheduledPrompt.id}}"
           ]
         }
       }
     },
     {
-      "name": "reorderRemovedId",
+      "name": "reorder-removed-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/reorder",
         "json": {
           "expectedRevision": 18,
           "orderedPromptIds": [
-            "{{createFirst.body.scheduledPrompt.id}}",
-            "{{createThird.body.scheduledPrompt.id}}",
-            "{{createFourth.body.scheduledPrompt.id}}",
-            "{{createFifth.body.scheduledPrompt.id}}",
-            "{{createSixth.body.scheduledPrompt.id}}",
-            "{{createEighth.body.scheduledPrompt.id}}",
-            "{{createSecond.body.scheduledPrompt.id}}"
+            "{{create-first.body.scheduledPrompt.id}}",
+            "{{create-third.body.scheduledPrompt.id}}",
+            "{{create-fourth.body.scheduledPrompt.id}}",
+            "{{create-fifth.body.scheduledPrompt.id}}",
+            "{{create-sixth.body.scheduledPrompt.id}}",
+            "{{create-eighth.body.scheduledPrompt.id}}",
+            "{{create-second.body.scheduledPrompt.id}}"
           ]
         }
       }
@@ -3058,26 +3058,26 @@
         "json": {
           "expectedRevision": 18,
           "orderedPromptIds": [
-            "{{createSixth.body.scheduledPrompt.id}}",
-            "{{createEighth.body.scheduledPrompt.id}}",
-            "{{createNinth.body.scheduledPrompt.id}}",
-            "{{createFifth.body.scheduledPrompt.id}}",
-            "{{createFourth.body.scheduledPrompt.id}}",
-            "{{createThird.body.scheduledPrompt.id}}",
-            "{{createFirst.body.scheduledPrompt.id}}"
+            "{{create-sixth.body.scheduledPrompt.id}}",
+            "{{create-eighth.body.scheduledPrompt.id}}",
+            "{{create-ninth.body.scheduledPrompt.id}}",
+            "{{create-fifth.body.scheduledPrompt.id}}",
+            "{{create-fourth.body.scheduledPrompt.id}}",
+            "{{create-third.body.scheduledPrompt.id}}",
+            "{{create-first.body.scheduledPrompt.id}}"
           ]
         }
       }
     },
     {
-      "name": "promptsAfterReorder",
+      "name": "prompts-after-reorder",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "inEmptyBody",
+      "name": "in-empty-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3085,7 +3085,7 @@
       }
     },
     {
-      "name": "inNullBody",
+      "name": "in-null-body",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3093,7 +3093,7 @@
       }
     },
     {
-      "name": "inMissingDuration",
+      "name": "in-missing-duration",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3104,7 +3104,7 @@
       }
     },
     {
-      "name": "inDurationSubMinute",
+      "name": "in-duration-sub-minute",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3116,7 +3116,7 @@
       }
     },
     {
-      "name": "inDurationInvalidFormat",
+      "name": "in-duration-invalid-format",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3128,7 +3128,7 @@
       }
     },
     {
-      "name": "inDurationWithLetterS",
+      "name": "in-duration-with-letter-s",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3140,7 +3140,7 @@
       }
     },
     {
-      "name": "inDurationHoursOnly",
+      "name": "in-duration-hours-only",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3152,7 +3152,7 @@
       }
     },
     {
-      "name": "inDurationEmpty",
+      "name": "in-duration-empty",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3164,7 +3164,7 @@
       }
     },
     {
-      "name": "inDurationTooShort",
+      "name": "in-duration-too-short",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3176,7 +3176,7 @@
       }
     },
     {
-      "name": "inDurationTooLong",
+      "name": "in-duration-too-long",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3188,7 +3188,7 @@
       }
     },
     {
-      "name": "inDurationNotAString",
+      "name": "in-duration-not-a-string",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3200,7 +3200,7 @@
       }
     },
     {
-      "name": "inUnknownChat",
+      "name": "in-unknown-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3212,7 +3212,7 @@
       }
     },
     {
-      "name": "inBlankPrompt",
+      "name": "in-blank-prompt",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3224,7 +3224,7 @@
       }
     },
     {
-      "name": "inTwoHours",
+      "name": "in-two-hours",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3236,7 +3236,7 @@
       }
     },
     {
-      "name": "inOneMinute",
+      "name": "in-one-minute",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3248,7 +3248,7 @@
       }
     },
     {
-      "name": "inAtMax",
+      "name": "in-at-max",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/in",
@@ -3260,14 +3260,14 @@
       }
     },
     {
-      "name": "promptsAtEnd",
+      "name": "prompts-at-end",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "reorderWrongMethod",
+      "name": "reorder-wrong-method",
       "http": {
         "method": "POST",
         "path": "/api/v1/scheduled-prompts/reorder",
@@ -3278,14 +3278,14 @@
       }
     },
     {
-      "name": "renderWrongMethod",
+      "name": "render-wrong-method",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts/render"
       }
     },
     {
-      "name": "promptsWrongMethod",
+      "name": "prompts-wrong-method",
       "http": {
         "method": "PATCH",
         "path": "/api/v1/scheduled-prompts",
