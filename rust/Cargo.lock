@@ -1085,6 +1085,7 @@ dependencies = [
  "garcon-agent-direct-openai-compatible",
  "garcon-agent-direct-openai-responses-compatible",
  "garcon-base",
+ "garcon-cases",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
