@@ -109,6 +109,17 @@ for await (const line of input) {
     case 'thread/resume':
       write({ id, result: { thread: { id: params.threadId, path: params.path ?? nativePath }, model: params.model, serviceTier: null } });
       break;
+    case 'thread/fork':
+      if (mode === 'fork-unsettled') {
+        write({ id, error: { code: -32600, message: `lastTurnId '${params.lastTurnId}' identifies an in-progress turn` } });
+      } else {
+        write({ id, result: { thread: { id: 'forked-thread', path: nativePath }, model: params.model, serviceTier: null } });
+      }
+      break;
+    case 'thread/unsubscribe':
+    case 'thread/archive':
+      write({ id, result: {} });
+      break;
     case 'thread/compact/start': {
       const turnId = `turn-${++turnStarts}`;
       write({ method: 'turn/started', params: { threadId: params.threadId, turn: { id: turnId } } });

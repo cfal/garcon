@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+#[path = "app_server_client/fork.rs"]
+mod fork;
 #[path = "app_server_client/resume.rs"]
 mod resume;
 #[path = "app_server_client/transcript.rs"]

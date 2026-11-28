@@ -69,6 +69,7 @@ use super::{
 };
 
 mod capacity_retry;
+mod fork;
 mod resume;
 
 type CodexClientFactory = Rc<
@@ -179,7 +180,10 @@ impl CodexAppServerRuntime {
         request: CodexStartRequest,
     ) -> ExecutorResult<CodexStartedSession> {
         request.execution.assert_open()?;
-        let (client, events) = self.new_client(&request.execution)?;
+        let (client, events) = self.new_client(
+            request.execution.env_overrides.as_ref(),
+            request.execution.activation.codex_config.as_ref(),
+        )?;
         let mut active = None;
         let result = self
             .start_session_inner(&request, &client, &events, &mut active)
@@ -370,16 +374,13 @@ impl CodexAppServerRuntime {
 
     fn new_client(
         &self,
-        request: &CodexExecutionRequest,
+        env: Option<&IndexMap<String, String>>,
+        config: Option<&CodexProviderConfig>,
     ) -> ExecutorResult<(CodexAppServerClient, CodexClientEvents)> {
         if self.0.closed.get() {
             return Err("Codex app-server runtime is shut down".into());
         }
-        let config = request.activation.codex_config.as_ref();
-        let client = (self.0.create_client)(
-            build_codex_env(request.env_overrides.as_ref(), config),
-            config,
-        );
+        let client = (self.0.create_client)(build_codex_env(env, config), config);
         self.0
             .clients
             .borrow_mut()

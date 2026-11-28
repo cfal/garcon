@@ -1,0 +1,2 @@
+{"fn":"createCodexForkTargetPath","args":[{"sourcePath":"/synthetic/source.jsonl","targetAgentSessionId":"target","createdAt":{"$":"date","value":"invalid"}}]}
+{"fn":"createCodexForkTargetPath","args":[{"sourcePath":"source.jsonl","targetAgentSessionId":"target","createdAt":{"$":"date","value":"+275760-09-13T00:00:00.000Z"}}]}

@@ -1,0 +1,70 @@
+{
+  "module": "server-agents/codex/src/agents/codex/fork-transcript.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/fork-transcript.test.js"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "rewriteCodexForkTranscriptEntry",
+      "argument": 1,
+      "guard": "rust/garcon-agent-codex/tests/oracles/fork-transcript.ts#forkEntryContext",
+      "dropped": 1,
+      "kept": 12
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.result",
+      "type": "a function",
+      "where": "result",
+      "at": "server-agents/codex/src/agents/codex/__tests__/fork-transcript.test.js:109:21",
+      "fn": "createCodexForkTranscriptRewriter",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a function",
+      "where": "result",
+      "at": "server-agents/codex/src/agents/codex/__tests__/fork-transcript.test.js:124:29",
+      "fn": "createCodexForkTranscriptRewriter",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a function",
+      "where": "result",
+      "at": "server-agents/codex/src/agents/codex/__tests__/fork-transcript.test.js:130:21",
+      "fn": "createCodexForkTranscriptRewriter",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a function",
+      "where": "result",
+      "at": "server-agents/codex/src/agents/codex/__tests__/fork-transcript.test.js:159:27",
+      "fn": "createCodexForkTranscriptRewriter",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a function",
+      "where": "result",
+      "at": "server-agents/codex/src/agents/codex/__tests__/fork-transcript.test.js:180:12",
+      "fn": "createCodexForkTranscriptRewriter",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a function",
+      "where": "result",
+      "at": "server-agents/codex/src/agents/codex/__tests__/fork-transcript.test.js:196:12",
+      "fn": "createCodexForkTranscriptRewriter",
+      "count": 1
+    }
+  ],
+  "cases": 66,
+  "sha256": "c43823e9fb643cdb64ff4e9aeca042fe887706223088e1dde2098edcc4261453"
+}
