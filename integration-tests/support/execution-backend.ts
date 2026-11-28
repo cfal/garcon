@@ -16,6 +16,15 @@ export function executionBackend(value = process.env.GARCON_TEST_EXECUTION_BACKE
   return value;
 }
 
+export function executorCommand(repoRoot: string): string[] {
+  const worker = process.env.GARCON_TEST_WORKER ?? 'original';
+  if (worker === 'original') return [process.execPath, 'server/main.ts', 'executor'];
+  if (worker === 'rust') {
+    return [process.env.GARCON_TEST_RUST_EXECUTOR_BINARY ?? join(repoRoot, 'rust/target/release/garcon-executor')];
+  }
+  throw new Error(`Unknown worker: ${worker}`);
+}
+
 const WORKER_PORT_SPAN = 10_000;
 
 async function ephemeralPortFloor(): Promise<number> {
@@ -54,7 +63,7 @@ export class ExecutorProcess {
   #stopping = false;
   #unexpectedExit: Error | null = null;
 
-  private constructor(readonly child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>, private readonly launch: { repoRoot: string; configDir: string }) {
+  private constructor(readonly child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>, private readonly launch: { repoRoot: string; configDir: string; command: string[] }) {
     void this.#connected.promise.catch(() => undefined);
     void this.#listening.promise.catch(() => undefined);
     const capture = (line: string) => {
@@ -86,10 +95,11 @@ export class ExecutorProcess {
     readonly environment: Record<string, string>;
     readonly connection: { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string } | { readonly kind: 'dial'; readonly url: string };
   }): Promise<ExecutorProcess> {
+    const command = executorCommand(input.repoRoot);
     const env = isolatedEnvironment(input.directories.home, input.environment);
     await mkdir(env.TMPDIR, { recursive: true });
     const child = Bun.spawn({
-      cmd: [process.execPath, 'server/main.ts', 'executor',
+      cmd: [...command,
         ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : []),
         ...(input.connection.kind === 'listen' && input.connection.bindAddress ? ['--bind-address', input.connection.bindAddress] : []),
         '--no-tls', '--config-dir', input.directories.config,
@@ -97,7 +107,7 @@ export class ExecutorProcess {
       cwd: input.repoRoot, env: { ...env, GARCON_CONTROLLER_URL: input.connection.kind === 'dial' ? input.connection.url : '' },
       stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
-    return new ExecutorProcess(child, { repoRoot: input.repoRoot, configDir: input.directories.config });
+    return new ExecutorProcess(child, { repoRoot: input.repoRoot, configDir: input.directories.config, command });
   }
 
   get logs(): readonly string[] { return this.#logs.values(); }
@@ -105,7 +115,7 @@ export class ExecutorProcess {
   async connectionUrl(): Promise<string> {
     const address = new URL(await this.listening());
     if (address.hostname === '0.0.0.0' || address.hostname === '[::]') address.hostname = '127.0.0.1';
-    const reveal = Bun.spawn([process.execPath, 'server/main.ts', 'executor', 'connection-url',
+    const reveal = Bun.spawn([...this.launch.command, 'connection-url',
       '--config-dir', this.launch.configDir, '--advertise-url', address.href, '--no-tls'],
     { cwd: this.launch.repoRoot, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
     const result = (await new Response(reveal.stdout).text()).trim();
