@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/pi/src/agents/pi/pi-models.ts",
+  "tests": [
+    "rust/garcon-agent-pi/tests/oracles/pi-models.suite.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 68,
+  "sha256": "31be7148115409900225cc9dd02687a9a0a74759676955653d1547606bb6e062"
+}
