@@ -1,0 +1,1144 @@
+{
+  "scenario": "auth-disabled",
+  "cases": [
+    {
+      "name": "status",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "authDisabled": true,
+            "isAuthenticated": true,
+            "needsSetup": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "local",
+              "username": "local"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-without-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [],
+            "total": 0
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-with-forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [],
+            "total": 0
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "register-forbidden",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "login-forbidden",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "username-change-forbidden",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "password-change-forbidden",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/password"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "logout-forbidden",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/logout"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-refused-changes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "local",
+              "username": "local"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "status~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "63",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/api/v1/auth/status"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "status~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "status~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "authDisabled": true,
+            "isAuthenticated": true,
+            "needsSetup": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/../status"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "status~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "status~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "status~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "authDisabled": true,
+            "isAuthenticated": true,
+            "needsSetup": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//api/v1/auth/status"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "42",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "user~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "local",
+              "username": "local"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/../user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "user~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "user~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "local",
+              "username": "local"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-without-token~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "51",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-without-token~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chats/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-without-token~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [],
+            "total": 0
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chats/../chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-without-token~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chats/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-without-token~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chats/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-without-token~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [],
+            "total": 0
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-with-forged-token~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "51",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "HEAD",
+          "path": "/api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-with-forged-token~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chats/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-with-forged-token~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [],
+            "total": 0
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chats/../chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-with-forged-token~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chats/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-with-forged-token~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chats/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-chats-with-forged-token~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "lastSelectedChatId": null,
+            "sessions": [],
+            "total": 0
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "//api/v1/chats"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "register-forbidden~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "register-forbidden~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "login-forbidden~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "login-forbidden~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "username-change-forbidden~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "username-change-forbidden~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/username"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "password-change-forbidden~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/password"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "password-change-forbidden~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Authentication is disabled by server configuration",
+            "errorCode": "AUTH_CHANGE_FORBIDDEN",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/auth/password"
+        },
+        "status": 403
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-refused-changes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "42",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-refused-changes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-refused-changes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "local",
+              "username": "local"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/../user"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-refused-changes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-refused-changes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/user/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "user-after-refused-changes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "user": {
+              "id": "local",
+              "username": "local"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//api/v1/auth/user"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}
