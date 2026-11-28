@@ -1,0 +1,10 @@
+{"fn":"inputDetailFixture","args":["2026-11-28T09:00:00.000Z","Synthetic","submission",true]}
+{"fn":"inputDetailFixture","args":["","",null,false]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"2026-11-28T09:00:00.000Z","clientMessageId":"submission","boundary":null,"preambles":[]}]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"2026-11-28T09:00:00.000Z","clientMessageId":"submission","boundary":{"kind":"new-chat","ownershipEpoch":"epoch"},"preambles":[]}]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"2026-11-28T09:00:00.000Z","clientMessageId":"submission","boundary":{"kind":"selection-change","ownershipEpoch":"epoch","selectionRevision":4},"preambles":[{"id":"11111111-1111-4111-8111-111111111111","title":"Reminder","content":"Synthetic {{chat_id}} {{current_date}} \\{{chat_id}}"},{"id":"22222222-2222-4222-8222-222222222222","title":"Review","content":"Second part"}]}]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"2026-11-28T09:00:00.000Z","clientMessageId":"submission","boundary":null,"preambles":[{"id":"11111111-1111-4111-8111-111111111111","title":"Reminder","content":"Must remain absent"}]}]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"2026-11-28T09:00:00.000Z","clientMessageId":null,"boundary":{"kind":"new-chat","ownershipEpoch":"epoch"},"preambles":[]}]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"not a timestamp","clientMessageId":"submission","boundary":null,"preambles":[]}]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"not a timestamp","clientMessageId":"","boundary":{"kind":"new-chat","ownershipEpoch":"epoch"},"preambles":[]}]}
+{"fn":"preparePreambleInputFixture","args":[{"at":"2026-11-28T09:00:00.000Z","clientMessageId":"","boundary":null,"preambles":[]}]}

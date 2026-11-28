@@ -13,7 +13,8 @@ use garcon_contract::{
     garcon_ticket_result::{TicketCommandOutcome, parse_stored_ticket_command_outcome},
     preamble_prefix::PreamblePrefixReceipt,
     preambles::{
-        PREAMBLE_MAX_COUNT, PendingPreambleBoundary, is_preamble_id, normalize_preamble_title,
+        PREAMBLE_MAX_COUNT, PendingPreambleBoundary, Preamble, is_preamble_id,
+        normalize_preamble_title,
     },
     tool_result_message::ToolResultMessage,
 };
@@ -417,4 +418,61 @@ pub struct LedgerRowDraft {
     pub at: String,
     pub provider_meta: Option<Opaque>,
     pub data: LedgerRowData,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptPage {
+    pub view_id: TranscriptViewId,
+    pub rows: Vec<LedgerRow>,
+    pub next_before: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputComposition {
+    pub input: LedgerRow,
+    pub committed_rows: Vec<LedgerRow>,
+    pub prompt: Vec<LedgerRow>,
+    pub provider_prefix: String,
+    pub inserted: bool,
+}
+
+pub struct AppendInputRequest<'a> {
+    pub view_id: &'a TranscriptViewId,
+    pub at: &'a str,
+    pub detail: &'a LedgerUserInputDetail,
+    pub excluded_ordinals: Option<&'a HashSet<u64>>,
+    pub preamble_boundary: Option<&'a PendingPreambleBoundary>,
+    pub preambles: &'a [Preamble],
+}
+
+pub struct AppendChatRowRequest<'a> {
+    pub view_id: &'a TranscriptViewId,
+    pub at: &'a str,
+    pub message: &'a str,
+    pub detail: &'a LedgerCliRowNoticeDetail,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppendChatRowResult {
+    pub row: LedgerRow,
+    pub inserted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppendSelectionChangeNoticeResult {
+    pub row: LedgerRow,
+    pub inserted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerCheckpoint {
+    pub view_id: TranscriptViewId,
+    pub ordinal: u64,
+    pub log_frames: i64,
+    pub checkpointed_frames: i64,
 }

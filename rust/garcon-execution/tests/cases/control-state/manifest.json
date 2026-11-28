@@ -1,0 +1,40 @@
+{
+  "module": "server/controller/chat-execution/control-state.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/control-state.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "queuedAttachmentBytes",
+      "argument": 0
+    },
+    {
+      "fn": "queueEntryAttachments",
+      "argument": 0
+    },
+    {
+      "fn": "cloneStoredQueueEntry",
+      "argument": 0
+    },
+    {
+      "fn": "toClientQueueEntry",
+      "argument": 0
+    },
+    {
+      "fn": "toClientChatExecutionControlState",
+      "argument": 0
+    },
+    {
+      "fn": "hasPendingTurnInput",
+      "argument": 0
+    },
+    {
+      "fn": "cloneStoredChatExecutionControl",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "1810dca174e816e8f8671cc2d62859dc52d9ec197f6b4c4ad98f76fca8422563"
+}

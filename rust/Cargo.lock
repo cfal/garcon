@@ -917,6 +917,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-execution"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "garcon-executor"
 version = "0.0.0"
 dependencies = [
@@ -1018,11 +1036,13 @@ dependencies = [
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "indexmap",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
@@ -1092,6 +1112,19 @@ dependencies = [
  "tokio-util",
  "uuid",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "garcon-search"
+version = "0.0.0"
+dependencies = [
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-js",
+ "icu_normalizer",
+ "regress",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
