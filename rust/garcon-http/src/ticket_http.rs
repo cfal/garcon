@@ -145,20 +145,8 @@ pub(super) async fn read_ticket_body(request: &mut HttpRequest) -> Result<Value,
 fn parse_ticket_body(bytes: &[u8]) -> Result<Value, Box<dyn Error>> {
     let text = std::str::from_utf8(bytes).map_err(|_| invalid_json())?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let mut parsed = json::parse(text).map_err(|_| invalid_json())?;
-    if json::contains_unpaired_surrogate_escape(bytes) {
-        // Without per-string provenance, a real U+FFFD can be refused if another value has a lone surrogate.
-        let mut values = vec![&mut parsed];
-        while let Some(value) = values.pop() {
-            match value {
-                Value::String(text) if text.contains('\u{fffd}') => *value = Value::Bool(false),
-                Value::Array(items) => values.extend(items),
-                Value::Object(fields) => values.extend(fields.values_mut()),
-                _ => {}
-            }
-        }
-    }
-    Ok(parsed)
+    // The mutation validator rejects an ill-formed string like a non-string.
+    json::parse_replacing_unpaired_surrogate_values(text, false).map_err(|_| invalid_json())
 }
 
 #[cfg(test)]
@@ -179,6 +167,18 @@ mod tests {
         ] {
             assert!(parse_ticket_body(valid).unwrap().is_string());
         }
+    }
+
+    #[test]
+    fn preserves_genuine_replacement_characters_and_the_final_duplicate() {
+        let title = br#"{"action":"create","input":{"title":"bad \ud800","title":"real \ufffd","project":"fixture"}}"#;
+        let body = parse_ticket_body(title).unwrap();
+        assert!(parse_ticket_mutation_payload(&body).is_ok());
+        assert_eq!(body["input"]["title"], "real \u{fffd}");
+        let mixed = br#"{"action":"create","input":{"title":"real \ufffd","description":"bad \udfff","project":"fixture"}}"#;
+        let body = parse_ticket_body(mixed).unwrap();
+        let error = parse_ticket_mutation_payload(&body).unwrap_err();
+        assert_eq!(error.to_string(), "body must be well-formed Unicode text.");
     }
 
     #[test]

@@ -15,10 +15,8 @@ use garcon_contract::{
     garcon_ticket_result::{
         parse_garcon_ticket_result, parse_ticket_command_outcome, ticket_command_outcome,
     },
-    preamble_prefix::PreamblePrefixReceipt,
-    preambles::PendingPreambleBoundary,
     ticket_command_notice::ticket_command_notice_text,
-    transcript_notice_details::{AppliedPreambleReference, TranscriptNoticeDetail},
+    transcript_notice_details::TranscriptNoticeDetail,
 };
 use garcon_js::json::Opaque;
 use serde_json::{Value, json};
@@ -37,12 +35,7 @@ pub struct ImportedRow {
     pub preamble_application: Option<PreambleHistoryEvidence>,
 }
 
-pub struct PreambleHistoryEvidence {
-    pub receipt: PreamblePrefixReceipt,
-    pub boundary: PendingPreambleBoundary,
-    pub preambles: Vec<AppliedPreambleReference>,
-    pub requires_native_occurrence: bool,
-}
+pub use crate::preamble_history::PreambleHistoryEvidence;
 
 pub async fn imported_drafts(
     rows: impl IntoIterator<Item = ImportedRow>,
@@ -218,8 +211,13 @@ fn imported_control_input(
         )]));
     }
     if let Some(chat_id) = parse_chat_id_disclosure(content) {
+        let at = if timestamp.is_empty() {
+            now()?
+        } else {
+            timestamp.into()
+        };
         return Ok(Some(vec![notice(
-            at,
+            &at,
             chat_id_disclosure_notice_content(&chat_id),
             json!({"type": "chat-id-disclosure", "title": CHAT_ID_DISCOVERY_NOTICE_TITLE}),
         )]));

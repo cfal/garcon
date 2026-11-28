@@ -1,0 +1,17 @@
+{"id":"scopedFields#0","fn":"scopedFields","args":["pi:session-1",{"sessionId":"s-1","attempt":2}],"result":{"scope":"pi:session-1","sessionId":"s-1","attempt":2},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:1"}
+{"id":"scopedFields#1","fn":"scopedFields","args":["scope",{}],"result":{"scope":"scope"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:2"}
+{"id":"scopedFields#2","fn":"scopedFields","args":["scope",{"scope":"inner","a":null,"b":true,"c":[1,{"d":"e"}]}],"result":{"scope":"inner","a":null,"b":true,"c":[1,{"d":"e"}]},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:3"}
+{"id":"scopedFields#3","fn":"scopedFields","args":["",{"message":"x"}],"result":{"scope":"","message":"x"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:4"}
+{"id":"scopedFields#4","fn":"scopedFields","args":["pi",{"1":"a","b":2}],"result":{"1":"a","scope":"pi","b":2},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:5"}
+{"id":"scopedFields#5","fn":"scopedFields","args":["pi",{"1":"b","10":"a","c":3}],"result":{"1":"b","10":"a","scope":"pi","c":3},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:6"}
+{"id":"scopedFields#6","fn":"scopedFields","args":["pi",{"attempt":0.5,"big":1e+21,"none":null}],"result":{"scope":"pi","attempt":0.5,"big":1e+21,"none":null},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:7"}
+{"id":"scopedFields#7","fn":"scopedFields","args":["K",{"sessionId":"ı"}],"result":{"scope":"K","sessionId":"ı"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:10"}
+{"id":"scopedFields#8","fn":"scopedFields","args":["日本😀",{"a":"K"}],"result":{"scope":"日本😀","a":"K"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:11"}
+{"id":"scopedFields#9","fn":"scopedFields","args":["__proto__",{"constructor":"toString"}],"result":{"scope":"__proto__","constructor":"toString"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:12"}
+{"id":"scopedFields#10","fn":"scopedFields","args":["x",{"0":"z","1":"a","2":"b","10":"c"}],"result":{"0":"z","1":"a","2":"b","10":"c","scope":"x"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:15"}
+{"id":"scopedFields#11","fn":"scopedFields","args":["x",{"scope":"K"}],"result":{"scope":"K"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:16"}
+{"id":"scopedFields#12","fn":"scopedFields","args":["x",{"1":"a","b":{"1":1,"2":2}}],"result":{"1":"a","scope":"x","b":{"1":1,"2":2}},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:17"}
+{"id":"scopedFieldsWithoutValue#0","fn":"scopedFieldsWithoutValue","args":["pi:session-1"],"result":{"scope":"pi:session-1"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:8"}
+{"id":"scopedFieldsWithoutValue#1","fn":"scopedFieldsWithoutValue","args":[""],"result":{"scope":""},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:9"}
+{"id":"scopedFieldsWithoutValue#2","fn":"scopedFieldsWithoutValue","args":[" "],"result":{"scope":" "},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:13"}
+{"id":"scopedFieldsWithoutValue#3","fn":"scopedFieldsWithoutValue","args":["Ḱ"],"result":{"scope":"Ḱ"},"origin":"rust/garcon-agents-common/tests/inputs/scoped-agent-logger.jsonl:14"}

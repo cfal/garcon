@@ -148,7 +148,13 @@ async fn discover(request: ApiProviderDiscoveryRequest) -> ExecutorResult<Vec<Ag
         ModelDiscoveryKind::AnthropicModels => anthropic_models(&request).await,
         ModelDiscoveryKind::OllamaTags => {
             let url = format!("{}/api/tags", base.strip_suffix("/v1").unwrap_or(base));
-            let body = get_json(&url, header::HeaderMap::new(), "Ollama model discovery").await?;
+            let url = Url::parse(&url).map_err(|_| "fetch() URL is invalid")?;
+            let body = get_json(
+                url.as_str(),
+                header::HeaderMap::new(),
+                "Ollama model discovery",
+            )
+            .await?;
             if body.is_null() {
                 return Err("null is not an object (evaluating '(await readJsonResponse(response, \"Model discovery\")).models')".into());
             }
@@ -218,10 +224,17 @@ pub async fn discover_api_provider_models(
     }
     let timeout = Duration::from_millis(delay as u64);
     let signal = options.signal.unwrap_or_default();
+    let elapsed = tokio::time::sleep(timeout);
     let result = tokio::select! {
         biased;
         () = signal.cancelled() => Err("The operation was aborted.".into()),
-        () = tokio::time::sleep(timeout) => Err("The operation timed out.".into()),
+        () = async {
+            // Bun arms a zero timeout without aborting synchronous discovery work.
+            if timeout.is_zero() {
+                tokio::task::yield_now().await;
+            }
+            elapsed.await;
+        } => Err("The operation timed out.".into()),
         result = discover(request) => result,
     };
     match result {

@@ -335,6 +335,76 @@ fn write_fake_cli(script: &Path, body: &str) {
 }
 
 #[tokio::test]
+async fn live_content_and_compaction_rows_keep_their_native_source() {
+    use garcon_contract::chat_types::{CompactionTrigger, ToolUseChatMessage};
+
+    async fn receive(events: &mut mpsc::UnboundedReceiver<AgentRuntimeEvent>) -> AgentRuntimeEvent {
+        tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    LocalSet::new().run_until(async {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("fake-claude-stream");
+        write_fake_cli(&script, r#"
+read -r prompt || exit 1
+printf '%s\n' '{"type":"assistant","uuid":"internal","content":[{"type":"text","text":"internal output"}]}'
+printf '%s\n' '{"type":"command_lifecycle","state":"started","command_uuid":"stream-input"}'
+printf '%s\n' '{"type":"assistant","uuid":"assistant-1","content":[{"type":"text","text":" "},{"type":"text","text":"visible"},{"type":"tool_use","id":"read-1","name":"Read","input":{"file_path":"synthetic.txt"}}]}'
+printf '%s\n' '{"type":"user","uuid":"user-1","isReplay":true,"message":{"content":[{"type":"text","text":"copied prompt"},{"type":"tool_result","tool_use_id":"read-1","content":"synthetic output"}]},"tool_use_result":{"exitCode":0}}'
+printf '%s\n' '{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"auto","pre_tokens":1000,"post_tokens":250}}'
+printf '%s\n' '{"type":"user","uuid":"summary-1","message":{"content":"This session is being continued from a previous conversation. Summary: synthetic summary"}}'
+printf '%s\n' '{"type":"result","user_message_uuid":"stream-input","result":"visible"}'
+printf '%s\n' '{"type":"system","subtype":"session_state_changed","state":"idle"}'
+read -r close || exit 2
+"#);
+        let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
+        let options = options(directory.path());
+        let session = Rc::new(ClaudeRunningSession::with_clock(options.clone(), Rc::new(ManualClock::new(1234))));
+        runtime.register_session(session.clone());
+        let (publish, mut events) = mpsc::unbounded_channel();
+        let turn = runtime.begin_turn(&session, runtime_operation("run-1".into(),
+            Rc::new(move |event| publish.send(event).unwrap()))).unwrap();
+        turn.protocol.borrow_mut().input_uuid = "stream-input".into();
+        runtime.spawn_cli(&session, options, false, Rc::new(|_, frame| panic!("unexpected frame {frame:?}"))).await.unwrap();
+        let process = session.process.borrow().clone().unwrap();
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        assert!(matches!(receive(&mut events).await, AgentRuntimeEvent::Steerable));
+        let AgentRuntimeEvent::Rows { rows } = receive(&mut events).await else { panic!("expected content rows"); };
+        assert_eq!(rows.len(), 2);
+        assert!(matches!(&rows[0].message, ChatMessage::Assistant(message) if message.content == "visible"));
+        assert!(matches!(&rows[1].message, ChatMessage::ToolUse(ToolUseChatMessage::Read { .. })));
+        let source = rows[1].provider_meta.as_ref().unwrap();
+        assert_eq!(source["entryId"], "assistant-1");
+        assert_eq!(garcon_js::json::as_number(&source["withinSourceOrdinal"]), Some(1.0));
+
+        let AgentRuntimeEvent::Rows { rows } = receive(&mut events).await else { panic!("expected tool result"); };
+        assert_eq!(rows.len(), 1);
+        let ChatMessage::ToolResult(result) = &rows[0].message else { panic!("expected tool result"); };
+        assert_eq!(result.tool_id, "read-1");
+        assert_eq!(serde_json::to_string(&result.content).unwrap(), r#"{"raw":"synthetic output","toolUseResult":{"exitCode":0}}"#);
+        assert_eq!(rows[0].provider_meta.as_ref().unwrap()["entryId"], "user-1");
+
+        let AgentRuntimeEvent::Rows { rows } = receive(&mut events).await else { panic!("expected compaction"); };
+        assert_eq!(rows.len(), 1);
+        let ChatMessage::Compaction(summary) = &rows[0].message else { panic!("expected compaction"); };
+        assert_eq!(summary.summary, "synthetic summary");
+        assert_eq!(summary.trigger, CompactionTrigger::Auto);
+        assert_eq!(summary.pre_tokens.map(|value| value.0), Some(1000.0));
+        assert_eq!(summary.post_tokens.map(|value| value.0), Some(250.0));
+        let source = rows[0].provider_meta.as_ref().unwrap();
+        assert_eq!(source["entryId"], "summary-1");
+        assert_eq!(garcon_js::json::as_number(&source["withinSourceOrdinal"]), Some(0.0));
+        assert!(matches!(receive(&mut events).await, AgentRuntimeEvent::RunEnded { outcome: ProviderRunOutcome::Finished { .. }, .. }));
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        assert_eq!(process.transport.exited().await.unwrap(), 0);
+        assert!(events.try_recv().is_err());
+    }).await;
+}
+
+#[tokio::test]
 async fn a_real_cli_publishes_only_the_correlated_result_and_waits_for_provider_idle() {
     use garcon_interface::producer::AgentFinalResponse;
 

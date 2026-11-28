@@ -1,6 +1,8 @@
 import type { ApiProviderDiscoveryRequest } from '@garcon/server-agent-interface';
 import { discoverApiProviderModels } from '../../../../server/runtime/providers/discovery.ts';
 
+export { discoverApiProviderModels };
+
 type Probe = Omit<ApiProviderDiscoveryRequest, 'baseUrl'> & { path: string };
 type Reply = { status?: number; body?: unknown; raw?: string };
 
@@ -22,6 +24,19 @@ export async function discoverModels(input: Probe, replies: Reply[]) {
     const result = await discoverApiProviderModels({ ...selection, baseUrl: `http://127.0.0.1:${provider.port}${path}` });
     return { result, calls };
   } finally {
+    provider.stop(true);
+  }
+}
+
+export async function discoverAtZeroTimeout(modelDiscovery: ApiProviderDiscoveryRequest['modelDiscovery']) {
+  const reply = Promise.withResolvers<Response>();
+  const provider = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => reply.promise });
+  try {
+    return await discoverApiProviderModels({
+      protocol: 'openai-compatible', baseUrl: `http://127.0.0.1:${provider.port}`, modelDiscovery,
+    }, { timeoutMs: 0 });
+  } finally {
+    reply.resolve(new Response());
     provider.stop(true);
   }
 }

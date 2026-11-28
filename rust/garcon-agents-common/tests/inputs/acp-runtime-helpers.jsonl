@@ -1,0 +1,20 @@
+{"fn":"permissionChoiceOutcome","args":[[{"optionId":"allow","kind":null},{"optionId":"deny"}],"allow-once"]}
+{"fn":"permissionChoiceOutcome","args":[[{"optionId":null,"option_id":"snake","id":"generic","kind":"allow_once"},{"optionId":"allow"}],"allow-once"]}
+{"fn":"permissionChoiceOutcome","args":[[{"optionId":"","id":"allow","kind":"allow_once"},{"optionId":7,"id":"approve"}],"allow-once"]}
+{"fn":"permissionChoiceOutcome","args":[[{"optionId":"deny","name":"Deny"},{"id":"reject_once"},{"id":"reject-once"}],"reject"]}
+{"fn":"permissionChoiceOutcome","args":[[{"id":"allow","kind":"reject_once"},{"id":"approve"}],"reject"]}
+{"fn":"permissionChoiceOutcome","args":[[{"id":"allow-always","kind":"allow_once"},{"id":"allow"},{"id":"persist","kind":"allow_always"}],"auto-approve"]}
+{"fn":"automaticPermissionChoice","args":["manualBypass",null,{"agentId":"synthetic","command":"agent","acceptsEditsOnClient":false}]}
+{"fn":"automaticPermissionChoice","args":["acceptEdits",{"kind":"edit"},{"agentId":"synthetic","command":"agent","acceptsEditsOnClient":true}]}
+{"fn":"permissionOutcome","args":["peer-option-id"]}
+{"fn":"permissionOutcome","args":[""]}
+{"fn":"permissionCancelledOutcome","args":[]}
+{"fn":"buildPromptFallback","args":[{"command":"  prompt with whitespace  "}]}
+{"fn":"buildPromptFallback","args":[{"command":""}]}
+{"fn":"fallbackPermissionToolUse","args":[{},"permission-1","2001-01-01T00:00:00.000Z"]}
+{"fn":"fallbackPermissionToolUse","args":[{"toolCallId":null,"callId":"call-1","id":"other","toolName":null,"tool_name":"fallback tool","kind":"edit","rawInput":"{\"2\":\"b\",\"1\":\"a\",\"n\":9007199254740993}","input":{"wrong":true},"locations":["unused"]},"permission-2","2001-01-01T00:00:00.000Z"]}
+{"fn":"fallbackPermissionToolUse","args":[{"toolCallId":false,"id":"not-read","toolName":7,"title":"Example","locations":["sample"],"content":[{"type":"text","text":"data"}],"rawInput":{}},"permission-3","2001-01-01T00:00:00.000Z"]}
+{"fn":"fallbackPermissionToolUse","args":[{"toolCallId":"","toolName":"","rawInput":"","raw_input":{"unused":true},"title":""},"permission-4","2001-01-01T00:00:00.000Z"]}
+{"fn":"fallbackPermissionToolUse","args":[{"id":"tool-1","name":"Label","args":"[1,2]","content":[{"type":"text","text":"unused"}]},"permission-5","2001-01-01T00:00:00.000Z"]}
+{"fn":"fallbackPermissionToolUse","args":[{"id":"tool-2","name":"Label","args":["array"],"locations":[],"content":["data"]},"permission-6","2001-01-01T00:00:00.000Z"]}
+{"fn":"fallbackPermissionToolUse","args":[{"id":"tool-3","name":"Label","input":"malformed"},"permission-7","2001-01-01T00:00:00.000Z"]}

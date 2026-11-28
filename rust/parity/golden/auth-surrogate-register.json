@@ -1,0 +1,63 @@
+{
+  "scenario": "auth-surrogate-register",
+  "cases": [
+    {
+      "name": "register-final-replacement-character",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true,
+            "token": "{{jwt}}",
+            "user": {
+              "id": "registered�",
+              "username": "registered�"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/register"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "login-final-username",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true,
+            "token": "{{jwt}}",
+            "user": {
+              "id": "registered�",
+              "username": "registered�"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/auth/login"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}
