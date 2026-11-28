@@ -25,6 +25,7 @@ fn model(value: &str, label: &str, is_local: Option<bool>) -> AgentModelOption {
         value: value.to_owned(),
         label: label.to_owned(),
         supports_images: None,
+        thinking_modes: None,
         is_local,
         api_provider_id: None,
         endpoint_id: None,

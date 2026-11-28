@@ -334,6 +334,280 @@ fn write_fake_cli(script: &Path, body: &str) {
     fs::set_permissions(script, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
+fn write_fake_session_cli(script: &Path) {
+    fs::write(
+        script,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = --version ]; then
+  printf '%s\n' '2.1.238 (Claude Code)'
+  exit 0
+fi
+printf 'spawn\n' >> process-starts
+{READ_INITIALIZE}
+{ACK_INITIALIZE}
+while IFS= read -r frame; do
+  case "$frame" in *'"type":"user"'*) ;; *) exit 3 ;; esac
+  printf '%s\n' "$frame" >> prompt-frames
+  input_id=${{frame#*\"uuid\":\"}}
+  input_id=${{input_id%%\"*}}
+  printf '{{"type":"command_lifecycle","state":"started","command_uuid":"%s"}}\n' "$input_id"
+  printf '{{"type":"result","user_message_uuid":"%s","result":"synthetic answer"}}\n' "$input_id"
+  printf '%s\n' '{{"type":"system","subtype":"session_state_changed","state":"idle"}}'
+done
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(script, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+fn execution_request(
+    directory: &Path,
+    run: &str,
+    prompt: &str,
+    publish: Rc<dyn Fn(AgentRuntimeEvent)>,
+) -> crate::runtime_types::ClaudeExecutionRequest {
+    let session = options(directory);
+    crate::runtime_types::ClaudeExecutionRequest {
+        chat_id: session.chat_id,
+        project_path: session.project_path,
+        model: session.model,
+        permission_mode: session.permission_mode,
+        thinking_mode: session.thinking_mode,
+        claude_thinking_mode: session.claude_thinking_mode,
+        execution_admission: None,
+        command: prompt.into(),
+        images: Vec::new(),
+        env_overrides: None,
+        operation: runtime_operation(run.into(), publish),
+    }
+}
+
+#[tokio::test]
+async fn starts_and_resumes_one_native_process_only_after_execution_admission() {
+    use garcon_interface::execution::AgentExecutionAdmission;
+
+    struct Admission {
+        signal: CancellationToken,
+        entered: Cell<Option<oneshot::Sender<()>>>,
+        release: Cell<Option<oneshot::Receiver<()>>>,
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl AgentExecutionAdmission for Admission {
+        fn signal(&self) -> &CancellationToken {
+            &self.signal
+        }
+
+        async fn mark_started(&self) -> ExecutorResult<()> {
+            self.entered.take().unwrap().send(()).unwrap();
+            self.release.take().unwrap().await?;
+            Ok(())
+        }
+    }
+
+    LocalSet::new()
+        .run_until(async {
+            let directory = tempfile::tempdir().unwrap();
+            let script = directory.path().join("fake-claude-runtime");
+            write_fake_session_cli(&script);
+            let runtime = ClaudeCli::new(
+                Rc::new({
+                    let script = script.clone();
+                    move || script.as_os_str().to_owned()
+                }),
+                Rc::new(Logger),
+            );
+            let (entered, pending_admission) = oneshot::channel();
+            let (release, allowed) = oneshot::channel();
+            let (publish, mut events) = mpsc::unbounded_channel();
+            let mut first = execution_request(
+                directory.path(),
+                "first-run",
+                "synthetic first prompt",
+                Rc::new({
+                    let publish = publish.clone();
+                    move |event| publish.send(event).unwrap()
+                }),
+            );
+            first.execution_admission = Some(Rc::new(Admission {
+                signal: CancellationToken::new(),
+                entered: Cell::new(Some(entered)),
+                release: Cell::new(Some(allowed)),
+            }));
+            let activated = Rc::new(Cell::new(false));
+            let id = "synthetic-session";
+            let start = tokio::task::spawn_local({
+                let runtime = runtime.clone();
+                let activated = activated.clone();
+                async move {
+                    runtime
+                        .start_claude_cli_session(ClaudeStartRequest {
+                            execution: first,
+                            agent_session_id: id.into(),
+                            on_session_activated: Some(Rc::new(move || activated.set(true))),
+                        })
+                        .await
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(5), pending_admission)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(activated.get());
+            assert_eq!(runtime.running_sessions()[0].agent_session_id, id);
+            assert!(!directory.path().join("prompt-frames").exists());
+            assert_eq!(
+                fs::read_to_string(directory.path().join("process-starts")).unwrap(),
+                "spawn\n"
+            );
+            let error = runtime.prepare_claude_project_path_update(ClaudeProjectPathUpdate {
+                chat_id: "synthetic-chat".into(),
+                agent_session_id: Some(id.into()),
+                previous_project_path: directory.path().to_string_lossy().into_owned(),
+                next_project_path: "synthetic-destination".into(),
+                native_path: None,
+            }).await.unwrap_err();
+            let error = error.downcast_ref::<AgentIntegrationError>().unwrap();
+            assert_eq!(error.code, AgentIntegrationErrorCode::SESSION_BUSY);
+            assert_eq!(error.message, "Cannot update project path while Claude is running");
+            release.send(()).unwrap();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(5), start)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap(),
+                id
+            );
+            assert!(runtime.running_sessions().is_empty());
+
+            let session = runtime.session(id).unwrap();
+            let pid = session.process_id().unwrap();
+            runtime
+                .run_claude_turn(ClaudeResumeRequest {
+                    execution: execution_request(
+                        directory.path(),
+                        "second-run",
+                        "synthetic second prompt",
+                        Rc::new(move |event| publish.send(event).unwrap()),
+                    ),
+                    agent_session_id: id.into(),
+                    native_path: None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(session.process_id(), Some(pid));
+            assert!(runtime.running_sessions().is_empty());
+            let mut frames: Vec<Value> = fs::read_to_string(directory.path().join("prompt-frames"))
+                .unwrap()
+                .lines()
+                .map(|line| garcon_js::json::parse(line).unwrap())
+                .collect();
+            assert_eq!(frames.len(), 2);
+            assert_eq!(frames[0]["message"]["content"], "synthetic first prompt");
+            assert_eq!(frames[1]["message"]["content"], "synthetic second prompt");
+            assert_ne!(frames[0]["uuid"], frames[1]["uuid"]);
+            let mut completed = Vec::new();
+            while let Ok(event) = events.try_recv() {
+                if let AgentRuntimeEvent::RunEnded {
+                    run_id,
+                    outcome: ProviderRunOutcome::Finished { final_response },
+                    ..
+                } = event
+                {
+                    completed.push(json!({"runId":run_id, "outcome":"finished", "finalResponse":final_response}));
+                }
+            }
+            assert_eq!(completed.len(), 2);
+            assert_eq!(completed[0]["runId"], "first-run");
+            assert_eq!(completed[1]["runId"], "second-run");
+            runtime
+                .release_session("different-chat", Some(id))
+                .await
+                .unwrap();
+            assert_eq!(session.process_id(), Some(pid));
+            runtime
+                .release_session(&session.chat_id, Some(id))
+                .await
+                .unwrap();
+            assert!(runtime.session(id).is_none());
+            assert!(session.process_id().is_none());
+
+            for frame in &mut frames {
+                frame.as_object_mut().unwrap().shift_remove("uuid");
+            }
+            let starts = fs::read_to_string(directory.path().join("process-starts")).unwrap();
+            let original_directory = tempfile::tempdir().unwrap();
+            let original = tokio::process::Command::new("bun")
+                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/oracles/cli-runtime.ts"))
+                .arg(script)
+                .arg(original_directory.path())
+                .output().await.unwrap();
+            assert!(original.status.success(), "{}", String::from_utf8_lossy(&original.stderr));
+            assert_eq!(
+                serde_json::to_string(&json!({"frames":frames,"completed":completed,"starts":starts})).unwrap(),
+                String::from_utf8(original.stdout).unwrap(),
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_refused_mark_started_sends_no_prompt_and_retires_the_initialized_cli() {
+    use garcon_interface::execution::AgentExecutionAdmission;
+
+    struct Refusal(CancellationToken);
+
+    #[async_trait::async_trait(?Send)]
+    impl AgentExecutionAdmission for Refusal {
+        fn signal(&self) -> &CancellationToken {
+            &self.0
+        }
+
+        async fn mark_started(&self) -> ExecutorResult<()> {
+            Err("synthetic admission refusal".into())
+        }
+    }
+
+    LocalSet::new()
+        .run_until(async {
+            let directory = tempfile::tempdir().unwrap();
+            let script = directory.path().join("fake-claude-refusal");
+            write_fake_session_cli(&script);
+            let runtime = ClaudeCli::new(
+                Rc::new(move || script.as_os_str().to_owned()),
+                Rc::new(Logger),
+            );
+            let mut execution = execution_request(
+                directory.path(),
+                "refused-run",
+                "not submitted",
+                Rc::new(|_| {}),
+            );
+            execution.execution_admission = Some(Rc::new(Refusal(CancellationToken::new())));
+            let id = "synthetic-session";
+            let error = runtime
+                .start_claude_cli_session(ClaudeStartRequest {
+                    execution,
+                    agent_session_id: id.into(),
+                    on_session_activated: None,
+                })
+                .await
+                .unwrap_err();
+            assert_eq!(error.to_string(), "synthetic admission refusal");
+            assert_eq!(
+                fs::read_to_string(directory.path().join("process-starts")).unwrap(),
+                "spawn\n"
+            );
+            assert!(!directory.path().join("prompt-frames").exists());
+            assert!(runtime.session(id).is_none());
+            assert!(runtime.running_sessions().is_empty());
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn live_content_and_compaction_rows_keep_their_native_source() {
     use garcon_contract::chat_types::{CompactionTrigger, ToolUseChatMessage};

@@ -1,0 +1,8 @@
+{"fn":"splitExecutorError","args":["\n\u26a0 agent executor error: first line\nsecond line"]}
+{"fn":"splitExecutorError","args":["prefix\n\u26a0 agent executor error: terminal note\n \t\u00a0"]}
+{"fn":"splitExecutorError","args":["prefix\n\u26a0 agent executor error: quoted\nmore text"]}
+{"fn":"splitExecutorError","args":["prefix\r\n\u26a0 agent executor error: failure"]}
+{"fn":"splitExecutorError","args":["\u26a0 agent executor error: no leading newline"]}
+{"fn":"splitExecutorError","args":["\n\u26a0 agent executor error: "]}
+{"fn":"splitExecutorError","args":["prefix\n\u26a0 agent executor error: quoted\nmore\n\u26a0 agent executor error: real"]}
+{"fn":"splitExecutorError","args":[""]}

@@ -34,6 +34,7 @@ uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
 
 [dev-dependencies]
+garcon-agents-common = { workspace = true, features = ["test-support"] }
 garcon-cases.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

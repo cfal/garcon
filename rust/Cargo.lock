@@ -940,6 +940,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-agent-antigravity"
+version = "0.0.0"
+dependencies = [
+ "garcon-agents-common",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-js",
+ "indexmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "garcon-agent-claude"
 version = "0.0.0"
 dependencies = [

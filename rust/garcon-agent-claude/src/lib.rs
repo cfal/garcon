@@ -14,6 +14,8 @@ pub mod config;
 pub mod context_window_control;
 pub mod disk_attachments;
 pub mod endpoint_runtime;
+pub mod execution;
+pub mod history_loader;
 pub mod interrupt_receipt;
 pub mod model_context;
 pub mod native_path;
@@ -21,6 +23,7 @@ pub mod permission_response;
 pub mod permission_tool_converter;
 pub mod process_retirements;
 pub mod runtime_state;
+pub mod runtime_types;
 pub mod session_model;
 pub mod session_options;
 pub mod single_query_process;
@@ -144,6 +147,7 @@ pub fn claude_catalog(logger: Rc<dyn AgentLogger>) -> ModelCatalog {
                 value: model.value.into(),
                 label: model.label.into(),
                 supports_images: model.supports_images,
+                thinking_modes: None,
                 is_local: None,
                 api_provider_id: None,
                 endpoint_id: None,

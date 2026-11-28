@@ -1,5 +1,6 @@
 mod catalog_configuration;
 mod runtime_environment;
+mod unavailable_local_executor;
 
 use std::cell::Cell;
 use std::error::Error;
@@ -10,11 +11,10 @@ use std::rc::Rc;
 
 use garcon_base::log::{Logger, ScopedLogger, create_logger};
 use garcon_base::server_runtime::{
-    ServerListener, advertised_server_url, create_server_runtime_state, log_server_ready,
-    publish_server_runtime, remove_server_runtime,
+    ServerListener, ServerRuntimeState, advertised_server_url, create_server_runtime_state,
+    log_server_ready, publish_server_runtime, remove_server_runtime,
 };
 use garcon_contract::cli_runtime_paths::{RuntimeKind, cli_runtime_file};
-use garcon_contract::tickets::TicketProjectDefault;
 use garcon_contract::ws_revision_invalidations::TicketsInvalidatedMessage;
 use garcon_http::app_title::resolve_public_app_title;
 use garcon_http::compose_routes::compose_routes;
@@ -26,12 +26,9 @@ use garcon_http::routes::{
     r#static::StaticRoutes, tickets::create_ticket_routes,
 };
 use garcon_http::ws::{BrowserSocketLimits, BrowserSocketOptions, BrowserSockets};
-use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
-use garcon_interface::execution_runtime::{
-    ExecutionProjectInspectRequest, ExecutionProjectInspectResponse, ExecutionProjectService,
-    ResolveFileMentionsRequest, TicketProjectDefaultRequest,
-};
-use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
+use garcon_interface::execution_runtime::ExecutionRuntimeApi;
+use garcon_interface::host::AgentApiProviderReader;
+use garcon_interface::resources::ExecutorResult;
 use garcon_js::SystemClock;
 use garcon_stores::auth::passwords::BunPasswords;
 use garcon_stores::auth::service::AuthService;
@@ -53,11 +50,22 @@ use super::provider_configuration::{ProviderConfiguration, ProviderProfiles};
 use super::workspace_lease::{ControllerLease, acquire_controller_lease};
 use super::workspace_version::open_workspace;
 
+pub use unavailable_local_executor::UnavailableLocalExecutor;
+
+pub struct LocalExecutorContext<'a> {
+    pub config: &'a ServerConfig,
+    pub workspace_dir: &'a Path,
+    pub credentials: Rc<dyn AgentApiProviderReader>,
+}
+
+type StartLocal<'a> =
+    Box<dyn FnOnce(LocalExecutorContext<'_>) -> ExecutorResult<Rc<dyn ExecutionRuntimeApi>> + 'a>;
+
 pub struct Controller {
     pub address: SocketAddr,
     pub runtime_file: String,
     pub instance_id: String,
-    local: Rc<dyn ExecutionProjectService>,
+    local: Rc<dyn ExecutionRuntimeApi>,
     lease: ControllerLease,
     listener: JoinHandle<()>,
     auth_routes: Rc<AuthRoutes>,
@@ -74,13 +82,25 @@ pub struct Controller {
 ///
 /// # Safety
 /// Call before starting other threads; startup changes the process environment.
-pub unsafe fn run_native(args: &[String], local: Rc<dyn ExecutionProjectService>) -> ExitCode {
+pub unsafe fn run_native(args: &[String], local: Rc<dyn ExecutionRuntimeApi>) -> ExitCode {
+    // SAFETY: the caller guarantees the startup environment can be changed.
+    unsafe { run_native_with_local(args, |_| Ok(local)) }
+}
+
+/// Builds Local on the controller's LocalSet after the workspace and provider
+/// policy are open and before the listener is bound.
+/// # Safety
+/// Call before starting other threads; startup changes the process environment.
+pub unsafe fn run_native_with_local(
+    args: &[String],
+    start_local: impl FnOnce(LocalExecutorContext<'_>) -> ExecutorResult<Rc<dyn ExecutionRuntimeApi>>,
+) -> ExitCode {
     if is_help_requested(args) {
         print!("{HELP_TEXT}");
         return ExitCode::SUCCESS;
     }
     // SAFETY: callers guarantee the startup environment can be changed.
-    match unsafe { run_process(args, local) } {
+    match unsafe { run_process(args, Box::new(start_local)) } {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             create_logger("server").error(&format!("Failed to start or stop server: {error}"));
@@ -89,10 +109,7 @@ pub unsafe fn run_native(args: &[String], local: Rc<dyn ExecutionProjectService>
     }
 }
 
-unsafe fn run_process(
-    args: &[String],
-    local: Rc<dyn ExecutionProjectService>,
-) -> Result<(), Box<dyn Error>> {
+unsafe fn run_process(args: &[String], start_local: StartLocal<'_>) -> Result<(), Box<dyn Error>> {
     if args.first().is_some_and(|argument| argument == "executor") {
         return Err("The native controller does not run the executor subcommand".into());
     }
@@ -103,7 +120,7 @@ unsafe fn run_process(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    tokio::task::LocalSet::new().block_on(&runtime, run_until_shutdown(config, local))
+    tokio::task::LocalSet::new().block_on(&runtime, run_until_shutdown(config, start_local))
 }
 
 fn install_root() -> std::io::Result<PathBuf> {
@@ -124,7 +141,7 @@ fn install_root() -> std::io::Result<PathBuf> {
 
 async fn run_until_shutdown(
     config: ServerConfig,
-    local: Rc<dyn ExecutionProjectService>,
+    start_local: StartLocal<'_>,
 ) -> Result<(), Box<dyn Error>> {
     #[cfg(unix)]
     let shutdown_signal = {
@@ -146,7 +163,7 @@ async fn run_until_shutdown(
             interrupt.recv().await;
         }
     };
-    let controller = Controller::start(config, local).await?;
+    let controller = Controller::start_with_local(config, start_local).await?;
     tokio::select! {
         () = shutdown_signal => {}
         _ = controller.lease_lost() => {}
@@ -158,7 +175,16 @@ impl Controller {
     /// Starts the controller on the caller's LocalSet.
     pub async fn start(
         config: ServerConfig,
-        local: Rc<dyn ExecutionProjectService>,
+        local: Rc<dyn ExecutionRuntimeApi>,
+    ) -> Result<Self, Box<dyn Error>> {
+        Self::start_with_local(config, |_| Ok(local)).await
+    }
+
+    pub async fn start_with_local(
+        config: ServerConfig,
+        start_local: impl FnOnce(
+            LocalExecutorContext<'_>,
+        ) -> ExecutorResult<Rc<dyn ExecutionRuntimeApi>>,
     ) -> Result<Self, Box<dyn Error>> {
         if std::env::var_os("GARCON_AGENT_EXECUTOR_CONFIG").is_some_and(|value| !value.is_empty()) {
             return Err("GARCON_AGENT_EXECUTOR_CONFIG is no longer supported. Add executors in the app and use a fresh workspace for experimental remote-only chats.".into());
@@ -180,8 +206,16 @@ impl Controller {
         )
         .await?;
         let shutting_down = Rc::new(Cell::new(false));
-        let result = bind_controller(&config, &lease, Rc::clone(&shutting_down), &logger).await;
+        let result = bind_controller(
+            &config,
+            &lease,
+            Rc::clone(&shutting_down),
+            &logger,
+            start_local,
+        )
+        .await;
         let BoundController {
+            local,
             listener,
             router,
             address,
@@ -236,8 +270,8 @@ impl Controller {
         })
     }
 
-    pub fn local(&self) -> &dyn ExecutionProjectService {
-        &*self.local
+    pub fn local(&self) -> Rc<dyn ExecutionRuntimeApi> {
+        self.local.clone()
     }
 
     pub async fn lease_lost(&self) {
@@ -252,10 +286,12 @@ impl Controller {
         let listener = self.listener.await;
         self.auth_routes.drain().await;
         self.executors.drain().await;
+        let local = self.local.dispose().await;
         self.tickets.close();
         let runtime = remove_server_runtime(self.runtime_file, &self.instance_id).await;
         let lease = self.lease.release().await;
         listener?;
+        local?;
         runtime?;
         lease?;
         Ok(())
@@ -263,6 +299,7 @@ impl Controller {
 }
 
 struct BoundController {
+    local: Rc<dyn ExecutionRuntimeApi>,
     listener: Listener,
     router: HttpRouter,
     address: SocketAddr,
@@ -279,6 +316,7 @@ async fn bind_controller(
     lease: &ControllerLease,
     shutting_down: Rc<Cell<bool>>,
     logger: &ScopedLogger,
+    start_local: impl FnOnce(LocalExecutorContext<'_>) -> ExecutorResult<Rc<dyn ExecutionRuntimeApi>>,
 ) -> Result<BoundController, Box<dyn Error>> {
     let path = cli_runtime_file(&config.config_dir, RuntimeKind::Controller);
     match fs::remove_file(path).await {
@@ -308,6 +346,7 @@ async fn bind_controller(
     let executors = ExecutorConfigStore::open(&lease.workspace_dir().to_string_lossy()).await?;
     let providers =
         ProviderConfiguration::open(profiles, lease.workspace_dir(), &executors).await?;
+    let credentials = providers.local_credentials();
     let settings = SettingsStore::open(
         &lease.workspace_dir().to_string_lossy(),
         providers.settings_options(),
@@ -402,6 +441,39 @@ async fn bind_controller(
         )),
     )?
     .with_browser_sockets(browser_sockets.clone());
+    let local = start_local(LocalExecutorContext {
+        config,
+        workspace_dir: lease.workspace_dir(),
+        credentials,
+    })?;
+    let (listener, address, runtime_file) = match bind_listener(config, &runtime, logger).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            if let Err(dispose) = local.dispose().await {
+                logger.warn(&format!("Failed to dispose Local executor: {dispose}"));
+            }
+            return Err(error);
+        }
+    };
+    Ok(BoundController {
+        local,
+        listener,
+        router,
+        address,
+        runtime_file,
+        instance_id: runtime.identity.instance_id.clone(),
+        auth_routes,
+        browser_sockets,
+        executors,
+        tickets,
+    })
+}
+
+async fn bind_listener(
+    config: &ServerConfig,
+    runtime: &ServerRuntimeState,
+    logger: &ScopedLogger,
+) -> Result<(Listener, SocketAddr, String), Box<dyn Error>> {
     let listener = Listener::bind(
         &config.bind_address,
         config.port,
@@ -415,58 +487,12 @@ async fn bind_controller(
         .clone()
         .unwrap_or_else(|| advertised_server_url(&config.bind_address, f64::from(address.port())));
     let base_url = format!("{origin}{}", config.base_path);
-    let published = publish_server_runtime(&runtime, &base_url, &config.config_dir).await?;
+    let published = publish_server_runtime(runtime, &base_url, &config.config_dir).await?;
     logger.info(&format!(
         "Published controller runtime at {} ({base_url})",
         published.file_path
     ));
-    Ok(BoundController {
-        listener,
-        router,
-        address,
-        runtime_file: published.file_path,
-        instance_id: runtime.identity.instance_id.clone(),
-        auth_routes,
-        browser_sockets,
-        executors,
-        tickets,
-    })
-}
-
-pub struct UnavailableLocalExecutor;
-
-fn unavailable() -> Box<dyn Error> {
-    Box::new(AgentCallError::new(
-        AgentDeliveryOutcome::NotDispatched,
-        "Local executor is unavailable",
-    ))
-}
-
-#[async_trait::async_trait(?Send)]
-impl ExecutionProjectService for UnavailableLocalExecutor {
-    async fn ticket_project_default(
-        &self,
-        _: TicketProjectDefaultRequest,
-        _: Option<ExecutorCallOptions>,
-    ) -> ExecutorResult<TicketProjectDefault> {
-        Err(unavailable())
-    }
-
-    async fn inspect(
-        &self,
-        _: ExecutionProjectInspectRequest,
-        _: Option<ExecutorCallOptions>,
-    ) -> ExecutorResult<ExecutionProjectInspectResponse> {
-        Err(unavailable())
-    }
-
-    async fn resolve_file_mentions(
-        &self,
-        _: ResolveFileMentionsRequest,
-        _: Option<ExecutorCallOptions>,
-    ) -> ExecutorResult<String> {
-        Err(unavailable())
-    }
+    Ok((listener, address, published.file_path))
 }
 
 #[cfg(test)]
@@ -523,10 +549,7 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(3), stream.read_to_string(&mut response)).await.unwrap().unwrap();
             assert!(response.starts_with("HTTP/1.1 200 "), "{response}");
             assert!(response.contains(&controller.instance_id));
-            let unavailable = controller.local().resolve_file_mentions(ResolveFileMentionsRequest {
-                project_path: "/fixture".into(),
-                command: "probe".into(),
-            }, None).await.unwrap_err();
+            let unavailable = controller.local().get_project_service(None).await.err().unwrap();
             assert!(unavailable.to_string().contains("Local executor is unavailable"));
 
             controller.shutdown().await.unwrap();

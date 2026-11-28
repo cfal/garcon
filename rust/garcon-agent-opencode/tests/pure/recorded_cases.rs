@@ -802,6 +802,49 @@ fn event_converter_cases_match() {
 }
 
 #[test]
+fn history_loader_cases_match() {
+    use garcon_agent_opencode::agents::opencode::history_loader::{
+        convert_open_code_stored_messages, latest_open_code_stored_activity_at,
+    };
+    use garcon_base::event_loop::EventLoopSteps;
+    use garcon_interface::native_message_source::get_native_message_revision_source;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let stats = replay(format!("{CASES}/history-loader"), |function, args| {
+        if function != "convertHistory" {
+            return Err(CaseError::unhandled(function));
+        }
+        let input = value(function, args, 0)?;
+        let messages = input
+            .as_array()
+            .ok_or_else(|| CaseError::unhandled(function))?;
+        let clock = ManualClock::new(FIXED_NOW);
+        let (rows, activity) = runtime.block_on(async {
+            let mut steps = EventLoopSteps::new("opencode-history-conversion");
+            let rows = convert_open_code_stored_messages(messages, &mut steps, &clock).await;
+            (
+                rows,
+                latest_open_code_stored_activity_at(messages, &clock).await,
+            )
+        });
+        let rows: Vec<_> = rows
+            .iter()
+            .map(|row| {
+                json!({
+                    "row": message_value(row),
+                    "source": get_native_message_revision_source(row),
+                })
+            })
+            .collect();
+        Ok(json!({"rows": rows, "lastActivity": activity}))
+    });
+    assert_eq!(stats.with_wildcards, 0);
+}
+
+#[test]
 fn tool_result_converter_cases_match() {
     use garcon_agent_opencode::agents::opencode::tool_result_converter::normalize_open_code_tool_result_content;
 

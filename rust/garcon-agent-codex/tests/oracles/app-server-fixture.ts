@@ -11,6 +11,7 @@ const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + '
 let threadListAttempts = 0;
 let utilityRequestId: number | undefined;
 let utilityResponses = 0;
+let turnStarts = 0;
 
 for await (const line of input) {
   if (trace) appendFileSync(trace, line + '\n');
@@ -102,6 +103,29 @@ for await (const line of input) {
       write({ method: 'serverRequest/resolved', params });
       write({ id, result: {} });
       break;
+    case 'thread/start':
+      write({ id, result: { thread: { id: 'thread', path: nativePath }, model: params.model, serviceTier: null } });
+      break;
+    case 'turn/start':
+      if (mode === 'capacity-retry') {
+        const { threadId } = params;
+        const turnId = `turn-${++turnStarts}`;
+        write({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
+        if (turnStarts === 1) {
+          const error = { message: 'Selected model is at capacity', codexErrorInfo: 'serverOverloaded' };
+          write({ method: 'error', params: { threadId, turnId, error, willRetry: false } });
+          write({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'failed', error, items: [] } } });
+        } else {
+          write({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed', items: [
+            { type: 'agentMessage', id: 'resolved', phase: 'final_answer', text: 'Recovered.' },
+          ] } } });
+        }
+        write({ id, result: { turn: { id: turnId, status: 'inProgress' } } });
+        break;
+      }
+      write({ id, result: { turn: { id: 'turn', status: 'inProgress' } } });
+      write({ method: 'turn/started', params: { threadId: params.threadId, turn: { id: 'turn' } } });
+      break;
     case 'bad':
       write({ id, error: { code: -32001, message: 'Synthetic RPC error', data: { reason: 'synthetic' } } });
       break;
@@ -139,6 +163,20 @@ for await (const line of input) {
       }
       break;
     case 'turn/steer':
+      if (mode === 'managed-steer-terminal') {
+        write({ method: 'turn/completed', params: { threadId: params.threadId, turn: {
+          id: params.expectedTurnId, status: 'completed',
+          items: [{ type: 'agentMessage', id: 'final', phase: 'final_answer', text: 'Final answer.' }],
+        } } });
+        const release = process.env.SYNTHETIC_CODEX_STEER_RELEASE!;
+        const timer = setInterval(() => {
+          if (!existsSync(release)) return;
+          clearInterval(timer);
+          write({ id, result: { turnId: params.expectedTurnId } });
+        }, 10);
+        timer.unref();
+        break;
+      }
       if (mode === 'exit') process.exit(7);
       if (mode === 'steer-mismatch') {
         write({ id, error: { code: -32602, message: 'expected active turn id `turn` but found `next`' } });

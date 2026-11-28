@@ -27,6 +27,7 @@ fn model(value: &str, label: &str) -> AgentModelOption {
         value: value.into(),
         label: label.into(),
         supports_images: None,
+        thinking_modes: None,
         is_local: None,
         api_provider_id: None,
         endpoint_id: None,
