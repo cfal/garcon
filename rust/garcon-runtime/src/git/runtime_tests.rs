@@ -3,6 +3,7 @@ use std::process::Stdio;
 use std::rc::Rc;
 use std::time::Duration;
 
+use garcon_base::executor_disconnect::as_agent_call_error;
 use garcon_contract::git::{
     GitCommitSnapshotOptions, GitCommitSnapshotResponse, GitReviewBodyPurpose,
     GitReviewDocumentFileBodiesResponse, GitReviewMode, GitWorkbenchSnapshotOptions,
@@ -12,7 +13,6 @@ use garcon_contract::git_error::{GitServiceError, GitServiceErrorCode as Code};
 use garcon_contract::git_execution::{
     ExecutionGitReviewDocumentFileBodiesOptions, GitExecutorScope, GitReviewDocumentRef,
 };
-use garcon_interface::errors::AgentCallError;
 use garcon_interface::git::ExecutionGitService;
 use garcon_js::{Number, OptionalNullable};
 use serde_json::json;
@@ -259,7 +259,7 @@ async fn rejects_foreign_documents_and_paths_and_preserves_typed_non_repository_
         let rejected = gateway.get_status(ProjectOptions { project_path: String::new() }, None).await.unwrap_err();
         assert_eq!(rejected.downcast_ref::<GitServiceError>().unwrap().code, Code::GIT_INVALID_INPUT);
         let retired = gateway.get_status(ProjectOptions { project_path: project.into() }, None).await.unwrap_err();
-        assert!(retired.is::<AgentCallError>());
+        assert!(as_agent_call_error(retired.as_ref()).is_some());
         assert_eq!(retired.to_string(), "Git serving instance retired");
     }).await;
 }

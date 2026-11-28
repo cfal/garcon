@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/model-catalog.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/models.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 190,
+  "sha256": "362e173bae4b0a22353e8493939d501807e372305fd8f32f12f3968564081dae"
+}

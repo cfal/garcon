@@ -13,6 +13,7 @@ workspace = true
 test-support = []
 
 [dependencies]
+async-compression = { version = "0.4", features = ["tokio", "zstd"] }
 async-trait.workspace = true
 base64 = "0.23"
 futures.workspace = true
@@ -22,6 +23,7 @@ garcon-interface.workspace = true
 garcon-js.workspace = true
 indexmap.workspace = true
 ipnet = "2"
+memchr = "2"
 murmur3 = "0.5"
 regress = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-no-provider", "json", "stream", "gzip", "brotli", "deflate", "zstd"] }

@@ -1,0 +1,230 @@
+{"fn":"unwrapGlobalEvent","args":[null]}
+{"fn":"unwrapGlobalEvent","args":[{}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"sync"}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"sync","id":"evt_sync","properties":{"a":1}}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":5}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"message.updated","id":5,"properties":"x"}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"message.updated","id":"evt_1","properties":{"info":{"id":"m"}}}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":[]}, 5]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":null}]}
+{"fn":"unwrapGlobalEvent","args":[{"directory":"/repo","payload":{"type":"session.created","properties":{"sessionID":"ses_1","info":{"id":"ses_1"}}}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"message.updated","id":"","properties":[]}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"😀","id":"eé"}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.part.updated","properties":{}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","finish":"stop"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","finish":"tool-calls"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","finish":"unknown"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","finish":""}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","finish":5}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","finish":"error"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{"name":"MessageAbortedError"}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{"name":"OtherError","data":{"message":" data message "}}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{"name":" OtherError "}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":"boom"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{"data":{"message":"ignored"},"name":"MessageAbortedError"}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":""}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":"1"},"role":"assistant","id":"a"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{},"role":"assistant","id":"a"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"user","id":"a"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{"data":{"message":5},"name":"NamedError"}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{"data":{"message":null},"name":"NamedError"}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1},"role":"assistant","id":"a","error":{"data":{"message":"  😀 "},"name":"  "}}}}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[null]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","summary":true}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","summary":"true"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","mode":"compaction"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"user","agent":"compaction"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","agent":"Compaction"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","agent":"compaction","summary":false}]}
+{"fn":"isOpenCodeCompactionAssistant","args":["assistant"]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction"}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":1}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","auto":true}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.updated","properties":{"part":{"type":"compaction","auto":true}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated"}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":null}}]}
+{"fn":"isOpenCodeManualCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction"}}}]}
+{"fn":"isOpenCodeManualCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":false}}}]}
+{"fn":"isOpenCodeManualCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true}}}]}
+{"fn":"isOpenCodeManualCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":"text"}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true,"metadata":{"compaction_continue":true}}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true,"metadata":null}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":1,"metadata":{"compaction_continue":true}}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true,"metadata":{"compaction_continue":1}}}}]}
+{"fn":"extractSessionId","args":[{"type":"message.updated","properties":{"sessionID":"ses_1"}}]}
+{"fn":"extractSessionId","args":[{"type":"message.updated","properties":{"sessionID":"","part":{"sessionID":"ses_2"}}}]}
+{"fn":"extractSessionId","args":[{"type":"message.updated","properties":{"info":{"sessionID":"ses_3"}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":"ses_4"}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":null}}}]}
+{"fn":"extractSessionId","args":[{"type":"message.updated","properties":{"info":{"id":"ses_5"}}}]}
+{"fn":"extractSessionId","args":[{"type":"message.updated"}]}
+{"fn":"extractSessionId","args":[{"type":"message.updated","properties":{"sessionID":5}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"sessionID":0,"info":{"id":0}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":null}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":false}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":"😀"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":" provider overloaded ","attempt":2,"next":1700000000000}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"retrying"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"   ","attempt":1}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"busy"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.idle","properties":{"status":{"type":"retry","message":"m"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":"3","next":"1700000000000"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":1.5,"next":1.9}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":1e21}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":-0}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status"}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":5}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":null}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":" m ","attempt":2,"next":-1.9}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":2,"next":8640000000000000}}}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":2,"message":"Rate limit hit.","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":0,"message":"No period","nextAttemptAt":null}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":1.5,"message":"ends..","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":-1,"message":"x","nextAttemptAt":null}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":1e21,"message":"x","nextAttemptAt":null}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":0.5,"message":"é..","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNotice","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":2,"next":1700000000000}}}]}
+{"fn":"openCodeRetryNotice","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m"}}}]}
+{"fn":"openCodeRetryNotice","args":[{"type":"session.status","properties":{"status":{"type":"idle"}}}]}
+{"fn":"extractTextParts","args":[null]}
+{"fn":"extractTextParts","args":[[]]}
+{"fn":"extractTextParts","args":[[{"type":"text","text":"  a  "},{"type":"tool","text":"b"},{"type":"text","text":5},null,{"type":"text","text":"   "}]]}
+{"fn":"extractTextParts","args":["text"]}
+{"fn":"extractTextParts","args":[[{"type":"text"},{"type":"text","text":""}]]}
+{"fn":"extractTextParts","args":[[{"type":"text","text":"a"},{"type":"text","text":"b"}]]}
+{"fn":"extractTextParts","args":[[{"type":"text","text":" a "},{"type":"text","text":"😀"},{"type":"TEXT","text":"c"}]]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":""}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":" sync"}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"Sync"}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"sync​"}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"session.status","id":""}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"session.status","id":5}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"session.status","id":"😀","properties":5}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"session.status","properties":[]}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"session.status","properties":{"a":["é",1,null]}}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}]}
+{"fn":"unwrapGlobalEvent","args":[{"directory":"/repo","payload":"session.status"}]}
+{"fn":"unwrapGlobalEvent","args":[{"directory":"/repo","payload":{"type":["sync"]}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"sync","properties":{"type":"sync"}}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"message.updated","id":" ","properties":{"info":{"id":"é́"}}}}]}
+{"fn":"unwrapGlobalEvent","args":[{"payload":{"type":"İ","id":"İ"}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"Assistant","id":"a","time":{"completed":1}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":" assistant","id":"a","time":{"completed":1}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"","id":"a","time":{"completed":1}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"😀","time":{"completed":1},"finish":"😀"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"finish":" "}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"finish":"tool-calls "}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"finish":"unknown​"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"finish":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":"messageabortederror"}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":"MessageAbortedError "}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":" é "}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":"Named","data":{"message":" "}}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":"Named","data":{"message":5}}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":"Named","data":5}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":"Named","data":{"message":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"name":"","data":{"message":""}}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":{"data":[]}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":[]}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":0}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1},"error":"MessageAbortedError"}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1e+21}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":true}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":0}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":null}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":[]}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"a","time":null}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":" ","time":{"completed":1}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"Message.updated","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated ","properties":{"info":{"role":"assistant","id":"a","time":{"completed":1}}}}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated","properties":{"info":{"role":"assistant","id":"é́","time":{"completed":1},"finish":"stop"}},"id":"eé"}]}
+{"fn":"openCodeAssistantTerminal","args":[{"type":"message.updated"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","summary":1}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","mode":"Compaction"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","mode":"compaction "}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","agent":"compaction ","summary":false}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"İassistant"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":"assistant","agent":"😀"}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":["assistant"]}]}
+{"fn":"isOpenCodeCompactionAssistant","args":[{"role":{"role":"assistant"},"summary":true}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"id":"prt"}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"Compaction","auto":true}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction ","auto":true}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":"true"}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":[true]}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":{"auto":true}}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"😀","auto":true}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated ","properties":{"part":{"type":"compaction","auto":true}}}]}
+{"fn":"isOpenCodeCompactionControlPart","args":[{"type":"message.part.updated","properties":{"part":[]}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true,"metadata":{"compaction_continue":true,"other":1}}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text ","synthetic":true,"metadata":{"compaction_continue":true}}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":"true","metadata":{"compaction_continue":true}}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true,"metadata":[]}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true,"metadata":{"compaction_continue":[true]}}}}]}
+{"fn":"isOpenCodeCompactionContinuationPart","args":[{"type":"message.part.updated","properties":{"part":{"type":"text","synthetic":true,"metadata":{"compaction_continue":"true"}}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.","properties":{"info":{"id":"ses_6"}}}]}
+{"fn":"extractSessionId","args":[{"type":"Session.created","properties":{"info":{"id":"ses_6"}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created ","properties":{"info":{"id":"ses_6"}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":"ses_6"},"sessionID":0}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":"ses_6"},"sessionID":false}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":"ses_6"},"sessionID":[]}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":"ses_6"},"sessionID":{"a":1}}}]}
+{"fn":"extractSessionId","args":[{"type":"session.created","properties":{"info":{"id":"ses_6"},"sessionID":""}}]}
+{"fn":"extractSessionId","args":[{"type":"message.part.updated","properties":{"part":{"sessionID":"ses_7"},"sessionID":null}}]}
+{"fn":"extractSessionId","args":[{"type":"message.part.updated","properties":{"part":{"sessionID":" "}}}]}
+{"fn":"extractSessionId","args":[{"type":"message.part.updated","properties":{"part":{"sessionID":"😀"}}}]}
+{"fn":"extractSessionId","args":[{"type":"message.part.updated","properties":{"part":{"sessionID":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}}]}
+{"fn":"extractSessionId","args":[{"type":"message.updated","properties":{"sessionID":" ","info":{"sessionID":""},"part":{}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":" "}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"​"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"﻿é\t"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"😀"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"é","attempt":0}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":-1}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":0.5}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":1e-7}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":1e+21}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":9007199254740992}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":null}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":"3"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":0,"next":0}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":0}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":-1}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":-1.9}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":1e-7}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":1701769700000}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":1700000000000.999}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":8640000000000000}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":-8640000000000000}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":8640000000000001}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":-8640000000000001}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","next":"1700000000000"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"Retry","message":"m"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","extra":1}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":"retry "}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status","properties":{"status":{"type":["retry"],"message":"m"}}}]}
+{"fn":"openCodeSessionRetryStatus","args":[{"type":"session.status ","properties":{"status":{"type":"retry","message":"m"}}}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":0,"message":"no period","nextAttemptAt":""}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":1e-7,"message":"m","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":1e-7,"message":"m...","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":1e+21,"message":"m","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":9007199254740992,"message":"é.","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":2,"message":"😀.","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":2,"message":" m . ","nextAttemptAt":"2026-01-01T00:00:00.000Z"}]}
+{"fn":"openCodeRetryNoticeText","args":[{"attempt":-1,"message":"m","nextAttemptAt":" "}]}
+{"fn":"openCodeRetryNotice","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":" m ","attempt":2,"next":1700000000000}}}]}
+{"fn":"openCodeRetryNotice","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":0,"next":1700000000000}}}]}
+{"fn":"openCodeRetryNotice","args":[{"type":"session.status","properties":{"status":{"type":"retry","message":"m","attempt":1e+21,"next":1700000000000}}}]}
+{"fn":"extractTextParts","args":[[[{"type":"text","text":"﻿x"}]]]}
+{"fn":"extractTextParts","args":[[[{"type":"text","text":"​"}]]]}
+{"fn":"extractTextParts","args":[[[{"type":"text","text":"a"},{"type":"text"},{"type":"text","text":"b"}]]]}
+{"fn":"extractTextParts","args":[[[{"type":"text","text":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}]]]}
+{"fn":"extractTextParts","args":[[{"type":"text","text":"x"}]]}
+{"fn":"extractTextParts","args":[{}]}

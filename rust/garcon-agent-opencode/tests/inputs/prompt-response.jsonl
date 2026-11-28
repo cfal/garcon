@@ -1,0 +1,17 @@
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant","parentID":"msg_0","finish":"stop"},"parts":[{"type":"text","messageID":"msg_1","text":"Hello"},{"type":"text","messageID":"msg_9","text":"other"},{"type":"tool","messageID":"msg_1"}]}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant"},"parts":[]}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant","summary":true},"parts":[{"type":"text","messageID":"msg_1","text":"summary"}]}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant","mode":"compaction"}}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant","parentID":""}}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"","role":"assistant"}}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"user"}}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":"msg_1"}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":null},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[null,"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant"},"parts":[{"type":"text","messageID":"msg_1","text":"a"},{"type":"text","messageID":"msg_1","text":"b"},{"type":"text","messageID":"msg_1"}]}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant"},"parts":"not an array"}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant","agent":"compaction"},"parts":[{"type":"text","messageID":"msg_1","text":"hidden"}]}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_😀","role":"assistant","parentID":"pé"},"parts":[{"type":"text","messageID":"msg_😀","text":"  \n"},{"type":"text","messageID":"msg_😀","text":"😀"}]}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant","parentID":null},"parts":[{"type":"text","messageID":"msg_1","text":5}]}},"ses_1"]}
+{"fn":"parseOpenCodePromptResponse","args":[{"data":{"info":{"id":"msg_1","role":"assistant"},"parts":[{"type":"text","messageID":"msg_1","text":""}]}},""]}

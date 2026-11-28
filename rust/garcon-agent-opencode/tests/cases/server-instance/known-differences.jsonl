@@ -1,0 +1,4 @@
+{"fn":"mergeOpenCodeConfigContent","args":["{\"__proto__\":{\"x\":1},\"a\":2}","file:///plugin.js"],"result":"{\"__proto__\":{\"x\":1},\"a\":2,\"plugin\":[\"file:///plugin.js\"]}","reason":"prototype lookup in the original"}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"__proto__\":\"not an object\",\"a\":2}","file:///plugin.js"],"result":"{\"__proto__\":\"not an object\",\"a\":2,\"plugin\":[\"file:///plugin.js\"]}","reason":"prototype lookup in the original"}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"x\",{\"__proto__\":{\"a\":1}}]]}","file:///plugin.js"],"result":"{\"plugin\":[[\"x\",{\"__proto__\":{\"a\":1}}],\"file:///plugin.js\"]}","reason":"prototype lookup in the original"}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":\"\\ud800\"}","file:///plugin.js"],"result":"{\"a\":\"�\",\"plugin\":[\"file:///plugin.js\"]}","reason":"unpaired surrogate in a result"}

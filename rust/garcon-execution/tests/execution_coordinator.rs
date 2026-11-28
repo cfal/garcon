@@ -658,10 +658,59 @@ fn replays_coordinator_traces() {
 }
 
 #[tokio::test]
+async fn query_facet_distinguishes_turn_reservations_from_other_execution_owners() {
+    LocalSet::new()
+        .run_until(async {
+            let (execution, ports) = fixture("terminal");
+            let queries: &dyn ChatExecutionQueries = execution.as_ref();
+
+            let snapshot = execution.reserve_transcript_snapshot(CHAT).unwrap();
+            assert!(queries.owns_execution(CHAT));
+            assert!(!queries.is_chat_turn_reserved(CHAT));
+            assert!(queries.get_turn_reserved_chat_ids().is_empty());
+            execution
+                .release_transcript_snapshot(&snapshot)
+                .await
+                .unwrap();
+
+            let reservation = execution
+                .reserve_direct_turn(CHAT, &identity("first"))
+                .unwrap();
+            assert!(queries.is_chat_turn_reserved(CHAT));
+            assert_eq!(queries.get_turn_reserved_chat_ids(), [CHAT]);
+            run(&execution, reservation).await.unwrap();
+
+            execution.mark_run_terminal_committed(CHAT, "first");
+            let metadata = turn("first");
+            let settlement = execution.on_agent_turn_terminal(
+                CHAT,
+                Some(&metadata),
+                AgentTurnSettlementOutcome::Finished,
+            );
+            let observe = async {
+                ports.settling.notified().await;
+                assert!(queries.owns_execution(CHAT));
+                assert!(!queries.is_chat_turn_reserved(CHAT));
+                assert!(queries.get_turn_reserved_chat_ids().is_empty());
+                ports.settlement.notify_one();
+            };
+            let (result, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+                tokio::join!(settlement, observe)
+            })
+            .await
+            .unwrap();
+            result.unwrap();
+            assert!(!queries.owns_execution(CHAT));
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn dropping_stop_waiter_does_not_cancel_provider_interrupt_or_state_cleanup() {
     LocalSet::new()
         .run_until(async {
             let (execution, ports) = fixture("coalesced");
+            let queries: &dyn ChatExecutionQueries = execution.as_ref();
             let reservation = execution
                 .reserve_direct_turn(CHAT, &identity("first"))
                 .unwrap();
@@ -675,7 +724,7 @@ async fn dropping_stop_waiter_does_not_cancel_provider_interrupt_or_state_cleanu
                 }
             }
             assert!(reservation.execution_admission.signal().is_cancelled());
-            assert!(execution.is_chat_stop_in_flight(CHAT));
+            assert!(queries.is_chat_stop_in_flight(CHAT));
             ports.abort.notify_one();
             tokio::time::timeout(
                 Duration::from_secs(2),
@@ -683,7 +732,7 @@ async fn dropping_stop_waiter_does_not_cancel_provider_interrupt_or_state_cleanu
             )
             .await
             .unwrap();
-            assert!(!execution.is_chat_stop_in_flight(CHAT));
+            assert!(!queries.is_chat_stop_in_flight(CHAT));
             assert!(
                 execution
                     .reserve_direct_turn(CHAT, &identity("successor"))

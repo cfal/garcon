@@ -1,3 +1,4 @@
+pub mod api_providers;
 pub mod auth;
 pub mod executors;
 pub mod runtime;

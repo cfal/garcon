@@ -1,0 +1,14 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/tool-use-converter.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/tool-use-converter.test.js"
+  ],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/tool-use-converter.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 168,
+  "sha256": "480c8607883f4fa587cf49a40ac7f8382054800117e0f762f8fbd1ae44973df5"
+}

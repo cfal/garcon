@@ -15,9 +15,11 @@ async-trait.workspace = true
 bcrypt = "0.19.3"
 garcon-base.workspace = true
 garcon-contract.workspace = true
+garcon-interface.workspace = true
 garcon-js.workspace = true
 garcon-link.workspace = true
 getrandom = "0.4"
+indexmap.workspace = true
 jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto"] }
 percent-encoding = "2"
 regex = "1"
