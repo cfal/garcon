@@ -1,0 +1,33 @@
+{"fn":"parseChatMessageJson","args":[{"type":"user-message","timestamp":"fixture","content":"Body only","presentation":{"origin":"cli","style":"error","title":"Heading"}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"user-message","timestamp":"fixture","content":"Body only","presentation":{"origin":"cli","disclosure":"collapsed"}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"user-message","content":"Body only","presentation":{"origin":"cli","style":"notice","title":"invalid\ntitle"},"images":[{"data":"YWJj","name":"fixture.png","mimeType":"image/png"}]}]}
+{"fn":"parseChatMessageJson","args":[{"type":"user-message","metadata":{"questionReply":{"questionId":null}}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"assistant-message","content":"Question","questions":{"id":"set","questions":[{"id":"q","prompt":"What now?","options":[],"allowFreeText":true}]}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"assistant-message","content":"Question","questions":{"id":"set","questions":[{"id":"q","prompt":"What now?","options":[],"allowFreeText":false}]}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"command-output","commandId":"cmd","channel":"stdout","format":"markdown","content":"# Output","offset":0,"context":null}]}
+{"fn":"parseChatMessageJson","args":[{"type":"command-output","commandId":"cmd","channel":"stderr","format":"plain","content":"Diagnostic","offset":9007199254740991,"context":{"executorId":"local","projectPath":"/project"}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"command-output","commandId":"cmd","channel":"stderr","format":"markdown","content":"not markdown","offset":0,"context":null}]}
+{"fn":"parseChatMessageJson","args":[{"type":"command-output","commandId":"cmd","channel":"stderr","format":"plain","content":"no context","offset":0}]}
+{"fn":"parseChatMessageJson","args":[{"type":"command-result","commandId":"cmd","result":{"outcome":"finished","exitCode":0,"signal":null,"capture":"complete","cwd":{"kind":"reported","path":"/project"}},"content":"not used"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"command-result","commandId":"","result":{"outcome":"finished","exitCode":0,"signal":null,"capture":"complete","cwd":{"kind":"withheld"}}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"thinking","timestamp":0,"content":"Thought"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"tool-result","toolId":"tool","content":{"raw":"Done","n":1.0,"big":9007199254740993,"exp21":1e21,"small":1e-7}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"error","content":"Error"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"cli-row","content":"Heading","presentation":{"style":"custom","customStyle":{"lightAccent":"#012abc","darkAccent":"#fed234"},"extra":true},"format":"invalid","disclosure":"collapsed","title":"  verbatim  "}]}
+{"fn":"parseChatMessageJson","args":[{"type":"cli-row","presentation":"custom","format":"markdown"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-request","permissionOccurrenceId":"permission","reason":"Provider explanation","requestedTool":{"type":"bash-tool-use","timestamp":"fixture","toolId":"tool","command":"echo fixture"}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-request","permissionOccurrenceId":"permission","reason":42,"requestedTool":{"type":"bash-tool-use","toolId":"tool","command":"echo fixture"}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-request","permissionOccurrenceId":"permission","requestedTool":{"type":"assistant-message"}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-request","requestedTool":{"type":"user-message","metadata":{"questionReply":null}}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-resolved","permissionOccurrenceId":"permission","allowed":[],"questionResponse":{"type":"ask-user-question-response","outcome":"answered","answers":[]}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-resolved","permissionOccurrenceId":"permission","allowed":0,"questionResponse":{"type":"ask-user-question-response","outcome":"wrong"}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-cancelled","permissionOccurrenceId":"permission","reason":"session-complete"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-cancelled","permissionOccurrenceId":"permission","reason":{"n":1.0,"big":9007199254740993,"exp21":1e21,"small":1e-7}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-expired","permissionOccurrenceId":"permission"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-expired","permissionOccurrenceId":""}]}
+{"fn":"parseChatMessageJson","args":[{"type":"compaction","trigger":"auto","summary":"Summary","preTokens":9007199254740993,"postTokens":0.5}]}
+{"fn":"parseChatMessageJson","args":[{"type":"compaction","trigger":"invalid","summary":"Summary","preTokens":"12"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"agent-switch","fromAgentId":"codex","toAgentId":"claude","fromModel":null,"toModel":"model","fromExecutorId":"","toExecutorId":42}]}
+{"fn":"parseChatMessagesJson","args":[[[],null,{},"not a message",{"type":"constructor"},{"type":"__proto__"},{"type":"assistant-message","content":"Text"},{"type":"bash-tool-use","toolId":"tool","command":"echo fixture"}]]}
+{"fn":"parseChatMessagesJson","args":[null]}
+{"fn":"parseChatMessagesJson","args":[[{"type":"assistant-message"},{"type":"user-message","metadata":{"questionReply":false}},{"type":"error"}]]}
