@@ -1,0 +1,163 @@
+{
+  "module": "common/ask-user-question-response.ts",
+  "tests": [
+    "common/__tests__/ask-user-question-response.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "normalizeAskUserQuestionDecisionResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:44:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:45:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:47:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:87:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:88:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:99:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:100:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:102:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:104:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:117:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:119:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:162:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:163:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:176:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a BashToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:184:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:231:14",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 6
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:233:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "common/__tests__/ask-user-question-response.test.js:235:12",
+      "fn": "askUserQuestionDecisionValidationError",
+      "count": 1
+    }
+  ],
+  "cases": 225,
+  "sha256": "6a237a23100a3c846c1f9a09bd122e6146154e39f7424bc7cfdc23192c314c6d"
+}
