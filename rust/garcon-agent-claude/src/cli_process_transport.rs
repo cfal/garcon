@@ -95,12 +95,19 @@ pub struct ClaudeProcessOptions {
 }
 
 pub fn spawn_claude_subprocess(options: ClaudeProcessOptions) -> io::Result<ClaudeSubprocess> {
+    spawn_claude_subprocess_with_stdin(options, Stdio::piped())
+}
+
+pub(crate) fn spawn_claude_subprocess_with_stdin(
+    options: ClaudeProcessOptions,
+    stdin: Stdio,
+) -> io::Result<ClaudeSubprocess> {
     let mut child = Command::new(options.executable)
         .args(options.arguments)
         .current_dir(options.cwd)
         .env_clear()
         .envs(options.environment)
-        .stdin(Stdio::piped())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -430,7 +437,7 @@ impl Inner {
     }
 }
 
-async fn wait_for_exit(exited: ClaudeExitStatus, duration: Duration) -> bool {
+pub(crate) async fn wait_for_exit(exited: ClaudeExitStatus, duration: Duration) -> bool {
     tokio::select! {
         biased;
         _ = exited => true,

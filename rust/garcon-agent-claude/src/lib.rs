@@ -1,5 +1,6 @@
 pub mod claude_auth_login;
 pub mod cli_control;
+pub mod cli_environment;
 pub mod cli_process_transport;
 pub mod cli_protocol;
 pub mod compaction;
@@ -7,6 +8,7 @@ pub mod model_context;
 pub mod native_path;
 pub mod permission_tool_converter;
 pub mod process_retirements;
+pub mod single_query_process;
 pub mod slash_command_discovery;
 pub mod tool_use_converter;
 pub mod user_input;
