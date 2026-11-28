@@ -760,6 +760,66 @@ fn permission_tool_converter_cases_match() {
 }
 
 #[test]
+fn event_converter_cases_match() {
+    use garcon_agent_opencode::agents::opencode::event_converter::convert_open_code_event_to_chat_messages;
+    use garcon_interface::native_message_source::get_native_message_revision_source;
+
+    replay(format!("{CASES}/event-converter"), |function, args| {
+        if function != "convertEvents" {
+            return Err(CaseError::unhandled(function));
+        }
+        let input = value(function, args, 0)?;
+        let events = input
+            .as_array()
+            .ok_or_else(|| CaseError::unhandled(function))?;
+        let turn = build_turn(&json!({}), None);
+        let logger = recording_logger();
+        let clock = ManualClock::new(FIXED_NOW);
+        let results = events
+            .iter()
+            .map(|input| {
+                convert_open_code_event_to_chat_messages(
+                    &event(input),
+                    &turn,
+                    logger.as_ref(),
+                    &clock,
+                )
+                .map(|rows| {
+                    rows.iter()
+                        .map(|row| {
+                            json!({
+                                "row": message_value(row),
+                                        "source": get_native_message_revision_source(row),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        let log = logger.lines.borrow().clone();
+        Ok(json!({ "results": results, "turn": snapshot_turn(&turn), "log": log }))
+    });
+}
+
+#[test]
+fn tool_result_converter_cases_match() {
+    use garcon_agent_opencode::agents::opencode::tool_result_converter::normalize_open_code_tool_result_content;
+
+    replay(
+        format!("{CASES}/tool-result-converter"),
+        |function, args| {
+            if function != "normalizeOpenCodeToolResultContent" {
+                return Err(CaseError::unhandled(function));
+            }
+            Ok(message_value(&normalize_open_code_tool_result_content(
+                &value(function, args, 0)?,
+                &value(function, args, 1)?,
+            )))
+        },
+    );
+}
+
+#[test]
 fn tool_use_converter_cases_match() {
     use garcon_cases::{ReplayOptions, ResultOrderException, replay_with_options};
 

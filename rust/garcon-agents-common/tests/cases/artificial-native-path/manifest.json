@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/chats/artificial-native-path.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 79,
+  "sha256": "e964f99e9102f24bdbf5a4237ee2f5fd79e4c593afac9d2ad6a65c1c83532d13"
+}

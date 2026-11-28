@@ -123,6 +123,20 @@ pub struct TranscriptView {
     pub content_start_ordinal: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NativeActivityProviderWatermark {
+    pub ordinal: u64,
+    pub at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptNativeActivityState {
+    pub view_id: TranscriptViewId,
+    pub session: Option<LedgerRow>,
+    pub provider_watermark: Option<NativeActivityProviderWatermark>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LedgerRow {
