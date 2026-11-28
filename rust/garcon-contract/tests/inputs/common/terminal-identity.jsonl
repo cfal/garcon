@@ -1,0 +1,16 @@
+{"fn":"terminalId","args":[{"executorId":"local","terminalRuntimeId":"00000000-0000-0000-0000-000000000000","sessionId":"abcdef01-2345-6789-ABCD-EF0123456789"}]}
+{"fn":"terminalId","args":[{"executorId":"instance","terminalRuntimeId":"","sessionId":"nested/session"}]}
+{"fn":"parseTerminalReference","args":["local/00000000-0000-0000-0000-000000000000/abcdef01-2345-6789-ABCD-EF0123456789"]}
+{"fn":"parseTerminalReference","args":["12345678-1234-4abc-8abd-1234567890ab/12345678-1234-AABC-FABD-1234567890AB/ABCDEF01-2345-6789-ABCD-EF0123456789"]}
+{"fn":"parseTerminalReference","args":["LOCAL/00000000-0000-0000-0000-000000000000/abcdef01-2345-6789-ABCD-EF0123456789"]}
+{"fn":"parseTerminalReference","args":["12345678-1234-1abc-8abd-1234567890ab/00000000-0000-0000-0000-000000000000/abcdef01-2345-6789-ABCD-EF0123456789"]}
+{"fn":"parseTerminalReference","args":["local/00000000-0000-0000-0000-000000000000/abcdef01-2345-6789-ABCD-EF0123456789/extra"]}
+{"fn":"parseTerminalReference","args":["local/00000000-0000-0000-0000-000000000000/abcdef01-2345-6789-ABCD-EF0123456789\n"]}
+{"fn":"parseTerminalReference","args":["local/00000000-0000-0000-0000-000000000000/abcdef01-2345-6789-ABCD-EF012345678g"]}
+{"fn":"parseTerminalReference","args":["local//abcdef01-2345-6789-ABCD-EF0123456789"]}
+{"fn":"parseTerminalReference","args":["local/00000000-0000-0000-0000-000000000000"]}
+{"fn":"parseTerminalReference","args":[""]}
+{"fn":"parseTerminalReference","args":[false]}
+{"fn":"parseTerminalReference","args":[{}]}
+{"fn":"parseTerminalReference","args":[null]}
+{"fn":"parseTerminalReference","args":[]}

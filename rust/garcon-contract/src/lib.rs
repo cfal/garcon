@@ -59,6 +59,7 @@ pub mod tags;
 pub mod template_tokens;
 pub mod terminal;
 pub mod terminal_error;
+pub mod terminal_identity;
 pub mod ticket_validation;
 pub mod tickets;
 pub mod tool_schedule;
