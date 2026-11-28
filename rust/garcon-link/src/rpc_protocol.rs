@@ -72,6 +72,7 @@ pub struct IntegrationManifestAuthMethods {
 
 impl IntegrationManifest {
     pub fn from_integration(integration: &AgentIntegration) -> ExecutorResult<Self> {
+        let scope = integration.producers.scope()?;
         let settings = IntegrationManifestSettings {
             descriptors: integration.settings.describe().to_vec(),
             defaults: integration.settings.defaults()?,
@@ -102,7 +103,7 @@ impl IntegrationManifest {
             .unwrap_or_default();
         Ok(Self {
             descriptor: integration.descriptor.clone(),
-            scope: integration.producers.scope()?,
+            scope,
             settings,
             attachments: integration.attachments.clone(),
             capabilities: NULLABLE_AGENT_FACETS
