@@ -23,4 +23,5 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 garcon-cases.workspace = true
+rusqlite = { workspace = true, features = ["hooks"] }
 tempfile.workspace = true

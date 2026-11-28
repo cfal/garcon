@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::error::Error;
-use std::fmt;
 use std::future::Future;
 use std::rc::Rc;
 
 use futures::future::{FutureExt, LocalBoxFuture, Shared, join_all};
+use garcon_base::errors::{DiagnosticError, ErrorMetadata, SharedDiagnosticError, error_metadata};
 use garcon_interface::integration::{
     AGENT_INTEGRATION_API_VERSION, AgentIntegration, AgentIntegrationClass,
 };
@@ -28,26 +28,20 @@ struct Lifecycle {
 #[error("Unsupported agent integration: {0}")]
 pub struct UnknownAgentIntegration(pub String);
 
-#[derive(Debug)]
-struct SharedLifecycleError(Rc<dyn Error>);
-
-impl fmt::Display for SharedLifecycleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl Error for SharedLifecycleError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(self.0.as_ref())
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct IntegrationLifecycleErrors {
     message: &'static str,
     pub errors: Vec<Box<dyn Error>>,
+}
+
+impl DiagnosticError for IntegrationLifecycleErrors {
+    fn diagnostic_metadata(&self) -> ErrorMetadata<'_> {
+        ErrorMetadata {
+            name: "AggregateError",
+            code: None,
+        }
+    }
 }
 
 pub struct IntegrationRegistry {
@@ -150,8 +144,7 @@ impl IntegrationRegistry {
                 start
             }
         };
-        task.await
-            .map_err(|error| SharedLifecycleError(error).into())
+        task.await.map_err(share_lifecycle_error)
     }
 
     pub async fn stop(&self) -> ExecutorResult<()> {
@@ -183,9 +176,18 @@ impl IntegrationRegistry {
                 stop
             }
         };
-        task.await
-            .map_err(|error| SharedLifecycleError(error).into())
+        task.await.map_err(share_lifecycle_error)
     }
+}
+
+fn share_lifecycle_error(error: Rc<dyn Error>) -> Box<dyn Error> {
+    let metadata = error
+        .downcast_ref::<IntegrationLifecycleErrors>()
+        .map_or_else(
+            || error_metadata(error.as_ref()),
+            DiagnosticError::diagnostic_metadata,
+        );
+    SharedDiagnosticError::new(error.clone(), metadata).into()
 }
 
 fn spawn_lifecycle(work: impl Future<Output = ExecutorResult<()>> + 'static) -> LifecycleTask {

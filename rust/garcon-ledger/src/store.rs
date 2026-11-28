@@ -155,12 +155,14 @@ impl TranscriptLedgerStore {
           INSERT INTO transcript_views(view_id, status, created_at, content_start_ordinal)
           VALUES (?, 'current', ?, ?)
         ",
-                    )?
+                    )
+                    .map_err(as_error)?
                     .execute(params![
                         view_id.as_str(),
                         created_at,
                         bind_ordinal(input.content_start_ordinal)
-                    ])?;
+                    ])
+                    .map_err(as_error)?;
                 insert_encoded_rows(&entry.db, &view_id, &encoded, 1)
             })?;
             let view = TranscriptView {
@@ -632,8 +634,8 @@ impl ConnectionCache {
             }
             ConnectionCloseAttempt::Failed { entry, failure } => {
                 self.failed_close.insert(chat_id.clone(), *entry);
-                let failure = SharedLedgerFailure::new(failure);
-                self.open_failures.insert(chat_id, failure.clone());
+                self.open_failures
+                    .insert(chat_id, SharedLedgerFailure::new(Box::new(failure.clone())));
                 Err(Box::new(failure))
             }
         }
@@ -702,4 +704,67 @@ fn append_notice(
     entry.next_ordinal += 1;
     // INFALLIBLE: the notice append paths each pass one draft.
     Ok(rows.pop().expect("materialized notice"))
+}
+
+#[cfg(test)]
+mod close_tests {
+    use std::ptr;
+
+    use garcon_base::errors::DiagnosticError;
+    use rusqlite::ffi;
+
+    use super::*;
+    use crate::{errors::safe_fence_diagnostic, sqlite_operations::SqliteError};
+
+    #[test]
+    fn close_errors_remain_concrete_and_the_chat_keeps_its_fence() {
+        for close_all in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let store = TranscriptLedgerStore::new(
+                root.path().to_str().unwrap(),
+                TranscriptLedgerStoreOptions::default(),
+            )
+            .unwrap();
+            let mut statement = ptr::null_mut();
+            store
+                .read("test", |entry| {
+                    // SAFETY: The handle is live during preparation. The raw, uncached
+                    // statement is finalized below, after SQLite refuses to close the
+                    // connection while it owns that statement.
+                    let code = unsafe {
+                        ffi::sqlite3_prepare_v2(
+                            entry.db.handle(),
+                            c"SELECT 1".as_ptr(),
+                            -1,
+                            &mut statement,
+                            ptr::null_mut(),
+                        )
+                    };
+                    assert_eq!(code, ffi::SQLITE_OK);
+                    assert!(!statement.is_null());
+                    Ok(())
+                })
+                .unwrap();
+            let result = if close_all {
+                store.close()
+            } else {
+                store.close_chat("test")
+            };
+            // SAFETY: A live statement prevents SQLite from closing its connection.
+            // The prepare above succeeded; this is the only finalization.
+            let finalized = unsafe { ffi::sqlite3_finalize(statement) };
+            assert_eq!(finalized, ffi::SQLITE_OK);
+            let error = result.unwrap_err();
+            let sqlite = error
+                .downcast_ref::<SqliteError>()
+                .expect("close returns its SQLite failure");
+            assert_eq!(sqlite.diagnostic_metadata().code, Some("SQLITE_BUSY"));
+            let fenced = store.read("test", |_| Ok(())).unwrap_err();
+            assert_eq!(
+                safe_fence_diagnostic(fenced.as_ref()).cause_code,
+                "SQLITE_BUSY"
+            );
+            store.close().unwrap();
+        }
+    }
 }

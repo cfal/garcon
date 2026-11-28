@@ -828,6 +828,7 @@ name = "garcon-agents-common"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
  "futures",
  "garcon-base",
  "garcon-cases",
@@ -835,10 +836,16 @@ dependencies = [
  "garcon-interface",
  "garcon-js",
  "indexmap",
+ "libc",
+ "regress",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "tokio-util",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -858,6 +865,8 @@ dependencies = [
  "http-body",
  "http-body-util",
  "libc",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -867,6 +876,7 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
+ "webpki-roots 1.0.12",
  "windows-sys 0.61.2",
 ]
 
@@ -947,6 +957,7 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -1097,7 +1108,6 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
- "webpki-roots 1.0.12",
  "x25519-dalek",
  "zeroize",
 ]
@@ -1147,6 +1157,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

@@ -142,12 +142,12 @@ Parallel. Each needs only wave 0.
 | runtime-projects-files | `ProjectService`, `FilesService`, directory creation | Ported unit tests; golden cases; the TypeScript and the Rust service compared over the same generated directory tree | merged: 89969af78 (link). 38/38 crate tests; recorded cases directory-reader 10/10, errors 12/12, file-revision 3/3, file-mentions 7/7; the TypeScript and Rust services agree over the same tree (collation, symlinks and loops, unreadable entries, invalid UTF-8 names, large directories, revisions after writes by each side, ticket-default trees); removing ctime from the revision hash fails it; Windows compile-checked only. Open from review: the abort error loses its name once erased |
 | runtime-git | `GitRuntime`: status, diff engine, comparisons, history, worktrees, stashes, review documents; `gh` | Ported unit tests against real repositories from `git-fixture` | claimed by harness 2026-11-28; `git::{run, operation_context, git_domain_error, types}` by link (c6aa587e9); ten parser modules (1,241 recorded cases) and the first read operations merged at 2f1c50c0d; conflicts, discard, and stashes in the gate; comparisons, the diff engine, review documents, the remaining mutations, the assembled `GitRuntime`, and `gh` open |
 | runtime-terminals | PTY runtime, replay buffer, terminal framing | Ported unit tests with a real shell | merged by link 2026-11-28 (c2ba5c4d5, in the gate): 60/60 crate tests with three real-shell cases; terminal identity 16/16 and replay buffer 9/9 recorded; stale attachment generations, missing UUID validation, and a UTF-16 replay budget each fail it; ConPTY compile-checked only |
-| agents-direct | `garcon-agents-common` execution, producer adapter, direct runtimes and session store; the three direct integrations | Ported unit tests against `fake-openai-server` and `fake-anthropic-server`; the integration conformance kit | claimed by link 2026-11-28; plan approved (execution leaves and adapters; session store and the three protocol runtimes; the three integration crates with the conformance kit; runtime host and registry; roster in the executor) |
+| agents-direct | `garcon-agents-common` execution, producer adapter, direct runtimes and session store; the three direct integrations | Ported unit tests against `fake-openai-server` and `fake-anthropic-server`; the integration conformance kit | claimed by link 2026-11-28. Merged: `garcon-agents-common` adapters, catalog, settings, lifecycle, migration, the direct session store and native session, and the runtime integration host, registry, and migration store. Open: the turn runtime, the three protocol runtimes on a shared HTTP client, the three integration crates with the conformance kit, the roster |
 | edge | Arguments and environment, lease, runtime descriptor, the native mode (`GARCON_RS_CONTROLLER=native`) that answers unported routes with a marked 501 and logs them, router with `wrapRoutes` semantics, auth store, service, tokens and rate limiter, WebSocket upgrade, session, and delivery budget, SPA shell | Parity: `api-session`, `auth-logout`, `settings-shell`, `websocket-session`, `static-assets*` native | done: 29255b2fb (scenarios). Configuration (176 cases), native start, listener, routes, static assets, runtime routes, leases, the seven auth methods, and the browser WebSocket (upgrade, permessage-deflate, authentication and revocation fences, ping, reconnect, request validation, write budget). Native replay with no fallback: 5,144 of 12,238 cases match, 6,485 answer the unported marker, 605 are blocked behind those, 4 mismatch (settings-shell title cases, waiting on the settings store); `websocket-session` 31 matched and 1 unported; 223 route methods unported. Seven review findings on the WebSocket layer open |
-| stores | Settings and its sub-stores, snippets, preambles, chat boards, canvases, saved searches, folders, tickets, API providers and assignments, Telegram settings, executor configuration | New parity scenarios per route group on an empty and a seeded workspace; ported unit tests; files written by one implementation read by the other | claimed by scenarios 2026-11-28; plan approved, one route group per commit: settings store and title (the settings snapshot routes stay unported until the agent registry exists), Telegram, tickets, executor configuration, API providers, preambles, snippets, canvases, boards, saved searches, folders, tags; forecast ceiling 9,698 native matches |
+| stores | Settings and its sub-stores, snippets, preambles, chat boards, canvases, saved searches, folders, tickets, API providers and assignments, Telegram settings, executor configuration | New parity scenarios per route group on an empty and a seeded workspace; ported unit tests; files written by one implementation read by the other | claimed by scenarios 2026-11-28. Merged: the settings store and stored title, the Telegram settings store. The settings snapshot routes and Telegram routes that return it stay unported until the agent registry exists. In progress: tickets |
 | ledger | Store, codec, service, views, staging, paging, anchors, native activity, clear and reload | `docs/transcript-ledger-v5-cts.md`; ported unit tests; ledgers written by one implementation read by the other | claimed by foundation 2026-11-28. Merged: row codec and contracts (247 recorded; rows written by each implementation read by the other), connection, schema, migrations, fences. Open: the store, append and idempotency, staging, paging, anchors, folds, services |
-| search | FTS5 schema, indexer, query, worker pair as threads | Ported unit tests; the search corpus fixtures; same index readable by both | claimed by interface 2026-11-28. Merged: row projection, latency statistics, query validation, and the literal boundary matcher (8,281 of 8,281 spans against Bun). Open: schema and sync, ranking, paging, snippets, the worker threads, the service |
-| execution-state | The pure state machines of `chat-execution/` (control transitions, operations, ownership) and `commands/command-ledger.ts` | Golden cases from the TypeScript transition tests | claimed by research 2026-11-28. Merged: control state and projection, transitions (166 recorded), the in-memory repository, turn identity, attempts, the finalization tracker, ownership, and the API contract test for its part. Open: control operations, the command ledger |
+| search | FTS5 schema, indexer, query, worker pair as threads | Ported unit tests; the search corpus fixtures; same index readable by both | claimed by interface 2026-11-28. Merged: row projection, latency statistics, query validation and the literal boundary matcher (8,281 of 8,281 spans against Bun), schema and sync, query execution with ranking, paging, and snippets, and the writer and two reader threads with their supervisor; 22 queries return the same bytes from indexes built by the Bun writer and by the Rust writer thread. Open: the service, then search-surface |
+| execution-state | The pure state machines of `chat-execution/` (control transitions, operations, ownership) and `commands/command-ledger.ts` | Golden cases from the TypeScript transition tests | done: 76f5bb47c (research, in the gate). Control state and projection, transitions, the in-memory repository, turn identity, attempts, the finalization tracker, ownership, control operations, and the command ledger in `garcon-execution`: 42 Rust tests and 214 recorded cases; concrete error types reach callers; no cancellation point between commit and `input_accepted`; the API contract test pins the ownership booleans, and its coordinator half waits for wave 2 |
 
 ### Wave 2: assembly
 
@@ -164,7 +164,7 @@ Parallel. Each needs only wave 0.
 | agents-best-effort | worker | cursor, amp, factory | Ported unit tests and golden converter cases only; no scripted tier exists | open |
 | chats | stores, ledger | Registry, metadata index, list projector, ownership journal, identifiers, tags, parents, order | Ported unit tests; registry files read by both | open |
 | agents-registry | chats, agents-direct | `AgentRegistry`, runtime router, directory, catalog, session settings, producer bindings, `ExecutorManager` with the in-process Local runtime | Ported unit tests | open |
-| execution | execution-state, agents-registry | Coordinator, queue drainer, steering, accepted input, start, session, steer, queue, and fork commands | Ported unit tests | open |
+| execution | execution-state, agents-registry | Coordinator, queue drainer, steering, accepted input, start, session, steer, queue, and fork commands | Ported unit tests | claimed by research 2026-11-28 for the parts the original tests against fakes: accepted input and terminal helpers, receipt projection, command settlement; steer, queued steer, and control input delivery and the queue drainer; the coordinator. The command modules that need the chats registry and the agent registry wait for those units |
 | chat-surface | execution, edge | Chat routes, command routes, snapshots, rows, browser chat handler, `server-event-wiring` | **Core milestone:** generic server suites pass in-process on the native controller with direct providers | open |
 | remote-client | link, agents-registry | `RemoteExecutorClient`, remote integration and service proxies, CLI dispatcher | Remote lanes, Rust controller with TypeScript worker | open |
 
@@ -184,7 +184,7 @@ Parallel after the core milestone.
 | pull-request-reviews | Scanner, runner, poster, routes | `pull-request-reviews` suite | open |
 | notifications | Telegram notifier, attention tracker | Ported unit tests | open |
 | catalog-surface | Agents, models, API-provider, usage, CLI-update, prompt-refinement routes, title generation | `provider-*`, `usage-*`, `agent-*` suites | open |
-| controller-only | The `garcon-controller` binary (ADR-023): a controller whose Local executor is absent. New behavior with no original to mirror; its semantics need the user's confirmation before the unit starts (see open questions) | New server suites for startup, chat admission, catalogs, and the SPA with only remote executors | open |
+| controller-only | The `garcon-controller` binary (ADR-023): a controller whose Local executor is absent. New behavior with no original to mirror; its semantics need the user's confirmation before the unit starts (see open questions) | New server suites for startup, chat admission, catalogs, and the SPA with only remote executors | open; semantics decided in ADR-030 (Local listed and unavailable with a fixed reason) |
 
 ### Wave 4: lift
 
@@ -287,10 +287,10 @@ report the remaining mismatches to the manager instead of editing further.
 | `@opencode-ai/sdk` | HTTP and SSE client | Event framing and reconnect |
 | `jsonc-parser` | A JSONC crate | Comment and trailing-comma tolerance |
 | `mime-types` | Existing table in `static_assets.rs` | Already matched |
-| `localeCompare`, `Intl.Collator` | ICU4X `icu_collator` behind `garcon_js::collation`, pinned to the Unicode version of Bun 1.4.3 | The default locale is `en-US` whatever `LANG` says; Bun orders Han by radical and stroke, ICU4X's compiled data by code point (open question) |
+| `localeCompare`, `Intl.Collator` | ICU4X `icu_collator` behind `garcon_js::collation`, pinned to the Unicode version of Bun 1.4.3 | The default locale is `en-US` whatever `LANG` says; Bun orders Han by radical and stroke, ICU4X's compiled data by code point (accepted, ADR-029) |
 | `String.prototype.normalize` | ICU4X `icu_normalizer`, same pin | Unicode version |
 | `Date.parse`, local dates, `Intl` time zones | `garcon_js::date_parse` on `tz-rs` and `tzdb` | Bundled IANA data is newer than Bun 1.4.3's ICU (America/Vancouver from 2026-11-01); the three-letter aliases are case-sensitive |
-| `new RegExp` on user input | `regress`, unoptimized, for validation | Not JavaScriptCore's parser: 16 listed syntax differences (open question); matching differences in `research/regexp.md` |
+| `new RegExp` on user input | `regress`, unoptimized, for validation | Not JavaScriptCore's parser: 16 listed syntax differences (accepted, ADR-029); matching differences in `research/regexp.md` |
 | Bun `Worker` | Threads | Message ordering, shutdown |
 
 ## Recording coverage
@@ -364,35 +364,14 @@ runs.
 | 026 | Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine |
 | 027 | Each integration is a crate of its own, held to the compatibility suite |
 | 028 | The manager approves known differences that are clear bugs |
+| 029 | Three differences are accepted: the native 431 framing, regular-expression syntax validation, Han collation |
+| 030 | A controller without a Local executor lists Local as unavailable |
+| 031 | Provider requests identify as Garcon and never follow a redirect to another origin |
 
 ## Open questions
 
-- What a controller without a Local executor presents (unit `controller-only`).
-  Proposed: Local stays listed and is reported unavailable with a fixed
-  reason, so the existing unavailable-executor paths apply and new chats
-  require a remote executor.
-- Whether `Content-Length: 0` on the listener's own 431 response may stand as
-  a known difference (18 cases of the `runtime` scenario). The original's
-  listener sends no such header; hyper adds it. Both carry
-  `Connection: close` and no body, so no client sees a different message.
-  Listed provisionally by the manager on 2026-11-28; matching it exactly
-  means a head-size check in front of hyper.
-- Whether regular-expression syntax validation must agree exactly with
-  JavaScriptCore. `validateHiddenBashCommandPattern` only gives early
-  feedback (the browser compiles the pattern and drops an invalid one). The
-  port validates with `regress`, bounded in time and memory, and differs on
-  16 recorded patterns: 11 it accepts and the original rejects (quantified
-  `\b`, class ranges with `\u{...}` without the `u` flag, overflowing
-  counts), 5 it rejects and the original accepts (an astral group name,
-  nesting of 256 or deeper). Listed provisionally on 2026-11-28. Exact
-  agreement means porting JavaScriptCore's parser in syntax-checking mode:
-  estimated 2,000 to 4,000 lines and one to two weeks.
-- Whether Han characters must sort by radical and stroke as in the original.
-  Bun's ICU does; ICU4X's compiled collation data sorts them by code point,
-  which changes the order of names that contain characters from outside the
-  main CJK block (about half of such pairs) and almost none inside it
-  (0.18%). Listed provisionally on 2026-11-28. Exact agreement means
-  generating and committing custom ICU4X collation data.
+None. The six questions of 2026-11-28 are decided in ADR-029, ADR-030, and
+ADR-031.
 
 ## Out of scope
 
