@@ -1,0 +1,18 @@
+{
+  "module": "common/chat-handoff-artifact-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-handoff-artifact-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-handoff-artifact-contracts.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseChatHandoffArtifactResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 161,
+  "sha256": "a00aa03d93f9587fd98da6b5dae1df02d9e8e71002080349503c4164891ffc07"
+}
