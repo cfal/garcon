@@ -4,7 +4,7 @@ use garcon_contract::{
     chat_types::ToolResultMessage,
     tool_result_content::{ToolResultLimits, is_empty_tool_result, tool_result_text_part},
 };
-use garcon_js::{json::as_number, number_to_string, trim, utf16};
+use garcon_js::{array_index, json::as_number, number_to_string, trim, utf16};
 use serde_json::{Map, Value};
 
 use super::MAX_TOOL_RESULT_CHARS;
@@ -199,14 +199,14 @@ impl ExtractionBudget {
                         });
                     }
                 }
-                for (key, child) in record {
+                for key in javascript_keys(record.keys()) {
                     if preferred.iter().any(|(field, _)| *field == key)
                         || (key == "text"
                             && object.budget.indexed_parts.contains(&ptr::from_ref(record)))
                     {
                         continue;
                     }
-                    object.child(Some(key), |budget, depth| budget.value(child, depth));
+                    object.child(Some(key), |budget, depth| budget.value(&record[key], depth));
                     if !object.budget.ready() {
                         break;
                     }
@@ -385,5 +385,34 @@ fn text_suffix(text: &str, units: usize) -> Cow<'_, str> {
         Cow::Owned(format!("\u{fffd}{tail}"))
     } else {
         Cow::Borrowed(tail)
+    }
+}
+
+pub(super) fn javascript_keys<'a>(
+    keys: impl Iterator<Item = &'a String> + Clone + 'a,
+) -> impl Iterator<Item = &'a str> {
+    let mut indices: Vec<_> = keys
+        .clone()
+        .filter_map(|key| array_index(key).map(|index| (index, key.as_str())))
+        .collect();
+    indices.sort_by_key(|&(index, _)| index);
+    indices.into_iter().map(|(_, key)| key).chain(
+        keys.map(String::as_str)
+            .filter(|key| array_index(key).is_none()),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn integer_index_keys_spend_the_object_budget_first() {
+        let value = json!({"b":"bee", "10":"ten", "2":"two"});
+        assert_eq!(
+            ExtractionBudget::new(10, 512).value(&value, 0),
+            "2 two 10 t"
+        );
     }
 }

@@ -1,5 +1,11 @@
 use garcon_cases::{CaseError, replay, unknown};
-use garcon_contract::{chat_search::ChatSearchSnippetRole, chat_types::parse_chat_message};
+use garcon_contract::{
+    chat_search::ChatSearchSnippetRole,
+    chat_types::{
+        ChatMessage, CodexSubagentAction, CodexSubagentDetails, CodexSubagentState,
+        CodexSubagentStatus, ToolUseChatMessage, parse_chat_message,
+    },
+};
 use garcon_search::{
     message_projector::project_search_message,
     query_latency_stats::{QueryLatencySample, QueryLatencyStats},
@@ -61,8 +67,37 @@ fn search_leaves_match_bun() {
         ),
         dispatch,
     );
-    assert_eq!(stats.total, 182);
+    assert_eq!(stats.total, 184);
     assert_eq!(stats.with_wildcards, 0);
+}
+
+#[test]
+fn projects_native_subagent_states_in_javascript_key_order() {
+    let state = |status| CodexSubagentState {
+        status,
+        message: None,
+    };
+    let message = ChatMessage::ToolUse(ToolUseChatMessage::CodexSubagent {
+        timestamp: "synthetic".into(),
+        tool_id: "fixture".into(),
+        action: CodexSubagentAction::SpawnAgent,
+        details: Box::new(CodexSubagentDetails {
+            agent_states: Some(
+                [
+                    ("normal".into(), state(CodexSubagentStatus::Running)),
+                    ("10".into(), state(CodexSubagentStatus::Completed)),
+                    ("2".into(), state(CodexSubagentStatus::PendingInit)),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            ..Default::default()
+        }),
+    });
+    assert_eq!(
+        project_search_message(&message).unwrap().body,
+        "spawn_agent agentStates 2 status pendingInit 10 status completed normal status running",
+    );
 }
 
 #[test]
