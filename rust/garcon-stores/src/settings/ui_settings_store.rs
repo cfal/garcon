@@ -1,7 +1,6 @@
 use std::error::Error;
 
 use garcon_base::domain_error::DomainError;
-use garcon_contract::error_codes::ErrorCode;
 use garcon_contract::settings::{
     ExecutorProjectPreferences, GENERATION_UI_SETTING_KEYS, generation_selection_executor_error,
     parse_executor_project_preferences, parse_executor_project_preferences_patch,
@@ -25,12 +24,7 @@ impl SettingsStore {
     ) -> Result<Opaque, Box<dyn Error>> {
         for key in GENERATION_UI_SETTING_KEYS {
             if let Some(error) = patch.get(key).and_then(generation_selection_executor_error) {
-                return Err(Box::new(DomainError::new(
-                    ErrorCode::VALIDATION_FAILED,
-                    error,
-                    400,
-                    false,
-                )));
+                return Err(Box::new(DomainError::new_validation(error)));
             }
         }
         self.mutate(|settings| {
