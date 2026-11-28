@@ -24,6 +24,7 @@ fn unicode_property_classes_match_bun_for_every_scalar() {
     assert_eq!(data.len(), 0x11_0000);
     for (code, expected) in data.into_iter().enumerate() {
         let Some(character) = char::from_u32(code as u32) else {
+            assert_eq!(expected, 0, "U+{code:04X}");
             continue;
         };
         let category = unicode::category(character);
@@ -31,7 +32,9 @@ fn unicode_property_classes_match_bun_for_every_scalar() {
             | (u8::from(category.is_number()) << 1)
             | (u8::from(category.is_mark()) << 2)
             | (u8::from(category.is_format()) << 3)
-            | (u8::from(unicode::is_white_space(character)) << 4);
+            | (u8::from(unicode::is_white_space(character)) << 4)
+            | (u8::from(unicode::is_extended_pictographic(character)) << 5)
+            | (u8::from(unicode::is_emoji_component(character)) << 6);
         assert_eq!(actual, expected, "U+{code:04X}");
     }
 }

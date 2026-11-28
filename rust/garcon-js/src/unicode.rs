@@ -2,7 +2,9 @@
 
 use icu_properties::{
     CodePointMapData, CodePointSetData,
-    props::{GeneralCategory, GeneralCategoryGroup, WhiteSpace},
+    props::{
+        EmojiComponent, ExtendedPictographic, GeneralCategory, GeneralCategoryGroup, WhiteSpace,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,4 +31,12 @@ pub fn category(character: char) -> Category {
 
 pub fn is_white_space(character: char) -> bool {
     CodePointSetData::new::<WhiteSpace>().contains(character)
+}
+
+pub fn is_extended_pictographic(character: char) -> bool {
+    CodePointSetData::new::<ExtendedPictographic>().contains(character)
+}
+
+pub fn is_emoji_component(character: char) -> bool {
+    CodePointSetData::new::<EmojiComponent>().contains(character)
 }
