@@ -511,8 +511,13 @@ name = "garcon-link"
 version = "0.0.0"
 dependencies = [
  "aes-gcm",
+ "base64",
  "bytes",
  "futures",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
  "garcon-js",
  "hkdf",
  "http-body-util",
@@ -522,6 +527,7 @@ dependencies = [
  "rcgen",
  "rustls",
  "rustls-pki-types",
+ "serde",
  "serde_json",
  "sha2",
  "thiserror",

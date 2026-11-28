@@ -1,0 +1,9 @@
+{
+  "module": "rust/garcon-link/tests/oracles/queue-and-limits.ts",
+  "tests": [],
+  "inputs": "rust/garcon-link/tests/inputs/queue-and-limits.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 2,
+  "sha256": "54c8689376d70234920eb5efa8cb03070a39d9a750f0763e4331585f1ab8cc25"
+}

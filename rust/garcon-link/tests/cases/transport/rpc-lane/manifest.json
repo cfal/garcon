@@ -1,0 +1,9 @@
+{
+  "module": "server/remote/transport/rpc-lane.ts",
+  "tests": [],
+  "inputs": "rust/garcon-link/tests/inputs/rpc-lane.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "9cdf170691416e836373f79241efb0195280423bb6f0de23693cdf30c7e290f0"
+}

@@ -1,0 +1,9 @@
+{
+  "module": "rust/garcon-link/tests/oracles/failure-reason.ts",
+  "tests": [],
+  "inputs": "rust/garcon-link/tests/inputs/failure-reason.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 6,
+  "sha256": "fe13c94832086e758bbbdfda1114ac87fd901648b370f326e9ef12b673fd4433"
+}

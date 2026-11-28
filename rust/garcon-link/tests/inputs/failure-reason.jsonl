@@ -1,0 +1,6 @@
+{"fn":"reasonWithStack","args":["syntax","Unexpected identifier SYNTHETIC_SENTINEL","SyntaxError: Unexpected identifier SYNTHETIC_SENTINEL\n    at <parse> (:0)\n    at async load (/synthetic/loader.ts:12:34)"]}
+{"fn":"reasonWithStack","args":["syntax","line one\n    at fake (/synthetic/fake.ts:1:1)","SyntaxError: line one\n    at fake (/synthetic/fake.ts:1:1)\n    at /synthetic/caller.ts:3:7"]}
+{"fn":"reasonWithStack","args":["syntax","Unexpected identifier SYNTHETIC_SENTINEL","SyntaxError: Unexpected identifier SYNTHETIC_SENTINEL\n    at <parse> (:0)"]}
+{"fn":"reasonWithStack","args":["syntax","Unexpected identifier SYNTHETIC_SENTINEL"]}
+{"fn":"reasonWithStack","args":["error","Executor connection lost"]}
+{"fn":"reasonWithStack","args":["value","synthetic failure"]}
