@@ -2,6 +2,7 @@
 
 pub mod compaction_routing;
 pub mod endpoint_coordinator;
+pub mod event_converter;
 pub mod global_event_listener;
 pub mod idle_lifecycle;
 pub mod instance_lifecycle;
@@ -26,6 +27,7 @@ pub mod session_identity_plugin;
 pub mod sse_events;
 pub mod steering;
 pub mod thinking_variant;
+pub mod tool_result_converter;
 pub mod tool_use_converter;
 pub mod turn_events;
 pub mod turn_failure;
