@@ -18,20 +18,29 @@ use garcon_agent_codex::app_server::{
         CodexSteerRequestOptions,
     },
     native_path_discovery_refresh::NativePathDiscoveryRefreshLimiter,
+    operation_routes::codex_operation,
     protocol::JsonRpcId,
     request_builders::{
         CodexThreadConfiguration, CodexThreadSettings, thread_settings_target_from_snapshot,
     },
     runtime::{
-        interrupt::CodexInterrupt, thread_settings::CodexSourceThreadSettings,
+        client_events::{BufferedClientEvent, CodexClientEvents},
+        interrupt::CodexInterrupt,
+        source_registry::{CodexSessionSource, CodexSourceRegistry},
+        thread_settings::CodexSourceThreadSettings,
+        turn_events::dispatch_turn_notification,
         utility::CodexAppServerUtility,
     },
+    runtime_support::NoopLogger,
     steering::classify_codex_steer_rejection,
 };
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
+use garcon_agents_common::execution::runtime_events::AgentRuntimeEvent;
 use garcon_contract::chat_modes::{PermissionMode, ThinkingMode};
+use garcon_contract::chat_types::ChatMessage;
 use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
 use garcon_interface::host::AgentLogger;
+use garcon_interface::producer::AgentFinalResponse;
 use garcon_interface::services::{AgentSteerRejectionReason, AgentSteerResult};
 use garcon_js::json::{Opaque, from_str};
 use indexmap::IndexMap;
@@ -53,6 +62,128 @@ struct Fixture {
     _directory: TempDir,
     command: PathBuf,
     trace: PathBuf,
+}
+
+#[tokio::test]
+async fn native_turn_events_publish_rows_before_completion_and_keep_their_captured_operation() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(FIXTURE);
+            let client = CodexAppServerClient::new(fixture.options("turn-events"));
+            let registry = Rc::new(RefCell::new(CodexSourceRegistry::default()));
+            let observed = Rc::new(RefCell::new(Vec::new()));
+            let events = CodexClientEvents::buffer(
+                &client,
+                Rc::new(NoopLogger),
+                {
+                    let registry = registry.clone();
+                    let observed = observed.clone();
+                    move |client, event| {
+                        if let BufferedClientEvent::Notification(note) = event
+                            && let Some(completion) = dispatch_turn_notification(
+                                &registry,
+                                &NoopLogger,
+                                client,
+                                "2026-02-21T10:00:00.000Z",
+                                &note,
+                            )
+                        {
+                            assert_eq!(
+                                completion.final_response,
+                                Some(AgentFinalResponse::Text {
+                                    text: "Final\n".into()
+                                }),
+                            );
+                            observed.borrow_mut().push((
+                                completion.operation.run_id.clone(),
+                                if completion.is_active {
+                                    "current end"
+                                } else {
+                                    "detached end"
+                                }
+                                .into(),
+                            ));
+                        }
+                        Ok(())
+                    }
+                },
+                |_, _| Ok(()),
+            );
+            let operation = |run_id: &'static str| {
+                let observed = observed.clone();
+                codex_operation(
+                    "chat",
+                    run_id,
+                    Rc::new(move |event| {
+                        let mut observed = observed.borrow_mut();
+                        match event {
+                            AgentRuntimeEvent::Steerable => {
+                                observed.push((run_id.into(), "steerable".into()))
+                            }
+                            AgentRuntimeEvent::Rows { rows } => {
+                                for row in rows {
+                                    let ChatMessage::Assistant(message) = row.message else {
+                                        panic!("expected assistant row");
+                                    };
+                                    observed.push((run_id.into(), message.content));
+                                }
+                            }
+                            _ => panic!("unexpected turn event"),
+                        }
+                    }),
+                )
+            };
+            let old = operation("old-run");
+            let source = Rc::new(CodexSessionSource::new(
+                "thread".into(),
+                client.clone(),
+                old.clone(),
+            ));
+            registry.borrow_mut().activate(source.clone());
+            garcon_agent_codex::app_server::runtime_session_state::CodexTurnRoutes::adopt_turn(
+                &source.routes,
+                "old-turn",
+                old,
+            );
+            let next = operation("next-run");
+            source.routes.borrow_mut().reactivate(next);
+            let send = |turn_id, start| {
+                let client = client.clone();
+                async move {
+                    client
+                        .request(
+                            "send-turn-events",
+                            Some(&json!({"threadId":"thread","turnId":turn_id,"start":start})),
+                            Some(Duration::from_secs(3)),
+                        )
+                        .await
+                        .unwrap();
+                }
+            };
+            send("next-turn", true).await;
+            assert_eq!(observed.borrow().len(), 1, "early events are buffered");
+            events.release().unwrap();
+            send("old-turn", false).await;
+            let observed = observed.borrow().clone();
+            assert_eq!(
+                observed
+                    .iter()
+                    .map(|(run, event)| (run.as_str(), event.as_str()))
+                    .collect::<Vec<_>>(),
+                [
+                    ("old-run", "steerable"),
+                    ("next-run", "steerable"),
+                    ("next-run", "Live"),
+                    ("next-run", "Final\n"),
+                    ("next-run", "current end"),
+                    ("old-run", "Live"),
+                    ("old-run", "Final\n"),
+                    ("old-run", "detached end"),
+                ],
+            );
+            client.shutdown().await.unwrap();
+        })
+        .await;
 }
 
 impl Fixture {

@@ -379,6 +379,16 @@ pub fn parse_codex_thread_item(
     })
 }
 
+pub(super) fn read_live_thread_item(value: &Value) -> Option<CodexThreadItem> {
+    let id = value["id"].as_str()?.to_owned();
+    let kind = CodexThreadItemType::parse(value["type"].as_str()?)?;
+    Some(CodexThreadItem {
+        value: Opaque::from_value(value.clone()),
+        kind,
+        id,
+    })
+}
+
 fn validate_codex_thread_item(
     item: &Map<String, Value>,
     kind: CodexThreadItemType,
