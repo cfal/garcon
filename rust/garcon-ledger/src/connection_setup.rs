@@ -11,7 +11,8 @@ use crate::{
     file_stat::stat_size_if_exists,
     session_query::SESSION_INDEX_SQL,
     sqlite_operations::{
-        LedgerResult, as_error, next_ordinal, non_negative_integer, run_query, run_transaction,
+        LedgerResult, SqliteError, as_error, next_ordinal, non_negative_integer, run_query,
+        run_transaction,
     },
     ticket_outcome_query::TICKET_OUTCOME_INDEX_SQL,
 };
@@ -265,7 +266,7 @@ pub fn close_connection(entry: ConnectionEntry) -> ConnectionCloseAttempt {
         Ok(()) => ConnectionCloseAttempt::Closed { checkpoint_failure },
         Err((db, failure)) => ConnectionCloseAttempt::Failed {
             entry: Box::new(ConnectionEntry { db, ..entry }),
-            failure: as_error(failure),
+            failure: SqliteError::new(failure),
         },
     }
 }

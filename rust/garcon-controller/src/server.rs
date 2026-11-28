@@ -32,6 +32,7 @@ use garcon_stores::auth::service::AuthService;
 use garcon_stores::auth::store::AuthAccountStore;
 use garcon_stores::auth::token::AuthTokens;
 use garcon_stores::settings::{SettingsStore, SettingsStoreOptions};
+use garcon_stores::telegram_settings_store::TelegramSettingsStore;
 use tokio::fs;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -286,6 +287,7 @@ async fn bind_controller(
         SettingsStoreOptions::default(),
     )
     .await?;
+    TelegramSettingsStore::open(&config.config_dir, clock.clone()).await?;
     let routes = create_edge_routes(
         Rc::clone(&runtime),
         config.workspace_name.clone(),
@@ -304,6 +306,9 @@ async fn bind_controller(
         .map(PathBuf::from);
     if !garcon_js::is_integer(config.max_ws_clients.0) || config.max_ws_clients.0 < 1.0 {
         return Err("WebSocket maximum must be a positive integer".into());
+    }
+    if config.http_idle_timeout_seconds.0 > f64::from(u8::MAX) {
+        return Err("Bun.serve expects idleTimeout to be 255 or less".into());
     }
     let browser_sockets = BrowserSockets::new(
         BrowserSocketOptions {
@@ -337,9 +342,6 @@ async fn bind_controller(
         )),
     )?
     .with_browser_sockets(browser_sockets.clone());
-    if config.http_idle_timeout_seconds.0 > f64::from(u8::MAX) {
-        return Err("Bun.serve expects idleTimeout to be 255 or less".into());
-    }
     let listener = Listener::bind(
         &config.bind_address,
         config.port,
@@ -472,6 +474,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initializes_telegram_secrets_before_publishing_readiness() {
+        LocalSet::new()
+            .run_until(async {
+                let root = tempfile::tempdir().unwrap();
+                let initial = config(root.path());
+                let notifications = Path::new(&initial.config_dir).join("notifications.json");
+                let controller = Controller::start(initial, Rc::new(UnavailableLocalExecutor))
+                    .await
+                    .unwrap();
+                let bytes = fs::read(&notifications).await.unwrap();
+                let value: Value = garcon_js::json::from_slice(&bytes).unwrap();
+                assert_eq!(value["version"], 1);
+                assert_eq!(value["telegram"]["botToken"], "");
+                controller.shutdown().await.unwrap();
+
+                fs::write(&notifications, br#"{"version":2}"#)
+                    .await
+                    .unwrap();
+                let error =
+                    Controller::start(config(root.path()), Rc::new(UnavailableLocalExecutor))
+                        .await
+                        .err()
+                        .unwrap();
+                assert!(
+                    error
+                        .to_string()
+                        .starts_with("State file notifications.json is corrupt.")
+                );
+                assert!(!notifications.exists());
+                assert!(!notifications.with_file_name("runtime.json").exists());
+            })
+            .await;
+    }
+
+    #[tokio::test]
     async fn serves_the_persisted_app_title_in_the_public_shell_and_manifest() {
         LocalSet::new().run_until(async {
             let root = tempfile::tempdir().unwrap();
@@ -549,6 +586,26 @@ mod tests {
             }).await.unwrap();
             controller.shutdown().await.unwrap();
         }).await;
+    }
+
+    #[tokio::test]
+    async fn edge_review_validates_the_http_idle_limit_before_websocket_options() {
+        LocalSet::new()
+            .run_until(async {
+                let root = tempfile::tempdir().unwrap();
+                let mut config = config(root.path());
+                config.http_idle_timeout_seconds = garcon_js::Number(256.0);
+                config.ws_idle_timeout_seconds = garcon_js::Number(961.0);
+                let error = Controller::start(config, Rc::new(UnavailableLocalExecutor))
+                    .await
+                    .err()
+                    .unwrap();
+                assert_eq!(
+                    error.to_string(),
+                    "Bun.serve expects idleTimeout to be 255 or less"
+                );
+            })
+            .await;
     }
 
     #[tokio::test]

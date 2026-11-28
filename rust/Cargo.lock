@@ -957,6 +957,7 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -1149,12 +1150,15 @@ dependencies = [
  "garcon-contract",
  "garcon-js",
  "icu_normalizer",
+ "indexmap",
  "regress",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

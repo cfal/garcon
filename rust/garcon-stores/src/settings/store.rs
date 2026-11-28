@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::rc::Rc;
 
+use garcon_base::errors::NamedError;
 use garcon_base::json_file_store::{JsonFileStore, JsonWriteOptions, WriteFileError};
 use garcon_base::keyed_lock::KeyedLock;
 use garcon_contract::settings::{
@@ -271,11 +272,12 @@ impl SettingsStore {
             return Ok(());
         }
         let current = self.snapshot();
-        let _providers = self.retain_providers(&current, &current)?;
+        let providers = self.retain_providers(&current, &current)?;
         self.writer
             .write(&self.file_path, &current)
             .await
             .map_err(|error| error.source)?;
+        drop(providers);
         self.publish(Vec::new())
     }
 
@@ -290,7 +292,7 @@ impl SettingsStore {
             &generation_references(&candidate, "executorId"),
             &generation_references(&previous, "executorId"),
         )?;
-        let _providers = self.retain_providers(&candidate, &previous)?;
+        let providers = self.retain_providers(&candidate, &previous)?;
         if let Err(error) = self.writer.write(&self.file_path, &candidate).await {
             if error.renamed {
                 let mut pending = self.pending.borrow_mut();
@@ -309,6 +311,7 @@ impl SettingsStore {
             return Err(error.source);
         }
         self.current.replace(candidate);
+        drop(providers);
         self.publish(notifications)
     }
 
@@ -358,7 +361,11 @@ async fn read(file_path: &str) -> Result<(ProjectSettings, bool), BoxError> {
             || (empty_settings(), false),
             |value| {
                 if !value.is_object() {
-                    return Err("Project settings state must be a JSON object".into());
+                    return Err(Box::new(NamedError {
+                        name: "TypeError".into(),
+                        message: "Project settings state must be a JSON object".into(),
+                        code: None,
+                    }));
                 }
                 Ok(sanitize_project_settings(&value))
             },

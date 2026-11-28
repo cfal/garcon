@@ -2,6 +2,7 @@ import { syntheticRows } from '../../../../server-agents/common/src/search/__tes
 import type { HistoricalSearchMessageRow } from '../../../../server-agents/common/src/search/rows.ts';
 import { openSearchReadDatabase } from '../../../../server-agents/common/src/search/schema.ts';
 import type { IndexerEvent, IndexerRequest } from '../../../../server-agents/common/src/search/worker-protocol.ts';
+import { queries, queryActions, queryIndex } from './query-corpus.ts';
 
 if (Bun.version !== '1.4.3') throw new Error(`Expected Bun 1.4.3, got ${Bun.version}`);
 
@@ -37,7 +38,7 @@ const actions: Action[] = [
 type Request = IndexerRequest extends infer R ? R extends IndexerRequest
   ? Omit<R, 'requestId' | 'lifecycleEpoch'> : never : never;
 
-async function write(dbPath: string) {
+async function write(dbPath: string, workload: readonly Action[] = actions) {
   const worker = new Worker(new URL('../../../../server-agents/common/src/search/indexer-main.ts', import.meta.url));
   let nextId = 1;
   function send(request: Request, requestId = nextId++): Promise<IndexerEvent> {
@@ -47,7 +48,7 @@ async function write(dbPath: string) {
         if (data.requestId !== requestId || data.lifecycleEpoch !== 'fixture-epoch'
           || data.type === 'delete-progress') return;
         clearTimeout(timer);
-        if (data.type === 'error') reject(new Error(data.code));
+        if (data.type === 'error') reject(new Error(`${request.type}: ${data.code}`));
         else resolve(data);
       };
       worker.onerror = error => { clearTimeout(timer); reject(error); };
@@ -57,7 +58,7 @@ async function write(dbPath: string) {
   try {
     const opened = await send({ type: 'open', dbPath });
     if (opened.type !== 'opened' || !opened.recreated) throw new Error('Expected a fresh search index');
-    for (const action of actions) {
+    for (const action of workload) {
       if (action.kind === 'delete') {
         await send({ type: 'delete-chat', chatId: action.chatId });
       } else if (action.kind === 'fail') {
@@ -109,8 +110,12 @@ function inspect(dbPath: string) {
 
 const [mode, path] = process.argv.slice(2);
 if (mode === 'actions') console.log(JSON.stringify(actions));
+else if (mode === 'query-actions') console.log(JSON.stringify([...actions, ...queryActions()]));
+else if (mode === 'query-options') console.log(JSON.stringify(queries));
+else if (mode === 'query' && path) console.log(JSON.stringify(queryIndex(path)));
+else if (mode === 'write-query' && path) await write(path, [...actions, ...queryActions()]);
 else if (mode === 'inspect' && path) console.log(JSON.stringify(inspect(path)));
 else if (mode === 'write' && path) {
   await write(path);
   console.log(JSON.stringify(inspect(path)));
-} else throw new Error('Expected actions, inspect, or write');
+} else throw new Error('Unknown schema interop mode');

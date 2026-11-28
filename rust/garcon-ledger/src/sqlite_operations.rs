@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, rc::Rc};
 
 use garcon_base::errors::{DiagnosticError, ErrorMetadata};
 use garcon_js::Number;
@@ -64,7 +64,7 @@ pub fn run_transaction<T>(
 ) -> LedgerResult<T> {
     let result = (|| {
         db.execute_batch("BEGIN IMMEDIATE").map_err(as_error)?;
-        let result = work()?;
+        let result = work().map_err(as_error)?;
         db.execute_batch("COMMIT").map_err(as_error)?;
         Ok(result)
     })();
@@ -118,17 +118,23 @@ pub fn is_query_failure(error: &(dyn Error + 'static)) -> bool {
 
 pub fn as_error(error: impl Into<Box<dyn Error>>) -> Box<dyn Error> {
     match error.into().downcast::<rusqlite::Error>() {
-        Ok(error) => Box::new(SqliteError(*error)),
+        Ok(error) => Box::new(SqliteError::new(*error)),
         Err(error) => error,
     }
 }
 
-#[derive(Debug)]
-pub struct SqliteError(pub rusqlite::Error);
+#[derive(Debug, Clone)]
+pub struct SqliteError(Rc<rusqlite::Error>);
+
+impl SqliteError {
+    pub fn new(error: rusqlite::Error) -> Self {
+        Self(Rc::new(error))
+    }
+}
 
 impl fmt::Display for SqliteError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.0 {
+        match self.0.as_ref() {
             rusqlite::Error::SqlInputError { msg, .. } => formatter.write_str(msg),
             rusqlite::Error::SqliteFailure(error, Some(msg))
                 if error.extended_code & 0xff == ffi::SQLITE_CANTOPEN
@@ -143,13 +149,13 @@ impl fmt::Display for SqliteError {
 
 impl Error for SqliteError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.0)
+        Some(self.0.as_ref())
     }
 }
 
 impl DiagnosticError for SqliteError {
     fn diagnostic_metadata(&self) -> ErrorMetadata<'_> {
-        let code = match &self.0 {
+        let code = match self.0.as_ref() {
             rusqlite::Error::SqlInputError { error, .. }
             | rusqlite::Error::SqliteFailure(error, _) => Some(error.extended_code),
             _ => None,

@@ -9,6 +9,7 @@ use garcon_contract::ws_events::{
     ChatProcessingSnapshotResult, ClientRequestErrorCode, ClientRequestErrorMessage,
     ReconnectStateMessage, SessionWsMessage, WsFaultMessage, WsPongMessage,
 };
+use garcon_contract::ws_protocol::is_terminal_stream_client_message_type;
 use garcon_contract::ws_requests::{
     ChatReloadCancelRequest, ChatReloadRequest, ChatSubscribeRequest, ClientWsMessage,
     ReconnectStateQueryRequest, parse_client_ws_message,
@@ -47,6 +48,11 @@ impl PrimaryHandler {
         let Ok(raw) = json::parse(&String::from_utf8_lossy(input)) else {
             return Some(Reply::fault("Malformed JSON"));
         };
+        if is_terminal_stream_client_message_type(&raw["type"])
+            && let Some(request_type) = raw["type"].as_str()
+        {
+            return Some(Reply::unported(request_type, None, None));
+        }
         let request = match parse_client_ws_message(&raw) {
             Ok(Some(request)) => request,
             Ok(None) => return malformed_request(&raw),
@@ -127,7 +133,7 @@ impl PrimaryRequests for PrimaryHandler {
                 "Could not encode browser WebSocket reply: {error}"
             )),
         }
-        if let (Some(path), Some(request_type)) = (&self.unported_log, reply.unported)
+        if let (Some(path), Some(request_type)) = (&self.unported_log, reply.unported.as_deref())
             && let Err(error) = log_unported(path, "WS", request_type).await
         {
             self.logger
@@ -186,7 +192,7 @@ fn malformed_request(raw: &Value) -> Option<Reply> {
 
 struct Reply {
     message: SessionWsMessage,
-    unported: Option<&'static str>,
+    unported: Option<String>,
 }
 
 impl Reply {
@@ -222,7 +228,7 @@ impl Reply {
         ))
     }
 
-    fn unported(request_type: &'static str, id: Option<String>, chat_id: Option<String>) -> Self {
+    fn unported(request_type: &str, id: Option<String>, chat_id: Option<String>) -> Self {
         let mut reply = if let Some(id) = id {
             Self::request_error(
                 id,
@@ -234,7 +240,7 @@ impl Reply {
         } else {
             Self::fault("not ported")
         };
-        reply.unported = Some(request_type);
+        reply.unported = Some(request_type.into());
         reply
     }
 

@@ -1,16 +1,26 @@
-use std::{path::Path, process::Command};
+use std::{path::Path, process::Command, time::Duration};
 
-use garcon_contract::chat_search::ChatSearchSnippetRole as Role;
+use garcon_contract::chat_search::{
+    ChatSearchResultMode, ChatSearchSnippetRole as Role, TranscriptSearchAllowedChat,
+    compile_chat_search_query,
+};
 use garcon_js::{
+    Number,
     clock::ManualClock,
     json::{Opaque, from_str},
 };
 use garcon_search::{
+    indexer::spawn_indexer,
+    query::{
+        SearchIndexOptions, SearchIndexResult, TranscriptSearchOrder, search_transcript_index_v1,
+    },
     rows::{HistoricalSearchMessageRow, SearchMessageRowInput},
     schema::*,
+    worker_protocol::{IndexerEvent, IndexerRequest},
+    worker_supervisor::Response,
 };
 use rusqlite::{Connection, types::ValueRef};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -77,8 +87,8 @@ enum Action {
     },
 }
 
-fn write_with_rust(path: &Path) {
-    let actions: Vec<Action> = from_str(&bun("actions", None)).unwrap();
+fn write_with_rust(path: &Path, workload: &str) {
+    let actions: Vec<Action> = from_str(&bun(workload, None)).unwrap();
     let clock = ManualClock::new(CLOCK_MS);
     let opened = open_search_database(path).unwrap();
     assert!(opened.recreated);
@@ -155,6 +165,160 @@ fn write_with_rust(path: &Path) {
     close_search_database(db).unwrap();
 }
 
+async fn write_with_indexer(path: &Path, workload: &str) {
+    let actions: Vec<Action> = from_str(&bun(workload, None)).unwrap();
+    let worker = spawn_indexer(1).unwrap();
+    let deadline = Duration::from_secs(30);
+    let classify = |event: &IndexerEvent| match event {
+        IndexerEvent::DeleteProgress { .. } => Response::Progress,
+        _ => Response::Complete,
+    };
+    assert_eq!(
+        worker
+            .request(
+                [IndexerRequest::Open(path.to_owned())],
+                None,
+                deadline,
+                classify
+            )
+            .await
+            .unwrap(),
+        IndexerEvent::Opened { recreated: true },
+    );
+    for action in actions {
+        let session = worker.begin_session().unwrap();
+        match action {
+            Action::Build {
+                chat_id,
+                transcript_view_id,
+                target_through,
+                expected_after_ordinal,
+                mode,
+                advance_to,
+                rows,
+                finish,
+            } => {
+                let accepted = session
+                    .request(
+                        [IndexerRequest::SyncBegin {
+                            mode,
+                            chat_id,
+                            transcript_view_id,
+                            expected_after_ordinal,
+                            target_through,
+                        }],
+                        None,
+                        deadline,
+                        classify,
+                    )
+                    .await
+                    .unwrap();
+                let IndexerEvent::SyncAccepted {
+                    current: false,
+                    stale_rows,
+                    ..
+                } = accepted
+                else {
+                    panic!("expected a build: {accepted:?}")
+                };
+                let mut remaining = stale_rows;
+                while remaining {
+                    let event = session
+                        .request([IndexerRequest::SyncCleanup], None, deadline, classify)
+                        .await
+                        .unwrap();
+                    let IndexerEvent::CleanupProgress {
+                        remaining: more, ..
+                    } = event
+                    else {
+                        panic!("expected cleanup: {event:?}")
+                    };
+                    remaining = more;
+                }
+                assert_eq!(
+                    session
+                        .request(
+                            [IndexerRequest::SyncRows {
+                                frame_index: 0,
+                                rows,
+                                advance_to
+                            }],
+                            None,
+                            deadline,
+                            classify
+                        )
+                        .await
+                        .unwrap(),
+                    IndexerEvent::SyncProgress {
+                        frame_index: 0,
+                        indexed_through: advance_to
+                    },
+                );
+                if finish {
+                    assert!(matches!(
+                        session
+                            .request([IndexerRequest::SyncFinish], None, deadline, classify)
+                            .await
+                            .unwrap(),
+                        IndexerEvent::SyncComplete { .. }
+                    ));
+                }
+            }
+            Action::Fail {
+                chat_id,
+                transcript_view_id,
+                error_code,
+            } => {
+                assert_eq!(
+                    session
+                        .request(
+                            [IndexerRequest::MarkFailed {
+                                chat_id,
+                                transcript_view_id,
+                                error_code
+                            }],
+                            None,
+                            deadline,
+                            classify
+                        )
+                        .await
+                        .unwrap(),
+                    IndexerEvent::Ack
+                );
+            }
+            Action::Delete { chat_id } => {
+                assert_eq!(
+                    session
+                        .request(
+                            [IndexerRequest::DeleteChat { chat_id }],
+                            None,
+                            deadline,
+                            classify
+                        )
+                        .await
+                        .unwrap(),
+                    IndexerEvent::Ack
+                );
+            }
+        }
+    }
+    assert_eq!(
+        worker
+            .request([IndexerRequest::Checkpoint], None, deadline, classify)
+            .await
+            .unwrap(),
+        IndexerEvent::CheckpointComplete { busy: 0 }
+    );
+    assert_eq!(
+        worker
+            .request([IndexerRequest::Close], None, deadline, classify)
+            .await
+            .unwrap(),
+        IndexerEvent::Closed
+    );
+    worker.wait_closed().await.unwrap();
+}
+
 fn rows(db: &Connection, sql: &str) -> Vec<Vec<Value>> {
     let mut statement = db.prepare(sql).unwrap();
     let columns = statement.column_count();
@@ -207,7 +371,7 @@ fn bun_and_rust_read_each_others_derived_indexes() {
     let bun_path = directory.path().join("bun.sqlite");
     let rust_path = directory.path().join("rust.sqlite");
     let bun_native = bun("write", Some(&bun_path));
-    write_with_rust(&rust_path);
+    write_with_rust(&rust_path, "actions");
     let rust_reads_bun = inspect_with_rust(&bun_path);
     let rust_native = inspect_with_rust(&rust_path);
     let bun_reads_rust = bun("inspect", Some(&rust_path));
@@ -233,6 +397,135 @@ fn bun_and_rust_read_each_others_derived_indexes() {
         bun_native, bun_reads_rust,
         "Bun and Rust writers agree byte-for-byte"
     );
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QueryFixture {
+    name: String,
+    text: String,
+    allowed_chats: Vec<TranscriptSearchAllowedChat>,
+    #[serde(default)]
+    order: TranscriptSearchOrder,
+    mode: Option<ChatSearchResultMode>,
+    offset: Option<Number>,
+    limit: Option<Number>,
+    snippet_limit: Option<Number>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum QueryObservation<'a> {
+    Success {
+        name: &'a str,
+        result: SearchIndexResult,
+    },
+    Failure {
+        name: &'a str,
+        error: String,
+    },
+}
+
+fn run_queries(path: &Path, fixtures: &[QueryFixture]) -> String {
+    let db = open_search_read_database(path).unwrap();
+    let responses: Vec<_> = fixtures
+        .iter()
+        .map(|fixture| {
+            let name = fixture.name.as_str();
+            match search_transcript_index_v1(
+                &db,
+                SearchIndexOptions {
+                    query: &compile_chat_search_query(&fixture.text, None),
+                    allowed_chats: &fixture.allowed_chats,
+                    order: fixture.order,
+                    mode: fixture.mode.unwrap_or(ChatSearchResultMode::Page),
+                    offset: fixture.offset,
+                    limit: fixture.limit,
+                    snippet_limit: fixture.snippet_limit,
+                },
+            ) {
+                Ok(result) => QueryObservation::Success { name, result },
+                Err(error) => QueryObservation::Failure {
+                    name,
+                    error: error.to_string(),
+                },
+            }
+        })
+        .collect();
+    serde_json::to_string(&responses).unwrap()
+}
+
+#[tokio::test]
+async fn real_queries_match_bun_on_both_derived_indexes() {
+    let directory = directory();
+    let bun_path = directory.path().join("bun-query.sqlite");
+    let rust_path = directory.path().join("rust-query.sqlite");
+    let fixtures: Vec<QueryFixture> = from_str(&bun("query-options", None)).unwrap();
+    assert_eq!(fixtures.len(), 22);
+    bun("write-query", Some(&bun_path));
+    write_with_indexer(&rust_path, "query-actions").await;
+    let expected = bun("query", Some(&bun_path));
+    let observations: Vec<Opaque> = from_str(&expected).unwrap();
+    let result = |name| {
+        &observations
+            .iter()
+            .find(|item| item["name"] == name)
+            .unwrap()["result"]
+    };
+    assert_eq!(
+        result("sample-before-literal")["page"]["total"].as_f64(),
+        Some(0.0)
+    );
+    assert_eq!(
+        result("sample-before-literal")["index"]["resultsTruncated"],
+        true
+    );
+    assert_eq!(
+        result("sample-latest")["results"][0]["matchedMessageCount"].as_f64(),
+        Some(10_000.0)
+    );
+    assert_eq!(
+        result("exact-after-sampling")["results"][0]["snippets"][0]["ordinal"].as_f64(),
+        Some(1.0)
+    );
+    assert_eq!(result("frontier")["page"]["total"].as_f64(), Some(1.0));
+    assert_eq!(result("bounded-prefix")["page"]["hasMore"], true);
+    assert!(
+        result("literal-boundaries")["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|hit| {
+                hit["snippets"][0]["text"].as_str().is_some_and(|text| {
+                    text.starts_with("... ") && text.contains("#731. then more")
+                })
+            })
+    );
+    for (label, actual) in [
+        ("Bun queries of Rust index", bun("query", Some(&rust_path))),
+        (
+            "Rust queries of Bun index",
+            run_queries(&bun_path, &fixtures),
+        ),
+        (
+            "Rust queries of Rust index",
+            run_queries(&rust_path, &fixtures),
+        ),
+    ] {
+        if actual != expected {
+            let received: Vec<Opaque> = from_str(&actual).unwrap();
+            assert_eq!(received.len(), observations.len(), "{label}");
+            for (actual, want) in received.iter().zip(&observations) {
+                assert_eq!(
+                    serde_json::to_string(actual).unwrap(),
+                    serde_json::to_string(want).unwrap(),
+                    "{label}: {}",
+                    want["name"]
+                );
+            }
+            assert_eq!(actual, expected, "{label}: JSON bytes");
+        }
+    }
 }
 
 #[test]
