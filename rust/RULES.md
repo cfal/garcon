@@ -60,6 +60,10 @@ the user corrects how a port behaves, the correction is added under
   `garcon_js::Number` validated with `garcon_js::is_integer`: the original
   accepts 1e21 there and echoes it as `1e+21`, and no Rust integer type does
   both. Do not pick a wider integer type to make such a case pass.
+- Negative zero: an integer type has none. The original keeps `-0` where a
+  client sends it and prints it as `0` on every output path, so a port holds
+  the value in a plain integer type, and the replay matches a recorded `-0`
+  against an integer zero. Do not model a signed zero around an integer.
   `serde_json` writes the `f64` 1.0 as `1.0`, where JavaScript writes `1`: a
   value that can be fractional and
   reaches output is written through `garcon_js::Number`.
