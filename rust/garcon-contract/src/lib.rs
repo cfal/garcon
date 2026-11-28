@@ -32,6 +32,7 @@ pub mod error_codes;
 pub mod executor_path;
 pub mod executors;
 pub mod file_contracts;
+pub mod file_mention_context;
 pub mod generation_prompts;
 pub mod gh;
 pub mod gh_identity;
