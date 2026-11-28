@@ -38,6 +38,13 @@ fn dates_and_time_zones_match_bun_in_separate_processes() {
         ":America/New_York",
         "america/new_york",
         "PST",
+        "pst",
+        "pSt",
+        "IST",
+        "ist",
+        "iSt",
+        "est",
+        "cet",
         "Unrecognized/Zone",
     ] {
         let output = Command::new(&binary)

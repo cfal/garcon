@@ -333,7 +333,7 @@ pub mod win32 {
             if !absolute
                 && !device.is_empty()
                 && !cwd_device.is_empty()
-                && device.to_lowercase() != cwd_device.to_lowercase()
+                && !device.eq_ignore_ascii_case(&cwd_device)
             {
                 let drive_cwd =
                     drive_current_directory(&device).unwrap_or_else(|| format!("{device}\\"));
@@ -362,7 +362,7 @@ pub mod win32 {
         if !found.is_empty() {
             if device.is_empty() {
                 *device = found;
-            } else if device.to_lowercase() != found.to_lowercase() {
+            } else if !device.eq_ignore_ascii_case(&found) {
                 return false;
             }
         }
@@ -394,7 +394,7 @@ pub mod win32 {
     fn drive_current_directory(device: &str) -> Option<String> {
         let cwd = std::env::var(format!("={device}")).ok()?;
         let (found, _, absolute) = root_parts(&cwd);
-        (absolute && found.to_lowercase() == device.to_lowercase()).then_some(cwd)
+        (absolute && found.eq_ignore_ascii_case(device)).then_some(cwd)
     }
 
     #[cfg(not(windows))]
@@ -436,14 +436,14 @@ pub mod win32 {
         if source
             .peek()
             .zip(target.peek())
-            .is_some_and(|(a, b)| a.to_lowercase() != b.to_lowercase())
+            .is_some_and(|(a, b)| !a.eq_ignore_ascii_case(b))
         {
             return to;
         }
         while source
             .peek()
             .zip(target.peek())
-            .is_some_and(|(a, b)| a.to_lowercase() == b.to_lowercase())
+            .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
         {
             source.next();
             target.next();
