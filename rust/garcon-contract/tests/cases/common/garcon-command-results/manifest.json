@@ -1,0 +1,31 @@
+{
+  "module": "common/garcon-command-results.ts",
+  "tests": [
+    "common/__tests__/garcon-command-results.test.js",
+    "common/__tests__/garcon-agent-result.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-command-results.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseAgentCommandOutcome",
+      "argument": 0
+    },
+    {
+      "fn": "garconCommandResultContent",
+      "argument": 0
+    },
+    {
+      "fn": "agentCommandOutcomeTitle",
+      "argument": 0
+    },
+    {
+      "fn": "agentCommandOutcomeContent",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 458,
+  "sha256": "d44ea4be09bebb4ffa36c968811f207771d5782567c1c43fc925e30c9c1e8ebc"
+}

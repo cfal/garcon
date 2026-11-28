@@ -1,0 +1,26 @@
+{
+  "module": "common/native-session-lookup.ts",
+  "tests": [
+    "common/__tests__/native-session-lookup.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseNativeSessionId",
+      "argument": 0
+    },
+    {
+      "fn": "parseNativeSessionLookupRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseNativeSessionLookupResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 276,
+  "sha256": "c1a1e972f17d0b03be8640c6c16d59a803166bf59300ea7484e57e7c7d9ea5ff"
+}

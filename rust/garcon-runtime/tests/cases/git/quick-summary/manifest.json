@@ -1,0 +1,13 @@
+{
+  "module": "server/runtime/git/quick-summary.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 30,
+  "sha256": "66c417f65306fe543004d7d2179641688994be4650d7f6085ed3426d03066511"
+}

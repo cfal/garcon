@@ -1,0 +1,48 @@
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"1780000000000001","transcriptViewId":"view","expectedAgentId":"codex","expectedAgentOwnershipEpoch":"epoch","content":"> Q\n\nA","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}}},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"1780000000000001","transcriptViewId":"view","expectedAgentId":"codex","expectedAgentOwnershipEpoch":"epoch","content":"> Q\n\nA","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}}},"command"]}
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"different","transcriptViewId":"view","expectedAgentId":"codex","expectedAgentOwnershipEpoch":"epoch","content":"> Q\n\nA","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}}},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"1780000000000001","transcriptViewId":"view","expectedAgentId":"","expectedAgentOwnershipEpoch":"epoch","content":"> Q\n\nA","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}}},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"1780000000000001","transcriptViewId":"view","expectedAgentId":"codex","expectedAgentOwnershipEpoch":"epoch","content":"> Q\n\nA","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}},"document":true,"handoff":null},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"1780000000000001","transcriptViewId":"view","expectedAgentId":"codex","expectedAgentOwnershipEpoch":"epoch","content":"> Q\n\nA","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}},"whenTurnUnavailable":"queue"},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"1780000000000001","transcriptViewId":"view","expectedAgentId":"codex","expectedAgentOwnershipEpoch":"epoch","content":"> Q\n\nA","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}},"images":[{}]},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{"chatId":"1780000000000001","transcriptViewId":"view","expectedAgentId":32,"expectedAgentOwnershipEpoch":"epoch","content":"wrong","command":"> Q\n\nA","questionReply":{"questionId":"q","question":"Q","answer":"A","source":{"chatId":"1780000000000001","transcriptViewId":"view","ordinal":8}}},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{"questionReply":null},"content"]}
+{"fn":"parseCommandQuestionReply","args":[{},"content"]}
+{"fn":"rejectQuestionReply","args":[{}]}
+{"fn":"rejectQuestionReply","args":[{"questionReply":null}]}
+{"fn":"parseCommandUserMessagePresentation","args":[{"$":"undefined"}]}
+{"fn":"parseCommandUserMessagePresentation","args":[null]}
+{"fn":"parseCommandUserMessagePresentation","args":[{"origin":"cli","disclosure":"collapsed"}]}
+{"fn":"parseCommandUserMessagePresentation","args":[{"origin":"cli","style":"notice","title":"Line\nbreak"}]}
+{"fn":"renderRuntimeShell","args":["<base __GARCON_RUNTIME_BASE_PATH__>__GARCON_RUNTIME_BASE_PATH__","/prefix/sub/"]}
+{"fn":"renderRuntimeShell","args":["__GARCON_RUNTIME_BASE_PATH__","/"]}
+{"fn":"renderRuntimeShell","args":["missing placeholder","bad"]}
+{"fn":"renderRuntimeShell","args":["__GARCON_RUNTIME_BASE_PATH__","/x/../y"]}
+{"fn":"generationModelTestConfigurationKey","args":[{}]}
+{"fn":"generationModelTestConfigurationKey","args":[{"executorId":"","agentId":5,"model":{"id":"bad"},"thinkingMode":"unknown"}]}
+{"fn":"generationModelTestConfigurationKey","args":[{"executorId":"test","agentId":"codex","model":"model","apiProviderId":"fixture","modelEndpointId":"endpoint","modelProtocol":"openai-compatible","thinkingMode":"high"}]}
+{"fn":"isGenerationTestTarget","args":["chatTitle"]}
+{"fn":"isGenerationTestTarget","args":["agentSwitchCompaction"]}
+{"fn":"isGenerationTestTarget","args":["commitMessage"]}
+{"fn":"isGenerationTestTarget","args":["promptRefinement"]}
+{"fn":"isGenerationTestTarget","args":["other"]}
+{"fn":"isGenerationTestTarget","args":[null]}
+{"fn":"isGenerateGitNameRequest","args":[{"description":"","previousName":""}]}
+{"fn":"isGenerateGitNameRequest","args":[{"description":"🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲","previousName":"🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲"}]}
+{"fn":"isGenerateGitNameRequest","args":[{"description":"🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲","previousName":"x"}]}
+{"fn":"isGenerateGitNameRequest","args":[{"description":"x","previousName":"🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲🌲"}]}
+{"fn":"isGenerateGitNameRequest","args":[{"description":"x","previousName":"x","extra":true}]}
+{"fn":"isGenerateGitNameRequest","args":[null]}
+{"fn":"nextRunOrSteerRoute","args":["run",409,"SESSION_BUSY"]}
+{"fn":"nextRunOrSteerRoute","args":["steer",409,"STEER_TURN_UNAVAILABLE"]}
+{"fn":"nextRunOrSteerRoute","args":["steer",409,"STEER_TURN_CHANGED"]}
+{"fn":"nextRunOrSteerRoute","args":["run",500,"SESSION_BUSY"]}
+{"fn":"nextRunOrSteerRoute","args":["run",409]}
+{"fn":"nextRunOrSteerRoute","args":["steer",409,null]}
+{"fn":"nextRunOrSteerRoute","args":["steer",422,"STEER_TURN_CHANGED"]}
+{"fn":"nextRunOrSteerRoute","args":["run",{"$":"number","value":"NaN"},"SESSION_BUSY"]}
+{"fn":"handoffTimeouts","args":[]}
+{"fn":"workspaceLayoutWire","args":[{"version":2,"root":{"type":"partition","id":"split","direction":"horizontal","ratio":0.5,"children":[{"type":"window","id":"a","order":[{"type":"chat","chatId":null},{"type":"singleton","kind":"chat-canvas"}],"active":null,"mru":[]},{"type":"window","id":"b","order":[{"type":"terminal","terminalId":"terminal"}],"active":{"type":"terminal","terminalId":"terminal"},"mru":[]}]},"unplacedTerminalIds":["unused"]}]}
+{"fn":"publicSharedSnapshotWire","args":[{"shareToken":"fixture","title":"Share","agentId":"codex","model":"model","sharedAt":"2026-11-28T00:00:00Z","frozenMessageCount":1,"messages":[{"n":1,"big":9007199254740992,"exp21":1e+21,"small":1e-7}]}]}
+{"fn":"publicSharedSnapshotWire","args":[{"shareToken":"fixture","title":"Share","agentId":"codex","model":"model","sharedAt":"2026-11-28T00:00:00Z","messages":[]}]}
+{"fn":"chatDetailsWire","args":[{"chatId":"1780000000000001","firstMessage":"Fixture","createdAt":null,"lastActivityAt":null,"agentSessionId":null,"transcriptSource":{"kind":"provider-reference","value":"reference"},"carryOver":{"revision":"r","archivedMessageCount":1,"segments":[{"id":"segment","agentId":"codex","model":"model","capturedAt":"time","storedMessageCount":1,"visibleMessageCount":1,"truncated":false,"trailingHandoff":null}]}}]}
