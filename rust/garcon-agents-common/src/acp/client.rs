@@ -154,7 +154,7 @@ impl AcpClient {
     pub fn prompt_session(
         &self,
         params: AcpPromptSessionParams<'_>,
-        mut options: AcpRequestOptions,
+        options: AcpRequestOptions,
     ) -> impl Future<Output = ExecutorResult<AcpSessionPromptResult>> + use<> {
         let mut normalized = Map::from_iter([
             ("sessionId".to_owned(), json!(params.session_id)),
@@ -163,10 +163,18 @@ impl AcpClient {
         if let Some(config) = params.config {
             normalized.insert("config".to_owned(), Value::Object(config.clone()));
         }
+        self.send_prompt(normalized, options)
+    }
+
+    pub(super) fn send_prompt(
+        &self,
+        params: Map<String, Value>,
+        mut options: AcpRequestOptions,
+    ) -> impl Future<Output = ExecutorResult<AcpSessionPromptResult>> + use<> {
         // A prompt lasts as long as the turn unless the caller sets a deadline.
         options.timeout_ms = Some(options.timeout_ms.unwrap_or(0.0));
         self.transport
-            .request("session/prompt", Some(Value::Object(normalized)), options)
+            .request("session/prompt", Some(Value::Object(params)), options)
     }
 
     pub fn set_session_config_option(

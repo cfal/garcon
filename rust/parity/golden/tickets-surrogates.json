@@ -82,6 +82,33 @@
       "noise": []
     },
     {
+      "name": "create-replacement-title-with-lone-description",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "body must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
       "name": "create-lone-project",
       "expected": {
         "body": {
@@ -313,13 +340,84 @@
       "noise": []
     },
     {
+      "name": "create-final-replacement-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "collectionRevision": 3,
+            "storeId": "{{bootstrap.body.storeId}}",
+            "success": true,
+            "ticket": {
+              "assignee": null,
+              "createdAt": "{{timestamp}}",
+              "createdBy": {
+                "declaredChatId": null,
+                "kind": "user",
+                "principalMode": "authenticated",
+                "username": "parity"
+              },
+              "description": "",
+              "id": "G-3",
+              "labels": [],
+              "number": 3,
+              "parentId": null,
+              "priority": 2,
+              "project": "parity",
+              "resolution": null,
+              "revision": 1,
+              "status": "open",
+              "title": "Genuine �",
+              "updatedAt": "{{timestamp}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
       "name": "list-only-valid-writes",
       "expected": {
         "body": {
           "kind": "json",
           "value": {
-            "collectionRevision": 2,
+            "collectionRevision": 3,
             "items": [
+              {
+                "assignee": null,
+                "blockedByCount": 0,
+                "commentCount": 0,
+                "createdAt": "{{timestamp}}",
+                "createdBy": {
+                  "declaredChatId": null,
+                  "kind": "user",
+                  "principalMode": "authenticated",
+                  "username": "parity"
+                },
+                "id": "G-3",
+                "labels": [],
+                "number": 3,
+                "parentId": null,
+                "priority": 2,
+                "project": "parity",
+                "resolution": null,
+                "revision": 1,
+                "status": "open",
+                "title": "Genuine �",
+                "updatedAt": "{{timestamp}}"
+              },
               {
                 "assignee": null,
                 "blockedByCount": 0,

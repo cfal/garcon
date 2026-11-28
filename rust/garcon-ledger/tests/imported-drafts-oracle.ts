@@ -17,11 +17,17 @@ function encoded(drafts: readonly LedgerRowDraft[]) {
 
 export async function importedDraftsFixture(
   rows: readonly (AgentImportedTranscriptRow & { readonly preambleApplication?: PreambleHistoryEvidence })[],
-  at: string,
+  at: string | readonly string[],
 ) {
+  let index = 0;
   return encoded(await importedDrafts(rows.map(row => ({
     ...row, message: parsed(row.message), providerMeta: row.providerMeta ?? null,
-  })), () => at));
+  })), () => {
+    if (typeof at === 'string') return at;
+    const next = at[index++];
+    if (next === undefined) throw new Error('Fixture clock exhausted');
+    return next;
+  }));
 }
 
 export function frozenDraftsFixture(messages: readonly ChatMessage[], at: string) {

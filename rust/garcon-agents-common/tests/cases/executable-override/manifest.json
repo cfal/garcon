@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/executable-override.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/executable-override.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 49,
+  "sha256": "54d76ae9ec5e55020d67d834a65f9a9e547fe2a15775e6aa47c0ac55a5ffe73f"
+}

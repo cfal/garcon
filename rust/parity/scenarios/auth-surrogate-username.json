@@ -1,0 +1,25 @@
+{
+  "name": "auth-surrogate-username",
+  "description": "A username change reads the final duplicate field, even if an earlier value was ill-formed.",
+  "steps": [
+    {
+      "name": "rename-final-replacement-character",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"currentPassword\":\"{{password}}\",\"username\":\"bad\\ud800\",\"username\":\"renamed\\ufffd\"}"
+      }
+    },
+    {
+      "name": "login-final-username",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "auth": "none",
+        "json": { "username": "renamed\ufffd", "password": "{{password}}" }
+      }
+    }
+  ],
+  "traps": false
+}

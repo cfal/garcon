@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use garcon_base::{
     errors::{DiagnosticError, error_metadata},
     event_loop::EventLoopSteps,
@@ -54,10 +56,21 @@ fn fixture_error(error: impl std::fmt::Display) -> CaseError {
 async fn dispatch(function: &str, args: &[Value]) -> Result<Value, CaseError> {
     let rows = unknown(function, args.first())?;
     let timestamp = unknown(function, args.get(1))?;
-    let at = timestamp
-        .as_str()
-        .ok_or_else(|| fixture_error("Expected timestamp"))?;
-    let now = || Ok(at.to_owned());
+    if !(timestamp.is_string() || timestamp.is_array()) {
+        return Err(fixture_error("Expected timestamp or clock sequence"));
+    }
+    let tick = Cell::new(0);
+    let now = || {
+        timestamp
+            .as_str()
+            .or_else(|| {
+                let index = tick.get();
+                tick.set(index + 1);
+                timestamp.get(index).and_then(Value::as_str)
+            })
+            .map(str::to_owned)
+            .ok_or_else(|| "Fixture clock exhausted".into())
+    };
     let mut steps = EventLoopSteps::new("transcript-import-conversion");
     let drafts = match function {
         "importedDraftsFixture" => {

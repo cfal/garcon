@@ -79,11 +79,17 @@ the user corrects how a port behaves, the correction is added under
   listed with the reason "unpaired surrogate in a result".
   Exception, before a durable write: where the original refuses an
   ill-formed string before it writes (creating the account, changing the
-  username), the route refuses too, by asking
-  `garcon_js::json::contains_unpaired_surrogate_escape` about the raw body
-  and checking the parsed field for U+FFFD. The validator itself is unchanged
-  and a genuine U+FFFD still passes. A new route of this kind goes to the
-  manager first.
+  username, a ticket mutation, a chat row, a stored path), the port refuses
+  too, and decides per field, never from the body as a whole: a surrogate in
+  another field, or in a duplicate key that a later one overwrites, must not
+  change the answer. `garcon_js::json::parse_with_unpaired_surrogate_fields`
+  reports it for named top-level strings, and
+  `parse_replacing_unpaired_surrogate_values` marks ill-formed string values
+  at any depth so the ordinary validation then rejects them as the original
+  does, in its order and with its message. The validator itself is unchanged
+  and a genuine U+FFFD still passes. A boundary replacement must never turn
+  an input the original refuses into a stored file. A new route of this kind
+  goes to the manager first.
 - Prototype lookups (standing decision, 2026-11-28, ADR-028). Where the
   original indexes a plain object with an untrusted key and so returns an
   inherited member (`table["__proto__"]`, `"constructor"`, `"toString"`),
