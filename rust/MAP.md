@@ -184,7 +184,7 @@ Parallel after the core milestone.
 | pull-request-reviews | Scanner, runner, poster, routes | `pull-request-reviews` suite | open |
 | notifications | Telegram notifier, attention tracker | Ported unit tests | open |
 | catalog-surface | Agents, models, API-provider, usage, CLI-update, prompt-refinement routes, title generation | `provider-*`, `usage-*`, `agent-*` suites | open |
-| controller-only | The `garcon-controller` binary (ADR-023): a controller whose Local executor is absent. New behavior with no original to mirror; its semantics need the user's confirmation before the unit starts (see open questions) | New server suites for startup, chat admission, catalogs, and the SPA with only remote executors | open |
+| controller-only | The `garcon-controller` binary (ADR-023): a controller whose Local executor is absent. New behavior with no original to mirror; its semantics need the user's confirmation before the unit starts (see open questions) | New server suites for startup, chat admission, catalogs, and the SPA with only remote executors | open; semantics decided in ADR-030 (Local listed and unavailable with a fixed reason) |
 
 ### Wave 4: lift
 
@@ -287,10 +287,10 @@ report the remaining mismatches to the manager instead of editing further.
 | `@opencode-ai/sdk` | HTTP and SSE client | Event framing and reconnect |
 | `jsonc-parser` | A JSONC crate | Comment and trailing-comma tolerance |
 | `mime-types` | Existing table in `static_assets.rs` | Already matched |
-| `localeCompare`, `Intl.Collator` | ICU4X `icu_collator` behind `garcon_js::collation`, pinned to the Unicode version of Bun 1.4.3 | The default locale is `en-US` whatever `LANG` says; Bun orders Han by radical and stroke, ICU4X's compiled data by code point (open question) |
+| `localeCompare`, `Intl.Collator` | ICU4X `icu_collator` behind `garcon_js::collation`, pinned to the Unicode version of Bun 1.4.3 | The default locale is `en-US` whatever `LANG` says; Bun orders Han by radical and stroke, ICU4X's compiled data by code point (accepted, ADR-029) |
 | `String.prototype.normalize` | ICU4X `icu_normalizer`, same pin | Unicode version |
 | `Date.parse`, local dates, `Intl` time zones | `garcon_js::date_parse` on `tz-rs` and `tzdb` | Bundled IANA data is newer than Bun 1.4.3's ICU (America/Vancouver from 2026-11-01); the three-letter aliases are case-sensitive |
-| `new RegExp` on user input | `regress`, unoptimized, for validation | Not JavaScriptCore's parser: 16 listed syntax differences (open question); matching differences in `research/regexp.md` |
+| `new RegExp` on user input | `regress`, unoptimized, for validation | Not JavaScriptCore's parser: 16 listed syntax differences (accepted, ADR-029); matching differences in `research/regexp.md` |
 | Bun `Worker` | Threads | Message ordering, shutdown |
 
 ## Recording coverage
@@ -364,46 +364,14 @@ runs.
 | 026 | Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine |
 | 027 | Each integration is a crate of its own, held to the compatibility suite |
 | 028 | The manager approves known differences that are clear bugs |
+| 029 | Three differences are accepted: the native 431 framing, regular-expression syntax validation, Han collation |
+| 030 | A controller without a Local executor lists Local as unavailable |
+| 031 | Provider requests identify as Garcon and never follow a redirect to another origin |
 
 ## Open questions
 
-- What a controller without a Local executor presents (unit `controller-only`).
-  Proposed: Local stays listed and is reported unavailable with a fixed
-  reason, so the existing unavailable-executor paths apply and new chats
-  require a remote executor.
-- Whether `Content-Length: 0` on the listener's own 431 response may stand as
-  a known difference (18 cases of the `runtime` scenario). The original's
-  listener sends no such header; hyper adds it. Both carry
-  `Connection: close` and no body, so no client sees a different message.
-  Listed provisionally by the manager on 2026-11-28; matching it exactly
-  means a head-size check in front of hyper.
-- Whether regular-expression syntax validation must agree exactly with
-  JavaScriptCore. `validateHiddenBashCommandPattern` only gives early
-  feedback (the browser compiles the pattern and drops an invalid one). The
-  port validates with `regress`, bounded in time and memory, and differs on
-  16 recorded patterns: 11 it accepts and the original rejects (quantified
-  `\b`, class ranges with `\u{...}` without the `u` flag, overflowing
-  counts), 5 it rejects and the original accepts (an astral group name,
-  nesting of 256 or deeper). Listed provisionally on 2026-11-28. Exact
-  agreement means porting JavaScriptCore's parser in syntax-checking mode:
-  estimated 2,000 to 4,000 lines and one to two weeks.
-- Whether Han characters must sort by radical and stroke as in the original.
-  Bun's ICU does; ICU4X's compiled collation data sorts them by code point,
-  which changes the order of names that contain characters from outside the
-  main CJK block (about half of such pairs) and almost none inside it
-  (0.18%). Listed provisionally on 2026-11-28. Exact agreement means
-  generating and committing custom ICU4X collation data.
-- How the port presents itself to model providers. The original's requests
-  carry `User-Agent: Bun/1.4.3` (Bun's fetch default); the port sends the
-  same for now, since a provider or a proxy may key on it. Header names go
-  out in lowercase and in the HTTP client's order where Bun sends mixed case;
-  values and the set of fields match. A choice for the lift.
-- A security observation about the original, kept as is in the port: on a
-  redirect to another origin its provider requests drop `Authorization` but
-  forward `x-api-key` like any other header (the behavior of fetch), so a
-  provider endpoint that redirects elsewhere receives that key at the new
-  origin. Whether the port should refuse to follow such a redirect is the
-  user's decision.
+None. The six questions of 2026-11-28 are decided in ADR-029, ADR-030, and
+ADR-031.
 
 ## Out of scope
 
