@@ -145,6 +145,7 @@ pub fn claude_catalog(logger: Rc<dyn AgentLogger>) -> ModelCatalog {
                 value: model.value.into(),
                 label: model.label.into(),
                 supports_images: model.supports_images,
+                thinking_modes: None,
                 is_local: None,
                 api_provider_id: None,
                 endpoint_id: None,
