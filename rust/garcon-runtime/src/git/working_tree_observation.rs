@@ -76,10 +76,10 @@ async fn load_fingerprint_index_entry_map(
     Ok(entries)
 }
 
-fn node_truncated_millis(ns: i128) -> f64 {
+pub(super) fn node_millis(ns: i128) -> f64 {
     let seconds = ns.div_euclid(1_000_000_000) as f64;
     let nano_remainder = ns.rem_euclid(1_000_000_000) as f64;
-    (seconds * 1000.0 + nano_remainder / 1_000_000.0).trunc()
+    seconds * 1000.0 + nano_remainder / 1_000_000.0
 }
 
 async fn worktree_stat_fingerprint(project_path: &str, file: &str) -> String {
@@ -93,8 +93,8 @@ async fn worktree_stat_fingerprint(project_path: &str, file: &str) -> String {
         Ok(stat) => {
             let kind = if stat.is_file { "file" } else { "not-file" };
             let stat = stat.revision;
-            let mtime = garcon_js::number_to_string(node_truncated_millis(stat.mtime_ns));
-            let ctime = garcon_js::number_to_string(node_truncated_millis(stat.ctime_ns));
+            let mtime = garcon_js::number_to_string(node_millis(stat.mtime_ns).trunc());
+            let ctime = garcon_js::number_to_string(node_millis(stat.ctime_ns).trunc());
             let size = garcon_js::number_to_string(stat.size as f64);
             format!("{kind}:{file}:{size}:{mtime}:{ctime}")
         }
