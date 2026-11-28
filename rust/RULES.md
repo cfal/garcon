@@ -101,16 +101,6 @@ the user corrects how a port behaves, the correction is added under
 
 - `serde_json` is built with `preserve_order`. Declare struct fields in the
   order the original writes its object literal.
-- When a provider constructs a shared question prompt with a different key
-  order from the shared parser, keep the parser's order in the shared type.
-  Readers apply that parser before using the row. Scope the converter replay's
-  `ResultOrderException` to the question elements so its values and the rest
-  of the row still match.
-- When a provider passes raw `changes` or `allowedPrompts` arrays through but
-  readers always coerce them with the shared parser, call the same contract
-  coercion in the port. List exact converter-case differences with the reason
-  "raw array read as the shared parser reads it"; this class is provisional
-  pending user confirmation.
 - A property the original leaves `undefined` is absent:
   `#[serde(skip_serializing_if = "Option::is_none")]`. A property it sets to
   `null` is `null`. Where the original distinguishes the two on input, keep
