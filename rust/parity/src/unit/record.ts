@@ -65,7 +65,7 @@ export async function captureTests(repoRoot: string, modulePath: string, tests: 
   for (const test of tests) {
     const file = resolve(repoRoot, test);
     const batch: CaptureRecord[] = [];
-    const run = await runWithRecordStream([process.execPath, 'test', '--preload', PRELOAD, file], childEnvironment({
+    const run = await runWithRecordStream([process.execPath, 'test', '--max-concurrency=1', '--preload', PRELOAD, file], childEnvironment({
       [MODULE_VARIABLE]: modulePath,
       [RECORD_STREAM_VARIABLE]: '3',
       [ROOT_VARIABLE]: repoRoot,
