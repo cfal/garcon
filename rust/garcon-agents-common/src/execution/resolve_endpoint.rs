@@ -67,7 +67,7 @@ pub async fn resolve_agent_endpoint(
     }))
 }
 
-pub(super) fn call_error<'a>(
+pub(crate) fn call_error<'a>(
     error: &'a (dyn std::error::Error + 'static),
 ) -> Option<&'a AgentCallError> {
     error.downcast_ref::<AgentCallError>().or_else(|| {

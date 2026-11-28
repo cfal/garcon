@@ -828,6 +828,7 @@ name = "garcon-agents-common"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
  "futures",
  "garcon-base",
  "garcon-cases",
@@ -836,8 +837,10 @@ dependencies = [
  "garcon-js",
  "indexmap",
  "libc",
+ "regress",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tokio-util",
