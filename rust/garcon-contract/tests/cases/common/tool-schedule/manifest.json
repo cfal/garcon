@@ -1,0 +1,36 @@
+{
+  "module": "common/tool-schedule.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/tool-schedule.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseToolScheduleRequest",
+      "argument": 0
+    },
+    {
+      "fn": "hasSchedulePrompt",
+      "argument": 0
+    },
+    {
+      "fn": "toolScheduleTitle",
+      "argument": 0
+    },
+    {
+      "fn": "toolScheduleOptions",
+      "argument": 0
+    },
+    {
+      "fn": "toolScheduleDetails",
+      "argument": 0
+    },
+    {
+      "fn": "describeToolSchedule",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 36,
+  "sha256": "3285af828fedaf1e5e209e1358248d9cb0bbb6d7baf4bfb61db80a61d5d1dec3"
+}

@@ -29,4 +29,5 @@ pub mod project_resolution;
 pub mod slash_commands;
 pub mod terminal;
 pub mod terminal_error;
+pub mod tool_schedule;
 pub mod transcript_projection;

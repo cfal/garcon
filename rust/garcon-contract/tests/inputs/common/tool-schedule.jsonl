@@ -1,0 +1,36 @@
+{"fn":"parseToolScheduleRequest","args":[{"action":"wakeup","delaySeconds":60,"prompt":"synthetic","timerCondition":"","daemon":false,"exactTiming":false,"reason":"","noop":true,"expression":"","maxIterations":0,"extra":true}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"wakeup","delaySeconds":0,"prompt":"synthetic","timerCondition":"\ufeff"}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"wakeup","delaySeconds":"60","prompt":"synthetic"}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"wakeup","delaySeconds":60,"prompt":"synthetic","noop":null}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"wakeup","delaySeconds":60,"prompt":"synthetic","exactTiming":true}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"wakeup","delaySeconds":60,"prompt":"synthetic","maxIterations":1}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"cron","expression":" * * * * * ","prompt":"synthetic","recurring":false,"durable":false,"daemon":true,"maxIterations":1e21,"exactTiming":true,"delaySeconds":0,"timerCondition":""}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"cron","expression":" * * * * * ","prompt":"synthetic","delaySeconds":1}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"cron","expression":" * * * * * ","prompt":"synthetic","maxIterations":1.1}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"cron","expression":" * * * * * ","prompt":"synthetic","maxIterations":-1}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"delete","jobId":" raw-id "}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"delete","jobId":" \t"}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"list","extra":"ignored"}]}
+{"fn":"parseToolScheduleRequest","args":[{"action":"stop-loop"}]}
+{"fn":"parseToolScheduleRequest","args":[null]}
+{"fn":"hasSchedulePrompt","args":[{"action":"wakeup","delaySeconds":0,"prompt":""}]}
+{"fn":"hasSchedulePrompt","args":[{"action":"cron","expression":"* * * * *","prompt":""}]}
+{"fn":"hasSchedulePrompt","args":[{"action":"stop-loop"}]}
+{"fn":"toolScheduleTitle","args":[{"action":"wakeup","delaySeconds":60,"prompt":""}]}
+{"fn":"toolScheduleTitle","args":[{"action":"wakeup","delaySeconds":120,"prompt":""}]}
+{"fn":"toolScheduleTitle","args":[{"action":"wakeup","delaySeconds":1,"prompt":""}]}
+{"fn":"toolScheduleTitle","args":[{"action":"wakeup","delaySeconds":1e-7,"prompt":""}]}
+{"fn":"toolScheduleTitle","args":[{"action":"wakeup","delaySeconds":-60,"prompt":""}]}
+{"fn":"toolScheduleTitle","args":[{"action":"cron","expression":"* * * * *","prompt":""}]}
+{"fn":"toolScheduleTitle","args":[{"action":"cron","expression":"* * * * *","prompt":"","recurring":true}]}
+{"fn":"toolScheduleTitle","args":[{"action":"cron","expression":"* * * * *","prompt":"","recurring":false}]}
+{"fn":"toolScheduleTitle","args":[{"action":"delete","jobId":"specific"}]}
+{"fn":"toolScheduleOptions","args":[{"action":"wakeup","delaySeconds":60,"prompt":"","timerCondition":"","daemon":false,"exactTiming":false,"reason":"","noop":true}]}
+{"fn":"toolScheduleOptions","args":[{"action":"wakeup","delaySeconds":0,"prompt":"","timerCondition":"never"}]}
+{"fn":"toolScheduleOptions","args":[{"action":"wakeup","delaySeconds":0,"prompt":"","timerCondition":"any"}]}
+{"fn":"toolScheduleOptions","args":[{"action":"wakeup","delaySeconds":0,"prompt":"","timerCondition":"sender"}]}
+{"fn":"toolScheduleOptions","args":[{"action":"cron","expression":"* * * * *","prompt":"","maxIterations":0,"daemon":true,"durable":false,"exactTiming":true}]}
+{"fn":"toolScheduleDetails","args":[{"action":"list"}]}
+{"fn":"toolScheduleDetails","args":[{"action":"wakeup","delaySeconds":60,"prompt":"synthetic","timerCondition":""}]}
+{"fn":"describeToolSchedule","args":[{"action":"stop-loop"}]}
+{"fn":"describeToolSchedule","args":[{"action":"cron","expression":"* * * * *","prompt":"synthetic","maxIterations":8,"daemon":false}]}
