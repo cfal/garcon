@@ -1,0 +1,5 @@
+{"fn":"aggregateUsage","args":["claude-opus-5-5",[[1000000,1],[10000,2]]]}
+{"fn":"aggregateUsage","args":["unpriced",[[10,20],[15,30]]]}
+{"fn":"aggregateUsage","args":["claude-opus-5-5",[[1e21,1]]]}
+{"fn":"aggregateUsage","args":["claude-opus-5-5",[[9007199254740991,0],[2,0]]]}
+{"fn":"aggregateUsage","args":["unpriced",[[9007199254740991,2]]]}

@@ -1,0 +1,14 @@
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","outputDeferred":null,"item":{"type":"contextCompaction","id":"x"}}],"nextCursor":3}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","outputDeferred":false,"item":{"type":"contextCompaction","id":"x","startedAtMs":1e21}}],"nextCursor":"","backwardsCursor":"a"}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"type":"contextCompaction","id":"x","completedAtMs":0.5}}]}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"id":"x"}}]}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"id":"x","type":["agentMessage"]}}]}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"type":"dynamicToolCall","id":"x","tool":"example","status":"completed","contentItems":null,"success":null}}]}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"type":"dynamicToolCall","id":"x","tool":"example","status":"completed","contentItems":null}}]}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"type":"collabAgentToolCall","id":"x","tool":["wait"],"status":"completed","senderThreadId":"s","receiverThreadIds":["r"],"agentsStates":{}}}]}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"type":"functionCallOutput","id":"x","name":"example","output":[{"type":"input_audio","file_id":"synthetic"},{"type":"input_image","image_url":"data:example","detail":"original"},{"type":"encrypted_content","encrypted_content":"synthetic"}]}}]}]}
+{"fn":"parseThreadItemsListResponse","args":[{"data":[{"turnId":"a","item":{"type":"fileChange","id":"x","changes":[],"status":"completed"}},{"turnId":"a","item":{"type":"webSearch","id":"y","query":"synthetic","action":null}},{"turnId":"a","item":{"type":"imageGeneration","id":"z","status":"completed","fileId":"synthetic","inputImages":[{"path":"/synthetic.png","sha256":"synthetic"}]}}]}]}
+{"fn":"parseThreadTurnsListResponse","args":[{"data":[null],"nextCursor":3}]}
+{"fn":"parseThreadTurnsListResponse","args":[{"data":[{"id":"a","itemsView":"full","status":"completed","rootTurnId":null,"items":[]}]}]}
+{"fn":"parseThreadTurnsListResponse","args":[{"data":[{"id":"a","itemsView":"summary","status":"failed","items":[],"error":{"message":"failed","codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":["compact"]}}}}]}]}
+{"fn":"parseThreadTurnsListResponse","args":[{"data":[{"id":"a","itemsView":"summary","status":"failed","items":[],"error":{"message":"failed","codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":3}}}}]}]}

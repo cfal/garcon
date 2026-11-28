@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/usage/usage-record.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/usage-record.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 15,
+  "sha256": "c0551dfb4491e19270e7631ea4dca4017dab809536a3995d1f86c8fed08d0c24"
+}

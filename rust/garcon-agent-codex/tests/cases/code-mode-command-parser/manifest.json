@@ -3,11 +3,11 @@
   "tests": [
     "server-agents/codex/src/agents/codex/__tests__/code-mode-command-projection.test.js"
   ],
-  "inputs": "../../../../home/build/code-mode-inputs.hK2Pje/inputs.jsonl",
+  "inputs": "rust/garcon-agent-codex/tests/inputs/code-mode-command-parser.jsonl",
   "guards": [],
   "jsonArguments": [],
   "bunVersion": "1.4.3",
   "notCaptured": [],
   "cases": 708,
-  "sha256": "8a01349cbd4cd7c2b72c7a8cc1e2895eb426ea10fd40103e1469f2dada6d181d"
+  "sha256": "7da4ec0224cc858b37a6b8253b1d360d5d5223bf2b3eeddb0881aacc8b782cdb"
 }
