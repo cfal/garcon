@@ -74,8 +74,8 @@ pub struct ExecutorOptions {
 
 pub struct ExecutorApi {
     info: ExecutorInfo,
-    projects: ProjectService,
-    files: FilesService,
+    pub(crate) projects: ProjectService,
+    pub(crate) files: FilesService,
     terminals: Rc<TerminalService>,
     disposed: Rc<Cell<bool>>,
 }
@@ -601,6 +601,8 @@ fn wire_frame(kind: &str, payload: impl Serialize) -> Result<String, serde_json:
 mod tests {
     use std::time::Duration;
 
+    use garcon_base::domain_error::DomainError;
+    use garcon_contract::error_codes::ErrorCode;
     use garcon_interface::errors::AgentIntegrationErrorCode;
     use garcon_js::json::Opaque;
     use garcon_link::connection_url::create_executor_secret;
@@ -682,6 +684,31 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 assert_eq!(inspected["resolution"]["kind"], "available");
+                for path in [project.path().join("missing"), project.path().parent().unwrap().into()] {
+                    let error = connection.primary.call(
+                        "", "projects.ticketProjectDefault",
+                        Opaque::from_value(json!({"projectPath": path.to_str().unwrap()})),
+                        options(),
+                    ).await.unwrap_err();
+                    let error = error.downcast_ref::<DomainError>().unwrap();
+                    assert_eq!(error.code, ErrorCode::TICKET_PROJECT_UNAVAILABLE);
+                    assert_eq!(error.status, 503);
+                    assert!(error.retryable);
+                    assert_eq!(error.message, "Cannot resolve the project default. Check the context directory, or enter an explicit project.");
+                }
+                for (request, message) in [
+                    (json!({"projectPath": root, "extra": true}), "Unexpected ticket field."),
+                    (json!({}), "projectPath must be well-formed Unicode text."),
+                    (json!({"projectPath": 3}), "projectPath must be well-formed Unicode text."),
+                ] {
+                    let error = connection.primary.call(
+                        "", "projects.ticketProjectDefault", Opaque::from_value(request), options(),
+                    ).await.unwrap_err();
+                    let error = error.downcast_ref::<garcon_interface::errors::AgentIntegrationError>().unwrap();
+                    assert_eq!(error.code, AgentIntegrationErrorCode::PROVIDER_FAILURE);
+                    assert_eq!(error.message, message);
+                    assert!(!error.retryable);
+                }
                 let error = connection
                     .primary
                     .call(
