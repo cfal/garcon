@@ -1,5 +1,7 @@
 use std::cell::Cell;
 
+use garcon_base::errors::error_metadata;
+use garcon_base::json_file_store::ReadJsonStateError;
 use garcon_contract::settings::TranscriptSearchFeatureSettings;
 use serde_json::json;
 
@@ -33,23 +35,43 @@ async fn fences_provider_references_and_holds_events_until_an_uncertain_write_is
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().to_str().unwrap();
     let writer = Rc::new(FaultWriter::default());
-    let store =
-        SettingsStore::open_with_writer(workspace, SettingsStoreOptions::default(), writer.clone())
-            .await
-            .unwrap();
+    let guard_active = Rc::new(Cell::new(false));
+    let store = SettingsStore::open_with_writer(
+        workspace,
+        SettingsStoreOptions {
+            retain_provider_references: Some(Rc::new({
+                let guard_active = Rc::clone(&guard_active);
+                move |_, _| {
+                    assert!(!guard_active.replace(true));
+                    let guard_active = Rc::clone(&guard_active);
+                    Ok(Box::new(move || assert!(guard_active.replace(false))))
+                }
+            })),
+            ..Default::default()
+        },
+        writer.clone(),
+    )
+    .await
+    .unwrap();
     let select = |id| json!({ "chatTitle": { "apiProviderId": id } });
-    store
-        .set_ui_settings(select("old").as_object().unwrap())
-        .await
-        .unwrap();
     let notifications = Rc::new(RefCell::new(Vec::new()));
     let stop = store.on_change({
         let notifications = Rc::clone(&notifications);
         Rc::new(move |event| {
+            assert!(
+                !guard_active.get(),
+                "provider write guard reaches the listener"
+            );
             notifications.borrow_mut().push(event.clone());
             Ok(())
         })
     });
+    store
+        .set_ui_settings(select("old").as_object().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(&*notifications.borrow(), &[SettingsChange::RemoteSettings]);
+    notifications.borrow_mut().clear();
     writer.failure.set(Some(false));
     assert!(
         store
@@ -124,16 +146,46 @@ async fn serializes_settings_writes_on_one_cache_and_preserves_unrelated_fields(
 }
 
 #[tokio::test]
+async fn invalid_ui_generation_selection_uses_the_validation_error_class() {
+    let root = tempfile::tempdir().unwrap();
+    let store = SettingsStore::open(
+        root.path().to_str().unwrap(),
+        SettingsStoreOptions::default(),
+    )
+    .await
+    .unwrap();
+    let patch = json!({ "chatTitle": { "executorId": 42 } });
+    let error = store
+        .set_ui_settings(patch.as_object().unwrap())
+        .await
+        .unwrap_err();
+    let metadata = error_metadata(error.as_ref());
+    assert_eq!(metadata.name, "ValidationDomainError");
+    assert_eq!(metadata.code, Some("VALIDATION_FAILED"));
+    assert_eq!(error.to_string(), "Invalid executor ID");
+    assert!(!root.path().join("project-settings.json").exists());
+}
+
+#[tokio::test]
 async fn corrupt_settings_are_quarantined_instead_of_replaced_with_defaults() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().to_str().unwrap();
     let file = root.path().join("project-settings.json");
     tokio::fs::write(&file, b"[]").await.unwrap();
-    assert!(
-        SettingsStore::open(workspace, SettingsStoreOptions::default())
-            .await
-            .is_err()
+    let error = SettingsStore::open(workspace, SettingsStoreOptions::default())
+        .await
+        .err()
+        .unwrap();
+    let Some(ReadJsonStateError::Corrupt(error)) = error.downcast_ref::<ReadJsonStateError>()
+    else {
+        panic!("{error}");
+    };
+    let source = error.source().unwrap();
+    assert_eq!(
+        source.to_string(),
+        "Project settings state must be a JSON object"
     );
+    assert_eq!(error_metadata(source).name, "TypeError");
     assert!(!file.exists());
     assert!(
         SettingsStore::open(workspace, SettingsStoreOptions::default())

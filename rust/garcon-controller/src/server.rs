@@ -32,6 +32,7 @@ use garcon_stores::auth::service::AuthService;
 use garcon_stores::auth::store::AuthAccountStore;
 use garcon_stores::auth::token::AuthTokens;
 use garcon_stores::settings::{SettingsStore, SettingsStoreOptions};
+use garcon_stores::telegram_settings_store::TelegramSettingsStore;
 use tokio::fs;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -286,6 +287,7 @@ async fn bind_controller(
         SettingsStoreOptions::default(),
     )
     .await?;
+    TelegramSettingsStore::open(&config.config_dir, clock.clone()).await?;
     let routes = create_edge_routes(
         Rc::clone(&runtime),
         config.workspace_name.clone(),
@@ -469,6 +471,41 @@ mod tests {
             assert!(!lock.exists());
             assert!(TcpStream::connect(addr).await.is_err());
         }).await;
+    }
+
+    #[tokio::test]
+    async fn initializes_telegram_secrets_before_publishing_readiness() {
+        LocalSet::new()
+            .run_until(async {
+                let root = tempfile::tempdir().unwrap();
+                let initial = config(root.path());
+                let notifications = Path::new(&initial.config_dir).join("notifications.json");
+                let controller = Controller::start(initial, Rc::new(UnavailableLocalExecutor))
+                    .await
+                    .unwrap();
+                let bytes = fs::read(&notifications).await.unwrap();
+                let value: Value = garcon_js::json::from_slice(&bytes).unwrap();
+                assert_eq!(value["version"], 1);
+                assert_eq!(value["telegram"]["botToken"], "");
+                controller.shutdown().await.unwrap();
+
+                fs::write(&notifications, br#"{"version":2}"#)
+                    .await
+                    .unwrap();
+                let error =
+                    Controller::start(config(root.path()), Rc::new(UnavailableLocalExecutor))
+                        .await
+                        .err()
+                        .unwrap();
+                assert!(
+                    error
+                        .to_string()
+                        .starts_with("State file notifications.json is corrupt.")
+                );
+                assert!(!notifications.exists());
+                assert!(!notifications.with_file_name("runtime.json").exists());
+            })
+            .await;
     }
 
     #[tokio::test]

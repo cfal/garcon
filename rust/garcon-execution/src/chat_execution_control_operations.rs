@@ -1,6 +1,6 @@
 //! Applies queue transitions under the controller's shared per-chat lock.
 
-use std::{collections::HashSet, future::Future, rc::Rc};
+use std::{collections::HashSet, error::Error, future::Future, rc::Rc};
 
 use garcon_base::{
     domain_error::DomainError,
@@ -29,10 +29,18 @@ use crate::{
         clone_stored_chat_execution_control,
     },
     types::{
-        ExecutionOperationResult, ProjectAdmissionPort, QueueCommandMutationResult,
-        QueuedAttachmentAdmissionPort, transition_error,
+        ControlTransitionError, ExecutionOperationResult, ProjectAdmissionPort,
+        QueueCommandMutationResult, QueuedAttachmentAdmissionPort, transition_error,
     },
 };
+
+fn erase_transition_error(error: ControlTransitionError) -> Box<dyn Error> {
+    match error {
+        ControlTransitionError::Domain(error) => Box::new(error),
+        ControlTransitionError::Mutation(error) => Box::new(error),
+        ControlTransitionError::Pause(error) => Box::new(error),
+    }
+}
 
 pub trait ChatExecutionControlOperationsHost {
     fn chat_exists(&self, chat_id: &str) -> bool;
@@ -205,16 +213,17 @@ impl ChatExecutionControlOperations {
         Ok(result)
     }
 
-    async fn commit_transition<T>(
+    fn commit_transition<T>(
         &self,
         chat_id: &str,
         current: &Control,
         transition: ControlTransition<T>,
     ) -> ExecutionOperationResult<Committed<T>> {
-        let result: ExecutionOperationResult<_> = match transition.outcome {
-            TransitionOutcome::Rejected { rejection } => {
-                Err(Box::new(transition_error(&rejection, current)))
-            }
+        // A committed entry must be announced before the operation can be dropped.
+        match transition.outcome {
+            TransitionOutcome::Rejected { rejection } => Err(erase_transition_error(
+                transition_error(&rejection, current),
+            )),
             TransitionOutcome::Ok { value } if transition.changed => self
                 .commit_now(chat_id, &transition.next, transition.public_changed)
                 .map(|control| Committed {
@@ -227,10 +236,7 @@ impl ChatExecutionControlOperations {
                 control: clone_stored_chat_execution_control(current),
                 changed: false,
             }),
-        };
-        // Every original caller awaits commitTransition before post-commit notifications.
-        tokio::task::yield_now().await;
-        result
+        }
     }
 
     pub async fn read(&self, chat_id: &str) -> ExecutionOperationResult<Control> {
@@ -279,9 +285,8 @@ impl ChatExecutionControlOperations {
                         .assert_supported(chat_id, &input.images)?;
                 }
             }
-            let Committed { value, control, .. } = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let Committed { value, control, .. } =
+                self.commit_transition(chat_id, &current, transition)?;
             if !value.duplicate {
                 self.host.input_accepted(chat_id)?;
                 self.log_mutation(
@@ -315,9 +320,8 @@ impl ChatExecutionControlOperations {
             let transition = self.transition(Some(chat_id), |context| {
                 create_queued_steer(&current, &input, context)
             })?;
-            let Committed { value, control, .. } = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let Committed { value, control, .. } =
+                self.commit_transition(chat_id, &current, transition)?;
             if !value.duplicate {
                 self.host.input_accepted(chat_id)?;
                 self.log_mutation(
@@ -349,9 +353,7 @@ impl ChatExecutionControlOperations {
             let transition = self.transition(None, |context| {
                 mark_queue_entry_steer(&current, input, context)
             })?;
-            let committed = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let committed = self.commit_transition(chat_id, &current, transition)?;
             if committed.changed {
                 self.log_mutation(
                     "mark-steer",
@@ -388,9 +390,8 @@ impl ChatExecutionControlOperations {
                     Some(error.domain_error().code),
                 );
             }
-            let Committed { value, control, .. } = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let Committed { value, control, .. } =
+                self.commit_transition(chat_id, &current, transition)?;
             if !value.duplicate {
                 self.host.input_accepted(chat_id)?;
                 self.log_mutation(
@@ -428,9 +429,8 @@ impl ChatExecutionControlOperations {
                     Some(error.domain_error().code),
                 );
             }
-            let Committed { value, control, .. } = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let Committed { value, control, .. } =
+                self.commit_transition(chat_id, &current, transition)?;
             if !value.duplicate {
                 self.log_mutation("delete", chat_id, &input.entry_id, &control, None, None);
             }
@@ -463,9 +463,8 @@ impl ChatExecutionControlOperations {
                     Some(error.domain_error().code),
                 );
             }
-            let Committed { value, control, .. } = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let Committed { value, control, .. } =
+                self.commit_transition(chat_id, &current, transition)?;
             if !value.value.duplicate {
                 self.log_move(chat_id, input, &control, value.rebased, None);
             }
@@ -496,8 +495,7 @@ impl ChatExecutionControlOperations {
             let current = self.load(chat_id).await;
             let transition = self.transition(None, |context| change(&current, context))?;
             Ok(self
-                .commit_transition(chat_id, &current, transition)
-                .await?
+                .commit_transition(chat_id, &current, transition)?
                 .control)
         })
         .await
@@ -514,9 +512,8 @@ impl ChatExecutionControlOperations {
             let transition = self.transition(None, |context| {
                 enqueue_control_input(&current, input, context)
             })?;
-            let Committed { value, control, .. } = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let Committed { value, control, .. } =
+                self.commit_transition(chat_id, &current, transition)?;
             self.log_control_mutation("enqueue", chat_id, &value, &control);
             self.host.input_accepted(chat_id)?;
             Ok(EnqueuedControl {
@@ -559,9 +556,7 @@ impl ChatExecutionControlOperations {
                 });
             }
             let transition = self.transition(None, |context| pause_queue(&current, context))?;
-            let committed = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let committed = self.commit_transition(chat_id, &current, transition)?;
             if committed.changed {
                 self.log_pause_mutation("pause", chat_id, &committed.control, None);
             }
@@ -582,9 +577,7 @@ impl ChatExecutionControlOperations {
             let current = self.load(chat_id).await;
             let transition =
                 self.transition(None, |context| resume_queue(&current, pause_id, context))?;
-            let committed = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let committed = self.commit_transition(chat_id, &current, transition)?;
             if committed.changed {
                 self.log_pause_mutation("resume", chat_id, &committed.control, None);
             }
@@ -607,8 +600,9 @@ impl ChatExecutionControlOperations {
                 self.transition(None, |context| dequeue_next_turn(&current, context))?;
             let input = match transition.outcome {
                 TransitionOutcome::Rejected { rejection } => {
-                    return Err(Box::new(transition_error(&rejection, &current))
-                        as Box<dyn std::error::Error>);
+                    return Err(erase_transition_error(transition_error(
+                        &rejection, &current,
+                    )));
                 }
                 TransitionOutcome::Ok { value: None } => return Ok(None),
                 TransitionOutcome::Ok { value: Some(input) } => input,
@@ -667,8 +661,7 @@ impl ChatExecutionControlOperations {
             let current = self.load(chat_id).await;
             let transition = self.transition(None, |context| reserve(&current, input, context))?;
             let control = self
-                .commit_transition(chat_id, &current, transition)
-                .await?
+                .commit_transition(chat_id, &current, transition)?
                 .control;
             // INFALLIBLE: a successful reservation keeps the entry and the repository saves its copy.
             let entry = control
@@ -720,9 +713,7 @@ impl ChatExecutionControlOperations {
             let current = self.load(chat_id).await;
             let transition =
                 self.transition(None, |context| settle(&current, entry_id, context))?;
-            let committed = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let committed = self.commit_transition(chat_id, &current, transition)?;
             if committed.changed {
                 self.log_mutation(operation, chat_id, entry_id, &committed.control, None, None);
             }
@@ -751,8 +742,7 @@ impl ChatExecutionControlOperations {
                 )
             })?;
             let control = self
-                .commit_transition(chat_id, &current, transition)
-                .await?
+                .commit_transition(chat_id, &current, transition)?
                 .control;
             if prior_revision.is_some() {
                 self.log_mutation("requeue", chat_id, entry_id, &control, prior_revision, None);
@@ -773,9 +763,7 @@ impl ChatExecutionControlOperations {
             let transition = self.transition(None, |context| {
                 pause_after_failure(&current, cause, context)
             })?;
-            let committed = self
-                .commit_transition(chat_id, &current, transition)
-                .await?;
+            let committed = self.commit_transition(chat_id, &current, transition)?;
             if committed.changed {
                 let entry_id = match cause {
                     FailurePauseCause::QueuedTurnFailed { entry_id } => Some(entry_id.as_str()),
