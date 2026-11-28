@@ -5,6 +5,7 @@ use std::{
 };
 
 use futures::future::LocalBoxFuture;
+use garcon_interface::producer::AgentFinalResponse;
 use indexmap::IndexMap;
 use tokio::sync::Notify;
 
@@ -12,7 +13,7 @@ use crate::app_server::{
     client::CodexAppServerClient,
     operation_routes::CodexOperation,
     request_builders::CodexConfirmedThreadSettings,
-    runtime_session_state::{CodexTurnRoutes, RunningStatus},
+    runtime_session_state::{CodexTurnRoutes, FinishSessionOptions, RunningStatus},
     turn_item_ledger::CodexTurnItemLedger,
 };
 
@@ -29,6 +30,12 @@ pub struct CodexSourceActivation {
     pub settings_timeout: Duration,
 }
 
+pub(super) struct PendingFinish {
+    pub options: FinishSessionOptions,
+    pub operation: Option<Rc<CodexOperation>>,
+    pub response: Option<AgentFinalResponse>,
+}
+
 pub struct CodexSessionSource {
     pub chat_id: String,
     pub thread_id: String,
@@ -43,6 +50,8 @@ pub struct CodexSessionSource {
     pub(super) idle_since: Cell<Option<i64>>,
     pub(super) settings: CodexSourceThreadSettings,
     pub(super) cleanup_attachments: RefCell<Option<LocalBoxFuture<'static, ()>>>,
+    pub(super) deliveries: Cell<usize>,
+    pub(super) pending_finish: RefCell<Option<PendingFinish>>,
     pub(super) interrupt: Rc<CodexInterrupt>,
     pub(super) terminal: Notify,
     pub(super) turn_attempt: Cell<u64>,
@@ -78,6 +87,8 @@ impl CodexSessionSource {
             idle_since: Cell::new(None),
             settings,
             cleanup_attachments: RefCell::default(),
+            deliveries: Cell::new(0),
+            pending_finish: RefCell::default(),
             interrupt: Rc::new(CodexInterrupt::default()),
             terminal: Notify::new(),
             turn_attempt: Cell::new(0),

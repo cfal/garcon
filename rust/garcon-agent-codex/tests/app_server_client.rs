@@ -39,9 +39,12 @@ use garcon_agent_codex::app_server::{
 };
 use garcon_agent_codex::runtime_types::{CodexExecutionRequest, CodexStartRequest};
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
-use garcon_agents_common::execution::runtime_events::{AgentRuntimeEvent, ProviderRunOutcome};
+use garcon_agents_common::execution::runtime_events::{
+    AgentRuntimeEvent, ProviderRunOutcome, RuntimeSteerRequest,
+};
 use garcon_contract::chat_types::ChatMessage;
 use garcon_contract::{
+    async_user_questions::{AsyncQuestionReply, async_question_reply_text},
     chat_command_contracts::PermissionDecisionPayload,
     chat_modes::{PermissionMode, ThinkingMode},
 };
@@ -1047,6 +1050,138 @@ async fn managed_runtime_starts_a_session_and_publishes_rows_before_its_terminal
         runtime.release_session("chat", Some(&result.agent_session_id)).await;
         runtime.shutdown().await;
     }).await;
+}
+
+#[tokio::test]
+async fn managed_steering_waits_for_acknowledgement_before_publishing_the_terminal_event() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Rc::new(Fixture::new(FIXTURE));
+            let path = fixture._directory.path();
+            let native_path = path.join("rollout.jsonl");
+            let release = path.join("release-steer");
+            tokio::fs::write(&native_path, "{}\n").await.unwrap();
+            let factory = {
+                let fixture = fixture.clone();
+                let release = release.clone();
+                Rc::new(
+                    move |_, _: Option<&garcon_agent_codex::runtime_types::CodexProviderConfig>| {
+                        let mut options = fixture.options("managed-steer-terminal");
+                        options.env.insert(
+                            "SYNTHETIC_CODEX_NATIVE_PATH".into(),
+                            native_path.to_str().unwrap().into(),
+                        );
+                        options.env.insert(
+                            "SYNTHETIC_CODEX_STEER_RELEASE".into(),
+                            release.to_str().unwrap().into(),
+                        );
+                        CodexAppServerClient::new(options)
+                    },
+                )
+            };
+            let runtime = CodexAppServerRuntime::new(CodexAppServerRuntimeOptions::new(
+                factory,
+                Rc::new(|| "synthetic-occurrence".into()),
+            ));
+            let (publish, mut events) = tokio::sync::mpsc::unbounded_channel();
+            runtime
+                .start_session(CodexStartRequest {
+                    execution: CodexExecutionRequest {
+                        activation: ThreadActivationSettings {
+                            model: "synthetic-model".into(),
+                            project_path: path.to_str().unwrap().into(),
+                            permission_mode: PermissionMode::Default,
+                            speed: None,
+                            codex_config: None,
+                        },
+                        thinking_mode: None,
+                        model_endpoint_id: None,
+                        client_message_id: None,
+                        admission: None,
+                        command: "first".into(),
+                        images: vec![],
+                        env_overrides: None,
+                        operation: codex_operation(
+                            "chat",
+                            "run",
+                            Rc::new(move |event| {
+                                let _ = publish.send(event);
+                            }),
+                        ),
+                    },
+                    on_session_activated: None,
+                })
+                .await
+                .unwrap();
+            assert!(matches!(
+                events.try_recv().unwrap(),
+                AgentRuntimeEvent::Steerable
+            ));
+            let target = runtime.capture_steer_target("thread").unwrap();
+            let reply = AsyncQuestionReply {
+                question_id: "synthetic-question".into(),
+                question: "Which one?".into(),
+                answer: "The first.".into(),
+                source: None,
+            };
+            let request = RuntimeSteerRequest {
+                chat_id: "chat".into(),
+                project_path: path.to_str().unwrap().into(),
+                agent_session_id: "thread".into(),
+                native_session: None,
+                target: Some(target),
+                input: async_question_reply_text(&reply),
+                question_reply: Some(reply),
+                client_message_id: "steer".into(),
+                prepare_delivery: Rc::new(|| async { Ok(()) }.boxed_local()),
+            };
+            let in_flight = tokio::task::spawn_local({
+                let runtime = runtime.clone();
+                async move { runtime.steer(request).await }
+            });
+            let rows = tokio::time::timeout(Duration::from_secs(3), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let premature_terminal = events.try_recv().is_ok();
+            let still_completing = runtime
+                .running_sessions()
+                .iter()
+                .any(|session| session.status.as_deref() == Some("completing"));
+            tokio::fs::write(&release, "").await.unwrap();
+            assert!(matches!(rows, AgentRuntimeEvent::Rows { .. }));
+            assert!(
+                !premature_terminal && still_completing,
+                "terminal must wait for the delivery reservation"
+            );
+            assert_eq!(
+                in_flight.await.unwrap().unwrap(),
+                AgentSteerResult::Accepted
+            );
+            let terminal = events.try_recv().unwrap();
+            assert!(matches!(
+                terminal,
+                AgentRuntimeEvent::RunEnded { run_id, outcome: ProviderRunOutcome::Finished {
+                    final_response: Some(AgentFinalResponse::Text { text })
+                }, .. } if run_id == "run" && text == "Final answer."
+            ));
+            assert!(!runtime.is_running("thread"));
+            let frames = fixture.frames();
+            let steer = frames
+                .iter()
+                .find(|frame| frame["method"] == "turn/steer")
+                .unwrap();
+            assert_eq!(steer["params"]["expectedTurnId"], "turn");
+            assert_eq!(steer["params"]["clientUserMessageId"], "steer");
+            assert!(
+                steer["params"]["input"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("<send_user_message_question_reply>")
+            );
+            runtime.shutdown().await;
+        })
+        .await;
 }
 
 #[tokio::test]
