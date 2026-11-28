@@ -4,3 +4,4 @@
 //! catalogs), one module per TypeScript file.
 
 pub mod auth;
+pub mod settings;

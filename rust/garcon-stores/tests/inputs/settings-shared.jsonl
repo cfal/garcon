@@ -1,0 +1,19 @@
+{"fn":"normalizeUiSettings","args":[null]}
+{"fn":"normalizeUiSettings","args":[[]]}
+{"fn":"normalizeUiSettings","args":[{"unknown":{"9":1.0,"0":false},"appIdentity":{"title":" \u00a0Fixture  ","secret":true},"pinnedInsertPosition":"left","chatTitle":{"agentId":"claude","model":"m","apiProviderId":null,"enabled":false}}]}
+{"fn":"normalizeUiSettings","args":[{"first":1,"appIdentity":{"title":"   "},"second":2,"chatTitle":{"enabled":"yes"},"third":3}]}
+{"fn":"normalizeUiSettings","args":[{"hiddenBashCommandPatterns":["[","echo *"],"commitMessage":{"customPrompt":"subject"},"ticketChat":{"customPrompt":"{{title}}","enabled":true},"agentSwitchCompaction":{"thinkingMode":"high","contextWindowTokens":12000}}]}
+{"fn":"normalizeUiSettings","args":[{"promptRefinement":{"enabled":true,"customPrompt":"prefix"},"notifications":{"telegram":{"enabled":true,"opaque":null}}}]}
+{"fn":"normalizeUiSettings","args":[{"appIdentity":{"title":42},"pinnedInsertPosition":"bottom","chatTitle":{"executorId":"bad","modelEndpointId":17}}]}
+{"fn":"sanitizeFolderFilter","args":[{"textTokens":[" a ","  ",0,"b","a"],"tags":[" x "," X ","x"],"agents":{},"models":["m"],"status":" active ","unknown":true}]}
+{"fn":"sanitizeFolderFilter","args":[{"status":"archived","textTokens":null}]}
+{"fn":"sanitizeFolderFilter","args":[null]}
+{"fn":"sanitizeStringArray","args":[["  ","\ufefffoo","a","a",true,null,"\u200b"]]}
+{"fn":"sanitizeStringArray","args":[{"0":"x","1":"y"}]}
+{"fn":"normalizeRemoteSettingsVersion","args":[0]}
+{"fn":"normalizeRemoteSettingsVersion","args":[-1]}
+{"fn":"normalizeRemoteSettingsVersion","args":[1.2]}
+{"fn":"normalizeRemoteSettingsVersion","args":[9007199254740991]}
+{"fn":"normalizeRemoteSettingsVersion","args":[9007199254740992]}
+{"fn":"normalizeRemoteSettingsVersion","args":[null]}
+{"fn":"normalizeRemoteSettingsVersion","args":["12"]}
