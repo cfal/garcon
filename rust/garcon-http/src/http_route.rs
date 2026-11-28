@@ -105,7 +105,11 @@ impl HttpRouter {
                 .unwrap_or_else(|error| self.unhandled(&*error));
         }
         let Some((_, route)) = self.table.lookup(method, pathname) else {
-            return not_found();
+            if self.options.shutting_down.get() {
+                return shutting_down();
+            }
+            return request_url(&request)
+                .map_or_else(|error| self.unhandled(&error), |_| not_found());
         };
         let metadata = match route {
             Route::Ported { metadata, .. } | Route::Unported(metadata) => metadata,

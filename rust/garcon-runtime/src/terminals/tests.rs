@@ -220,7 +220,13 @@ async fn uses_the_injected_runtime_base_and_shell_without_controller_configurati
             ("FORCE_COLOR", "3"),
             ("GARCON_CONTROLLER_URL", ""),
         ] {
-            assert_eq!(&command.env[OsStr::new(key)], OsStr::new(expected));
+            let effective = command
+                .env
+                .iter()
+                .rev()
+                .find(|(name, _)| name.eq_ignore_ascii_case(OsStr::new(key)))
+                .map(|(_, value)| value.as_os_str());
+            assert_eq!(effective, Some(OsStr::new(expected)));
         }
     })
     .await;

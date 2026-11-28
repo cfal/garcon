@@ -1,0 +1,11 @@
+{
+  "module": "common/chat-canvas.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-canvas.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 41,
+  "sha256": "503eccb6af161ed11a7d0bf0d20225e2ea3148a28732f50f7cce3f029886fc47"
+}

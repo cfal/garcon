@@ -1,3 +1,5 @@
+mod runtime_environment;
+
 use std::cell::Cell;
 use std::error::Error;
 use std::net::SocketAddr;
@@ -50,12 +52,17 @@ pub struct Controller {
     logger: ScopedLogger,
 }
 
-pub fn run_native(args: &[String], local: Rc<dyn ExecutionProjectService>) -> ExitCode {
+/// Runs the native controller in the calling process.
+///
+/// # Safety
+/// Call before starting other threads; startup changes the process environment.
+pub unsafe fn run_native(args: &[String], local: Rc<dyn ExecutionProjectService>) -> ExitCode {
     if is_help_requested(args) {
         print!("{HELP_TEXT}");
         return ExitCode::SUCCESS;
     }
-    match run_process(args, local) {
+    // SAFETY: callers guarantee the startup environment can be changed.
+    match unsafe { run_process(args, local) } {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             create_logger("server").error(&format!("Failed to start or stop server: {error}"));
@@ -64,7 +71,7 @@ pub fn run_native(args: &[String], local: Rc<dyn ExecutionProjectService>) -> Ex
     }
 }
 
-fn run_process(
+unsafe fn run_process(
     args: &[String],
     local: Rc<dyn ExecutionProjectService>,
 ) -> Result<(), Box<dyn Error>> {
@@ -73,6 +80,8 @@ fn run_process(
     }
     let server_root = install_root()?;
     let config = initialize_server_config(args, &server_root.to_string_lossy())?;
+    // SAFETY: the native entry point is single threaded and has not built the runtime yet.
+    unsafe { runtime_environment::install(&config.config_dir) };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -99,14 +108,29 @@ async fn run_until_shutdown(
     config: ServerConfig,
     local: Rc<dyn ExecutionProjectService>,
 ) -> Result<(), Box<dyn Error>> {
-    use tokio::signal::unix::{SignalKind, signal};
+    #[cfg(unix)]
+    let shutdown_signal = {
+        use tokio::signal::unix::{SignalKind, signal};
 
-    let mut terminate = signal(SignalKind::terminate())?;
-    let mut interrupt = signal(SignalKind::interrupt())?;
+        let mut terminate = signal(SignalKind::terminate())?;
+        let mut interrupt = signal(SignalKind::interrupt())?;
+        async move {
+            tokio::select! {
+                _ = terminate.recv() => {}
+                _ = interrupt.recv() => {}
+            }
+        }
+    };
+    #[cfg(windows)]
+    let shutdown_signal = {
+        let mut interrupt = tokio::signal::windows::ctrl_c()?;
+        async move {
+            interrupt.recv().await;
+        }
+    };
     let controller = Controller::start(config, local).await?;
     tokio::select! {
-        _ = terminate.recv() => {}
-        _ = interrupt.recv() => {}
+        () = shutdown_signal => {}
         _ = controller.lease_lost() => {}
     }
     controller.shutdown().await

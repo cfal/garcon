@@ -1,0 +1,26 @@
+{"fn":"emptyFilterSpec","args":[]}
+{"fn":"parseChatFilterQuery","args":[" Status:ACTIVE is:!Archived title:\"A title|other\" tag:Alpha|BETA model:gpt AGENT:Codex project:\"Two words\" 'literal phrase' unknown:token "]}
+{"fn":"parseChatFilterQuery","args":["parent:bad id:1783725900000200|bad source:1783725900000201|1783725900000202 status:invalid Title:|| status:unread"]}
+{"fn":"parseChatFilterQuery","args":["created-before:2000-02-29 created-after:1900-02-29 updated-before:0000-01-01 updated-after:0004-02-29"]}
+{"fn":"parseChatFilterQuery","args":["created-before:2026-11-28T12:03:04.5+05:30 updated-after:2026-04-01T24:00:00Z created-after:2026-01-01T00:00:00+24:00 updated-before:2026-01-01T00:00:00z"]}
+{"fn":"parseChatFilterQuery","args":["created-after:0001-01-01T00:00:00+23:59 created-before:9999-12-31T23:59:59-23:59"]}
+{"fn":"tokenizeChatFilter","args":["lead\"quoted\"suffix title:'two words'\u0085next\ufeffend can't 'unclosed"]}
+{"fn":"tokenizeChatFilter","args":["\"\" '' :\"\" 'single' \"double\" foo'bar baz:\"spaces\"tail"]}
+{"fn":"hasChatFilterWhitespace","args":["\u0085"]}
+{"fn":"hasChatFilterWhitespace","args":["\ufeff"]}
+{"fn":"hasChatFilterWhitespace","args":["\u180e"]}
+{"fn":"addTagToQuery","args":["  title:Example  tag:FIRST|second  ","First"]}
+{"fn":"addTagToQuery","args":["  title:Example  ","Next"]}
+{"fn":"removeTagFromQuery","args":["tag:K tag:k tag:\u212a [TAG:K] keep","k"]}
+{"fn":"removeTagFromQuery","args":["tag:I tag:i tag:\u0131 keep","i"]}
+{"fn":"removeTagFromQuery","args":["before\u00a0 TAG:a+b tag:a+b\u0085tag:a+b after","a+b"]}
+{"fn":"removeTagFromQuery","args":["tag:\u00c9a TAG:\u00e9a tag:\u00e9 keep","\u00e9"]}
+{"fn":"removeTagFromQuery","args":["tag:a tag:a-extra tag:ab tag:ab tag: keep",""]}
+{"fn":"removeTagFromQuery","args":["tag:x\ud801\udc00x tag:x\ud801\udc28x keep","x\ud801\udc28x"]}
+{"fn":"queryHasTag","args":["TAG:first|SECOND hello","second"]}
+{"fn":"queryHasTag","args":["project:second tag:first","second"]}
+{"fn":"chatOrderGroupFor","args":[{"isPinned":true,"isArchived":true}]}
+{"fn":"chatOrderGroupFor","args":[{"isPinned":false,"isArchived":true}]}
+{"fn":"serializeChatFilter","args":[{"textTokens":["final phrase"],"titles":[["one","two spaces"]],"tags":[["a","b"]],"agents":["a","b"],"models":["x","z"],"project":["foo","bar"],"status":"unread","orderGroup":{"group":"pinned","negated":true},"ids":[["1783725900000200"]],"createdBefore":["2026-11-28T00:00:00.000Z"]}]}
+{"fn":"matchesChatFilter","args":[{"id":"1783725900000200","parentChatId":null,"lineage":null,"title":"Title","projectPath":"/project","agentId":"Codex","model":null,"tags":["First"],"isProcessing":true,"isUnread":false,"isPinned":false,"isArchived":false,"createdAt":"2026-01-01T00:00:00Z","lastActivityAt":null,"lastMessage":"A needle"},{"textTokens":["needle"],"titles":[["title"]],"tags":[["first"]],"agents":["cod"],"models":[],"project":["project"],"status":"active","createdAfter":["2025-12-31T23:59:59Z"]}]}
+{"fn":"matchesChatFilter","args":[{"id":"1783725900000200","parentChatId":null,"lineage":null,"title":"Title","projectPath":"/project","agentId":"Codex","model":null,"tags":[],"isProcessing":true,"isUnread":false,"isPinned":false,"isArchived":false,"createdAt":"2026-01-01T00:00:00Z","lastActivityAt":null},{"textTokens":[],"titles":[],"tags":[],"agents":[],"models":[],"project":[],"createdAfter":["2026-01-01T00:00:00Z"]}]}
