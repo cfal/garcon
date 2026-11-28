@@ -63,6 +63,167 @@ fn ticket_recording_result<T: Serialize>(
 }
 
 #[test]
+fn ws_session_event_recordings() {
+    use garcon_contract::ws_events::*;
+    #[derive(serde::Deserialize)]
+    #[serde(
+        tag = "outcome",
+        rename_all = "kebab-case",
+        rename_all_fields = "camelCase"
+    )]
+    enum RecordedControl {
+        Snapshot { chat_id: String, control: Value },
+        NotFound { chat_id: String },
+        Unavailable { chat_id: String },
+    }
+
+    assert_recording("ws-events", |function, args| match function {
+        "parseServerWsMessage" => {
+            let value = unknown(function, args.first())?;
+            Ok(match parse_session_ws_message(&value) {
+                Some(SessionWsMessage::ReconnectState(value)) => {
+                    instance_record("ReconnectStateMessage", value)
+                }
+                Some(SessionWsMessage::WsFault(value)) => instance_record("WsFaultMessage", value),
+                Some(SessionWsMessage::WsPong(value)) => instance_record("WsPongMessage", value),
+                Some(SessionWsMessage::ClientRequestError(value)) => {
+                    instance_record("ClientRequestErrorMessage", value)
+                }
+                None => Value::Null,
+            })
+        }
+        "new ClientRequestErrorMessage" => Ok(instance_record(
+            "ClientRequestErrorMessage",
+            ClientRequestErrorMessage::new(
+                required_text(function, args.first())?.to_owned(),
+                required_text(function, args.get(1))?.to_owned(),
+                typed_argument(function, args.get(2))?,
+                required_text(function, args.get(3))?.to_owned(),
+                typed_argument(function, args.get(4))?,
+                text(function, args.get(5))?.map(str::to_owned),
+            ),
+        )),
+        "new ReconnectStateMessage" => {
+            let results: Vec<RecordedControl> = typed_argument(function, args.get(1))?;
+            let results = results
+                .into_iter()
+                .map(|result| {
+                    Ok(match result {
+                        RecordedControl::Snapshot { chat_id, control } => {
+                            ReconnectControlResult::Snapshot {
+                                chat_id,
+                                control: parse_chat_execution_control_state(&control)
+                                    .map(Box::new)
+                                    .ok_or_else(|| {
+                                        CaseError::undeliverable("invalid execution control")
+                                    })?,
+                            }
+                        }
+                        RecordedControl::NotFound { chat_id } => {
+                            ReconnectControlResult::NotFound { chat_id }
+                        }
+                        RecordedControl::Unavailable { chat_id } => {
+                            ReconnectControlResult::Unavailable { chat_id }
+                        }
+                    })
+                })
+                .collect::<Result<_, CaseError>>()?;
+            Ok(instance_record(
+                "ReconnectStateMessage",
+                ReconnectStateMessage::new(
+                    typed_argument(function, args.first())?,
+                    results,
+                    required_text(function, args.get(2))?.to_owned(),
+                    text(function, args.get(3))?.map(str::to_owned),
+                ),
+            ))
+        }
+        "new WsFaultMessage" => Ok(instance_record(
+            "WsFaultMessage",
+            WsFaultMessage::new(required_text(function, args.first())?.to_owned()),
+        )),
+        "new WsPongMessage" => Ok(instance_record(
+            "WsPongMessage",
+            WsPongMessage::new(
+                required_text(function, args.first())?.to_owned(),
+                garcon_js::Number(javascript_number(function, args.get(1))?),
+                required_text(function, args.get(2))?.to_owned(),
+                typed_argument(function, args.get(3))?,
+                required_text(function, args.get(4))?.to_owned(),
+            ),
+        )),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn ws_session_event_wire_bytes_match_bun() {
+    use garcon_contract::ws_events::parse_session_ws_message;
+    let inputs = include_str!("inputs/common/ws-events.jsonl");
+    let bun = pinned_bun_stdout(
+        r#"import { parseServerWsMessage } from "./common/ws-events.ts";
+           for (const line of process.argv[1].trimEnd().split("\n")) {
+             console.log(JSON.stringify(parseServerWsMessage(JSON.parse(line).args[0])));
+           }"#,
+        &[inputs],
+    );
+    let expected: Vec<_> = bun.lines().collect();
+    let inputs: Vec<_> = inputs.lines().collect();
+    assert_eq!(expected.len(), inputs.len());
+    for (input, expected) in inputs.into_iter().zip(expected) {
+        let fixture: Value = garcon_js::json::from_str(input).unwrap();
+        let actual = parse_session_ws_message(&fixture["args"][0]);
+        assert_eq!(serde_json::to_string(&actual).unwrap(), expected, "{input}");
+    }
+}
+
+#[test]
+fn ws_session_event_reconnect_rejects_mixed_control_instance_identities() {
+    use garcon_contract::chat_execution_control::empty_chat_execution_control_state;
+    use garcon_contract::ws_events::{SessionWsMessage, parse_session_ws_message};
+    let mut input = json!({
+        "type":"reconnect-state",
+        "serverInstanceId":"server-a",
+        "processing":{"outcome":"snapshot","chats":[]},
+        "controlResults":[{"chatId":"chat-1","outcome":"snapshot",
+            "control":empty_chat_execution_control_state("server-a")}],
+    });
+    assert!(matches!(
+        parse_session_ws_message(&input),
+        Some(SessionWsMessage::ReconnectState(_))
+    ));
+    input["controlResults"][0]["control"]["serverInstanceId"] = json!("server-b");
+    assert_eq!(parse_session_ws_message(&input), None);
+}
+
+#[test]
+fn ws_session_event_client_request_error_strictly_validates_optional_fields() {
+    use garcon_contract::ws_events::{SessionWsMessage, parse_session_ws_message};
+    let valid = json!({
+        "type":"client-request-error","clientRequestId":"req-1","requestType":"chat-reload",
+        "code":"CHAT_RUNNING","message":"Chat is running","retryable":true,
+    });
+    assert!(matches!(
+        parse_session_ws_message(&valid),
+        Some(SessionWsMessage::ClientRequestError(message)) if message.chat_id.is_none()
+    ));
+    for (field, value) in [
+        ("code", json!("UNKNOWN")),
+        ("code", Value::Null),
+        ("message", json!(42)),
+        ("retryable", json!("false")),
+        ("retryable", Value::Null),
+        ("chatId", json!(42)),
+        ("chatId", json!(" ")),
+        ("chatId", Value::Null),
+    ] {
+        let mut invalid = valid.clone();
+        invalid[field] = value;
+        assert_eq!(parse_session_ws_message(&invalid), None, "{invalid}");
+    }
+}
+
+#[test]
 fn garcon_command_rejection_recordings() {
     use garcon_contract::garcon_command_rejection::*;
     assert_recording("garcon-command-rejection", |function, args| {
