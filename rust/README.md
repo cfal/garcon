@@ -418,6 +418,11 @@ quadrant report lists outcome mismatches, including missing tests, and counts
 shared failures separately within the matching outcomes. It exits 1 on any
 mismatch.
 
+Both JUnit comparers keep file, classname, and test name as the identity. If
+Bun emits the same title for several parameterized cases, the comparers pair
+the occurrences in report order and print how many they paired. Different
+occurrence counts still fail, and the report names each unpaired occurrence.
+
 ## SACS on a Rust worker
 
 Use one scripted driver per JUnit report, since `compare-junit.ts` compares

@@ -147,11 +147,8 @@ fn git_spawn_error(
     options: &GitCommandOptions,
     error: io::Error,
 ) -> Box<dyn std::error::Error> {
-    if matches!(
-        error.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
-    ) && !git_on_command_path(cwd, options)
-    {
+    // Bun resolves the executable before attempting to enter the working directory.
+    if !git_on_command_path(cwd, options) {
         return NamedError {
             name: "Error".into(),
             code: Some("ENOENT".into()),

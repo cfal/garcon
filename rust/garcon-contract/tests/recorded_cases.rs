@@ -7,7 +7,8 @@
 use std::borrow::Cow;
 
 use garcon_cases::{
-    CaseError, Stats, bigint, javascript_number, markers, replay, round_tripped, text, unknown,
+    CaseError, ReplayOptions, ResultOrderException, Stats, bigint, javascript_number, markers,
+    replay, replay_with_options, round_tripped, text, unknown,
 };
 use garcon_contract::agent_integration::{
     is_agent_setting_label_key, is_agent_setting_option_description_key,
@@ -472,8 +473,29 @@ fn dispatch_executors(function: &str, args: &[Value]) -> Result<Value, CaseError
 
 #[test]
 fn executors_cases_match() {
-    let stats = replay(
+    const CALLER_ORDER: &str = "pass-through of the request's object; key order is the caller's";
+    let stats = replay_with_options(
         concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/common/executors"),
+        ReplayOptions {
+            result_order_exceptions: &[
+                ResultOrderException {
+                    function: "parseUpdateExecutorRequest",
+                    path: "$.result.connection",
+                    reason: CALLER_ORDER,
+                },
+                ResultOrderException {
+                    function: "parseExecutorSnapshot",
+                    path: "$.result",
+                    reason: CALLER_ORDER,
+                },
+                ResultOrderException {
+                    function: "parseExecutors",
+                    path: "$.result[*]",
+                    reason: CALLER_ORDER,
+                },
+            ],
+            ..Default::default()
+        },
         dispatch_executors,
     );
     assert_all_match("common/executors.ts", stats);

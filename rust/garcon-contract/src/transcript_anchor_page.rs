@@ -48,6 +48,31 @@ pub struct TranscriptAnchorRequest {
     pub purpose: Option<TranscriptReadPurpose>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptAnchorContinuation {
+    pub chat_id: String,
+    pub direction: TranscriptAnchorDirection,
+    pub transcript_view_id: String,
+    pub watermark_ordinal: u64,
+    pub cursor_ordinal: u64,
+    pub anchors_remaining: u64,
+}
+
+impl From<TranscriptAnchorContinuation> for TranscriptAnchorRequest {
+    fn from(continuation: TranscriptAnchorContinuation) -> Self {
+        Self {
+            chat_id: continuation.chat_id,
+            direction: continuation.direction,
+            anchors_remaining: continuation.anchors_remaining,
+            transcript_view_id: Some(continuation.transcript_view_id),
+            cursor_ordinal: Some(continuation.cursor_ordinal),
+            watermark_ordinal: Some(continuation.watermark_ordinal),
+            purpose: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptAnchorPage {
@@ -332,15 +357,16 @@ pub fn transcript_anchor_cursor(page: &TranscriptAnchorPage) -> u64 {
 
 pub fn transcript_anchor_continuation(
     page: &TranscriptAnchorPage,
-) -> Option<TranscriptAnchorRequest> {
-    (page.page_status == TranscriptAnchorPageStatus::Partial).then(|| TranscriptAnchorRequest {
-        chat_id: page.chat_id.clone(),
-        direction: page.direction,
-        anchors_remaining: page.anchors_remaining,
-        transcript_view_id: Some(page.transcript_view_id.clone()),
-        cursor_ordinal: Some(transcript_anchor_cursor(page)),
-        watermark_ordinal: Some(page.watermark_ordinal),
-        purpose: None,
+) -> Option<TranscriptAnchorContinuation> {
+    (page.page_status == TranscriptAnchorPageStatus::Partial).then(|| {
+        TranscriptAnchorContinuation {
+            chat_id: page.chat_id.clone(),
+            direction: page.direction,
+            transcript_view_id: page.transcript_view_id.clone(),
+            watermark_ordinal: page.watermark_ordinal,
+            cursor_ordinal: transcript_anchor_cursor(page),
+            anchors_remaining: page.anchors_remaining,
+        }
     })
 }
 

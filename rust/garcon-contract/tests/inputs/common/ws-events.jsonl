@@ -42,3 +42,89 @@
 {"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"CHAT_RUNNING","message":42,"retryable":false}]}
 {"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"CHAT_RUNNING","message":"failure","retryable":"false"}]}
 {"fn":"parseServerWsMessage","args":[{"type":"unknown-event"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":" c-1 ","transcriptViewId":" generation-1 ","messages":[{"ordinal":1,"message":{"type":"assistant-message","timestamp":"now","content":"hi"}}],"firstOrdinal":1,"lastOrdinal":1,"resendCandidates":[{"ordinal":3,"content":"prompt","attachmentNames":["a.png"]}],"turnId":"turn-1","clientRequestId":" req-1 ","upstreamRequestId":"cursor-req-1"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":"c-1","transcriptViewId":"v","messages":[{"ordinal":1,"message":{"type":"future-message","timestamp":"now","payload":{}}}],"firstOrdinal":1,"lastOrdinal":1,"resendCandidates":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":"c-1","transcriptViewId":"v","messages":[{"ordinal":1,"message":{"type":"assistant-message","timestamp":"now","content":"hi"}}],"firstOrdinal":2,"lastOrdinal":2,"resendCandidates":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":"c-1","transcriptViewId":"v","messages":[{"ordinal":0,"message":{"type":"user-message","timestamp":"now","content":"bad"}}],"firstOrdinal":1,"lastOrdinal":1,"resendCandidates":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":"c-1","transcriptViewId":"v","messages":[{"ordinal":1,"message":{"type":"assistant-message","content":"hi"}},{"ordinal":1,"message":{"type":"assistant-message","content":"duplicate"}}],"firstOrdinal":1,"lastOrdinal":1,"resendCandidates":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":"c-1","transcriptViewId":"v","messages":[],"firstOrdinal":1,"lastOrdinal":0,"resendCandidates":[],"turnId":null,"clientRequestId":"","upstreamRequestId":2}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":"c-1","transcriptViewId":null,"messages":[],"firstOrdinal":1,"lastOrdinal":0,"resendCandidates":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-messages","chatId":"c-1","transcriptViewId":"v","messages":[{"ordinal":1,"message":{"type":"user-message","content":"why","metadata":{"questionReply":null}}}],"firstOrdinal":1,"lastOrdinal":1,"resendCandidates":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-subscribed","chatId":"c-1","transcriptViewId":"v","clientRequestId":"req","messages":[{"ordinal":1,"message":{"type":"assistant-message","timestamp":"now","content":"hi"}}],"firstOrdinal":1,"lastOrdinal":1,"nextAfterOrdinal":1,"throughOrdinal":3,"hasMore":true,"resendCandidates":[],"transientFeed":{"serverInstanceId":"s","chatId":"c-1","transcriptViewId":"v","transientRevision":0,"rows":[]}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-subscribed","chatId":"c-1","transcriptViewId":"v","clientRequestId":"req","messages":[],"firstOrdinal":1,"lastOrdinal":0,"nextAfterOrdinal":0,"throughOrdinal":0,"hasMore":false,"resendCandidates":[],"transientFeed":{"serverInstanceId":"s","chatId":"c-1","transcriptViewId":"different","transientRevision":0,"rows":[]}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-subscribed","chatId":"c-1","transcriptViewId":"v","clientRequestId":"req","messages":[],"firstOrdinal":1,"lastOrdinal":0,"nextAfterOrdinal":0,"throughOrdinal":0,"hasMore":false,"resendCandidates":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-subscribed","chatId":"c-1","transcriptViewId":"v","clientRequestId":"req","messages":[],"firstOrdinal":1,"lastOrdinal":0,"nextAfterOrdinal":0,"throughOrdinal":1,"hasMore":false,"resendCandidates":[],"transientFeed":{"serverInstanceId":"s","chatId":"c-1","transcriptViewId":"v","transientRevision":0,"rows":[]}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-transcript-replaced","chatId":"c-1","previousTranscriptViewId":" previous ","transcriptViewId":"v","lastOrdinal":2}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-transcript-replaced","chatId":"c-1","previousTranscriptViewId":"old","transcriptViewId":"v","lastOrdinal":9007199254740992}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-transient-feed-mutation","serverInstanceId":"s","chatId":"c-1","transcriptViewId":"v","transientRevision":1,"mutation":{"kind":"remove","permissionOccurrenceId":"p"}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-transient-feed-mutation","serverInstanceId":"s","chatId":"c-1","transcriptViewId":"v","transientRevision":1,"mutation":{"kind":"clear-run","runId":"run"}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-transient-feed-mutation","serverInstanceId":"s","chatId":"c-1","transcriptViewId":"v","transientRevision":1,"mutation":{"kind":"upsert","row":{"permissionOccurrenceId":"p","runId":"run","transcript":{"transcriptViewId":"v","afterOrdinal":3},"displayOrder":1,"message":{"type":"permission-request","timestamp":"now","permissionOccurrenceId":"p","requestedTool":{"type":"bash-tool-use","timestamp":"now","toolId":"tool","command":"echo fixture"}}}}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-transient-feed-mutation","serverInstanceId":"s","chatId":"c-1","transcriptViewId":"v","transientRevision":1,"mutation":{"kind":"unknown"}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-reload-progress","clientRequestId":"req-reload","chatId":"c-1","phase":"saving","rows":60000}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-reload-progress","clientRequestId":"req-reload","chatId":"c-1","phase":"saving"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-reload-progress","clientRequestId":"req-reload","chatId":"c-1","phase":"finished","rows":0}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-reloaded","clientRequestId":"req-reload","chatId":"c-1","transcriptViewId":"v","messages":[{"ordinal":51,"message":{"type":"assistant-message","timestamp":"now","content":"hi"}}],"lastOrdinal":100,"pageOldestOrdinal":51,"pageNewestOrdinal":100,"nextBeforeOrdinal":51,"hasMore":true}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-reloaded","clientRequestId":"req","chatId":"c-1","transcriptViewId":"v","messages":[],"lastOrdinal":0,"pageOldestOrdinal":0,"pageNewestOrdinal":0,"nextBeforeOrdinal":null,"hasMore":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-reloaded","clientRequestId":"req","chatId":"c-1","transcriptViewId":"v","messages":[],"lastOrdinal":0,"pageOldestOrdinal":0,"pageNewestOrdinal":0,"hasMore":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"agent-run-finished","chatId":"c-1","exitCode":1e21,"turnId":"turn","clientRequestId":"","upstreamRequestId":"upstream","outcome":"interrupted"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"agent-run-finished","chatId":"c-1","exitCode":null}]}
+{"fn":"parseServerWsMessage","args":[{"type":"agent-run-finished","chatId":"c-1","exitCode":1.5}]}
+{"fn":"parseServerWsMessage","args":[{"type":"agent-run-failed","chatId":"c-1","error":" timeout ","turnId":"turn","clientRequestId":null}]}
+{"fn":"parseServerWsMessage","args":[{"type":"agent-run-failed","chatId":"c-1","error":" "}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-session-created","chatId":"c-1"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-project-path-updated","chatId":" c-1 ","projectPath":"/workspace/worktree ","effectiveProjectKey":" key ","previousProjectPath":"/workspace/repo"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-project-path-updated","chatId":"c-1","projectPath":"\u00a0","effectiveProjectKey":"key","previousProjectPath":"/workspace/repo"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-session-stopped","chatId":"c-1","outcome":"already-idle","intent":"interrupt-and-send"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-session-stopped","chatId":"c-1","outcome":"interrupted","intent":"stop"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-processing-updated","chatId":"c-1","phase":null}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-processing-updated","chatId":"c-1","phase":"stopping"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-processing-updated","chatId":"c-1"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-activity-updated","chatId":"c-1","activityStatus":"pending-user-action"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-activity-updated","chatId":"c-1","activityStatus":null}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-activity-updated","chatId":"c-1","activityStatus":"pending"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-execution-control-updated","chatId":"c-1","control":{"serverInstanceId":"s","queue":{"entries":[],"steeringEntryId":null,"recentlyDispatched":[],"pause":null,"reorderRevision":0},"version":4,"updatedAt":"2026-07-18T00:00:00.000Z"}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-operational-notice","chatId":"c-1","noticeType":"warning","content":" unavailable ","timestamp":42,"detail":{"type":"project-unavailable","projectPath":" /workspace ","reason":"not-found"}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-operational-notice","chatId":"c-1","noticeType":"info","content":"compacting","detail":{"type":"carryover-compaction-started"}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-operational-notice","chatId":"c-1","noticeType":"error","content":"drift","detail":{"type":"native-transcript-drift","extra":true}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-operational-notice","chatId":"c-1","noticeType":"info","content":"Message","detail":null}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-title-updated","chatId":"c-1","title":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-session-deleted","chatId":"c-1"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-read-updated-v1","chatId":"c-1","lastReadAt":" as sent "}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-list-refresh-requested","reason":"metadata-repaired","chatId":null}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-list-refresh-requested","reason":"metadata-repaired","chatId":"c-1"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-list-refresh-requested","reason":"tags-updated","chatId":"c-1"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-boards-invalidated","revision":1,"reason":"reordered"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-boards-invalidated","revision":1,"reason":"reordered","extra":true}]}
+{"fn":"parseServerWsMessage","args":[{"type":"tickets-invalidated","revision":1}]}
+{"fn":"parseServerWsMessage","args":[{"type":"pull-request-reviews-invalidated","revision":1}]}
+{"fn":"parseServerWsMessage","args":[{"type":"settings-changed","settings":{"version":2,"features":{"transcriptSearch":{"enabled":false},"agentCommands":{"enabled":true}},"ui":{},"uiEffective":{},"paths":{"pinnedProjectPaths":[],"browseStartPath":"","recentProjectPaths":[]},"pinnedChatIds":[],"recentAgentSettings":[],"executionDefaults":{"global":{"permissionMode":"default","thinkingMode":"none","agentSettingsById":{}},"byAgent":{}},"projectBasePath":"/workspace","telegram":{"botTokenAvailable":false,"botUsername":null,"botFirstName":null,"recipientUsername":null,"recipientDisplayName":null,"recipientLinked":false,"pendingLink":false,"linkUrl":null}}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"settings-changed","settings":{"version":"oops"}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"settings-changed","settings":{"uiEffective":{"chatTitle":{"executorId":""}}}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"api-providers-invalidated"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"api-providers-invalidated","revision":1}]}
+{"fn":"parseServerWsMessage","args":[{"type":"executors-changed","executors":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"executors-changed","executors":{}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"transcript-search-status","status":{"updatedAt":"2026-07-18T00:00:00.000Z","phase":"ready","version":1,"chats":{"indexed":1,"total":1,"pending":0,"failed":0,"unindexed":0},"queuedJobs":0,"resync":null,"backlogRows":0,"activeChat":null,"lastErrorCode":null}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"transcript-search-status","status":{"updatedAt":"now","phase":"ready","version":1,"chats":{"total":0,"indexed":0,"pending":0,"failed":0,"unindexed":0},"queuedJobs":0,"resync":null,"backlogRows":0,"activeChat":null,"lastErrorCode":null}}]}
+{"fn":"parseServerWsMessage","args":[{"type":"scheduled-prompts-invalidated","reason":"log-appended"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"scheduled-prompts-invalidated","reason":"updated"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"scheduled-prompts-invalidated","reason":"renamed"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"snippets-invalidated","reason":"removed"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"snippets-invalidated","reason":"reordered"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"preambles-invalidated","reason":"reordered"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"preambles-invalidated","reason":"renamed"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-preambles-invalidated","chatId":"1000000000000001","revision":42}]}
+{"fn":"parseServerWsMessage","args":[{"type":"chat-preambles-invalidated","chatId":"1000000000000001 ","revision":42}]}
+{"fn":"parseServerWsMessage","args":[null]}
+{"fn":"isChatListInvalidationReason","args":["chat-added"]}
+{"fn":"isChatListInvalidationReason","args":["pinned-toggled"]}
+{"fn":"isChatListInvalidationReason","args":["archive-toggled"]}
+{"fn":"isChatListInvalidationReason","args":["tags-updated"]}
+{"fn":"isChatListInvalidationReason","args":["parent-updated"]}
+{"fn":"isChatListInvalidationReason","args":["chats-reordered"]}
+{"fn":"isChatListInvalidationReason","args":["agent-handoff"]}
+{"fn":"isChatListInvalidationReason","args":["execution-settings-updated"]}
+{"fn":"isChatListInvalidationReason","args":["metadata-repaired"]}
+{"fn":"isChatListInvalidationReason","args":["__proto__"]}
+{"fn":"isChatListInvalidationReason","args":[" chats-reordered "]}
+{"fn":"isChatListInvalidationReason","args":[null]}
