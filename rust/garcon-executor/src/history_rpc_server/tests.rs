@@ -107,7 +107,7 @@ impl Fixture {
         self.server
             .handle(
                 HistoryIntegration {
-                    scope: &self.scope,
+                    scope: self.scope.clone(),
                     execution: &self.execution,
                     legacy: None,
                     native: Some(self.source.clone()),
