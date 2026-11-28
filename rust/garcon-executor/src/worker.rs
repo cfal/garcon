@@ -7,15 +7,20 @@ use std::io;
 use std::path::Path;
 use std::rc::Rc;
 
+use async_trait::async_trait;
 use garcon_base::errors::NamedError;
 use garcon_base::event_loop_stalls::{ActivityTracker, EventLoopStallOptions};
 use garcon_base::workspace_lease::{WorkspaceLeaseOptions, acquire_workspace_lease};
+use garcon_contract::api_providers::ApiProviderModelDiscoveryResponse;
 use garcon_contract::cli_runtime_paths::{cli_gateway_runtime_file, executor_data_directory};
-use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
+use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome, AgentIntegrationErrorCode};
 use garcon_interface::execution_runtime::{
-    ExecutionProjectService, ExecutorAvailability, ExecutorInfo, ExecutorServices,
+    ApiProviderDiscoveryRequest, ExecutionProjectService, ExecutionRuntimeApi,
+    ExecutorAvailability, ExecutorInfo, ExecutorServices,
 };
 use garcon_interface::files::ExecutionFilesService;
+use garcon_interface::git::{ExecutionGhService, ExecutionGitService};
+use garcon_interface::integration::AgentIntegration;
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_interface::terminals::ExecutionTerminalService;
 use garcon_js::Number;
@@ -73,71 +78,212 @@ pub struct ExecutorOptions {
     pub child_environment: Option<ChildEnvironment>,
 }
 
-pub struct ExecutorApi {
+type AvailabilityListener = Rc<dyn Fn(ExecutorAvailability)>;
+
+#[derive(Default)]
+struct ExecutorLifetime {
+    disposed: Cell<bool>,
+    listeners: RefCell<Vec<AvailabilityListener>>,
+}
+
+impl ExecutorLifetime {
+    fn available(&self, options: Option<&ExecutorCallOptions>) -> ExecutorResult<()> {
+        if options
+            .and_then(|opts| opts.signal.as_ref())
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(NamedError {
+                name: "AbortError".into(),
+                message: "The operation was aborted.".into(),
+                code: None,
+            }
+            .into());
+        }
+        if self.disposed.get() {
+            return Err(AgentCallError::new(
+                AgentDeliveryOutcome::NotDispatched,
+                "Executor is disposed",
+            )
+            .into());
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct ExecutorApi {
     info: ExecutorInfo,
-    pub(crate) projects: ProjectService,
-    pub(crate) files: FilesService,
+    pub(crate) projects: Rc<ProjectService>,
+    pub(crate) files: Rc<FilesService>,
     terminals: Rc<TerminalService>,
-    disposed: Rc<Cell<bool>>,
+    terminal_runtime: TerminalRuntime,
+    lifetime: Rc<ExecutorLifetime>,
 }
 
 impl ExecutorApi {
-    pub fn info(&self) -> &ExecutorInfo {
+    pub(crate) fn info(&self) -> &ExecutorInfo {
         &self.info
     }
 
-    pub fn availability(&self) -> ExecutorAvailability {
-        if self.disposed.get() {
+    pub(crate) fn projects(&self) -> &dyn ExecutionProjectService {
+        self.projects.as_ref()
+    }
+
+    pub(crate) fn files(&self) -> &dyn ExecutionFilesService {
+        self.files.as_ref()
+    }
+
+    pub(crate) fn terminals(&self) -> Rc<dyn ExecutionTerminalService> {
+        self.terminals.clone()
+    }
+
+    fn dispose_services(&self) {
+        if self.lifetime.disposed.replace(true) {
+            return;
+        }
+        self.terminals.dispose();
+        self.terminal_runtime.shutdown();
+        let listeners = self.lifetime.listeners.borrow().clone();
+        for listener in listeners {
+            if self
+                .lifetime
+                .listeners
+                .borrow()
+                .iter()
+                .any(|registered| Rc::ptr_eq(registered, &listener))
+            {
+                listener(ExecutorAvailability::Disposed);
+            }
+        }
+        self.lifetime.listeners.borrow_mut().clear();
+    }
+}
+
+#[async_trait(?Send)]
+impl ExecutionRuntimeApi for ExecutorApi {
+    fn id(&self) -> &str {
+        &self.info.executor_id
+    }
+
+    fn availability(&self) -> ExecutorAvailability {
+        if self.lifetime.disposed.get() {
             ExecutorAvailability::Disposed
         } else {
             ExecutorAvailability::Ready
         }
     }
 
-    pub fn projects(&self) -> &dyn ExecutionProjectService {
-        &self.projects
+    async fn get_info(&self, options: Option<ExecutorCallOptions>) -> ExecutorResult<ExecutorInfo> {
+        self.lifetime.available(options.as_ref())?;
+        Ok(self.info.clone())
     }
 
-    pub fn files(&self) -> &dyn ExecutionFilesService {
-        &self.files
+    async fn get_agent_integration(
+        &self,
+        agent_id: &str,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<AgentIntegration>> {
+        self.lifetime.available(options.as_ref())?;
+        Err(format!("Unsupported agent integration: {agent_id}").into())
     }
 
-    pub fn terminals(&self) -> Rc<dyn ExecutionTerminalService> {
-        self.terminals.clone()
+    async fn get_project_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionProjectService>> {
+        self.lifetime.available(options.as_ref())?;
+        Ok(self.projects.clone())
     }
+
+    async fn discover_api_provider_models(
+        &self,
+        _request: ApiProviderDiscoveryRequest,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ApiProviderModelDiscoveryResponse> {
+        self.lifetime.available(options.as_ref())?;
+        Err(unported_service("API provider model discovery"))
+    }
+
+    async fn get_files_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionFilesService>> {
+        self.lifetime.available(options.as_ref())?;
+        Ok(self.files.clone())
+    }
+
+    async fn get_git_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionGitService>> {
+        self.lifetime.available(options.as_ref())?;
+        Err(unported_service("Git"))
+    }
+
+    async fn get_gh_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionGhService>> {
+        self.lifetime.available(options.as_ref())?;
+        Err(unported_service("GitHub"))
+    }
+
+    async fn get_terminal_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionTerminalService>> {
+        self.lifetime.available(options.as_ref())?;
+        Ok(self.terminals())
+    }
+
+    fn on_availability_changed(&self, listener: AvailabilityListener) -> Box<dyn Fn()> {
+        if !self
+            .lifetime
+            .listeners
+            .borrow()
+            .iter()
+            .any(|registered| Rc::ptr_eq(registered, &listener))
+        {
+            self.lifetime
+                .listeners
+                .borrow_mut()
+                .push(Rc::clone(&listener));
+        }
+        let lifetime = Rc::downgrade(&self.lifetime);
+        Box::new(move || {
+            if let Some(lifetime) = lifetime.upgrade() {
+                lifetime
+                    .listeners
+                    .borrow_mut()
+                    .retain(|registered| !Rc::ptr_eq(registered, &listener));
+            }
+        })
+    }
+
+    async fn dispose(&self) -> ExecutorResult<()> {
+        self.dispose_services();
+        Ok(())
+    }
+}
+
+fn unported_service(service: &str) -> Box<dyn Error> {
+    AgentCallError::with_code(
+        AgentDeliveryOutcome::NotDispatched,
+        format!("Executor {service} service is not ported yet"),
+        AgentIntegrationErrorCode::OPERATION_UNSUPPORTED,
+    )
+    .into()
 }
 
 pub struct Executor {
     api: Rc<ExecutorApi>,
-    terminal_runtime: TerminalRuntime,
 }
 
 impl Executor {
     pub fn start(options: ExecutorOptions) -> ExecutorResult<Self> {
-        let disposed = Rc::new(Cell::new(false));
+        let lifetime: Rc<ExecutorLifetime> = Rc::default();
         let available = Rc::new({
-            let disposed = Rc::clone(&disposed);
-            move |options: Option<&ExecutorCallOptions>| -> ExecutorResult<()> {
-                if options
-                    .and_then(|opts| opts.signal.as_ref())
-                    .is_some_and(CancellationToken::is_cancelled)
-                {
-                    return Err(NamedError {
-                        name: "AbortError".into(),
-                        message: "The operation was aborted.".into(),
-                        code: None,
-                    }
-                    .into());
-                }
-                if disposed.get() {
-                    return Err(AgentCallError::new(
-                        AgentDeliveryOutcome::NotDispatched,
-                        "Executor is disposed",
-                    )
-                    .into());
-                }
-                Ok(())
-            }
+            let lifetime = Rc::clone(&lifetime);
+            move |options: Option<&ExecutorCallOptions>| lifetime.available(options)
         });
         let mut projects = ProjectService::new(&options.project_base_path, available.clone())?;
         if let Some(environment) = options.child_environment.clone() {
@@ -170,19 +316,17 @@ impl Executor {
         };
         let api = Rc::new(ExecutorApi {
             info,
-            projects,
-            files,
+            projects: Rc::new(projects),
+            files: Rc::new(files),
             terminals,
-            disposed,
-        });
-        Ok(Self {
-            api,
             terminal_runtime,
-        })
+            lifetime,
+        });
+        Ok(Self { api })
     }
 
-    pub fn api(&self) -> Rc<ExecutorApi> {
-        Rc::clone(&self.api)
+    pub fn api(&self) -> Rc<dyn ExecutionRuntimeApi> {
+        self.api.clone()
     }
 
     /// Runs the remote worker until shutdown. The authenticated controller
@@ -222,9 +366,7 @@ impl Executor {
 
 impl Drop for Executor {
     fn drop(&mut self) {
-        self.api.disposed.set(true);
-        self.api.terminals.dispose();
-        self.terminal_runtime.shutdown();
+        self.api.dispose_services();
     }
 }
 
@@ -282,7 +424,11 @@ impl Worker {
         if let Some(prior) = self.mismatched.take() {
             prior.retire_unknown();
         }
-        let api = self.executor.borrow().as_ref().map(Executor::api);
+        let api = self
+            .executor
+            .borrow()
+            .as_ref()
+            .map(|executor| Rc::clone(&executor.api));
         let api = if let Some(api) = api {
             if api.info().executor_id != transport.executor_id {
                 let rpc = ExecutorRpc::new(transport, ExecutorRpcContinuity::default());
@@ -312,7 +458,7 @@ impl Worker {
                 child_environment: Some(Rc::clone(&self.child_environment)),
             })
             .map_err(Rc::from)?;
-            let api = executor.api();
+            let api = Rc::clone(&executor.api);
             self.executor.replace(Some(executor));
             api
         };
@@ -341,7 +487,7 @@ impl Worker {
             let server = Rc::downgrade(&server);
             move |endpoint| {
                 if let Some(server) = server.upgrade() {
-                    server.install(&endpoint);
+                    server.install(&endpoint)?;
                 }
                 Ok(())
             }
@@ -642,6 +788,95 @@ mod tests {
     use tokio::{sync::mpsc, task::LocalSet, time::timeout};
 
     use super::*;
+
+    #[tokio::test]
+    async fn shared_runtime_api_returns_stable_services_and_notifies_disposal_once() {
+        LocalSet::new()
+            .run_until(async {
+                let project = tempfile::tempdir().unwrap();
+                let root = project.path().to_str().unwrap();
+                let executor = Executor::start(ExecutorOptions {
+                    executor_id: "local".to_owned(),
+                    project_base_path: root.to_owned(),
+                    terminal_runtime_id: None,
+                    user_shell: None,
+                    child_environment: None,
+                })
+                .unwrap();
+                let api: Rc<dyn ExecutionRuntimeApi> = executor.api();
+                assert_eq!(api.id(), "local");
+                assert_eq!(api.availability(), ExecutorAvailability::Ready);
+                let info = api.get_info(None).await.unwrap();
+                assert!(info.services.files && info.services.terminals);
+                assert!(!info.services.git && !info.services.gh);
+                assert!(Rc::ptr_eq(
+                    &api.get_project_service(None).await.unwrap(),
+                    &api.get_project_service(None).await.unwrap(),
+                ));
+                assert!(Rc::ptr_eq(
+                    &api.get_files_service(None).await.unwrap(),
+                    &api.get_files_service(None).await.unwrap(),
+                ));
+                assert!(Rc::ptr_eq(
+                    &api.get_terminal_service(None).await.unwrap(),
+                    &api.get_terminal_service(None).await.unwrap(),
+                ));
+                let git = api.get_git_service(None).await.err().unwrap();
+                let git = git.downcast_ref::<AgentCallError>().unwrap();
+                assert_eq!(git.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
+                assert_eq!(git.outcome, AgentDeliveryOutcome::NotDispatched);
+                let unknown = api
+                    .get_agent_integration("missing", None)
+                    .await
+                    .err()
+                    .unwrap();
+                assert_eq!(
+                    unknown.to_string(),
+                    "Unsupported agent integration: missing"
+                );
+
+                let changes = Rc::new(RefCell::new(Vec::new()));
+                let off = api.on_availability_changed(Rc::new(|_| panic!("unsubscribed callback")));
+                off();
+                let projects = api.get_project_service(None).await.unwrap();
+                let _off = api.on_availability_changed(Rc::new({
+                    let api = Rc::clone(&api);
+                    let changes = Rc::clone(&changes);
+                    move |state| {
+                        assert_eq!(api.availability(), state);
+                        changes.borrow_mut().push(state);
+                    }
+                }));
+                api.dispose().await.unwrap();
+                drop(executor);
+                assert_eq!(&*changes.borrow(), &[ExecutorAvailability::Disposed]);
+                let error = projects
+                    .inspect(
+                        garcon_interface::execution_runtime::ExecutionProjectInspectRequest {
+                            project_path: root.to_owned(),
+                            include_git_repository: None,
+                        },
+                        None,
+                    )
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.to_string(), "Executor is disposed");
+                let signal = CancellationToken::new();
+                signal.cancel();
+                let error = api
+                    .get_info(Some(ExecutorCallOptions {
+                        signal: Some(signal),
+                        ..Default::default()
+                    }))
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    error.downcast_ref::<NamedError>().unwrap().name,
+                    "AbortError"
+                );
+            })
+            .await;
+    }
 
     #[tokio::test]
     async fn authenticated_worker_describes_its_services_and_refuses_unported_calls() {
