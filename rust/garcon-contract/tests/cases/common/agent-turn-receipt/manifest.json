@@ -1,0 +1,18 @@
+{
+  "module": "common/agent-turn-receipt.ts",
+  "tests": [
+    "common/__tests__/agent-turn-receipt.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseAgentTurnReceipt",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 133,
+  "sha256": "740ccf57bf9dbaf8a255dd7b8343721ca20abe0d51782bd9307e73e3cf83bb39"
+}

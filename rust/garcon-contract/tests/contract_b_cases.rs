@@ -59,7 +59,515 @@ fn ticket_recording_result<T: Serialize>(
 ) -> Result<Value, CaseError> {
     let value =
         result.map_err(|error| CaseError::new("TicketValidationError", error.to_string()))?;
-    serde_json::to_value(value).map_err(|error| CaseError::undeliverable(error.to_string()))
+    Ok(serialized_record(value))
+}
+
+#[test]
+fn garcon_start_agent_recordings() {
+    use garcon_contract::garcon_start_agent::parse_garcon_start_agent;
+    assert_recording("garcon-start-agent", |function, args| match function {
+        "parseGarconStartAgent" => Ok(json!(parse_garcon_start_agent(required_text(
+            function,
+            args.first()
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_start_agent_preserves_literal_body_and_requires_a_model_for_explicit_selection() {
+    use garcon_contract::garcon_start_agent::{
+        GARCON_START_PROMPT_MAX_BYTES, parse_garcon_start_agent,
+    };
+    let command = |selection, body: &str| {
+        format!("<garcon-start-agent ref=\"run\" {selection}>\n{body}\n</garcon-start-agent>")
+    };
+    let body = "  A &amp; B < C\n";
+    let parsed =
+        parse_garcon_start_agent(&command(r#"provider="A &amp; B" model="demo""#, body)).unwrap();
+    assert_eq!(parsed.provider_id.as_deref(), Some("A & B"));
+    assert_eq!(parsed.prompt, body);
+    assert!(parsed.executor_id.is_none());
+    assert!(parse_garcon_start_agent(&command(r#"provider="demo""#, body)).is_none());
+    let allowed = "x".repeat(GARCON_START_PROMPT_MAX_BYTES);
+    assert!(parse_garcon_start_agent(&command("", &allowed)).is_some());
+    assert!(parse_garcon_start_agent(&command("", &(allowed + "x"))).is_none());
+}
+
+#[test]
+fn garcon_resume_agent_recordings() {
+    use garcon_contract::garcon_resume_agent::parse_garcon_resume_agent;
+    assert_recording("garcon-resume-agent", |function, args| match function {
+        "parseGarconResumeAgent" => Ok(json!(parse_garcon_resume_agent(required_text(
+            function,
+            args.first()
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_resume_agent_keeps_nested_commands_in_literal_prompt() {
+    use garcon_contract::garcon_resume_agent::parse_garcon_resume_agent;
+    let nested = r#"<garcon-stop-agent chat-id="1000000000000001" />"#;
+    let input = format!(
+        "<garcon-resume-agent ref=\"sample\" chat-id=\"1000000000000001\">\n{nested}\n</garcon-resume-agent>"
+    );
+    let parsed = parse_garcon_resume_agent(&input).unwrap();
+    assert_eq!(parsed.prompt, nested);
+    assert!(!parsed.request.asynchronous);
+    assert!(
+        parse_garcon_resume_agent(&input.replace(r#"ref="sample""#, r#"ref="sample" fork="true""#))
+            .is_none()
+    );
+}
+
+#[test]
+fn garcon_stop_agent_recordings() {
+    use garcon_contract::garcon_stop_agent::parse_garcon_stop_agent;
+    assert_recording("garcon-stop-agent", |function, args| match function {
+        "parseGarconStopAgent" => Ok(json!(parse_garcon_stop_agent(required_text(
+            function,
+            args.first()
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_stop_agent_requires_a_self_closing_command_and_exact_remove_flag() {
+    use garcon_contract::garcon_stop_agent::parse_garcon_stop_agent;
+    let command =
+        |attribute| format!("<garcon-stop-agent chat-id=\"2000000000000000\" {attribute}/>");
+    assert!(!parse_garcon_stop_agent(&command("")).unwrap().remove);
+    assert!(
+        parse_garcon_stop_agent(&command(r#"remove="true""#))
+            .unwrap()
+            .remove
+    );
+    assert!(parse_garcon_stop_agent(&command(r#"remove="True""#)).is_none());
+    assert!(
+        parse_garcon_stop_agent(
+            r#"<garcon-stop-agent chat-id="2000000000000000"></garcon-stop-agent>"#
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn garcon_schedule_recordings() {
+    use garcon_contract::garcon_schedule::*;
+    assert_recording("garcon-schedule", |function, args| {
+        let input = required_text(function, args.first())?;
+        Ok(match function {
+            "parseGarconSchedule" => serialized_record(parse_garcon_schedule(input)),
+            "parseGarconScheduleInstant" => json!(parse_garcon_schedule_instant(input)),
+            "garconScheduleActionContent" => json!(garcon_schedule_action_content(input)),
+            "parseGarconScheduleAction" => json!(parse_garcon_schedule_action(input)),
+            "scheduledPromptLabel" => json!(scheduled_prompt_label(input)),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn garcon_schedule_applies_the_offset_before_comparing_inclusive_ends() {
+    use garcon_contract::garcon_schedule::*;
+    let input = r#"<garcon-schedule at="2030-01-02T09:00:00+02:00" every="1m" until="2030-01-02T07:00:00Z" />"#;
+    let schedule = parse_garcon_schedule(input).unwrap();
+    assert_eq!(schedule.interval_minutes, Some(1));
+    assert_eq!(
+        schedule.end_at_utc.as_deref(),
+        Some("2030-01-02T07:00:00.000Z")
+    );
+    assert!(parse_garcon_schedule(&input.replace("07:00:00Z", "06:59:00Z")).is_none());
+    assert!(parse_garcon_schedule_instant("2030-02-29T00:00:00Z").is_none());
+    assert!(parse_garcon_schedule_instant("0000-01-01T00:00:00+00:01").is_none());
+}
+
+#[test]
+fn garcon_schedule_frames_actions_and_does_not_split_label_surrogates() {
+    use garcon_contract::garcon_schedule::*;
+    use garcon_contract::scheduled_prompts::SCHEDULED_PROMPT_LABEL_MAX_LENGTH;
+    let body = "A & B < C\n</garcon-schedule-action>\n&amp;lt;";
+    let action = garcon_schedule_action_content(body);
+    assert_eq!(parse_garcon_schedule_action(&action).unwrap().body, body);
+    let prefix = "x".repeat(SCHEDULED_PROMPT_LABEL_MAX_LENGTH - 1);
+    assert_eq!(
+        scheduled_prompt_label(&format!("{prefix}\u{1f600} tail")),
+        prefix
+    );
+}
+
+#[test]
+fn garcon_command_envelope_recordings() {
+    use garcon_contract::garcon_command_envelope::*;
+    assert_recording("garcon-command-envelope", |function, args| {
+        let content = required_text(function, args.first())?;
+        let offset = |index| javascript_number(function, args.get(index));
+        Ok(match function {
+            "new GarconEnvelopeScanner" => {
+                let scanner = GarconEnvelopeScanner::new(content);
+                markers::instance(
+                    "GarconEnvelopeScanner",
+                    serde_json::Map::from_iter([("content".to_owned(), json!(scanner.content()))]),
+                )
+            }
+            "garconEnvelopeCommandAt" => json!(garcon_envelope_command_at(content, offset(1)?)),
+            "garconEnvelopeSpanAt" => {
+                if let Some(span) = garcon_envelope_span_at(content, offset(1)?, offset(2)?) {
+                    json!({"command":span.command,"start":markers::number(span.start),"end":span.end})
+                } else {
+                    Value::Null
+                }
+            }
+            "garconEnvelopeOpenerEnd" => {
+                let start = args
+                    .get(1)
+                    .filter(|value| !markers::is_undefined(value))
+                    .map(|value| javascript_number(function, Some(value)))
+                    .transpose()?
+                    .unwrap_or(0.0);
+                json!(garcon_envelope_opener_end(content, start))
+            }
+            "decodeGarconXmlText" => json!(decode_garcon_xml_text(content)),
+            "escapeGarconXmlText" => json!(escape_garcon_xml_text(content)),
+            "parseGarconCommandEnvelope"
+            | "parseGarconXmlEnvelope"
+            | "parseGarconPromptEnvelope" => {
+                let name = required_text(function, args.get(1))?;
+                let allowed: Vec<String> = typed_argument(function, args.get(2))?;
+                json!(match function {
+                    "parseGarconCommandEnvelope" =>
+                        parse_garcon_command_envelope(content, name, &allowed),
+                    "parseGarconXmlEnvelope" => parse_garcon_xml_envelope(content, name, &allowed),
+                    _ => parse_garcon_prompt_envelope(content, name, &allowed),
+                })
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn garcon_envelope_scanner_preserves_cache_boundaries_and_deep_nesting() {
+    use garcon_contract::garcon_command_envelope::{
+        GarconEnvelopeScanner, garcon_envelope_span_at,
+    };
+    let first = "<garcon-start-agent>First.</garcon-start-agent>";
+    let second = "<garcon-resume-agent>Second.</garcon-resume-agent>";
+    let content = format!("{first}\n{second}\n</garcon-start-agent>");
+    let mut scanner = GarconEnvelopeScanner::new(&content);
+    assert_eq!(
+        scanner.span_at(0.0, first.len() as f64).unwrap().end,
+        Some(first.len())
+    );
+    assert_eq!(
+        scanner.span_at(0.0, content.len() as f64).unwrap().end,
+        None
+    );
+    assert_eq!(
+        scanner
+            .span_at((first.len() + 1) as f64, content.len() as f64)
+            .unwrap()
+            .end,
+        Some(first.len() + 1 + second.len())
+    );
+    assert_eq!(
+        scanner
+            .span_at(0.0, (first.len() + 1 + second.len()) as f64)
+            .unwrap()
+            .end,
+        Some(first.len())
+    );
+    let nested = "<garcon-start-agent>".repeat(10_000) + &"</garcon-start-agent>".repeat(10_000);
+    assert_eq!(
+        garcon_envelope_span_at(&nested, 0.0, nested.len() as f64)
+            .unwrap()
+            .end,
+        Some(nested.len())
+    );
+    assert_eq!(
+        garcon_envelope_span_at(&nested, 0.0, (nested.len() - 1) as f64)
+            .unwrap()
+            .end,
+        None
+    );
+}
+
+#[test]
+fn garcon_ticket_command_recordings() {
+    use garcon_contract::garcon_ticket_command::*;
+    assert_recording("garcon-ticket-command", |function, args| {
+        Ok(match function {
+            "isTicketReadAction" => json!(is_ticket_read_action(
+                unknown(function, args.first())?.as_ref()
+            )),
+            "isTicketReadCommand" => json!(is_ticket_read_command(
+                unknown(function, args.first())?.as_ref()
+            )),
+            "parseGarconTicketCommand" => json!(parse_garcon_ticket_command(required_text(
+                function,
+                args.first()
+            )?)),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn garcon_ticket_command_decodes_entities_once_and_requires_mutation_correlation() {
+    use garcon_contract::garcon_ticket_command::GarconTicketCommand;
+    use garcon_contract::{
+        garcon_ticket_command::parse_garcon_ticket_command, ticket_commands::TicketMutationPayload,
+    };
+    let command = r#"<garcon-ticket-comment ref="comment" ticket-id="G-1">Synthetic &lt;text&gt; &amp; &amp;lt;</garcon-ticket-comment>"#;
+    let Some(GarconTicketCommand::Mutation(parsed)) = parse_garcon_ticket_command(command) else {
+        panic!("expected mutation");
+    };
+    assert_eq!(parsed.reference, "comment");
+    let TicketMutationPayload::Comment { body, .. } = parsed.payload else {
+        panic!("expected comment");
+    };
+    assert_eq!(body, "Synthetic <text> & &lt;");
+    assert!(parse_garcon_ticket_command(&command.replace(r#" ref="comment""#, "")).is_none());
+    assert!(parse_garcon_ticket_command("<garcon-ticket-list />").is_some());
+}
+
+#[test]
+fn garcon_agent_result_recordings() {
+    use garcon_contract::garcon_agent_result::*;
+    assert_recording("garcon-agent-result", |function, args| {
+        if function == "parseGarconAgentResult" {
+            return Ok(json!(parse_garcon_agent_result(required_text(
+                function,
+                args.first()
+            )?)));
+        }
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "parseAgentChildOutcome" => Ok(json!(parse_agent_child_outcome(value))),
+            "garconAgentResultContent" => garcon_agent_result_content(value)
+                .map(|v| json!(v))
+                .map_err(|error| CaseError::new("Error", error.to_string())),
+            "boundAgentChildResult" => Ok(serialized_record(bound_agent_child_result(value))),
+            "agentChildOutcomeContent" => {
+                let detail = parse_agent_child_outcome(value)
+                    .ok_or_else(|| CaseError::unhandled(function))?;
+                agent_child_outcome_content(&detail)
+                    .map(|v| json!(v))
+                    .map_err(|error| {
+                        CaseError::new("CommandRequestValidationError", error.to_string())
+                    })
+            }
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+fn synthetic_agent_result() -> Value {
+    json!({
+        "type":"agent-start-outcome","ref":"sample","async":false,"requestViewId":"00000000-0000-4000-8000-000000000001",
+        "requestOrdinal":1,"status":"completed","chatId":"1000000000000001",
+        "output":{"availability":"available","completeness":"complete","text":"Exact &lt; <body>\r"}
+    })
+}
+
+#[test]
+fn garcon_agent_result_preserves_framing_and_bounds_escaped_output() {
+    use garcon_contract::garcon_agent_result::*;
+    let mut detail = synthetic_agent_result();
+    let xml = garcon_agent_result_content(&detail).unwrap();
+    assert_eq!(json!(parse_garcon_agent_result(&xml).unwrap()), detail);
+    detail["output"]["text"] = json!("&".repeat(GARCON_AGENT_OUTPUT_MAX_BYTES));
+    assert!(parse_agent_child_outcome(&detail).is_none());
+    let bounded = bound_agent_child_result(&detail);
+    assert_eq!(
+        bounded["output"],
+        json!({"availability":"unavailable","reason":"too-large"})
+    );
+    assert!(parse_agent_child_outcome(&bounded).is_some());
+}
+
+#[test]
+fn garcon_command_results_recordings() {
+    use garcon_contract::garcon_command_results::*;
+    assert_recording("garcon-command-results", |function, args| {
+        if function == "parseGarconCommandResult" {
+            return Ok(json!(parse_garcon_command_result(required_text(
+                function,
+                args.first()
+            )?)));
+        }
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "parseAgentCommandOutcome" => Ok(json!(parse_agent_command_outcome(value))),
+            "garconCommandResultContent" => garcon_command_result_content(value)
+                .map(|v| json!(v))
+                .map_err(|error| CaseError::new("Error", error.to_string())),
+            "agentCommandOutcomeTitle" | "agentCommandOutcomeContent" => {
+                let detail = parse_agent_command_outcome(value)
+                    .ok_or_else(|| CaseError::unhandled(function))?;
+                if function == "agentCommandOutcomeTitle" {
+                    Ok(json!(agent_command_outcome_title(&detail)))
+                } else {
+                    agent_command_outcome_content(&detail)
+                        .map(|v| json!(v))
+                        .map_err(|error| {
+                            CaseError::new("CommandRequestValidationError", error.to_string())
+                        })
+                }
+            }
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn garcon_command_results_validate_recurrence_and_emit_standalone_schedule_envelopes() {
+    use garcon_contract::garcon_command_results::*;
+    let mut detail = json!({
+        "type":"agent-schedule-outcome","requestViewId":"00000000-0000-4000-8000-000000000001",
+        "requestOrdinal":1,"status":"created","scheduleId":"00000000-0000-4000-8000-000000000002",
+        "nextRunAt":"2030-01-01T12:00:00.000Z","endAtUtc":"2030-01-01T12:00:00.000Z",
+        "intervalMinutes":5,"busyBehavior":"queue"
+    });
+    let xml = garcon_command_result_content(&detail).unwrap();
+    assert_eq!(json!(parse_garcon_command_result(&xml).unwrap()), detail);
+    detail["intervalMinutes"] = Value::Null;
+    assert!(parse_agent_command_outcome(&detail).is_none());
+    assert_eq!(
+        garcon_command_result_content(&detail)
+            .unwrap_err()
+            .to_string(),
+        "Invalid agent command outcome"
+    );
+}
+
+#[test]
+fn garcon_ticket_result_recordings() {
+    use garcon_contract::error_codes::ErrorCode;
+    use garcon_contract::garcon_ticket_result::*;
+    use garcon_contract::ticket_records::parse_ticket_write_result;
+    assert_recording("garcon-ticket-result", |function, args| {
+        if function == "parseGarconTicketResult" {
+            return Ok(json!(parse_garcon_ticket_result(required_text(
+                function,
+                args.first()
+            )?)));
+        }
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "parseTicketErrorCode" => ticket_recording_result(
+                parse_ticket_error_code(value).map(|v| ErrorCode::from(v).as_str()),
+            ),
+            "parseTicketCommandResult" => {
+                ticket_recording_result(parse_ticket_command_result(value))
+            }
+            "ticketMutationReceipt" => {
+                let write = parse_ticket_write_result(value)
+                    .map_err(|error| CaseError::undeliverable(error.to_string()))?;
+                Ok(json!(ticket_mutation_receipt(&write)))
+            }
+            "ticketCommandContext" => match ticket_command_context(value) {
+                Ok(Some(context)) => Ok(serialized_record(context)),
+                Ok(None) => Ok(markers::undefined()),
+                Err(error) => Err(CaseError::new("TicketValidationError", error.to_string())),
+            },
+            "garconTicketResultContent" => Ok(json!(garcon_ticket_result_content(value))),
+            "ticketCommandOutcome" => Ok(serialized_record(ticket_command_outcome(value))),
+            "parseTicketCommandOutcome" => Ok(json!(parse_ticket_command_outcome(value))),
+            "parseStoredTicketCommandOutcome" => {
+                Ok(json!(parse_stored_ticket_command_outcome(value)))
+            }
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn garcon_ticket_result_notice_keeps_correlation_and_drops_private_result_fields() {
+    use garcon_contract::garcon_ticket_result::*;
+    let value = json!({
+        "command":"read","ticketId":"G-1","requestViewId":"00000000-0000-4000-8000-000000000001",
+        "requestOrdinal":4,"status":"error","errorCode":"TICKET_NOT_FOUND","message":"Not found."
+    });
+    let xml = garcon_ticket_result_content(&value);
+    assert_eq!(json!(parse_garcon_ticket_result(&xml).unwrap()), value);
+    let notice = ticket_command_outcome(&value);
+    assert!(notice.get("message").is_none());
+    assert_eq!(
+        garcon_js::json::as_number(&notice["requestOrdinal"]),
+        Some(4.0)
+    );
+    assert_eq!(
+        serialized_record(parse_ticket_command_outcome(&notice).unwrap()),
+        serialized_record(&notice)
+    );
+}
+
+#[test]
+fn transcript_notice_details_recordings() {
+    use garcon_contract::transcript_notice_details::*;
+    assert_recording("transcript-notice-details", |function, args| {
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        Ok(match function {
+            "parseTranscriptNoticeDetail" => json!(parse_transcript_notice_detail(value)),
+            "isCarryoverMigrationQuarantineNoticeDetail" => {
+                json!(is_carryover_migration_quarantine_notice_detail(value))
+            }
+            "isPreambleApplicationNoticeDetail" => {
+                json!(is_preamble_application_notice_detail(value))
+            }
+            "isPreambleSelectionChangedNoticeDetail" => {
+                json!(is_preamble_selection_changed_notice_detail(value))
+            }
+            "isHandoffSummaryNoticeDetail" => json!(is_handoff_summary_notice_detail(value)),
+            "isPublicationGapNoticeDetail" => json!(is_publication_gap_notice_detail(value)),
+            "isChatIdDisclosureNoticeDetail" => json!(is_chat_id_disclosure_notice_detail(value)),
+            "isChatIdDiscoveryFailureNoticeDetail" => {
+                json!(is_chat_id_discovery_failure_notice_detail(value))
+            }
+            "isInterAgentMessageOutcomeNoticeDetail" => {
+                json!(is_inter_agent_message_outcome_notice_detail(value))
+            }
+            "isInterAgentMessageReceivedNoticeDetail" => {
+                json!(is_inter_agent_message_received_notice_detail(value))
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn transcript_notice_details_identify_and_project_publication_gaps_and_quarantines() {
+    use garcon_contract::transcript_notice_details::*;
+    let parsed =
+        parse_transcript_notice_detail(&json!({"type":"publication-gap","extra":"ignored"}));
+    assert_eq!(parsed, Some(TranscriptNoticeDetail::PublicationGap));
+    assert_eq!(json!(parsed), json!({"type":"publication-gap"}));
+    let raw = json!({
+        "type":"carryover-migration-quarantine","artifactId":"archive","errorCode":"FAILED","private":"ignored"
+    });
+    let parsed = parse_transcript_notice_detail(&raw).unwrap();
+    assert!(matches!(
+        parsed,
+        TranscriptNoticeDetail::CarryoverMigrationQuarantine { .. }
+    ));
+    assert_eq!(
+        json!(parsed),
+        json!({"type":"carryover-migration-quarantine","artifactId":"archive","errorCode":"FAILED"})
+    );
+    assert!(
+        parse_transcript_notice_detail(
+            &json!({"type":"carryover-migration-quarantine","errorCode":"FAILED"})
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -344,6 +852,49 @@ fn ticket_records_round_trip_typed_domain_records_and_reject_contradictions() {
             .to_string(),
         "Comment body and tombstone disagree.",
     );
+}
+
+#[test]
+fn ticket_records_serialize_comments_writes_and_link_activities_in_bun_field_order() {
+    use garcon_contract::ticket_records::*;
+    let ticket = synthetic_ticket_wire();
+    let comment = json!({
+        "id":"11111111-1111-4111-8111-111111111111","ticketId":ticket["id"],"sequence":1,"revision":2,
+        "body":null,"deletedAt":ticket["updatedAt"],"author":ticket["createdBy"],
+        "createdAt":ticket["createdAt"],"updatedAt":ticket["updatedAt"]
+    });
+    let write = json!({
+        "success":true,"storeId":"33333333-3333-4333-8333-333333333333",
+        "collectionRevision":2,"ticket":ticket,"comment":comment
+    });
+    let linked = json!({
+        "sequence":1,"ticketId":ticket["id"],"at":ticket["createdAt"],"actor":ticket["createdBy"],
+        "source":null,"action":"linked","kind":"blocks","sourceId":"G-1","targetId":"G-2"
+    });
+    let mut unlinked = linked.clone();
+    unlinked["action"] = json!("unlinked");
+    let arguments = [
+        comment.clone(),
+        write.clone(),
+        linked.clone(),
+        unlinked.clone(),
+    ]
+    .map(|value| value.to_string());
+    let arguments = arguments.each_ref().map(String::as_str);
+    let bun = pinned_bun_stdout(
+        r#"import { parseTicketActivity, parseTicketComment, parseTicketWriteResult } from "./common/ticket-records.ts";
+           for (const [index, parse] of [parseTicketComment, parseTicketWriteResult, parseTicketActivity, parseTicketActivity].entries()) {
+             console.log(JSON.stringify(parse(JSON.parse(process.argv[index + 1]))));
+           }"#,
+        &arguments,
+    );
+    let actual = [
+        serde_json::to_string(&parse_ticket_comment(&comment).unwrap()).unwrap(),
+        serde_json::to_string(&parse_ticket_write_result(&write).unwrap()).unwrap(),
+        serde_json::to_string(&parse_ticket_activity(&linked).unwrap()).unwrap(),
+        serde_json::to_string(&parse_ticket_activity(&unlinked).unwrap()).unwrap(),
+    ];
+    assert_eq!(actual.join("\n"), bun.trim_end());
 }
 
 #[test]

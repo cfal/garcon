@@ -1016,8 +1016,8 @@ pub struct GitStashEntry {
     #[serde(rename = "ref")]
     pub reference: String,
     pub hash: String,
-    pub message: String,
     pub date: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

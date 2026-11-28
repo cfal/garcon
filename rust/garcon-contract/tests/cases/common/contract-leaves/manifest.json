@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-contract/tests/support/contract_leaves_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/contract-leaves.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 48,
+  "sha256": "55265e12a3110e7fe989e4df3576063e73f7a64b2a1dadba9bcc9643167fcfd3"
+}

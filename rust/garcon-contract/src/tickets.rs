@@ -1,7 +1,7 @@
 //! Ports `common/tickets.ts`.
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::error_codes::ErrorCode;
 
@@ -195,10 +195,10 @@ pub struct TicketComment {
     pub sequence: u64,
     pub revision: u64,
     pub body: Option<String>,
+    pub deleted_at: Option<String>,
     pub author: TicketActor,
     pub created_at: String,
     pub updated_at: String,
-    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,8 +272,27 @@ pub enum TicketActivityAction {
     CommentAdded(TicketCommentChange),
     CommentEdited(TicketCommentChange),
     CommentRemoved(TicketCommentChange),
-    Linked(TicketLink),
-    Unlinked(TicketLink),
+    Linked(#[serde(serialize_with = "serialize_activity_link")] TicketLink),
+    Unlinked(#[serde(serialize_with = "serialize_activity_link")] TicketLink),
+}
+
+fn serialize_activity_link<S: Serializer>(
+    link: &TicketLink,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ActivityLink<'a> {
+        kind: TicketLinkKind,
+        source_id: &'a str,
+        target_id: &'a str,
+    }
+    ActivityLink {
+        kind: link.kind,
+        source_id: &link.source_id,
+        target_id: &link.target_id,
+    }
+    .serialize(serializer)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -423,9 +442,9 @@ pub struct TicketDetail {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TicketWriteResult {
+    pub success: bool,
     #[serde(flatten)]
     pub version: TicketCollectionVersion,
-    pub success: bool,
     pub ticket: Ticket,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment: Option<TicketComment>,

@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
-use garcon_js::path::posix;
+use garcon_js::path::native;
 use hyper::header::{
     CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue,
 };
@@ -145,8 +145,8 @@ async fn resolve(build_dir: &Path, pathname: &str) -> Option<(PathBuf, std::fs::
     let pathname = pathname.strip_prefix('/').unwrap_or(pathname).to_owned();
     tokio::task::spawn_blocking(move || {
         let cwd = std::env::current_dir().ok()?;
-        let build_dir = posix::resolve(cwd.to_str()?, &[build_dir.to_str()?]);
-        let candidate = posix::resolve(&build_dir, &[&pathname]);
+        let build_dir = native::resolve(cwd.to_str()?, &[build_dir.to_str()?]);
+        let candidate = native::resolve(&build_dir, &[&pathname]);
         if !Path::new(&candidate).starts_with(&build_dir) {
             return None;
         }
@@ -250,7 +250,10 @@ pub async fn serve_manifest(
     build_dir: &Path,
     app_title: &PublicAppTitle,
 ) -> Result<NativeResponse, serde_json::Error> {
-    let Some(template) = read_text(build_dir, "/site.webmanifest").await else {
+    let Some(template) = read_text(build_dir, "/site.webmanifest")
+        .await
+        .filter(|text| !text.is_empty())
+    else {
         return Ok(not_found());
     };
     let manifest = apply_manifest_title(&template, app_title)?;
@@ -286,7 +289,9 @@ pub async fn serve_path(build_dir: &Path, pathname: &str) -> NativeResponse {
         _ => "application/octet-stream",
     };
     let mut response = file_response(pathname, content_type, contents);
-    if let Ok(disposition) = HeaderValue::try_from(format!("filename=\"{filename}\"")) {
+    if !filename.contains('"')
+        && let Ok(disposition) = HeaderValue::try_from(format!("filename=\"{filename}\""))
+    {
         response.headers.insert(CONTENT_DISPOSITION, disposition);
     }
     response
@@ -450,5 +455,27 @@ mod tests {
         assert_eq!(data["name"], title.title);
         assert_eq!(data["short_name"], title.title);
         assert_eq!(data["start_url"], ".");
+    }
+
+    #[tokio::test]
+    async fn returns_not_found_for_an_empty_manifest() {
+        let build = tempfile::tempdir().unwrap();
+        std::fs::write(build.path().join("site.webmanifest"), "").unwrap();
+        let response = serve_manifest(build.path(), &PublicAppTitle::default())
+            .await
+            .unwrap();
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
+        assert_eq!(response.body, not_found().body);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn omits_content_disposition_when_the_filename_contains_a_quote() {
+        let build = tempfile::tempdir().unwrap();
+        std::fs::write(build.path().join("quoted\"filename.bin"), "fixture").unwrap();
+        let response = serve_path(build.path(), "/quoted\"filename.bin").await;
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.headers[CONTENT_TYPE], "application/octet-stream");
+        assert!(!response.headers.contains_key(CONTENT_DISPOSITION));
     }
 }

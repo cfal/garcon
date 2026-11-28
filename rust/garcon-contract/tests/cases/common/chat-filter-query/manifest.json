@@ -1,0 +1,13 @@
+{
+  "module": "common/chat-filter-query.ts",
+  "tests": [
+    "common/__tests__/chat-filter-relationships.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-filter-query.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 453,
+  "sha256": "2d3b7aa0488530e763e4f21cf1a1d3d1464c3c6382100d8492e72de2b8ea7d66"
+}

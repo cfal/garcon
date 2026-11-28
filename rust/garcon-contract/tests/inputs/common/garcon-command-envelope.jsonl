@@ -1,0 +1,18 @@
+{"fn":"garconEnvelopeCommandAt","args":["🧪<garcon-start-agent>",2]}
+{"fn":"garconEnvelopeCommandAt","args":["<garcon-ticket-comment-edit ",0]}
+{"fn":"garconEnvelopeCommandAt","args":["<garcon-ticket-read-result ",0]}
+{"fn":"garconEnvelopeSpanAt","args":["🧪<garcon-schedule />",2,21]}
+{"fn":"garconEnvelopeOpenerEnd","args":["🧪<garcon-schedule ref=\"a > b\" />",2]}
+{"fn":"garconEnvelopeOpenerEnd","args":["<garcon-schedule ref=\"a < b\" />"]}
+{"fn":"garconEnvelopeOpenerEnd","args":["<garcon-schedule <garcon-schedule />",0]}
+{"fn":"decodeGarconXmlText","args":["&lt; &gt; &quot; &apos; &amp;lt;"]}
+{"fn":"decodeGarconXmlText","args":["&#38;"]}
+{"fn":"decodeGarconXmlText","args":["a\u0001b"]}
+{"fn":"escapeGarconXmlText","args":["<garcon-test a=\"'\">&lt;</garcon-test>"]}
+{"fn":"parseGarconCommandEnvelope","args":["<garcon-test a=\"&quot;\">\r\n&amp;lt;\r\n</garcon-test>","garcon-test",["a"]]}
+{"fn":"parseGarconXmlEnvelope","args":["<garcon-test a=\"&quot;\">\r\n&amp;lt;\r\n</garcon-test>","garcon-test",["a"]]}
+{"fn":"parseGarconXmlEnvelope","args":["<garcon-test a=\"one\" a=\"two\" />","garcon-test",["a"]]}
+{"fn":"parseGarconXmlEnvelope","args":["<garcon-test a=\"a\"/> extra","garcon-test",["a"]]}
+{"fn":"parseGarconXmlEnvelope","args":["<garcon-test a=\"\uFEFF\"/>","garcon-test",["a"]]}
+{"fn":"parseGarconPromptEnvelope","args":["<garcon-start-agent ref=\"r\">\nA < B & C\n<garcon-schedule />\n</garcon-start-agent>","garcon-start-agent",["ref"]]}
+{"fn":"parseGarconPromptEnvelope","args":["<garcon-resume-agent ref=\"r\">nested<garcon-start-agent>\n</garcon-resume-agent>","garcon-resume-agent",["ref"]]}
