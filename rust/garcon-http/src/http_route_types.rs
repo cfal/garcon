@@ -44,6 +44,10 @@ pub type RouteFuture<'a, Output> = Pin<Box<dyn Future<Output = Output> + 'a>>;
 pub type RouteHandler =
     Rc<dyn Fn(HttpRequest, Url, HttpRouteContext) -> RouteFuture<'static, RouteResult>>;
 
+#[derive(Debug, thiserror::Error)]
+#[error("not ported")]
+pub(crate) struct UnportedRequest;
+
 #[derive(Default, Clone)]
 pub struct RouteMetadata {
     pub no_auth: bool,
