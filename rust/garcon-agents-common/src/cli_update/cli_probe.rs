@@ -1,7 +1,6 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{ffi::OsStr, path::Path, time::Duration};
+
+use crate::which::which_in;
 
 use super::{
     bounded_command::{BoundedCommandOptions, run_bounded_command},
@@ -12,51 +11,12 @@ use super::{
 const VERSION_PROBE_MAX_BYTES: usize = 16 * 1024;
 
 pub fn find_executable(command: &str, env: &Environment) -> Option<String> {
-    if command.is_empty() {
-        return None;
-    }
-    let path = Path::new(command);
-    let candidates =
-        if path.is_absolute() || command.contains('/') || (cfg!(windows) && command.contains('\\'))
-        {
-            vec![PathBuf::from(command.strip_prefix("./").unwrap_or(command))]
-        } else {
-            let path_env = env.get("PATH").or_else(|| env.get("Path"))?;
-            std::env::split_paths(path_env)
-                .filter(|root| !root.as_os_str().is_empty())
-                .map(|root| root.join(path))
-                .collect()
-        };
-    for path in candidates {
-        if let Some(path) = executable_candidate(path) {
-            let path = if path.is_absolute() {
-                path
-            } else {
-                std::env::current_dir().ok()?.join(path)
-            };
-            return path.into_os_string().into_string().ok();
-        }
-    }
-    None
-}
-
-#[cfg(not(windows))]
-fn executable_candidate(path: PathBuf) -> Option<PathBuf> {
-    is_executable_file(&path).then_some(path)
-}
-
-#[cfg(windows)]
-fn executable_candidate(path: PathBuf) -> Option<PathBuf> {
-    if is_executable_file(&path) {
-        return Some(path);
-    }
-    if path.extension().is_some() {
-        return None;
-    }
-    ["exe", "cmd", "bat", "com"]
-        .into_iter()
-        .map(|extension| path.with_extension(extension))
-        .find(|path| is_executable_file(path))
+    let path = env.get("PATH").or_else(|| env.get("Path")).map(OsStr::new);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    which_in(OsStr::new(command), path, &cwd)?
+        .into_os_string()
+        .into_string()
+        .ok()
 }
 
 pub(super) fn is_executable_file(path: &Path) -> bool {

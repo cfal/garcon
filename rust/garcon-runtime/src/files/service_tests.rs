@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use garcon_base::domain_error::DomainError;
+use garcon_base::domain_error::as_domain_error;
 use garcon_base::errors::{ErrorInput, diagnostic_error_code};
 use garcon_contract::error_codes::ErrorCode;
 use garcon_contract::file_contracts::{
@@ -45,7 +45,7 @@ async fn unsupported_directory_creation_wins_before_validating_the_request() {
         )
         .await
         .unwrap_err();
-    let error = result.downcast_ref::<DomainError>().unwrap();
+    let error = as_domain_error(result.as_ref()).unwrap();
     assert_eq!(error.code, ErrorCode::OPERATION_UNSUPPORTED);
     assert_eq!(error.status, 501);
 }
@@ -75,7 +75,7 @@ async fn directory_creation_never_replaces_escapes_or_nests() {
     ] {
         let failure = call(name).await.unwrap_err();
         assert_eq!(
-            failure.downcast_ref::<DomainError>().unwrap().code,
+            as_domain_error(failure.as_ref()).unwrap().code,
             ErrorCode::VALIDATION_FAILED
         );
     }
@@ -152,7 +152,7 @@ async fn two_hard_links_share_one_save_revision_check() {
                 result => panic!("expected exactly one write: {result:?}"),
             };
             assert_eq!(
-                error.downcast_ref::<DomainError>().unwrap().code,
+                as_domain_error(error.as_ref()).unwrap().code,
                 ErrorCode::FILE_REVISION_CONFLICT
             );
         })
@@ -214,7 +214,7 @@ async fn content_admission_survives_lost_replies_and_does_not_gate_metadata() {
                 .await
                 .unwrap_err();
             assert_eq!(
-                busy.downcast_ref::<DomainError>().unwrap().code,
+                as_domain_error(busy.as_ref()).unwrap().code,
                 ErrorCode::FILE_SERVICE_BUSY
             );
             let busy = ordinary
@@ -226,7 +226,7 @@ async fn content_admission_survives_lost_replies_and_does_not_gate_metadata() {
                 .await
                 .unwrap_err();
             assert_eq!(
-                busy.downcast_ref::<DomainError>().unwrap().code,
+                as_domain_error(busy.as_ref()).unwrap().code,
                 ErrorCode::FILE_SERVICE_BUSY
             );
             let unavailable = fixture.service(FilesServiceOptions {
@@ -262,7 +262,7 @@ async fn content_admission_survives_lost_replies_and_does_not_gate_metadata() {
             for reply in replies {
                 if let Err(error) = reply.await.unwrap() {
                     assert_eq!(
-                        error.downcast_ref::<DomainError>().unwrap().code,
+                        as_domain_error(error.as_ref()).unwrap().code,
                         ErrorCode::FILE_REVISION_CONFLICT
                     );
                     failures += 1;
@@ -343,7 +343,7 @@ async fn replacement_service_cannot_pass_a_cancelled_dispatched_save() {
             release.notify_one();
             let error = second.await.unwrap().unwrap_err();
             assert_eq!(
-                error.downcast_ref::<DomainError>().unwrap().code,
+                as_domain_error(error.as_ref()).unwrap().code,
                 ErrorCode::FILE_REVISION_CONFLICT
             );
             assert_eq!(
@@ -370,7 +370,7 @@ async fn invalid_revision_oversized_content_and_preabort_leave_file_unchanged() 
             request.request.conflict_resolution = FileSaveConflictResolution::Overwrite;
             let error = service.save(request, None).await.unwrap_err();
             assert_eq!(
-                error.downcast_ref::<DomainError>().unwrap().code,
+                as_domain_error(error.as_ref()).unwrap().code,
                 ErrorCode::VALIDATION_FAILED
             );
 
@@ -379,7 +379,7 @@ async fn invalid_revision_oversized_content_and_preabort_leave_file_unchanged() 
             request.request.conflict_resolution = FileSaveConflictResolution::Overwrite;
             let error = service.save(request, None).await.unwrap_err();
             assert_eq!(
-                error.downcast_ref::<DomainError>().unwrap().code,
+                as_domain_error(error.as_ref()).unwrap().code,
                 ErrorCode::FILE_TOO_LARGE
             );
 

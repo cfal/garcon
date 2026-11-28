@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/usage-aggregation.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/usage-aggregation.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 5,
+  "sha256": "47ff5edacb768d1c66e4a64a6f0004ca1608132d1dcc6a1502f569a8202ad771"
+}

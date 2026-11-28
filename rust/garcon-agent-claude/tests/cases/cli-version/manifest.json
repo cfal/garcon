@@ -1,0 +1,22 @@
+{
+  "module": "server-agents/claude/src/agents/claude/cli-version.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/cli-version.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.result",
+      "type": "a ClaudeCliVersionProbe instance",
+      "where": "result",
+      "at": "server-agents/claude/src/agents/claude/__tests__/cli-version.test.js:62:10",
+      "fn": "new ClaudeCliVersionProbe",
+      "count": 5
+    }
+  ],
+  "cases": 131,
+  "sha256": "33237dc033f27279fd7e2e8089f24367e343cc56377dbfe063f0768e1b54c645"
+}

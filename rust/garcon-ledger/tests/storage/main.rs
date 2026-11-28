@@ -6,6 +6,7 @@ mod error_diagnostics;
 mod failure_fences;
 mod input_cases;
 mod presentation_views;
+mod producer_lease;
 mod replay_views;
 mod store_behavior;
 mod view_reader;

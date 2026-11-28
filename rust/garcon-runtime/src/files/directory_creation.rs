@@ -79,6 +79,7 @@ pub async fn create_child_directory(_: &str, _: &str, _: &str) -> ExecutorResult
 mod tests {
     use std::os::unix::fs::symlink;
 
+    use garcon_base::domain_error::as_domain_error;
     use garcon_contract::error_codes::ErrorCode;
     use tokio::fs;
 
@@ -122,7 +123,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            error.downcast_ref::<DomainError>().unwrap().code,
+            as_domain_error(error.as_ref()).unwrap().code,
             ErrorCode::FILE_REVISION_CONFLICT
         );
         assert!(

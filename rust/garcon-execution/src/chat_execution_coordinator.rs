@@ -2,6 +2,9 @@
 //! The server's LocalSet owns execution work. Assembly supplies committed
 //! terminals through the subscription port and queues per-chat lifecycle
 //! events after transcript publication.
+//! Chat commands use [`ChatExecutionCommands`], read-only consumers use
+//! [`ChatExecutionQueries`], and shutdown uses [`ChatExecutionLifecycle`].
+//! These facets are declared in [`crate::types`]; the coordinator implements all three.
 
 use std::{
     cell::{Cell, RefCell},
