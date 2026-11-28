@@ -1,0 +1,99 @@
+{"fn":"isAgentId","args":["ab"]}
+{"fn":"isAgentId","args":["claude"]}
+{"fn":"isAgentId","args":["codex"]}
+{"fn":"isAgentId","args":["direct-openai-compatible"]}
+{"fn":"isAgentId","args":["direct-anthropic-compatible"]}
+{"fn":"isAgentId","args":["a-b_c9"]}
+{"fn":"isAgentId","args":["z9_-"]}
+{"fn":"isAgentId","args":["a-"]}
+{"fn":"isAgentId","args":["a_"]}
+{"fn":"isAgentId","args":["a-b-c-d-e-f"]}
+{"fn":"isAgentId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}
+{"fn":"isAgentId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}
+{"fn":"isAgentId","args":["a"]}
+{"fn":"isAgentId","args":[""]}
+{"fn":"isAgentId","args":["A"]}
+{"fn":"isAgentId","args":["Claude"]}
+{"fn":"isAgentId","args":["1ab"]}
+{"fn":"isAgentId","args":["-ab"]}
+{"fn":"isAgentId","args":["_ab"]}
+{"fn":"isAgentId","args":["ab.cd"]}
+{"fn":"isAgentId","args":["ab/cd"]}
+{"fn":"isAgentId","args":["ab cd"]}
+{"fn":"isAgentId","args":["ab "]}
+{"fn":"isAgentId","args":[" ab"]}
+{"fn":"isAgentId","args":["ab\n"]}
+{"fn":"isAgentId","args":["é"]}
+{"fn":"isAgentId","args":["aé"]}
+{"fn":"isAgentId","args":["ı"]}
+{"fn":"isAgentId","args":["K"]}
+{"fn":"isAgentId","args":["aı"]}
+{"fn":"isAgentId","args":["１"]}
+{"fn":"isAgentId","args":["a１"]}
+{"fn":"isAgentId","args":[" "]}
+{"fn":"isAgentId","args":["a "]}
+{"fn":"isAgentId","args":["﻿a"]}
+{"fn":"isAgentId","args":["́"]}
+{"fn":"isAgentId","args":["😀"]}
+{"fn":"isAgentId","args":["a😀"]}
+{"fn":"isAgentId","args":["日本語"]}
+{"fn":"isAgentId","args":["constructor"]}
+{"fn":"isAgentId","args":["toString"]}
+{"fn":"isAgentId","args":[null]}
+{"fn":"isAgentId","args":[{"$":"undefined"}]}
+{"fn":"isAgentId","args":[5]}
+{"fn":"isAgentId","args":[true]}
+{"fn":"isAgentId","args":[[]]}
+{"fn":"isAgentId","args":[{}]}
+{"fn":"isAgentId","args":[]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":"Claude","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"Shell","inputFormatByModel":{"shell":"markdown"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":"Claude","inputFormatByModel":{"a":"plain","b":"markdown"},"extra":1,"supportsImages":true}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":" ","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":" ","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":"😀","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":5,"inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":["x"],"inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":null,"inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":{},"inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"Conversation","selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":" literal","selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal ","selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"Literal","selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation\n","selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":["literal"],"selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":{},"selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":5,"selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":null,"selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":true,"selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"selectionLabel":"x","inputFormatByModel":{}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"html"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"Plain"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"":"plain"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{" ":"plain"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":null}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":5}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":true}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":["plain"]}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":{"b":"plain"}}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"plain","b":"markdown","c":"html"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"__proto__":"plain","constructor":"markdown"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":null}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":"markdown"}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":[]}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":5}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":true}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x"}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","inputFormatByModel":{},"selectionLabel":"x"}]}
+{"fn":"hasAgentExecutionMetadata","args":[{}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal"}]}
+{"fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"plain"}}]}
+{"fn":"hasAgentExecutionMetadata","args":[null]}
+{"fn":"hasAgentExecutionMetadata","args":[{"$":"undefined"}]}
+{"fn":"hasAgentExecutionMetadata","args":[[]]}
+{"fn":"hasAgentExecutionMetadata","args":[["literal","x",{}]]}
+{"fn":"hasAgentExecutionMetadata","args":["x"]}
+{"fn":"hasAgentExecutionMetadata","args":[5]}
+{"fn":"hasAgentExecutionMetadata","args":[true]}
+{"fn":"hasAgentExecutionMetadata","args":[]}

@@ -1,0 +1,99 @@
+{"id":"isAgentId#0","fn":"isAgentId","args":["ab"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:1"}
+{"id":"isAgentId#1","fn":"isAgentId","args":["claude"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:2"}
+{"id":"isAgentId#2","fn":"isAgentId","args":["codex"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:3"}
+{"id":"isAgentId#3","fn":"isAgentId","args":["direct-openai-compatible"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:4"}
+{"id":"isAgentId#4","fn":"isAgentId","args":["direct-anthropic-compatible"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:5"}
+{"id":"isAgentId#5","fn":"isAgentId","args":["a-b_c9"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:6"}
+{"id":"isAgentId#6","fn":"isAgentId","args":["z9_-"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:7"}
+{"id":"isAgentId#7","fn":"isAgentId","args":["a-"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:8"}
+{"id":"isAgentId#8","fn":"isAgentId","args":["a_"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:9"}
+{"id":"isAgentId#9","fn":"isAgentId","args":["a-b-c-d-e-f"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:10"}
+{"id":"isAgentId#10","fn":"isAgentId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:11"}
+{"id":"isAgentId#11","fn":"isAgentId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:12"}
+{"id":"isAgentId#12","fn":"isAgentId","args":["a"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:13"}
+{"id":"isAgentId#13","fn":"isAgentId","args":[""],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:14"}
+{"id":"isAgentId#14","fn":"isAgentId","args":["A"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:15"}
+{"id":"isAgentId#15","fn":"isAgentId","args":["Claude"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:16"}
+{"id":"isAgentId#16","fn":"isAgentId","args":["1ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:17"}
+{"id":"isAgentId#17","fn":"isAgentId","args":["-ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:18"}
+{"id":"isAgentId#18","fn":"isAgentId","args":["_ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:19"}
+{"id":"isAgentId#19","fn":"isAgentId","args":["ab.cd"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:20"}
+{"id":"isAgentId#20","fn":"isAgentId","args":["ab/cd"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:21"}
+{"id":"isAgentId#21","fn":"isAgentId","args":["ab cd"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:22"}
+{"id":"isAgentId#22","fn":"isAgentId","args":["ab "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:23"}
+{"id":"isAgentId#23","fn":"isAgentId","args":[" ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:24"}
+{"id":"isAgentId#24","fn":"isAgentId","args":["ab\n"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:25"}
+{"id":"isAgentId#25","fn":"isAgentId","args":["é"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:26"}
+{"id":"isAgentId#26","fn":"isAgentId","args":["aé"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:27"}
+{"id":"isAgentId#27","fn":"isAgentId","args":["ı"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:28"}
+{"id":"isAgentId#28","fn":"isAgentId","args":["K"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:29"}
+{"id":"isAgentId#29","fn":"isAgentId","args":["aı"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:30"}
+{"id":"isAgentId#30","fn":"isAgentId","args":["１"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:31"}
+{"id":"isAgentId#31","fn":"isAgentId","args":["a１"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:32"}
+{"id":"isAgentId#32","fn":"isAgentId","args":[" "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:33"}
+{"id":"isAgentId#33","fn":"isAgentId","args":["a "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:34"}
+{"id":"isAgentId#34","fn":"isAgentId","args":["﻿a"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:35"}
+{"id":"isAgentId#35","fn":"isAgentId","args":["́"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:36"}
+{"id":"isAgentId#36","fn":"isAgentId","args":["😀"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:37"}
+{"id":"isAgentId#37","fn":"isAgentId","args":["a😀"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:38"}
+{"id":"isAgentId#38","fn":"isAgentId","args":["日本語"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:39"}
+{"id":"isAgentId#39","fn":"isAgentId","args":["constructor"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:40"}
+{"id":"isAgentId#40","fn":"isAgentId","args":["toString"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:41"}
+{"id":"isAgentId#41","fn":"isAgentId","args":[null],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:42"}
+{"id":"isAgentId#42","fn":"isAgentId","args":[{"$":"undefined"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:43"}
+{"id":"isAgentId#43","fn":"isAgentId","args":[5],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:44"}
+{"id":"isAgentId#44","fn":"isAgentId","args":[true],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:45"}
+{"id":"isAgentId#45","fn":"isAgentId","args":[[]],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:46"}
+{"id":"isAgentId#46","fn":"isAgentId","args":[{}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:47"}
+{"id":"isAgentId#47","fn":"isAgentId","args":[],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:48"}
+{"id":"hasAgentExecutionMetadata#0","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":"Claude","inputFormatByModel":{}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:49"}
+{"id":"hasAgentExecutionMetadata#1","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"Shell","inputFormatByModel":{"shell":"markdown"}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:50"}
+{"id":"hasAgentExecutionMetadata#2","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":"Claude","inputFormatByModel":{"a":"plain","b":"markdown"},"extra":1,"supportsImages":true}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:51"}
+{"id":"hasAgentExecutionMetadata#3","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":" ","inputFormatByModel":{}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:52"}
+{"id":"hasAgentExecutionMetadata#4","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":" ","inputFormatByModel":{}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:53"}
+{"id":"hasAgentExecutionMetadata#5","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":"😀","inputFormatByModel":{}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:54"}
+{"id":"hasAgentExecutionMetadata#6","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":5,"inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:55"}
+{"id":"hasAgentExecutionMetadata#7","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":["x"],"inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:56"}
+{"id":"hasAgentExecutionMetadata#8","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":null,"inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:57"}
+{"id":"hasAgentExecutionMetadata#9","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","selectionLabel":{},"inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:58"}
+{"id":"hasAgentExecutionMetadata#10","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:59"}
+{"id":"hasAgentExecutionMetadata#11","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"Conversation","selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:60"}
+{"id":"hasAgentExecutionMetadata#12","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":" literal","selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:61"}
+{"id":"hasAgentExecutionMetadata#13","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal ","selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:62"}
+{"id":"hasAgentExecutionMetadata#14","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"Literal","selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:63"}
+{"id":"hasAgentExecutionMetadata#15","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"conversation\n","selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:64"}
+{"id":"hasAgentExecutionMetadata#16","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":["literal"],"selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:65"}
+{"id":"hasAgentExecutionMetadata#17","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":{},"selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:66"}
+{"id":"hasAgentExecutionMetadata#18","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":5,"selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:67"}
+{"id":"hasAgentExecutionMetadata#19","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":null,"selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:68"}
+{"id":"hasAgentExecutionMetadata#20","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":true,"selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:69"}
+{"id":"hasAgentExecutionMetadata#21","fn":"hasAgentExecutionMetadata","args":[{"selectionLabel":"x","inputFormatByModel":{}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:70"}
+{"id":"hasAgentExecutionMetadata#22","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"html"}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:71"}
+{"id":"hasAgentExecutionMetadata#23","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"Plain"}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:72"}
+{"id":"hasAgentExecutionMetadata#24","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"":"plain"}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:73"}
+{"id":"hasAgentExecutionMetadata#25","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{" ":"plain"}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:74"}
+{"id":"hasAgentExecutionMetadata#26","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":null}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:75"}
+{"id":"hasAgentExecutionMetadata#27","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":5}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:76"}
+{"id":"hasAgentExecutionMetadata#28","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":true}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:77"}
+{"id":"hasAgentExecutionMetadata#29","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":["plain"]}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:78"}
+{"id":"hasAgentExecutionMetadata#30","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":{"b":"plain"}}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:79"}
+{"id":"hasAgentExecutionMetadata#31","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"plain","b":"markdown","c":"html"}}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:80"}
+{"id":"hasAgentExecutionMetadata#32","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"__proto__":"plain","constructor":"markdown"}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:81"}
+{"id":"hasAgentExecutionMetadata#33","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":null}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:82"}
+{"id":"hasAgentExecutionMetadata#34","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":"markdown"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:83"}
+{"id":"hasAgentExecutionMetadata#35","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":[]}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:84"}
+{"id":"hasAgentExecutionMetadata#36","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":5}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:85"}
+{"id":"hasAgentExecutionMetadata#37","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":true}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:86"}
+{"id":"hasAgentExecutionMetadata#38","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:87"}
+{"id":"hasAgentExecutionMetadata#39","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","inputFormatByModel":{},"selectionLabel":"x"}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:88"}
+{"id":"hasAgentExecutionMetadata#40","fn":"hasAgentExecutionMetadata","args":[{}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:89"}
+{"id":"hasAgentExecutionMetadata#41","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:90"}
+{"id":"hasAgentExecutionMetadata#42","fn":"hasAgentExecutionMetadata","args":[{"executionPolicy":"literal","selectionLabel":"x","inputFormatByModel":{"a":"plain"}}],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:91"}
+{"id":"hasAgentExecutionMetadata#43","fn":"hasAgentExecutionMetadata","args":[null],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:92"}
+{"id":"hasAgentExecutionMetadata#44","fn":"hasAgentExecutionMetadata","args":[{"$":"undefined"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:93"}
+{"id":"hasAgentExecutionMetadata#45","fn":"hasAgentExecutionMetadata","args":[[]],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:94"}
+{"id":"hasAgentExecutionMetadata#46","fn":"hasAgentExecutionMetadata","args":[["literal","x",{}]],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:95"}
+{"id":"hasAgentExecutionMetadata#47","fn":"hasAgentExecutionMetadata","args":["x"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:96"}
+{"id":"hasAgentExecutionMetadata#48","fn":"hasAgentExecutionMetadata","args":[5],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:97"}
+{"id":"hasAgentExecutionMetadata#49","fn":"hasAgentExecutionMetadata","args":[true],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:98"}
+{"id":"hasAgentExecutionMetadata#50","fn":"hasAgentExecutionMetadata","args":[],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/agents.jsonl:99"}

@@ -12,3 +12,4 @@ workspace = true
 [dependencies]
 garcon-contract.workspace = true
 garcon-js.workspace = true
+serde_json.workspace = true
