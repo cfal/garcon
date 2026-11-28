@@ -13,10 +13,24 @@ use indexmap::IndexMap;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use super::direct_chat_runtime_base::{DirectChatProtocol, DirectChatRuntimeBase};
+use crate::shared::provider_http::ProviderHttpEndpoint;
+
+use super::anthropic_compatible_chat_runtime::{
+    AnthropicCompatibleChatProtocol, run_anthropic_compatible_single_query,
+};
+use super::direct_chat_runtime_base::{
+    DirectChatProtocol, DirectChatRuntimeBase, DirectChatRuntimeBaseConfig,
+};
+use super::openai_compatible_chat_runtime::{
+    OpenAiCompatibleChatProtocol, run_open_ai_compatible_single_query,
+};
+use super::openai_compatible_responses_runtime::{
+    OpenAiCompatibleResponsesProtocol, run_open_ai_responses_single_query,
+};
 use super::runtime_types::{
     DirectEndpointRuntime, DirectResumeRequest, DirectStartRequest, DirectStartedSession,
 };
+use super::session_store::DirectSessionStore;
 use super::single_query_options::DirectSingleQueryOptions;
 
 #[async_trait(?Send)]
@@ -218,6 +232,107 @@ impl<R: DirectCompatibleRuntime> DirectEndpointRouterRuntime<R> {
     }
 }
 
+#[derive(Clone)]
+pub struct DirectRuntimeFamilyOptions {
+    pub runtime_label: String,
+    pub sessions: DirectSessionStore,
+}
+
+pub fn create_direct_open_ai_chat_runtime(
+    options: DirectRuntimeFamilyOptions,
+) -> DirectEndpointRouterRuntime<DirectChatRuntimeBase<OpenAiCompatibleChatProtocol>> {
+    let config = options.clone();
+    DirectEndpointRouterRuntime::new(DirectEndpointRouterConfig {
+        label: options.runtime_label.clone(),
+        protocol: ApiProtocol::OpenAiCompatible,
+        create_runtime: Box::new(move |endpoint| {
+            DirectChatRuntimeBase::new(
+                config.base(endpoint),
+                OpenAiCompatibleChatProtocol(config.http(endpoint)),
+            )
+        }),
+        run_single_query: Box::new(move |prompt, endpoint, query| {
+            let protocol = OpenAiCompatibleChatProtocol(options.http(&endpoint));
+            Box::pin(
+                async move { run_open_ai_compatible_single_query(&protocol, prompt, query).await },
+            )
+        }),
+    })
+}
+
+pub fn create_direct_open_ai_responses_runtime(
+    options: DirectRuntimeFamilyOptions,
+) -> DirectEndpointRouterRuntime<DirectChatRuntimeBase<OpenAiCompatibleResponsesProtocol>> {
+    let config = options.clone();
+    DirectEndpointRouterRuntime::new(DirectEndpointRouterConfig {
+        label: options.runtime_label.clone(),
+        protocol: ApiProtocol::OpenAiCompatible,
+        create_runtime: Box::new(move |endpoint| {
+            DirectChatRuntimeBase::new(config.base(endpoint), config.responses(endpoint))
+        }),
+        run_single_query: Box::new(move |prompt, endpoint, query| {
+            let protocol = options.responses(&endpoint);
+            Box::pin(
+                async move { run_open_ai_responses_single_query(&protocol, prompt, query).await },
+            )
+        }),
+    })
+}
+
+pub fn create_direct_anthropic_runtime(
+    options: DirectRuntimeFamilyOptions,
+) -> DirectEndpointRouterRuntime<DirectChatRuntimeBase<AnthropicCompatibleChatProtocol>> {
+    let config = options.clone();
+    DirectEndpointRouterRuntime::new(DirectEndpointRouterConfig {
+        label: options.runtime_label.clone(),
+        protocol: ApiProtocol::AnthropicMessages,
+        create_runtime: Box::new(move |endpoint| {
+            DirectChatRuntimeBase::new(config.base(endpoint), config.anthropic(endpoint))
+        }),
+        run_single_query: Box::new(move |prompt, endpoint, query| {
+            let protocol = options.anthropic(&endpoint);
+            Box::pin(async move {
+                run_anthropic_compatible_single_query(&protocol, prompt, query).await
+            })
+        }),
+    })
+}
+
+impl DirectRuntimeFamilyOptions {
+    fn base(&self, endpoint: &DirectEndpointRuntime) -> DirectChatRuntimeBaseConfig {
+        DirectChatRuntimeBaseConfig {
+            runtime_label: self.runtime_label.clone(),
+            default_model: endpoint.selection.model.clone(),
+            sessions: self.sessions.clone(),
+            max_messages_per_session: None,
+        }
+    }
+
+    fn http(&self, endpoint: &DirectEndpointRuntime) -> ProviderHttpEndpoint {
+        ProviderHttpEndpoint {
+            runtime_label: self.runtime_label.clone(),
+            default_model: endpoint.selection.model.clone(),
+            base_url: endpoint.selection.base_url.clone(),
+            credential: endpoint.credential.clone(),
+        }
+    }
+
+    fn responses(&self, endpoint: &DirectEndpointRuntime) -> OpenAiCompatibleResponsesProtocol {
+        OpenAiCompatibleResponsesProtocol {
+            endpoint: self.http(endpoint),
+            endpoint_id: endpoint.selection.endpoint_id.clone(),
+            endpoint_fingerprint: direct_endpoint_fingerprint(endpoint),
+        }
+    }
+
+    fn anthropic(&self, endpoint: &DirectEndpointRuntime) -> AnthropicCompatibleChatProtocol {
+        AnthropicCompatibleChatProtocol {
+            endpoint: self.http(endpoint),
+            max_tokens: None,
+        }
+    }
+}
+
 pub fn direct_endpoint_fingerprint(endpoint: &DirectEndpointRuntime) -> String {
     let selection = &endpoint.selection;
     let mut headers = selection
@@ -239,3 +354,6 @@ pub fn direct_endpoint_fingerprint(endpoint: &DirectEndpointRuntime) -> String {
 fn digest(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }
+
+#[cfg(test)]
+mod tests;
