@@ -1,0 +1,14 @@
+{"fn":"endpointModelOptionValue","args":["",""]}
+{"fn":"endpointModelOptionValue","args":["endpoint","model:latest"]}
+{"fn":"endpointModelOptionValue","args":["endpoint:sub","model"]}
+{"fn":"endpointModelOptionValue","args":["\ud83d\ude00","model\u00a0"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint:model:latest"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint:"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint-suffix:model"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["endpoint","ENDPOINT:model"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["endpoint:sub","endpoint:sub:still:model"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint:endpoint:model"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["",":raw"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["","raw"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["\ud83d\ude00","\ud83d\ude00:model\u00a0"]}
+{"fn":"rawModelFromEndpointOptionValue","args":["e\u0301","\u00e9:model"]}

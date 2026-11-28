@@ -832,6 +832,125 @@ fn windows_lexical_storage_paths_match_bun() {
 }
 
 #[test]
+fn windows_generated_lexical_paths_match_bun() {
+    use garcon_js::path::win32;
+
+    let mut rng = Rng(0x08a3_75b1_4f87_fead);
+    let mut basenames = sample_paths(&mut rng, 12_000);
+    let letters = [
+        "a", "A", "\u{c4}", "\u{e4}", "\u{130}", "i", "\u{df}", "\u{1e9e}", "\u{3a3}", "\u{3c3}",
+        "\u{3c2}", "\u{212a}", "K", "k",
+    ];
+    let separators = ["/", "\\", "/\\", "\\/"];
+    let mut relative = Vec::new();
+    let mut joins = Vec::new();
+    let mut resolves = Vec::new();
+
+    for a in letters {
+        for b in letters {
+            for sep in separators {
+                let drive_root = format!("C:{sep}{a}");
+                let drive_target = format!("c:{sep}{b}");
+                let unc_root = format!("//{a}{sep}share");
+                let unc_target = format!("\\\\{b}{sep}SHARE");
+                for (from, to) in [(&drive_root, &drive_target), (&unc_root, &unc_target)] {
+                    relative.push((from.clone(), to.clone()));
+                    relative.push((from.clone(), format!("{to}{sep}child")));
+                    relative.push((format!("{from}{sep}old"), format!("{to}{sep}new")));
+                    joins.push(vec![
+                        from.clone(),
+                        format!("{b}{sep}."),
+                        String::from(".."),
+                        to.clone(),
+                    ]);
+                    resolves.push((
+                        from.clone(),
+                        vec![
+                            String::from("branch"),
+                            to.clone(),
+                            format!("{sep}root"),
+                            a.to_owned(),
+                        ],
+                    ));
+                    basenames.push(format!("{from}{sep}{b}{sep}"));
+                }
+                resolves.push((
+                    drive_root,
+                    vec![format!("c:{b}"), a.to_owned(), String::from("..")],
+                ));
+            }
+        }
+    }
+    for _ in 0..12_000 {
+        let a = rng.pick(&letters);
+        let b = rng.pick(&letters);
+        let sep = rng.pick(&separators);
+        let c = rng.pick(&letters);
+        let root = match rng.below(4) {
+            0 => format!("C:{sep}{a}"),
+            1 => format!("d:{sep}{a}"),
+            2 => format!("//{a}{sep}share"),
+            _ => format!("\\\\host\\{a}"),
+        };
+        let target = match rng.below(4) {
+            0 => format!("c:{sep}{b}{sep}{c}"),
+            1 => format!("D:{sep}{b}"),
+            2 => format!("\\\\{b}{sep}share{sep}{c}"),
+            _ => format!("//HOST/{b}"),
+        };
+        let path = format!("{a}{sep}..{sep}{b}{sep}{c}");
+        basenames.push(format!("{root}{sep}{path}{sep}"));
+        relative.push((format!("{root}{sep}{c}"), target));
+        resolves.push((
+            root.clone(),
+            vec![path.clone(), format!("{sep}{b}{sep}.."), a.to_string()],
+        ));
+        joins.push(vec![root, path, format!("{sep}{c}"), String::from("..")]);
+    }
+
+    let cwd = r"C:\synthetic\base";
+    let relative: Vec<_> = relative.into_iter().map(|(a, b)| (cwd, a, b)).collect();
+    let reply = ask(json!({
+        "win32Basename": basenames, "win32Join": joins,
+        "win32Resolve": resolves, "win32Relative": relative,
+    }));
+    let mut differences = Mismatches::new();
+    for (input, answer) in basenames.iter().zip(section(&reply, "win32Basename")) {
+        let actual = win32::basename(input);
+        if actual != string(answer) {
+            differences.add(format!("win32.basename({input:?})"), actual, answer);
+        }
+    }
+    for (parts, answer) in joins.iter().zip(section(&reply, "win32Join")) {
+        let parts: Vec<_> = parts.iter().map(String::as_str).collect();
+        let actual = win32::join(&parts);
+        if actual != string(answer) {
+            differences.add(format!("win32.join({parts:?})"), actual, answer);
+        }
+    }
+    for ((cwd, parts), answer) in resolves.iter().zip(section(&reply, "win32Resolve")) {
+        let parts: Vec<_> = parts.iter().map(String::as_str).collect();
+        let actual = win32::resolve(cwd, &parts);
+        if actual != string(answer) {
+            differences.add(format!("win32.resolve({cwd:?}, {parts:?})"), actual, answer);
+        }
+    }
+    for ((cwd, from, to), answer) in relative.iter().zip(section(&reply, "win32Relative")) {
+        let actual = win32::relative(cwd, from, to);
+        if actual != string(answer) {
+            differences.add(format!("win32.relative({from:?}, {to:?})"), actual, answer);
+        }
+    }
+    let checked = basenames.len() + joins.len() + resolves.len() + relative.len();
+    assert_eq!(section(&reply, "win32Basename").len(), basenames.len());
+    assert_eq!(section(&reply, "win32Join").len(), joins.len());
+    assert_eq!(section(&reply, "win32Resolve").len(), resolves.len());
+    assert_eq!(section(&reply, "win32Relative").len(), relative.len());
+    eprintln!("win32 generated comparisons: {checked}");
+    differences.finish("path.win32 lexical", checked);
+}
+
+#[test]
 fn number_classes_match_bun() {
     let mut rng = Rng(0x5DEE_CE66_D1CE_5E1D);
     let values = sample_doubles(&mut rng, 40_000);

@@ -51,6 +51,15 @@ the user corrects how a port behaves, the correction is added under
   module and a test through the erased path. Test with the concrete error a
   real failing call produces (`std::io::Error` from the file system), never
   only with a stand-in built for the test.
+- Lone surrogates (standing decision, 2026-11-28, ADR-028). The JSON boundary
+  replaces an unpaired surrogate with U+FFFD. A recorded case in which the
+  original rejects or treats specially a string only because of an unpaired
+  surrogate, and the port accepts the replaced text, is listed in the unit's
+  `known-differences.jsonl` with the reason "lone surrogate replaced at the
+  JSON boundary" and the port's exact result; it needs no further approval.
+  Never make a validator reject a genuine U+FFFD, and never add a lossless
+  string type to carry surrogates. A function whose original works on UTF-16
+  code units is still ported and tested on code units.
 - A request header is read as Fetch's `headers.get()` returns it: every field
   of that name, each trimmed, joined with `", "`. Reading only the first
   field accepts requests the original refuses.
