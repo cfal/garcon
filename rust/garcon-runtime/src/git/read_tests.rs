@@ -32,9 +32,7 @@ use super::worktrees::{
     serialize_worktree_mtime,
 };
 
-#[path = "../../tests/support/git_fixture.rs"]
-mod git_fixture;
-use git_fixture::GitFixture;
+use super::git_fixture::GitFixture;
 
 const CASES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/git");
 
