@@ -3,10 +3,9 @@
 use std::error::Error;
 
 use garcon_base::domain_error::DomainError;
-use garcon_base::errors::{DiagnosticError, ErrorInput, ErrorMetadata, has_node_error_code};
+use garcon_base::errors::{ErrorInput, has_node_error_code};
 use garcon_base::path_boundary::is_project_boundary_error;
 use garcon_contract::error_codes::ErrorCode;
-use tokio_util::sync::CancellationToken;
 
 pub fn file_operation_error(error: Box<dyn Error>) -> Box<dyn Error> {
     if is_project_boundary_error(error.as_ref()) {
@@ -68,27 +67,6 @@ fn permission_denied() -> DomainError {
         403,
         false,
     )
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub(crate) struct AbortError(pub(crate) &'static str);
-
-impl DiagnosticError for AbortError {
-    fn diagnostic_metadata(&self) -> ErrorMetadata<'_> {
-        ErrorMetadata {
-            name: "AbortError",
-            code: None,
-        }
-    }
-}
-
-pub(crate) fn check_cancelled(signal: Option<&CancellationToken>) -> Result<(), AbortError> {
-    if signal.is_some_and(CancellationToken::is_cancelled) {
-        Err(AbortError("This operation was aborted"))
-    } else {
-        Ok(())
-    }
 }
 
 pub(crate) fn has_any_node_code(error: &(dyn Error + 'static), codes: &[&str]) -> bool {
