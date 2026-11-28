@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/opencode-auth.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/opencode-auth.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 19,
+  "sha256": "7bb223803789f44b3b0168e3a0199d91bd22313fb934197fb9f0e41577314fd3"
+}

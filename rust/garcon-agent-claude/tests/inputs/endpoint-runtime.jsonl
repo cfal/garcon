@@ -1,0 +1,3 @@
+{"fn":"buildClaudeEndpointRuntime","args":[{"selection":{"protocol":"openai-compatible","baseUrl":"https://synthetic.invalid","model":"unused[0k]"},"credential":"unused"}]}
+{"fn":"buildClaudeEndpointRuntime","args":[{"selection":{"protocol":"anthropic-messages","baseUrl":"https://synthetic.invalid","model":"synthetic[0k]"},"credential":null}]}
+{"fn":"buildClaudeEndpointRuntime","args":[{"selection":{"protocol":"anthropic-messages","baseUrl":"https://synthetic.invalid","model":"synthetic[300k]"},"credential":""}]}

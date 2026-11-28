@@ -1,0 +1,9 @@
+{"fn":"producerBindingsTrace","args":["dedup"]}
+{"fn":"producerBindingsTrace","args":["publication-failed"]}
+{"fn":"producerBindingsTrace","args":["sink-error"]}
+{"fn":"producerBindingsTrace","args":["scope-unavailable"]}
+{"fn":"producerBindingsTrace","args":["close-during-bind"]}
+{"fn":"producerBindingsTrace","args":["replace-while-closing"]}
+{"fn":"producerBindingsTrace","args":["control-events"]}
+{"fn":"producerBindingsTrace","args":["join-cancel"]}
+{"fn":"producerBindingsTrace","args":["retry"]}

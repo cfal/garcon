@@ -1,0 +1,30 @@
+{"fn":"fileUrl","args":["/opt/garcon/garcon-session-identity.mjs"]}
+{"fn":"fileUrl","args":["/tmp/garcon-opencode-session-identity-abc123/garcon-session-identity.mjs"]}
+{"fn":"fileUrl","args":["/opt/Garçon plugins/100% session #1.mjs"]}
+{"fn":"fileUrl","args":["/a b/c?d=e&f"]}
+{"fn":"fileUrl","args":["/a\"b<c>d{e}f`g|h^i"]}
+{"fn":"fileUrl","args":["/a\\b"]}
+{"fn":"fileUrl","args":["/tab\there"]}
+{"fn":"fileUrl","args":["/line\nbreak"]}
+{"fn":"fileUrl","args":["/ünïcödé/😀.mjs"]}
+{"fn":"fileUrl","args":["/a//b/./c/.."]}
+{"fn":"fileUrl","args":["/tmp/x\u007fy"]}
+{"fn":"fileUrl","args":["/tmp/x\u007fy"]}
+{"fn":"fileUrl","args":["/sym]'(*,/;:=!~"]}
+{"fn":"fileUrl","args":["/a+b,c;d=e@f:g"]}
+{"fn":"fileUrl","args":["/percent%25already"]}
+{"fn":"fileUrl","args":["/tmp/garcon-opencode-session-identity-x/garcon-session-identity.mjs/.."]}
+{"fn":"fileUrl","args":["/.hidden"]}
+{"fn":"fileUrl","args":["/tmp/a b"]}
+{"fn":"fileUrl","args":["/tmp/ünïcödé 😀.mjs"]}
+{"fn":"fileUrl","args":["/tmp/x'y"]}
+{"fn":"fileUrl","args":["/tmp/[ bracket ]"]}
+{"fn":"fileUrl","args":["/tmp/100%"]}
+{"fn":"fileUrl","args":["/tmp/100%25"]}
+{"fn":"fileUrl","args":["/tmp/café/naïve/日本語/🚀.mjs"]}
+{"fn":"fileUrl","args":["/tmp/a|b^c"]}
+{"fn":"fileUrl","args":["/tmp/\u0001control\u007f"]}
+{"fn":"fileUrl","args":["/tmp/a=b&c?d#e"]}
+{"fn":"fileUrl","args":["/"]}
+{"fn":"fileUrl","args":["//tmp/a"]}
+{"fn":"fileUrl","args":["/tmp/garcon-opencode-session-identity-f9a1c3f1e2d34b6a8c0e5d2b7f1a9c3e/garcon-session-identity.mjs"]}

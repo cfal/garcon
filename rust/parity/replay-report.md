@@ -2,19 +2,20 @@
 
 Build: `garcon-server`
 
-Passed: 12254/12254 cases
-Matched natively: 122/12254 cases
-Matched via fallback: 12132/12254 cases
-Unported: 0/12254 cases
-Blocked by an unported step: 0/12254 cases
-After an unported write: 0/12254 cases
-Mismatching: 0/12254 cases
+Passed: 12257/12257 cases
+Matched natively: 122/12257 cases
+Matched via fallback: 12135/12257 cases
+Unported: 0/12257 cases
+Blocked by an unported step: 0/12257 cases
+After an unported write: 0/12257 cases
+Mismatching: 0/12257 cases
 
 ## Scenarios
 
 | scenario | passed | matched natively | unported | blocked | after an unported write | mismatching |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | agents | 351/351 | 0/351 | 0 | 0 | 0 | 0 |
+| api-providers-management | 3/3 | 0/3 | 0 | 0 | 0 | 0 |
 | api-providers-seeded | 371/371 | 0/371 | 0 | 0 | 0 | 0 |
 | api-providers | 458/458 | 0/458 | 0 | 0 | 0 | 0 |
 | api-session | 196/196 | 0/196 | 0 | 0 | 0 | 0 |

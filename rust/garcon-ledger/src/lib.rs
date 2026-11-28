@@ -17,6 +17,7 @@ pub mod presentation;
 pub mod producer_lease;
 pub mod projection;
 pub mod raw_page;
+pub mod service;
 pub mod session_query;
 pub mod sqlite_operations;
 pub mod staging_views;

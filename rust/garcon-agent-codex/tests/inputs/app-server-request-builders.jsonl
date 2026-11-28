@@ -1,0 +1,52 @@
+{"fn":"parseLeadingSlashCommand","args":["/a:B-3_c\u00a0\tfirst\nsecond\r\n"]}
+{"fn":"parseLeadingSlashCommand","args":["/valid\u0085not-js-whitespace"]}
+{"fn":"parseLeadingSlashCommand","args":["/å"]}
+{"fn":"parseLeadingSlashCommand","args":["/skill  \n"]}
+{"fn":"buildUserInput","args":["  ",["/fixture/image"],[]]}
+{"fn":"buildUserInput","args":["/known\t\n",["/fixture/image"],[{"name":"known","path":"/fixture/skill"}]]}
+{"fn":"buildUserInput","args":["/known\u00a0argument",[],[{"name":"known","path":"/fixture/first"},{"name":"known","path":"/fixture/second"}]]}
+{"fn":"codexSandboxSettings","args":["default"]}
+{"fn":"codexSandboxSettings","args":["acceptEdits"]}
+{"fn":"codexSandboxSettings","args":["manualBypass"]}
+{"fn":"codexSandboxSettings","args":["bypassPermissions"]}
+{"fn":"codexSandboxSettings","args":["plan"]}
+{"fn":"mapThinkingModeToCodexEffort","args":[]}
+{"fn":"mapThinkingModeToCodexEffort","args":["none","gpt-6-luna"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["low"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["medium"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["high"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["xhigh"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["ultra"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["max","gpt-5.5"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["max","gpt-5.6-sol"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["max","acme-openai:gpt-6.2-sol"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["max","acme-openai:gpt-5.6-sol"]}
+{"fn":"mapThinkingModeToCodexEffort","args":["max","acme-openai:gpt-5.6"]}
+{"fn":"buildCodexEnv","args":[]}
+{"fn":"buildCodexEnv","args":[{"A":"inherited","B":"retained"},{"config":{},"env":{"A":"overridden","C":""}}]}
+{"fn":"codexSourceRuntimeIdentity","args":[{}]}
+{"fn":"codexSourceRuntimeIdentity","args":[{"envOverrides":{"KEY":"synthetic","LAST":"value"},"codexConfig":{"env":{"KEY":"override"},"config":{"9":[1e20,"fixture"],"1":true,"42":false,"\ue000":"bmp","\ud83d\ude00":"astral"}}}]}
+{"fn":"codexSourceRuntimeIdentity","args":[{"envOverrides":{"LAST":"value","KEY":"synthetic"},"codexConfig":{"config":{"42":false,"1":true,"9":[1e20,"fixture"],"\ud83d\ude00":"astral","\ue000":"bmp"},"env":{"KEY":"override"}}}]}
+{"fn":"codexSourceRuntimeIdentity","args":[{"codexConfig":{"config":{},"modelCatalogPath":"/fixture/model"}}]}
+{"fn":"codexThreadSettingsTarget","args":[{"model":"gpt-5.4-mini","permissionMode":"manualBypass","thinkingMode":"high"}]}
+{"fn":"codexThreadSettingsTarget","args":[{"model":"gpt-5.4-mini","permissionMode":"bypassPermissions","thinkingMode":"none"}]}
+{"fn":"codexThreadSettingsTarget","args":[{"model":"edge:gpt-6-luna","permissionMode":"plan","thinkingMode":"max"}]}
+{"fn":"buildThreadSettingsUpdateParams","args":["thread-1",{"model":"gpt-5.4-mini","effort":"high","permissionMode":"manualBypass","approvalPolicy":"on-request","approvalsReviewer":"user","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}}]}
+{"fn":"buildThreadSettingsUpdateParams","args":["thread-1",{"model":"gpt-5.4-mini","effort":null,"permissionMode":"bypassPermissions","approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"dangerFullAccess"}}]}
+{"fn":"threadSettingsTargetFromSnapshot","args":[{"model":"m","serviceTier":"fast","effort":"high","approvalPolicy":"on-request","approvalsReviewer":"user","sandboxPolicy":{"type":"workspaceWrite","writableRoots":["/fixture"],"excludeSlashTmp":true}},"default"]}
+{"fn":"threadSettingsTargetFromSnapshot","args":[{"model":"m","serviceTier":null,"effort":null,"approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"dangerFullAccess","ignore":"extra"}},"plan"]}
+{"fn":"threadSettingsTargetFromSnapshot","args":[{"model":"m","serviceTier":"vendor","effort":null,"approvalPolicy":{"structured":true},"approvalsReviewer":"user","sandboxPolicy":{"type":"future","remote":true}},"bypassPermissions"]}
+{"fn":"threadSettingsMatch","args":[{"model":"m","serviceTier":"ultrafast","effort":"high","approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"workspaceWrite","writableRoots":["/fixture"]},"permissionMode":"default"},{"model":"m","effort":null,"approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"workspaceWrite","networkAccess":false},"permissionMode":"plan"}]}
+{"fn":"threadSettingsMatch","args":[{"model":"m","serviceTier":"default","effort":"high","approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"workspaceWrite","excludeSlashTmp":true},"permissionMode":"default"},{"model":"m","effort":"high","approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"workspaceWrite"},"permissionMode":"default"}]}
+{"fn":"threadSettingsMatch","args":[{"model":"m","serviceTier":"default","effort":"high","approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"dangerFullAccess"},"permissionMode":"bypassPermissions"},{"model":"m","effort":"low","approvalPolicy":"never","approvalsReviewer":"user","sandboxPolicy":{"type":"dangerFullAccess"},"permissionMode":"bypassPermissions"}]}
+{"fn":"buildThreadStartParams","args":[{"model":"gpt-5.4-codex","projectPath":"/repo","permissionMode":"bypassPermissions","codexConfig":{"config":{"model_provider":"openai"}}}]}
+{"fn":"buildThreadStartParams","args":[{"model":"m","projectPath":"/repo","permissionMode":"manualBypass","speed":"fast"}]}
+{"fn":"buildThreadResumeParams","args":[{"agentSessionId":"thread-1","model":"gpt-5.4-codex","projectPath":"/repo","permissionMode":"default","speed":"ultrafast","nativePath":"/fixture/history.jsonl"}]}
+{"fn":"buildThreadResumeParams","args":[{"agentSessionId":"thread-1","model":"m","projectPath":"/repo","permissionMode":"plan","speed":"standard","nativePath":""}]}
+{"fn":"buildThreadForkParams","args":[{"agentSessionId":"thread-1","nativePath":"/fixture/history.jsonl","model":"gpt-5.4-codex","projectPath":"/repo"}]}
+{"fn":"buildThreadForkParams","args":[{"agentSessionId":"thread-1","projectPath":"/repo","model":null,"codexConfig":{"config":{"model_provider":"custom-openai"}},"lastTurnId":"turn","modelProvider":"synthetic","speed":"fast"}]}
+{"fn":"buildThreadForkParams","args":[{"agentSessionId":"thread-1","projectPath":"/repo","lastTurnId":"","modelProvider":""}]}
+{"fn":"buildTurnStartParams","args":[{"threadId":"thread-1","command":"run this","model":"gpt-5.4-codex","projectPath":"/repo","permissionMode":"manualBypass","thinkingMode":"none","clientMessageId":""}]}
+{"fn":"buildTurnStartParams","args":[{"threadId":"thread-1","command":"hello","model":"gpt-6-luna","projectPath":"/repo","permissionMode":"default","thinkingMode":"max","speed":"ultrafast","clientMessageId":"message-1"}]}
+{"fn":"buildTurnStartParams","args":[{"threadId":"thread-1","command":"  ","model":"gpt-5.5","projectPath":"/repo","permissionMode":"default","thinkingMode":"max","filePaths":["/fixture/text","/fixture/video"],"imagePaths":["/fixture/image"]}]}
+{"fn":"buildTurnStartParams","args":[{"threadId":"thread-1","command":"/known","model":"m","projectPath":"/repo","permissionMode":"plan","filePaths":["/fixture/file"],"skills":[{"name":"known","path":"/fixture/skill"}]}]}

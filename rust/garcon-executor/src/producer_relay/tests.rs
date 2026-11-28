@@ -30,8 +30,8 @@ struct Producers {
 
 #[async_trait(?Send)]
 impl AgentProducers for Producers {
-    fn scope(&self) -> &AgentResourceScope {
-        &self.scope
+    fn scope(&self) -> ExecutorResult<AgentResourceScope> {
+        Ok(self.scope.clone())
     }
     async fn bind(
         &self,

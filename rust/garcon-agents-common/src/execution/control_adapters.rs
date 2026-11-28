@@ -62,9 +62,8 @@ pub fn create_agent_steering(
     runtime: Rc<dyn RuntimeSteering>,
     new_id: Rc<dyn Fn() -> String>,
 ) -> Rc<dyn AgentSteering> {
-    use garcon_interface::producer::AgentProducers;
     let targets = Rc::new(AgentResourceTable::new(
-        producer.scope().clone(),
+        producer.fixed_scope().clone(),
         AgentSteerTargetKind::SteerTarget,
         256,
     ));
