@@ -11,15 +11,20 @@ workspace = true
 
 [dependencies]
 base64 = "0.23"
+bytes.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
 garcon-link.workspace = true
 garcon-runtime = { path = "../garcon-runtime" }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+subtle = "2"
 tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
