@@ -21,6 +21,7 @@ pub mod execution_attempt;
 pub mod execution_errors;
 pub mod execution_ownership;
 pub mod executor_manager_ports;
+pub mod integration_chat_reference;
 pub mod listener_dispatch;
 pub mod model_catalog_cache;
 pub mod producer_bindings;

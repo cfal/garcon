@@ -16,7 +16,7 @@ garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
 indexmap.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["hooks"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -32,6 +32,5 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 garcon-cases.workspace = true
-rusqlite = { workspace = true, features = ["hooks"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

@@ -1,0 +1,134 @@
+{"fn":"parseFirstJsonlValue","args":[""]}
+{"fn":"parseFirstJsonlValue","args":["[1,2]"]}
+{"fn":"parseFirstJsonlValue","args":["\"text\""]}
+{"fn":"parseFirstJsonlValue","args":["1"]}
+{"fn":"parseFirstJsonlValue","args":["true"]}
+{"fn":"parseFirstJsonlValue","args":["null"]}
+{"fn":"parseFirstJsonlValue","args":["{}"]}
+{"fn":"parseFirstJsonlValue","args":["[]"]}
+{"fn":"parseFirstJsonlValue","args":["1 2"]}
+{"fn":"parseFirstJsonlValue","args":["1{\"a\":1}"]}
+{"fn":"parseFirstJsonlValue","args":["{}{}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{ \"a\" : 1 }\n{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{ \"a\" : 1 }\n{\"b\":"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1} {\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}, {\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}garbage"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n"]}
+{"fn":"parseFirstJsonlValue","args":[" { } "]}
+{"fn":"parseFirstJsonlValue","args":["nul"]}
+{"fn":"parseFirstJsonlValue","args":["tru"]}
+{"fn":"parseFirstJsonlValue","args":["fals"]}
+{"fn":"parseFirstJsonlValue","args":["1."]}
+{"fn":"parseFirstJsonlValue","args":["1.5"]}
+{"fn":"parseFirstJsonlValue","args":["1e"]}
+{"fn":"parseFirstJsonlValue","args":["1e5"]}
+{"fn":"parseFirstJsonlValue","args":["1E5"]}
+{"fn":"parseFirstJsonlValue","args":["1.5e+3"]}
+{"fn":"parseFirstJsonlValue","args":["12345678901234567890"]}
+{"fn":"parseFirstJsonlValue","args":["-0"]}
+{"fn":"parseFirstJsonlValue","args":["0.0"]}
+{"fn":"parseFirstJsonlValue","args":["1e-400"]}
+{"fn":"parseFirstJsonlValue","args":["\"abc"]}
+{"fn":"parseFirstJsonlValue","args":["\"abc\\\""]}
+{"fn":"parseFirstJsonlValue","args":["[1,"]}
+{"fn":"parseFirstJsonlValue","args":["{"]}
+{"fn":"parseFirstJsonlValue","args":["["]}
+{"fn":"parseFirstJsonlValue","args":["}"]}
+{"fn":"parseFirstJsonlValue","args":[","]}
+{"fn":"parseFirstJsonlValue","args":["01"]}
+{"fn":"parseFirstJsonlValue","args":["-"]}
+{"fn":"parseFirstJsonlValue","args":["_"]}
+{"fn":"parseFirstJsonlValue","args":["$"]}
+{"fn":"parseFirstJsonlValue","args":["a_1$"]}
+{"fn":"parseFirstJsonlValue","args":["truex"]}
+{"fn":"parseFirstJsonlValue","args":["nullx"]}
+{"fn":"parseFirstJsonlValue","args":["x{"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":01}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}{\"b\":"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}{bad}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}x{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}}"]}
+{"fn":"parseFirstJsonlValue","args":["{ \"a\":1}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": true}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": null}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": {\"b\": 1}}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": [1]}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": 1.5}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": -1}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": 12345678901}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": {}}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": []}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\": false}}"]}
+{"fn":"parseFirstJsonlValue","args":["[1,2]}"]}
+{"fn":"parseFirstJsonlValue","args":["[{\"a\":1}]}"]}
+{"fn":"parseFirstJsonlValue","args":["[[1]]}"]}
+{"fn":"parseFirstJsonlValue","args":["[1,[2]]}"]}
+{"fn":"parseFirstJsonlValue","args":["[1,2,]}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1,}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}]"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1,\"b\":2}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"b\":2,\"a\":1}}"]}
+{"fn":"parseFirstJsonlValue","args":["[{\"a\":1},{\"a\":2}]}]"]}
+{"fn":"parseFirstJsonlValue","args":["{\"x\":{\"a\":1},\"y\":{\"a\":2}}}"]}
+{"fn":"parseFirstJsonlValue","args":["[ ]}"]}
+{"fn":"parseFirstJsonlValue","args":["[[],[]]}"]}
+{"fn":"parseFirstJsonlValue","args":["[1, 2]}"]}
+{"fn":"parseFirstJsonlValue","args":["[1 ,2]}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1 ,}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1,}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1,}x"]}
+{"fn":"parseFirstJsonlValue","args":["[1,]"]}
+{"fn":"parseFirstJsonlValue","args":["[1,]x"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\" 1}"]}
+{"fn":"parseFirstJsonlValue","args":["{,}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":undefined}"]}
+{"fn":"parseFirstJsonlValue","args":["NaN"]}
+{"fn":"parseFirstJsonlValue","args":["undefined"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":'x'}"]}
+{"fn":"parseFirstJsonlValue","args":["{'a':1}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1e}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1.}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\\q\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\\u12\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\\u12g4\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\t\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\""]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"x"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\\ud800\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\r\n{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\t{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\uFEFF{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1} {\"b\":2} {\"c\":3}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"}{\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"}{\"}{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n\n{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n\nx"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n {\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["1\n\n2"]}
+{"fn":"parseFirstJsonlValue","args":["1\nx"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n{\"b\":"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n{\"b\":2}\n{\"a\":3}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n{\"b\":2}\n{"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\u00A0\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"日本\":\"日本語\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\u00E9\u0301\"}\n{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1}\n{\"b\":2}\n{\"a\":3}x"]}
+{"fn":"parseFirstJsonlValue","args":["[1,2]\n[3]"]}
+{"fn":"parseFirstJsonlValue","args":["\"a\"\n\"b\""]}
+{"fn":"parseFirstJsonlValue","args":["{\"\u212A\":\"\u00A0\"}"]}
+{"fn":"parseFirstJsonlValue","args":["\"\u212A\u0301\""]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"日本😀\"}\n{\"b\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"__proto__\":{\"x\":1}}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"constructor\":1,\"toString\":2}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"2\":2,\"1\":1,\"b\":0,\"a\":3}"]}
+{"fn":"parseFirstJsonlValue","args":["\"\u00A0\""]}
+{"fn":"parseFirstJsonlValue","args":["\uFEFF1"]}
+{"fn":"parseFirstJsonlValue","args":["1\u00A0"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\u2028\u2029\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\u0085\u200B\"}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1e400}"]}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":{\"b\":{\"c\":[{\"d\":[[{\"e\":7}]}]}]}}}"]}
