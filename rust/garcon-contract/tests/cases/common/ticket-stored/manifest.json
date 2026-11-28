@@ -1,0 +1,42 @@
+{
+  "module": "common/ticket-stored.ts",
+  "tests": [
+    "common/__tests__/ticket-stored.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ticket-stored.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "normalizeStoredTicketOwner",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeStoredTicket",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeStoredTicketActivity",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeStoredTicketWriteResult",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeStoredTicketRequest",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeStoredTicketOutcome",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeStoredTicketResult",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 447,
+  "sha256": "de13bca63eb9bf866999a8bc3018f06b8d08ec5f47d051a0579b966a471f0e42"
+}
