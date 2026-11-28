@@ -1,0 +1,17 @@
+{"fn":"isPublicationGapNoticeDetail","args":[{"type":"publication-gap","private":"dropped"}]}
+{"fn":"isPublicationGapNoticeDetail","args":[{"type":"unknown"}]}
+{"fn":"isCarryoverMigrationQuarantineNoticeDetail","args":[{"type":"carryover-migration-quarantine","artifactId":"artifact","errorCode":"MIGRATION_FAILED"}]}
+{"fn":"isCarryoverMigrationQuarantineNoticeDetail","args":[{"type":"carryover-migration-quarantine","artifactId":"","errorCode":"MIGRATION_FAILED"}]}
+{"fn":"isHandoffSummaryNoticeDetail","args":[{"type":"handoff-summary"}]}
+{"fn":"isChatIdDisclosureNoticeDetail","args":[{"type":"chat-id-disclosure"}]}
+{"fn":"isChatIdDiscoveryFailureNoticeDetail","args":[{"type":"chat-id-discovery-failure","reason":"delivery-failed"}]}
+{"fn":"isPreambleApplicationNoticeDetail","args":[{"type":"preamble-application","preambles":[{"id":"00000000-0000-4000-8000-000000000001","title":"Policy"}]}]}
+{"fn":"isPreambleSelectionChangedNoticeDetail","args":[{"type":"preamble-selection-changed","preambles":[]}]}
+{"fn":"isInterAgentMessageOutcomeNoticeDetail","args":[{"type":"inter-agent-message-outcome","results":[{"chatId":"1000000000000001","status":"failed","reason":"queue-full"}]}]}
+{"fn":"isInterAgentMessageReceivedNoticeDetail","args":[{"type":"inter-agent-message-received","fromChatId":null}]}
+{"fn":"parseTranscriptNoticeDetail","args":[{"type":"publication-gap","anything":"ignored"}]}
+{"fn":"parseTranscriptNoticeDetail","args":[{"type":"carryover-migration-quarantine","artifactId":"artifact","errorCode":"MIGRATION_FAILED","private":"ignored"}]}
+{"fn":"parseTranscriptNoticeDetail","args":[{"type":"inter-agent-message-received"}]}
+{"fn":"parseTranscriptNoticeDetail","args":[{"type":"inter-agent-message-outcome","results":[{"chatId":"1000000000000001","status":"delivered","reason":"ignored"},{"chatId":"1000000000000002","status":"failed","reason":"queue-full"}],"private":"ignored"}]}
+{"fn":"parseTranscriptNoticeDetail","args":[{"type":"preamble-application","preambles":[{"id":"00000000-0000-4000-8000-000000000001","title":"Policy"}]}]}
+{"fn":"parseTranscriptNoticeDetail","args":[{"type":"ticket-command-outcome","command":"list","requestViewId":"00000000-0000-4000-8000-000000000001","requestOrdinal":1,"status":"ok"}]}
