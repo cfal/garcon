@@ -256,8 +256,10 @@ report the remaining mismatches to the manager instead of editing further.
   error text. Make it idiomatic only after the gate passes, and run the gate
   again.
 - Controller logic runs on one core thread, as it runs on one event loop today.
-  SQLite, rendering, token fitting, search, compression, and other work
-  proportional to a transcript run off it.
+  Short bounded SQLite transactions stay on it where the original runs them
+  synchronously; SQLite work proportional to a transcript, rendering, token
+  fitting, search, and compression run in the original's bounded steps or off
+  it.
 - Compile no Rust on the development machine; build and test on the build
   machine (ADR-026, `RULES.md` "Build"). Never kill a server you did not
   start; start test servers on port 0.
