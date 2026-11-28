@@ -1,0 +1,46 @@
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"run_command","rawInput":{"CommandLine":"printf test","toolSummary":"Example"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"run_command","rawInput":{"CommandLine":null,"command":"unused"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"view_file","rawInput":{"AbsolutePath":"/work/file","StartLine":1,"EndLine":99}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"read_file","args":{"file_path":"/work/file","start_line":1.5,"end_line":-3}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"write_to_file","args":{"TargetFile":"/work/file","CodeContent":"example"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"edit_file","rawInput":{"Path":"/work/file","TargetContent":"before","Replacement":"after"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"multi_replace_file_content","rawInput":{"TargetFile":"/work/file","ReplacementChunks":[{"TargetContent":"a","ReplacementContent":"b"},{"target_content":"c","replacement_content":"d"}]}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"multi_replace_file_content","rawInput":{"Path":"/work/file","ReplacementChunks":[{"ReplacementContent":""},{}]}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"grep_search","args":{"Query":"example","SearchPath":"/work"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"find_by_name","args":{"Pattern":"*.ts","SearchDirectory":"/work"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"list_dir","args":{"DirectoryPath":"/work"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"read_url_content","args":{"Url":"https://example.test/"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"search_web","args":{"Query":"example"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"schedule","rawInput":{"DurationSeconds":2,"Prompt":"Review","ExactTiming":false}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"schedule","rawInput":{"DurationSeconds":0,"CronExpression":"0 12 * * *","Prompt":"Review","IsDaemon":false}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"schedule","rawInput":{"DurationSeconds":2,"duration_seconds":3,"Prompt":"Review","unexpected":true}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"enter_plan_mode","rawInput":{"Reason":"Plan","reason":"Plan"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"enter_plan_mode","rawInput":{"Reason":"Plan","reason":"Other"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"exit_plan_mode","rawInput":{"Plan":"Done"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"exit_plan_mode","rawInput":"not-a-plan"}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","title":"Run update_steps","kind":"other","rawInput":{"steps":[{"title":"A","status":"done"},{"title":"B","status":"pending"},{"title":"C","status":"failed"},{"title":"D","status":"skipped"},{"title":"E","status":"in_progress"}]}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","title":"Run update_steps","kind":"edit","rawInput":{"steps":[]}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"update_steps","rawInput":{"steps":[]}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"update_steps","rawInput":{"steps":[{"title":"A","status":"unknown"}]}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"manage_task","rawInput":{"Action":"list"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"manage_task","rawInput":{"action":"kill","task_id":"id"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"manage_task","rawInput":{"action":"stop","task_id":"id"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"manage_task","rawInput":{"Action":"send_input","TaskId":"id","Input":""}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"manage_task","rawInput":{"Action":"send_input","TaskId":"id","Input":null}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"send_message","rawInput":{"Recipient":"peer","Message":"Hello"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"invoke_subagent","rawInput":{"Role":"example","Prompt":"Summarize","Model":"m"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"call_mcp_tool","rawInput":{"ServerName":"server","ToolName":"tool","args":{"opaque":true}}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"run_command","rawInput":{"server":"server","tool":"tool","arguments":null,"args":{"limit":0}}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"run_command","_meta":{"is_mcp_tool_call":true},"rawInput":{"CommandLine":"printf test"}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","name":"custom","rawInput":{"payload":["sample"]}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":"c","kind":"generic","args":{"payload":true}}]}
+{"fn":"convertAntigravityToolUpdate","args":["stamp",{"toolCallId":42,"name":"list_dir"}]}
+{"fn":"antigravityToolCall","args":[{"toolCallId":"c","title":"Run update_steps","kind":false,"rawInput":null,"args":{"items":["first"]}}]}
+{"fn":"antigravityToolCall","args":[{"toolCallId":"c","title":"Run update_steps","kind":{},"rawInput":null}]}
+{"fn":"antigravityToolCall","args":[{"toolCallId":"c","_meta":{"is_mcp_tool_call":true},"title":"Run update_steps"}]}
+{"fn":"antigravityToolCall","args":[{"toolCallId":""}]}
+{"fn":"antigravityToolResultText","args":["run_command","Created At: A\nCompleted At: B\nresult\n"]}
+{"fn":"antigravityToolResultText","args":["run_command","Created At: A\nCompleted At: B"]}
+{"fn":"antigravityToolResultText","args":["run_command","Created At: A"]}
+{"fn":"antigravityToolResultText","args":["run_command","xx\nCreated At: A\n"]}
+{"fn":"antigravityToolResultText","args":["custom","Created At: A\nCompleted At: B\nresult"]}

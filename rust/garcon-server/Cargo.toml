@@ -8,8 +8,11 @@ publish.workspace = true
 
 [dependencies]
 bytes = "1"
+garcon-contract.workspace = true
 garcon-controller.workspace = true
+garcon-executor.workspace = true
 garcon-http.workspace = true
+garcon-interface.workspace = true
 http-body-util = "0.1"
 libc = "0.2"
 hyper = { version = "1", features = ["client", "http1", "server"] }
@@ -20,8 +23,18 @@ tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net",
 
 
 [dev-dependencies]
+async-trait.workspace = true
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+futures.workspace = true
+garcon-base.workspace = true
+garcon-chats = { path = "../garcon-chats" }
+garcon-contract.workspace = true
+garcon-execution.workspace = true
+garcon-executor.workspace = true
+garcon-interface.workspace = true
+garcon-ledger.workspace = true
 ruzstd = "0.8"
 serde_json.workspace = true
 tempfile = "3"
+tokio-util.workspace = true
 tower-service = "0.3"

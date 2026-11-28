@@ -1,10 +1,12 @@
+use std::ffi::OsString;
+
 use garcon_agents_common::execution::resolve_endpoint::ResolvedAgentEndpoint;
 use garcon_contract::api_providers::ApiProtocol;
-use garcon_interface::errors::AgentIntegrationError;
+use garcon_interface::{errors::AgentIntegrationError, resources::ExecutorResult};
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use crate::model_context::resolve_claude_model;
+use crate::{config::ClaudeConfig, model_context::resolve_claude_model};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +39,35 @@ pub fn build_claude_endpoint_runtime(
     );
     env_overrides.insert("CLAUDE_CODE_SUBAGENT_MODEL_FORCE".into(), "1".into());
     Ok(Some(ClaudeEndpointRuntime { env_overrides }))
+}
+
+pub fn build_claude_host_environment(
+    config: &ClaudeConfig,
+) -> ExecutorResult<Option<IndexMap<String, String>>> {
+    let environment: IndexMap<_, _> = [
+        ("ANTHROPIC_API_KEY", config.anthropic_api_key()?),
+        ("ANTHROPIC_BASE_URL", config.anthropic_base_url()?),
+        ("CLAUDE_CONFIG_DIR", config.config_home_dir()?),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|value| (key.into(), value)))
+    .collect();
+    Ok((!environment.is_empty()).then_some(environment))
+}
+
+pub fn build_claude_process_environment(
+    config: &ClaudeConfig,
+) -> ExecutorResult<IndexMap<OsString, OsString>> {
+    let mut environment: IndexMap<_, _> = std::env::vars_os()
+        .filter(|(key, _)| key != "CLAUDECODE")
+        .collect();
+    environment.extend(
+        build_claude_host_environment(config)?
+            .into_iter()
+            .flatten()
+            .map(|(key, value)| (OsString::from(key), OsString::from(value))),
+    );
+    Ok(environment)
 }
 
 #[cfg(test)]

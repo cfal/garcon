@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-antigravity/tests/oracles/config-models-auth.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-antigravity/tests/inputs/config-models-auth.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 34,
+  "sha256": "04e0eaf82c36def629e83c7346caa2934f90e81c41c72ac0ef226d9dac3b80fd"
+}

@@ -37,7 +37,7 @@ pub trait OpenCodeProjectPathRuntime {
 
 pub fn create_open_code_project_path_updates(
     runtime: Rc<dyn OpenCodeProjectPathRuntime>,
-    session_id: impl Fn(&AgentChatReference) -> Option<String> + 'static,
+    session_id: impl Fn(&AgentChatReference) -> ExecutorResult<Option<String>> + 'static,
 ) -> Rc<PrepareProjectPathUpdate> {
     let session_id = Rc::new(session_id);
     Rc::new(move |request| {
@@ -46,7 +46,7 @@ pub fn create_open_code_project_path_updates(
         async move {
             let signal = AbortSignal::from_token(request.signal);
             signal.throw_if_aborted()?;
-            let Some(session_id) = session_id(&request.chat).filter(|id| !id.is_empty()) else {
+            let Some(session_id) = session_id(&request.chat)?.filter(|id| !id.is_empty()) else {
                 return Ok(None);
             };
             runtime
@@ -203,7 +203,7 @@ mod tests {
     async fn moves_the_provider_session_and_rolls_it_back_without_replacing_the_native_binding() {
         let runtime = Rc::new(Moving::default());
         let prepare = create_open_code_project_path_updates(runtime.clone(), |chat| {
-            chat.agent_session_id.clone()
+            Ok(chat.agent_session_id.clone())
         });
         let request = fixture(Some("session-1"));
         let caller = request.signal.clone();
@@ -231,7 +231,7 @@ mod tests {
     async fn updates_an_unstarted_chat_without_starting_opencode() {
         let runtime = Rc::new(Moving::default());
         let prepare = create_open_code_project_path_updates(runtime.clone(), |chat| {
-            chat.agent_session_id.clone()
+            Ok(chat.agent_session_id.clone())
         });
         assert!(
             prepare(fixture(None))

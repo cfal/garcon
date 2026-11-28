@@ -2,10 +2,14 @@
 
 use std::{error::Error, path::Path, rc::Rc};
 
-use garcon_contract::ws_events::ApiProvidersInvalidatedMessage;
+use garcon_contract::{executors::LOCAL_EXECUTOR_ID, ws_events::ApiProvidersInvalidatedMessage};
 use garcon_http::{
     compose_routes::RouteMap, http_route_types::Route,
     routes::api_providers::create_api_provider_routes, ws::BrowserSockets,
+};
+use garcon_interface::{
+    host::{AgentApiProviderReader, AgentResolveCredentialRequest, AgentResolvedCredential},
+    resources::ExecutorResult,
 };
 use garcon_stores::{
     api_providers::{
@@ -47,6 +51,10 @@ impl ProviderConfiguration {
         Ok(Self { access })
     }
 
+    pub(crate) fn local_credentials(&self) -> Rc<dyn AgentApiProviderReader> {
+        Rc::new(LocalCredentials(self.access.clone()))
+    }
+
     pub(crate) fn settings_options(&self) -> SettingsStoreOptions {
         let profiles = self.access.store.clone();
         SettingsStoreOptions {
@@ -71,5 +79,28 @@ impl ProviderConfiguration {
         let _stop_profiles = self.access.store.on_changed(notify.clone());
         let _stop_assignments = self.access.assignments.on_changed(notify);
         create_api_provider_routes(ApiProviderService::new(self.access))
+    }
+}
+
+struct LocalCredentials(Rc<ApiProviderAccess>);
+
+#[async_trait::async_trait(?Send)]
+impl AgentApiProviderReader for LocalCredentials {
+    async fn resolve_credential(
+        &self,
+        request: AgentResolveCredentialRequest,
+    ) -> ExecutorResult<Option<AgentResolvedCredential>> {
+        if request.signal.is_cancelled() {
+            return Err(garcon_base::errors::NamedError {
+                name: "AbortError".into(),
+                message: "The operation was aborted.".into(),
+                code: None,
+            }
+            .into());
+        }
+        Ok(Some(self.0.resolve_credential(
+            LOCAL_EXECUTOR_ID,
+            &request.reference,
+        )?))
     }
 }

@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/history-loader.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/history-loader.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "5d5fe5a6406e407d554e0d3b9d05aa7f747e3032ce501d1102c5f3f1bdf190e7"
+}

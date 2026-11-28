@@ -45,6 +45,13 @@ pub fn with_open_code_request_scope(
 pub struct OpenCodeSdkResult(Value);
 
 impl OpenCodeSdkResult {
+    pub(super) fn into_data(self) -> Option<Value> {
+        let Value::Object(mut object) = self.0 else {
+            return None;
+        };
+        object.shift_remove("data")
+    }
+
     /// A response the server accepted, with `data` as its decoded body.
     pub fn success(data: Value, status: u16) -> Self {
         Self(Value::Object(

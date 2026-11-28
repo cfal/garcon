@@ -1,0 +1,34 @@
+{"fn":"resolveAuthMethod","args":[null,false]}
+{"fn":"resolveAuthMethod","args":[null,true]}
+{"fn":"resolveAuthMethod","args":["oauth-personal",true]}
+{"fn":"resolveAuthMethod","args":["oauth-business",true]}
+{"fn":"resolveAuthMethod","args":["agent-platform",true]}
+{"fn":"resolveAuthMethod","args":["gemini-api-key",false]}
+{"fn":"resolveAuthMethod","args":["invalid-method",false]}
+{"fn":"resolveAuthMethod","args":["",true]}
+{"fn":"resolveAuthMethod","args":[" oauth-business ",true]}
+{"fn":"parseAntigravityModels","args":["Fetching available models...\ngemini-test-pro-high\tGemini Test Pro (High)\ngemini-test-pro-low\tGemini Test Pro (Low)\ngemini-test-pro-low\tDuplicate\n"]}
+{"fn":"parseAntigravityModels","args":[""]}
+{"fn":"parseAntigravityModels","args":[" a \t \r\n b \t label \t tail \r\n\tUnnamed\n x\t first\rnot a new line\n a\t Not new"]}
+{"fn":"parseAntigravityModels","args":["__proto__\t Constructor\nconstructor\tConstructor\n  "]}
+{"fn":"antigravityCliFailure","args":[{"stdout":"","stderr":"Fetching available models...\nError: Please sign in to view available models.\n","exitCode":1}]}
+{"fn":"antigravityCliFailure","args":[{"stdout":"diagnostic ignored","stderr":"using current profile","exitCode":7}]}
+{"fn":"antigravityCliFailure","args":[{"stdout":"\nFetching available models (cached)\r\n eRrOr:\u00a0 Explain \n why  ","stderr":"","exitCode":null}]}
+{"fn":"antigravityCliFailure","args":[{"stdout":"not used","stderr":"Fetching available models","exitCode":143}]}
+{"fn":"validateAntigravityLoginCode","args":["synthetic-code"]}
+{"fn":"validateAntigravityLoginCode","args":["https://example.test/callback?code=synthetic"]}
+{"fn":"validateAntigravityLoginCode","args":["https://"]}
+{"fn":"validateAntigravityLoginCode","args":["text with whitespace"]}
+{"fn":"validateAntigravityLoginCode","args":["https://example.test/a\u00a0b"]}
+{"fn":"validateAntigravityLoginCode","args":["http+custom:abc"]}
+{"fn":"antigravityModeForPermissionMode","args":["default"]}
+{"fn":"antigravityModeForPermissionMode","args":["acceptEdits"]}
+{"fn":"antigravityModeForPermissionMode","args":["plan"]}
+{"fn":"antigravityModeForPermissionMode","args":["manualBypass"]}
+{"fn":"antigravityModeForPermissionMode","args":["bypassPermissions"]}
+{"fn":"antigravityPrompt","args":[{"command":"  hi\u00a0","images":[{"kind":"image","name":"image.png","data":"data:image/png;base64,YQ==","mimeType":"image/png"}]}]}
+{"fn":"antigravityPrompt","args":[{"command":"  ","images":[{"kind":"image","name":"image.png","data":"data:image/png;base64,YQ==","mimeType":"image/png"}]}]}
+{"fn":"antigravityPrompt","args":[{"command":"hey","images":[{"kind":"image","name":"bad.txt","data":"data:text/plain;base64,YQ==","mimeType":"image/png"}]}]}
+{"fn":"antigravityPrompt","args":[{"command":"hey","images":[{"kind":"image","data":"YQ==","mimeType":"image/png"}]}]}
+{"fn":"antigravityPrompt","args":[{"command":"  ","images":[]}]}
+{"fn":"antigravityPrompt","args":[{"command":"  hi  "}]}

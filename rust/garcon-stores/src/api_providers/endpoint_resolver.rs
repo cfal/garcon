@@ -169,6 +169,7 @@ impl ApiProviderEndpointResolver {
                         supports_images: Some(
                             model.supports_images.unwrap_or(endpoint.supports_images),
                         ),
+                        thinking_modes: None,
                         is_local: Some(is_local(profile, endpoint, Some(model))),
                         api_provider_id: Some(profile.id.clone()),
                         endpoint_id: Some(endpoint.id.clone()),

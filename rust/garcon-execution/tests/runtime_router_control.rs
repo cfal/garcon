@@ -260,6 +260,30 @@ impl RuntimeRouterLedger for Ports {
     fn is_run_active(&self, chat: &str) -> bool {
         self.mode == "running" && chat == CHAT
     }
+    fn active_run_id(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn open_producer(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> ExecutionOperationResult<Rc<garcon_ledger::producer_lease::ProducerLease>> {
+        Err("unexpected producer open".into())
+    }
+    fn begin_run(&self, _: &str, _: &str) -> ExecutionOperationResult<String> {
+        Err("unexpected run".into())
+    }
+    fn interrupt_run(&self, _: &str) -> ExecutionOperationResult<()> {
+        Err("unexpected interruption".into())
+    }
+    fn fail_run(
+        &self,
+        _: &str,
+        _: &str,
+        _: garcon_interface::producer::AgentRunFailureDetail,
+    ) -> ExecutionOperationResult<()> {
+        Err("unexpected run failure".into())
+    }
     fn claim_permission_resolution(
         &self,
         control: &ChatTransientControlAction,
@@ -392,6 +416,7 @@ fn registry_with_running_fixture(mode: &str) -> AgentRegistry {
     AgentRegistry::new(AgentRegistryOptions {
         runtime,
         directory: Rc::new(AgentDirectory::new(Rc::new(NoTranscriptSource))),
+        ownership_transfer_pending: Rc::new(|_| false),
         get_carry_over_revision: Rc::new(|_| "frozen-revision".into()),
         logger: Rc::new(create_logger("test")),
     })

@@ -650,6 +650,16 @@ Decision: Local stays in the executor list and is reported unavailable with a
 fixed reason. Starting a chat requires a remote executor. No new paths: the
 existing handling of an unavailable executor applies.
 
+Consequences: the unavailable Local is a full `ExecutionRuntimeApi` handle, so
+the controller is composed the same way with or without a real Local. Its ID
+is `local` and its availability is offline; `get_info`, the integration and
+service lookups, and model discovery answer the existing not-dispatched
+UNAVAILABLE error with the text "Local executor is unavailable";
+subscriptions never fire and dispose is idempotent. The manager lists such a
+Local from its availability, without fetching info, and so without an
+instance ID, a project base path, or capabilities; that listing and the thin
+main of the controller-only binary belong to the controller-only unit.
+
 ## ADR-031: Provider requests identify as Garcon and never cross origins
 
 Status: accepted by the user (2026-11-28)

@@ -6,20 +6,34 @@ use std::{
 };
 
 use futures::FutureExt;
-use garcon_agents_common::execution::runtime_events::{AgentRuntimeEvent, AgentRuntimeOperation};
-use garcon_contract::chat_types::{AssistantMessage, ChatMessage, CompactionMessage, ErrorMessage};
+use garcon_agents_common::{
+    execution::{
+        permission_modes::provider_startup_permission_mode,
+        runtime_events::{AgentRuntimeEvent, AgentRuntimeOperation, ProviderRunOutcome},
+    },
+    shared::idle_session_purger::{
+        DEFAULT_IDLE_SESSION_MAX_AGE_MS, DEFAULT_IDLE_SESSION_PURGE_INTERVAL_MS, IdleSessionPurger,
+    },
+};
+use garcon_contract::{
+    chat_modes::{ClaudeThinkingMode, PermissionMode, ThinkingMode},
+    chat_types::{AssistantMessage, ChatMessage, CompactionMessage, ErrorMessage},
+};
 use garcon_interface::{
+    errors::{AgentIntegrationError, AgentIntegrationErrorCode},
+    execution::AgentRunningSession,
     host::AgentLogger,
     native_message_source::{
         NativeMessageSourceInput, NativeSourced, attach_native_message_source,
     },
-    producer::{AgentProviderPermissionLifecycle, AgentTerminalPermission},
+    producer::{AgentProviderPermissionLifecycle, AgentRunFailureDetail, AgentTerminalPermission},
     resources::ExecutorResult,
 };
 use garcon_js::{Number, json::Opaque, trim};
 use indexmap::IndexMap;
 use serde_json::{Value, json};
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     active_turn::ClaudeActiveTurn,
@@ -29,7 +43,7 @@ use crate::{
     cli_process_transport::{
         ClaudeProcessExit, ClaudeProcessOptions, ClaudeProcessSignal, ClaudeProcessTransport,
         ClaudeProcessTransportOptions, ClaudeTransportFailure, ClaudeTransportFailureKind,
-        spawn_claude_subprocess,
+        Retirement, spawn_claude_subprocess,
     },
     cli_protocol::{
         ClaudeProviderSessionState, ClaudeResultCorrelation, ClaudeTurnInputEvent,
@@ -40,22 +54,37 @@ use crate::{
         ClaudeProviderStateHandlers, flush_deferred_claude_provider_idle,
         handle_claude_provider_lifecycle_message,
     },
+    cli_version::{ClaudeCliVersionProbe, CliVersion},
     compaction::{extract_compaction_summary, is_compaction_summary_text, parse_compact_metadata},
+    disk_attachments::{MaterializedClaudeDiskAttachments, materialize_claude_disk_attachments},
     interrupt_receipt::{
         ClaudeInterruptReceiptHandlers, ClaudeInterruptSession, handle_claude_interrupt_receipt,
     },
+    model_context::resolve_claude_model,
     process_retirements::ClaudeProcessRetirementTracker,
     runtime_state::{
         CONVERSATION_RESET_FAILURE, ClaudeRunningSession, ClaudeSessionProcess,
         INTERRUPT_COMPLETION_TIMEOUT, INTERRUPT_RECEIPT_TIMEOUT, InterruptFallbackStage,
         PendingPermission,
     },
-    session_options::{ClaudeSessionOptions, normalize_claude_thinking_mode_for_state},
+    runtime_types::{
+        ClaudeProjectPathUpdate, ClaudeResumeRequest, ClaudeStartRequest,
+        assert_claude_execution_open,
+    },
+    session_model::{ClaudeSessionModelOptions, configure_claude_session_model},
+    session_options::{
+        ClaudeSessionOptions, merge_claude_session_options,
+        normalize_claude_thinking_mode_for_state,
+    },
     steering::{
         CLAUDE_STEER_IDLE_FENCE_TIMEOUT, CLAUDE_STEER_WRITE_TIMEOUT, ClaudeSteeringController,
         ClaudeSteeringControllerOptions,
     },
     turn_publisher::ClaudeTurnPublisher,
+    user_input::{
+        ClaudeUserInputFrameOptions, build_claude_initial_user_content,
+        build_claude_user_input_frame,
+    },
 };
 
 pub type ClaudeStreamHandler = dyn Fn(&Rc<ClaudeRunningSession>, Opaque);
@@ -69,16 +98,26 @@ pub struct ClaudeCli {
     pub shutting_down: Cell<bool>,
     sessions: RefCell<IndexMap<String, Rc<ClaudeRunningSession>>>,
     retirements: ClaudeProcessRetirementTracker,
+    idle_purger: IdleSessionPurger,
     pub pending_permissions: RefCell<Vec<PendingPermission>>,
-    executable: Rc<dyn Fn() -> OsString>,
+    executable: Rc<dyn Fn() -> ExecutorResult<OsString>>,
+    pub version_probe: Rc<ClaudeCliVersionProbe>,
 }
 
 impl ClaudeCli {
     pub fn new(executable: Rc<dyn Fn() -> OsString>, logger: Rc<dyn AgentLogger>) -> Rc<Self> {
+        Self::with_executable_reader(Rc::new(move || Ok(executable())), logger)
+    }
+
+    pub fn with_executable_reader(
+        executable: Rc<dyn Fn() -> ExecutorResult<OsString>>,
+        logger: Rc<dyn AgentLogger>,
+    ) -> Rc<Self> {
         Rc::new_cyclic(|runtime: &std::rc::Weak<Self>| {
             let runtime = runtime.clone();
             Self {
                 executable,
+                version_probe: Rc::new(ClaudeCliVersionProbe::default()),
                 publisher: ClaudeTurnPublisher::new(logger.clone()),
                 steering: ClaudeSteeringController::new(ClaudeSteeringControllerOptions {
                     session: Rc::new({
@@ -108,6 +147,7 @@ impl ClaudeCli {
                 shutting_down: Cell::new(false),
                 sessions: RefCell::default(),
                 retirements: ClaudeProcessRetirementTracker::default(),
+                idle_purger: IdleSessionPurger::default(),
                 pending_permissions: RefCell::default(),
                 control: ClaudeControlBroker::new(Rc::new(move |session_id, frame| {
                     let process = runtime
@@ -149,10 +189,9 @@ impl ClaudeCli {
         if session.active_turn.borrow().is_some() {
             return Err(format!("Claude session {} already has an active turn", session.id).into());
         }
-        let turn = Rc::new(ClaudeActiveTurn::new(
-            session.background_task_count.get(),
-            operation,
-        ));
+        let mut turn = ClaudeActiveTurn::new(session.background_task_count.get(), operation);
+        turn.started_at_iso = Some(session.now_iso()?);
+        let turn = Rc::new(turn);
         session.unowned_provider_activity.set(false);
         session.active_turn.replace(Some(turn.clone()));
         session.last_activity_at.set(turn.started_at);
@@ -164,6 +203,18 @@ impl ClaudeCli {
         session: &Rc<ClaudeRunningSession>,
         options: ClaudeSessionOptions,
         resume: bool,
+        on_message: Rc<ClaudeStreamHandler>,
+    ) -> ExecutorResult<()> {
+        self.spawn_cli_with_version(session, options, resume, None, on_message)
+            .await
+    }
+
+    async fn spawn_cli_with_version(
+        self: &Rc<Self>,
+        session: &Rc<ClaudeRunningSession>,
+        options: ClaudeSessionOptions,
+        resume: bool,
+        version: Option<CliVersion>,
         on_message: Rc<ClaudeStreamHandler>,
     ) -> ExecutorResult<()> {
         let prior_retirement = session.retirement.borrow().clone();
@@ -181,6 +232,7 @@ impl ClaudeCli {
         if session.process.borrow().is_some() {
             return Err(format!("Claude session {} already has a process", session.id).into());
         }
+        let executable = (self.executable)()?;
         let args = build_claude_cli_args(ClaudeCliArgOptions {
             model: Some(&options.model),
             permission_mode: Some(options.permission_mode),
@@ -191,6 +243,19 @@ impl ClaudeCli {
             stream_json: true,
             ..Default::default()
         })?;
+        if let Some(version) = version {
+            let fields = cli_log_fields([
+                ("binary", json!(executable.to_string_lossy())),
+                ("chatId", json!(session.chat_id)),
+                ("sessionId", json!(session_log_id(&session.id))),
+                ("resumed", json!(resume)),
+                (
+                    "cliVersion",
+                    json!(version.map(Number::to_js_string).join(".")),
+                ),
+            ]);
+            self.logger.info("Spawning Claude CLI", Some(&fields));
+        }
         let mut environment = build_claude_cli_environment(
             &options.model,
             std::env::vars_os(),
@@ -202,7 +267,7 @@ impl ClaudeCli {
         )?;
         environment.insert("CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS".into(), "1".into());
         let process = spawn_claude_subprocess(ClaudeProcessOptions {
-            executable: (self.executable)(),
+            executable,
             arguments: args.into_iter().map(OsString::from).collect(),
             cwd: options.project_path.clone().into(),
             environment,
@@ -328,6 +393,562 @@ impl ClaudeCli {
                 Err(error)
             }
         }
+    }
+
+    async fn spawn_registered_cli(
+        self: &Rc<Self>,
+        session: &Rc<ClaudeRunningSession>,
+        options: ClaudeSessionOptions,
+        resume: bool,
+        version: CliVersion,
+    ) -> ExecutorResult<()> {
+        let logger = self.logger.clone();
+        self.spawn_cli_with_version(
+            session,
+            options,
+            resume,
+            Some(version),
+            Rc::new(move |_, message| {
+                if message["type"] == "system" {
+                    return;
+                }
+                let fields = message
+                    .get("type")
+                    .cloned()
+                    .map(|kind| IndexMap::from([("messageType".into(), kind.into())]));
+                logger.info(
+                    "Claude CLI emitted an unrecognized message type",
+                    fields.as_ref(),
+                );
+            }),
+        )
+        .await
+    }
+
+    pub async fn start_claude_cli_session(
+        self: &Rc<Self>,
+        request: ClaudeStartRequest,
+    ) -> ExecutorResult<String> {
+        let ClaudeStartRequest {
+            execution,
+            agent_session_id,
+            on_session_activated,
+        } = request;
+        let admission = execution.execution_admission.as_deref();
+        assert_claude_execution_open(admission)?;
+        resolve_claude_model(&execution.model)?;
+        if execution.chat_id.is_empty() {
+            return Err("chatId is required when starting a Claude session".into());
+        }
+        if agent_session_id.is_empty() {
+            return Err("agentSessionId is required when starting a Claude session".into());
+        }
+
+        let options = execution.session_options(&agent_session_id);
+        let session = Rc::new(ClaudeRunningSession::new(options.clone()));
+        session
+            .initialization
+            .replace(Some(CancellationToken::new()));
+        let active_turn = self.begin_turn(&session, execution.operation)?;
+        let previous = self.register_session(session.clone());
+        let version = async {
+            if let Some(previous) = previous {
+                self.retire_session(&previous).await?;
+            }
+            if !self.is_current_session(&session) {
+                return Ok(None);
+            }
+            if let Some(activate) = on_session_activated {
+                activate();
+            }
+            self.version_probe
+                .assert_compatible(&(self.executable)()?)
+                .await
+                .map(Some)
+        }
+        .await;
+        let version = match version {
+            Ok(Some(version)) if self.is_current_session(&session) => version,
+            Ok(_) => return Ok(agent_session_id),
+            Err(error) => {
+                if self.is_current_session(&session) {
+                    session.active_turn.take();
+                    active_turn.finish();
+                    self.sessions.borrow_mut().shift_remove(&agent_session_id);
+                }
+                complete_session_initialization(&session);
+                return Err(error);
+            }
+        };
+
+        let mut prepared = None;
+        let mut result = async {
+            assert_claude_execution_open(admission)?;
+            self.spawn_registered_cli(&session, options, false, version)
+                .await?;
+            assert_claude_execution_open(admission)?;
+            let attachments = prepared.insert(
+                materialize_claude_disk_attachments(&execution.command, &execution.images).await?,
+            );
+            if let Some(admission) = admission {
+                admission.mark_started().await?;
+            }
+            self.send_user_message(&session, &active_turn, attachments)
+                .await?;
+            complete_session_initialization(&session);
+            active_turn.completion().await;
+            Ok(())
+        }
+        .await;
+        if result.is_err() && self.is_current_session(&session) {
+            match self.retire_session(&session).await {
+                Ok(()) => {
+                    if self.is_current_session(&session) {
+                        self.sessions.borrow_mut().shift_remove(&agent_session_id);
+                    }
+                }
+                Err(retirement) => result = Err(retirement),
+            }
+        }
+        complete_session_initialization(&session);
+        if let Some(prepared) = prepared {
+            prepared.cleanup().await;
+        }
+        result.map(|()| agent_session_id)
+    }
+
+    pub async fn run_claude_turn(
+        self: &Rc<Self>,
+        request: ClaudeResumeRequest,
+    ) -> ExecutorResult<()> {
+        let ClaudeResumeRequest {
+            execution,
+            agent_session_id,
+            ..
+        } = request;
+        let admission = execution.execution_admission.as_deref();
+        assert_claude_execution_open(admission)?;
+        resolve_claude_model(&execution.model)?;
+        if agent_session_id.is_empty() {
+            return Err("Cannot resume without session ID".into());
+        }
+        if execution.chat_id.is_empty() {
+            return Err("Cannot resume without chat ID".into());
+        }
+        let version = self
+            .version_probe
+            .assert_compatible(&(self.executable)()?)
+            .await?;
+        assert_claude_execution_open(admission)?;
+        if self.shutting_down.get() {
+            return Err("Claude runtime is shutting down".into());
+        }
+
+        let options = execution.session_options(&agent_session_id);
+        let mut session = self.session(&agent_session_id);
+        let initialization = session
+            .as_ref()
+            .and_then(|session| session.initialization.borrow().clone());
+        if let Some(initialization) = initialization {
+            initialization.cancelled().await;
+            session = self.session(&agent_session_id);
+        }
+        let session = session.unwrap_or_else(|| {
+            let session = Rc::new(ClaudeRunningSession::new(options.clone()));
+            self.register_session(session.clone());
+            session
+        });
+        if self.shutting_down.get() {
+            return Err("Claude runtime is shutting down".into());
+        }
+
+        let aborting = session
+            .active_turn
+            .borrow()
+            .clone()
+            .filter(|turn| turn.protocol.borrow().abort_requested());
+        if let Some(turn) = aborting {
+            turn.completion().await;
+            assert_claude_execution_open(admission)?;
+        }
+        if session.active_turn.borrow().is_some() || session.resume_owner.borrow().is_some() {
+            return Err(
+                format!("Claude session {agent_session_id} already has an active turn").into(),
+            );
+        }
+        let owner = Rc::new(());
+        session.resume_owner.replace(Some(owner.clone()));
+        let is_resume_owner = || {
+            session
+                .resume_owner
+                .borrow()
+                .as_ref()
+                .is_some_and(|current| Rc::ptr_eq(current, &owner))
+        };
+        let mut owned_turn = None;
+        let mut prepared = None;
+        let mut result = async {
+            if execution.chat_id != session.chat_id {
+                return Err("Chat ID mismatch".into());
+            }
+            let desired_options = merge_claude_session_options(&session.options.borrow(), options);
+            resolve_claude_model(&desired_options.model)?;
+            session.options.replace(desired_options.clone());
+            session.last_activity_at.set(Instant::now());
+
+            let permission_mode = desired_options.permission_mode;
+            let previous_mode = if session.process.borrow().is_some() {
+                provider_startup_permission_mode(Some(session.current_permission_mode.get()))
+            } else {
+                PermissionMode::Default
+            };
+            let desired_mode = provider_startup_permission_mode(Some(permission_mode));
+            let permission_startup_changed = previous_mode != desired_mode
+                && [previous_mode, desired_mode].contains(&PermissionMode::BypassPermissions);
+            let thinking_mode =
+                normalize_claude_thinking_mode_for_state(desired_options.claude_thinking_mode);
+            let env_changed = env_overrides_changed(
+                session.current_env_overrides.borrow().as_ref(),
+                desired_options.env_overrides.as_ref(),
+            );
+            let needs_retirement = session.process.borrow().is_some()
+                && (desired_options.thinking_mode != session.current_thinking_mode.get()
+                    || thinking_mode != session.current_claude_thinking_mode.get()
+                    || permission_startup_changed
+                    || env_changed);
+            if needs_retirement {
+                self.wait_for_session_retirement(&session).await?;
+            }
+
+            let retire = || self.wait_for_session_retirement(&session).boxed_local();
+            let spawn = || {
+                self.spawn_registered_cli(&session, desired_options.clone(), true, version)
+                    .boxed_local()
+            };
+            configure_claude_session_model(
+                &session,
+                &desired_options.model,
+                ClaudeSessionModelOptions {
+                    execution_admission: admission,
+                    control_broker: &self.control,
+                    logger: self.logger.as_ref(),
+                    is_current_session: &|| {
+                        !self.shutting_down.get()
+                            && self.is_current_session(&session)
+                            && is_resume_owner()
+                    },
+                    retire_process: &retire,
+                    resume_process: &spawn,
+                },
+            )
+            .await?;
+
+            if permission_mode != session.current_permission_mode.get() {
+                self.set_internal_permission_mode(&agent_session_id, permission_mode);
+            }
+            session.current_permission_mode.set(permission_mode);
+
+            assert_claude_execution_open(admission)?;
+            let turn = owned_turn.insert(self.begin_turn(&session, execution.operation)?);
+            let attachments = prepared.insert(
+                materialize_claude_disk_attachments(&execution.command, &execution.images).await?,
+            );
+            if let Some(admission) = admission {
+                admission.mark_started().await?;
+            }
+            self.send_user_message(&session, turn, attachments).await?;
+            turn.completion().await;
+            Ok(())
+        }
+        .await;
+        if result.is_err()
+            && owned_turn
+                .as_ref()
+                .is_some_and(|turn| session.is_current_turn(turn))
+            && let Err(retirement) = self.retire_session(&session).await
+        {
+            result = Err(retirement);
+        }
+        if is_resume_owner() {
+            session.resume_owner.take();
+        }
+        if let Some(prepared) = prepared {
+            prepared.cleanup().await;
+        }
+        result
+    }
+
+    async fn send_user_message(
+        &self,
+        session: &ClaudeRunningSession,
+        turn: &ClaudeActiveTurn,
+        prepared: &MaterializedClaudeDiskAttachments<'_>,
+    ) -> ExecutorResult<()> {
+        let input_uuid = turn.protocol.borrow().input_uuid.clone();
+        let content =
+            build_claude_initial_user_content(&prepared.command, &prepared.inline_attachments)?;
+        let frame = build_claude_user_input_frame(ClaudeUserInputFrameOptions {
+            content: &content,
+            session_id: &session.id,
+            uuid: &input_uuid,
+            priority: None,
+        })?;
+        let process = self
+            .session(&session.id)
+            .and_then(|session| session.process.borrow().clone())
+            .ok_or_else(|| format!("Claude session {} has no writable process", session.id))?;
+        process
+            .transport
+            .write_line(frame, Default::default())
+            .await
+    }
+
+    fn is_current_session(&self, session: &Rc<ClaudeRunningSession>) -> bool {
+        self.session(&session.id)
+            .is_some_and(|current| Rc::ptr_eq(&current, session))
+    }
+
+    pub async fn prepare_claude_project_path_update(
+        &self,
+        request: ClaudeProjectPathUpdate,
+    ) -> ExecutorResult<()> {
+        let Some(id) = request
+            .agent_session_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+        else {
+            return Ok(());
+        };
+        let busy = |message| {
+            AgentIntegrationError::new(
+                AgentIntegrationErrorCode::SESSION_BUSY,
+                message,
+                false,
+                None,
+            )
+        };
+        let session = self.session(id);
+        if session
+            .as_ref()
+            .is_some_and(|session| session.chat_id != request.chat_id)
+        {
+            return Err(busy("Chat ID mismatch").into());
+        }
+        if session
+            .as_ref()
+            .is_some_and(|session| session.active_turn.borrow().is_some())
+        {
+            return Err(busy("Cannot update project path while Claude is running").into());
+        }
+        if self
+            .pending_permissions
+            .borrow()
+            .iter()
+            .any(|pending| pending.agent_session_id == id)
+        {
+            return Err(
+                busy("Cannot update project path while Claude is waiting for permission").into(),
+            );
+        }
+        if let Some(session) = session {
+            self.wait_for_session_retirement(&session).await?;
+        }
+        self.retirements.wait(id, &request.chat_id).await
+    }
+
+    pub fn set_internal_permission_mode(&self, id: &str, mode: PermissionMode) {
+        let Some(session) = self.session(id) else {
+            return;
+        };
+        session.current_permission_mode.set(mode);
+        session.options.borrow_mut().permission_mode = mode;
+        if session.process.borrow().is_some() {
+            let provider_mode = provider_startup_permission_mode(Some(mode));
+            let update = self.control.request(
+                id,
+                json!({"subtype":"set_permission_mode", "mode":provider_mode}).into(),
+                Default::default(),
+            );
+            let logger = self.logger.clone();
+            let session_id = session_log_id(id);
+            tokio::task::spawn_local(async move {
+                if let Err(error) = update.await {
+                    let fields = cli_log_fields([
+                        ("sessionId", json!(session_id)),
+                        ("error", json!(error.to_string())),
+                    ]);
+                    logger.warn("Claude CLI permission-mode update failed", Some(&fields));
+                }
+            });
+        }
+    }
+
+    pub fn set_internal_thinking_mode(self: &Rc<Self>, id: &str, mode: ThinkingMode) {
+        let Some(session) = self.session(id) else {
+            return;
+        };
+        session.options.borrow_mut().thinking_mode = mode;
+        if session.process.borrow().is_some()
+            && session.active_turn.borrow().is_none()
+            && mode != session.current_thinking_mode.get()
+        {
+            self.retire_process_in_background(&session);
+        }
+    }
+
+    pub fn set_internal_claude_thinking_mode(self: &Rc<Self>, id: &str, mode: ClaudeThinkingMode) {
+        let Some(session) = self.session(id) else {
+            return;
+        };
+        session.options.borrow_mut().claude_thinking_mode = Some(mode);
+        if session.process.borrow().is_some()
+            && session.active_turn.borrow().is_none()
+            && mode != session.current_claude_thinking_mode.get()
+        {
+            self.retire_process_in_background(&session);
+        }
+    }
+
+    pub fn fail_claude_internal_session(
+        self: &Rc<Self>,
+        agent_session_id: &str,
+        message: String,
+        operation: AgentRuntimeOperation,
+    ) {
+        if let Some(session) = self.session(agent_session_id) {
+            self.fail_session(&session, message);
+            self.retire_process_in_background(&session);
+        } else {
+            (operation.publish)(AgentRuntimeEvent::RunEnded {
+                run_id: operation.run_id,
+                outcome: ProviderRunOutcome::Failed {
+                    error: Some(AgentRunFailureDetail {
+                        code: "PROVIDER_FAILURE".into(),
+                        message: Some(message),
+                    }),
+                },
+                working_directory: None,
+            });
+        }
+    }
+
+    pub fn running_sessions(&self) -> Vec<AgentRunningSession> {
+        self.sessions
+            .borrow()
+            .values()
+            .filter_map(|session| {
+                let active = session.active_turn.borrow();
+                let turn = active.as_ref()?;
+                Some(AgentRunningSession {
+                    agent_session_id: session.id.clone(),
+                    status: Some("running".into()),
+                    started_at: turn.started_at_iso.clone(),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn release_session(
+        &self,
+        chat_id: &str,
+        agent_session_id: Option<&str>,
+    ) -> ExecutorResult<()> {
+        let Some(id) = agent_session_id.filter(|id| !id.is_empty()) else {
+            return Ok(());
+        };
+        let Some(session) = self.session(id) else {
+            return self.retirements.wait(id, chat_id).await;
+        };
+        if session.chat_id != chat_id {
+            return Ok(());
+        }
+        self.sessions.borrow_mut().shift_remove(id);
+        session.resume_owner.take();
+        self.retire_session(&session).await
+    }
+
+    pub fn start_purge_timer(self: &Rc<Self>) {
+        let runtime = Rc::downgrade(self);
+        self.idle_purger
+            .start(DEFAULT_IDLE_SESSION_PURGE_INTERVAL_MS, move || {
+                let Some(runtime) = runtime.upgrade() else {
+                    return;
+                };
+                let now = Instant::now();
+                let max_age = Duration::from_millis(DEFAULT_IDLE_SESSION_MAX_AGE_MS as u64);
+                let mut evicted = Vec::new();
+                runtime.sessions.borrow_mut().retain(|_, session| {
+                    if session.active_turn.borrow().is_none()
+                        && now.duration_since(session.last_activity_at.get()) >= max_age
+                    {
+                        evicted.push(session.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+                for session in evicted {
+                    let runtime = runtime.clone();
+                    let retirement = runtime.begin_session_retirement(&session);
+                    tokio::task::spawn_local(async move {
+                        if let Err(error) = await_retirement(retirement).await {
+                            let fields = cli_log_fields([
+                                ("sessionId", json!(session_log_id(&session.id))),
+                                ("error", json!(error.to_string())),
+                            ]);
+                            runtime
+                                .logger
+                                .error("Claude idle process retirement failed", Some(&fields));
+                        }
+                    });
+                }
+            });
+    }
+
+    pub async fn shutdown(&self) {
+        self.shutting_down.set(true);
+        self.idle_purger.stop();
+        self.control.shutdown("Claude runtime shut down");
+        let sessions: Vec<_> = self.sessions.borrow().values().cloned().collect();
+        let retirements =
+            futures::future::join_all(sessions.iter().map(|session| self.retire_session(session)))
+                .await;
+        for (session, result) in sessions.iter().zip(retirements) {
+            if let Err(error) = result {
+                let fields = cli_log_fields([
+                    ("sessionId", json!(session_log_id(&session.id))),
+                    ("error", json!(error.to_string())),
+                ]);
+                self.logger
+                    .error("Claude process shutdown failed", Some(&fields));
+            }
+        }
+        self.sessions.borrow_mut().clear();
+        self.pending_permissions.borrow_mut().clear();
+    }
+
+    async fn retire_session(&self, session: &Rc<ClaudeRunningSession>) -> ExecutorResult<()> {
+        await_retirement(self.begin_session_retirement(session)).await
+    }
+
+    fn begin_session_retirement(
+        &self,
+        session: &Rc<ClaudeRunningSession>,
+    ) -> ExecutorResult<Option<Rc<Retirement>>> {
+        if let Some(turn) = session.active_turn.take() {
+            turn.clear_abort_timer();
+            turn.finish();
+        }
+        complete_session_initialization(session);
+        self.cancel_pending_permissions(session);
+        self.retire_session_process(session)
+    }
+
+    async fn wait_for_session_retirement(
+        &self,
+        session: &Rc<ClaudeRunningSession>,
+    ) -> ExecutorResult<()> {
+        await_retirement(self.retire_session_process(session)).await
     }
 
     pub fn finish_turn(&self, session: &ClaudeRunningSession) {
@@ -1166,6 +1787,29 @@ mod tests;
 
 fn session_log_id(id: &str) -> String {
     String::from_utf16_lossy(&id.encode_utf16().take(8).collect::<Vec<_>>())
+}
+
+fn complete_session_initialization(session: &ClaudeRunningSession) {
+    if let Some(initialization) = session.initialization.take() {
+        initialization.cancel();
+    }
+}
+
+async fn await_retirement(
+    retirement: ExecutorResult<Option<Rc<Retirement>>>,
+) -> ExecutorResult<()> {
+    if let Some(retirement) = retirement? {
+        retirement.as_ref().clone().await?;
+    }
+    Ok(())
+}
+
+fn env_overrides_changed(
+    previous: Option<&IndexMap<String, String>>,
+    current: Option<&IndexMap<String, String>>,
+) -> bool {
+    previous.filter(|environment| !environment.is_empty())
+        != current.filter(|environment| !environment.is_empty())
 }
 
 fn cli_log_fields<const N: usize>(

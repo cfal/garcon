@@ -33,6 +33,7 @@ use garcon_execution::{
     control_input_delivery::ControlInputSignal,
     control_state::{StoredControlInputEntry, StoredControlReceipt},
     session_types::{AgentSteerOptions, RunAgentTurnOptions},
+    transcript_mutation::TranscriptMutationCoordinator,
     turn_identity::TurnIdentity,
     turn_terminal_settlement::{
         AgentTurnSettlementOutcome, TurnEventMetadata, WorkingDirectorySettlement,
@@ -51,6 +52,7 @@ use garcon_interface::{
     services::{AgentSteerResult, AgentSteerTarget, AgentSteerTargetKind},
 };
 use garcon_js::clock::ManualClock;
+use garcon_ledger::{clear::TranscriptClearExecution, view_mutation::TranscriptMutationExecution};
 use serde_json::{Value, json};
 use tokio::{sync::Notify, task::LocalSet};
 use tokio_util::sync::CancellationToken;
@@ -701,6 +703,58 @@ async fn query_facet_distinguishes_turn_reservations_from_other_execution_owners
             .unwrap();
             result.unwrap();
             assert!(!queries.owns_execution(CHAT));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn clear_promotion_keeps_the_queue_lock_and_releases_only_its_reservation() {
+    LocalSet::new()
+        .run_until(async {
+            use std::task::{Context, Waker};
+
+            let (coordinator, _) = fixture("receipt");
+            let adapter = TranscriptMutationCoordinator::new(coordinator.clone());
+            let first = adapter.reserve_transcript_snapshot(CHAT).unwrap();
+            assert!(adapter.reserve_transcript_snapshot(CHAT).is_err());
+            assert!(!adapter.has_pending_turn_input(CHAT).await.unwrap());
+            coordinator
+                .create_chat_queue_entry(CHAT, "queued".into(), None)
+                .await
+                .unwrap();
+            assert!(adapter.has_pending_turn_input(CHAT).await.unwrap());
+            let mut competing = coordinator
+                .with_chat_execution_control(CHAT, |_| Box::pin(std::future::ready(Ok(()))));
+            let promoted = adapter
+                .with_chat_execution_control(
+                    CHAT,
+                    Box::new(|pending| {
+                        assert!(pending);
+                        assert!(
+                            competing
+                                .as_mut()
+                                .poll(&mut Context::from_waker(Waker::noop()))
+                                .is_pending()
+                        );
+                        Ok(garcon_contract::chat_clear::ClearChatResponse {
+                            success: true,
+                            chat_id: garcon_contract::chat_id::parse_chat_id(&json!(
+                                "1767225600000000"
+                            ))
+                            .unwrap(),
+                            transcript_view_id: VIEW.into(),
+                        })
+                    }),
+                )
+                .await
+                .unwrap();
+            assert!(promoted.success);
+            competing.await.unwrap();
+            first().await.unwrap();
+            let next = adapter.reserve_transcript_snapshot(CHAT).unwrap();
+            assert!(coordinator.owns_execution(CHAT));
+            next().await.unwrap();
+            assert!(!coordinator.owns_execution(CHAT));
         })
         .await;
 }
