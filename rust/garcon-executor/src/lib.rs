@@ -6,6 +6,7 @@
 //! and `server/remote/server/`.
 
 pub mod cli;
+mod cli_gateway;
 mod executor_rpc_server;
 mod listener_secret;
 mod terminal_rpc_server;

@@ -40,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
 
+use crate::cli_gateway::CliGateway;
 use crate::executor_rpc_server::{ExecutorRpcServer, describe, not_dispatched};
 use crate::listener_secret::load_listener_secret;
 
@@ -430,6 +431,32 @@ async fn serve_leased(
         },
         EventLoopStallOptions::default(),
     );
+    let gateway = match CliGateway::start(
+        &data_dir,
+        Rc::new({
+            let worker = Rc::downgrade(&worker);
+            move || {
+                worker.upgrade().and_then(|worker| {
+                    worker
+                        .serving
+                        .borrow()
+                        .as_ref()
+                        .map(|serving| Rc::clone(&serving.connection))
+                })
+            }
+        }),
+    )
+    .await
+    {
+        Ok(gateway) => Some(gateway),
+        Err(error) => {
+            warn_frame(
+                "executor-cli-unavailable",
+                serde_json::json!({ "message": error.to_string() }),
+            );
+            None
+        }
+    };
     let _off_error = link.on_error(Rc::new(|failure| {
         if should_log_link_failure(failure) {
             warn_frame("executor-unavailable", failure);
@@ -504,6 +531,10 @@ async fn serve_leased(
     }
     .await;
     stop_monitor();
+    let gateway_cleanup = match gateway {
+        Some(gateway) => gateway.dispose().await,
+        None => Ok(()),
+    };
     link.dispose().await;
     if let Some(serving) = worker.serving.take() {
         serving.server.dispose();
@@ -513,7 +544,7 @@ async fn serve_leased(
     }
     worker.journal.dispose();
     worker.executor.take();
-    result
+    result.and(gateway_cleanup)
 }
 
 fn startup_link_error(error: SessionError) -> Box<dyn Error> {
