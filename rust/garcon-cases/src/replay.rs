@@ -114,7 +114,6 @@ struct Failure<'a> {
 struct Report<'a> {
     module: String,
     failures: Vec<Failure<'a>>,
-    order_issues: Vec<Failure<'a>>,
     stats: Stats,
 }
 
@@ -127,11 +126,10 @@ fn in_case(difference: Difference) -> Difference {
     }
 }
 
-fn check_result<'a>(
-    case: &'a RecordedCase,
+fn check_result(
+    case: &RecordedCase,
     actual: &Value,
     known_differences: &mut usize,
-    order_issues: Option<&mut Vec<Failure<'a>>>,
     exceptions: &mut OrderExceptions<'_>,
 ) -> Option<Difference> {
     let original = compare::first_difference(&case.result, actual);
@@ -147,7 +145,6 @@ fn check_result<'a>(
         if let Some(difference) = compare::first_difference_exact(&known.result, actual) {
             return Some(in_case(difference));
         }
-        *known_differences += 1;
         &known.result
     } else {
         if let Some(difference) = original {
@@ -155,15 +152,13 @@ fn check_result<'a>(
         }
         &case.result
     };
-    if let Some(issues) = order_issues
-        && let Some(difference) = compare::first_key_order_difference(expected, actual, |path| {
-            exceptions.visit(&case.function, path)
-        })
-    {
-        issues.push(Failure {
-            case,
-            difference: in_case(difference),
-        });
+    if let Some(difference) = compare::first_key_order_difference(expected, actual, |path| {
+        exceptions.visit(&case.function, path)
+    }) {
+        return Some(in_case(difference));
+    }
+    if case.known.is_some() {
+        *known_differences += 1;
     }
     None
 }
@@ -179,32 +174,20 @@ fn check<'a, F>(
     recording: &'a manifest::Recording,
     dispatch: &mut F,
     with_wildcards: usize,
-    check_key_order: bool,
     exceptions: &mut OrderExceptions<'_>,
 ) -> Report<'a>
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
 {
     let mut failures: Vec<Failure<'a>> = Vec::new();
-    let mut order_issues = Vec::new();
     let mut known_differences = 0;
     for case in &recording.cases {
         let difference = match dispatch(&case.function, &case.args) {
-            Ok(value) => check_result(
-                case,
-                &value,
-                &mut known_differences,
-                check_key_order.then_some(&mut order_issues),
-                exceptions,
-            ),
+            Ok(value) => check_result(case, &value, &mut known_differences, exceptions),
             Err(error) => match &error.outcome {
-                Outcome::Error { .. } | Outcome::Thrown(_) => check_result(
-                    case,
-                    &error.recorded(),
-                    &mut known_differences,
-                    check_key_order.then_some(&mut order_issues),
-                    exceptions,
-                ),
+                Outcome::Error { .. } | Outcome::Thrown(_) => {
+                    check_result(case, &error.recorded(), &mut known_differences, exceptions)
+                }
                 Outcome::Unhandled => Some(Difference {
                     path: "$".to_owned(),
                     kind: "unhandled",
@@ -233,7 +216,6 @@ where
             known_differences,
         },
         failures,
-        order_issues,
     }
 }
 
@@ -316,10 +298,10 @@ fn render(report: &Report<'_>) -> String {
 
 /// Calls `dispatch` for every recorded case of `cases_dir` with the case's
 /// function name and arguments, and compares what it returns with the
-/// recorded result. Prints the first difference of each failing case and the
-/// distinct differences grouped by path and kind, then panics unless every
-/// case matches. An approved `known-differences.jsonl` entry must match the
-/// port's result exactly and fails if the result matches the original again.
+/// recorded result, including object key order. Prints the first difference
+/// of each failing case and groups differences by path and kind, then panics
+/// unless every case matches. An approved `known-differences.jsonl` entry must
+/// match the port's result exactly and fails if the result matches the original again.
 /// An edited case file, an unhandled function, or a wildcard result fails.
 pub fn replay<F>(cases_dir: impl AsRef<Path>, dispatch: F) -> Stats
 where
@@ -378,38 +360,7 @@ where
         "{}: expected {expected_wildcards} wildcard cases, found {count}",
         recording.module,
     );
-    let audit_key_order =
-        std::env::var_os("GARCON_CASES_AUDIT_KEY_ORDER").is_some_and(|value| value == "1");
-    let report = check(
-        &recording,
-        &mut dispatch,
-        count,
-        audit_key_order || !exceptions.is_empty(),
-        &mut exceptions,
-    );
-    if audit_key_order {
-        let directory = cases_dir.as_ref();
-        let directory = directory
-            .canonicalize()
-            .unwrap_or_else(|_| directory.to_owned());
-        let issues: Vec<_> = report
-            .order_issues
-            .iter()
-            .map(|issue| {
-                json!({
-                    "case": issue.case.id, "path": issue.difference.path,
-                    "expected": issue.difference.expected, "actual": issue.difference.actual,
-                })
-            })
-            .collect();
-        println!(
-            "KEY_ORDER_AUDIT {}",
-            json!({
-                "directory": directory.to_string_lossy(), "module": report.module, "cases": report.stats.total,
-                "structuralFailures": report.failures.len(), "orderOnly": issues,
-            })
-        );
-    }
+    let report = check(&recording, &mut dispatch, count, &mut exceptions);
     let unused = exceptions.report();
     assert!(
         unused.is_empty(),
@@ -438,13 +389,12 @@ mod tests {
             recording,
             dispatch,
             wildcard_cases(recording).count(),
-            false,
             &mut OrderExceptions::new(&[]),
         )
     }
 
     #[test]
-    fn audit_counts_only_cases_that_would_otherwise_pass() {
+    fn replay_reports_key_order_after_checking_values() {
         let (_dir, recording) = recording(&[
             ("orderOnly", json!([]), json!({"z": 1, "a": 2})),
             ("valueAndOrder", json!([]), json!({"z": 1, "a": 2})),
@@ -455,14 +405,26 @@ mod tests {
                 Ok(json!({"a": 2, "z": if function == "orderOnly" { 1 } else { 7 }}))
             },
             0,
-            true,
             &mut OrderExceptions::new(&[]),
         );
-        assert_eq!(report.stats.passed, 1);
-        assert_eq!(report.failures[0].difference.kind, "value");
-        assert_eq!(report.order_issues.len(), 1);
-        assert_eq!(report.order_issues[0].case.function, "orderOnly");
-        assert_eq!(report.order_issues[0].difference.path, "$.result");
+        assert_eq!(report.stats.passed, 0);
+        assert_eq!(report.failures[0].case.function, "orderOnly");
+        assert_eq!(report.failures[0].difference.kind, "key-order");
+        assert_eq!(report.failures[0].difference.path, "$.result");
+        assert_eq!(report.failures[1].difference.kind, "value");
+    }
+
+    #[test]
+    #[should_panic(expected = "FAIL parse#0 at $.result.items[0] (key-order)")]
+    fn plain_replay_rejects_out_of_order_integer_keys_in_nested_serialized_results() {
+        let (dir, _) = recording(&[(
+            "parse",
+            json!([]),
+            json!({"items": [{"2": 2, "11": 11, "a": 0}]}),
+        )]);
+        replay(dir.path(), |_, _| {
+            Ok(json!({"items": [{"11": 11, "2": 2, "a": 0}]}))
+        });
     }
 
     #[test]
@@ -515,15 +477,15 @@ mod tests {
                 })
             },
             0,
-            true,
             &mut exceptions,
         );
-        assert_eq!(report.failures.len(), 1);
-        assert_eq!(report.failures[0].difference.path, "$.result.stays");
+        assert_eq!(report.failures.len(), 3);
+        assert_eq!(report.failures[2].difference.path, "$.result.stays");
         assert_eq!(
             report
-                .order_issues
+                .failures
                 .iter()
+                .filter(|issue| issue.difference.kind == "key-order")
                 .map(|issue| issue.difference.path.as_str())
                 .collect::<Vec<_>>(),
             ["$.result", "$.result.connection",]
@@ -535,7 +497,7 @@ mod tests {
     #[should_panic(
         expected = "Unused result key-order exceptions: parse at $.result.removed (Passed through.)"
     )]
-    fn fails_an_unused_order_exception_even_without_auditing() {
+    fn fails_an_unused_order_exception() {
         let (dir, _) = recording(&[("parse", json!([]), json!({"renamed": {"x": 1}}))]);
         replay_with_options(
             dir.path(),
@@ -718,6 +680,21 @@ mod tests {
             Err(CaseError::unhandled(fn_name))
         });
         assert_eq!(absent.failures[0].difference.kind, "unhandled");
+    }
+
+    #[test]
+    fn an_approved_result_in_the_wrong_order_does_not_count_as_a_match() {
+        let (directory, _) = recording(&[("f", json!([]), json!({"original": true}))]);
+        let recording = approval(
+            directory.path(),
+            &json!({"fn": "f", "args": [], "result": {"z": 1, "a": 2}, "reason": "synthetic fixture"}),
+        );
+        let report = check(&recording, &mut |_, _| Ok(json!({"a": 2, "z": 1})));
+        assert_eq!(
+            (report.stats.passed, report.stats.known_differences),
+            (0, 0)
+        );
+        assert_eq!(report.failures[0].difference.kind, "key-order");
     }
 
     #[test]
