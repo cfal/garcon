@@ -1,0 +1,11 @@
+{"fn":"hasLeadingSlashCommand","args":["\ufeff\u00a0/plan\u00a0now"]}
+{"fn":"hasLeadingSlashCommand","args":["/folder/file"]}
+{"fn":"hasLeadingSlashCommand","args":["/a\u0085"]}
+{"fn":"hasLeadingSlashCommand","args":["/a\u2028"]}
+{"fn":"isScheduledPromptsInvalidationReason","args":["log-appended"]}
+{"fn":"isScheduledPromptsInvalidationReason","args":["LOG-APPENDED"]}
+{"fn":"scheduledPromptSelectionMatches","args":[{"agentId":"codex","agentOwnershipEpoch":"e1","model":null},{"agentId":"codex","agentOwnershipEpoch":"e1","model":null}]}
+{"fn":"scheduledPromptSelectionMatches","args":[{"agentId":"codex","agentOwnershipEpoch":"e1","model":null},{"agentId":"codex","agentOwnershipEpoch":"e2","model":null}]}
+{"fn":"normalizeScheduledPromptRunLogEntry","args":[{"at":"2026-01-01T00:00:00+00:00","scheduledPromptId":" schedule ","promptLabel":"","outcome":"queued","chatId":" ","message":"Synthetic"}]}
+{"fn":"normalizeScheduledPromptRunLogEntry","args":[{"at":"2026-01-01T00:00:00Z","scheduledPromptId":null,"promptLabel":"unexpected","outcome":"failed","chatId":null,"message":"Synthetic"}]}
+{"fn":"normalizeScheduledPromptRunLogEntry","args":[{"at":"2026-01-01T00:00:00Z","scheduledPromptId":null,"promptLabel":null,"outcome":"failed","chatId":null,"message":"Synthetic"}]}
