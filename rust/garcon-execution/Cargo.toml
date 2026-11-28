@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64 = "0.23"
 futures.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
