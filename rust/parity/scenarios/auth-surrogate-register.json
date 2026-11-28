@@ -1,0 +1,27 @@
+{
+  "name": "auth-surrogate-register",
+  "description": "An overwritten ill-formed username does not poison the final well-formed username during registration.",
+  "server": { "account": "none" },
+  "steps": [
+    {
+      "name": "register-final-replacement-character",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "auth": "none",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"username\":\"bad\\ud800\",\"username\":\"registered\\ufffd\",\"password\":\"fixture-password\"}"
+      }
+    },
+    {
+      "name": "login-final-username",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "auth": "none",
+        "json": { "username": "registered\ufffd", "password": "fixture-password" }
+      }
+    }
+  ],
+  "traps": false
+}
