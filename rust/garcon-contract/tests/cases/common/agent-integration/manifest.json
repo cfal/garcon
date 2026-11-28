@@ -1,0 +1,17 @@
+{
+  "module": "common/agent-integration.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/agent-integration.jsonl",
+  "notCaptured": [
+    {
+      "fn": "parseAgentSettingsById",
+      "where": "result",
+      "path": "$.result",
+      "type": "a Object instance",
+      "count": 1,
+      "at": null
+    }
+  ],
+  "cases": 135,
+  "sha256": "651c01f0bfdc52aa7e7b4d400422606036a19484fa7e9e432f6e1d37f6c5b7a4"
+}

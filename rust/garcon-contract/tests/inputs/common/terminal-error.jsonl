@@ -1,0 +1,24 @@
+{"fn":"new TerminalError","args":["terminal-not-found","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-limit","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-validation","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-takeover-required","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-not-attached","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-process-exited","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-replay-sequence","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-backpressure","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-auth-expired","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-unsupported","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-unavailable","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-runtime-changed","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-outcome-unknown","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-internal","Synthetic terminal failure."]}
+{"fn":"new TerminalError","args":["terminal-backpressure","Synthetic é中😀 failure.",429]}
+{"fn":"new TerminalError","args":["terminal-takeover-required","Synthetic é中😀 failure.",409]}
+{"fn":"new TerminalError","args":["terminal-not-attached","Synthetic é中😀 failure.",409]}
+{"fn":"new TerminalError","args":["terminal-internal","Synthetic é中😀 failure.",502]}
+{"fn":"new TerminalError","args":["terminal-outcome-unknown","Synthetic é中😀 failure.",502]}
+{"fn":"new TerminalError","args":["terminal-unsupported","Synthetic é中😀 failure.",501]}
+{"fn":"new TerminalError","args":["terminal-unavailable","Synthetic é中😀 failure.",503]}
+{"fn":"new TerminalError","args":["terminal-validation","Synthetic é中😀 failure.",400]}
+{"fn":"new TerminalError","args":["terminal-validation",""]}
+{"fn":"new TerminalError","args":["terminal-validation","Invalid terminal RPC request.",{"$":"undefined"}]}

@@ -1,0 +1,5604 @@
+{
+  "scenario": "projects",
+  "cases": [
+    {
+      "name": "resolve-project-root",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "effectiveProjectKey": "{{projectDir}}",
+              "kind": "available"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "effectiveProjectKey": "{{projectDir}}",
+              "kind": "available"
+            },
+            "target": {
+              "executorId": "local",
+              "kind": "path",
+              "projectPath": "."
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/missing/nested"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{workspaceDir}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": ".."
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.."
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Executor is unavailable",
+            "errorCode": "EXECUTOR_UNAVAILABLE",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "chatId must be a canonical Garcon chat ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-wrong-method",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/projects/resolve?projectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "168",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "effectiveProjectKey": "{{projectDir}}",
+              "kind": "available"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/../resolve?projectPath={{projectDir}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/../resolve?projectPath={{projectDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/../auth.json"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/%2e%2e%2fauth.json"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/ü-雪-😀"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-project-root~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "effectiveProjectKey": "{{projectDir}}",
+              "kind": "available"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath={{projectDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "157",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local/../resolve?projectPath=.&executorId=local"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-root-on-local~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "effectiveProjectKey": "{{projectDir}}",
+              "kind": "available"
+            },
+            "target": {
+              "executorId": "local",
+              "kind": "path",
+              "projectPath": "."
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.&executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "148",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/missing/nested/"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/missing/nested/../nested"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested/../nested"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/missing/nested/../auth.json"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested/%2e%2e%2fauth.json"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/missing/nested/ü-雪-😀"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-missing-project~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{projectDir}}/missing/nested"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "138",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{workspaceDir}}/"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{workspaceDir}}/../resolve?projectPath={{workspaceDir}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}/../resolve?projectPath={{workspaceDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{workspaceDir}}/../auth.json"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}/%2e%2e%2fauth.json"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{workspaceDir}}/ü-雪-😀"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-outside-project-base~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "{{workspaceDir}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath={{workspaceDir}}"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "105",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.."
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "../"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=../"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "../../resolve?projectPath=.."
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=../../resolve?projectPath=.."
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "../../auth.json"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=../%2e%2e%2fauth.json"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "../ü-雪-😀"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=../%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-relative-path-outside-base~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": ".."
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.."
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve/../resolve"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-no-target~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "/"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "/../resolve?projectPath="
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=/../resolve?projectPath="
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "/../auth.json"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=/%2e%2e%2fauth.json"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "outside-base"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "/ü-雪-😀"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-empty~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "  /"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "  /../resolve?projectPath=  "
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20/../resolve?projectPath=%20%20"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "  /../auth.json"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20/%2e%2e%2fauth.json"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "resolution": {
+              "kind": "unavailable",
+              "reason": "not-found"
+            },
+            "target": {
+              "kind": "path",
+              "projectPath": "  /ü-雪-😀"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=%20%20/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-blank~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=%20%20"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing/../resolve?projectPath=.&projectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-duplicated~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.&projectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1/../resolve?projectPath=.&extra=1"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&extra=1/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-path-unexpected-query-field~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.&extra=1"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "97",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote/../resolve?projectPath=.&executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-invalid~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.&executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "97",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=/../resolve?projectPath=.&executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-empty~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.&executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "97",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local/../resolve?projectPath=.&executorId=local&executorId=local"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-duplicated~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "103",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}/../resolve?projectPath=.&executorId={{uuid}}"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid executor ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?projectPath=.&executorId={{uuid}}/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-executor-unavailable~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Executor is unavailable",
+            "errorCode": "EXECUTOR_UNAVAILABLE",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?projectPath=.&executorId={{uuid}}"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=./"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=./../resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=./%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=./%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-both-chat-and-path-targets~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=./"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=./../resolve?expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=./%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?expectedProjectPath=./%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-missing~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=./"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=./../resolve?chatId=&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=./%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=./%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-empty~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "119",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "chatId must be a canonical Garcon chat ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=./"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=./../resolve?chatId=not-a-chat&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "chatId must be a canonical Garcon chat ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=./%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "chatId must be a canonical Garcon chat ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=./%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-invalid~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "chatId must be a canonical Garcon chat ID",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=./"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=./../resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=./%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=./%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-id-duplicated~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001/../resolve?chatId=1000000000000001"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-missing~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=1000000000000001"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20/../resolve?chatId=1000000000000001&expectedProjectPath=%20"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-blank~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "140",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing/../resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-expected-path-duplicated~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=."
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=./"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Provide either chatId with expectedProjectPath, or projectPath",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=./../resolve?chatId=1000000000000001&expectedProjectPath=."
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=./%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=./%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-chat-not-found~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Session not found",
+            "errorCode": "SESSION_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-wrong-method~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/projects/resolve?projectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-wrong-method~forged-token",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/projects/resolve?projectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-wrong-method~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/projects/resolve?projectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "resolve-wrong-method~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/projects/resolve?projectPath=."
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}

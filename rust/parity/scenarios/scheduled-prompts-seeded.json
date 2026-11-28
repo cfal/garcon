@@ -11,21 +11,21 @@
   },
   "steps": [
     {
-      "name": "promptsSeeded",
+      "name": "prompts-seeded",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "promptsSeededAgain",
+      "name": "prompts-seeded-again",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "enableUnknownId",
+      "name": "enable-unknown-id",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -37,7 +37,7 @@
       }
     },
     {
-      "name": "enableStaleRevision",
+      "name": "enable-stale-revision-checked-after-run-time",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -49,7 +49,7 @@
       }
     },
     {
-      "name": "enableIgnoredRecord",
+      "name": "enable-ignored-record",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -61,7 +61,7 @@
       }
     },
     {
-      "name": "enableMissedOneOff",
+      "name": "enable-missed-one-off",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -73,7 +73,7 @@
       }
     },
     {
-      "name": "enableDisabledRecurring",
+      "name": "enable-disabled-recurring",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -85,7 +85,7 @@
       }
     },
     {
-      "name": "enableThenLeaveUnchanged",
+      "name": "enable-then-leave-unchanged",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts/enabled",
@@ -97,14 +97,14 @@
       }
     },
     {
-      "name": "promptsAfterEnable",
+      "name": "prompts-after-enable",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"
       }
     },
     {
-      "name": "updateAdvancedRecurring",
+      "name": "update-advanced-recurring",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -140,7 +140,7 @@
       }
     },
     {
-      "name": "updateRemovedOneOff",
+      "name": "update-removed-one-off",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -174,7 +174,7 @@
       }
     },
     {
-      "name": "updateFutureToRunNextYear",
+      "name": "update-future-to-run-next-year",
       "http": {
         "method": "PUT",
         "path": "/api/v1/scheduled-prompts",
@@ -209,7 +209,7 @@
       }
     },
     {
-      "name": "removeDisabledMissedOneOff",
+      "name": "remove-disabled-missed-one-off",
       "http": {
         "method": "DELETE",
         "path": "/api/v1/scheduled-prompts",
@@ -236,7 +236,7 @@
       }
     },
     {
-      "name": "promptsAtEnd",
+      "name": "prompts-at-end",
       "http": {
         "method": "GET",
         "path": "/api/v1/scheduled-prompts"

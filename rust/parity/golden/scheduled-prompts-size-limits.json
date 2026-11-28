@@ -2,7 +2,7 @@
   "scenario": "scheduled-prompts-size-limits",
   "cases": [
     {
-      "name": "createPrompt32001Rejected",
+      "name": "create-prompt-32001-rejected",
       "expected": {
         "body": {
           "kind": "json",
@@ -28,7 +28,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingPastLimitRejected",
+      "name": "create-prompt-expanding-past-limit-rejected",
       "expected": {
         "body": {
           "kind": "json",
@@ -54,7 +54,7 @@
       "noise": []
     },
     {
-      "name": "createName121CodePointsRejected",
+      "name": "create-name-121-code-points-rejected",
       "expected": {
         "body": {
           "kind": "json",
@@ -80,7 +80,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4097BytesRejected",
+      "name": "create-title-template-4097-bytes-rejected",
       "expected": {
         "body": {
           "kind": "json",
@@ -106,7 +106,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4096BytesAccepted",
+      "name": "create-title-template-4096-bytes-accepted",
       "expected": {
         "body": {
           "kind": "json",
@@ -191,7 +191,7 @@
       "noise": []
     },
     {
-      "name": "createName120CodePointsAccepted",
+      "name": "create-name-120-code-points-accepted",
       "expected": {
         "body": {
           "kind": "json",
@@ -304,7 +304,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingToLimitAccepted",
+      "name": "create-prompt-expanding-to-limit-accepted",
       "expected": {
         "body": {
           "kind": "text-digest",
@@ -326,7 +326,7 @@
       "noise": []
     },
     {
-      "name": "createPromptAtLimitAccepted",
+      "name": "create-prompt-at-limit-accepted",
       "expected": {
         "body": {
           "kind": "text-digest",
@@ -348,7 +348,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt",
+      "name": "prompts-with-large-prompt",
       "expected": {
         "body": {
           "kind": "text-digest",
@@ -370,7 +370,7 @@
       "noise": []
     },
     {
-      "name": "renderExpandedToLimit",
+      "name": "render-expanded-to-limit",
       "expected": {
         "body": {
           "kind": "json",
@@ -395,7 +395,7 @@
       "noise": []
     },
     {
-      "name": "renderPromptAtLimit",
+      "name": "render-prompt-at-limit",
       "expected": {
         "body": {
           "kind": "json",
@@ -420,7 +420,7 @@
       "noise": []
     },
     {
-      "name": "createPrompt32001Rejected~unauthenticated",
+      "name": "create-prompt-32001-rejected~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -446,7 +446,7 @@
       "noise": []
     },
     {
-      "name": "createPrompt32001Rejected~forged-token",
+      "name": "create-prompt-32001-rejected~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -472,7 +472,7 @@
       "noise": []
     },
     {
-      "name": "createPrompt32001Rejected~malformed-json",
+      "name": "create-prompt-32001-rejected~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -498,7 +498,7 @@
       "noise": []
     },
     {
-      "name": "createPrompt32001Rejected~non-ascii-json",
+      "name": "create-prompt-32001-rejected~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -524,7 +524,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingPastLimitRejected~unauthenticated",
+      "name": "create-prompt-expanding-past-limit-rejected~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -550,7 +550,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingPastLimitRejected~forged-token",
+      "name": "create-prompt-expanding-past-limit-rejected~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -576,7 +576,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingPastLimitRejected~malformed-json",
+      "name": "create-prompt-expanding-past-limit-rejected~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -602,7 +602,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingPastLimitRejected~non-ascii-json",
+      "name": "create-prompt-expanding-past-limit-rejected~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -628,7 +628,7 @@
       "noise": []
     },
     {
-      "name": "createName121CodePointsRejected~unauthenticated",
+      "name": "create-name-121-code-points-rejected~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -654,7 +654,7 @@
       "noise": []
     },
     {
-      "name": "createName121CodePointsRejected~forged-token",
+      "name": "create-name-121-code-points-rejected~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -680,7 +680,7 @@
       "noise": []
     },
     {
-      "name": "createName121CodePointsRejected~malformed-json",
+      "name": "create-name-121-code-points-rejected~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -706,7 +706,7 @@
       "noise": []
     },
     {
-      "name": "createName121CodePointsRejected~non-ascii-json",
+      "name": "create-name-121-code-points-rejected~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -732,7 +732,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4097BytesRejected~unauthenticated",
+      "name": "create-title-template-4097-bytes-rejected~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -758,7 +758,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4097BytesRejected~forged-token",
+      "name": "create-title-template-4097-bytes-rejected~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -784,7 +784,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4097BytesRejected~malformed-json",
+      "name": "create-title-template-4097-bytes-rejected~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -810,7 +810,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4097BytesRejected~non-ascii-json",
+      "name": "create-title-template-4097-bytes-rejected~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -836,7 +836,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4096BytesAccepted~unauthenticated",
+      "name": "create-title-template-4096-bytes-accepted~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -862,7 +862,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4096BytesAccepted~forged-token",
+      "name": "create-title-template-4096-bytes-accepted~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -888,7 +888,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4096BytesAccepted~malformed-json",
+      "name": "create-title-template-4096-bytes-accepted~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -914,7 +914,7 @@
       "noise": []
     },
     {
-      "name": "createTitleTemplate4096BytesAccepted~non-ascii-json",
+      "name": "create-title-template-4096-bytes-accepted~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -940,7 +940,7 @@
       "noise": []
     },
     {
-      "name": "createName120CodePointsAccepted~unauthenticated",
+      "name": "create-name-120-code-points-accepted~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -966,7 +966,7 @@
       "noise": []
     },
     {
-      "name": "createName120CodePointsAccepted~forged-token",
+      "name": "create-name-120-code-points-accepted~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -992,7 +992,7 @@
       "noise": []
     },
     {
-      "name": "createName120CodePointsAccepted~malformed-json",
+      "name": "create-name-120-code-points-accepted~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1018,7 +1018,7 @@
       "noise": []
     },
     {
-      "name": "createName120CodePointsAccepted~non-ascii-json",
+      "name": "create-name-120-code-points-accepted~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1044,7 +1044,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingToLimitAccepted~unauthenticated",
+      "name": "create-prompt-expanding-to-limit-accepted~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -1070,7 +1070,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingToLimitAccepted~forged-token",
+      "name": "create-prompt-expanding-to-limit-accepted~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -1096,7 +1096,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingToLimitAccepted~malformed-json",
+      "name": "create-prompt-expanding-to-limit-accepted~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1122,7 +1122,7 @@
       "noise": []
     },
     {
-      "name": "createPromptExpandingToLimitAccepted~non-ascii-json",
+      "name": "create-prompt-expanding-to-limit-accepted~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1148,7 +1148,7 @@
       "noise": []
     },
     {
-      "name": "createPromptAtLimitAccepted~unauthenticated",
+      "name": "create-prompt-at-limit-accepted~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -1174,7 +1174,7 @@
       "noise": []
     },
     {
-      "name": "createPromptAtLimitAccepted~forged-token",
+      "name": "create-prompt-at-limit-accepted~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -1200,7 +1200,7 @@
       "noise": []
     },
     {
-      "name": "createPromptAtLimitAccepted~malformed-json",
+      "name": "create-prompt-at-limit-accepted~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1226,7 +1226,7 @@
       "noise": []
     },
     {
-      "name": "createPromptAtLimitAccepted~non-ascii-json",
+      "name": "create-prompt-at-limit-accepted~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1252,7 +1252,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~unauthenticated",
+      "name": "prompts-with-large-prompt~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -1278,7 +1278,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~forged-token",
+      "name": "prompts-with-large-prompt~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -1304,7 +1304,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~head",
+      "name": "prompts-with-large-prompt~head",
       "expected": {
         "body": {
           "kind": "empty"
@@ -1323,7 +1323,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~trailing-slash",
+      "name": "prompts-with-large-prompt~trailing-slash",
       "expected": {
         "body": {
           "kind": "text",
@@ -1343,7 +1343,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~dot-segment",
+      "name": "prompts-with-large-prompt~dot-segment",
       "expected": {
         "body": {
           "kind": "text-digest",
@@ -1365,7 +1365,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~encoded-traversal",
+      "name": "prompts-with-large-prompt~encoded-traversal",
       "expected": {
         "body": {
           "kind": "text",
@@ -1385,7 +1385,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~non-ascii",
+      "name": "prompts-with-large-prompt~non-ascii",
       "expected": {
         "body": {
           "kind": "text",
@@ -1405,7 +1405,7 @@
       "noise": []
     },
     {
-      "name": "promptsWithLargePrompt~double-slash",
+      "name": "prompts-with-large-prompt~double-slash",
       "expected": {
         "body": {
           "kind": "text-digest",
@@ -1427,7 +1427,7 @@
       "noise": []
     },
     {
-      "name": "renderExpandedToLimit~unauthenticated",
+      "name": "render-expanded-to-limit~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -1453,7 +1453,7 @@
       "noise": []
     },
     {
-      "name": "renderExpandedToLimit~forged-token",
+      "name": "render-expanded-to-limit~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -1479,7 +1479,7 @@
       "noise": []
     },
     {
-      "name": "renderExpandedToLimit~malformed-json",
+      "name": "render-expanded-to-limit~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1505,7 +1505,7 @@
       "noise": []
     },
     {
-      "name": "renderExpandedToLimit~non-ascii-json",
+      "name": "render-expanded-to-limit~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1531,7 +1531,7 @@
       "noise": []
     },
     {
-      "name": "renderPromptAtLimit~unauthenticated",
+      "name": "render-prompt-at-limit~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -1557,7 +1557,7 @@
       "noise": []
     },
     {
-      "name": "renderPromptAtLimit~forged-token",
+      "name": "render-prompt-at-limit~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -1583,7 +1583,7 @@
       "noise": []
     },
     {
-      "name": "renderPromptAtLimit~malformed-json",
+      "name": "render-prompt-at-limit~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -1609,7 +1609,7 @@
       "noise": []
     },
     {
-      "name": "renderPromptAtLimit~non-ascii-json",
+      "name": "render-prompt-at-limit~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",

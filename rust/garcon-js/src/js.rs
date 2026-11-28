@@ -5,7 +5,7 @@
 use std::cmp::Ordering;
 use std::fmt;
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A JavaScript `number` that can be fractional and reaches JSON output.
 ///
@@ -23,6 +23,12 @@ pub struct Number(pub f64);
 impl Number {
     pub fn to_js_string(self) -> String {
         number_to_string(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Number {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Number, D::Error> {
+        f64::deserialize(deserializer).map(Number)
     }
 }
 
@@ -338,6 +344,32 @@ mod tests {
             serde_json::to_value(Number(1e21)).unwrap(),
             serde_json::json!(1e21)
         );
+    }
+
+    #[test]
+    fn reads_a_json_number_as_a_javascript_double() {
+        #[derive(Debug, PartialEq, Deserialize, Serialize)]
+        struct Settings {
+            min: Number,
+            step: Number,
+        }
+        let settings: Settings = crate::json::from_str(r#"{"min":1,"step":0.5}"#).unwrap();
+        assert_eq!(
+            settings,
+            Settings {
+                min: Number(1.0),
+                step: Number(0.5)
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&settings).unwrap(),
+            r#"{"min":1,"step":0.5}"#
+        );
+        // An integer beyond 2^53 rounds as `JSON.parse` rounds it.
+        let big: Number = crate::json::from_str("9007199254740993").unwrap();
+        assert_eq!(big, Number(9007199254740992.0));
+        assert!(crate::json::from_str::<Number>("\"1\"").is_err());
+        assert!(crate::json::from_str::<Number>("null").is_err());
     }
 
     #[derive(Serialize)]

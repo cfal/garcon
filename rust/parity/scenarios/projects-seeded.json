@@ -1,0 +1,28 @@
+{
+  "name": "projects-seeded",
+  "description": "Resolve seeded directories and chat targets, distinguishing stale bindings from missing paths and unavailable executors.",
+  "server": {
+    "files": {
+      "workspace/workspace-version.json": "{\"version\":10}",
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/chats.json": "{\n  \"version\": 6,\n  \"sessions\": {\n    \"1000000000000001\": {\n      \"agentId\": \"shell\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"catalog-project-owner-1\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"nested\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    },\n    \"1000000000000002\": {\n      \"agentId\": \"shell\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"catalog-project-owner-2\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"nested\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null,\n      \"executorId\": \"33333333-3333-4333-8333-333333333333\"\n    },\n    \"1000000000000003\": {\n      \"agentId\": \"shell\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"catalog-project-owner-3\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"deleted-directory\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    }\n  }\n}",
+      "project/nested/README.txt": "This is a file, not a project directory.\n",
+      "project/nested/\u00fc \u96ea/fixture.txt": "This fixture creates a directory whose name is not ASCII.\n"
+    }
+  },
+  "traps": true,
+  "steps": [
+    { "name": "resolve-seeded-directory", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/nested" } },
+    { "name": "resolve-path-with-dot-segments", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=nested/../nested/." } },
+    { "name": "resolve-directory-with-non-ascii-name", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=nested/%C3%BC%20%E9%9B%AA" } },
+    { "name": "resolve-file-is-not-directory", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=nested/README.txt" } },
+    { "name": "resolve-child-of-file-is-not-found", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=nested/README.txt/child" } },
+    { "name": "resolve-chat-project", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=nested" } },
+    { "name": "resolve-chat-project-with-explicit-local", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=nested&executorId=local" } },
+    { "name": "resolve-chat-stale-path-even-if-canonical-path-is-equal", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath={{projectDir}}/nested" } },
+    { "name": "resolve-chat-stale-executor", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=nested&executorId=33333333-3333-4333-8333-333333333333" } },
+    { "name": "resolve-remote-chat-does-not-default-to-local", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000002&expectedProjectPath=nested" } },
+    { "name": "resolve-remote-chat-executor-unavailable", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000002&expectedProjectPath=nested&executorId=33333333-3333-4333-8333-333333333333" } },
+    { "name": "resolve-chat-path-no-longer-exists", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000003&expectedProjectPath=deleted-directory" } }
+  ]
+}

@@ -797,7 +797,7 @@
       "noise": []
     },
     {
-      "name": "create-omega-ignoring-extra-fields",
+      "name": "create-omega",
       "expected": {
         "body": {
           "kind": "json",
@@ -3191,8 +3191,8 @@
           "kind": "json",
           "value": {
             "contextExecutorId": "local",
-            "contextProjectPath": "{{projectDir}}/C:\\",
-            "expandedText": "{{projectDir}}/C:\\{{today}}",
+            "contextProjectPath": "{{projectDir}}",
+            "expandedText": "{{projectDir}}{{today}}",
             "shortName": "join-path",
             "source": "snippet",
             "sourceId": "{{uuid}}",
@@ -3211,6 +3211,32 @@
           "path": "/api/v1/snippets/expand"
         },
         "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-new-chat-project-path-with-a-backslash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Project path not found: {{projectDir}}/C:\\",
+            "errorCode": "SNIPPET_PROJECT_PATH_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 404
       },
       "noise": []
     },
@@ -3599,13 +3625,43 @@
       "noise": []
     },
     {
-      "name": "expand-scheduled-path-ending-in-backslash",
+      "name": "expand-scheduled-join-path",
       "expected": {
         "body": {
           "kind": "json",
           "value": {
-            "error": "Scheduled snippet replacements must not create or escape adjacent template variables. Add a separator.",
-            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "contextExecutorId": "local",
+            "contextProjectPath": "{{projectDir}}",
+            "expandedText": "{{projectDir}}{{current_date}}",
+            "shortName": "join-path",
+            "source": "snippet",
+            "sourceId": "{{uuid}}",
+            "sourceUpdatedAt": "{{timestamp}}",
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-scheduled-project-path-with-a-backslash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Project path not found: {{projectDir}}/C:\\",
+            "errorCode": "SNIPPET_PROJECT_PATH_NOT_FOUND",
             "retryable": false,
             "success": false
           }
@@ -3620,7 +3676,7 @@
           "method": "POST",
           "path": "/api/v1/snippets/expand"
         },
-        "status": 422
+        "status": 404
       },
       "noise": []
     },
@@ -3968,6 +4024,448 @@
       "noise": []
     },
     {
+      "name": "update-created-omega",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "revision": 12,
+              "snippets": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "alpha-default",
+                  "id": "{{uuid}}",
+                  "shortName": "alpha",
+                  "template": "Alpha {{arguments}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-path",
+                  "template": "{{project_path}}{{current_date}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-prefix",
+                  "template": "{{chat_id{{arguments}}}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-suffix",
+                  "template": "{{arguments}}{{chat_id}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-tail",
+                  "template": "{{arguments}}chat_id}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-wrap",
+                  "template": "{{{{arguments}}}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "literal-path",
+                  "template": "Literal \\{{project_path}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "omega-default",
+                  "id": "{{create-omega.body.snapshot.snippets[0].id}}",
+                  "shortName": "omega",
+                  "template": "Omega {{arguments}} edited",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "parity",
+                  "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "runtime-tokens",
+                  "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "zeta-default",
+                  "id": "{{uuid}}",
+                  "shortName": "zeta",
+                  "template": "Zeta {{arguments}} {{arguments}}",
+                  "updatedAt": "{{timestamp}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 12,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "alpha-default",
+                "id": "{{uuid}}",
+                "shortName": "alpha",
+                "template": "Alpha {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-path",
+                "template": "{{project_path}}{{current_date}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-prefix",
+                "template": "{{chat_id{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-suffix",
+                "template": "{{arguments}}{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-tail",
+                "template": "{{arguments}}chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-wrap",
+                "template": "{{{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "literal-path",
+                "template": "Literal \\{{project_path}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "omega-default",
+                "id": "{{create-omega.body.snapshot.snippets[0].id}}",
+                "shortName": "omega",
+                "template": "Omega {{arguments}} edited",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "parity",
+                "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "runtime-tokens",
+                "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "zeta-default",
+                "id": "{{uuid}}",
+                "shortName": "zeta",
+                "template": "Zeta {{arguments}} {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-omega",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "revision": 13,
+              "snippets": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "alpha-default",
+                  "id": "{{uuid}}",
+                  "shortName": "alpha",
+                  "template": "Alpha {{arguments}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-path",
+                  "template": "{{project_path}}{{current_date}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-prefix",
+                  "template": "{{chat_id{{arguments}}}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-suffix",
+                  "template": "{{arguments}}{{chat_id}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-tail",
+                  "template": "{{arguments}}chat_id}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "join-wrap",
+                  "template": "{{{{arguments}}}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "literal-path",
+                  "template": "Literal \\{{project_path}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "parity",
+                  "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "",
+                  "id": "{{uuid}}",
+                  "shortName": "runtime-tokens",
+                  "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "defaultArguments": "zeta-default",
+                  "id": "{{uuid}}",
+                  "shortName": "zeta",
+                  "template": "Zeta {{arguments}} {{arguments}}",
+                  "updatedAt": "{{timestamp}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 13,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "alpha-default",
+                "id": "{{uuid}}",
+                "shortName": "alpha",
+                "template": "Alpha {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-path",
+                "template": "{{project_path}}{{current_date}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-prefix",
+                "template": "{{chat_id{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-suffix",
+                "template": "{{arguments}}{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-tail",
+                "template": "{{arguments}}chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-wrap",
+                "template": "{{{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "literal-path",
+                "template": "Literal \\{{project_path}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "parity",
+                "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "runtime-tokens",
+                "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "zeta-default",
+                "id": "{{uuid}}",
+                "shortName": "zeta",
+                "template": "Zeta {{arguments}} {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
       "name": "expand-wrong-method",
       "expected": {
         "body": {
@@ -4066,7 +4564,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "2490",
+          "content-length": "2278",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -4104,7 +4602,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -4160,14 +4658,6 @@
                 "id": "{{uuid}}",
                 "shortName": "literal-path",
                 "template": "Literal \\{{project_path}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
                 "updatedAt": "{{timestamp}}"
               },
               {
@@ -4257,7 +4747,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -4313,14 +4803,6 @@
                 "id": "{{uuid}}",
                 "shortName": "literal-path",
                 "template": "Literal \\{{project_path}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
                 "updatedAt": "{{timestamp}}"
               },
               {
@@ -7335,7 +7817,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "2490",
+          "content-length": "2278",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -7373,7 +7855,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -7429,14 +7911,6 @@
                 "id": "{{uuid}}",
                 "shortName": "literal-path",
                 "template": "Literal \\{{project_path}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
                 "updatedAt": "{{timestamp}}"
               },
               {
@@ -7526,7 +8000,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -7586,14 +8060,6 @@
               },
               {
                 "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
                 "defaultArguments": "",
                 "id": "{{uuid}}",
                 "shortName": "parity",
@@ -7634,7 +8100,7 @@
       "noise": []
     },
     {
-      "name": "create-omega-ignoring-extra-fields~unauthenticated",
+      "name": "create-omega~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -7660,7 +8126,7 @@
       "noise": []
     },
     {
-      "name": "create-omega-ignoring-extra-fields~forged-token",
+      "name": "create-omega~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -7686,7 +8152,7 @@
       "noise": []
     },
     {
-      "name": "create-omega-ignoring-extra-fields~malformed-json",
+      "name": "create-omega~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -7712,7 +8178,7 @@
       "noise": []
     },
     {
-      "name": "create-omega-ignoring-extra-fields~non-ascii-json",
+      "name": "create-omega~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -7796,7 +8262,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "2490",
+          "content-length": "2278",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -7834,7 +8300,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -7890,14 +8356,6 @@
                 "id": "{{uuid}}",
                 "shortName": "literal-path",
                 "template": "Literal \\{{project_path}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
                 "updatedAt": "{{timestamp}}"
               },
               {
@@ -7987,7 +8445,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -8043,14 +8501,6 @@
                 "id": "{{uuid}}",
                 "shortName": "literal-path",
                 "template": "Literal \\{{project_path}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
                 "updatedAt": "{{timestamp}}"
               },
               {
@@ -9609,7 +10059,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "2490",
+          "content-length": "2278",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -9647,7 +10097,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -9703,14 +10153,6 @@
                 "id": "{{uuid}}",
                 "shortName": "literal-path",
                 "template": "Literal \\{{project_path}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
                 "updatedAt": "{{timestamp}}"
               },
               {
@@ -9800,7 +10242,7 @@
         "body": {
           "kind": "json",
           "value": {
-            "revision": 11,
+            "revision": 13,
             "snippets": [
               {
                 "createdAt": "{{timestamp}}",
@@ -9856,14 +10298,6 @@
                 "id": "{{uuid}}",
                 "shortName": "literal-path",
                 "template": "Literal \\{{project_path}}",
-                "updatedAt": "{{timestamp}}"
-              },
-              {
-                "createdAt": "{{timestamp}}",
-                "defaultArguments": "omega-default",
-                "id": "{{uuid}}",
-                "shortName": "omega",
-                "template": "Omega {{arguments}}",
                 "updatedAt": "{{timestamp}}"
               },
               {
@@ -15004,6 +15438,110 @@
       "noise": []
     },
     {
+      "name": "expand-new-chat-project-path-with-a-backslash~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-new-chat-project-path-with-a-backslash~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-new-chat-project-path-with-a-backslash~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-new-chat-project-path-with-a-backslash~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Snippet is invalid",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
       "name": "expand-new-chat-project-path-not-string~unauthenticated",
       "expected": {
         "body": {
@@ -16460,7 +16998,7 @@
       "noise": []
     },
     {
-      "name": "expand-scheduled-path-ending-in-backslash~unauthenticated",
+      "name": "expand-scheduled-join-path~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -16486,7 +17024,7 @@
       "noise": []
     },
     {
-      "name": "expand-scheduled-path-ending-in-backslash~forged-token",
+      "name": "expand-scheduled-join-path~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -16512,7 +17050,7 @@
       "noise": []
     },
     {
-      "name": "expand-scheduled-path-ending-in-backslash~malformed-json",
+      "name": "expand-scheduled-join-path~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -16538,7 +17076,111 @@
       "noise": []
     },
     {
-      "name": "expand-scheduled-path-ending-in-backslash~non-ascii-json",
+      "name": "expand-scheduled-join-path~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Snippet is invalid",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-scheduled-project-path-with-a-backslash~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-scheduled-project-path-with-a-backslash~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-scheduled-project-path-with-a-backslash~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets/expand"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "expand-scheduled-project-path-with-a-backslash~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -17392,6 +18034,896 @@
           "path": "/api/v1/snippets/expand"
         },
         "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-omega~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-omega~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-omega~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-omega~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and snippet are required",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "2278",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 13,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "alpha-default",
+                "id": "{{uuid}}",
+                "shortName": "alpha",
+                "template": "Alpha {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-path",
+                "template": "{{project_path}}{{current_date}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-prefix",
+                "template": "{{chat_id{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-suffix",
+                "template": "{{arguments}}{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-tail",
+                "template": "{{arguments}}chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-wrap",
+                "template": "{{{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "literal-path",
+                "template": "Literal \\{{project_path}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "parity",
+                "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "runtime-tokens",
+                "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "zeta-default",
+                "id": "{{uuid}}",
+                "shortName": "zeta",
+                "template": "Zeta {{arguments}} {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/../snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-update~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 13,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "alpha-default",
+                "id": "{{uuid}}",
+                "shortName": "alpha",
+                "template": "Alpha {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-path",
+                "template": "{{project_path}}{{current_date}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-prefix",
+                "template": "{{chat_id{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-suffix",
+                "template": "{{arguments}}{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-tail",
+                "template": "{{arguments}}chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-wrap",
+                "template": "{{{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "literal-path",
+                "template": "Literal \\{{project_path}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "parity",
+                "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "runtime-tokens",
+                "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "zeta-default",
+                "id": "{{uuid}}",
+                "shortName": "zeta",
+                "template": "Zeta {{arguments}} {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-omega~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-omega~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-omega~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-omega~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "2278",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 13,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "alpha-default",
+                "id": "{{uuid}}",
+                "shortName": "alpha",
+                "template": "Alpha {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-path",
+                "template": "{{project_path}}{{current_date}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-prefix",
+                "template": "{{chat_id{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-suffix",
+                "template": "{{arguments}}{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-tail",
+                "template": "{{arguments}}chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-wrap",
+                "template": "{{{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "literal-path",
+                "template": "Literal \\{{project_path}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "parity",
+                "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "runtime-tokens",
+                "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "zeta-default",
+                "id": "{{uuid}}",
+                "shortName": "zeta",
+                "template": "Zeta {{arguments}} {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/../snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-remove~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 13,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "alpha-default",
+                "id": "{{uuid}}",
+                "shortName": "alpha",
+                "template": "Alpha {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-path",
+                "template": "{{project_path}}{{current_date}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-prefix",
+                "template": "{{chat_id{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-suffix",
+                "template": "{{arguments}}{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-tail",
+                "template": "{{arguments}}chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "join-wrap",
+                "template": "{{{{arguments}}}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "literal-path",
+                "template": "Literal \\{{project_path}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "parity",
+                "template": "Run {{arguments}} in {{project_path}} for {{chat_id}}; literal \\{{arguments}} and {{unknown_token}}.",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "{{uuid}}",
+                "shortName": "runtime-tokens",
+                "template": "Chat {{chat_id}} on {{current_date}} local {{current_date_local}}; literal \\{{chat_id}}",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "zeta-default",
+                "id": "{{uuid}}",
+                "shortName": "zeta",
+                "template": "Zeta {{arguments}} {{arguments}}",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/snippets"
+        },
+        "status": 200
       },
       "noise": []
     },

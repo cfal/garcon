@@ -1,0 +1,10 @@
+{
+  "module": "common/project-resolution.ts",
+  "tests": [
+    "common/__tests__/project-resolution.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/project-resolution.jsonl",
+  "notCaptured": [],
+  "cases": 273,
+  "sha256": "d1c9eb26bf18d8f6c1a785cf8c35d0227ec579c20b17718141f610575afdecd3"
+}

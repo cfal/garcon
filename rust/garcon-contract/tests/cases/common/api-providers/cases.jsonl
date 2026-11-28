@@ -1,0 +1,99 @@
+{"id":"isApiProviderId#0","fn":"isApiProviderId","args":["ab"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:1"}
+{"id":"isApiProviderId#1","fn":"isApiProviderId","args":["custom"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:2"}
+{"id":"isApiProviderId#2","fn":"isApiProviderId","args":["alibaba-cloud"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:3"}
+{"id":"isApiProviderId#3","fn":"isApiProviderId","args":["a-b_c9"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:4"}
+{"id":"isApiProviderId#4","fn":"isApiProviderId","args":["z9_-"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:5"}
+{"id":"isApiProviderId#5","fn":"isApiProviderId","args":["a-"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:6"}
+{"id":"isApiProviderId#6","fn":"isApiProviderId","args":["a_"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:7"}
+{"id":"isApiProviderId#7","fn":"isApiProviderId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:8"}
+{"id":"isApiProviderId#8","fn":"isApiProviderId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:9"}
+{"id":"isApiProviderId#9","fn":"isApiProviderId","args":["a"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:10"}
+{"id":"isApiProviderId#10","fn":"isApiProviderId","args":[""],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:11"}
+{"id":"isApiProviderId#11","fn":"isApiProviderId","args":["A"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:12"}
+{"id":"isApiProviderId#12","fn":"isApiProviderId","args":["Custom"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:13"}
+{"id":"isApiProviderId#13","fn":"isApiProviderId","args":["1ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:14"}
+{"id":"isApiProviderId#14","fn":"isApiProviderId","args":["-ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:15"}
+{"id":"isApiProviderId#15","fn":"isApiProviderId","args":["_ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:16"}
+{"id":"isApiProviderId#16","fn":"isApiProviderId","args":["ab.cd"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:17"}
+{"id":"isApiProviderId#17","fn":"isApiProviderId","args":["ab/cd"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:18"}
+{"id":"isApiProviderId#18","fn":"isApiProviderId","args":["ab cd"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:19"}
+{"id":"isApiProviderId#19","fn":"isApiProviderId","args":["ab "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:20"}
+{"id":"isApiProviderId#20","fn":"isApiProviderId","args":[" ab"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:21"}
+{"id":"isApiProviderId#21","fn":"isApiProviderId","args":["ab\n"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:22"}
+{"id":"isApiProviderId#22","fn":"isApiProviderId","args":["é"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:23"}
+{"id":"isApiProviderId#23","fn":"isApiProviderId","args":["aé"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:24"}
+{"id":"isApiProviderId#24","fn":"isApiProviderId","args":["ı"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:25"}
+{"id":"isApiProviderId#25","fn":"isApiProviderId","args":["K"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:26"}
+{"id":"isApiProviderId#26","fn":"isApiProviderId","args":["aı"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:27"}
+{"id":"isApiProviderId#27","fn":"isApiProviderId","args":["１"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:28"}
+{"id":"isApiProviderId#28","fn":"isApiProviderId","args":["a１"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:29"}
+{"id":"isApiProviderId#29","fn":"isApiProviderId","args":[" "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:30"}
+{"id":"isApiProviderId#30","fn":"isApiProviderId","args":["a "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:31"}
+{"id":"isApiProviderId#31","fn":"isApiProviderId","args":["﻿a"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:32"}
+{"id":"isApiProviderId#32","fn":"isApiProviderId","args":["😀"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:33"}
+{"id":"isApiProviderId#33","fn":"isApiProviderId","args":["a😀"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:34"}
+{"id":"isApiProviderId#34","fn":"isApiProviderId","args":["日本語"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:35"}
+{"id":"isApiProviderId#35","fn":"isApiProviderId","args":["constructor"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:36"}
+{"id":"isApiProviderId#36","fn":"isApiProviderId","args":["toString"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:37"}
+{"id":"isApiProviderId#37","fn":"isApiProviderId","args":[null],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:38"}
+{"id":"isApiProviderId#38","fn":"isApiProviderId","args":[{"$":"undefined"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:39"}
+{"id":"isApiProviderId#39","fn":"isApiProviderId","args":[5],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:40"}
+{"id":"isApiProviderId#40","fn":"isApiProviderId","args":[true],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:41"}
+{"id":"isApiProviderId#41","fn":"isApiProviderId","args":[[]],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:42"}
+{"id":"isApiProviderId#42","fn":"isApiProviderId","args":[{}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:43"}
+{"id":"isApiProviderId#43","fn":"isApiProviderId","args":[],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:44"}
+{"id":"isApiProviderTemplateId#0","fn":"isApiProviderTemplateId","args":["alibaba-cloud"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:45"}
+{"id":"isApiProviderTemplateId#1","fn":"isApiProviderTemplateId","args":["fireworks"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:46"}
+{"id":"isApiProviderTemplateId#2","fn":"isApiProviderTemplateId","args":["gemini"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:47"}
+{"id":"isApiProviderTemplateId#3","fn":"isApiProviderTemplateId","args":["ollama"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:48"}
+{"id":"isApiProviderTemplateId#4","fn":"isApiProviderTemplateId","args":["openrouter"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:49"}
+{"id":"isApiProviderTemplateId#5","fn":"isApiProviderTemplateId","args":["together"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:50"}
+{"id":"isApiProviderTemplateId#6","fn":"isApiProviderTemplateId","args":["zai"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:51"}
+{"id":"isApiProviderTemplateId#7","fn":"isApiProviderTemplateId","args":["custom"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:52"}
+{"id":"isApiProviderTemplateId#8","fn":"isApiProviderTemplateId","args":["Custom"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:53"}
+{"id":"isApiProviderTemplateId#9","fn":"isApiProviderTemplateId","args":["CUSTOM"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:54"}
+{"id":"isApiProviderTemplateId#10","fn":"isApiProviderTemplateId","args":[" custom"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:55"}
+{"id":"isApiProviderTemplateId#11","fn":"isApiProviderTemplateId","args":["custom "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:56"}
+{"id":"isApiProviderTemplateId#12","fn":"isApiProviderTemplateId","args":["azure"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:57"}
+{"id":"isApiProviderTemplateId#13","fn":"isApiProviderTemplateId","args":[""],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:58"}
+{"id":"isApiProviderTemplateId#14","fn":"isApiProviderTemplateId","args":[null],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:59"}
+{"id":"isApiProviderTemplateId#15","fn":"isApiProviderTemplateId","args":[{"$":"undefined"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:60"}
+{"id":"isApiProviderTemplateId#16","fn":"isApiProviderTemplateId","args":[5],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:61"}
+{"id":"isApiProviderTemplateId#17","fn":"isApiProviderTemplateId","args":[true],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:62"}
+{"id":"isApiProviderTemplateId#18","fn":"isApiProviderTemplateId","args":[[]],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:63"}
+{"id":"isApiProviderTemplateId#19","fn":"isApiProviderTemplateId","args":[{}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:64"}
+{"id":"isApiProviderTemplateId#20","fn":"isApiProviderTemplateId","args":["constructor"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:65"}
+{"id":"isApiProviderTemplateId#21","fn":"isApiProviderTemplateId","args":["toString"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:66"}
+{"id":"isApiProviderTemplateId#22","fn":"isApiProviderTemplateId","args":["includes"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:67"}
+{"id":"isApiProviderTemplateId#23","fn":"isApiProviderTemplateId","args":["__proto__"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:68"}
+{"id":"isApiProviderTemplateId#24","fn":"isApiProviderTemplateId","args":["ı"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:69"}
+{"id":"isApiProviderTemplateId#25","fn":"isApiProviderTemplateId","args":["K"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:70"}
+{"id":"isApiProviderTemplateId#26","fn":"isApiProviderTemplateId","args":[" "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:71"}
+{"id":"isApiProviderTemplateId#27","fn":"isApiProviderTemplateId","args":["日本語雪"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:72"}
+{"id":"isApiProviderTemplateId#28","fn":"isApiProviderTemplateId","args":["😀"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:73"}
+{"id":"isApiProviderTemplateId#29","fn":"isApiProviderTemplateId","args":["openrouter-models"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:74"}
+{"id":"isApiProviderTemplateId#30","fn":"isApiProviderTemplateId","args":["anthropic-messages"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:75"}
+{"id":"isApiProviderTemplateId#31","fn":"isApiProviderTemplateId","args":[],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:76"}
+{"id":"labelForProtocol#0","fn":"labelForProtocol","args":["anthropic-messages"],"result":"Anthropic-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:77"}
+{"id":"labelForProtocol#1","fn":"labelForProtocol","args":["openai-compatible"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:78"}
+{"id":"labelForProtocol#2","fn":"labelForProtocol","args":[""],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:79"}
+{"id":"labelForProtocol#3","fn":"labelForProtocol","args":["x"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:80"}
+{"id":"labelForProtocol#4","fn":"labelForProtocol","args":["anthropic-messages "],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:81"}
+{"id":"labelForProtocol#5","fn":"labelForProtocol","args":[" anthropic-messages"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:82"}
+{"id":"labelForProtocol#6","fn":"labelForProtocol","args":["Anthropic-Messages"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:83"}
+{"id":"labelForProtocol#7","fn":"labelForProtocol","args":["ANTHROPIC-MESSAGES"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:84"}
+{"id":"labelForProtocol#8","fn":"labelForProtocol","args":["anthropic-messages"],"result":"Anthropic-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:85"}
+{"id":"labelForProtocol#9","fn":"labelForProtocol","args":["anthropic‑messages"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:86"}
+{"id":"labelForProtocol#10","fn":"labelForProtocol","args":["anthropicKmessages"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:87"}
+{"id":"labelForProtocol#11","fn":"labelForProtocol","args":["ı"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:88"}
+{"id":"labelForProtocol#12","fn":"labelForProtocol","args":["K"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:89"}
+{"id":"labelForProtocol#13","fn":"labelForProtocol","args":[" "],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:90"}
+{"id":"labelForProtocol#14","fn":"labelForProtocol","args":["日本語雪"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:91"}
+{"id":"labelForProtocol#15","fn":"labelForProtocol","args":["😀"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:92"}
+{"id":"labelForProtocol#16","fn":"labelForProtocol","args":["openai"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:93"}
+{"id":"labelForProtocol#17","fn":"labelForProtocol","args":["open-ai-compatible"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:94"}
+{"id":"labelForProtocol#18","fn":"labelForProtocol","args":["none"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:95"}
+{"id":"labelForProtocol#19","fn":"labelForProtocol","args":["0"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:96"}
+{"id":"labelForProtocol#20","fn":"labelForProtocol","args":["constructor"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:97"}
+{"id":"labelForProtocol#21","fn":"labelForProtocol","args":["toString"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:98"}
+{"id":"labelForProtocol#22","fn":"labelForProtocol","args":["anthropic-messages\n"],"result":"OpenAI-compatible","origin":"rust/garcon-contract/tests/inputs/common/api-providers.jsonl:99"}
