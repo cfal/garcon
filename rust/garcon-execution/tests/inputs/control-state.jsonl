@@ -1,0 +1,12 @@
+{"fn":"emptyStoredChatExecutionControl","args":[""]}
+{"fn":"emptyStoredChatExecutionControl","args":["server-1"]}
+{"fn":"queuedAttachmentBytes","args":[[]]}
+{"fn":"queuedAttachmentBytes","args":[[{"data":"=="},{"data":"a="},{"data":"data:image/png;base64,AAAA"},{"data":"prefix,😀=="}]]}
+{"fn":"queueEntryAttachments","args":[[{"data":"a"},{"data":"b","name":"","mimeType":""},{"data":"c","name":" a ","mimeType":" image/png "},{"data":"d","name":"d.png","mimeType":"image/png"}]]}
+{"fn":"queueEntryAttachments","args":[[]]}
+{"fn":"cloneStoredQueueEntry","args":[{"id":"entry","content":"prose","kind":"turn","images":[{"data":"AA","name":"a","mimeType":"image/png"}],"revision":2,"status":"steering","createdAt":"2026-08-12T00:00:00.000Z","updatedAt":"2026-08-12T00:00:01.000Z","submission":{"clientMessageId":"message","transcriptViewId":"view","excludedResendOrdinals":[1,1e21]}}]}
+{"fn":"toClientQueueEntry","args":[{"id":"entry","content":"prose","kind":"turn","images":[{"data":"AA"}],"revision":2,"status":"steering","createdAt":"2026-08-12T00:00:00.000Z","updatedAt":"2026-08-12T00:00:01.000Z","submission":{"clientMessageId":"message","transcriptViewId":"view"}}]}
+{"fn":"toClientChatExecutionControlState","args":[{"serverInstanceId":"s","entries":[{"id":"entry","content":"prose","kind":"turn","images":[{"data":"AA"}],"revision":2,"status":"steering","createdAt":"2026-08-12T00:00:00.000Z","updatedAt":"2026-08-12T00:00:01.000Z"}],"controlEntries":[],"recentlyDispatched":[],"appliedCommands":[],"pause":null,"reorderRevision":1,"version":6,"updatedAt":null}]}
+{"fn":"hasPendingTurnInput","args":[{"serverInstanceId":"s","entries":[],"controlEntries":[],"recentlyDispatched":[],"appliedCommands":[],"pause":null,"reorderRevision":0,"version":0,"updatedAt":null}]}
+{"fn":"hasPendingTurnInput","args":[{"serverInstanceId":"s","entries":[],"controlEntries":[{"id":"control","content":"go","transcriptViewId":"view","createdAt":"2026-08-12T00:00:01.000Z","receipt":null}],"recentlyDispatched":[],"appliedCommands":[],"pause":null,"reorderRevision":0,"version":0,"updatedAt":null}]}
+{"fn":"cloneStoredChatExecutionControl","args":[{"serverInstanceId":"s","entries":[],"controlEntries":[{"id":"control","content":"go","transcriptViewId":"view","createdAt":"2026-08-12T00:00:01.000Z","receipt":{"title":"Inter-agent message","content":"go","detail":{"type":"inter-agent-message-received","fromChatId":null}}}],"recentlyDispatched":[],"appliedCommands":[],"pause":null,"reorderRevision":0,"version":0,"updatedAt":null,"resumePauses":[]}]}

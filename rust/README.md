@@ -84,14 +84,20 @@ A WebSocket reply with `"garconRsUnported": true` has the same meaning. The
 step captures a reply matched by `clientRequestId` or a marked `ws-fault`
 without an ID; an unmarked reply compares normally.
 A step is blocked if an unavailable earlier response supplies a required
-placeholder, directly or through another blocked step. It is not sent. Any
-other missing response placeholder is a mismatch. Unported and blocked
-cases are not matches and do not use known differences. The report counts
-native matches, unported cases, blocked cases, and mismatches per scenario and
-in total, and names each blocked case's supplying step. A partial port may
-use `replay --build "<command>" --allow-unported` to accept unported and
-blocked cases; mismatches still fail. The lift gate omits the flag and
-requires zero unported or blocked cases.
+placeholder, directly or through another blocked step. It is not sent.
+If an unported or blocked step is a write (any HTTP method other than GET,
+HEAD, or OPTIONS, or a WebSocket request), subsequent differing steps in
+that scenario are counted as after an unported write. Matching steps still
+count as matches. This includes missing placeholders that are not directly
+blocked; otherwise a missing placeholder is a mismatch.
+
+The report counts native matches, unported cases, blocked cases, differences
+after an unported write, and mismatches per scenario and in total. It names
+the supplier of each blocked step and the first unavailable write for each
+affected later step. These cases are not matches and do not use known
+differences. A partial port may use `replay --build "<command>" --allow-unported`
+to accept all three unavailable categories. Mismatches still fail. The lift
+gate omits the flag and requires zero in all three categories.
 
 What is compared, per case:
 
@@ -100,7 +106,9 @@ What is compared, per case:
   structurally, text exactly, binary by SHA-256. A textual body over 64 KB is
   recorded as `text-digest`, the SHA-256 and byte length of its text after the
   placeholders below are applied, so a large body that holds a value of the
-  server start is still compared.
+  server start is still compared. Use the standard replay invocation without
+  overriding `TMPDIR`: HEAD content lengths can include the length of the
+  original's temporary workspace path.
 - WebSocket: whether the upgrade succeeded, the negotiated subprotocol, the
   replies to the step's own requests (matched by `clientRequestId`), the close
   code and reason of a connection the server accepted and then closed, and for
@@ -303,9 +311,9 @@ fn recorded_cases_match() {
 ```
 
 `replay` calls the dispatcher with each case's function and arguments, as
-recorded, and compares what it returns with the recorded result: object key
-order is not compared, and numbers compare by mathematical value without
-rounding integers. The Rust replay compares results at the JSON boundary:
+recorded, and compares what it returns with the recorded result. Numbers
+compare by mathematical value without rounding integers.
+The Rust replay compares results at the JSON boundary:
 recorded `undefined` matches an absent object property or `null` in an
 array, but at the root it still requires a marker. Recorded negative zero
 also matches a Rust integer zero; float outputs must preserve the sign.
@@ -318,9 +326,10 @@ recording holds. On a difference
 it prints the first one per case with its JSON path, then the distinct
 differences grouped by path, and panics unless every case matches.
 
-`GARCON_CASES_AUDIT_KEY_ORDER=1` reports cases that pass structurally but
-would fail if the recorded and serialized result keys were compared in
-order. It does not fail the replay, so one test can audit several recordings.
+Replay compares object key order as recorded, including nested objects and
+JavaScript's integer-like keys first. A result with different key order fails
+even if its values match. The old `GARCON_CASES_AUDIT_KEY_ORDER=1` setting is
+accepted as a no-op; no environment setting is needed.
 For a typed result, give the dispatcher the port's actual serialized output:
 serialize it with `serde_json::to_vec` and read those bytes directly into the
 result `Value` with `garcon_js::json::from_slice`. Do not sort or reconstruct

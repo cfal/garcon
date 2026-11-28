@@ -1,0 +1,26 @@
+[package]
+name = "garcon-execution"
+version = "0.0.0"
+description = "Process-local chat execution state and command coordination for the Garcon controller."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+garcon-cases.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,28 @@
+{
+  "module": "rust/garcon-execution/tests/support/ownership-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/ownership.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "attemptTrace",
+      "argument": 0
+    },
+    {
+      "fn": "attemptTrace",
+      "argument": 2
+    },
+    {
+      "fn": "ownershipTrace",
+      "argument": 1
+    },
+    {
+      "fn": "finalizationTrace",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 10,
+  "sha256": "05f0b14d576a063672cd8b7f8707cdbcb923aaca779ea56374c4064b3db4f8b5"
+}

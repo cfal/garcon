@@ -173,3 +173,21 @@ the native session does not read `chats.json` to reproduce
 `SESSION_NOT_FOUND`. A reload cancellation without an active reload is
 still a no-op. Terminal stream handling and chat event broadcasts are
 outside the edge unit.
+
+## Ledger responsiveness
+
+- The original eagerly cascades abandoned staging rows during a synchronous
+  open, despite the bounded cleanup described in ledger design section 4.2.
+  The port keeps that behavior. In one build-machine run the connection
+  test reopened two equivalent FULL-mode databases, each with 60,000
+  abandoned rows with 200 code units of message content per row. It took
+  251.64 ms on Bun 1.4.3 and 448.49 ms in the Rust debug build. The timer
+  excludes seeding and process startup. This is a workload observation, not a
+  latency limit or a comparison of release builds; the test checks that
+  current and retained staging rows survive and abandoned rows are gone.
+- Append-and-compose still scans backward inside its synchronous write
+  transaction. In a build-machine comparison over 20,000 transparent
+  notice rows, appending the next input and composing its prompt took
+  70.84 ms on Bun 1.4.3 and 507.10 ms in the Rust debug build. The timer
+  excludes seeding, reopening, and process startup. Both implementations
+  committed the same address and returned the same input and prompt.
