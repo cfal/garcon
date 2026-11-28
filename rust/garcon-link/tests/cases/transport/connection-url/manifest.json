@@ -1,0 +1,11 @@
+{
+  "module": "server/remote/transport/connection-url.ts",
+  "tests": [
+    "server/remote/transport/__tests__/connection-url.test.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "notCaptured": [],
+  "cases": 273,
+  "sha256": "1438461768a9f05da777dcbcf315dccdb612d994d58ab25bbe6084586d68887e"
+}

@@ -1,0 +1,9 @@
+{"fn":"parseBulkControl","args":[{"type":"bulk-activate","sessionId":"22222222-2222-4222-8222-222222222222"}]}
+{"fn":"parseBulkControl","args":[{"type":"bulk-activate","sessionId":"22222222-2222-4222-8222-222222222222","extra":true}]}
+{"fn":"parseBulkControl","args":[{"type":"bulk-activate","sessionId":"stale"}]}
+{"fn":"parseBulkControl","args":[{"type":"bulk-unknown","sessionId":"22222222-2222-4222-8222-222222222222"}]}
+{"fn":"parseBulkControl","args":[{"type":[["bulk-prepare"]],"sessionId":"22222222-2222-4222-8222-222222222222"}]}
+{"fn":"isSessionId","args":["22222222-2222-4222-8222-222222222222"]}
+{"fn":"isSessionId","args":["22222222-2222-4222-8222-222222222222\n"]}
+{"fn":"isSessionId","args":["22222222-2222-5222-8222-222222222222"]}
+{"fn":"isSessionId","args":[null]}
