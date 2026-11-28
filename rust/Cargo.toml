@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "garcon-agent-antigravity",
   "garcon-agent-claude",
   "garcon-agent-codex",
   "garcon-agent-direct-anthropic-compatible",

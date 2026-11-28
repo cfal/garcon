@@ -1,0 +1,26 @@
+{"fn":"runtimeOptions","args":[{"prompt":"prompt","model":"model-a","thinkingMode":"high","timeoutMs":42000,"settings":{"ownerId":"test","schemaVersion":1,"values":{"providerOption":true,"thinkingMode":"low","timeoutMs":1}},"endpoint":null}]}
+{"fn":"runtimeOptions","args":[{"prompt":"prompt","model":"model-a","thinkingMode":"none","settings":{"ownerId":"test","schemaVersion":1,"values":{}},"endpoint":null}]}
+{"fn":"runtimeOptions","args":[{"prompt":"prompt","model":"model-a","thinkingMode":"max","timeoutMs":0.5,"settings":{"ownerId":"test","schemaVersion":1,"values":{"reasoningEffort":"low","1":"one","b":2,"a":3}},"endpoint":null}]}
+{"fn":"runtimeOptions","args":[{"prompt":"prompt","model":"model-a","thinkingMode":"xhigh","timeoutMs":1e21,"settings":{"ownerId":"test","schemaVersion":1,"values":{"signal":"not a signal","timeoutMs":null}},"endpoint":null}]}
+{"fn":"timeoutAfter","args":[1]}
+{"fn":"timeoutAfter","args":[5]}
+{"fn":"timeoutAfter","args":[0.4]}
+{"fn":"timeoutAfter","args":[0.5]}
+{"fn":"timeoutAfter","args":[1.4]}
+{"fn":"timeoutAfter","args":[1.5]}
+{"fn":"timeoutAfter","args":[2.4]}
+{"fn":"timeoutAfter","args":[2.5]}
+{"fn":"timeoutAfter","args":[30]}
+{"fn":"timeoutAfter","args":[0]}
+{"fn":"timeoutAfter","args":[{"$":"number","value":"-0"}]}
+{"fn":"timeoutAfter","args":[-1]}
+{"fn":"timeoutAfter","args":[null]}
+{"fn":"timeoutAfter","args":[{"$":"undefined"}]}
+{"fn":"timeoutAfter","args":["5"]}
+{"fn":"timeoutAfter","args":[true]}
+{"fn":"timeoutAfter","args":[[]]}
+{"fn":"timeoutAfter","args":[{}]}
+{"fn":"timeoutAfter","args":[1e21]}
+{"fn":"timeoutAfter","args":[9007199254740991]}
+{"fn":"timeoutAfter","args":[2147483647]}
+{"fn":"timeoutAfter","args":[2147483648]}

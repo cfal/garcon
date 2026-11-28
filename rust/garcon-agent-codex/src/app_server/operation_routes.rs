@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use garcon_agents_common::execution::runtime_events::{
     AgentRuntimeEvent, AgentRuntimePublisher, ProviderRunOutcome, RuntimePermissionResponse,
@@ -25,6 +25,13 @@ pub struct CodexOperation {
     pub chat_id: String,
     pub run_id: String,
     pub publish: AgentRuntimePublisher,
+    terminal: Cell<bool>,
+}
+
+impl CodexOperation {
+    pub(super) fn mark_terminal(&self) -> bool {
+        !self.terminal.replace(true)
+    }
 }
 
 pub fn codex_operation(
@@ -36,6 +43,7 @@ pub fn codex_operation(
         chat_id: chat_id.into(),
         run_id: run_id.into(),
         publish,
+        terminal: Cell::new(false),
     })
 }
 
