@@ -1,5 +1,7 @@
 //! Ports `server-agents/common/src/shared/attachment-files.ts`.
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{borrow::Cow, future::Future};
 
 use garcon_contract::attachments::chat_attachment_extension;
@@ -56,9 +58,12 @@ pub async fn materialize_attachment_files<'a>(
     if attachments.is_empty() {
         return Ok(MaterializedAttachmentFiles::default());
     }
-    let directory = tempfile::Builder::new()
-        .prefix(&format!("{directory_prefix}-"))
-        .tempdir_in(std::env::temp_dir())?;
+    let prefix = format!("{directory_prefix}-");
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(&prefix);
+    #[cfg(unix)]
+    builder.permissions(std::fs::Permissions::from_mode(0o700));
+    let directory = builder.tempdir_in(std::env::temp_dir())?;
     let path = directory.path().to_string_lossy().into_owned();
     let files = write_attachments(&path, attachments).await?;
     let _ = directory.keep();
