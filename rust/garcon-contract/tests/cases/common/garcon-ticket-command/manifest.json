@@ -1,0 +1,22 @@
+{
+  "module": "common/garcon-ticket-command.ts",
+  "tests": [
+    "common/__tests__/garcon-ticket-command.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-ticket-command.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isTicketReadAction",
+      "argument": 0
+    },
+    {
+      "fn": "isTicketReadCommand",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 208,
+  "sha256": "57619c04497a52377486a751715b4bc3a14fdd13e64c22b9c038a3cdadc2485e"
+}

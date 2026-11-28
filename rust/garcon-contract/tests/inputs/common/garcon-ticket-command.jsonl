@@ -1,0 +1,7 @@
+{"fn":"isTicketReadAction","args":["list"]}
+{"fn":"isTicketReadAction","args":["read"]}
+{"fn":"isTicketReadAction","args":["history"]}
+{"fn":"isTicketReadAction","args":["update"]}
+{"fn":"isTicketReadCommand","args":[{"type":"ticket","payload":{"action":"list","query":{"limit":50}}}]}
+{"fn":"isTicketReadCommand","args":[{"type":"ticket","ref":"r","payload":{"action":"comment","ticketId":"G-1","body":"Synthetic"}}]}
+{"fn":"parseGarconTicketCommand","args":["<garcon-ticket-comment ref=\"demo\" ticket-id=\"G-1\">A &amp; B</garcon-ticket-comment>"]}
