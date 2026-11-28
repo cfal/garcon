@@ -1,0 +1,39 @@
+{
+  "module": "server/runtime/git/review-patch.ts",
+  "tests": [
+    "server/runtime/git/__tests__/review-patch.test.js",
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "limitedPatchFileBody",
+      "argument": 2,
+      "guard": "rust/parity/fixtures/git/guards.ts#limitReason",
+      "dropped": 8,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "fn": "createReviewPatchBody",
+      "where": "args",
+      "path": "$.args",
+      "type": "more than 1048576 bytes encoded",
+      "at": null,
+      "count": 1
+    },
+    {
+      "fn": "createReviewPatchBody",
+      "where": "args",
+      "path": "$.args",
+      "type": "more than 1048576 bytes encoded",
+      "at": null,
+      "count": 1
+    }
+  ],
+  "cases": 332,
+  "sha256": "2e250cf1a43a328a79a01dbaecae6389b5609111fdf0dd784276e9f4072cd986"
+}
