@@ -21,11 +21,14 @@ use garcon_contract::{
     chat_transient_feed::ChatTransientFeedMutation,
     chat_types::{ChatMessage, ChatProcessingPhase},
     ws_events::{
-        ChatActivityUpdatedMessage, ChatMessagesMessage, ChatPreamblesInvalidatedMessage,
-        ChatTranscriptReplacedMessage, ChatTransientFeedMutationMessage, ServerWsMessage,
+        ChatActivityUpdatedMessage, ChatExecutionControlUpdatedMessage, ChatMessagesMessage,
+        ChatPreamblesInvalidatedMessage, ChatTranscriptReplacedMessage,
+        ChatTransientFeedMutationMessage, ServerWsMessage,
     },
 };
-use garcon_execution::command_ledger::CommandLedger;
+use garcon_execution::{
+    command_ledger::CommandLedger, control_projection::ClientChatExecutionControlState,
+};
 use garcon_interface::resources::ExecutorResult;
 use garcon_ledger::{
     contracts::{
@@ -39,6 +42,9 @@ use serde_json::Value;
 use task_queue::ChatTaskQueue;
 
 pub type ChatEventPublisher = dyn Fn(ServerWsMessage) -> ExecutorResult<()>;
+pub type ChatExecutionControlPublisher = dyn Fn(
+    ChatExecutionControlUpdatedMessage<ClientChatExecutionControlState>,
+) -> ExecutorResult<()>;
 pub type ReplaceChatMetadata =
     dyn Fn(ChatId, String) -> LocalBoxFuture<'static, ExecutorResult<()>>;
 
@@ -52,6 +58,7 @@ pub struct ServerEventWiringDeps {
     pub replace_metadata: Rc<ReplaceChatMetadata>,
     pub resend_candidates: Rc<ResendCandidates>,
     pub publish: Rc<ChatEventPublisher>,
+    pub publish_execution_control: Rc<ChatExecutionControlPublisher>,
 }
 
 pub struct ServerEventWiring {

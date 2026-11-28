@@ -25,6 +25,7 @@ use garcon_execution::{
         CommandLedgerChange, CommandLedgerDetail, CommandTerminalStatus, InterruptionReason,
         command_ledger_key,
     },
+    control_state::to_client_chat_execution_control_state,
     event_bus::{AgentEventBus, AgentRunCompletionOutcome, TurnEventMetadata},
     listener_dispatch::ListenerWork,
     turn_finalization_tracker::QueuedTurnFinalizationOutcome,
@@ -34,7 +35,10 @@ use garcon_execution::{
 use garcon_js::{Clock, Number, to_iso_string};
 
 use super::task_queue::Completion;
-use super::{ChatId, ExecutorResult, ServerEventWiring, ServerWsMessage, Value, parse_chat_id};
+use super::{
+    ChatExecutionControlUpdatedMessage, ChatId, ExecutorResult, ServerEventWiring, ServerWsMessage,
+    Value, parse_chat_id,
+};
 
 const TURN_FAILURE_DEDUPE_MS: i64 = 30_000;
 
@@ -57,6 +61,16 @@ impl ServerEventWiring {
         clock: Rc<dyn Clock>,
         mark_search_catalog_dirty: Rc<dyn Fn(&str)>,
     ) {
+        let wiring = Rc::downgrade(self);
+        coordinator.on_execution_control_updated(move |chat, state| {
+            if let Some(wiring) = wiring.upgrade() {
+                (wiring.deps.publish_execution_control)(ChatExecutionControlUpdatedMessage::new(
+                    chat.into(),
+                    Box::new(to_client_chat_execution_control_state(state)),
+                ))?;
+            }
+            Ok(())
+        });
         let wiring = Rc::downgrade(self);
         coordinator.on_processing_invalidated(move |chat| {
             if let Some(wiring) = wiring.upgrade() {
