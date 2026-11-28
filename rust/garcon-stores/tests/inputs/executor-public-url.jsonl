@@ -1,0 +1,29 @@
+{"fn":"parsePublicUrl","args":["https://controller.test/base///"]}
+{"fn":"parsePublicUrl","args":["http://[::1]:8080/"]}
+{"fn":"parsePublicUrl","args":["HTTP://Controller.Example:80/a"]}
+{"fn":"parsePublicUrl","args":["https://host.test/path?"]}
+{"fn":"parsePublicUrl","args":[""]}
+{"fn":"parsePublicUrl","args":["/relative"]}
+{"fn":"parsePublicUrl","args":["ws://host/"]}
+{"fn":"parsePublicUrl","args":["https://user:secret@host/"]}
+{"fn":"parsePublicUrl","args":["https://host/?secret=value"]}
+{"fn":"parsePublicUrl","args":["https://host/#secret=value"]}
+{"fn":"parsePublicUrl","args":["http://0.0.0.0/"]}
+{"fn":"parsePublicUrl","args":["http://[::]/"]}
+{"fn":"parsePublicUrl","args":["https://example.com/"]}
+{"fn":"parsePublicUrl","args":["https://host/path with space"]}
+{"fn":"parsePublicUrl","args":["https://host/path\u00a0"]}
+{"fn":"parsePublicUrl","args":["https://host/path\\a"]}
+{"fn":"executorPublicUrl","args":["https://controller.test/base", "synthetic-id"]}
+{"fn":"executorPublicUrl","args":["http://[::1]:8080/", "synthetic-id"]}
+{"fn":"executorPublicUrl","args":["https://controller.test/base/", "a/b?'()+_ \u4f60\u597d"]}
+{"fn":"requestPublicUrlFixture","args":["http://internal:8080/api/v1/executors", "other.test:9000", "https://controller.test/base", "/untrusted"]}
+{"fn":"requestPublicUrlFixture","args":["http://internal:8080/api/v1/executors", "other.test:9000", null, "/tools/garcon"]}
+{"fn":"requestPublicUrlFixture","args":["https://[::1]:8443/api/v1/executors", null, null, ""]}
+{"fn":"requestPublicUrlFixture","args":["http://internal/", "attacker.test/path", null, ""]}
+{"fn":"requestPublicUrlFixture","args":["http://internal/", "user@host", null, ""]}
+{"fn":"requestPublicUrlFixture","args":["http://internal/", "host?query", null, ""]}
+{"fn":"requestPublicUrlFixture","args":["http://internal/", "host#fragment", null, ""]}
+{"fn":"requestPublicUrlFixture","args":["http://internal/", "host:invalid", null, ""]}
+{"fn":"requestPublicUrlFixture","args":["http://internal/", "host\\path", null, ""]}
+{"fn":"requestPublicUrlFixture","args":["http://internal/", "host,other", null, ""]}

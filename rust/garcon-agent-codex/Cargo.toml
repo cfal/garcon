@@ -9,8 +9,16 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+garcon-contract.workspace = true
 garcon-js.workspace = true
+indexmap.workspace = true
+oxc_allocator = "=0.160.0"
+oxc_ast = "=0.160.0"
+oxc_parser = "=0.160.0"
+oxc_semantic = "=0.160.0"
+oxc_span = "=0.160.0"
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 garcon-cases.workspace = true
-serde_json.workspace = true

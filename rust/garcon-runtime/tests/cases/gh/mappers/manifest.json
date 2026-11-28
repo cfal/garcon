@@ -1,0 +1,31 @@
+{
+  "module": "server/runtime/gh/gh-mappers.ts",
+  "tests": [
+    "server/runtime/gh/__tests__/gh-mappers.test.js",
+    "rust/garcon-runtime/tests/oracles/gh-mapper-inputs.suite.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "buildPatchFileSet",
+      "argument": 0,
+      "guard": "rust/garcon-runtime/tests/oracles/gh-mapper-guards.ts#isPatchList",
+      "dropped": 10,
+      "kept": 51
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.result.fileBodies",
+      "type": "a Object instance",
+      "where": "result",
+      "at": "rust/garcon-runtime/tests/oracles/gh-mapper-inputs.suite.ts:42:18",
+      "fn": "buildPatchFileSet",
+      "count": 1
+    }
+  ],
+  "cases": 680,
+  "sha256": "2bfd6221476f2eea32f64e2ef35e12795775fd218db2becc9f71c05c39f3a3ae"
+}
