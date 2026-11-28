@@ -250,6 +250,84 @@ fn verify_wire_round_trip<T: DeserializeOwned + Serialize>(wire: &str) {
 }
 
 #[test]
+fn model_catalog_round_trips_bun_json() {
+    use garcon_contract::model_catalog::*;
+    let fixtures = pinned_bun_stdout(
+        r#"import "./rust/garcon-contract/tests/inputs/common/model-catalog-wire.ts";"#,
+        &[],
+    );
+    let lines: Vec<_> = fixtures.lines().collect();
+    assert_eq!(lines.len(), 4);
+    assert_eq!(
+        serde_json::to_string(CATALOG_INSTANCE_HEADER).unwrap(),
+        lines[0]
+    );
+    assert_eq!(serde_json::to_string(LOGIN_AGENT_QUERY).unwrap(), lines[1]);
+    for line in &lines[2..4] {
+        verify_wire_round_trip::<ModelCatalogResponse>(line);
+    }
+}
+
+#[test]
+fn models_recordings() {
+    use garcon_contract::models::is_codex_sol_model;
+    assert_recording("models", |function, args| match function {
+        "isCodexSolModel" => Ok(json!(is_codex_sol_model(text(function, args.first())?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn model_constants_match_bun() {
+    use garcon_contract::models::*;
+    let original = pinned_bun_stdout(
+        r#"import * as models from "./common/models.ts";
+           console.log(JSON.stringify(models));"#,
+        &[],
+    );
+    let original: Value = garcon_js::json::from_str(&original).unwrap();
+    assert_eq!(
+        original,
+        json!({
+            "CLAUDE_MODELS": CLAUDE_MODELS,
+            "GPT_6_ASTRA_MODEL": GPT_6_ASTRA_MODEL,
+            "GPT_6_2_SOL_MODEL": GPT_6_2_SOL_MODEL,
+            "GPT_6_2_ASTRA_MODEL": GPT_6_2_ASTRA_MODEL,
+            "GPT_6_1_SOL_MODEL": GPT_6_1_SOL_MODEL,
+            "GPT_6_1_TERRA_MODEL": GPT_6_1_TERRA_MODEL,
+            "GPT_6_SOL_MODEL": GPT_6_SOL_MODEL,
+            "GPT_6_LUNA_MODEL": GPT_6_LUNA_MODEL,
+            "CODEX_MODELS": CODEX_MODELS,
+            "AMP_MODELS": AMP_MODELS,
+            "FACTORY_MODELS": FACTORY_MODELS,
+            "PI_MODELS": PI_MODELS,
+            "OPENROUTER_MODELS": OPENROUTER_MODELS,
+            "ALIBABA_CLOUD_MODELS": ALIBABA_CLOUD_MODELS,
+            "FIREWORKS_MODELS": FIREWORKS_MODELS,
+            "GEMINI_MODELS": GEMINI_MODELS,
+            "TOGETHER_MODELS": TOGETHER_MODELS,
+            "ZAI_MODELS": ZAI_MODELS,
+        })
+    );
+}
+
+#[test]
+fn model_routing_recordings() {
+    use garcon_contract::model_routing::*;
+    assert_recording("model-routing", |function, args| {
+        let endpoint_id = required_text(function, args.first())?;
+        let model = required_text(function, args.get(1))?;
+        Ok(match function {
+            "endpointModelOptionValue" => json!(endpoint_model_option_value(endpoint_id, model)),
+            "rawModelFromEndpointOptionValue" => {
+                json!(raw_model_from_endpoint_option_value(endpoint_id, model))
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
 fn agent_execution_dtos_round_trip_bun_json() {
     use garcon_contract::agent_execution::*;
     let fixtures = agent_wire_fixtures();

@@ -1,0 +1,11 @@
+{
+  "module": "common/model-routing.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/model-routing.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 14,
+  "sha256": "45a9f7ff76c9d8b8702f36592356a86ff062b08009563f6f64bb8a02f126839e"
+}
