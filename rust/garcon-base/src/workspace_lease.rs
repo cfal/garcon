@@ -75,14 +75,16 @@ pub struct WorkspaceLeaseOptions {
 
 pub struct WorkspaceLease {
     pub workspace_dir: PathBuf,
-    released: Cell<bool>,
+    lock_path: PathBuf,
+    release_started: Cell<bool>,
+    ownership: Rc<Cell<Ownership>>,
     stop: CancellationToken,
     heartbeat: RefCell<Option<task::JoinHandle<Result<(), ReleaseWorkspaceLeaseError>>>>,
 }
 
 impl WorkspaceLease {
     pub async fn release(&self) -> Result<(), ReleaseWorkspaceLeaseError> {
-        if self.released.replace(true) {
+        if self.release_started.replace(true) {
             return Ok(());
         }
         self.stop.cancel();
@@ -97,7 +99,18 @@ impl WorkspaceLease {
 impl Drop for WorkspaceLease {
     fn drop(&mut self) {
         self.stop.cancel();
+        if self.ownership.get() == Ownership::Held {
+            self.ownership.set(Ownership::Released);
+            let _ = std::fs::remove_dir(&self.lock_path);
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ownership {
+    Held,
+    Released,
+    Compromised,
 }
 
 /// Acquires and refreshes the lock on the current executor's `LocalSet`.
@@ -154,8 +167,10 @@ async fn acquire(
         time::sleep(delay).await;
     };
     let stop = CancellationToken::new();
+    let ownership = Rc::new(Cell::new(Ownership::Held));
     let heartbeat = task::spawn_local(maintain_lock(Heartbeat {
-        path: lock_path,
+        path: lock_path.clone(),
+        ownership: Rc::clone(&ownership),
         stale,
         update,
         mtime,
@@ -168,7 +183,9 @@ async fn acquire(
     }));
     Ok(WorkspaceLease {
         workspace_dir,
-        released: Cell::new(false),
+        lock_path,
+        release_started: Cell::new(false),
+        ownership,
         stop,
         heartbeat: RefCell::new(Some(heartbeat)),
     })
@@ -261,23 +278,44 @@ async fn remove_lock(path: &Path) -> io::Result<()> {
 }
 
 async fn modified_ms(path: &Path) -> io::Result<i64> {
-    let time = fs::metadata(path).await?.modified()?;
+    fs::metadata(path).await?.modified().map(epoch_millis)
+}
+
+fn epoch_millis(time: SystemTime) -> i64 {
     let millis = |duration: Duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX);
-    Ok(time
-        .duration_since(UNIX_EPOCH)
-        .map_or_else(|error| -millis(error.duration()), millis))
+    time.duration_since(UNIX_EPOCH)
+        .map_or_else(|error| -millis(error.duration()), millis)
 }
 
 async fn set_times(path: &Path, ms: i64) -> io::Result<()> {
+    set_open_times(open_lock_directory(path).await?, ms).await
+}
+
+async fn open_lock_directory(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_READ_ATTRIBUTES: u32 = 0x80;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+        options
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES);
+    }
+    options.open(path).await
+}
+
+async fn set_open_times(file: fs::File, ms: i64) -> io::Result<()> {
     let distance = Duration::from_millis(ms.unsigned_abs());
     let time: SystemTime = if ms < 0 {
         UNIX_EPOCH - distance
     } else {
         UNIX_EPOCH + distance
     };
-    let path = path.to_owned();
+    let file = file.into_std().await;
     task::spawn_blocking(move || {
-        std::fs::File::open(path)?.set_times(FileTimes::new().set_accessed(time).set_modified(time))
+        file.set_times(FileTimes::new().set_accessed(time).set_modified(time))
     })
     .await
     .map_err(io::Error::other)?
@@ -304,6 +342,7 @@ fn older_than(previous: i64, now: i64, stale: u64) -> bool {
 
 struct Heartbeat {
     path: PathBuf,
+    ownership: Rc<Cell<Ownership>>,
     stale: u64,
     update: u64,
     mtime: i64,
@@ -318,6 +357,7 @@ struct Heartbeat {
 async fn maintain_lock(heartbeat: Heartbeat) -> Result<(), ReleaseWorkspaceLeaseError> {
     let Heartbeat {
         path,
+        ownership,
         stale,
         update,
         mut mtime,
@@ -331,18 +371,37 @@ async fn maintain_lock(heartbeat: Heartbeat) -> Result<(), ReleaseWorkspaceLease
     let cause = loop {
         tokio::select! {
             biased;
-            () = stop.cancelled() => return Ok(remove_lock(&path).await?),
+            () = stop.cancelled() => {
+                if ownership.get() == Ownership::Held {
+                    ownership.set(Ownership::Released);
+                    remove_lock(&path).await?;
+                }
+                return Ok(());
+            },
             () = time::sleep_until(next_update) => {}
         }
-        let current = modified_ms(&path).await;
+        // Updates the observed directory, even if dropping the lease removes
+        // its path while the filesystem operation is in flight.
+        let current = async {
+            let directory = open_lock_directory(&path).await?;
+            let mtime = directory.metadata().await?.modified().map(epoch_millis)?;
+            Ok::<_, io::Error>((directory, mtime))
+        }
+        .await;
+        if ownership.get() != Ownership::Held {
+            return Ok(());
+        }
         let result = match current {
-            Ok(current) if current == mtime => {
+            Ok((directory, current)) if current == mtime => {
                 let fresh = precision.timestamp(clock.now_ms());
-                set_times(&path, fresh).await.map(|()| fresh)
+                set_open_times(directory, fresh).await.map(|()| fresh)
             }
             Ok(_) => break io::Error::other("Unable to update lock within the stale threshold"),
             Err(error) => Err(error),
         };
+        if ownership.get() != Ownership::Held {
+            return Ok(());
+        }
         let delay = match result {
             Ok(new_mtime) => {
                 mtime = new_mtime;
@@ -359,6 +418,7 @@ async fn maintain_lock(heartbeat: Heartbeat) -> Result<(), ReleaseWorkspaceLease
         };
         next_update = time::Instant::now() + Duration::from_millis(delay);
     };
+    ownership.set(Ownership::Compromised);
     if let Some(on_compromised) = on_compromised {
         on_compromised(WorkspaceLeaseCompromised { cause });
     } else {
@@ -372,6 +432,58 @@ async fn maintain_lock(heartbeat: Heartbeat) -> Result<(), ReleaseWorkspaceLease
 mod tests {
     use super::*;
     use garcon_js::ManualClock;
+
+    #[tokio::test]
+    async fn dropping_a_lease_before_the_local_set_ends_removes_the_lock() {
+        let root = tempfile::tempdir().unwrap();
+        let lock = root.path().join(WORKSPACE_LOCK_NAME);
+        task::LocalSet::new()
+            .run_until(async {
+                let _lease = acquire_workspace_lease(
+                    root.path(),
+                    WorkspaceLeaseOptions {
+                        retries: Some(0),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                assert!(lock.is_dir());
+            })
+            .await;
+        assert!(!lock.exists());
+    }
+
+    #[tokio::test]
+    async fn dropping_a_compromised_lease_leaves_the_directory_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let lock = root.path().join(WORKSPACE_LOCK_NAME);
+        task::LocalSet::new()
+            .run_until(async {
+                let (report, compromised) = tokio::sync::oneshot::channel();
+                let lease = acquire_workspace_lease(
+                    root.path(),
+                    WorkspaceLeaseOptions {
+                        retries: Some(0),
+                        update_ms: Some(1_000),
+                        on_compromised: Some(Box::new(move |_| report.send(()).unwrap())),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+                set_times(&lock, 3_000).await.unwrap();
+                time::timeout(Duration::from_secs(10), compromised)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                drop(lease);
+                assert!(lock.is_dir());
+            })
+            .await;
+        assert!(lock.is_dir());
+        assert_eq!(modified_ms(&lock).await.unwrap(), 3_000);
+    }
 
     #[tokio::test]
     async fn retries_stale_lock_creation_but_leaves_nonempty_directories_alone() {

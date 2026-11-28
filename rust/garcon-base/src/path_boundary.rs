@@ -1,7 +1,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use garcon_js::path::posix;
+use garcon_js::path::native;
 use tokio::fs;
 
 pub const PROJECT_BOUNDARY_ERROR_CODE: &str = "outside_project_base";
@@ -42,17 +42,30 @@ pub fn is_project_boundary_error(error: &(dyn std::error::Error + 'static)) -> b
 }
 
 fn within_resolved_root(root: &str, target: &str) -> bool {
-    let relative = posix::relative("/", root, target);
+    let relative = native::relative(native::SEP, root, target);
     relative.is_empty()
-        || (relative != ".." && !relative.starts_with("../") && !posix::is_absolute(&relative))
+        || (relative != ".."
+            && !relative
+                .strip_prefix("..")
+                .is_some_and(|tail| tail.starts_with(native::SEP))
+            && !native::is_absolute(&relative))
 }
 
 fn resolve(target: &str) -> io::Result<String> {
-    if posix::is_absolute(target) {
-        return Ok(posix::resolve("/", &[target]));
+    #[cfg(not(windows))]
+    if native::is_absolute(target) {
+        return Ok(native::resolve(native::SEP, &[target]));
     }
     let cwd = std::env::current_dir()?;
-    Ok(posix::resolve(&cwd.to_string_lossy(), &[target]))
+    Ok(native::resolve(&cwd.to_string_lossy(), &[target]))
+}
+
+fn resolve_against(root: &str, path: &str) -> io::Result<String> {
+    if native::is_absolute(path) {
+        resolve(path)
+    } else {
+        Ok(native::resolve(root, &[path]))
+    }
 }
 
 pub async fn realpath(path: impl AsRef<Path>) -> io::Result<PathBuf> {
@@ -65,7 +78,22 @@ pub async fn realpath(path: impl AsRef<Path>) -> io::Result<PathBuf> {
             return Err(io::Error::from_raw_os_error(libc::ENOENT));
         }
     }
-    fs::canonicalize(path).await
+    let canonical = fs::canonicalize(path).await?;
+    #[cfg(windows)]
+    let canonical = {
+        let text = canonical.to_string_lossy();
+        if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+            PathBuf::from(format!(r"\\{unc}"))
+        } else if let Some(disk) = text
+            .strip_prefix(r"\\?\")
+            .filter(|tail| tail.as_bytes().get(1) == Some(&b':'))
+        {
+            PathBuf::from(disk)
+        } else {
+            canonical
+        }
+    };
+    Ok(canonical)
 }
 
 async fn resolve_real_path_allow_missing(target: &str) -> io::Result<String> {
@@ -80,25 +108,24 @@ async fn resolve_real_path_allow_missing(target: &str) -> io::Result<String> {
                     Err(check) if check.kind() == io::ErrorKind::NotFound => {}
                     Err(check) => return Err(check),
                 }
-                let parent = posix::dirname(&candidate);
+                let parent = native::dirname(&candidate);
                 if parent == candidate {
                     return Err(error);
                 }
-                missing_segments.push(posix::basename(&candidate));
+                missing_segments.push(native::basename(&candidate));
                 candidate = parent;
             }
             Err(error) => return Err(error),
         }
     };
     let real_ancestor = real_ancestor.to_string_lossy();
-    let mut segments = vec![real_ancestor.as_ref()];
-    segments.extend(missing_segments.iter().rev().map(String::as_str));
-    Ok(posix::resolve("/", &segments))
+    let segments: Vec<_> = missing_segments.iter().rev().map(String::as_str).collect();
+    Ok(native::resolve(&real_ancestor, &segments))
 }
 
 pub async fn resolve_real_within_base(root: &str, input: &str) -> Result<String, ProjectPathError> {
     let root = resolve(root)?;
-    let input = posix::resolve(&root, &[input]);
+    let input = resolve_against(&root, input)?;
     if !within_resolved_root(&root, &input) {
         return Err(ProjectBoundaryError::default().into());
     }
@@ -111,7 +138,7 @@ pub async fn resolve_real_within_canonical_base(
     input: &str,
 ) -> Result<String, ProjectPathError> {
     let root = resolve(canonical_root)?;
-    let input = posix::resolve(&root, &[input]);
+    let input = resolve_against(&root, input)?;
     let target = resolve_real_path_allow_missing(&input).await?;
     if !within_resolved_root(&root, &target) {
         return Err(ProjectBoundaryError::default().into());
@@ -121,7 +148,7 @@ pub async fn resolve_real_within_canonical_base(
 
 pub async fn assert_real_within_base(root: &str, target: &str) -> Result<String, ProjectPathError> {
     let root = resolve(root)?;
-    let target = posix::resolve(&root, &[target]);
+    let target = resolve_against(&root, target)?;
     if within_resolved_root(&root, &target) {
         return resolve_real_within_base(&root, &target).await;
     }

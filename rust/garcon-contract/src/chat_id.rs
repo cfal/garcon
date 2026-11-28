@@ -8,6 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use garcon_js::json::{Opaque, as_number};
 use garcon_js::{is_integer, is_safe_integer, utf16};
 
 pub const CHAT_ID_LENGTH: usize = 16;
@@ -67,17 +68,38 @@ impl<'de> Deserialize<'de> for ChatId {
 }
 
 /// The error `parseChatId` throws. `value` is the value that was rejected.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[error("Chat ID must be a valid 16-digit Unix-microsecond timestamp")]
 pub struct InvalidChatIdError {
-    pub value: Value,
+    pub value: InvalidChatIdValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InvalidChatIdValue {
+    Undefined,
+    Number(f64),
+    Json(Opaque),
+}
+
+impl InvalidChatIdValue {
+    pub fn from_json(value: Option<&Value>) -> Self {
+        match value {
+            None => Self::Undefined,
+            Some(value) => as_number(value).map_or_else(
+                || Self::Json(Opaque::from_value(value.clone())),
+                Self::Number,
+            ),
+        }
+    }
 }
 
 impl InvalidChatIdError {
-    fn new(value: impl Into<Value>) -> InvalidChatIdError {
-        InvalidChatIdError {
-            value: value.into(),
-        }
+    pub fn new(value: InvalidChatIdValue) -> Self {
+        Self { value }
+    }
+
+    fn from_json(value: Option<&Value>) -> Self {
+        Self::new(InvalidChatIdValue::from_json(value))
     }
 }
 
@@ -85,12 +107,12 @@ impl InvalidChatIdError {
 fn microseconds_of(value: &Value) -> Result<u64, InvalidChatIdError> {
     let text = value.as_str().filter(|text| CHAT_ID_PATTERN.is_match(text));
     let Some(text) = text else {
-        return Err(InvalidChatIdError::new(value.clone()));
+        return Err(InvalidChatIdError::from_json(Some(value)));
     };
     // INFALLIBLE: the pattern admits 16 ASCII digits, which a `u64` holds.
     let epoch_micros = text.parse().expect("16 digits parse as u64");
     if epoch_micros > MAX_SAFE_CHAT_ID {
-        return Err(InvalidChatIdError::new(value.clone()));
+        return Err(InvalidChatIdError::from_json(Some(value)));
     }
     Ok(epoch_micros)
 }
@@ -101,13 +123,18 @@ pub fn parse_chat_id(value: &Value) -> Result<ChatId, InvalidChatIdError> {
     let epoch_ms = (epoch_micros / MICROSECONDS_PER_MILLISECOND) as f64;
     // `Number.isFinite(new Date(epochMs).getTime())`: a Date holds ±8.64e15 ms.
     if !is_safe_integer(epoch_ms) || epoch_ms <= 0.0 || epoch_ms.abs() > MAX_DATE_MS {
-        return Err(InvalidChatIdError::new(value.clone()));
+        return Err(InvalidChatIdError::from_json(Some(value)));
     }
     // INFALLIBLE: the pattern accepted a string, which the checks kept.
     let text = value
         .as_str()
         .expect("a chat ID is the string that was checked");
     Ok(ChatId(text.to_owned()))
+}
+
+/// Reads a canonical chat ID from an input that may be absent.
+pub fn parse_chat_id_input(value: Option<&Value>) -> Result<ChatId, InvalidChatIdError> {
+    parse_chat_id(value.ok_or_else(|| InvalidChatIdError::new(InvalidChatIdValue::Undefined))?)
 }
 
 /// Reads the microseconds of a canonical chat ID.
@@ -122,10 +149,14 @@ pub fn chat_id_from_timestamp(
     micros_within_ms: f64,
 ) -> Result<ChatId, InvalidChatIdError> {
     if !is_safe_integer(epoch_ms) || epoch_ms <= 0.0 {
-        return Err(InvalidChatIdError::new(epoch_ms));
+        return Err(InvalidChatIdError::new(InvalidChatIdValue::Number(
+            epoch_ms,
+        )));
     }
     if !is_integer(micros_within_ms) || !(0.0..=999.0).contains(&micros_within_ms) {
-        return Err(InvalidChatIdError::new(micros_within_ms));
+        return Err(InvalidChatIdError::new(InvalidChatIdValue::Number(
+            micros_within_ms,
+        )));
     }
     // Both are safe integers, so the sum below 2^63 is exact.
     let epoch_micros = epoch_ms as u64 * MICROSECONDS_PER_MILLISECOND + micros_within_ms as u64;
@@ -214,7 +245,10 @@ mod tests {
                 "Chat ID must be a valid 16-digit Unix-microsecond timestamp",
                 "{chat_id}"
             );
-            assert_eq!(error.value, json!(chat_id));
+            assert_eq!(
+                error.value,
+                InvalidChatIdValue::from_json(Some(&json!(chat_id)))
+            );
         }
         for value in [
             Value::Null,
@@ -239,14 +273,39 @@ mod tests {
         // `value` is the component that was rejected.
         assert_eq!(
             chat_id_from_timestamp(0.0, 7.0).unwrap_err().value,
-            json!(0.0)
+            InvalidChatIdValue::Number(0.0)
         );
         assert_eq!(
             chat_id_from_timestamp(1_783_725_900_000.0, -1.0)
                 .unwrap_err()
                 .value,
-            json!(-1.0)
+            InvalidChatIdValue::Number(-1.0)
         );
+    }
+
+    #[test]
+    fn rejected_timestamp_keeps_the_original_double() {
+        for rejected in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0] {
+            let error = chat_id_from_timestamp(rejected, 0.0).unwrap_err();
+            let InvalidChatIdValue::Number(number) = error.value else {
+                panic!("rejected value was not a number");
+            };
+            assert_eq!(number.to_bits(), rejected.to_bits());
+        }
+    }
+
+    #[test]
+    fn distinguishes_absent_null_and_opaque_rejected_values() {
+        assert_eq!(
+            parse_chat_id_input(None).unwrap_err().value,
+            InvalidChatIdValue::Undefined,
+        );
+        for value in [Value::Null, json!({"value": ["synthetic", 1.0]})] {
+            assert_eq!(
+                parse_chat_id(&value).unwrap_err().value,
+                InvalidChatIdValue::Json(Opaque::from_value(value)),
+            );
+        }
     }
 
     #[test]
@@ -278,7 +337,10 @@ mod tests {
         // The padded ID is read like any other and its rejection is not caught.
         for legacy in ["0000000000", "0000000000000"] {
             let error = legacy_chat_id_to_canonical(&json!(legacy)).unwrap_err();
-            assert_eq!(error.value, json!("0000000000000000"));
+            assert_eq!(
+                error.value,
+                InvalidChatIdValue::from_json(Some(&json!("0000000000000000")))
+            );
         }
         // One microsecond past the epoch is a valid ID.
         assert_eq!(

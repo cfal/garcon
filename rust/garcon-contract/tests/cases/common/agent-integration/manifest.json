@@ -2,6 +2,30 @@
   "module": "common/agent-integration.ts",
   "tests": [],
   "inputs": "rust/garcon-contract/tests/inputs/common/agent-integration.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isAgentSettingLabelKey",
+      "argument": 0
+    },
+    {
+      "fn": "isAgentSettingOptionLabelKey",
+      "argument": 0
+    },
+    {
+      "fn": "isAgentSettingOptionDescriptionKey",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentSettingsEnvelope",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentSettingsById",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
   "notCaptured": [
     {
       "fn": "parseAgentSettingsById",

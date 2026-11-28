@@ -98,9 +98,15 @@ fn string(item: &Value) -> &str {
     item.as_str().unwrap()
 }
 
-/// Reads an oracle outcome: `Some` for a value, `None` where Bun threw.
-fn outcome(item: &Value) -> Option<&str> {
-    item.as_object()?.get("value").and_then(Value::as_str)
+fn outcome(item: &Value) -> Result<&str, (&str, &str)> {
+    if let Some(value) = item.get("value") {
+        Ok(string(value))
+    } else {
+        let error = item
+            .get("error")
+            .expect("oracle outcome has a value or an error");
+        Err((string(&error["name"]), string(&error["message"])))
+    }
 }
 
 /// Values the number formatter must get right: boundaries of the notation
@@ -214,10 +220,15 @@ fn rounding_and_fixed_digits_match_bun() {
     let mut rng = Rng(0xA076_1D64_78BD_642F);
     let values = sample_doubles(&mut rng, 40_000);
     let bits: Vec<String> = values.iter().map(|value| bits_of(*value)).collect();
-    let fixed: Vec<(String, u32)> = values
+    let mut fixed: Vec<(String, u32)> = values
         .iter()
         .map(|value| (bits_of(*value), rng.below(101) as u32))
         .collect();
+    fixed.extend([
+        (bits_of(1.0), 101),
+        (bits_of(f64::NAN), 101),
+        (bits_of(1.0), u32::MAX),
+    ]);
     let reply = ask(json!({ "mathRound": bits, "toFixed": fixed }));
     let mut mismatches = Mismatches::new();
     for (value, item) in values.iter().zip(section(&reply, "mathRound")) {
@@ -240,12 +251,16 @@ fn rounding_and_fixed_digits_match_bun() {
         .map(|(bits, digits)| (value_of(bits), *digits))
         .zip(section(&reply, "toFixed"))
     {
-        let ours = to_fixed(value, digits).ok();
-        if ours.as_deref() != outcome(item) {
+        let ours = to_fixed(value, digits).map_err(|error| ("RangeError", error.to_string()));
+        let actual = ours
+            .as_ref()
+            .map(String::as_str)
+            .map_err(|(name, message)| (*name, message.as_str()));
+        if actual != outcome(item) {
             mismatches.add(format!("toFixed {value:?}.{digits}"), ours, item);
         }
     }
-    mismatches.finish("math_round and to_fixed", values.len());
+    mismatches.finish("math_round and to_fixed", values.len() + fixed.len());
 }
 
 #[test]
@@ -647,12 +662,15 @@ fn json_round_trips_as_bun_round_trips_it() {
     let mut checked = 0;
     for (text, item) in texts.iter().zip(section(&reply, "jsonRoundTrip")) {
         checked += 1;
-        // Text both reject, such as a number that ends in a point, compares as
-        // two failures.
-        let ours = from_str::<Opaque>(text)
-            .ok()
-            .map(|opaque| serde_json::to_string(&opaque).unwrap());
-        if ours.as_deref() != outcome(item) {
+        let ours = from_str::<Opaque>(text).map(|opaque| serde_json::to_string(&opaque).unwrap());
+        let matches = match (&ours, outcome(item)) {
+            (Ok(actual), Ok(expected)) => actual == expected,
+            // The JSON helper returns serde diagnostics. The server translates
+            // them to its own errors rather than publishing Bun syntax text.
+            (Err(error), Err(("SyntaxError", _))) => error.is_syntax() || error.is_eof(),
+            _ => false,
+        };
+        if !matches {
             mismatches.add(format!("JSON {text}"), ours, item);
         }
     }
@@ -731,8 +749,13 @@ fn iso_dates_and_default_sort_match_bun() {
     let reply = ask(json!({ "iso": encoded, "defaultSort": groups }));
     let mut mismatches = Mismatches::new();
     for (value, item) in milliseconds.iter().zip(section(&reply, "iso")) {
-        let ours = garcon_js::to_iso_string(*value).ok();
-        if ours.as_deref() != outcome(item) {
+        let ours =
+            garcon_js::to_iso_string(*value).map_err(|error| ("RangeError", error.to_string()));
+        let actual = ours
+            .as_ref()
+            .map(String::as_str)
+            .map_err(|(name, message)| (*name, message.as_str()));
+        if actual != outcome(item) {
             mismatches.add(format!("toISOString({value})"), ours, item);
         }
     }
@@ -745,6 +768,67 @@ fn iso_dates_and_default_sort_match_bun() {
         }
     }
     mismatches.finish("toISOString and default sort", milliseconds.len());
+}
+
+#[test]
+fn windows_lexical_storage_paths_match_bun() {
+    use garcon_js::path::win32;
+
+    let basenames = [
+        r"C:\workspace\state.json",
+        "c:",
+        r"\\server\share",
+        r"\root\",
+        "file.json",
+        "",
+    ];
+    let joins: &[&[&str]] = &[
+        &[r"C:\workspace", ".state.json.42.tmp"],
+        &[r"\\server\share", "..", "outside"],
+        &["//server", "share", "file"],
+        &["//", "server", "share"],
+        &["", "", ""],
+    ];
+    let resolve: &[(&str, &[&str])] = &[
+        (r"C:\workspace", &[r"..\documents", "file.json"]),
+        (r"C:\workspace", &[r"\outside\name"]),
+        (r"C:\workspace", &[r"c:inside\..\file"]),
+        (r"C:\workspace", &[r"D:\root", r"\subfolder"]),
+        (r"\\server\share\workspace", &[r"..\a"]),
+        (env!("CARGO_MANIFEST_DIR"), &[r"d:elsewhere"]),
+    ];
+    let relative = [
+        (r"C:\workspace", r"C:\workspace", r"c:\WORKSPACE\inside"),
+        (r"C:\workspace", r"C:\workspace", r"C:\outside"),
+        (r"C:\workspace", r"C:\workspace", r"D:\outside"),
+        (
+            r"\\server\share",
+            r"\\server\share\a\b",
+            r"\\SERVER\share\a\c",
+        ),
+        (r"\\server\share", r"\\server\share\a", r"\\server\other\a"),
+        (r"C:\workspace", r"C:\", r"C:\workspace"),
+    ];
+    let reply = ask(json!({
+        "win32Basename": basenames, "win32Join": joins,
+        "win32Resolve": resolve, "win32Relative": relative
+    }));
+    for (input, expected) in basenames.into_iter().zip(section(&reply, "win32Basename")) {
+        assert_eq!(win32::basename(input), string(expected), "{input:?}");
+    }
+    for (input, expected) in joins.iter().zip(section(&reply, "win32Join")) {
+        assert_eq!(win32::join(input), string(expected), "{input:?}");
+    }
+    for ((cwd, input), expected) in resolve.iter().zip(section(&reply, "win32Resolve")) {
+        assert_eq!(win32::resolve(cwd, input), string(expected), "{input:?}");
+    }
+    for ((cwd, from, to), expected) in relative.into_iter().zip(section(&reply, "win32Relative")) {
+        assert_eq!(
+            win32::relative(cwd, from, to),
+            string(expected),
+            "{from:?} to {to:?}"
+        );
+    }
 }
 
 #[test]

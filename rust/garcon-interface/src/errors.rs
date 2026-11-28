@@ -4,6 +4,7 @@ use std::fmt;
 use std::ops::Deref;
 
 use garcon_contract::json::{JsonObject, JsonValue};
+use garcon_js::json::Opaque;
 
 /// Every code an `AgentIntegrationError` can carry.
 pub const AGENT_INTEGRATION_ERROR_CODES: &[AgentIntegrationErrorCode] = &[
@@ -94,7 +95,7 @@ pub struct AgentIntegrationError {
     pub code: AgentIntegrationErrorCode,
     pub message: String,
     pub retryable: bool,
-    pub details: Option<JsonObject>,
+    pub details: Option<Opaque>,
 }
 
 impl AgentIntegrationError {
@@ -108,7 +109,7 @@ impl AgentIntegrationError {
             code,
             message: message.into(),
             retryable,
-            details,
+            details: details.map(|details| Opaque::from_value(JsonValue::Object(details))),
         }
     }
 }
@@ -289,6 +290,23 @@ mod tests {
         assert!(error.retryable);
         assert_eq!(error.details, None);
         assert_eq!(error.to_string(), "Transcript unavailable");
+    }
+
+    #[test]
+    fn integration_error_details_serialize_js_numbers() {
+        let fields =
+            garcon_js::json::from_str(r#"{"n":1.0,"big":9007199254740993,"exp21":1e21,"zero":-0}"#)
+                .unwrap();
+        let error = AgentIntegrationError::new(
+            AgentIntegrationErrorCode::INVALID_SETTINGS,
+            "synthetic",
+            false,
+            Some(fields),
+        );
+        assert_eq!(
+            serde_json::to_string(&error.details).unwrap(),
+            r#"{"n":1,"big":9007199254740992,"exp21":1e+21,"zero":0}"#,
+        );
     }
 
     #[test]

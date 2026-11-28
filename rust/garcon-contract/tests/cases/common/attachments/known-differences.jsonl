@@ -1,0 +1,2 @@
+{"fn":"chatAttachmentMimeType","args":[{"name":"__proto__","type":{"$":"undefined"}}],"result":"application/octet-stream","reason":"The original's lookup reaches an inherited Object property for \"__proto__\" instead of only defined attachment keys.","approval":"user 2026-11-28"}
+{"fn":"chatAttachmentMimeType","args":[{"name":"clip.mov","type":"__proto__"}],"result":"video/quicktime","reason":"The original's lookup reaches an inherited Object property for \"__proto__\" instead of only defined attachment keys.","approval":"user 2026-11-28"}

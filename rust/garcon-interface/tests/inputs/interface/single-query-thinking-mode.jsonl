@@ -1,0 +1,9 @@
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED",{"operation":"single-query","setting":"thinkingMode"}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED",{"operation":"single-query","setting":"thinkingMode","extra":true}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["INVALID_SETTINGS",{"operation":"single-query","setting":"thinkingMode"}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED",{"operation":"query","setting":"thinkingMode"}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED",{"operation":"single-query","setting":"other"}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED",{"operation":"single-query"}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED",{"setting":"thinkingMode"}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED",{}]}
+{"fn":"isUnsupportedSingleQueryThinkingMode","args":["OPERATION_UNSUPPORTED"]}
