@@ -1,0 +1,2 @@
+{"fn":"parseFirstJsonlValue","args":["{\"a\":1e400}"],"result":{"kind":"invalid","error":{"$":"error","name":"SyntaxError","message":"Failed to parse JSONL","properties":{}}},"reason":"number beyond the double range is a parse error at the JSON boundary"}
+{"fn":"parseFirstJsonlValue","args":["{\"a\":\"\\ud800\"}"],"result":{"kind":"value","value":{"a":"\ufffd"},"raw":"{\"a\":\"\\ud800\"}","discardedSuffix":false},"reason":"unpaired surrogate in a result"}
