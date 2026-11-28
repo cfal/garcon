@@ -10,11 +10,16 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
+garcon-interface.workspace = true
 garcon-js.workspace = true
+indexmap.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
 garcon-cases.workspace = true
