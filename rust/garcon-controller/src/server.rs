@@ -14,7 +14,7 @@ use garcon_base::server_runtime::{
 };
 use garcon_contract::cli_runtime_paths::{RuntimeKind, cli_runtime_file};
 use garcon_contract::tickets::TicketProjectDefault;
-use garcon_http::app_title::PublicAppTitle;
+use garcon_http::app_title::resolve_public_app_title;
 use garcon_http::http_request::HttpAuthentication;
 use garcon_http::http_route::{HttpRouteOptions, HttpRouter};
 use garcon_http::listener::Listener;
@@ -31,6 +31,7 @@ use garcon_stores::auth::passwords::BunPasswords;
 use garcon_stores::auth::service::AuthService;
 use garcon_stores::auth::store::AuthAccountStore;
 use garcon_stores::auth::token::AuthTokens;
+use garcon_stores::settings::{SettingsStore, SettingsStoreOptions};
 use tokio::fs;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -280,13 +281,21 @@ async fn bind_controller(
         config.auth_disabled,
         config.trust_proxy_enabled,
     )?;
+    let settings = SettingsStore::open(
+        &lease.workspace_dir().to_string_lossy(),
+        SettingsStoreOptions::default(),
+    )
+    .await?;
     let routes = create_edge_routes(
         Rc::clone(&runtime),
         config.workspace_name.clone(),
         StaticRoutes {
             web_build_dir: PathBuf::from(&config.web_build_dir),
             base_path: config.base_path.clone(),
-            app_title: Rc::new(PublicAppTitle::default),
+            app_title: Rc::new(move || {
+                let current = settings.snapshot();
+                resolve_public_app_title(&current.ui, current.remote_settings_version)
+            }),
         },
         &auth_routes,
     )?;
@@ -459,6 +468,48 @@ mod tests {
             assert!(!descriptor.exists());
             assert!(!lock.exists());
             assert!(TcpStream::connect(addr).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn serves_the_persisted_app_title_in_the_public_shell_and_manifest() {
+        LocalSet::new().run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let mut config = config(root.path());
+            let build = root.path().join("web-build");
+            fs::create_dir(&build).await.unwrap();
+            fs::write(build.join("index.html"), r#"<html><head><title>Default</title><link href="__GARCON_RUNTIME_BASE_PATH__/site.webmanifest"></head><body></body></html>"#).await.unwrap();
+            fs::write(build.join("site.webmanifest"), r#"{"name":"Default","short_name":"Default"}"#).await.unwrap();
+            config.web_build_dir = build.to_string_lossy().into_owned();
+
+            fs::create_dir_all(&config.workspace_dir).await.unwrap();
+            open_workspace(Path::new(&config.workspace_dir)).await.unwrap();
+            let settings = SettingsStore::open(&config.workspace_dir, SettingsStoreOptions::default()).await.unwrap();
+            settings.save_settings(&serde_json::json!({
+                "ui":{"appIdentity":{"title":"  Tool & <Team>  "}},
+                "remoteSettingsVersion": 19,
+            })).await.unwrap();
+            drop(settings);
+
+            let controller = Controller::start(config, Rc::new(UnavailableLocalExecutor)).await.unwrap();
+            let addr = SocketAddr::from(([127, 0, 0, 1], controller.address.port()));
+            for path in ["/fixture/", "/fixture/chat/parity", "/fixture/site.webmanifest"] {
+                let mut stream = TcpStream::connect(addr).await.unwrap();
+                stream.write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                let mut response = String::new();
+                tokio::time::timeout(Duration::from_secs(3), stream.read_to_string(&mut response)).await.unwrap().unwrap();
+                assert!(response.starts_with("HTTP/1.1 200 "), "{response}");
+                if path.ends_with("webmanifest") {
+                    let (_, body) = response.split_once("\r\n\r\n").unwrap();
+                    let manifest: Value = garcon_js::json::from_str(body).unwrap();
+                    assert_eq!(manifest["name"], "Tool & <Team>");
+                    assert_eq!(manifest["short_name"], "Tool & <Team>");
+                } else {
+                    assert!(response.contains("<title>Tool &amp; &lt;Team&gt;</title>"), "{response}");
+                    assert!(response.contains(r#"__GARCON_APP_TITLE__={"title":"Tool & \u003cTeam>","version":19}"#), "{response}");
+                }
+            }
+            controller.shutdown().await.unwrap();
         }).await;
     }
 
