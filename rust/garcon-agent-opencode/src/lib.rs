@@ -3,4 +3,7 @@
 
 pub mod agents;
 pub mod config;
+mod integration;
 pub mod js;
+
+pub use integration::OpenCodeAgentIntegration;
