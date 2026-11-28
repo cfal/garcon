@@ -9,7 +9,10 @@ use garcon_ledger::{
         LedgerResult, get_transaction_rollback_failure, run_query, run_transaction,
     },
 };
-use rusqlite::Connection;
+use rusqlite::{
+    Connection, ffi,
+    hooks::{AuthAction, AuthContext, Authorization, TransactionOperation},
+};
 
 #[test]
 fn failed_transaction_rolls_back_and_remains_a_write_fence() {
@@ -127,6 +130,55 @@ fn a_failed_query_fences_only_the_originating_chat() {
             .is_err()
     );
     assert!(fences.read("two", || Ok(&mut b), |_| Ok(())).is_ok());
+}
+
+#[test]
+fn failed_rollback_preserves_the_sqlite_cause_and_fences_reads() {
+    let root = tempfile::tempdir().unwrap();
+    let mut entry = open_connection(
+        root.path().to_str().unwrap(),
+        "test",
+        LedgerSynchronous::Normal,
+        &HashSet::new(),
+    )
+    .unwrap();
+    entry
+        .db
+        .authorizer(Some(|context: AuthContext<'_>| match context.action {
+            AuthAction::Transaction {
+                operation: TransactionOperation::Rollback,
+            } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+
+    let mut fences = LedgerFailureFences::default();
+    let error = fences
+        .write::<()>(
+            "test",
+            || Ok(&mut entry),
+            |entry| {
+                run_transaction(&entry.db, || {
+                    Err(rusqlite::Error::SqliteFailure(
+                        ffi::Error::new(ffi::SQLITE_CORRUPT),
+                        Some("database disk image is malformed".into()),
+                    )
+                    .into())
+                })
+            },
+            rehydrate_connection,
+        )
+        .unwrap_err();
+    entry
+        .db
+        .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
+    entry.db.execute_batch("ROLLBACK").unwrap();
+
+    let diagnostic = safe_fence_diagnostic(error.as_ref());
+    assert_eq!(diagnostic.cause_name, "SQLiteError");
+    assert_eq!(diagnostic.cause_code, "SQLITE_CORRUPT");
+    assert!(fences.has_read_failure("test"));
 }
 
 #[test]

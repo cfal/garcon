@@ -23,10 +23,11 @@ thread_local! {
     static SLOW_STEP_REPORTER: RefCell<Option<Rc<SlowStepReporter>>> = const { RefCell::new(None) };
 }
 
-/// Gives Tokio's timer and I/O driver a turn. A task-only yield can be polled
-/// again without the driver getting a turn.
+/// Gives the current-thread runtime's timer and I/O driver a turn.
 pub async fn yield_to_event_loop() {
-    sleep(TIMER_TURN).await;
+    // Tokio 1.54 wakes deferred tasks after polling the driver. A separate task
+    // cannot be repolled early by unrelated wakes of the caller or its LocalSet.
+    let _ = tokio::spawn(tokio::task::yield_now()).await;
 }
 
 pub fn report_slow_steps(reporter: Rc<SlowStepReporter>) -> impl Fn() {
@@ -145,6 +146,30 @@ mod tests {
     use std::cell::Cell;
     use tokio::task::LocalSet;
 
+    #[tokio::test(start_paused = true)]
+    async fn yielding_does_not_wait_for_a_timer_deadline() {
+        let before = tokio::time::Instant::now();
+        LocalSet::new().run_until(yield_to_event_loop()).await;
+        assert_eq!(tokio::time::Instant::now(), before);
+    }
+
+    #[tokio::test]
+    async fn yielding_polls_the_driver_for_a_pending_timer() {
+        LocalSet::new()
+            .run_until(async {
+                tokio::task::spawn_local(async {
+                    let timer = holding_probe();
+                    std::thread::sleep(Duration::from_millis(10));
+                    assert!(!timer.is_elapsed(), "the driver has not run");
+                    yield_to_event_loop().await;
+                    assert!(timer.is_elapsed(), "the driver polled the due timer");
+                })
+                .await
+                .unwrap();
+            })
+            .await;
+    }
+
     fn steps(operation: &str, now: &Rc<Cell<f64>>) -> EventLoopSteps {
         let clock = now.clone();
         EventLoopSteps::with_clock(operation, move || clock.get())
@@ -159,8 +184,8 @@ mod tests {
                 let ticks = counts.clone();
                 let probe_time = now.clone();
                 let probe = tokio::task::spawn_local(async move {
-                    loop {
-                        sleep(TIMER_TURN).await;
+                    for _ in 0..60 {
+                        tokio::task::yield_now().await;
                         ticks.borrow_mut().push(probe_time.get());
                     }
                 });
@@ -175,8 +200,9 @@ mod tests {
                 probe.abort();
                 assert_eq!(visited, (0..60).collect::<Vec<_>>());
                 let ticks = counts.borrow();
-                assert!(ticks.len() > 2, "bulk work must let timers run");
+                assert!(ticks.len() > 2, "bulk work must let other local tasks run");
                 assert!(ticks.windows(2).all(|tick| tick[1] - tick[0] <= 20.0));
+                assert!(ticks.last().is_some_and(|tick| now.get() - tick <= 20.0));
             })
             .await;
     }
