@@ -1,0 +1,13 @@
+{
+  "module": "server/runtime/git/working-tree-observation.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 60,
+  "sha256": "71a30d23923b67da40b65c6c64c9a636576818d246246f5e6014ff55764a874e"
+}
