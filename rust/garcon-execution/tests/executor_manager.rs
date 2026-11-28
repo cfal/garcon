@@ -88,7 +88,7 @@ impl Runtime {
                     git: false,
                     gh: false,
                     terminals: false,
-                    directory_creation: false,
+                    directory_creation: id == "local",
                 },
             }),
             availability: Cell::new(availability),
@@ -277,6 +277,11 @@ fn domain_result<T>(result: ExecutorResult<T>) -> Value {
 
 async fn trace(scenario: &str) -> Value {
     let (_root, manager, _remote) = fixture().await;
+    if scenario == "wire" {
+        let bytes = serde_json::to_string(&manager.list_wire()).unwrap();
+        manager.dispose().await.unwrap();
+        return Value::String(bytes);
+    }
     let effects = Rc::new(RefCell::new(Vec::<Value>::new()));
     let off = manager.on_changed(Rc::new({
         let effects = effects.clone();
