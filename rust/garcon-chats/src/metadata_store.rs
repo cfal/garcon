@@ -1,6 +1,7 @@
 //! Derived chat previews. A persisted entry is visible only after its ledger
 //! view and content identity have been checked.
 
+pub mod ledger_transcript_source;
 mod preview;
 
 use std::{

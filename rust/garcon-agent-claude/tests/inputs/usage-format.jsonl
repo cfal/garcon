@@ -1,0 +1,8 @@
+{"fn":"parseClaudeUsageLine","args":["{\"type\":\"assistant\",\"timestamp\":\"2026-10-07T00:00:00Z\",\"message\":{\"model\":\"synthetic\",\"usage\":{\"output_tokens\":1e21,\"input_tokens\":2.7,\"cache_creation\":{\"ephemeral_1h_input_tokens\":3.25}}}}"]}
+{"fn":"parseClaudeUsageLine","args":["{\"type\":\"assistant\",\"timestamp\":\"2026-10-07T00:00:00Z\",\"requestId\":\"only-request\",\"message\":{\"model\":\"synthetic\",\"usage\":{}}}"]}
+{"fn":"parseClaudeUsageLine","args":["{\"type\":\"assistant\",\"timestamp\":\"2026-10-07T00:00:00Z\",\"message\":{\"id\":\"\",\"model\":\"synthetic\",\"usage\":{\"cache_creation\":[]}}}"]}
+{"fn":"parseClaudeUsageLine","args":["{\"type\":\"assistant\",\"timestamp\":\"2026-10-07T00:00:00Z\",\"forkedFrom\":[],\"message\":{\"id\":\"only-message\",\"model\":\"synthetic\",\"usage\":{}}}"]}
+{"fn":"parseClaudeUsageLine","args":["{\"type\":\"assistant\",\"timestamp\":\"2026-10-07T00:00:00Z\",\"message\":{\"model\":\"synthetic\",\"usage\":[]}}"]}
+{"fn":"parseClaudeUsageLine","args":["{\"type\":\"assistant\",\"timestamp\":\"invalid-date\",\"message\":{\"model\":\"synthetic\",\"usage\":{}}}"]}
+{"fn":"parseClaudeUsageLine","args":[" \r\n\t"]}
+{"fn":"parseClaudeUsageLine","args":["{\"usage\":!}"]}

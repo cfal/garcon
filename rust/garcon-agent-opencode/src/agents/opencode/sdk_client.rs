@@ -30,6 +30,10 @@ pub trait OpenCodeClient {
 
     fn supports_config_providers(&self) -> bool;
     fn supports_move_session(&self) -> bool;
+
+    fn supports_permission_reply(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone)]

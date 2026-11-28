@@ -1,6 +1,6 @@
 //! Ports `server-agents/common/src/shared/attachment-files.ts`.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, future::Future};
 
 use garcon_contract::attachments::chat_attachment_extension;
 use garcon_interface::resources::ExecutorResult;
@@ -28,9 +28,19 @@ pub struct MaterializedAttachmentFiles<'a> {
 impl MaterializedAttachmentFiles<'_> {
     /// Removes the files written, whatever has become of them.
     pub async fn cleanup(&self) {
-        if let Some(directory) = &self.directory {
-            let _ = tokio::fs::remove_dir_all(directory).await;
-        }
+        cleanup_directory(self.directory.as_deref()).await;
+    }
+
+    /// Returns cleanup that outlives the attachment input. Dropping it does not remove anything.
+    pub fn into_cleanup(self) -> impl Future<Output = ()> + 'static + use<> {
+        let directory = self.directory;
+        async move { cleanup_directory(directory.as_deref()).await }
+    }
+}
+
+async fn cleanup_directory(directory: Option<&str>) {
+    if let Some(directory) = directory {
+        let _ = tokio::fs::remove_dir_all(directory).await;
     }
 }
 
@@ -373,6 +383,48 @@ mod tests {
             .unwrap();
         assert!(none.files.is_empty());
         none.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn owned_cleanup_can_remove_an_empty_materialization_after_the_input_is_gone() {
+        let (directory, cleanup) = {
+            let invalid = Owned {
+                data: "not a data url".to_owned(),
+                name: None,
+                mime_type: None,
+            };
+            let materialized =
+                materialize_attachment_files("garcon-attachment-test", &[invalid.input()])
+                    .await
+                    .unwrap();
+            assert!(materialized.files.is_empty());
+            (
+                materialized.directory.clone().unwrap(),
+                materialized.into_cleanup(),
+            )
+        };
+        assert!(tokio::fs::metadata(&directory).await.unwrap().is_dir());
+        cleanup.await;
+        assert_eq!(
+            tokio::fs::metadata(&directory).await.unwrap_err().kind(),
+            std::io::ErrorKind::NotFound,
+        );
+    }
+
+    #[tokio::test]
+    async fn dropping_uninvoked_cleanup_leaves_the_directory_untouched() {
+        let input = Owned {
+            data: "not a data url".to_owned(),
+            name: None,
+            mime_type: None,
+        };
+        let materialized = materialize_attachment_files("garcon-attachment-test", &[input.input()])
+            .await
+            .unwrap();
+        let directory = materialized.directory.clone().unwrap();
+        drop(materialized.into_cleanup());
+        assert!(tokio::fs::metadata(&directory).await.unwrap().is_dir());
+        tokio::fs::remove_dir(&directory).await.unwrap();
     }
 
     #[test]

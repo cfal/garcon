@@ -3,11 +3,11 @@
 use std::borrow::Cow;
 
 use garcon_agents_common::shared::normalize_util::normalize_tool_result_content;
-use garcon_js::{json::Opaque, trim};
+use garcon_js::{json::Opaque, string_to_number, trim};
 use indexmap::IndexSet;
 use serde_json::{Map, Value};
 
-use crate::js::{is_js_whitespace, prop, string_of, string_to_number, strip_name_separators};
+use crate::js::{is_js_whitespace, prop, string_of, strip_name_separators};
 
 fn as_number(value: &Value) -> Option<f64> {
     value

@@ -58,6 +58,12 @@ if (request.parseInt) {
     return Number.isNaN(value) ? { nan: true } : { value: toBits(value) };
   });
 }
+if (request.stringToNumber) {
+  reply.stringToNumber = bits(request.stringToNumber).map((text) => {
+    const value = Number(text);
+    return Number.isNaN(value) ? 'NaN' : toBits(value);
+  });
+}
 if (request.iso) {
   // Milliseconds travel as decimal strings because they exceed 2^53 nowhere
   // but keep their sign and exact value this way.

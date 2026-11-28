@@ -18,21 +18,37 @@ use garcon_agent_codex::app_server::{
         CodexSteerRequestOptions,
     },
     native_path_discovery_refresh::NativePathDiscoveryRefreshLimiter,
+    operation_routes::codex_operation,
     protocol::JsonRpcId,
     request_builders::{
         CodexThreadConfiguration, CodexThreadSettings, thread_settings_target_from_snapshot,
     },
     runtime::{
-        interrupt::CodexInterrupt, thread_settings::CodexSourceThreadSettings,
+        client_events::{BufferedClientEvent, CodexClientEvents},
+        interrupt::CodexInterrupt,
+        permission_events::{CodexApprovalEvents, CodexApprovalRoute},
+        source_registry::{CodexSessionSource, CodexSourceRegistry},
+        thread_settings::CodexSourceThreadSettings,
+        turn_events::dispatch_turn_notification,
         utility::CodexAppServerUtility,
     },
+    runtime_support::NoopLogger,
     steering::classify_codex_steer_rejection,
 };
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
-use garcon_contract::chat_modes::{PermissionMode, ThinkingMode};
+use garcon_agents_common::execution::runtime_events::AgentRuntimeEvent;
+use garcon_contract::chat_types::ChatMessage;
+use garcon_contract::{
+    chat_command_contracts::PermissionDecisionPayload,
+    chat_modes::{PermissionMode, ThinkingMode},
+};
 use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
 use garcon_interface::host::AgentLogger;
+use garcon_interface::producer::{
+    AgentFinalResponse, AgentProviderPermissionLifecycle, AgentTerminalPermission,
+};
 use garcon_interface::services::{AgentSteerRejectionReason, AgentSteerResult};
+use garcon_js::clock::ManualClock;
 use garcon_js::json::{Opaque, from_str};
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -53,6 +69,222 @@ struct Fixture {
     _directory: TempDir,
     command: PathBuf,
     trace: PathBuf,
+}
+
+#[tokio::test]
+async fn native_approval_expires_only_for_the_owning_thread_and_reused_ids_are_fenced() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(FIXTURE);
+            let client = CodexAppServerClient::new(fixture.options("approval-events"));
+            let next_id = Cell::new(0);
+            let approvals = Rc::new(CodexApprovalEvents::new(
+                Rc::new(NoopLogger),
+                Rc::new(ManualClock::new(0)),
+                Rc::new(move || {
+                    next_id.set(next_id.get() + 1);
+                    format!("occurrence-{}", next_id.get())
+                }),
+            ));
+            let publications = Rc::new(RefCell::new(Vec::new()));
+            let operation = codex_operation("chat", "run", Rc::new({
+                let publications = publications.clone();
+                move |event| publications.borrow_mut().push(event)
+            }));
+            let events = CodexClientEvents::buffer(
+                &client,
+                Rc::new(NoopLogger),
+                move |client, event| match event {
+                    BufferedClientEvent::ServerRequest(request) => approvals.request(
+                        client,
+                        &request,
+                        |thread, turn| (thread == "thread" && turn == "turn").then(|| CodexApprovalRoute {
+                            operation: operation.clone(),
+                            permission_mode: PermissionMode::Default,
+                            active: true,
+                        }),
+                    ),
+                    BufferedClientEvent::Notification(note) if note.method == "serverRequest/resolved" => {
+                        approvals.resolved(client, note.params.as_deref().unwrap())
+                    }
+                    _ => Ok(()),
+                },
+                |_, _| Ok(()),
+            );
+            events.release().unwrap();
+            let send = |method: &'static str, params| {
+                let client = client.clone();
+                async move {
+                    client.request(method, Some(&params), Some(Duration::from_secs(3))).await.unwrap();
+                }
+            };
+            send("send-approval", json!({"requestId":101,"threadId":"thread","turnId":"wrong"})).await;
+            send("send-approval", json!({"requestId":102,"threadId":"thread","turnId":"turn"})).await;
+            let decision = |index| {
+                let publications = publications.borrow();
+                match publications.get(index) {
+                    Some(AgentRuntimeEvent::Permission { decision: Some(decision), run_id, .. }) => {
+                        assert_eq!(run_id, "run");
+                        decision.clone()
+                    }
+                    _ => panic!("expected captured approval capability"),
+                }
+            };
+            let original = decision(0);
+            send("resolve-approval", json!({"requestId":102,"threadId":"other"})).await;
+            assert_eq!(publications.borrow().len(), 1);
+            send("resolve-approval", json!({"requestId":102,"threadId":"thread"})).await;
+            assert!(matches!(
+                &publications.borrow()[1],
+                AgentRuntimeEvent::Permission {
+                    lifecycle: AgentProviderPermissionLifecycle::Terminal(AgentTerminalPermission::Expired {
+                        permission_occurrence_id,
+                    }),
+                    decision: None,
+                    ..
+                } if permission_occurrence_id == original.permission_occurrence_id()
+            ));
+            send("send-approval", json!({"requestId":102,"threadId":"thread","turnId":"turn"})).await;
+            let replacement = decision(2);
+            assert_ne!(original.permission_occurrence_id(), replacement.permission_occurrence_id());
+            let allow = PermissionDecisionPayload { allow: true, always_allow: Some(false), response: None };
+            assert_eq!(original.respond(allow.clone()).await.unwrap_err().to_string(), "Codex permission occurrence is no longer pending");
+            replacement.respond(allow.clone()).await.unwrap();
+            assert!(replacement.respond(allow).await.is_err());
+            send("resolve-approval", json!({"requestId":102,"threadId":"thread"})).await;
+            assert_eq!(publications.borrow().len(), 3);
+            let frames: Vec<_> = fixture.frames().into_iter().filter(|frame| {
+                frame.get("method").is_none() && matches!(frame["id"].as_i64(), Some(101 | 102))
+            }).collect();
+            assert_eq!(frames, [
+                json!({"id":101,"result":{"decision":"decline"}}),
+                json!({"id":102,"result":{"decision":"accept"}}),
+            ]);
+            client.shutdown().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn native_turn_events_publish_rows_before_completion_and_keep_their_captured_operation() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(FIXTURE);
+            let client = CodexAppServerClient::new(fixture.options("turn-events"));
+            let registry = Rc::new(RefCell::new(CodexSourceRegistry::default()));
+            let observed = Rc::new(RefCell::new(Vec::new()));
+            let events = CodexClientEvents::buffer(
+                &client,
+                Rc::new(NoopLogger),
+                {
+                    let registry = registry.clone();
+                    let observed = observed.clone();
+                    move |client, event| {
+                        if let BufferedClientEvent::Notification(note) = event
+                            && let Some(completion) = dispatch_turn_notification(
+                                &registry,
+                                &NoopLogger,
+                                client,
+                                "2026-02-21T10:00:00.000Z",
+                                &note,
+                            )
+                        {
+                            assert_eq!(
+                                completion.final_response,
+                                Some(AgentFinalResponse::Text {
+                                    text: "Final\n".into()
+                                }),
+                            );
+                            observed.borrow_mut().push((
+                                completion.operation.run_id.clone(),
+                                if completion.is_active {
+                                    "current end"
+                                } else {
+                                    "detached end"
+                                }
+                                .into(),
+                            ));
+                        }
+                        Ok(())
+                    }
+                },
+                |_, _| Ok(()),
+            );
+            let operation = |run_id: &'static str| {
+                let observed = observed.clone();
+                codex_operation(
+                    "chat",
+                    run_id,
+                    Rc::new(move |event| {
+                        let mut observed = observed.borrow_mut();
+                        match event {
+                            AgentRuntimeEvent::Steerable => {
+                                observed.push((run_id.into(), "steerable".into()))
+                            }
+                            AgentRuntimeEvent::Rows { rows } => {
+                                for row in rows {
+                                    let ChatMessage::Assistant(message) = row.message else {
+                                        panic!("expected assistant row");
+                                    };
+                                    observed.push((run_id.into(), message.content));
+                                }
+                            }
+                            _ => panic!("unexpected turn event"),
+                        }
+                    }),
+                )
+            };
+            let old = operation("old-run");
+            let source = Rc::new(CodexSessionSource::new(
+                "thread".into(),
+                client.clone(),
+                old.clone(),
+            ));
+            registry.borrow_mut().activate(source.clone());
+            garcon_agent_codex::app_server::runtime_session_state::CodexTurnRoutes::adopt_turn(
+                &source.routes,
+                "old-turn",
+                old,
+            );
+            let next = operation("next-run");
+            source.routes.borrow_mut().reactivate(next);
+            let send = |turn_id, start| {
+                let client = client.clone();
+                async move {
+                    client
+                        .request(
+                            "send-turn-events",
+                            Some(&json!({"threadId":"thread","turnId":turn_id,"start":start})),
+                            Some(Duration::from_secs(3)),
+                        )
+                        .await
+                        .unwrap();
+                }
+            };
+            send("next-turn", true).await;
+            assert_eq!(observed.borrow().len(), 1, "early events are buffered");
+            events.release().unwrap();
+            send("old-turn", false).await;
+            let observed = observed.borrow().clone();
+            assert_eq!(
+                observed
+                    .iter()
+                    .map(|(run, event)| (run.as_str(), event.as_str()))
+                    .collect::<Vec<_>>(),
+                [
+                    ("old-run", "steerable"),
+                    ("next-run", "steerable"),
+                    ("next-run", "Live"),
+                    ("next-run", "Final\n"),
+                    ("next-run", "current end"),
+                    ("old-run", "Live"),
+                    ("old-run", "Final\n"),
+                    ("old-run", "detached end"),
+                ],
+            );
+            client.shutdown().await.unwrap();
+        })
+        .await;
 }
 
 impl Fixture {

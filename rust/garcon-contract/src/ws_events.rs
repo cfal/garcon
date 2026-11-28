@@ -342,13 +342,13 @@ pub enum ChatOperationalNoticeDetail {
 }
 
 macro_rules! chat_event_messages {
-    ($( $name:ident ($variant:ident, $wire:literal) $(
+    ($( $name:ident $(<$param:ident = $default:ty>)? ($variant:ident, $wire:literal) $(
             #[$ctor_attr:meta]
         )* { $($(#[$field_attr:meta])* $field:ident : $ty:ty,)* })*) => {
         $(
             #[derive(Debug, Clone, PartialEq, Serialize)]
             #[serde(rename_all = "camelCase")]
-            pub struct $name {
+            pub struct $name $(<$param = $default>)? {
                 $($(#[$field_attr])* pub $field: $ty,)*
                 #[serde(rename = "type")]
                 message_type: &'static str,
@@ -356,10 +356,12 @@ macro_rules! chat_event_messages {
 
             impl $name {
                 pub const TYPE: &'static str = $wire;
+            }
 
+            impl $(<$param>)? $name $(<$param>)? {
                 $(#[$ctor_attr])*
                 pub fn new($($field: $ty),*) -> Self {
-                    Self { $($field,)* message_type: Self::TYPE }
+                    Self { $($field,)* message_type: $wire }
                 }
             }
         )*
@@ -516,9 +518,9 @@ chat_event_messages! {
         chat_id: String,
         activity_status: Option<ChatActivityStatus>,
     }
-    ChatExecutionControlUpdatedMessage(ChatExecutionControlUpdated, "chat-execution-control-updated") {
+    ChatExecutionControlUpdatedMessage<Control = ChatExecutionControlState>(ChatExecutionControlUpdated, "chat-execution-control-updated") {
         chat_id: String,
-        control: Box<ChatExecutionControlState>,
+        control: Box<Control>,
     }
     ChatOperationalNoticeMessage(ChatOperationalNotice, "chat-operational-notice") {
         chat_id: String,

@@ -1,0 +1,8 @@
+{"id":"explicitAcpModel#0","fn":"explicitAcpModel","args":[],"result":{"$":"undefined"},"origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:1"}
+{"id":"explicitAcpModel#1","fn":"explicitAcpModel","args":[null],"result":{"$":"undefined"},"origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:2"}
+{"id":"explicitAcpModel#2","fn":"explicitAcpModel","args":[""],"result":{"$":"undefined"},"origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:3"}
+{"id":"explicitAcpModel#3","fn":"explicitAcpModel","args":["default"],"result":{"$":"undefined"},"origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:4"}
+{"id":"explicitAcpModel#4","fn":"explicitAcpModel","args":["model-a"],"result":"model-a","origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:5"}
+{"id":"explicitAcpModel#5","fn":"explicitAcpModel","args":["Default"],"result":"Default","origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:6"}
+{"id":"explicitAcpModel#6","fn":"explicitAcpModel","args":[" default "],"result":" default ","origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:7"}
+{"id":"explicitAcpModel#7","fn":"explicitAcpModel","args":["custom/model"],"result":"custom/model","origin":"rust/garcon-agents-common/tests/inputs/acp-policy.jsonl:8"}
