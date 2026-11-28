@@ -2,6 +2,7 @@
 
 use garcon_cases::{CaseError, javascript_number, markers, replay, round_tripped, text, unknown};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use garcon_contract::chat_execution_control::{
@@ -234,6 +235,127 @@ fn pinned_bun_stdout(script: &str, arguments: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap()
+}
+
+fn agent_wire_fixtures() -> String {
+    pinned_bun_stdout(
+        r#"import "./rust/garcon-contract/tests/inputs/common/agent-wire.ts";"#,
+        &[],
+    )
+}
+
+fn verify_wire_round_trip<T: DeserializeOwned + Serialize>(wire: &str) {
+    let value: T = garcon_js::json::from_str(wire).expect("DTO accepts the original shape");
+    assert_eq!(serde_json::to_string(&value).unwrap(), wire);
+}
+
+#[test]
+fn agent_execution_dtos_round_trip_bun_json() {
+    use garcon_contract::agent_execution::*;
+    let fixtures = agent_wire_fixtures();
+    let lines: Vec<_> = fixtures.lines().collect();
+    assert_eq!(lines.len(), 16);
+    verify_wire_round_trip::<AgentAttachment>(lines[0]);
+    verify_wire_round_trip::<AgentCredentialReference>(lines[1]);
+    for line in &lines[2..4] {
+        verify_wire_round_trip::<AgentEndpointSelection>(line);
+    }
+    for line in &lines[4..6] {
+        verify_wire_round_trip::<AgentAuthStatus>(line);
+    }
+}
+
+#[test]
+fn agent_auth_dtos_round_trip_bun_json() {
+    use garcon_contract::agent_auth::*;
+    let fixtures = agent_wire_fixtures();
+    let lines: Vec<_> = fixtures.lines().collect();
+    assert_eq!(lines.len(), 16);
+    verify_wire_round_trip::<AgentDeviceAuthInfo>(lines[6]);
+    for line in &lines[7..9] {
+        verify_wire_round_trip::<AgentAuthLoginLaunchResult>(line);
+    }
+    for line in &lines[9..13] {
+        verify_wire_round_trip::<AgentAuthLoginStatus>(line);
+    }
+    verify_wire_round_trip::<AgentAuthLoginCompleteResult>(lines[13]);
+    verify_wire_round_trip::<AgentAuthLoginHttpStatus>(lines[14]);
+    assert_eq!(
+        serde_json::to_string(LOGIN_INSTANCE_QUERY).unwrap(),
+        lines[15]
+    );
+}
+
+fn serialized_record(value: impl Serialize) -> Value {
+    let encoded = serde_json::to_string(&value).expect("contract is serializable");
+    garcon_js::json::from_str(&encoded).expect("contract serializes to JSON")
+}
+
+#[test]
+fn agent_settings_recordings() {
+    use garcon_contract::agent_integration::{
+        AgentSettingDescriptor, parse_agent_settings_envelope,
+    };
+    use garcon_contract::agent_settings::*;
+    use garcon_js::json::Opaque;
+
+    assert_recording("agent-settings", |function, args| {
+        let envelope = |index| {
+            parse_agent_settings_envelope(unknown(function, args.get(index))?.as_ref()).ok_or_else(
+                || CaseError::undeliverable("expected a parsed agent settings envelope"),
+            )
+        };
+        let descriptor = || {
+            serde_json::from_value::<AgentSettingDescriptor>(
+                unknown(function, args.get(1))?.into_owned(),
+            )
+            .map_err(|error| CaseError::undeliverable(error.to_string()))
+        };
+        Ok(match function {
+            "createEmptyAgentSettings" => serialized_record(create_empty_agent_settings(
+                required_text(function, args.first())?,
+            )),
+            "normalizeAgentSettings" => {
+                let value = round_tripped(function, args.get(1))?;
+                let value = match value.as_deref() {
+                    None | Some(Value::Null) => None,
+                    Some(_) => Some(envelope(1)?),
+                };
+                serialized_record(normalize_agent_settings(
+                    required_text(function, args.first())?,
+                    value.as_ref(),
+                    &envelope(2)?,
+                ))
+            }
+            "cloneAgentSettings" => serialized_record(clone_agent_settings(&envelope(0)?)),
+            "settingValue" => setting_value(&envelope(0)?, &descriptor()?)
+                .map_or_else(markers::undefined, serialized_record),
+            "withAgentSetting" => {
+                let envelope = envelope(0)?;
+                let value = Opaque::from_value(unknown(function, args.get(2))?.into_owned());
+                serialized_record(with_agent_setting(&envelope, &descriptor()?, &value))
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn cloned_agent_settings_preserve_javascript_json_text() {
+    use garcon_contract::agent_integration::parse_agent_settings_envelope;
+    use garcon_contract::agent_settings::clone_agent_settings;
+    let input = r#"{"ownerId":"sample","schemaVersion":1,"values":{"one":1.0,"big":9007199254740993,"exp21":1e21,"negativeZero":-0}}"#;
+    let original = pinned_bun_stdout(
+        r#"import { cloneAgentSettings } from "./common/agent-settings.ts";
+           console.log(JSON.stringify(cloneAgentSettings(JSON.parse(Bun.argv.at(-1)))));"#,
+        &[input],
+    );
+    let value = garcon_js::json::from_str(input).unwrap();
+    let envelope = parse_agent_settings_envelope(&value).unwrap();
+    assert_eq!(
+        serde_json::to_string(&clone_agent_settings(&envelope)).unwrap(),
+        original.trim_end()
+    );
 }
 
 #[test]
