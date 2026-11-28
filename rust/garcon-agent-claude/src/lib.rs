@@ -13,6 +13,7 @@ pub mod context_window_control;
 pub mod interrupt_receipt;
 pub mod model_context;
 pub mod native_path;
+pub mod permission_response;
 pub mod permission_tool_converter;
 pub mod process_retirements;
 pub mod runtime_state;

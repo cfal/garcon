@@ -290,6 +290,14 @@ impl ClaudeCli {
             self.control.handle_response(&session.id, message);
             return true;
         }
+        if message["type"] == "control_request" {
+            self.handle_permission_control_request(session, message);
+            return true;
+        }
+        if message["type"] == "control_cancel_request" {
+            self.handle_permission_control_cancel(session, message);
+            return true;
+        }
         message["type"] == "system"
             && handle_claude_provider_lifecycle_message(
                 message,
