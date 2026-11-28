@@ -95,6 +95,31 @@ describe('placeholders of a step', () => {
     expect(expandPlaceholders('{{not-a-placeholder}}', resolved.values)).toBe('{{not-a-placeholder}}');
   });
 
+  test('names an earlier raw response header and checks its value when repeated', () => {
+    const etag = 'W/"catalog-value"';
+    const first: CapturedExchange = {
+      request: { method: 'GET', path: '/catalog', auth: 'token' },
+      status: 200, headers: { etag }, body: { kind: 'empty' },
+      rawHeaders: new Headers({ ETag: etag, 'X-Example': 'raw-value' }),
+    };
+    const step: ScenarioStep = {
+      name: 'conditional',
+      http: {
+        method: 'GET', path: '/catalog',
+        headers: { 'If-None-Match': '"other", {{catalog.headers.etag}}', 'X-Example': '{{catalog.headers.x-example}}' },
+      },
+    };
+    const earlier = new Map([['catalog', first]]);
+    const resolved = resolvePlaceholders(server, step, earlier, now);
+    expect(expandPlaceholders(step.http!.headers!['If-None-Match'], resolved.values)).toBe(`"other", ${etag}`);
+    expect(resolved.values['catalog.headers.x-example']).toBe('raw-value');
+    expect(normalizeCapture(first, server, { carried: resolved.carried })).toEqual({
+      request: first.request, status: 200, headers: { etag: '{{catalog.headers.etag}}' }, body: { kind: 'empty' },
+    });
+    step.http!.headers!['X-Example'] = '{{catalog.headers.x-missing}}';
+    expect(() => resolvePlaceholders(server, step, earlier, now)).toThrow('has no header x-missing');
+  });
+
   test('keep the values of the server start and the text of a WebSocket step', () => {
     const step: ScenarioStep = {
       name: 'socket',

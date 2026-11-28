@@ -25,7 +25,7 @@
     { "name": "catalog-agent-first-of-repeated", "http": { "method": "GET", "path": "/api/v1/models?agent=claude&agent=codex" } },
     { "name": "catalog-if-none-match-star", "http": { "method": "GET", "path": "/api/v1/models", "headers": { "If-None-Match": "*" } } },
     { "name": "catalog-if-none-match-miss", "http": { "method": "GET", "path": "/api/v1/models", "headers": { "If-None-Match": "\"other\", W/\"model-catalog:wrong\"" } } },
-    { "name": "catalog-if-none-match-hit-in-list", "http": { "method": "GET", "path": "/api/v1/models", "headers": { "If-None-Match": "\"other\", W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"" } } },
+    { "name": "catalog-if-none-match-hit-in-list", "http": { "method": "GET", "path": "/api/v1/models", "headers": { "If-None-Match": "\"other\", {{catalog-empty-provider-list.headers.etag}}" } } },
     { "name": "catalog-agent-ignores-if-none-match", "http": { "method": "GET", "path": "/api/v1/models?agent=claude", "headers": { "If-None-Match": "*" } } },
     { "name": "catalog-login-instance-stale", "http": { "method": "GET", "path": "/api/v1/models?loginInstance=retired-instance" } },
     { "name": "catalog-agent-login-instance-stale", "http": { "method": "GET", "path": "/api/v1/models?agent=claude&loginInstance=retired-instance" } },

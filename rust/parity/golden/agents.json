@@ -820,11 +820,6 @@
                   },
                   {
                     "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
-                  },
-                  {
-                    "isLocal": true,
                     "label": "Notes",
                     "value": "notes"
                   },
@@ -1682,11 +1677,6 @@
                     "isLocal": true,
                     "label": "Bash",
                     "value": "bash"
-                  },
-                  {
-                    "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
                   },
                   {
                     "isLocal": true,
@@ -3238,7 +3228,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "13804",
+          "content-length": "13759",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -4086,11 +4076,6 @@
                     "isLocal": true,
                     "label": "Bash",
                     "value": "bash"
-                  },
-                  {
-                    "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
                   },
                   {
                     "isLocal": true,
@@ -4994,11 +4979,6 @@
                   },
                   {
                     "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
-                  },
-                  {
-                    "isLocal": true,
                     "label": "Notes",
                     "value": "notes"
                   },
@@ -5099,7 +5079,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "13804",
+          "content-length": "13759",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -6031,11 +6011,6 @@
                     "isLocal": true,
                     "label": "Bash",
                     "value": "bash"
-                  },
-                  {
-                    "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
                   },
                   {
                     "isLocal": true,
