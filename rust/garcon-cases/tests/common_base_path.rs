@@ -8,7 +8,7 @@ use std::fs;
 
 use serde_json::{Value, json};
 
-use garcon_cases::{CaseError, json_argument, replay};
+use garcon_cases::{CaseError, replay, text};
 
 const CASES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/common/base-path");
 const INVALID_BASE_PATH: &str = "Invalid base path: use an absolute path of unescaped letters, digits, dots, hyphens, underscores, or tildes, without empty or dot segments";
@@ -48,22 +48,19 @@ fn strip_base_path(pathname: &str, base_path: &str) -> Option<String> {
         .then(|| pathname[base_path.len()..].to_owned())
 }
 
-// Calls the port for a recorded case. Arguments arrive as recorded: an
-// argument is taken as JSON or `undefined`, and one that is not a string,
-// which the original has no recorded behavior for, is not handled.
+// Calls the port for a recorded case. Each argument is a string, which the
+// reader `text` gives as it was recorded; one that is not a string, which the
+// original has no recorded behavior for, is not handled.
 fn dispatch(function: &str, args: &[Value]) -> Result<Value, CaseError> {
-    fn text<'a>(function: &str, argument: Option<&'a Value>) -> Result<&'a str, CaseError> {
-        json_argument(function, argument)?
-            .and_then(Value::as_str)
-            .ok_or_else(|| CaseError::unhandled(function))
-    }
+    let argument = |index: usize| {
+        text(function, args.get(index))
+            .and_then(|value| value.ok_or_else(|| CaseError::unhandled(function)))
+    };
     match function {
-        "parseBasePath" => parse_base_path(text(function, args.first())?).map(Value::String),
-        "stripBasePath" => Ok(strip_base_path(
-            text(function, args.first())?,
-            text(function, args.get(1))?,
-        )
-        .map_or(Value::Null, Value::String)),
+        "parseBasePath" => parse_base_path(argument(0)?).map(Value::String),
+        "stripBasePath" => {
+            Ok(strip_base_path(argument(0)?, argument(1)?).map_or(Value::Null, Value::String))
+        }
         _ => Err(CaseError::unhandled(function)),
     }
 }

@@ -96,8 +96,11 @@ export function mergeStrings(left: string, right: string): string {
     && WORD_CHARACTER.test(left[suffixStart - 1]) && WORD_CHARACTER.test(left[suffixStart])) {
     suffixStart += 1;
   }
+  // Moving the boundary gave characters back to the variable part, in the
+  // other run as well.
+  const kept = left.length - suffixStart;
   const leftVariable = left.slice(prefix, suffixStart);
-  const rightVariable = right.slice(prefix, right.length - suffix);
+  const rightVariable = right.slice(prefix, right.length - kept);
   const shape = leftVariable.length === rightVariable.length ? sharedShape(leftVariable, rightVariable) : null;
   const wildcard = shape === null ? WILDCARD : `[..${shape}:${leftVariable.length}]`;
   return `${left.slice(0, prefix)}${wildcard}${left.slice(suffixStart)}`;

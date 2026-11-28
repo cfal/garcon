@@ -70,6 +70,19 @@ describe('firstDifference', () => {
     expect(mergeStrings('a b c', 'a b  c')).toBe('a b [..]c');
   });
 
+  test('keeps the shape also when the two runs share a first or a last character', () => {
+    // About one pair of random tokens in sixteen shares a last character. The
+    // word boundary gives the shared characters back to the variable part.
+    expect(mergeStrings('token=a123', 'token=a987')).toBe('token=[..hex:4]');
+    expect(mergeStrings('token=abc4', 'token=9fe4')).toBe('token=[..hex:4]');
+    expect(mergeStrings('token=a1234', 'token=a9874')).toBe('token=[..hex:5]');
+    expect(mergeStrings('ms 12345', 'ms 67845')).toBe('ms [..digits:5]');
+    expect(mergeStrings('id abc4 tail', 'id a9z4 tail')).toBe('id [..base64url:4] tail');
+    // The lengths still have to agree.
+    expect(mergeStrings('ms 12345', 'ms 678945')).toBe('ms [..]');
+    expect(mergeStrings('5f2a9c1e7b4d4e6f8a90123456789abc5f2a9c1e7b4d4e6f8a90123456789abc', 'c41e9b2a7d3f5e0c8b1a4d6f29370123c41e9b2a7d3f5e0c8b1a4d6f2937012c')).toBe('[..hex:64]');
+  });
+
   test('accepts from a port only the length and the alphabet a wildcard recorded', () => {
     const hex = '5f2a9c1e7b4d4e6f8a90123456789abc'.repeat(2);
     expect(stringMatches('[..hex:64]', hex)).toBe(true);

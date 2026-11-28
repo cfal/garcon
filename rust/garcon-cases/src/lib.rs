@@ -7,30 +7,34 @@
 //! function for a case's function name and arguments. Every case must match.
 //!
 //! Arguments reach the dispatcher as they were recorded, so a value JSON
-//! cannot hold is a marker object. A function that takes JSON or `undefined`
-//! reads an argument with [`json_argument`]; anything else reads markers with
-//! [`markers`] and builds the ones a result needs with it too.
+//! cannot hold is a marker object. A dispatcher reads an argument with the
+//! readers here ([`round_tripped`], [`unknown`], [`text`], [`javascript_number`],
+//! [`bigint`]), which give the port the JSON the recorded value round-trips to.
+//! An argument that holds a marker JSON cannot carry, such as a Date or a Map,
+//! is decoded with [`markers`], which also builds the markers a result needs.
 //!
 //! ```no_run
 //! use serde_json::json;
 //!
-//! use garcon_cases::{CaseError, json_argument, replay};
+//! use garcon_cases::{CaseError, replay, text};
 //!
-//! # fn parse_label(value: Option<&serde_json::Value>) -> Option<String> {
-//! #     value?.as_str().map(|label| label.trim().to_owned()).filter(|label| !label.is_empty())
+//! # fn parse_label(label: &str) -> Option<String> {
+//! #     let label = label.trim();
+//! #     (!label.is_empty()).then(|| label.to_owned())
 //! # }
 //! # fn main() {
 //! replay("tests/cases/common/labels", |function, args| match function {
-//!     "parseLabel" => Ok(json!(parse_label(json_argument(function, args.first())?))),
+//!     "parseLabel" => Ok(json!(text(function, args.first())?.and_then(parse_label))),
 //!     _ => Err(CaseError::unhandled(function)),
 //! });
 //! # }
 //! ```
 
+mod arguments;
 mod compare;
 mod manifest;
 pub mod markers;
 mod replay;
 
-pub use markers::json_argument;
+pub use arguments::{bigint, javascript_number, round_tripped, text, unknown};
 pub use replay::{CaseError, Stats, replay};

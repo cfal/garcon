@@ -11,6 +11,8 @@ function captureOf(evaluation: Evaluation): Json {
   if ('result' in evaluation) return evaluation.result;
   if ('timedOut' in evaluation) return { 'no outcome within': `${EVALUATE_STALL_MS} ms` };
   if ('missing' in evaluation) return { 'no longer exported': true };
+  // A recorded case carries no guard, so the evaluator never holds it back.
+  if ('guarded' in evaluation) throw new Error('The evaluator held back a recorded case, which carries no guard.');
   return { 'not encodable': `${evaluation.notCaptured.type} at ${evaluation.notCaptured.path}` };
 }
 

@@ -33,7 +33,7 @@ async function recording(): Promise<Golden> {
 }
 
 // A case's recorded expectation, which has the shape of a capture.
-function recorded(golden: Golden, name: string): { request: { path: string }; body: { value?: Json; kind: string } } {
+function recorded(golden: Golden, name: string): { status: number; request: { path: string }; body: { value?: Json; kind: string } } {
   return golden.cases.find((entry) => entry.name === name)!.expected as unknown as ReturnType<typeof recorded>;
 }
 
@@ -79,6 +79,23 @@ describe('a scenario run against the stand-in controller', () => {
     expect(result.cases.map((entry) => [entry.name, entry.difference])).toEqual([
       ['create', null], ['rename', null], ['list', null], ['days', null], ['large', null],
     ]);
+  });
+
+  test('a scenario option starts the server with authentication disabled', async () => {
+    const disabled: Scenario = {
+      name: 'probe-auth-disabled',
+      description: 'Exercises the auth option of a scenario.',
+      server: { account: 'none', auth: 'disabled' },
+      steps: [
+        { name: 'status', http: { method: 'GET', path: '/api/v1/auth/status' } },
+        { name: 'login', http: { method: 'POST', path: '/api/v1/auth/login', json: { username: '{{username}}', password: '{{password}}' } } },
+      ],
+    };
+    const golden = mergeRuns(disabled, await runScenario(repoRoot, probe, disabled), await runScenario(repoRoot, probe, disabled));
+    // Every request counts as authenticated, and the sign-in route refuses.
+    expect(recorded(golden, 'status').body.value).toEqual({ needsSetup: false, isAuthenticated: true, authDisabled: true });
+    expect(recorded(golden, 'login').status).toBe(403);
+    expect(recorded(golden, 'login').body.value).toMatchObject({ errorCode: 'AUTH_CHANGE_FORBIDDEN' });
   });
 
   test('fails a step whose placeholder names a step that did not run before it', async () => {

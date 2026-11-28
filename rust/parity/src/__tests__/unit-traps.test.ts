@@ -37,15 +37,20 @@ describe('trapVariants', () => {
       [{ a: 'x', b: [0, 'y'], c: true }],
       [{ a: 'x', b: [1, ''], c: true }],
     ]);
-    // Two string leaves with nine traps each and a number leaf with eight.
-    expect(origins.slice(0, 26).every((origin) => how(origin) === 'replace')).toBe(true);
-    expect(origins.slice(26).every((origin) => how(origin) !== 'replace')).toBe(true);
-    expect(origins[26]).toBe(`trap:accented+after-first@$.args[0].a`);
-    expect(args[26]).toEqual([{ a: `x${accented}`, b: [1, 'y'], c: true }]);
+    // Two string leaves with nine traps each and a nested number leaf with
+    // the seven a JSON value can carry.
+    expect(origins.slice(0, 25).every((origin) => how(origin) === 'replace')).toBe(true);
+    expect(origins.slice(25).every((origin) => how(origin) !== 'replace')).toBe(true);
+    expect(origins[25]).toBe(`trap:accented+after-first@$.args[0].a`);
+    expect(args[25]).toEqual([{ a: `x${accented}`, b: [1, 'y'], c: true }]);
     expect(new Set(origins.map(trapOf))).toEqual(new Set([
       'empty', 'accented', 'cjk', 'astral', 'combining', 'dotless-i', 'kelvin', 'nbsp', 'long',
-      'zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53', 'nan',
+      'zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53',
     ]));
+    // Each variant names the argument whose leaf it changes.
+    const both = generate([[{ a: 'x' }, 'y']]).variants;
+    expect(both.every((variant) => variant.origin.includes(`@$.args[${variant.argument}]`))).toBe(true);
+    expect(new Set(both.map((variant) => variant.argument))).toEqual(new Set([0, 1]));
   });
 
   test('uses every trap string, each at its intended code points', () => {
@@ -62,12 +67,37 @@ describe('trapVariants', () => {
     expect(dotless).not.toBe('i');
   });
 
-  test('uses every trap number, and embeds nothing in a number', () => {
+  test('uses every trap number for an argument that is a number, and embeds nothing in a number', () => {
     const { args, origins } = generate([[1]]);
     expect(args.map((variant) => variant[0])).toEqual([
-      0, { $: 'number', value: '-0' }, -1, 0.5, 1e21, 1e-7, 2 ** 53, { $: 'number', value: 'NaN' },
+      0, { $: 'number', value: '-0' }, -1, 0.5, 1e21, 1e-7, 2 ** 53,
+      { $: 'number', value: 'NaN' }, { $: 'number', value: 'Infinity' }, { $: 'number', value: '-Infinity' },
+    ]);
+    expect(origins.map(trapOf)).toEqual([
+      'zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53', 'nan', 'infinity', 'negative-infinity',
     ]);
     expect(origins.every((origin) => how(origin) === 'replace')).toBe(true);
+  });
+
+  test('reads an argument recorded as a number marker as the number it is', () => {
+    const { args, origins } = generate([[{ $: 'number', value: '-0' }]]);
+    // The `negative-zero` trap gives the recorded call again.
+    expect(origins.map(trapOf)).toEqual(['zero', 'negative-one', 'half', '1e21', '1e-7', '2^53', 'nan', 'infinity', 'negative-infinity']);
+    expect(args.slice(6)).toEqual([[{ $: 'number', value: 'NaN' }], [{ $: 'number', value: 'Infinity' }], [{ $: 'number', value: '-Infinity' }]]);
+  });
+
+  test('replaces a number inside an object or an array only by a number JSON can carry', () => {
+    // A port receives such a number as JSON, which cannot hold NaN or an infinity.
+    const { variants } = generate([[{ a: [1], m: { $: 'map', value: [['k', 2]] } }]]);
+    const finite = ['zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53'];
+    for (const path of ['$.args[0].a[0]', '$.args[0].m.value[0][1]']) {
+      expect(variants.filter((variant) => variant.origin.endsWith(`@${path}`)).map((variant) => trapOf(variant.origin))).toEqual(finite);
+    }
+    // Negative zero JSON can carry, and does; it replaces the leaf in place.
+    const negativeZero = variants.find((variant) => variant.origin === 'trap:negative-zero@$.args[0].a[0]')!;
+    expect(negativeZero.args).toEqual([{ a: [{ $: 'number', value: '-0' }], m: { $: 'map', value: [['k', 2]] } }]);
+    // No variant anywhere holds NaN or an infinity.
+    expect(variants.some((variant) => /NaN|Infinity/.test(JSON.stringify(variant.args)))).toBe(false);
   });
 
   test('embeds a trap after the first character of the leaf and at its end, once the replacements are had', () => {
