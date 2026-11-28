@@ -211,13 +211,14 @@ fn has_no_transform(cache_control: Option<&str>) -> bool {
     })
 }
 
-/// A header value as text, or `None` when absent or not visible ASCII.
+/// A single field for the front door's shadow diagnostic, not a Fetch header read.
 pub fn header<K: AsHeaderName>(headers: &HeaderMap, name: K) -> Option<&str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
 fn declared_length(headers: &HeaderMap) -> Option<f64> {
-    let value = trim(header(headers, CONTENT_LENGTH)?);
+    let value = fetch_header_value(headers, &CONTENT_LENGTH)?;
+    let value = trim(&value);
     if value.is_empty() {
         return Some(0.0);
     }
@@ -247,22 +248,25 @@ fn should_skip(method: &Method, response: &NativeResponse, enabled: bool) -> boo
         || method == Method::HEAD
         || matches!(response.status.as_u16(), 101 | 204 | 304)
         || response.headers.contains_key(CONTENT_ENCODING)
-        || has_no_transform(header(&response.headers, CACHE_CONTROL))
-        || !is_compressible(header(&response.headers, CONTENT_TYPE))
+        || has_no_transform(fetch_header_value(&response.headers, &CACHE_CONTROL).as_deref())
+        || !is_compressible(fetch_header_value(&response.headers, &CONTENT_TYPE).as_deref())
         || declared_length(&response.headers)
             .is_some_and(|length| length.is_finite() && length < MIN_COMPRESSED_BYTES as f64)
 }
 
 fn header_value(text: String) -> HeaderValue {
-    HeaderValue::from_str(&text).expect("generated header values are visible ASCII")
+    let bytes: Vec<_> = text.chars().map(|byte| byte as u8).collect();
+    // INFALLIBLE: generated ASCII and validated Fetch ByteStrings are valid wire values.
+    HeaderValue::from_bytes(&bytes).expect("generated HTTP header value")
 }
 
 fn append_vary_accept_encoding(headers: &mut HeaderMap) {
-    let Some(existing) = header(headers, VARY).filter(|value| !value.is_empty()) else {
+    let Some(existing) = fetch_header_value(headers, &VARY).filter(|value| !value.is_empty())
+    else {
         headers.insert(VARY, HeaderValue::from_static("Accept-Encoding"));
         return;
     };
-    if trim(existing) == "*"
+    if trim(&existing) == "*"
         || existing
             .split(',')
             .any(|part| trim(part).eq_ignore_ascii_case("accept-encoding"))
@@ -273,9 +277,8 @@ fn append_vary_accept_encoding(headers: &mut HeaderMap) {
 }
 
 fn weaken_strong_etag(headers: &mut HeaderMap) {
-    if let Some(etag) = header(headers, ETAG)
+    if let Some(etag) = fetch_header_value(headers, &ETAG)
         .filter(|etag| !etag.is_empty() && !etag.starts_with("W/"))
-        .map(str::to_string)
     {
         headers.insert(ETAG, header_value(format!("W/{etag}")));
     }
@@ -295,7 +298,9 @@ pub fn finish(
         return response;
     }
     let mut response = response;
-    let Some(encoding) = negotiate_encoding(header(request, ACCEPT_ENCODING)) else {
+    let Some(encoding) =
+        negotiate_encoding(fetch_header_value(request, &ACCEPT_ENCODING).as_deref())
+    else {
         append_vary_accept_encoding(&mut response.headers);
         return response;
     };
@@ -381,11 +386,13 @@ fn select_range(
     {
         return None;
     }
-    let total = safe_unsigned(header(&response.headers, CONTENT_LENGTH)?)?;
+    let total = safe_unsigned(&fetch_header_value(&response.headers, &CONTENT_LENGTH)?)?;
     if request.contains_key(IF_RANGE) {
         let validator = fetch_header_value(request, &IF_RANGE)?;
         let inner = validator.strip_prefix('"')?.strip_suffix('"')?;
-        if inner.contains('"') || Some(validator.as_ref()) != header(&response.headers, ETAG) {
+        if inner.contains('"')
+            || fetch_header_value(&response.headers, &ETAG).as_ref() != Some(&validator)
+        {
             return None;
         }
     }
@@ -532,5 +539,93 @@ mod tests {
         let undeclared = finish(&Method::GET, &request, small(false), true, compress);
         assert_eq!(undeclared.headers.get(CONTENT_ENCODING).unwrap(), "gzip");
         assert_eq!(undeclared.headers.get(VARY).unwrap(), "Accept-Encoding");
+    }
+
+    fn asset() -> NativeResponse {
+        NativeResponse {
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+            body: Bytes::from(vec![b'a'; 4096]),
+        }
+    }
+
+    #[test]
+    fn finish_negotiates_all_accept_encoding_fields_in_order() {
+        for (first, second, expected) in [("br", "gzip", Some("gzip")), ("gzip", "gzip;q=0", None)]
+        {
+            let mut request = HeaderMap::new();
+            request.append(ACCEPT_ENCODING, HeaderValue::from_static(first));
+            request.append(ACCEPT_ENCODING, HeaderValue::from_static(second));
+            let response = finish(&Method::GET, &request, asset(), true, |encoding, body| {
+                encoding.compress(body)
+            });
+            assert_eq!(
+                response
+                    .headers
+                    .get(CONTENT_ENCODING)
+                    .and_then(|value| value.to_str().ok()),
+                expected
+            );
+            assert_eq!(response.headers[VARY], "Accept-Encoding");
+        }
+    }
+
+    #[test]
+    fn finish_joins_response_fields_before_skipping_and_transforming() {
+        let mut request = HeaderMap::new();
+        request.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+        let mut untouched = asset();
+        untouched
+            .headers
+            .append(CACHE_CONTROL, HeaderValue::from_static("public"));
+        untouched
+            .headers
+            .append(CACHE_CONTROL, HeaderValue::from_static("no-transform"));
+        let untouched = finish(&Method::GET, &request, untouched, true, |_, _| {
+            panic!("no-transform prevents compression")
+        });
+        assert!(!untouched.headers.contains_key(VARY));
+
+        let mut response = asset();
+        for (name, values) in [
+            (VARY, ["Origin", "Cookie"]),
+            (ETAG, ["\"one\"", "\"two\""]),
+            (CONTENT_LENGTH, ["2", "2"]),
+            (CONTENT_TYPE, ["application/zip", "text/plain"]),
+        ] {
+            for value in values {
+                response
+                    .headers
+                    .append(&name, HeaderValue::from_static(value));
+            }
+        }
+        let response = finish(&Method::GET, &request, response, true, |encoding, body| {
+            encoding.compress(body)
+        });
+        assert_eq!(response.headers[CONTENT_ENCODING], "gzip");
+        assert_eq!(response.headers[VARY], "Origin, Cookie, Accept-Encoding");
+        assert_eq!(response.headers[ETAG], "W/\"one\", \"two\"");
+        assert!(!response.headers.contains_key(CONTENT_LENGTH));
+    }
+
+    #[test]
+    fn range_selection_rejects_joined_length_and_if_range_validator_mismatches() {
+        let mut request = HeaderMap::new();
+        request.insert(RANGE, HeaderValue::from_static("bytes=0-1"));
+        request.insert(IF_RANGE, HeaderValue::from_static("\"tag\""));
+        for duplicate in [CONTENT_LENGTH, ETAG] {
+            let mut response = asset();
+            response
+                .headers
+                .insert(CONTENT_LENGTH, HeaderValue::from_static("4096"));
+            response
+                .headers
+                .insert(ETAG, HeaderValue::from_static("\"tag\""));
+            response
+                .headers
+                .append(duplicate, HeaderValue::from_static("4096"));
+            assert_eq!(select_range(&Method::GET, &request, &mut response), None);
+            assert_eq!(response.status, StatusCode::OK);
+        }
     }
 }

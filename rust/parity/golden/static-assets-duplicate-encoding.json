@@ -1,0 +1,69 @@
+{
+  "scenario": "static-assets-duplicate-encoding",
+  "cases": [
+    {
+      "name": "gzip-after-unsupported-encoding",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": ".fixture-0 { color: var(--foreground); }\n.fixture-1 { color: var(--foreground); }\n.fixture-2 { color: var(--foreground); }\n.fixture-3 { color: var(--foreground); }\n.fixture-4 { color: var(--foreground); }\n.fixture-5 { color: var(--foreground); }\n.fixture-6 { color: var(--foreground); }\n.fixture-7 { color: var(--foreground); }\n.fixture-8 { color: var(--foreground); }\n.fixture-9 { color: var(--foreground); }\n.fixture-10 { color: var(--foreground); }\n.fixture-11 { color: var(--foreground); }\n.fixture-12 { color: var(--foreground); }\n.fixture-13 { color: var(--foreground); }\n.fixture-14 { color: var(--foreground); }\n.fixture-15 { color: var(--foreground); }\n.fixture-16 { color: var(--foreground); }\n.fixture-17 { color: var(--foreground); }\n.fixture-18 { color: var(--foreground); }\n.fixture-19 { color: var(--foreground); }\n.fixture-20 { color: var(--foreground); }\n.fixture-21 { color: var(--foreground); }\n.fixture-22 { color: var(--foreground); }\n.fixture-23 { color: var(--foreground); }\n.fixture-24 { color: var(--foreground); }\n.fixture-25 { color: var(--foreground); }\n.fixture-26 { color: var(--foreground); }\n.fixture-27 { color: var(--foreground); }\n.fixture-28 { color: var(--foreground); }\n.fixture-29 { color: var(--foreground); }\n.fixture-30 { color: var(--foreground); }\n.fixture-31 { color: var(--foreground); }\n.fixture-32 { color: var(--foreground); }\n.fixture-33 { color: var(--foreground); }\n.fixture-34 { color: var(--foreground); }\n.fixture-35 { color: var(--foreground); }\n.fixture-36 { color: var(--foreground); }\n.fixture-37 { color: var(--foreground); }\n.fixture-38 { color: var(--foreground); }\n.fixture-39 { color: var(--foreground); }\n.fixture-40 { color: var(--foreground); }\n.fixture-41 { color: var(--foreground); }\n.fixture-42 { color: var(--foreground); }\n.fixture-43 { color: var(--foreground); }\n.fixture-44 { color: var(--foreground); }\n.fixture-45 { color: var(--foreground); }\n.fixture-46 { color: var(--foreground); }\n.fixture-47 { color: var(--foreground); }\n.fixture-48 { color: var(--foreground); }\n.fixture-49 { color: var(--foreground); }\n.fixture-50 { color: var(--foreground); }\n.fixture-51 { color: var(--foreground); }\n.fixture-52 { color: var(--foreground); }\n.fixture-53 { color: var(--foreground); }\n.fixture-54 { color: var(--foreground); }\n.fixture-55 { color: var(--foreground); }\n.fixture-56 { color: var(--foreground); }\n.fixture-57 { color: var(--foreground); }\n.fixture-58 { color: var(--foreground); }\n.fixture-59 { color: var(--foreground); }\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-encoding": "gzip",
+          "content-type": "text/css;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/assets/app.css",
+          "rawHeaders": [
+            [
+              "Accept-Encoding",
+              "br"
+            ],
+            [
+              "Accept-Encoding",
+              "gzip"
+            ]
+          ]
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "later-gzip-zero-quality-wins",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": ".fixture-0 { color: var(--foreground); }\n.fixture-1 { color: var(--foreground); }\n.fixture-2 { color: var(--foreground); }\n.fixture-3 { color: var(--foreground); }\n.fixture-4 { color: var(--foreground); }\n.fixture-5 { color: var(--foreground); }\n.fixture-6 { color: var(--foreground); }\n.fixture-7 { color: var(--foreground); }\n.fixture-8 { color: var(--foreground); }\n.fixture-9 { color: var(--foreground); }\n.fixture-10 { color: var(--foreground); }\n.fixture-11 { color: var(--foreground); }\n.fixture-12 { color: var(--foreground); }\n.fixture-13 { color: var(--foreground); }\n.fixture-14 { color: var(--foreground); }\n.fixture-15 { color: var(--foreground); }\n.fixture-16 { color: var(--foreground); }\n.fixture-17 { color: var(--foreground); }\n.fixture-18 { color: var(--foreground); }\n.fixture-19 { color: var(--foreground); }\n.fixture-20 { color: var(--foreground); }\n.fixture-21 { color: var(--foreground); }\n.fixture-22 { color: var(--foreground); }\n.fixture-23 { color: var(--foreground); }\n.fixture-24 { color: var(--foreground); }\n.fixture-25 { color: var(--foreground); }\n.fixture-26 { color: var(--foreground); }\n.fixture-27 { color: var(--foreground); }\n.fixture-28 { color: var(--foreground); }\n.fixture-29 { color: var(--foreground); }\n.fixture-30 { color: var(--foreground); }\n.fixture-31 { color: var(--foreground); }\n.fixture-32 { color: var(--foreground); }\n.fixture-33 { color: var(--foreground); }\n.fixture-34 { color: var(--foreground); }\n.fixture-35 { color: var(--foreground); }\n.fixture-36 { color: var(--foreground); }\n.fixture-37 { color: var(--foreground); }\n.fixture-38 { color: var(--foreground); }\n.fixture-39 { color: var(--foreground); }\n.fixture-40 { color: var(--foreground); }\n.fixture-41 { color: var(--foreground); }\n.fixture-42 { color: var(--foreground); }\n.fixture-43 { color: var(--foreground); }\n.fixture-44 { color: var(--foreground); }\n.fixture-45 { color: var(--foreground); }\n.fixture-46 { color: var(--foreground); }\n.fixture-47 { color: var(--foreground); }\n.fixture-48 { color: var(--foreground); }\n.fixture-49 { color: var(--foreground); }\n.fixture-50 { color: var(--foreground); }\n.fixture-51 { color: var(--foreground); }\n.fixture-52 { color: var(--foreground); }\n.fixture-53 { color: var(--foreground); }\n.fixture-54 { color: var(--foreground); }\n.fixture-55 { color: var(--foreground); }\n.fixture-56 { color: var(--foreground); }\n.fixture-57 { color: var(--foreground); }\n.fixture-58 { color: var(--foreground); }\n.fixture-59 { color: var(--foreground); }\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-length": "2510",
+          "content-type": "text/css;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/assets/app.css",
+          "rawHeaders": [
+            [
+              "Accept-Encoding",
+              "gzip"
+            ],
+            [
+              "Accept-Encoding",
+              "gzip;q=0"
+            ]
+          ]
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}
