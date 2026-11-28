@@ -829,6 +829,45 @@ setInterval(() => {}, 10000);
         assert_eq!(within(exit.shared()).await.unwrap(), 137);
     }
 
+    pub(super) async fn reports_a_broken_pipe_when_a_pending_flush_loses_its_reader() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join("close-stdin");
+        let (_, spec) = child_transport(
+            "sh",
+            &[
+                "-c",
+                r#"while [ ! -f "$1" ]; do sleep 0.01; done; exec 0<&-; exec sleep 30"#,
+                "agent",
+                marker.to_str().unwrap(),
+            ],
+            1000.0,
+        );
+        let mut process = pipe::spawn(&spec).unwrap();
+        let stdin = process.stdin().unwrap();
+        let written = stdin
+            .borrow_mut()
+            .write(&vec![b'x'; MAX_OUTPUT_DURING_SEND])
+            .unwrap();
+        let flushed = flush(&stdin, None, false, 0).unwrap();
+        std::fs::write(&marker, b"").unwrap();
+        let result = match flushed {
+            FrameFlush::Pending(flushed) => Some(timeout(LIMIT, flushed).await),
+            FrameFlush::Settled => None,
+        };
+        process.kill(AcpSignal::Sigterm);
+        within(process.exited()).await.unwrap();
+        assert!(matches!(written, StdinReport::Pending(_)));
+        let error = result
+            .expect("flush must wait for the pipe to drain")
+            .expect("flush must fail when its reader closes")
+            .unwrap_err();
+        assert_eq!(error.to_string(), "EPIPE: broken pipe, write");
+        assert!(has_node_error_code(
+            ErrorInput::Error(error.as_ref()),
+            "EPIPE"
+        ));
+    }
+
     pub(super) async fn reports_nothing_for_an_unconfirmed_write_the_child_will_not_read() {
         let (transport, spec) = shell_transport(CLOSED_INPUT_CHILD, 1000.0);
         let lines = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -1052,5 +1091,6 @@ local_tests! {
         replaces_the_childs_environment_and_leaves_out_an_undefined_value,
         confirms_a_small_write_at_once,
         reports_a_broken_pipe_once_the_child_closed_its_input,
+        reports_a_broken_pipe_when_a_pending_flush_loses_its_reader,
         reports_nothing_for_an_unconfirmed_write_the_child_will_not_read,
 }
