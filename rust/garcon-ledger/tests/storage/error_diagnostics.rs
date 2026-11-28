@@ -74,7 +74,7 @@ fn a_fence_does_not_reduce_extended_sqlite_codes_to_the_primary_code() {
         (ffi::SQLITE_READONLY_RECOVERY, "SQLITE_READONLY_RECOVERY"),
         (ffi::SQLITE_CANTOPEN_ISDIR, "SQLITE_CANTOPEN_ISDIR"),
     ] {
-        let cause = SqliteError(rusqlite::Error::SqliteFailure(
+        let cause = SqliteError::new(rusqlite::Error::SqliteFailure(
             ffi::Error::new(number),
             None,
         ));
@@ -123,7 +123,7 @@ fn extended_sqlite_error_names_match_bun_on_real_failures() {
             _ => unreachable!(),
         };
         let errno = error.sqlite_error().unwrap().extended_code;
-        let cause = SqliteError(error);
+        let cause = SqliteError::new(error);
         let metadata = cause.diagnostic_metadata();
         let output = Command::new("bun")
             .arg(concat!(
