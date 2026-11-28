@@ -106,6 +106,18 @@ for await (const line of input) {
     case 'thread/start':
       write({ id, result: { thread: { id: 'thread', path: nativePath }, model: params.model, serviceTier: null } });
       break;
+    case 'thread/resume':
+      write({ id, result: { thread: { id: params.threadId, path: params.path ?? nativePath }, model: params.model, serviceTier: null } });
+      break;
+    case 'thread/compact/start': {
+      const turnId = `turn-${++turnStarts}`;
+      write({ method: 'turn/started', params: { threadId: params.threadId, turn: { id: turnId } } });
+      write({ method: 'turn/completed', params: { threadId: params.threadId, turn: {
+        id: turnId, status: 'completed', items: [{ id: 'compaction', type: 'contextCompaction' }],
+      } } });
+      write({ id, result: {} });
+      break;
+    }
     case 'turn/start':
       if (mode === 'capacity-retry') {
         const { threadId } = params;
@@ -120,6 +132,16 @@ for await (const line of input) {
             { type: 'agentMessage', id: 'resolved', phase: 'final_answer', text: 'Recovered.' },
           ] } } });
         }
+        write({ id, result: { turn: { id: turnId, status: 'inProgress' } } });
+        break;
+      }
+      if (mode === 'managed-resume') {
+        const { threadId } = params;
+        const turnId = `turn-${++turnStarts}`;
+        write({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
+        write({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed', items: [
+          { type: 'agentMessage', id: `answer-${turnId}`, phase: 'final_answer', text: 'Synthetic answer.' },
+        ] } } });
         write({ id, result: { turn: { id: turnId, status: 'inProgress' } } });
         break;
       }

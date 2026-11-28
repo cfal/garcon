@@ -5,7 +5,13 @@ use std::{
 };
 
 use futures::future::join_all;
-use garcon_agents_common::execution::runtime_events::{RuntimeSteerRequest, RuntimeSteerTarget};
+use garcon_agents_common::{
+    execution::runtime_events::{RuntimeSteerRequest, RuntimeSteerTarget},
+    shared::idle_session_purger::{
+        DEFAULT_IDLE_SESSION_MAX_AGE_MS, DEFAULT_IDLE_SESSION_PURGE_INTERVAL_MS, IdleSessionPurger,
+        purge_idle_sessions,
+    },
+};
 use garcon_contract::chat_types::{ChatMessage, ErrorMessage};
 use garcon_interface::{
     execution::AgentRunningSession,
@@ -63,6 +69,7 @@ use super::{
 };
 
 mod capacity_retry;
+mod resume;
 
 type CodexClientFactory = Rc<
     dyn Fn(Option<IndexMap<String, String>>, Option<&CodexProviderConfig>) -> CodexAppServerClient,
@@ -76,6 +83,8 @@ pub struct CodexAppServerRuntimeOptions {
     pub materialization_timeout: Duration,
     pub settings_timeout: Duration,
     pub capacity_retry_delays: Vec<Duration>,
+    pub retained_source_idle_ms: i64,
+    pub retained_source_purge_interval_ms: u64,
     pub refresh: NativePathDiscoveryRefreshLimiter,
 }
 
@@ -92,6 +101,8 @@ impl CodexAppServerRuntimeOptions {
             materialization_timeout: Duration::from_secs(10),
             settings_timeout: Duration::from_secs(10),
             capacity_retry_delays: CAPACITY_RETRY_DELAYS.to_vec(),
+            retained_source_idle_ms: DEFAULT_IDLE_SESSION_MAX_AGE_MS,
+            retained_source_purge_interval_ms: DEFAULT_IDLE_SESSION_PURGE_INTERVAL_MS,
             refresh: NativePathDiscoveryRefreshLimiter::default(),
         }
     }
@@ -109,6 +120,9 @@ struct ManagedRuntime {
     materialization_timeout: Duration,
     settings_timeout: Duration,
     capacity_retry_delays: Vec<Duration>,
+    idle_purger: IdleSessionPurger,
+    retained_source_idle_ms: i64,
+    retained_source_purge_interval_ms: u64,
     closed: Cell<bool>,
 }
 
@@ -153,6 +167,9 @@ impl CodexAppServerRuntime {
                 .into_iter()
                 .take(MAX_CAPACITY_RETRIES)
                 .collect(),
+            idle_purger: IdleSessionPurger::default(),
+            retained_source_idle_ms: options.retained_source_idle_ms,
+            retained_source_purge_interval_ms: options.retained_source_purge_interval_ms,
             closed: Cell::new(false),
         }))
     }
@@ -438,6 +455,45 @@ impl CodexAppServerRuntime {
                 source.settings.handle_updated(&settings);
             }
             return Ok(());
+        }
+        if note.method == "turn/started"
+            && let (Some(thread_id), Some(turn_id)) =
+                (params["threadId"].as_str(), params["turn"]["id"].as_str())
+        {
+            let source = self
+                .0
+                .sources
+                .borrow()
+                .session_for_client_thread(client, thread_id);
+            if let Some(source) = source {
+                let new_turn = source.routes.borrow().operation_for_turn(turn_id).is_none();
+                if new_turn && source.settings.is_fenced() {
+                    let client = client.clone();
+                    let runtime = self.clone();
+                    let params = json!({"threadId":thread_id,"turnId":turn_id});
+                    tokio::task::spawn_local(async move {
+                        if let Err(error) =
+                            client.request("turn/interrupt", Some(&params), None).await
+                        {
+                            runtime
+                                .log_error("Codex fenced-turn interruption failed", error.as_ref());
+                        }
+                    });
+                    let operation = source.routes.borrow().last_or_source_operation();
+                    self.finish_session(
+                        &source,
+                        FinishSessionOptions {
+                            failed_message: Some(
+                                "Codex automatic turn blocked after an ambiguous settings update"
+                                    .into(),
+                            ),
+                            ..Default::default()
+                        },
+                        Some(&operation),
+                    );
+                    return Ok(());
+                }
+            }
         }
         if note.method == "error" {
             let route = params["threadId"]
@@ -936,8 +992,53 @@ impl CodexAppServerRuntime {
         .await;
     }
 
+    pub fn start_purge_timer(&self) {
+        if self.0.closed.get() {
+            return;
+        }
+        let runtime = Rc::downgrade(&self.0);
+        self.0
+            .idle_purger
+            .start(self.0.retained_source_purge_interval_ms, move || {
+                if let Some(runtime) = runtime.upgrade() {
+                    Self(runtime).purge_idle_sources();
+                }
+            });
+    }
+
+    fn purge_idle_sources(&self) {
+        let sources: Vec<_> = self
+            .0
+            .sources
+            .borrow()
+            .all_sources()
+            .filter_map(|source| source.idle_since.get().map(|idle| (idle, source.clone())))
+            .collect();
+        purge_idle_sessions(
+            sources,
+            |source| {
+                self.is_current(source)
+                    || is_active_session_status(source.status.get())
+                    || source.interrupt.current().is_some()
+                    || source.deliveries.get() > 0
+                    || source.settings.has_pending_configuration()
+            },
+            |source| source.idle_since.get().unwrap_or(i64::MAX),
+            |_, source| {
+                self.retire_source(&source);
+                let runtime = self.clone();
+                tokio::task::spawn_local(async move {
+                    runtime.shutdown_client(&source.client).await;
+                });
+            },
+            self.0.clock.now_ms(),
+            self.0.retained_source_idle_ms,
+        );
+    }
+
     pub async fn shutdown(&self) {
         self.0.closed.set(true);
+        self.0.idle_purger.stop();
         let sources: Vec<_> = self.0.sources.borrow().all_sources().cloned().collect();
         for source in &sources {
             self.retire_source(source);
