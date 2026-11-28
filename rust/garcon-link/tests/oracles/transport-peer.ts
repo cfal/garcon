@@ -53,7 +53,9 @@ const parked = role === "controller"
   ? { primary: new ParkedRpcCalls(), bulk: new ParkedRpcCalls() }
   : undefined;
 const hold = Promise.withResolvers<void>();
+const holdBulk = Promise.withResolvers<void>();
 let held = 0;
+let heldBulk = 0;
 
 peer.onSession((session) => {
   const connection = new ExecutorRpcConnection(peer, session, {
@@ -63,6 +65,10 @@ peer.onSession((session) => {
     if ((frame.request as { hold?: boolean } | null)?.hold) {
       output({ type: "held", count: ++held });
       await hold.promise;
+    }
+    if ((frame.request as { holdBulk?: boolean } | null)?.holdBulk) {
+      output({ type: "held-bulk", count: ++heldBulk });
+      await holdBulk.promise;
     }
     return { peer: role, input: frame.request };
   }));
@@ -88,6 +94,7 @@ if (mode === "serve") {
 }
 for await (const command of createInterface({ input: process.stdin, terminal: false })) {
   if (command === "release") hold.resolve();
+  else if (command === "release-bulk") holdBulk.resolve();
   else assert.fail(`unexpected test command ${command}`);
 }
 await peer.dispose();

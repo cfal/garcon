@@ -14,6 +14,7 @@ use bytes::Bytes;
 use futures::FutureExt;
 use futures::channel::oneshot;
 use futures::future::Shared;
+use garcon_base::log::{Logger, create_logger};
 use garcon_js::json::{Opaque, parse, stringify};
 use garcon_js::utf16;
 use hmac::{Hmac, Mac};
@@ -55,6 +56,7 @@ use crate::socket_admission::{ExecutorSocketAdmission, SocketAdmissionLease};
 pub const EXECUTOR_NOISE_CONTEXT: &str = "garcon-executor/v1";
 pub const REDIAL_DELAYS_MS: &[u64] = &[0, 5000, 5000, 10000, 10000, 10000, 10000, 10000, 30000];
 const LISTENER_STOP_SETTLE_MS: u64 = 25;
+const LISTENER_ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 const LISTENER_HTTP_IDLE: Duration = Duration::from_secs(10);
 const STABLE_SESSION_MS: u64 = 10_000;
 const MAX_SOCKETS: usize = 4;
@@ -671,13 +673,17 @@ impl WebSocketLink {
         if self.state.borrow().disposed {
             return Err(link_error("Executor listener cannot start"));
         }
-        let mut address = listener
+        let bound = listener
             .local_addr()
             .map_err(|error| Rc::new(error) as SessionError)?;
-        if address.ip() == std::net::Ipv4Addr::UNSPECIFIED {
-            address.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
-        }
         let scheme = if tls.is_some() { "wss" } else { "ws" };
+        let host = match hostname {
+            "0.0.0.0" => "127.0.0.1".to_owned(),
+            host if host.parse::<std::net::Ipv6Addr>().is_ok() => format!("[{host}]"),
+            host => host.to_owned(),
+        };
+        let address = Url::parse(&format!("{scheme}://{host}:{}/executor", bound.port()))
+            .map_err(|error| Rc::new(error) as SessionError)?;
         let noise = Rc::new(
             create_noise_server(NoiseServerOptions {
                 max_connections: Some(MAX_SOCKETS),
@@ -694,7 +700,7 @@ impl WebSocketLink {
             stop.clone(),
         ));
         self.state.borrow_mut().listener = Some(Listener { stop, noise, task });
-        Ok(format!("{scheme}://{address}/executor"))
+        Ok(address.into())
     }
 
     pub async fn dispose(&self) {
@@ -1665,12 +1671,8 @@ async fn accept_connections(
     stop: CancellationToken,
 ) {
     loop {
-        let stream = tokio::select! {
-            _ = stop.cancelled() => return,
-            stream = listener.accept() => match stream {
-                Ok((stream, _)) => stream,
-                Err(_) => return,
-            },
+        let Some((stream, _)) = accept_client(&stop, || listener.accept()).await else {
+            return;
         };
         let _ = stream.set_nodelay(true);
         let (tls, link, noise, stop) = (tls.clone(), link.clone(), Rc::clone(&noise), stop.clone());
@@ -1689,6 +1691,47 @@ async fn accept_connections(
                 () = serve => {}
             }
         });
+    }
+}
+
+async fn accept_client<T, F>(stop: &CancellationToken, mut accept: impl FnMut() -> F) -> Option<T>
+where
+    F: Future<Output = std::io::Result<T>>,
+{
+    use std::io::ErrorKind;
+
+    let mut reported = false;
+    loop {
+        let accepted = tokio::select! {
+            biased;
+            _ = stop.cancelled() => return None,
+            accepted = accept() => accepted,
+        };
+        match accepted {
+            Ok(client) => return Some(client),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::ConnectionAborted
+                        | ErrorKind::ConnectionReset
+                        | ErrorKind::ConnectionRefused
+                        | ErrorKind::Interrupted
+                ) =>
+            {
+                tokio::task::yield_now().await
+            }
+            Err(error) => {
+                if !reported {
+                    create_logger("executor-link")
+                        .warn(&format!("Executor listener accept failed: {error}"));
+                    reported = true;
+                }
+                tokio::select! {
+                    _ = stop.cancelled() => return None,
+                    () = tokio::time::sleep(LISTENER_ACCEPT_BACKOFF) => {}
+                }
+            }
+        }
     }
 }
 
@@ -1732,6 +1775,13 @@ fn respond_to_upgrade(
         *head.uri_mut() = request.uri().clone();
         *head.version_mut() = request.version();
         *head.headers_mut() = request.headers().clone();
+        if upgrade_headers(&request) {
+            // Tungstenite checks only the first field value.
+            head.headers_mut().insert(
+                hyper::header::CONNECTION,
+                hyper::header::HeaderValue::from_static("Upgrade"),
+            );
+        }
         response = create_response_with_body(&head, Full::default).ok();
         response.is_some()
     });
@@ -1766,6 +1816,9 @@ fn respond_to_upgrade(
 
 pub fn is_web_socket_upgrade<T>(request: &Request<T>) -> bool {
     upgrade_headers(request)
+        && ["upgrade", "sec-websocket-version", "sec-websocket-key"]
+            .into_iter()
+            .all(|name| request.headers().get_all(name).iter().count() == 1)
         && header(request, "sec-websocket-version") == Some("13")
         && header(request, "sec-websocket-key").is_some_and(|key| {
             key.as_bytes().strip_suffix(b"==").is_some_and(|digits| {
@@ -1780,11 +1833,13 @@ pub fn is_web_socket_upgrade<T>(request: &Request<T>) -> bool {
 fn upgrade_headers<T>(request: &Request<T>) -> bool {
     request.method() == hyper::Method::GET
         && header(request, "upgrade").is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
-        && header(request, "connection").is_some_and(|value| {
-            value
-                .split(',')
-                .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
-        })
+        && request
+            .headers()
+            .get_all(hyper::header::CONNECTION)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
 }
 
 fn header<'a, T>(request: &'a Request<T>, name: &str) -> Option<&'a str> {
@@ -1816,3 +1871,6 @@ fn displaceable_socket(state: &State) -> Option<Rc<NoiseConnection>> {
     }
     confirming
 }
+
+#[cfg(test)]
+mod tests;

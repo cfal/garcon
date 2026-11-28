@@ -1,0 +1,36 @@
+{"fn":"createExecutorSecret","args":[]}
+{"fn":"isExecutorSecret","args":["BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"isExecutorSecret","args":["BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"]}
+{"fn":"isExecutorSecret","args":["short"]}
+{"fn":"isExecutorSecret","args":[null]}
+{"fn":"isExecutorSecret","args":[42]}
+{"fn":"isExecutorSecret","args":[]}
+{"fn":"executorConnectionUrl","args":["wss://example.com/executor/22222222-2222-4222-8222-222222222222","BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"executorConnectionUrl","args":["ws://127.0.0.1:19781/executor","BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"executorConnectionUrl","args":["wss://example.com/any-prefix?route=worker&tag=a&tag=b","BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/executor/22222222-2222-4222-8222-222222222222#secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["ws://127.0.0.1:19781/executor#secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/any-prefix?route=worker&tag=a&tag=b#secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/#?secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/#??secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["not a url BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["https://example.com/#secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["wss://user:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc@example.com/#secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/#secret=short"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/#secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/#secret=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc&extra=value"]}
+{"fn":"parseConnectionUrl","args":["wss://example.com/#secret=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"]}
+{"fn":"validateExecutorSocketUrl","args":["wss://example.com/",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["wss://example.com/any-prefix",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["wss://example.com/custom/nested/path/",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["wss://example.com/garcon-tunnel/executor/22222222-2222-4222-8222-222222222222",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["wss://example.com/not-an-executor-id?route=worker&tag=a&tag=b",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["wss://example.com/a%2Fb?route=a%2Fb",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["not a url",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["https://example.com/any-prefix",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["ws://example.com/any-prefix",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["wss://user:password@example.com/any-prefix",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["wss://example.com/any-prefix#fragment",{"noTls":false}]}
+{"fn":"validateExecutorSocketUrl","args":["ws://0.0.0.0:19781/executor",{"noTls":true}]}
+{"fn":"validateExecutorSocketUrl","args":["ws://0.0.0.0:19781/executor",{"noTls":true,"allowPlaceholder":true}]}
+{"fn":"validateExecutorSocketUrl","args":["ws://127.0.0.1:19781/executor",{"noTls":true}]}

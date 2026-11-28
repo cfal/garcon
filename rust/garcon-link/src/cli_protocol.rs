@@ -7,6 +7,7 @@ use garcon_contract::executors::{is_executor_id, is_remote_executor_id};
 use garcon_js::json::{Opaque, as_number, stringify};
 use garcon_js::utf16;
 use indexmap::IndexMap;
+use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 
@@ -180,23 +181,68 @@ impl Serialize for CliOperation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CliHttpRequest {
     pub operation: CliOperation,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub executor_id: Option<String>,
     pub query: Vec<[String; 2]>,
     pub body: Opaque,
+    wire_order: Vec<HttpRequestField>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HttpRequestField {
+    Operation,
+    ExecutorId,
+    Query,
+    Body,
+}
+
+impl Serialize for CliHttpRequest {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        for field in &self.wire_order {
+            match field {
+                HttpRequestField::Operation => map.serialize_entry("operation", &self.operation)?,
+                HttpRequestField::ExecutorId => {
+                    if let Some(id) = &self.executor_id {
+                        map.serialize_entry("executorId", id)?;
+                    }
+                }
+                HttpRequestField::Query => map.serialize_entry("query", &self.query)?,
+                HttpRequestField::Body => map.serialize_entry("body", &self.body)?,
+            }
+        }
+        map.end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ControllerCliRequest {
     pub expected_server_instance_id: String,
     pub http: CliHttpRequest,
+    http_first: bool,
 }
 
+impl Serialize for ControllerCliRequest {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        if self.http_first {
+            map.serialize_entry("http", &self.http)?;
+        }
+        map.serialize_entry(
+            "expectedServerInstanceId",
+            &self.expected_server_instance_id,
+        )?;
+        if !self.http_first {
+            map.serialize_entry("http", &self.http)?;
+        }
+        map.end()
+    }
+}
+
+/// The gateway reads the status and Retry-After and writes only the body.
+/// The outer RPC result's property order does not reach the HTTP response.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CliHttpResponse {
@@ -340,8 +386,27 @@ pub fn parse_controller_cli_request(value: &Value) -> Result<ControllerCliReques
         return Err(cli_request_too_large(lane));
     }
     validate_operation(method, get, &query, body)?;
+    // The gateway validates this envelope before forwarding it over RPC.
+    // Keep the order of its validated fields as well as the opaque body.
+    let wire_order = http
+        .as_object()
+        .expect("exact validated the HTTP object")
+        .keys()
+        .map(|key| match key.as_str() {
+            "operation" => HttpRequestField::Operation,
+            "executorId" => HttpRequestField::ExecutorId,
+            "query" => HttpRequestField::Query,
+            "body" => HttpRequestField::Body,
+            // INFALLIBLE: exact validated these keys.
+            _ => unreachable!(),
+        })
+        .collect();
     Ok(ControllerCliRequest {
         expected_server_instance_id: expected_server_instance_id.to_owned(),
+        http_first: value
+            .as_object()
+            .and_then(|object| object.keys().next())
+            .is_some_and(|key| key == "http"),
         http: CliHttpRequest {
             operation,
             executor_id: http
@@ -353,6 +418,7 @@ pub fn parse_controller_cli_request(value: &Value) -> Result<ControllerCliReques
                 .map(|pair| pair.map(str::to_owned))
                 .collect(),
             body: Opaque::from_value(body.clone()),
+            wire_order,
         },
     })
 }

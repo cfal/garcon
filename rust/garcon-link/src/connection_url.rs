@@ -36,7 +36,9 @@ pub fn parse_connection_url(value: &str) -> Result<ConnectionUrl, DomainError> {
     if !matches!(url.scheme(), "ws" | "wss") || has_credentials(&url) {
         return Err(invalid_url());
     }
-    let mut params = form_urlencoded::parse(url.fragment().unwrap_or_default().as_bytes());
+    let fragment = url.fragment().unwrap_or_default();
+    let fragment = fragment.strip_prefix('?').unwrap_or(fragment);
+    let mut params = form_urlencoded::parse(fragment.as_bytes());
     let (name, secret) = params.next().ok_or_else(invalid_credential)?;
     let secret = Value::String(secret.into_owned());
     if params.next().is_some() || name != "secret" || !is_executor_secret(&secret) {

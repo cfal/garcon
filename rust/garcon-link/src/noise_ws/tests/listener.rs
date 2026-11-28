@@ -74,6 +74,25 @@ pub(super) async fn serve(
 pub(super) fn tls_identity(host: &str) -> (TlsAcceptor, Vec<u8>) {
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec![host.to_owned()]).expect("a test identity");
+    (tls_acceptor(&cert, &signing_key), cert.pem().into_bytes())
+}
+
+pub(super) fn tls_signed_by_ca(host: &str) -> (TlsAcceptor, Vec<u8>) {
+    let mut authority = rcgen::CertificateParams::new(Vec::new()).unwrap();
+    authority.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    authority.key_usages = vec![rcgen::KeyUsagePurpose::KeyCertSign];
+    let ca_key = rcgen::KeyPair::generate().unwrap();
+    let ca = authority.self_signed(&ca_key).unwrap();
+    let issuer = rcgen::Issuer::new(authority, ca_key);
+    let signing_key = rcgen::KeyPair::generate().unwrap();
+    let cert = rcgen::CertificateParams::new(vec![host.to_owned()])
+        .unwrap()
+        .signed_by(&signing_key, &issuer)
+        .unwrap();
+    (tls_acceptor(&cert, &signing_key), ca.pem().into_bytes())
+}
+
+fn tls_acceptor(cert: &rcgen::Certificate, signing_key: &rcgen::KeyPair) -> TlsAcceptor {
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -85,7 +104,7 @@ pub(super) fn tls_identity(host: &str) -> (TlsAcceptor, Vec<u8>) {
         signing_key.serialize_der().try_into().unwrap(),
     )
     .expect("the identity is accepted");
-    (TlsAcceptor::from(Arc::new(config)), cert.pem().into_bytes())
+    TlsAcceptor::from(Arc::new(config))
 }
 
 pub(super) struct Answered {

@@ -219,8 +219,43 @@ async fn interoperates(role: LinkRole, dialer: bool) {
         let held = line(&mut lines).await;
         assert_eq!(held["type"], "held");
         assert_eq!(held["count"].as_f64(), Some(1.0));
+        let bulk_request = json!({"projectPath":"/synthetic", "holdBulk":true});
+        let bulk_reply = recovered_bulk.call(
+            "",
+            "files.list",
+            Opaque::from_value(bulk_request.clone()),
+            RpcCallOptions::default(),
+        );
+        let held = line(&mut lines).await;
+        assert_eq!(held["type"], "held-bulk");
+        assert_eq!(held["count"].as_f64(), Some(1.0));
+        recovered_bulk.transport.close(None);
+        let new_bulk = tokio::time::timeout(DEADLINE, connection.bulk.wait(None, None))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(new_bulk.transport.id, recovered_bulk.transport.id);
+        let info = line(&mut lines).await;
+        assert_eq!(info["type"], "bulk-ready");
+        assert_eq!(info["sessionId"], new_bulk.transport.id);
+        assert!(connection.primary.active());
+        bun.stdin
+            .as_mut()
+            .unwrap()
+            .write_all(b"release-bulk\n")
+            .await
+            .unwrap();
+        let bulk_value = tokio::time::timeout(DEADLINE, bulk_reply)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            bulk_value.as_value(),
+            &json!({"peer":"worker","input":bulk_request})
+        );
         session.close(None);
-        assert!(!recovered_bulk.transport.connected());
+        assert!(!new_bulk.transport.connected());
         let replacement = next_connection(&mut connections).await;
         assert_ne!(replacement.primary.transport.id, session.id);
         assert_eq!(

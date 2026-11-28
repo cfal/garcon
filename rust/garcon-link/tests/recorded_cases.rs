@@ -1,5 +1,8 @@
 use garcon_base::domain_error::DomainError;
-use garcon_cases::{CaseError, markers::undefined, replay, round_tripped, text, unknown};
+use garcon_cases::{
+    CaseError, markers::undefined, replay, replay_with_expected_wildcards, round_tripped, text,
+    unknown,
+};
 use garcon_contract::terminal_error::TerminalError;
 use garcon_interface::errors::AgentCallError;
 use garcon_link::cli_protocol::{
@@ -21,6 +24,19 @@ use garcon_link::rpc_routing::rpc_lane;
 use garcon_link::terminal_protocol::{parse_terminal_notification, validate_terminal_rpc};
 use serde::Serialize;
 use serde_json::{Value, json};
+
+fn required_text<'a>(function: &str, argument: Option<&'a Value>) -> Result<&'a str, CaseError> {
+    text(function, argument)?
+        .ok_or_else(|| CaseError::undeliverable(format!("{function}: expected a string")))
+}
+
+fn lane(value: &str) -> Result<RpcLane, CaseError> {
+    match value {
+        "primary" => Ok(RpcLane::Primary),
+        "bulk" => Ok(RpcLane::Bulk),
+        _ => Err(CaseError::undeliverable("expected a primary or bulk lane")),
+    }
+}
 
 fn validation<T: Serialize>(result: Result<T, DomainError>) -> Value {
     match result {
@@ -48,42 +64,43 @@ fn domain_failure(error: &DomainError) -> Value {
 
 #[test]
 fn recorded_connection_url_cases_match() {
-    replay(
+    let stats = replay_with_expected_wildcards(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/connection-url"
         ),
+        1, // The random createExecutorSecret result.
         |function, args| match function {
-            "createExecutorSecret" => {
-                let secret = json!(create_executor_secret());
-                assert!(is_executor_secret(&secret));
-                Ok(secret)
-            }
+            "createExecutorSecret" => Ok(json!(create_executor_secret())),
             "parseConnectionUrl" => {
-                let url = text(function, args.first())?.unwrap_or_default();
+                let url = required_text(function, args.first())?;
                 Ok(validation(parse_connection_url(url)))
             }
             "validateExecutorSocketUrl" => {
-                let url = text(function, args.first())?.unwrap_or_default();
+                let url = required_text(function, args.first())?;
                 let options = round_tripped(function, args.get(1))?;
-                let flag = |name: &str| {
-                    options
-                        .as_deref()
-                        .and_then(|options| options.get(name))
-                        .and_then(Value::as_bool)
-                        .unwrap_or_default()
+                let options = options
+                    .as_deref()
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| CaseError::undeliverable("expected socket URL options"))?;
+                let flag = |name: &str, default: Option<bool>| {
+                    match options.get(name) {
+                        Some(value) => value.as_bool(),
+                        None => default,
+                    }
+                    .ok_or_else(|| CaseError::undeliverable(format!("expected a boolean {name}")))
                 };
                 Ok(validation(validate_executor_socket_url(
                     url,
                     ExecutorSocketUrlOptions {
-                        no_tls: flag("noTls"),
-                        allow_placeholder: flag("allowPlaceholder"),
+                        no_tls: flag("noTls", None)?,
+                        allow_placeholder: flag("allowPlaceholder", Some(false))?,
                     },
                 )))
             }
             "executorConnectionUrl" => {
-                let url = text(function, args.first())?.unwrap_or_default();
-                let secret = text(function, args.get(1))?.unwrap_or_default();
+                let url = required_text(function, args.first())?;
+                let secret = required_text(function, args.get(1))?;
                 Ok(match executor_connection_url(url, secret) {
                     Ok(value) => json!(value),
                     Err(error) => json!({
@@ -100,11 +117,23 @@ fn recorded_connection_url_cases_match() {
             _ => Err(CaseError::unhandled(function)),
         },
     );
+    assert_eq!(stats.with_wildcards, 1); // The random createExecutorSecret result.
+}
+
+#[test]
+fn required_text_rejects_nonstrings_instead_of_adapting_them() {
+    for value in [None, Some(Value::Null), Some(undefined()), Some(json!(1))] {
+        assert!(required_text("executorConnectionUrl", value.as_ref()).is_err());
+    }
+    assert_eq!(
+        required_text("executorConnectionUrl", Some(&json!(""))).unwrap(),
+        ""
+    );
 }
 
 #[test]
 fn recorded_failure_reason_cases_match() {
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/failure-reason"
@@ -113,30 +142,34 @@ fn recorded_failure_reason_cases_match() {
             if function != "reasonWithStack" {
                 return Err(CaseError::unhandled(function));
             }
-            let kind = text(function, args.first())?.unwrap_or_default();
-            let message = text(function, args.get(1))?.unwrap_or_default();
+            let kind = required_text(function, args.first())?;
+            let message = required_text(function, args.get(1))?;
             let stack = text(function, args.get(2))?;
             let header = if message.is_empty() {
                 "SyntaxError".to_owned()
             } else {
                 format!("SyntaxError: {message}")
             };
-            let failure = if kind == "syntax" {
-                Failure::SyntaxError {
+            let reason = match kind {
+                "syntax" => failure_reason(Failure::SyntaxError {
                     header: &header,
                     stack,
+                }),
+                "error" => {
+                    let error = std::io::Error::other(message.to_owned());
+                    failure_reason(Failure::Error(&error))
                 }
-            } else {
-                Failure::Text(message)
+                _ => failure_reason(Failure::Text(message)),
             };
-            Ok(json!(failure_reason(failure)))
+            Ok(json!(reason))
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
 }
 
 #[test]
 fn recorded_rpc_lane_cases_match() {
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/rpc-lane"
@@ -158,13 +191,14 @@ fn recorded_rpc_lane_cases_match() {
             }
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
 }
 
 #[tokio::test]
 async fn recorded_queue_and_limits_cases_match() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            replay(
+            let stats = replay(
                 concat!(
                     env!("CARGO_MANIFEST_DIR"),
                     "/tests/cases/transport/queue-and-limits"
@@ -192,6 +226,7 @@ async fn recorded_queue_and_limits_cases_match() {
                     _ => Err(CaseError::unhandled(function)),
                 },
             );
+            assert_eq!(stats.with_wildcards, 0);
         })
         .await;
 }
@@ -229,7 +264,7 @@ fn queue_budget() -> Value {
 
 #[test]
 fn recorded_rpc_routing_cases_match() {
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/rpc-routing"
@@ -238,13 +273,15 @@ fn recorded_rpc_routing_cases_match() {
             if function != "rpcLane" {
                 return Err(CaseError::unhandled(function));
             }
-            let method = text(function, args.first())?.unwrap_or_default();
+            let method = required_text(function, args.first())?;
             let request = unknown(function, args.get(1))?;
-            let lane = match text(function, args.get(2))? {
-                Some("bulk") => RpcLane::Bulk,
-                Some("primary") | None => RpcLane::Primary,
-                Some(other) if method == "calls.reconcile" => return Ok(json!(other)),
-                Some(_) => RpcLane::Primary,
+            let lane = match round_tripped(function, args.get(2))?.as_deref() {
+                None => RpcLane::Primary,
+                Some(value) => lane(
+                    value
+                        .as_str()
+                        .ok_or_else(|| CaseError::undeliverable("expected a lane string"))?,
+                )?,
             };
             Ok(match rpc_lane(method, &request, lane) {
                 Ok(lane) => serialized(lane),
@@ -256,7 +293,8 @@ fn recorded_rpc_routing_cases_match() {
                             "$": "error", "name": "AgentCallError", "message": agent.message,
                             "properties": {
                                 "code": agent.code.as_str(), "retryable": agent.retryable,
-                                "details": undefined(), "outcome": agent.outcome.as_str(),
+                                "details": agent.details.as_ref().map_or_else(undefined, serialized),
+                                "outcome": agent.outcome.as_str(),
                             }
                         })
                     } else {
@@ -266,11 +304,12 @@ fn recorded_rpc_routing_cases_match() {
             })
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
 }
 
 #[test]
 fn recorded_rpc_continuity_matches_every_classified_method() {
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/rpc-continuity"
@@ -279,24 +318,26 @@ fn recorded_rpc_continuity_matches_every_classified_method() {
             if function != "rpcContinuity" {
                 return Err(CaseError::unhandled(function));
             }
-            Ok(serialized(rpc_continuity(
-                text(function, args.first())?.unwrap_or_default(),
-            )))
+            Ok(serialized(rpc_continuity(required_text(
+                function,
+                args.first(),
+            )?)))
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
 }
 
 #[test]
 fn recorded_cli_protocol_cases_match() {
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/cli-protocol"
         ),
         |function, args| {
             if matches!(function, "cliOperation" | "cliRoute") {
-                let method = text(function, args.first())?.unwrap_or_default();
-                let path = text(function, args.get(1))?.unwrap_or_default();
+                let method = required_text(function, args.first())?;
+                let path = required_text(function, args.get(1))?;
                 return Ok(if function == "cliRoute" {
                     validation(cli_route(method, path))
                 } else {
@@ -304,34 +345,43 @@ fn recorded_cli_protocol_cases_match() {
                 });
             }
             let value = unknown(function, args.first())?;
-            let lane = if value.as_str() == Some("primary") {
-                RpcLane::Primary
-            } else {
-                RpcLane::Bulk
-            };
+            let read_lane = || lane(required_text(function, args.first())?);
             Ok(match function {
-                "cliPolicy" => value["operation"]
-                    .as_str()
-                    .and_then(CliOperation::parse)
-                    .map_or_else(undefined, |operation| {
-                        serialized(cli_policy(operation, &value["body"]))
-                    }),
-                "cliRequestBytes" => json!(cli_request_bytes(lane)),
-                "cliReplyBytes" => json!(cli_reply_bytes(lane)),
-                "cliRequestTooLarge" => domain_failure(&cli_request_too_large(lane)),
+                "cliPolicy" => {
+                    let operation = required_text(function, value.get("operation"))?;
+                    let operation = CliOperation::parse(operation).ok_or_else(|| {
+                        CaseError::undeliverable("expected a known CLI operation")
+                    })?;
+                    let body = value
+                        .get("body")
+                        .ok_or_else(|| CaseError::undeliverable("missing CLI request body"))?;
+                    serialized(cli_policy(operation, body))
+                }
+                "cliRequestBytes" => json!(cli_request_bytes(read_lane()?)),
+                "cliReplyBytes" => json!(cli_reply_bytes(read_lane()?)),
+                "cliRequestTooLarge" => domain_failure(&cli_request_too_large(read_lane()?)),
                 "parseControllerCliRequest" => validation(parse_controller_cli_request(&value)),
                 "parseCliHttpResponse" => validation(parse_cli_http_response(&value)),
                 _ => return Err(CaseError::unhandled(function)),
             })
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
+}
+
+#[test]
+fn validated_cli_request_serializes_in_its_original_key_order() {
+    let original = r#"{"http":{"body":null,"query":[["executorId","local"]],"operation":"GET /api/v1/models"},"expectedServerInstanceId":"synthetic"}"#;
+    let value = garcon_js::json::parse(original).unwrap();
+    let parsed = parse_controller_cli_request(&value).unwrap();
+    assert_eq!(serde_json::to_string(&parsed).unwrap(), original);
 }
 
 #[test]
 fn recorded_file_protocol_cases_match() {
     use base64::{Engine, engine::general_purpose::STANDARD};
 
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/file-protocol"
@@ -347,7 +397,7 @@ fn recorded_file_protocol_cases_match() {
                 },
                 "decodeFileText" => validation(decode_file_text(&value)),
                 "validateFileRpcRequest" => {
-                    let method = value.as_str().unwrap_or_default();
+                    let method = required_text(function, args.first())?;
                     let input = unknown(function, args.get(1))?;
                     match validate_file_rpc_request(method, &input) {
                         Ok(()) => undefined(),
@@ -358,11 +408,12 @@ fn recorded_file_protocol_cases_match() {
             })
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
 }
 
 #[test]
 fn recorded_git_protocol_cases_match() {
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/git-protocol"
@@ -371,11 +422,13 @@ fn recorded_git_protocol_cases_match() {
             if function != "isGitRpcMethod" {
                 return Err(CaseError::unhandled(function));
             }
-            Ok(json!(is_git_rpc_method(
-                text(function, args.first())?.unwrap_or_default()
-            )))
+            Ok(json!(is_git_rpc_method(required_text(
+                function,
+                args.first()
+            )?)))
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
 }
 
 fn terminal_failure(error: &TerminalError) -> Value {
@@ -387,7 +440,7 @@ fn terminal_failure(error: &TerminalError) -> Value {
 
 #[test]
 fn recorded_terminal_protocol_cases_match() {
-    replay(
+    let stats = replay(
         concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/cases/transport/terminal-protocol"
@@ -396,8 +449,8 @@ fn recorded_terminal_protocol_cases_match() {
             let value = unknown(function, args.first())?;
             Ok(match function {
                 "validateTerminalRpc" => match validate_terminal_rpc(
-                    value["method"].as_str().unwrap_or_default(),
-                    &value["request"],
+                    required_text(function, value.get("method"))?,
+                    value.get("request").unwrap_or(&Value::Null),
                 ) {
                     Ok(()) => undefined(),
                     Err(error) => terminal_failure(&error),
@@ -410,4 +463,5 @@ fn recorded_terminal_protocol_cases_match() {
             })
         },
     );
+    assert_eq!(stats.with_wildcards, 0);
 }
