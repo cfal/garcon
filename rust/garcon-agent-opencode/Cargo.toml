@@ -10,6 +10,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
 futures.workspace = true
 garcon-agents-common.workspace = true
 garcon-base.workspace = true
@@ -22,6 +23,9 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["process", "signal"] }
 
 [dev-dependencies]
 garcon-cases.workspace = true

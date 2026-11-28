@@ -1,0 +1,82 @@
+// Writes what Bun's TextDecoder makes of byte streams, cut at every
+// position, for the line decoder of the ACP transport.
+//   bun acp-textdecoder.ts <out.json>
+import { writeFileSync } from 'node:fs';
+
+const out = process.argv[2];
+if (!out) throw new Error('usage: bun acp-textdecoder.ts <out.json>');
+
+const bytes = (text: string) => [...new TextEncoder().encode(text)];
+const BOM = [0xef, 0xbb, 0xbf];
+const REPLACEMENT = [0xef, 0xbf, 0xbd];
+const streams: number[][] = [
+  [],
+  bytes('a'),
+  bytes('ab'),
+  bytes('é'),
+  bytes('€'),
+  bytes('😀'),
+  bytes('aé€😀b'),
+  [...BOM, ...bytes('a')],
+  BOM,
+  [...BOM, ...BOM, ...bytes('a')],
+  [...BOM, ...bytes('😀')],
+  [0xef],
+  [0xef, 0xbb],
+  [0xef, 0xbb, 0x61],
+  [0xef, 0xbb, 0xbf, 0x41],
+  [0xff],
+  [0xff, 0x61],
+  [0xc0, 0x80],
+  [0xc1, 0xbf],
+  [0xe0, 0x80, 0x80],
+  [0xe0, 0x9f, 0x80],
+  [0xf0, 0x80, 0x80, 0x80],
+  [0xf0, 0x8f, 0x80, 0x80],
+  [0xed, 0xa0, 0x80],
+  [0xed, 0xbf, 0xbf],
+  [0xf4, 0x90, 0x80, 0x80],
+  [0xf4, 0x8f, 0x80, 0x80],
+  [0xf5, 0x80, 0x80, 0x80],
+  [0xf8, 0x88, 0x80, 0x80, 0x80],
+  [0xfc, 0x84, 0x80, 0x80, 0x80, 0x80],
+  [0xc2],
+  [0xe1, 0x80],
+  [0xe1, 0x80, 0x41],
+  [0xf0, 0x9f],
+  [0xf0, 0x9f, 0x98],
+  [0x80],
+  [0xbf],
+  [0xc2, 0x41],
+  [0x61, 0x80, 0x62],
+  [0xe2, 0x28, 0xa1],
+  [0xe2, 0x82, 0x28],
+  [0xf0, 0x9f, 0x98, 0x41],
+  [0xc3, 0xc3, 0xa9],
+  [0xf0, 0x9f, 0xf0, 0x9f, 0x98, 0x80],
+  REPLACEMENT,
+  [...REPLACEMENT, ...REPLACEMENT],
+  [0xfe, 0xff, 0x61],
+  [0x61, 0xfe],
+  [...bytes('a'), 0xff, ...bytes('é'), 0x80, ...bytes('😀')],
+];
+
+function decode(chunks: number[][]): string {
+  const decoder = new TextDecoder();
+  return chunks
+    .map((chunk) => decoder.decode(new Uint8Array(chunk), { stream: true }))
+    .concat(decoder.decode())
+    .join('');
+}
+
+const cases: Array<{ chunks: number[][]; text: string }> = [];
+for (const stream of streams) {
+  const cuts = [
+    [stream],
+    ...stream.slice(1).map((_, at) => [stream.slice(0, at), stream.slice(at)]),
+    stream.map((byte) => [byte]),
+  ];
+  for (const chunks of cuts) cases.push({ chunks, text: decode(chunks) });
+}
+writeFileSync(out, `${JSON.stringify(cases)}\n`);
+console.log(`${streams.length} streams, ${cases.length} cases`);

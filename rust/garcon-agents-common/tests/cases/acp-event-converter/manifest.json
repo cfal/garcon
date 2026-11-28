@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/acp-event-converter.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/acp-event-converter.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 338,
+  "sha256": "09bd87f8be31d570bbf8d57dd8e8c3fd52aa1fe1bbd1628bfae211d71b6b8333"
+}

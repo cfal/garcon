@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-codex/tests/oracles/app-server-runtime-support.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/app-server-runtime-support.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 40,
+  "sha256": "eda62ac508d39c42108e56c9106adc4653f20f9464a33f631af40600cab357fb"
+}

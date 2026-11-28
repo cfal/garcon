@@ -12,6 +12,7 @@ type Result<T> = std::result::Result<T, BoxError>;
 
 pub mod access;
 pub mod assignments;
+pub mod endpoint_resolver;
 pub mod reference_writes;
 pub mod service;
 pub mod store;

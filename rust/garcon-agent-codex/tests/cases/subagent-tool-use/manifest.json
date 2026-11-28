@@ -1,0 +1,12 @@
+{
+  "module": "server-agents/codex/src/agents/codex/subagent-tool-use.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/subagent-tool-use.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 27,
+  "sha256": "96a1fc3496ce7f007f4df85b7dcdfddc80fbc48e714f7c61f9d03fc1690e67da"
+}
