@@ -25,7 +25,7 @@ export interface WebSocketStep {
   auth?: RequestAuth;
   protocols?: string[];
   send?: Json[];
-  // Replies are the frames that carry a `clientRequestId` the step sent.
+  // Replies carry a `clientRequestId` the step sent, except for unported faults.
   // They are collected until `frames` arrive, the socket closes, or the
   // socket stays quiet for `quietMs`. Unsolicited broadcasts are not
   // recorded, since their timing is not controlled by the step.

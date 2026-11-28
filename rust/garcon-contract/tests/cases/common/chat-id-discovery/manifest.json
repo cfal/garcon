@@ -1,0 +1,21 @@
+{
+  "module": "common/chat-id-discovery.ts",
+  "tests": [
+    "common/__tests__/chat-id-discovery.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-id-discovery.jsonl",
+  "guards": [
+    {
+      "fn": "chatIdDisclosureContent",
+      "argument": 0,
+      "guard": "common/chat-id.ts#parseChatId",
+      "dropped": 29,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 70,
+  "sha256": "7e6cbf0a75c06a6f7d986cacec5af623ea794ef718c447774ec30d535da80a02"
+}

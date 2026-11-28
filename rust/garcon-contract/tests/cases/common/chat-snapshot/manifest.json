@@ -1,0 +1,19 @@
+{
+  "module": "common/chat-snapshot.ts",
+  "tests": [
+    "common/__tests__/chat-snapshot.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseChatSnapshotResponse",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 166,
+  "sha256": "35c0f673227cd81155dc31f8e123b24514004747b32e85870601c3505158cde5"
+}

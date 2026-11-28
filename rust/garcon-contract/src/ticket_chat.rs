@@ -24,8 +24,10 @@ Project label: {{ticket_project}}
 
 {{ticket_description}}"#;
 
-static VARIABLE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{\{[^{}]*\}\}").expect("valid ticket template token pattern"));
+static VARIABLE: LazyLock<Regex> = LazyLock::new(|| {
+    // INFALLIBLE: the ticket template token pattern is a fixed, tested literal.
+    Regex::new(r"\{\{[^{}]*\}\}").expect("valid ticket template token pattern")
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketChatSubject {

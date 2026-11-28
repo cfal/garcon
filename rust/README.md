@@ -80,6 +80,9 @@ bun run parity:replay:rust   # the front door must match every case
 
 On a build replay, HTTP 501 with `X-Garcon-Rs-Unported: 1` means the build
 does not serve that case yet; a 501 without the marker is compared normally.
+A WebSocket reply with `"garconRsUnported": true` has the same meaning. The
+step captures a reply matched by `clientRequestId` or a marked `ws-fault`
+without an ID; an unmarked reply compares normally.
 A step is blocked if an unavailable earlier response supplies a required
 placeholder, directly or through another blocked step. It is not sent. Any
 other missing response placeholder is a mismatch. Unported and blocked
@@ -314,6 +317,15 @@ fail the test. A function the dispatcher does not handle fails whatever the
 recording holds. On a difference
 it prints the first one per case with its JSON path, then the distinct
 differences grouped by path, and panics unless every case matches.
+
+`GARCON_CASES_AUDIT_KEY_ORDER=1` reports cases that pass structurally but
+would fail if the recorded and serialized result keys were compared in
+order. It does not fail the replay, so one test can audit several recordings.
+For a typed result, give the dispatcher the port's actual serialized output:
+serialize it with `serde_json::to_vec` and read those bytes directly into the
+result `Value` with `garcon_js::json::from_slice`. Do not sort or reconstruct
+the map's keys to match the recording. This checks the order produced by the
+port's actual serializer, including custom `Serialize` implementations.
 
 A dispatcher reads an argument with the readers of `garcon_cases`, which give
 the port the JSON the recorded value round-trips to:

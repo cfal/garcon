@@ -123,7 +123,7 @@ fn parse_blame(output: &str) -> ExecutorResult<Vec<GitBlameLine>> {
             if !milliseconds.is_finite() || milliseconds.abs() > 8.64e15 {
                 return Err(garcon_base::errors::NamedError {
                     name: "RangeError".into(),
-                    message: "Invalid time value".into(),
+                    message: "Invalid Date".into(),
                     code: None,
                 }
                 .into());
@@ -233,4 +233,44 @@ pub async fn get_graph(
     Ok(GitGraphResult {
         commits: parse_graph(&result.stdout),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use garcon_base::errors::NamedError;
+
+    use super::parse_blame;
+
+    #[test]
+    fn invalid_blame_author_times_use_the_original_bun_range_error() {
+        let output = Command::new("bun")
+            .args([
+                "-e",
+                r#"
+                if (Bun.version !== '1.4.3') throw new Error('Expected Bun 1.4.3');
+                console.log(JSON.stringify(['invalid', '8640000000001'].map(time => {
+                    try { return new Date(Number(time) * 1000).toISOString(); }
+                    catch (error) { return [error.name, error.message]; }
+                })));
+            "#,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected: Vec<(String, String)> = garcon_js::json::from_slice(&output.stdout).unwrap();
+        assert_eq!(expected.len(), 2);
+        for (time, (name, message)) in ["invalid", "8640000000001"].into_iter().zip(expected) {
+            let blame = format!("{} 1 1 1\nauthor-time {time}\n\tline\n", "a".repeat(40));
+            let error = parse_blame(&blame).unwrap_err();
+            let error = error.downcast_ref::<NamedError>().unwrap();
+            assert_eq!(error.name, name);
+            assert_eq!(error.message, message);
+        }
+    }
 }

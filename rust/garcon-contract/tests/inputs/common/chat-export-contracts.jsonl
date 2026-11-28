@@ -1,0 +1,6 @@
+{"fn":"isTranscriptExportFormat","args":["markdown"]}
+{"fn":"isTranscriptExportFormat","args":["xml"]}
+{"fn":"isTranscriptExportFormat","args":["XML"]}
+{"fn":"isTranscriptExportCategory","args":["handoffs"]}
+{"fn":"isTranscriptExportCategory","args":["tools"]}
+{"fn":"isTranscriptExportCategory","args":["conversation"]}
