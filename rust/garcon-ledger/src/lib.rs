@@ -14,6 +14,7 @@ pub mod input_composition;
 pub mod input_submission;
 pub mod preamble_application;
 pub mod presentation;
+pub mod producer_lease;
 pub mod projection;
 pub mod raw_page;
 pub mod session_query;
