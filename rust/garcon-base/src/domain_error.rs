@@ -3,8 +3,12 @@
 use std::error::Error;
 use std::fmt;
 
-use garcon_contract::error_codes::ErrorCode;
-use garcon_contract::project_resolution::ProjectUnavailableReason;
+use garcon_contract::{
+    chat_view::ChatHistoryState, error_codes::ErrorCode,
+    project_resolution::ProjectUnavailableReason,
+};
+
+use crate::errors::{DiagnosticError, ErrorMetadata};
 
 /// An error the server reports to a client with a structured code, the HTTP
 /// status to answer with, and whether sending the request again can succeed.
@@ -111,6 +115,62 @@ impl Error for DomainError {
     }
 }
 
+/// A domain error whose caller can also inspect the degraded history state.
+#[derive(Debug)]
+pub struct TranscriptHistoryUnavailableError {
+    domain: DomainError,
+    pub history_state: ChatHistoryState,
+}
+
+impl TranscriptHistoryUnavailableError {
+    pub fn new(
+        history_error_code: impl Into<String>,
+        retryable: bool,
+        cause: Option<Box<dyn Error>>,
+    ) -> Self {
+        Self {
+            domain: DomainError {
+                cause,
+                ..DomainError::new(
+                    ErrorCode::TRANSCRIPT_UNAVAILABLE,
+                    "The transcript ledger is unavailable",
+                    422,
+                    retryable,
+                )
+            },
+            history_state: ChatHistoryState::Degraded {
+                error_code: history_error_code.into(),
+                retryable,
+            },
+        }
+    }
+
+    pub fn domain_error(&self) -> &DomainError {
+        &self.domain
+    }
+}
+
+impl DiagnosticError for TranscriptHistoryUnavailableError {
+    fn diagnostic_metadata(&self) -> ErrorMetadata<'_> {
+        ErrorMetadata {
+            name: self.domain.kind.name(),
+            code: Some(self.domain.code.as_str()),
+        }
+    }
+}
+
+impl fmt::Display for TranscriptHistoryUnavailableError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.domain, formatter)
+    }
+}
+
+impl Error for TranscriptHistoryUnavailableError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.domain.source()
+    }
+}
+
 pub const TRANSCRIPT_UNAVAILABLE_MESSAGE: &str = "Chat transcript is unavailable.";
 pub const TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE: &str =
     "Chat transcript is temporarily unavailable. Retry the request.";
@@ -125,19 +185,25 @@ pub fn transcript_unavailable_message(retryable: bool) -> &'static str {
     }
 }
 
-/// Whether `error` is a `DomainError`, which a `ValidationDomainError` and a
-/// `ProjectUnavailableError` also are. Its fields are read through
-/// `as_domain_error(error)`.
+/// Whether `error` is a `DomainError` or one of its subclasses.
+/// Its fields are read through `as_domain_error(error)`.
 pub fn is_domain_error(error: &(dyn Error + 'static)) -> bool {
     as_domain_error(error).is_some()
 }
 
 pub fn as_domain_error<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a DomainError> {
-    error.downcast_ref::<DomainError>().or_else(|| {
-        error
-            .downcast_ref::<crate::ticket_error::TicketDomainError>()
-            .map(|error| &**error)
-    })
+    error
+        .downcast_ref::<DomainError>()
+        .or_else(|| {
+            error
+                .downcast_ref::<crate::ticket_error::TicketDomainError>()
+                .map(|error| &**error)
+        })
+        .or_else(|| {
+            error
+                .downcast_ref::<TranscriptHistoryUnavailableError>()
+                .map(TranscriptHistoryUnavailableError::domain_error)
+        })
 }
 
 #[cfg(test)]
@@ -281,5 +347,25 @@ mod tests {
         assert!(!is_domain_error(&Other));
         let other: Box<dyn Error> = Box::new(Other);
         assert!(!is_domain_error(other.as_ref()));
+    }
+
+    #[test]
+    fn an_erased_history_error_keeps_its_domain_fields_and_concrete_state() {
+        let error: Box<dyn Error> =
+            TranscriptHistoryUnavailableError::new("SYNTHETIC_HISTORY_ERROR", true, None).into();
+        let domain = as_domain_error(error.as_ref()).unwrap();
+        assert_eq!(domain.code, ErrorCode::TRANSCRIPT_UNAVAILABLE);
+        assert_eq!(domain.status, 422);
+        assert!(domain.retryable);
+        let history = error
+            .downcast_ref::<TranscriptHistoryUnavailableError>()
+            .unwrap();
+        assert_eq!(
+            history.history_state,
+            ChatHistoryState::Degraded {
+                error_code: "SYNTHETIC_HISTORY_ERROR".into(),
+                retryable: true,
+            }
+        );
     }
 }

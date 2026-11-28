@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use crate::shared::provider_http::get_public_metadata;
 use futures::{
     FutureExt,
     future::{LocalBoxFuture, Shared},
@@ -14,7 +15,6 @@ use garcon_js::{
     json,
 };
 use serde_json::Value;
-use tokio::sync::OnceCell;
 
 use super::{
     bounded_command::{BoundedCommandOptions, run_bounded_command},
@@ -247,26 +247,9 @@ pub fn channel_latest_version(
 }
 
 async fn fetch_with_timeout(url: &str, accept: Option<&str>) -> Option<String> {
-    static CLIENT: OnceCell<reqwest::Client> = OnceCell::const_new();
-    let client = CLIENT
-        .get_or_try_init(|| async {
-            let tls = garcon_base::tls_roots::verified_client_config()?;
-            let client = reqwest::Client::builder()
-                .use_preconfigured_tls(tls)
-                .http1_only()
-                .timeout(LOOKUP_TIMEOUT)
-                .redirect(reqwest::redirect::Policy::limited(20))
-                .retry(reqwest::retry::never())
-                .build()?;
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(client)
-        })
+    let response = get_public_metadata(url, accept, LOOKUP_TIMEOUT)
         .await
         .ok()?;
-    let mut request = client.get(url);
-    if let Some(accept) = accept {
-        request = request.header(reqwest::header::ACCEPT, accept);
-    }
-    let response = request.send().await.ok()?.error_for_status().ok()?;
     if !response.status().is_success() {
         return None;
     }

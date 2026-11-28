@@ -318,9 +318,13 @@ the user corrects how a port behaves, the correction is added under
   per label and Bun 1.4.3 on `PATH`. `rust/Cargo.lock` comes back when the
   command changed it; anything else the command writes comes back only when
   named with `--pull` (a recorded case directory, a report). One call costs
-  about 40 seconds before the command starts, and every session shares one
-  four-core machine: put a unit's commands in one call, build one crate
-  (`-p`), and never the workspace.
+  about 40 seconds before the command starts, and the two build machines
+  (eight cores for the gate, the reviewer, and six sessions; four cores for
+  the five provider sessions) are shared: put a unit's commands in one
+  call, build one crate (`-p`), and build the workspace only for a change
+  to a shared public type. Session commands run at lower priority than the
+  gate. A call that ends with status 3 and no result is run again as it
+  was.
 - Only `/garcon`, `~/bin`, and the agent configuration directories survive a
   restart of the development machine. Keep nothing you need in `~/tmp` or
   anywhere else under the home directory.

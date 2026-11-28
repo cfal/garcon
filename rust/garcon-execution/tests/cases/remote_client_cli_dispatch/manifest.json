@@ -1,0 +1,52 @@
+{
+  "module": "rust/garcon-execution/tests/support/remote_client_cli_dispatch_fixture.ts",
+  "tests": [
+    "rust/garcon-execution/tests/support/remote_client_cli_dispatch_fixture.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "dispatchCli",
+      "argument": 1,
+      "guard": "acceptsLane",
+      "dropped": 17,
+      "kept": 0
+    },
+    {
+      "fn": "dispatchCli",
+      "argument": 2,
+      "guard": "acceptsBody",
+      "dropped": 0,
+      "kept": 17
+    },
+    {
+      "fn": "dispatchCli",
+      "argument": 3,
+      "guard": "acceptsHeader",
+      "dropped": 10,
+      "kept": 3
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "dispatchCli",
+      "argument": 0
+    },
+    {
+      "fn": "dispatchCli",
+      "argument": 1
+    },
+    {
+      "fn": "dispatchCli",
+      "argument": 2
+    },
+    {
+      "fn": "dispatchCli",
+      "argument": 3
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 71,
+  "sha256": "ca8438db2fb5f38817360059dd92718538757e8d6f35f0c376b6caaad6d1ce8e"
+}

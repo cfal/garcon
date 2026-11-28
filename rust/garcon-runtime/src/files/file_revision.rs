@@ -269,6 +269,8 @@ pub(crate) async fn stat_path(path: &str) -> io::Result<FileStat> {
 
 #[cfg(test)]
 mod tests {
+    use garcon_base::domain_error::as_domain_error;
+
     use super::*;
 
     #[tokio::test]
@@ -331,7 +333,7 @@ mod tests {
         })
         .await
         .unwrap_err();
-        let error = error.downcast_ref::<DomainError>().unwrap();
+        let error = as_domain_error(error.as_ref()).unwrap();
         assert_eq!(attempts, 3);
         assert_eq!(error.code, FILE_CHANGED_DURING_READ);
         assert!(error.retryable);
@@ -345,7 +347,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(
-            error.downcast_ref::<DomainError>().unwrap().code,
+            as_domain_error(error.as_ref()).unwrap().code,
             FILE_TOO_LARGE
         );
     }
