@@ -5,12 +5,13 @@
 // call that stalled. An input with `guardOnly` is not called: the record says
 // whether its guard rejects the argument.
 import { writeSync } from 'node:fs';
-import { decode, encodeCall } from './encode.js';
+import { decode, encodeOutcome, INSTANCES_VARIABLE, recordLine } from './encode.js';
 import type { Json } from '../wildcard.js';
 
 export const STREAM_VARIABLE = 'GARCON_UNIT_EVALUATE_FD';
 
 const streamFd = Number(process.env[STREAM_VARIABLE]);
+const instances = process.env[INSTANCES_VARIABLE] === '1';
 if (!Number.isInteger(streamFd)) {
   throw new Error(`The unit evaluator is started by \`bun rust/parity/cli.ts unit record|replay\` (${STREAM_VARIABLE} is unset).`);
 }
@@ -22,7 +23,7 @@ process.on('unhandledRejection', () => undefined);
 
 function write(record: object): void {
   try {
-    writeSync(streamFd, `${JSON.stringify(record)}\n`);
+    writeSync(streamFd, recordLine(record));
   } catch { /* The runner stopped reading. */ }
 }
 
@@ -54,11 +55,11 @@ async function evaluateOne(namespace: Record<string, unknown>, fn: string, args:
     else if (method === undefined) result = Reflect.apply(target, undefined, decoded);
     else result = Reflect.apply(target, namespace[owner!], decoded);
     if (result instanceof Promise) result = await result;
-    const call = encodeCall([], { kind: 'return', value: result });
-    return call.ok ? { result: call.result } : { notCaptured: call.failure };
+    const outcome = encodeOutcome({ kind: 'return', value: result }, instances);
+    return outcome.ok ? { result: outcome.value } : { notCaptured: outcome.failure };
   } catch (error) {
-    const call = encodeCall([], { kind: 'throw', value: error });
-    return call.ok ? { result: call.result } : { notCaptured: call.failure };
+    const outcome = encodeOutcome({ kind: 'throw', value: error });
+    return outcome.ok ? { result: outcome.value } : { notCaptured: outcome.failure };
   }
 }
 

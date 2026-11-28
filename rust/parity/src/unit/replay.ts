@@ -16,8 +16,8 @@ function captureOf(evaluation: Evaluation): Json {
 
 // Calls the original with every case in a fresh process and compares each
 // outcome with the recorded result.
-export async function replayCases(modulePath: string, cases: RecordedCase[], label: string): Promise<ScenarioResult> {
-  const evaluations = await evaluateInputs(modulePath, cases);
+export async function replayCases(modulePath: string, cases: RecordedCase[], label: string, instances = false): Promise<ScenarioResult> {
+  const evaluations = await evaluateInputs(modulePath, cases, EVALUATE_STALL_MS, instances);
   const golden: Golden = {
     scenario: label,
     cases: cases.map((entry) => ({ name: entry.id, expected: entry.result, noise: wildcardPaths(entry.result) })),
@@ -30,7 +30,7 @@ export async function replayCases(modulePath: string, cases: RecordedCase[], lab
 // when the case file was edited.
 export async function replayUnit(repoRoot: string, outDirectory: string): Promise<ScenarioResult> {
   const { manifest, cases } = await readCases(outDirectory);
-  return replayCases(resolve(repoRoot, manifest.module), cases, manifest.module);
+  return replayCases(resolve(repoRoot, manifest.module), cases, manifest.module, manifest.instances === true);
 }
 
 export function renderUnitReport(result: ScenarioResult): string {

@@ -44,6 +44,40 @@ pub fn marker(kind: &str, value: Value) -> Value {
     json!({ MARKER: kind, "value": value })
 }
 
+/// A JavaScript string with lone surrogates, preserving every UTF-16 unit.
+pub fn utf16(units: &[u16]) -> Value {
+    json!({ MARKER: "utf16", "value": units, "text": String::from_utf16_lossy(units) })
+}
+
+pub(crate) fn utf16_projection(value: &Value) -> Option<&Value> {
+    if kind(value) != Some("utf16") {
+        return None;
+    }
+    let units: Vec<u16> = value
+        .get("value")?
+        .as_array()?
+        .iter()
+        .map(|unit| u16::try_from(unit.as_u64()?).ok())
+        .collect::<Option<_>>()?;
+    let text = value.get("text")?;
+    (text.as_str()? == String::from_utf16_lossy(&units)).then_some(text)
+}
+
+/// A returned JavaScript class instance, as recorded with `--instances`.
+/// `fields` holds its encoded enumerable own properties, including markers
+/// for `undefined` and for any nested instances.
+pub fn instance(name: &str, fields: serde_json::Map<String, Value>) -> Value {
+    json!({ MARKER: "instance", "name": name, "fields": object_fields(fields) })
+}
+
+pub(crate) fn object_fields(fields: serde_json::Map<String, Value>) -> Value {
+    if fields.contains_key(MARKER) {
+        marker("object", Value::Object(fields))
+    } else {
+        Value::Object(fields)
+    }
+}
+
 /// A JavaScript number as a recording holds it. NaN, the infinities, and
 /// negative zero have no JSON form and become a `number` marker.
 pub fn number(value: f64) -> Value {
@@ -93,5 +127,23 @@ mod tests {
         for value in [0.0, 1e21, -1.0, 0.5] {
             assert_eq!(number(value).as_f64(), Some(value));
         }
+    }
+
+    #[test]
+    fn instance_markers_keep_the_class_name_and_encoded_own_fields() {
+        let encoded = instance(
+            "Reply",
+            serde_json::Map::from_iter([
+                ("$".to_owned(), json!("data")),
+                ("field".to_owned(), undefined()),
+            ]),
+        );
+        assert_eq!(
+            encoded,
+            json!({
+                "$": "instance", "name": "Reply",
+                "fields": {"$": "object", "value": {"$": "data", "field": {"$": "undefined"}}},
+            })
+        );
     }
 }

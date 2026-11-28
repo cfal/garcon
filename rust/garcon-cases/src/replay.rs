@@ -88,7 +88,7 @@ impl CaseError {
                 "$": "error",
                 "name": name,
                 "message": message,
-                "properties": properties,
+                "properties": markers::object_fields(properties.clone()),
             }),
             Outcome::Thrown(value) => markers::marker("throw", value.clone()),
             Outcome::Unhandled | Outcome::Undeliverable(_) => Value::Null,

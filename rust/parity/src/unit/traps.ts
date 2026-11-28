@@ -1,4 +1,4 @@
-import { encodeNumber } from './encode.js';
+import { decode, encodeNumber, encodeString } from './encode.js';
 import { childPath, isObject, type Json } from '../wildcard.js';
 
 // Trap variants probe the edges a port most often gets wrong in text and
@@ -94,12 +94,20 @@ function collect(value: Json, location: Location, leaves: Leaf[]): void {
   }
   if (!isObject(value)) return;
   const kind = markerKind(value);
-  if (kind === null || kind === 'map' || kind === 'set' || kind === 'object') {
+  if (kind === 'object' && isObject(value.value)) {
+    for (const [key, item] of Object.entries(value.value)) collect(item, [...location, 'value', key], leaves);
+  } else if (kind === null || kind === 'map' || kind === 'set') {
     for (const [key, item] of Object.entries(value)) {
       if (key !== '$') collect(item, [...location, key], leaves);
     }
   } else if (kind === 'number') {
     leaves.push(numberLeaf(location));
+  } else if (kind === 'utf16') {
+    leaves.push({ location, type: 'string', topLevel: location.length === 1 });
+  } else if (kind === 'object-entries' && Array.isArray(value.value)) {
+    value.value.forEach((entry, index) => {
+      if (Array.isArray(entry)) collect(entry[1], [...location, 'value', index, 1], leaves);
+    });
   }
 }
 
@@ -199,7 +207,7 @@ export function* candidateVariants(
         if (!entry || (!text && (embedded || (undeliverable && trap >= FIRST_NON_FINITE_TRAP)))) continue;
         for (const placement of text ? placements : ['replace' as const]) {
           const leaf = text
-            ? trapString(leafAt(call.args, location) as string, entry[1] as string, placement)
+            ? encodeString(trapString(decode(leafAt(call.args, location)) as string, entry[1] as string, placement))
             : encodeNumber(entry[1] as number);
           const args = replaceLeaf(call.args, location, leaf);
           if (isKnown(args)) continue;
