@@ -28,6 +28,51 @@ const CHAT: &str = "1767225600000000";
 const RUN: &str = "synthetic-run";
 
 #[tokio::test]
+async fn an_abandoned_run_delivers_transcript_unavailable_to_failure_listeners() {
+    LocalSet::new().run_until(async {
+        let root = tempfile::tempdir().unwrap();
+        let store = Rc::new(TranscriptLedgerStore::new(root.path().to_str().unwrap(), Default::default()).unwrap());
+        store.initialize_current_view(CHAT, InitializeViewInput {
+            view_id: Some(transcript_view_id("synthetic-view").unwrap()), content_start_ordinal: 1, rows: &[],
+        }).unwrap();
+        let ledger = Rc::new(TranscriptLedgerService::new(store, Default::default()));
+        let directory = Rc::new(AgentDirectory::new(Rc::new(SourceDirectory { integration: None, effects: Effects::default() })));
+        let logger = Rc::new(create_logger("test"));
+        let registry = Rc::new(AgentRegistry::new(AgentRegistryOptions {
+            runtime: AgentRuntimeRouterOptions {
+                registry: Rc::new(IdleFacets), directory: directory.clone(), ledger: Rc::new(IdleFacets),
+                unhandled_rejections: Rc::new(install_unhandled_rejection_policy(logger.clone())),
+            }, directory, get_carry_over_revision: Rc::new(|_| String::new()), logger,
+            ownership_transfer_pending: Rc::new(|_| false),
+        }));
+        let commands = Rc::new(CommandLedger::new(CommandLedgerOptions::default(), Rc::new(SystemClock)).unwrap());
+        let off = registry.bind_transcript_commits(&ledger, commands);
+        registry.events().track_turn(CHAT, &TurnEventMetadata { turn_id: Some(RUN.into()), ..Default::default() }).unwrap();
+        let (send, received) = oneshot::channel();
+        let send = RefCell::new(Some(send));
+        registry.events().on_failed(Rc::new(move |chat, message, code, metadata| {
+            let failure = (chat.to_owned(), message.to_owned(), code.to_owned(), metadata.and_then(|turn| turn.turn_id.clone()));
+            send.take().unwrap().send(failure).unwrap();
+            ListenerWork::Synchronous(Ok(()))
+        }));
+        let lease = ledger.open_producer(CHAT, "test").unwrap();
+        ledger.begin_run(CHAT, Some(RUN)).unwrap();
+        let db = rusqlite::Connection::open(root.path().join(CHAT).join("ledger.sqlite")).unwrap();
+        db.execute_batch("CREATE TRIGGER abort_terminal BEFORE INSERT ON transcript_rows
+            WHEN NEW.kind = 'run-ended' BEGIN SELECT RAISE(ABORT, 'synthetic terminal failure'); END").unwrap();
+        assert!(matches!(ledger.interrupt_run(CHAT).unwrap_err().downcast_ref(), Some(garcon_ledger::errors::LedgerError::Fenced { .. })));
+        assert!(lease.closed());
+        assert!(registry.events().get_active_turn(CHAT).is_some());
+        let failure = tokio::time::timeout(Duration::from_secs(2), received).await
+            .expect("the abandoned run should have published a failure").unwrap();
+        assert_eq!(failure, (CHAT.into(), "Transcript storage failed. Check server storage and restart the server before continuing this chat.".into(), "TRANSCRIPT_UNAVAILABLE".into(), Some(RUN.into())));
+        assert!(registry.events().get_active_turn(CHAT).is_none());
+        off();
+        ledger.close().unwrap();
+    }).await;
+}
+
+#[tokio::test]
 async fn committed_terminal_waits_for_transcript_fanout_and_command_result() {
     LocalSet::new().run_until(tokio::time::timeout(Duration::from_secs(5), async {
         let root = tempfile::tempdir().unwrap();
