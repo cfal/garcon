@@ -390,7 +390,7 @@ pub fn parse_controller_cli_request(value: &Value) -> Result<ControllerCliReques
     // Keep the order of its validated fields as well as the opaque body.
     let wire_order = http
         .as_object()
-        .expect("exact validated the HTTP object")
+        .ok_or_else(invalid)?
         .keys()
         .map(|key| match key.as_str() {
             "operation" => HttpRequestField::Operation,
