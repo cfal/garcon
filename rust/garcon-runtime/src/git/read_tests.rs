@@ -169,6 +169,150 @@ fn read(method: &str, request: Value) -> Value {
     json!({ "method": method, "request": request })
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn compares_commit_history_and_snapshots_for_renames_type_changes_gitlinks_and_non_utf8_paths()
+ {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::rc::Rc;
+
+    use garcon_contract::git::{GitCommitSnapshotOptions, GitHistoryCommitListOptions};
+
+    use super::commit_history::{get_commit_snapshot, get_history_commits};
+    use super::review_document_registry::GitReviewDocumentRegistry;
+
+    LocalSet::new()
+        .run_until(async {
+            let repo = GitFixture::with_commit().await;
+            let root = repo.path().canonicalize().unwrap();
+            let project = root.to_str().unwrap();
+            tokio::fs::write(root.join("old name"), "a small renamed file\n")
+                .await
+                .unwrap();
+            tokio::fs::write(root.join("changes-type"), "plain\n")
+                .await
+                .unwrap();
+            tokio::fs::write(root.join("binary"), b"\0zero")
+                .await
+                .unwrap();
+            repo.run(&["add", "--", "old name", "changes-type", "binary"])
+                .await;
+            let first = repo.run(&["rev-parse", "HEAD"]).await;
+            let first = first.trim_end();
+            repo.run(&[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{first},submodule"),
+            ])
+            .await;
+            repo.run(&["commit", "-m", "seed changed paths"]).await;
+            let parent = repo.run(&["rev-parse", "HEAD"]).await;
+            let parent = parent.trim_end();
+
+            repo.run(&["mv", "old name", "new name"]).await;
+            tokio::fs::remove_file(root.join("changes-type"))
+                .await
+                .unwrap();
+            tokio::fs::symlink("a.txt", root.join("changes-type"))
+                .await
+                .unwrap();
+            tokio::fs::write(root.join("binary"), b"\0one")
+                .await
+                .unwrap();
+            tokio::fs::write(root.join(OsStr::from_bytes(b"non-utf8-\xff")), "one\n")
+                .await
+                .unwrap();
+            repo.git(
+                &["add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                Some(b"changes-type\0binary\0non-utf8-\xff\0"),
+            )
+            .await;
+            repo.run(&[
+                "update-index",
+                "--cacheinfo",
+                &format!("160000,{parent},submodule"),
+            ])
+            .await;
+            repo.run(&["commit", "-m", "change the paths", "-m", "commit body"])
+                .await;
+
+            let history = GitHistoryCommitListOptions {
+                project_path: project.into(),
+                reference: None,
+                limit: Some(2),
+                offset: None,
+            };
+            let request = |commit: &str| GitCommitSnapshotOptions {
+                project_path: project.into(),
+                commit: commit.into(),
+                parent: Default::default(),
+                context: None,
+                body_candidate_count: None,
+            };
+            let mut original = original_reads(
+                project,
+                vec![
+                    read("getHistoryCommits", serialized(&history)),
+                    read("getCommitSnapshot", serialized(request("HEAD"))),
+                    read("getCommitSnapshot", serialized(request(first))),
+                    read("getCommitSnapshot", serialized(request("missing"))),
+                ],
+            )
+            .await;
+            let history = serialized(get_history_commits(&history, None, None).await.unwrap());
+            assert_eq!(history["nextOffset"], 2);
+            assert_eq!(
+                history.to_string(),
+                original[0].to_string(),
+                "history wire value"
+            );
+            let registry = Rc::new(GitReviewDocumentRegistry::default());
+            for (index, revision) in [(1, "HEAD"), (2, first), (3, "missing")] {
+                let mut actual = serialized(
+                    get_commit_snapshot(&request(revision), &registry, None, None, None)
+                        .await
+                        .unwrap(),
+                );
+                if let Some(document) = actual.get("documentId").and_then(Value::as_str) {
+                    let lease = registry.acquire(project, document).unwrap();
+                    assert_eq!(
+                        uuid::Uuid::parse_str(document).unwrap().get_version_num(),
+                        4
+                    );
+                    assert_eq!(
+                        uuid::Uuid::parse_str(original[index]["documentId"].as_str().unwrap())
+                            .unwrap()
+                            .get_version_num(),
+                        4
+                    );
+                    assert_eq!(
+                        lease.document.files_by_path.len(),
+                        actual["files"].as_array().unwrap().len()
+                    );
+                    actual["documentId"] = json!("<document>");
+                    original[index]["documentId"] = json!("<document>");
+                }
+                assert_eq!(
+                    actual.to_string(),
+                    original[index].to_string(),
+                    "snapshot of {revision}"
+                );
+                if revision == "HEAD" {
+                    let files = actual["files"].as_array().unwrap();
+                    let file = |name| files.iter().find(|file| file["path"] == name).unwrap();
+                    assert_eq!(file("new name")["originalPath"], "old name");
+                    assert_eq!(file("changes-type")["status"], "type-changed");
+                    assert_eq!(file("binary")["bodyState"], "binary");
+                    assert_eq!(file("submodule")["additions"], 1);
+                    assert_eq!(file("non-utf8-\u{fffd}")["additions"], 1);
+                }
+            }
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn compares_real_file_history_blame_and_graph_with_the_original_runtime() {
     LocalSet::new()

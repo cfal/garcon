@@ -2,7 +2,7 @@
 
 use garcon_js::{Number, OptionalNullable};
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 
 pub use crate::git_refs::{
     GIT_REF_RESULT_LIMITS, GitRefKind, GitRefOption, GitRefSort, GitRefsResponse,
@@ -305,13 +305,33 @@ pub enum GitCommitScope {
     WholeIndex,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitCommitResult {
     pub success: bool,
     pub output: String,
     pub commit_scope: GitCommitScope,
     pub index_synchronized: bool,
+}
+
+impl Serialize for GitCommitResult {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut result = serializer.serialize_struct("GitCommitResult", 4)?;
+        result.serialize_field("success", &self.success)?;
+        result.serialize_field("output", &self.output)?;
+        // The selected-file branch appends its scope after spreading the commit result.
+        match self.commit_scope {
+            GitCommitScope::SelectedFiles => {
+                result.serialize_field("indexSynchronized", &self.index_synchronized)?;
+                result.serialize_field("commitScope", &self.commit_scope)?;
+            }
+            GitCommitScope::WholeIndex => {
+                result.serialize_field("commitScope", &self.commit_scope)?;
+                result.serialize_field("indexSynchronized", &self.index_synchronized)?;
+            }
+        }
+        result.end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

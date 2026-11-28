@@ -4,7 +4,7 @@ import { GitRuntime } from '../../../../server/runtime/git/runtime.js';
 if (Bun.version !== '1.4.3') throw new Error('The Git runtime oracle requires the pinned Bun 1.4.3');
 
 type Method = 'getQuickSummary' | 'getWorkingTreeFingerprint' | 'getFileHistory' | 'getBlame' | 'getGraph'
-  | 'getWorktrees' | 'getTargetCandidates' | 'getRepoInfo';
+  | 'getWorktrees' | 'getTargetCandidates' | 'getRepoInfo' | 'getHistoryCommits' | 'getCommitSnapshot';
 type Read = {
   [K in Method]: {
     method: K;
@@ -31,6 +31,8 @@ try {
       case 'getWorktrees': results.push(await runtime.git.getWorktrees(read.request)); break;
       case 'getTargetCandidates': results.push(await runtime.git.getTargetCandidates(read.request)); break;
       case 'getRepoInfo': results.push(await runtime.git.getRepoInfo(read.request)); break;
+      case 'getHistoryCommits': results.push(await runtime.git.getHistoryCommits(read.request)); break;
+      case 'getCommitSnapshot': results.push(await runtime.git.getCommitSnapshot(read.request)); break;
     }
   }
   console.log(JSON.stringify(results));

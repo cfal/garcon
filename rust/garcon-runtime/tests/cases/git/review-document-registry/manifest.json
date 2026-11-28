@@ -1,0 +1,28 @@
+{
+  "module": "server/runtime/git/review-document-registry.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "registeredWorkbenchFile",
+      "argument": 0,
+      "guard": "rust/parity/fixtures/git/guards.ts#workbenchFile",
+      "dropped": 20,
+      "kept": 60
+    },
+    {
+      "fn": "registeredTreeDiffFile",
+      "argument": 0,
+      "guard": "rust/parity/fixtures/git/guards.ts#treeDiffFile",
+      "dropped": 30,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 122,
+  "sha256": "d6c974f8446739e3a94da216da04b2fab16cdeab650f890a0fe38df7d149d601"
+}

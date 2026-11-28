@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use garcon_base::executor_path::{to_executor_path, to_native_path};
 use garcon_base::path_boundary::assert_real_within_base;
 use garcon_contract::project_resolution::ProjectResolution;
+use garcon_contract::ticket_validation::{ticket_record, ticket_string};
 use garcon_contract::tickets::TicketProjectDefault;
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
 use garcon_interface::execution_runtime::{
@@ -14,6 +15,7 @@ use garcon_interface::execution_runtime::{
 };
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_js::{path::native, trim};
+use serde_json::{Value, json};
 
 use crate::git::run::{read_only_git_options, run_git};
 use crate::git::types::GitCommandOptions;
@@ -51,6 +53,34 @@ impl ProjectService {
     pub fn with_child_environment(mut self, environment: ChildEnvironment) -> Self {
         self.child_environment = Some(environment);
         self
+    }
+
+    pub async fn ticket_project_default_raw(
+        &self,
+        request: &Value,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<TicketProjectDefault> {
+        let options = options.as_ref();
+        (self.assert_available)(options)?;
+        let input = ticket_record(request, &["projectPath"])?;
+        let path = ticket_string(
+            input.get("projectPath").unwrap_or(&Value::Null),
+            "projectPath",
+        )?;
+        let base = to_native_path(&self.project_base_path, None);
+        let directory = to_native_path(path, None);
+        let signal = options.and_then(|options| options.signal.as_ref());
+        let result = resolve_ticket_project_default_with_environment(
+            &directory,
+            signal,
+            self.child_environment.clone(),
+            async |path: &str| {
+                inspect_project_directory(path, |input| assert_real_within_base(&base, input)).await
+            },
+        )
+        .await?;
+        (self.assert_available)(options)?;
+        Ok(result)
     }
 
     async fn is_git_repository(
@@ -93,22 +123,8 @@ impl ExecutionProjectService for ProjectService {
         request: TicketProjectDefaultRequest,
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<TicketProjectDefault> {
-        let options = options.as_ref();
-        (self.assert_available)(options)?;
-        let base = to_native_path(&self.project_base_path, None);
-        let directory = to_native_path(&request.project_path, None);
-        let signal = options.and_then(|options| options.signal.as_ref());
-        let result = resolve_ticket_project_default_with_environment(
-            &directory,
-            signal,
-            self.child_environment.clone(),
-            async |path: &str| {
-                inspect_project_directory(path, |input| assert_real_within_base(&base, input)).await
-            },
-        )
-        .await?;
-        (self.assert_available)(options)?;
-        Ok(result)
+        self.ticket_project_default_raw(&json!({"projectPath": request.project_path}), options)
+            .await
     }
 
     async fn inspect(
@@ -253,6 +269,15 @@ mod tests {
         );
 
         available.set(false);
+        let error = service
+            .ticket_project_default_raw(&json!({"extra": true}), None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<AgentCallError>().unwrap().outcome,
+            AgentDeliveryOutcome::NotDispatched
+        );
+        assert_eq!(error.to_string(), "Disposed");
         let error = service.inspect(request, None).await.unwrap_err();
         assert_eq!(
             error.downcast_ref::<AgentCallError>().unwrap().outcome,
