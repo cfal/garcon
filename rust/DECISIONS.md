@@ -616,3 +616,59 @@ Sessions still never add an entry on their own.
 Consequences: Supersedes the approval rule of ADR-015; the rest of it stands.
 Every known difference, whoever approved it, is listed for the user's review
 at the lift.
+
+## ADR-029: Three differences from the original are accepted
+
+Status: accepted by the user (2026-11-28)
+
+Context: Three differences had been listed provisionally by the manager
+because none is a bug in the original, so ADR-028 did not cover them.
+
+Decision: They stand.
+
+- The native listener's own 431 response carries `Content-Length: 0`; the
+  original's listener sends no such header. Listed for the 18 cases of the
+  `runtime` scenario under the `native` build label only.
+- `validateHiddenBashCommandPattern` validates with `regress`, unoptimized and
+  bounded, and differs from JavaScriptCore on 16 recorded patterns. Its parser
+  is not ported.
+- Han characters sort by code point (ICU4X's compiled collation data), where
+  the original sorts them by radical and stroke.
+
+Consequences: The entries name the user's acceptance. A new pattern or pair
+that differs for the same cause joins its list without a further decision; a
+difference with another cause does not.
+
+## ADR-030: A controller without a Local executor lists Local as unavailable
+
+Status: accepted by the user (2026-11-28)
+
+Context: ADR-023 introduced a controller-only binary, which the original does
+not have.
+
+Decision: Local stays in the executor list and is reported unavailable with a
+fixed reason. Starting a chat requires a remote executor. No new paths: the
+existing handling of an unavailable executor applies.
+
+## ADR-031: Provider requests identify as Garcon and never cross origins
+
+Status: accepted by the user (2026-11-28)
+
+Context: The original's requests to model providers go through Bun's fetch.
+They carry `User-Agent: Bun/1.4.3`, and on a redirect to another origin they
+drop `Authorization` but forward `x-api-key` like any other header, so a
+provider endpoint that redirects elsewhere hands that key to the new origin.
+
+Decision: The port departs from the original in both.
+
+- Provider requests carry `User-Agent: Garcon/<version>`, the release version
+  of the build, built in one place in `garcon-agents-common`.
+- A provider request does not follow a redirect to a different origin
+  (scheme, host, or port). It fails as a provider failure whose message names
+  the two origins and nothing else. Same-origin redirects are followed as
+  before.
+
+Consequences: The byte comparison of provider requests with the original
+excludes the `User-Agent` value. A provider configured behind a redirecting
+front that changes origin stops working until its endpoint is corrected, and
+says why.
