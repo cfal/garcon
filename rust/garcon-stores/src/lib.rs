@@ -4,6 +4,7 @@
 //! catalogs), one module per TypeScript file.
 
 pub mod auth;
+pub mod executors;
 pub mod private_sqlite;
 pub mod settings;
 pub mod telegram_settings_store;
