@@ -33,5 +33,5 @@ url.workspace = true
 
 [dev-dependencies]
 garcon-cases.workspace = true
-tempfile = "3"
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
