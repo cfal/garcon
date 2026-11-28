@@ -397,6 +397,158 @@ async fn closing_during_seed_leaves_a_clean_uninitialized_ledger_on_reopen() {
 }
 
 #[tokio::test]
+async fn dropping_a_suspended_seed_or_stage_allows_eviction_to_reclaim_its_rows() {
+    for seeding in [true, false] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let store = store(root);
+        if !seeding {
+            initialize(&store, "ledger", "current", &[notice("authoritative")]);
+        }
+        let abandoned = transcript_view_id("abandoned").unwrap();
+        let rows = notices(501, "synthetic");
+        {
+            let mut operation = std::pin::pin!(async {
+                if seeding {
+                    store
+                        .seed_current_view(
+                            "ledger",
+                            InitializeViewInput {
+                                view_id: Some(abandoned.clone()),
+                                content_start_ordinal: 1,
+                                rows: &rows,
+                            },
+                        )
+                        .await
+                } else {
+                    store
+                        .stage_view(
+                            "ledger",
+                            StageViewInput {
+                                view_id: abandoned.clone(),
+                                content_start_ordinal: 1,
+                                rows: &rows,
+                            },
+                        )
+                        .await
+                }
+            });
+            assert!(
+                operation
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            );
+            assert_eq!(row_count(root, abandoned.as_str()), 500);
+        }
+        assert_eq!(
+            row_count(root, abandoned.as_str()),
+            500,
+            "drop does not run a deletion transaction"
+        );
+        initialize(&store, "other", "other-view", &[]);
+        let current = store.current_view("ledger").unwrap();
+        assert_eq!(
+            current.as_ref().map(|view| view.view_id.as_str()),
+            (!seeding).then_some("current")
+        );
+        assert_eq!(
+            row_count(root, abandoned.as_str()),
+            0,
+            "abandoned staged rows survived eviction and reopen (seeding={seeding})"
+        );
+    }
+}
+
+#[tokio::test]
+async fn dropping_a_suspended_discard_allows_reopen_to_finish_cleanup() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let store = store(root);
+    initialize(&store, "ledger", "current", &[]);
+    let abandoned = transcript_view_id("abandoned").unwrap();
+    store
+        .stage_view(
+            "ledger",
+            StageViewInput {
+                view_id: abandoned.clone(),
+                content_start_ordinal: 1,
+                rows: &notices(2001, "synthetic"),
+            },
+        )
+        .await
+        .unwrap();
+    {
+        let mut discard = std::pin::pin!(store.discard_staging_view("ledger", &abandoned));
+        assert!(
+            discard
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        assert_eq!(row_count(root, abandoned.as_str()), 1);
+    }
+    initialize(&store, "other", "other-view", &[]);
+    assert_eq!(
+        store
+            .current_view("ledger")
+            .unwrap()
+            .unwrap()
+            .view_id
+            .as_str(),
+        "current"
+    );
+    assert_eq!(row_count(root, abandoned.as_str()), 0);
+}
+
+#[tokio::test]
+async fn dropping_an_old_stage_does_not_unpin_the_same_id_in_a_new_generation() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let store = store(root);
+    initialize(&store, "ledger", "current", &[]);
+    let stage = transcript_view_id("reused-stage-id").unwrap();
+    let rows = notices(501, "old");
+    {
+        let mut old = std::pin::pin!(store.stage_view(
+            "ledger",
+            StageViewInput {
+                view_id: stage.clone(),
+                content_start_ordinal: 1,
+                rows: &rows,
+            }
+        ));
+        assert!(
+            old.as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        store.close_chat("ledger").unwrap();
+        store
+            .stage_view(
+                "ledger",
+                StageViewInput {
+                    view_id: stage.clone(),
+                    content_start_ordinal: 1,
+                    rows: &[notice("new")],
+                },
+            )
+            .await
+            .unwrap();
+    }
+    initialize(&store, "other", "other-view", &[]);
+    let current = transcript_view_id("current").unwrap();
+    assert_eq!(
+        store
+            .replace_current_view("ledger", &current, &stage)
+            .unwrap()
+            .view_id,
+        stage
+    );
+    assert_eq!(row_count(root, stage.as_str()), 1);
+}
+
+#[tokio::test]
 async fn duplicate_submission_across_staging_batches_discards_only_the_staged_view() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
