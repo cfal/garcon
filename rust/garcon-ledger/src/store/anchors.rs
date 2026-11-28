@@ -47,13 +47,20 @@ impl<'a> TranscriptReadSignal<'a> {
         }
     }
 
-    pub(super) fn check(self) -> LedgerResult<()> {
+    pub fn check(self) -> LedgerResult<()> {
         if self.token.is_cancelled() {
-            return Err(self
-                .reason
-                .map_or_else(|| LockAborted.into(), |reason| reason()));
+            return Err(self.abort_error());
         }
         Ok(())
+    }
+
+    pub fn token(self) -> &'a CancellationToken {
+        self.token
+    }
+
+    pub(crate) fn abort_error(self) -> Box<dyn Error> {
+        self.reason
+            .map_or_else(|| LockAborted.into(), |reason| reason())
     }
 }
 
