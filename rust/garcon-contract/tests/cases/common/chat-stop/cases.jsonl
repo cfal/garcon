@@ -1,0 +1,6 @@
+{"id":"isStopSatisfied#0","fn":"isStopSatisfied","args":["interrupt-requested"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/chat-stop.jsonl:1"}
+{"id":"isStopSatisfied#1","fn":"isStopSatisfied","args":["already-idle"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/chat-stop.jsonl:2"}
+{"id":"isStopSatisfied#2","fn":"isStopSatisfied","args":["failed"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-stop.jsonl:3"}
+{"id":"isAbortAcknowledged#0","fn":"isAbortAcknowledged","args":["interrupt-requested"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/chat-stop.jsonl:4"}
+{"id":"isAbortAcknowledged#1","fn":"isAbortAcknowledged","args":["already-idle"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-stop.jsonl:5"}
+{"id":"isAbortAcknowledged#2","fn":"isAbortAcknowledged","args":["failed"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-stop.jsonl:6"}
