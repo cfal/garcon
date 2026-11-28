@@ -18,6 +18,8 @@ pub mod chat_title;
 pub mod chat_transient_feed;
 pub mod last_selected_chat_state;
 pub mod metadata_store;
+pub mod native_activity;
+pub mod native_activity_page_reader;
 pub mod preambles;
 pub mod registry_contracts;
 pub mod registry_entry_codec;

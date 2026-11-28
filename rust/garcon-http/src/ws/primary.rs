@@ -21,13 +21,13 @@ use serde_json::Value;
 use crate::http_route::log_unported;
 
 use super::server_sockets::PrimaryRequests;
-use super::{chat_subscribe::ChatSubscriptions, primary_delivery::PrimaryPeer};
+use super::{chat_session_state::BrowserChatServices, primary_delivery::PrimaryPeer};
 
 pub(super) struct PrimaryHandler {
     instance_id: String,
     clock: Rc<dyn Clock>,
     unported_log: Option<PathBuf>,
-    chat_subscriptions: Option<Rc<dyn ChatSubscriptions>>,
+    chat_services: Option<BrowserChatServices>,
     logger: ScopedLogger,
 }
 
@@ -41,16 +41,13 @@ impl PrimaryHandler {
             instance_id,
             clock,
             unported_log,
-            chat_subscriptions: None,
+            chat_services: None,
             logger: create_logger("ws:primary"),
         }
     }
 
-    pub(super) fn with_chat_subscriptions(
-        mut self,
-        subscriptions: Rc<dyn ChatSubscriptions>,
-    ) -> Self {
-        self.chat_subscriptions = Some(subscriptions);
+    pub(super) fn with_chat_services(mut self, chat: BrowserChatServices) -> Self {
+        self.chat_services = Some(chat);
         self
     }
 
@@ -75,15 +72,33 @@ impl PrimaryHandler {
                     Ok(time) => time,
                     Err(error) => return Some(Reply::fault(error.to_string())),
                 };
+                let processing = self
+                    .chat_services
+                    .as_ref()
+                    .map_or_else(empty_processing, |chat| {
+                        chat.session_state.processing_snapshot()
+                    });
                 Some(Reply::new(SessionWsMessage::WsPong(WsPongMessage::new(
                     id,
                     request.sent_at,
                     server_time,
-                    empty_processing(),
+                    processing,
                     self.instance_id.clone(),
                 ))))
             }
             ClientWsMessage::ReconnectStateQuery(request) => {
+                if let Some(chat) = &self.chat_services {
+                    return Some(
+                        match chat
+                            .session_state
+                            .reconnect(&request, &self.instance_id)
+                            .await
+                        {
+                            Ok(payload) => Reply::encoded(payload),
+                            Err(error) => Reply::new(error),
+                        },
+                    );
+                }
                 if !request.control_chat_ids.is_empty() {
                     return Some(Reply::unported(
                         ReconnectStateQueryRequest::TYPE,
@@ -109,13 +124,10 @@ impl PrimaryHandler {
                 let Some(id) = id else {
                     return Some(Reply::fault("chat-subscribe requires a clientRequestId"));
                 };
-                if let Some(subscriptions) = &self.chat_subscriptions {
+                if let Some(chat) = &self.chat_services {
                     return Some(
-                        match subscriptions.subscribe(&request, &id, &chat_id).await {
-                            Ok(payload) => Reply {
-                                message: ReplyMessage::Encoded(payload),
-                                unported: None,
-                            },
+                        match chat.subscriptions.subscribe(&request, &id, &chat_id).await {
+                            Ok(payload) => Reply::encoded(payload),
                             Err(error) => Reply::new(SessionWsMessage::ClientRequestError(error)),
                         },
                     );
@@ -229,6 +241,13 @@ impl Reply {
         }
     }
 
+    fn encoded(payload: Bytes) -> Self {
+        Self {
+            message: ReplyMessage::Encoded(payload),
+            unported: None,
+        }
+    }
+
     fn fault(message: impl Into<String>) -> Self {
         Self::new(SessionWsMessage::WsFault(WsFaultMessage::new(
             message.into(),
@@ -297,6 +316,7 @@ impl Reply {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ws::{ChatSessionState, ChatSubscriptions};
     use garcon_js::ManualClock;
     use serde_json::json;
 
@@ -384,11 +404,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn correctly_correlates_chat_subscriptions_and_keeps_the_marker_without_composition() {
-        struct Subscriptions;
+    async fn uses_chat_ports_when_composed_and_keeps_the_subscribe_marker_without_them() {
+        struct Chat;
 
         #[async_trait::async_trait(?Send)]
-        impl ChatSubscriptions for Subscriptions {
+        impl ChatSubscriptions for Chat {
             async fn subscribe(
                 &self,
                 request: &ChatSubscribeRequest,
@@ -409,6 +429,29 @@ mod tests {
             }
         }
 
+        #[async_trait::async_trait(?Send)]
+        impl ChatSessionState for Chat {
+            fn processing_snapshot(&self) -> ChatProcessingSnapshotResult {
+                ChatProcessingSnapshotResult::Unavailable
+            }
+
+            async fn reconnect(
+                &self,
+                request: &ReconnectStateQueryRequest,
+                server_instance_id: &str,
+            ) -> Result<Bytes, SessionWsMessage> {
+                assert_eq!(request.control_chat_ids, ["chat"]);
+                Ok(serde_json::to_vec(&ReconnectStateMessage::new(
+                    self.processing_snapshot(),
+                    vec![],
+                    server_instance_id.into(),
+                    request.client_request_id.clone(),
+                ))
+                .unwrap()
+                .into())
+            }
+        }
+
         let request = br#"{"type":"chat-subscribe","clientRequestId":"request",
             "chatId":"chat","transcriptViewId":"view","afterOrdinal":11,"throughOrdinal":20}"#;
         let handler = PrimaryHandler::new(
@@ -418,7 +461,10 @@ mod tests {
         );
         let reply = handler.reply(request).await.unwrap();
         assert_eq!(reply.unported.as_deref(), Some("chat-subscribe"));
-        let handler = handler.with_chat_subscriptions(Rc::new(Subscriptions));
+        let handler = handler.with_chat_services(BrowserChatServices {
+            subscriptions: Rc::new(Chat),
+            session_state: Rc::new(Chat),
+        });
         let reply = handler.reply(request).await.unwrap();
         assert_eq!(reply.unported, None);
         let value: Value = json::from_slice(&reply.encode().unwrap()).unwrap();
@@ -430,6 +476,23 @@ mod tests {
                 "code": "STALE_TRANSCRIPT_VIEW", "message": "stale view", "retryable": false,
             })
         );
+        for (request, expected_type) in [
+            (
+                r#"{"type":"ws-ping","clientRequestId":"ping","sentAt":0}"#,
+                "ws-pong",
+            ),
+            (
+                r#"{"type":"reconnect-state-query","clientRequestId":"reconnect","controlChatIds":["chat"]}"#,
+                "reconnect-state",
+            ),
+        ] {
+            let reply = handler.reply(request.as_bytes()).await.unwrap();
+            assert!(reply.unported.is_none());
+            let value: Value = json::from_slice(&reply.encode().unwrap()).unwrap();
+            assert_eq!(value["type"], expected_type);
+            assert_eq!(value["processing"], json!({"outcome":"unavailable"}));
+            assert_eq!(value["serverInstanceId"], "controller-instance");
+        }
     }
 
     #[tokio::test]
