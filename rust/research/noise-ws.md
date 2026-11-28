@@ -39,10 +39,12 @@
 
 The [MAP](../MAP.md) selects the fixed protocol over existing primitive
 implementations in RustCrypto: X25519, AES-256-GCM, SHA-256/HKDF, and OS
-randomness. Socket framing, readiness and lifecycle above them must
-still match this package. No Rust primitive combination or native link
-was built by this note; use the versions selected by `garcon-link`
-and verify them against the package vectors and bidirectional interop.
+randomness. A primitive-only scratch probe passed on Rust 1.99.1 with
+`x25519-dalek 2.0.1` (`static_secrets` plus defaults), `aes-gcm 0.10.3`,
+`hkdf 0.12.4`, and `sha2 0.10.9` (defaults). These are compile-checked
+candidates, not a dependency pin for `garcon-link`. Socket framing,
+readiness and lifecycle still need the package vectors and bidirectional
+native interop; neither was run against a Rust link in this research.
 
 ## Traps
 
@@ -64,5 +66,8 @@ out of them and requires confirmation records.
   `test/vectors.test.ts`, and `interop/README.md`. The Go interop runner
   tests 20 bidirectional transcripts against `flynn/noise v1.1.0`;
   it was not rerun for this note.
-- [Noise protocol specification](https://noiseprotocol.org/noise.html)
-  and [RustCrypto](https://github.com/RustCrypto).
+- [Noise protocol specification](https://noiseprotocol.org/noise.html);
+  [x25519-dalek](https://docs.rs/x25519-dalek/2.0.1/x25519_dalek/),
+  [aes-gcm](https://docs.rs/aes-gcm/0.10.3/aes_gcm/),
+  [hkdf](https://docs.rs/hkdf/0.12.4/hkdf/),
+  and [sha2](https://docs.rs/sha2/0.10.9/sha2/).
