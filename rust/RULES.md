@@ -179,6 +179,11 @@ the user corrects how a port behaves, the correction is added under
 - Port the unit tests that pin observable behavior, with the same names in
   snake case. Skip tests that only mock the original's internals. Never weaken
   or delete a test to make it pass.
+- The replay compares a result as it would cross the JSON boundary, because
+  that is the only way the result leaves the process: a property the original
+  returns as `undefined` matches an absent property, `undefined` inside an
+  array matches `null`, and `-0` matches an integer zero. A dispatcher does not
+  rebuild such values from the recorded arguments to make a case match.
 - Before reporting a unit done, plant a bug in it and confirm its oracle fails
   on the expected field. Cargo can keep a build when a source file is
   rewritten within the same clock tick as the write before it, so a quick
