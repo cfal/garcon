@@ -26,6 +26,7 @@ pub mod provider_discovery;
 pub mod runtime_proof;
 pub mod server_runtime;
 pub mod stored_json;
+pub mod task_worker;
 pub mod terminal_framing;
 pub mod ticket_error;
 pub mod tls_roots;
