@@ -1,0 +1,26 @@
+{"fn":"parseCliContext","args":[{"serverInstanceId":" instance ","defaultExecutorId":"local","workspaceName":" workspace "}]}
+{"fn":"parseCliContext","args":[{"serverInstanceId":" instance ","defaultExecutorId":"local","workspaceName":null}]}
+{"fn":"parseCliContext","args":[{"serverInstanceId":"ok","defaultExecutorId":"bogus"}]}
+{"fn":"parseCliContext","args":[{"serverInstanceId":17,"defaultExecutorId":"local","workspaceName":null}]}
+{"fn":"parseCliContext","args":[false]}
+{"fn":"parseServerRuntimeProbe","args":[{"schemaVersion":1,"instanceId":"abc","proof":"abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"}]}
+{"fn":"parseServerRuntimeProbe","args":[{"schemaVersion":0,"instanceId":17,"proof":"short"}]}
+{"fn":"parseServerRuntimeProbe","args":[{"schemaVersion":1,"instanceId":17,"proof":"short"}]}
+{"fn":"parseServerRuntimeProbe","args":[{"schemaVersion":1,"instanceId":"abc","proof":"short"}]}
+{"fn":"parseServerRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":" ident ","workspaceDir":" /fixture ","startedAt":" 03 Feb 2024 12:34 GMT ","pid":12,"baseUrl":"https://EXAMPLE.com/a/../b/","localCapability":"garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE","kind":"ignored"}]}
+{"fn":"parseServerRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":false,"workspaceDir":false,"startedAt":"bad","pid":0,"baseUrl":true,"localCapability":false}]}
+{"fn":"parseServerRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":false,"workspaceDir":false,"startedAt":"bad","pid":1,"baseUrl":true,"localCapability":false}]}
+{"fn":"parseServerRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":false,"workspaceDir":false,"startedAt":"2024","pid":1,"baseUrl":"https://?","localCapability":false}]}
+{"fn":"parseServerRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":false,"workspaceDir":false,"startedAt":"2024","pid":1,"baseUrl":"file:///path","localCapability":false}]}
+{"fn":"parseServerRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":false,"workspaceDir":false,"startedAt":"2024","pid":1,"baseUrl":"http://127.0.0.1:8080/","localCapability":"garcon_local_short"}]}
+{"fn":"parseServerRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":false,"workspaceDir":false,"startedAt":"2024","pid":1,"baseUrl":"http://127.0.0.1:8080/","localCapability":"garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"}]}
+{"fn":"parseCliRuntimeDescriptor","args":[{"kind":"executor-cli","schemaVersion":1,"instanceId":"ident","startedAt":"2024","pid":9007199254740991,"baseUrl":"HTTP://127.1:8080","localCapability":"garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"}]}
+{"fn":"parseCliRuntimeDescriptor","args":[{"kind":null,"schemaVersion":0}]}
+{"fn":"parseCliRuntimeDescriptor","args":[{"schemaVersion":1,"instanceId":"ident","workspaceDir":"/fixture","startedAt":"2024","pid":1,"baseUrl":"HTTP://127.1:8080","localCapability":"garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"}]}
+{"fn":"isLocalCapability","args":["garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"]}
+{"fn":"isLocalCapability","args":[7]}
+{"fn":"isLocalCapability","args":["garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE\n"]}
+{"fn":"isRuntimeProbeChallenge","args":["abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"]}
+{"fn":"isRuntimeProbeChallenge","args":["abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE="]}
+{"fn":"isRuntimeProbeChallenge","args":[{}]}
+{"fn":"runtimeProofPayload","args":["fixture-instance","fixture-challenge"]}

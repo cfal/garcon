@@ -12,6 +12,12 @@
     "reason": "The original reordered transcript broadcasts around ordinals 3 and 4; cause not yet identified."
   },
   {
+    "suite": "integration-tests/tests/server/chat-boards.test.ts",
+    "test": "Chat Board server integration > persists ordered boards and transitions tags with typed invalidations",
+    "path": "$.http[18].body.value.sessions[0].activityStatus",
+    "reason": "The original session snapshot raced: activityStatus was complete in runs 1, 4 and 6 and null in runs 2, 3 and 5 of six Bun 1.4.3 runs."
+  },
+  {
     "suite": "integration-tests/tests/server/chat-lifecycle.test.ts",
     "test": "chat lifecycle > deduplicates identical commands and rejects conflicting identity reuse",
     "reason": "The start-command response in chat-command-routes.ts snapshots activity before the test waits for the terminal event, so chat-activity-status.ts can project either working or complete."

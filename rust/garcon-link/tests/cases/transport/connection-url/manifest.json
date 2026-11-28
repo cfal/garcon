@@ -1,7 +1,7 @@
 {
   "module": "server/remote/transport/connection-url.ts",
   "tests": [
-    "rust/garcon-link/tests/oracles/connection-url.test.ts"
+    "rust/garcon-link/tests/oracles/connection-url.cases.ts"
   ],
   "inputs": "rust/garcon-link/tests/inputs/connection-url.jsonl",
   "guards": [],

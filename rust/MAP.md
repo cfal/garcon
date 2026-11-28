@@ -128,7 +128,7 @@ wait for base and contract-core.
 | suite-traces | ADR-020 suite level: the integration test client writes every HTTP exchange and every reply to its own WebSocket requests; normalization and wildcards reuse `rust/parity/src`; a comparer reports the first difference per test | The original matches its own trace on a second run for ten varied suites, with every wildcard reviewed | claimed by harness 2026-11-27 |
 | known-differences | ADR-015: `rust/parity/known-differences.json` honored by the edge replay and the trace comparer | A listed case passes only with exactly the listed result and fails once it no longer differs | claimed by harness 2026-11-27 |
 | base | `garcon-js` helpers; `garcon-base`: logging, domain errors, keyed lock, JSON file store, private files, workspace lease (same on-disk lock as `proper-lockfile`), path boundary, runtime descriptor | Ported unit tests; a TypeScript process and a Rust process exclude each other on one workspace | claimed by foundation 2026-11-27 |
-| contract-core | `garcon-contract`: identifiers, error codes, `chat-types`, WebSocket protocol and events, executors, agents, settings | Recorded cases for every parser and codec; JSON round trip with the TypeScript encoders | claimed by foundation 2026-11-27 |
+| contract-core | `garcon-contract`: identifiers, error codes, `chat-types`, WebSocket protocol and events, executors, agents, settings | Recorded cases for every parser and codec; JSON round trip with the TypeScript encoders | claimed by foundation 2026-11-27; 49 of the 149 `common/` modules merged at 238714bfd. Since 2026-11-28 foundation keeps the `chat-types` cluster and the edge prerequisites, research has the agent, model, command, notice, snippet, preamble, and scheduled-prompt modules, and interface the ticket family |
 | interface | `garcon-interface`: the integration and runtime contracts as traits; the `common/` domain modules its signatures need (git, gh, terminal, files, tickets, attachments, API providers, usage, and the rest) in `garcon-contract` | Every type that crosses the executor link serializes to the JSON the original sends; recorded cases for the parsers | claimed by interface 2026-11-27 |
 | port-rules | `GLOSSARY.md` (TypeScript term to Rust name), `RULES.md` (mapping rules and corrections), `research/` notes for each dependency listed under [dependencies](#dependencies) | Reviewed by the manager | done: 20 notes under `research/` and `GLOSSARY.md` |
 
@@ -138,8 +138,8 @@ Parallel. Each needs only wave 0.
 
 | Unit | Scope | Oracle | State |
 | --- | --- | --- | --- |
-| link | Noise PSK WebSocket in both dial directions, sessions, framing, RPC, lanes, reply journal, admission budgets, file, git, terminal, and CLI protocols | noise-ws test vectors; Rust client with TypeScript server and the reverse; ported transport tests | claimed by link 2026-11-27 |
-| runtime-projects-files | `ProjectService`, `FilesService`, directory creation | Ported unit tests; golden cases | open |
+| link | Noise PSK WebSocket in both dial directions, sessions, framing, RPC, lanes, reply journal, admission budgets, file, git, terminal, and CLI protocols | noise-ws test vectors; Rust client with TypeScript server and the reverse; ported transport tests | claimed by link 2026-11-27; all 24 transport modules and the review fixes merged at 238714bfd (138 crate tests, 791/791 recorded cases in ten directories, interoperation with the TypeScript link in both directions); under review |
+| runtime-projects-files | `ProjectService`, `FilesService`, directory creation | Ported unit tests; golden cases; the TypeScript and the Rust service compared over the same generated directory tree | claimed by link 2026-11-28 |
 | runtime-git | `GitRuntime`: status, diff engine, comparisons, history, worktrees, stashes, review documents; `gh` | Ported unit tests against real repositories from `git-fixture` | open |
 | runtime-terminals | PTY runtime, replay buffer, terminal framing | Ported unit tests with a real shell | open |
 | agents-direct | `garcon-agents-common` execution, producer adapter, direct runtimes and session store; the three direct integrations | Ported unit tests against `fake-openai-server` and `fake-anthropic-server`; the integration conformance kit | open |
@@ -365,6 +365,12 @@ runs.
   Proposed: Local stays listed and is reported unavailable with a fixed
   reason, so the existing unavailable-executor paths apply and new chats
   require a remote executor.
+- Whether `Content-Length: 0` on the listener's own 431 response may stand as
+  a known difference (18 cases of the `runtime` scenario). The original's
+  listener sends no such header; hyper adds it. Both carry
+  `Connection: close` and no body, so no client sees a different message.
+  Listed provisionally by the manager on 2026-11-28; matching it exactly
+  means a head-size check in front of hyper.
 
 ## Out of scope
 

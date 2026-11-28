@@ -1,0 +1,6 @@
+{"id":"createClientChatIds#0","fn":"createClientChatIds","args":[[1783725900000.375]],"result":["1783725900000375"],"origin":"rust/garcon-contract/tests/inputs/common/client-chat-id.jsonl:1"}
+{"id":"createClientChatIds#1","fn":"createClientChatIds","args":[[null]],"result":["1783725900000000"],"origin":"rust/garcon-contract/tests/inputs/common/client-chat-id.jsonl:2"}
+{"id":"createClientChatIds#2","fn":"createClientChatIds","args":[[297645454.345]],"result":["1783725900000000"],"origin":"rust/garcon-contract/tests/inputs/common/client-chat-id.jsonl:3"}
+{"id":"createClientChatIds#3","fn":"createClientChatIds","args":[[1783725900000,1783725900000,1783725899998,1783725900000.125,null]],"result":["1783725900000000","1783725900000001","1783725900000002","1783725900000125","1783725900000126"],"origin":"rust/garcon-contract/tests/inputs/common/client-chat-id.jsonl:4"}
+{"id":"createClientChatIds#4","fn":"createClientChatIds","args":[[1000000000000,9007199254740.99]],"result":["1000000000000000","9007199254740990"],"origin":"rust/garcon-contract/tests/inputs/common/client-chat-id.jsonl:5"}
+{"id":"createClientChatIds#5","fn":"createClientChatIds","args":[[]],"result":[],"origin":"rust/garcon-contract/tests/inputs/common/client-chat-id.jsonl:6"}

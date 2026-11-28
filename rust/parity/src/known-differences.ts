@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { childPath, firstDifference, isObject, WILDCARD, type Difference, type Json } from './wildcard.js';
+import { firstDifference, isObject, parseJsonPath, WILDCARD, type Difference, type Json } from './wildcard.js';
 
 export interface KnownDifference {
   scope: 'scenario' | 'suite';
@@ -11,20 +11,7 @@ export interface KnownDifference {
   parts: ReadonlyArray<string | number>;
   result: Json;
   reason: string;
-}
-
-function pathParts(path: string): Array<string | number> {
-  const parts: Array<string | number> = [];
-  const part = /(?:\.([A-Za-z_$][\w$]*)|\[(?:(0|[1-9]\d*)|("(?:[^"\\]|\\.)*"))\])/y;
-  for (let at = 1; at < path.length;) {
-    part.lastIndex = at;
-    const match = part.exec(path);
-    if (!match) throw new Error(`Invalid JSON path: ${path}`);
-    parts.push(match[1] ?? (match[2] === undefined ? JSON.parse(match[3]!) as string : Number(match[2])));
-    at = part.lastIndex;
-  }
-  if (path !== parts.reduce<string>(childPath, '$')) throw new Error(`Invalid JSON path: ${path}`);
-  return parts;
+  buildLabels?: readonly string[];
 }
 
 export function parseKnownDifferences(json: Json): KnownDifference[] {
@@ -42,15 +29,28 @@ export function parseKnownDifferences(json: Json): KnownDifference[] {
       || !Object.hasOwn(entry, 'result')) {
       throw new Error(`Known difference ${index + 1} needs exactly one scenario or suite, a case, path, result and reason`);
     }
+    const buildLabels = entry.buildLabels;
+    if (buildLabels !== undefined && (scope !== 'scenario' || !Array.isArray(buildLabels) || !buildLabels.length
+      || !buildLabels.every((label): label is string => typeof label === 'string' && label.trim().length > 0)
+      || new Set(buildLabels).size !== buildLabels.length)) {
+      throw new Error(`Known difference ${index + 1}: buildLabels must be a nonempty list of distinct scenario replay labels`);
+    }
     const identity = JSON.stringify([scope, name, entry.case, entry.path]);
     if (identities.has(identity)) throw new Error(`Duplicate known difference for ${name}/${entry.case} at ${entry.path}`);
     identities.add(identity);
-    return { scope, name, case: entry.case, path: entry.path, parts: pathParts(entry.path), result: entry.result!, reason: entry.reason };
+    return {
+      scope, name, case: entry.case, path: entry.path, parts: parseJsonPath(entry.path), result: entry.result!, reason: entry.reason,
+      ...(buildLabels === undefined ? {} : { buildLabels }),
+    };
   });
 }
 
 export async function readKnownDifferences(repoRoot: string): Promise<KnownDifference[]> {
   return parseKnownDifferences(JSON.parse(await readFile(join(repoRoot, 'rust/parity/known-differences.json'), 'utf8')) as Json);
+}
+
+export function scenarioKnownDifferencesForBuild(entries: readonly KnownDifference[], label: string): KnownDifference[] {
+  return entries.filter((entry) => entry.scope === 'scenario' && (entry.buildLabels?.includes(label) ?? true));
 }
 
 function atPath(value: Json | undefined, parts: KnownDifference['parts']): { value: Json | undefined; wildcardAncestor?: true } {

@@ -1,0 +1,5 @@
+{"fn":"expandTemplate","args":["{{unknown}}",["unknown"],{},100]}
+{"fn":"expandTemplate","args":["{{chat_id}}",["chat_id"],{"chat_id":"\ud83d\ude00\ud83d\ude00"},4]}
+{"fn":"expandTemplate","args":["{{chat_id}}",["chat_id"],{"chat_id":"1234"},{"$":"number","value":"NaN"}]}
+{"fn":"expandTemplate","args":["{{chat_id}}",["chat_id"],{"chat_id":"1234"},{"$":"number","value":"Infinity"}]}
+{"fn":"expandTemplate","args":["",[],{},{"$":"number","value":"-Infinity"}]}
