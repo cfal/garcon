@@ -1,0 +1,11 @@
+{
+  "module": "common/cli-runtime-paths.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 7,
+  "sha256": "9f7914852c17d20c6d987ce39ade084be33e920d7256681d555dbdad81899570"
+}
