@@ -1,0 +1,27 @@
+{
+  "module": "common/ws-protocol.ts",
+  "tests": [
+    "server/runtime/terminals/__tests__/terminal-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ws-protocol.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parsePrimaryWsClientMessage",
+      "argument": 0
+    },
+    {
+      "fn": "parsePrimaryWsServerMessage",
+      "argument": 0
+    },
+    {
+      "fn": "isTerminalStreamClientMessageType",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 210,
+  "sha256": "a0476c16710ba981b2cd7bf98c5026eb04c56d47312b04de0fc09e8ffb23d897"
+}
