@@ -4,7 +4,8 @@ use garcon_cases::{CaseError, text, unknown};
 use garcon_contract::file_contracts::{
     directory_name_problem, is_file_revision, parse_create_directory_request,
     parse_directory_entry, parse_file_identity_response, parse_file_revision_response,
-    parse_read_text_response, parse_save_text_request, parse_save_text_response,
+    parse_file_tree_response, parse_read_text_response, parse_save_text_request,
+    parse_save_text_response,
 };
 use serde_json::{Value, json};
 
@@ -53,6 +54,11 @@ fn dispatch_file_contracts(function: &str, args: &[Value]) -> Result<Value, Case
         "parseFileIdentityResponse" => {
             let value = argument(function)?;
             Ok(plain(parse_file_identity_response(&value)))
+        }
+        "parseFileTreeResponse" => {
+            let value = argument(function)?;
+            let result = parse_file_tree_response(&value);
+            Ok(garcon_js::json::parse(&serde_json::to_string(&result).unwrap()).unwrap())
         }
         _ => Err(CaseError::unhandled(function)),
     }
