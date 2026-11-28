@@ -409,6 +409,107 @@
       "noise": []
     },
     {
+      "name": "request-with-host-containing-a-space",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "defaultExecutorId": "local",
+            "serverInstanceId": "{{uuid}}",
+            "workspaceName": null
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
       "name": "cli-context~unauthenticated",
       "expected": {
         "body": {
@@ -2686,6 +2787,778 @@
           "path": "//api/v1/cli/context"
         },
         "status": 431
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/../context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%2e%2e%2fauth.json"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-containing-a-space~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/../context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%2e%2e%2fauth.json"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-outside-the-port-range~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/../context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%2e%2e%2fauth.json"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-host-with-credentials~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Internal server error",
+            "errorCode": "INTERNAL_ERROR",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-length": "95",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/cli/context"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "108",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/cli/context"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "defaultExecutorId": "local",
+            "serverInstanceId": "{{uuid}}",
+            "workspaceName": null
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/../context"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/cli/context/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "request-with-upper-case-host~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "defaultExecutorId": "local",
+            "serverInstanceId": "{{uuid}}",
+            "workspaceName": null
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/cli/context"
+        },
+        "status": 200
       },
       "noise": []
     }
