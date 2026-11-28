@@ -23,9 +23,11 @@ impl AgentLogger for Logger {
 
 fn options(logger: Rc<Logger>) -> CliLoginControllerOptions {
     let mut opts = CliLoginControllerOptions::new(
-        || CliLoginCommand {
-            executable: "synthetic-cli".into(),
-            args: vec!["login".into()],
+        || {
+            Ok(CliLoginCommand {
+                executable: "synthetic-cli".into(),
+                args: vec!["login".into()],
+            })
         },
         CliLoginMode::BrowserCode,
         logger,
@@ -117,6 +119,114 @@ fn recorded_login_parsers_match() {
             Ok(garcon_js::json::from_slice(&serde_json::to_vec(&parsed).unwrap()).unwrap())
         },
     );
+}
+
+#[tokio::test]
+async fn propagates_lazy_command_and_environment_read_failures_in_both_login_modes() {
+    use crate::environment::read_environment::read_environment;
+    use garcon_interface::host::AgentEnvironmentReader;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("Synthetic read failure: {0}")]
+    struct ReadFailure(&'static str);
+
+    struct Reader {
+        calls: RefCell<Vec<String>>,
+        fail: &'static str,
+    }
+
+    impl AgentEnvironmentReader for Reader {
+        fn get(&self, name: &str) -> ExecutorResult<Option<String>> {
+            self.calls.borrow_mut().push(name.to_owned());
+            if name == self.fail {
+                return Err(ReadFailure(self.fail).into());
+            }
+            Ok(Some("synthetic".into()))
+        }
+    }
+
+    LocalSet::new()
+        .run_until(async {
+            for (mode, mode_name) in [
+                (CliLoginMode::BrowserCode, "browser-code"),
+                (CliLoginMode::DeviceCode, "device-code"),
+            ] {
+                for fail in ["CLI_BINARY", "CLI_HOME"] {
+                    let reader = Rc::new(Reader {
+                        calls: RefCell::default(),
+                        fail,
+                    });
+                    let mut opts = options(Rc::new(Logger::default()));
+                    opts.mode = mode;
+                    opts.command = Rc::new({
+                        let reader = reader.clone();
+                        move || {
+                            Ok(CliLoginCommand {
+                                executable: read_environment(reader.as_ref(), "CLI_BINARY")?
+                                    .unwrap()
+                                    .into(),
+                                args: vec!["login".into()],
+                            })
+                        }
+                    });
+                    opts.environment = Some(Rc::new({
+                        let reader = reader.clone();
+                        move || {
+                            Ok(IndexMap::from([(
+                                "CLI_HOME".into(),
+                                read_environment(reader.as_ref(), "CLI_HOME")?
+                                    .unwrap()
+                                    .into(),
+                            )]))
+                        }
+                    }));
+                    opts.spawn_process =
+                        Some(Rc::new(|_, _| panic!("unexpected browser login spawn")));
+                    opts.spawn_pty = Some(Rc::new(|_, _| panic!("unexpected device login spawn")));
+                    let controller = CliLoginController::new(opts);
+                    assert!(reader.calls.borrow().is_empty());
+                    let error = controller.launch().await.unwrap_err();
+                    assert_eq!(error.downcast_ref::<ReadFailure>().unwrap().0, fail);
+                    let idle = controller.status(None);
+                    let terminal = controller.status(Some("synthetic-attempt-1"));
+                    let AgentAuthLoginStatus::Failed {
+                        running,
+                        error: terminal_error,
+                        ..
+                    } = terminal
+                    else {
+                        panic!("expected failed terminal state");
+                    };
+                    let actual = serde_json::to_vec(&serde_json::json!({
+                        "error": error.to_string(),
+                        "calls": reader.calls.borrow().as_slice(),
+                        "idle": idle,
+                        "terminal": {"state":"failed", "running":running, "error":terminal_error},
+                    }))
+                    .unwrap();
+                    controller.stop();
+                    let original = Command::new("bun")
+                        .arg(concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/tests/oracles/cli-login-callbacks.ts"
+                        ))
+                        .args([mode_name, fail])
+                        .output()
+                        .await
+                        .unwrap();
+                    assert!(
+                        original.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&original.stderr)
+                    );
+                    assert_eq!(
+                        String::from_utf8(actual).unwrap(),
+                        String::from_utf8(original.stdout).unwrap()
+                    );
+                }
+            }
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -212,7 +322,7 @@ async fn drains_real_process_pipes_after_url_and_retries_without_closing_stdin()
         let (succeeded, wait_succeeded) = oneshot::channel();
         let succeeded = RefCell::new(Some(succeeded));
         let mut opts = options(Rc::new(Logger::default()));
-        opts.command = Rc::new(|| CliLoginCommand { executable: "bun".into(), args: vec!["-e".into(), r#"
+        opts.command = Rc::new(|| Ok(CliLoginCommand { executable: "bun".into(), args: vec!["-e".into(), r#"
             const { createInterface } = require('node:readline');
             process.stdout.write('Open https://auth.example/');
             process.stderr.write('other stream\n');
@@ -224,7 +334,7 @@ async fn drains_real_process_pipes_after_url_and_retries_without_closing_stdin()
                 process.stderr.write('rejected.\n');
               } else process.stderr.write('x'.repeat(2 * 1024 * 1024) + '\n', () => process.exit(0));
             });
-        "#.into()] });
+        "#.into()] }));
         opts.parse_output_error = Some(Rc::new(move |line| (line == "Synthetic code rejected.").then(|| {
             let _ = rejected.take().unwrap().send(());
             CliLoginOutputError { retryable: true, message: "Copy the full code.".into() }
