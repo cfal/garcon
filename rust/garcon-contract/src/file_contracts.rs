@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::executors::{ExecutorId, parse_executor_id};
 use garcon_js::{Number, utf16};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanonicalFileIdentity {
     pub executor_id: ExecutorId,
@@ -35,7 +35,7 @@ pub const MAX_FILE_VIEW_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_FILE_SAVE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Whether a file has a revision, or is missing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum FileRevisionResponse {
     Ready { revision: FileRevision },
@@ -65,7 +65,7 @@ pub struct SaveTextRequest {
     pub conflict_resolution: FileSaveConflictResolution,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveTextResponse {
     pub success: bool,
@@ -94,7 +94,7 @@ pub struct CreateDirectoryRequest {
 }
 
 /// One directory as browsing lists it and as creation returns it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectoryEntry {
     pub name: String,
@@ -110,7 +110,7 @@ pub enum FileTreeEntryType {
 }
 
 /// One entry of a browsed directory.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeEntry {
     pub name: String,
@@ -122,14 +122,14 @@ pub struct FileTreeEntry {
     pub permissions_rwx: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeBreadcrumb {
     pub name: String,
     pub path: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeDirectory {
     pub path: String,
@@ -138,14 +138,14 @@ pub struct FileTreeDirectory {
     pub breadcrumbs: Vec<FileTreeBreadcrumb>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeHomeDirectory {
     pub path: String,
     pub breadcrumbs: Vec<FileTreeBreadcrumb>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeResponse {
     pub file_root_path: String,
