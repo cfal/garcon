@@ -2,8 +2,11 @@
 
 use std::error::Error;
 use std::fmt;
+use std::rc::Rc;
 
-use garcon_base::errors::{ErrorInput, js_string};
+use garcon_base::errors::{
+    ErrorInput, NamedError, SharedDiagnosticError, error_metadata, js_string,
+};
 use serde_json::Value;
 
 use super::json_values::{is_number, is_truthy};
@@ -55,19 +58,15 @@ fn data_message(data: Option<&Value>) -> &str {
 }
 
 pub fn is_method_not_found_error(error: &(dyn Error + 'static)) -> bool {
-    error
-        .downcast_ref::<AcpRpcError>()
-        .is_some_and(|error| error.has_code(-32601.0))
+    as_rpc_error(error).is_some_and(|error| error.has_code(-32601.0))
 }
 
 pub fn is_invalid_params_error(error: &(dyn Error + 'static)) -> bool {
-    error
-        .downcast_ref::<AcpRpcError>()
-        .is_some_and(|error| error.has_code(-32602.0))
+    as_rpc_error(error).is_some_and(|error| error.has_code(-32602.0))
 }
 
 pub fn is_session_not_found_error(error: &(dyn Error + 'static)) -> bool {
-    let Some(error) = error.downcast_ref::<AcpRpcError>() else {
+    let Some(error) = as_rpc_error(error) else {
         return false;
     };
     if error.has_code(-32601.0) {
@@ -82,6 +81,51 @@ pub fn is_session_not_found_error(error: &(dyn Error + 'static)) -> bool {
 
 pub fn is_recoverable_load_failure(error: &(dyn Error + 'static)) -> bool {
     is_method_not_found_error(error) || is_session_not_found_error(error)
+}
+
+/// The `AcpRpcError` behind an error the transport settled with: itself, or
+/// the failure a shared error holds.
+pub fn as_rpc_error<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a AcpRpcError> {
+    let mut error = Some(error);
+    while let Some(current) = error {
+        if let Some(rpc) = current.downcast_ref::<AcpRpcError>() {
+            return Some(rpc);
+        }
+        error = current.source();
+    }
+    None
+}
+
+/// `new Error(message)`.
+pub(super) fn plain_error(message: impl Into<String>) -> Box<dyn Error> {
+    NamedError {
+        name: "Error".to_owned(),
+        message: message.into(),
+        code: None,
+    }
+    .into()
+}
+
+/// `new Error(message)` as one object that rejects many promises.
+pub(super) fn shared_error(message: impl Into<String>) -> Rc<dyn Error> {
+    Rc::new(NamedError {
+        name: "Error".to_owned(),
+        message: message.into(),
+        code: None,
+    })
+}
+
+/// One failure for every promise it rejects.
+pub(super) fn shared(error: impl Error + 'static) -> Rc<dyn Error> {
+    Rc::new(error)
+}
+
+/// The failure one caller receives from an error shared with others.
+pub(super) fn boxed(error: &Rc<dyn Error>) -> Box<dyn Error> {
+    Box::new(SharedDiagnosticError::new(
+        Rc::clone(error),
+        error_metadata(error.as_ref()),
+    ))
 }
 
 #[cfg(test)]
