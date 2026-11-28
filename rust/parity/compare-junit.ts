@@ -8,6 +8,14 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export type Outcome = 'pass' | 'fail' | 'skip';
+type JunitReport = Map<string, Outcome[]>;
+
+interface PositionalPairing {
+  test: string;
+  paired: number;
+  original: number;
+  candidate: number;
+}
 
 const decodeEntities = (text: string) => text
   .replaceAll('&quot;', '"').replaceAll('&apos;', '\'').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
@@ -20,56 +28,74 @@ function testLabel(key: string): string {
   return (JSON.parse(key) as string[]).filter(Boolean).join(' > ');
 }
 
-function insert(outcomes: Map<string, Outcome>, key: string, outcome: Outcome): void {
-  if (outcomes.has(key)) throw new Error(`Duplicate JUnit test: ${testLabel(key)}`);
-  outcomes.set(key, outcome);
-}
-
-// Keys each test by its file, describe path, and name.
-export function parseJunit(xml: string): Map<string, Outcome> {
-  const outcomes = new Map<string, Outcome>();
+// Groups by file, describe path, and name, retaining XML order within a group.
+export function parseJunit(xml: string): JunitReport {
+  const outcomes: JunitReport = new Map();
   const testcase = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g;
   for (const match of xml.matchAll(testcase)) {
     const tag = match[1];
     const body = match[3] ?? '';
     const key = JSON.stringify(['file', 'classname', 'name'].map((name) => attribute(tag, name)));
     const outcome: Outcome = /<(failure|error)\b/.test(body) ? 'fail' : /<skipped\b/.test(body) ? 'skip' : 'pass';
-    insert(outcomes, key, outcome);
+    const group = outcomes.get(key);
+    if (group) group.push(outcome);
+    else outcomes.set(key, [outcome]);
   }
   return outcomes;
 }
 
-export async function readReports(path: string): Promise<Map<string, Outcome>> {
+export async function readReports(path: string): Promise<JunitReport> {
   const files = (await stat(path)).isDirectory()
     ? (await readdir(path)).filter((name) => name.endsWith('.xml')).sort().map((name) => join(path, name))
     : [path];
   if (files.length === 0) throw new Error('No JUnit test cases found');
-  const outcomes = new Map<string, Outcome>();
+  const outcomes: JunitReport = new Map();
   for (const file of files) {
     const report = parseJunit(await readFile(file, 'utf8'));
     if (report.size === 0) throw new Error('No JUnit test cases found');
-    for (const [key, outcome] of report) insert(outcomes, key, outcome);
+    for (const [key, group] of report) {
+      if (outcomes.has(key)) throw new Error(`Duplicate JUnit test across reports: ${testLabel(key)}`);
+      outcomes.set(key, group);
+    }
   }
   return outcomes;
 }
 
-export function compareOutcomes(original: ReadonlyMap<string, Outcome>, candidate: ReadonlyMap<string, Outcome>) {
+export function compareOutcomes(original: ReadonlyMap<string, readonly Outcome[]>, candidate: ReadonlyMap<string, readonly Outcome[]>) {
   const keys = [...new Set([...original.keys(), ...candidate.keys()])].sort();
   let failedBoth = 0;
+  let total = 0;
   const differences = [];
-  for (const test of keys) {
-    const expected = original.get(test);
-    const actual = candidate.get(test);
-    if (expected !== actual) differences.push({ test: testLabel(test), expected: expected ?? 'absent', actual: actual ?? 'absent' });
-    else if (expected === 'fail') failedBoth += 1;
+  const positionalPairings: PositionalPairing[] = [];
+  for (const key of keys) {
+    const left = original.get(key) ?? [];
+    const right = candidate.get(key) ?? [];
+    const count = Math.max(left.length, right.length);
+    const repeated = count > 1;
+    const test = testLabel(key);
+    total += count;
+    if (repeated) positionalPairings.push({ test, paired: Math.min(left.length, right.length), original: left.length, candidate: right.length });
+    for (let index = 0; index < count; index++) {
+      const expected = left[index];
+      const actual = right[index];
+      if (expected !== actual) differences.push({
+        test: repeated ? `${test} (occurrence ${index + 1})` : test,
+        expected: expected ?? 'absent', actual: actual ?? 'absent',
+      });
+      else if (expected === 'fail') failedBoth += 1;
+    }
   }
-  return { same: keys.length - differences.length, failedBoth, differences };
+  return { same: total - differences.length, failedBoth, differences, positionalPairings };
 }
 
-function tally(outcomes: Map<string, Outcome>): string {
+export function describePositionalPairing(pairing: PositionalPairing): string {
+  return `${pairing.test}: paired ${pairing.paired} by position (original=${pairing.original}, candidate=${pairing.candidate})`;
+}
+
+function tally(outcomes: JunitReport): string {
   const counts = { pass: 0, fail: 0, skip: 0 };
-  for (const outcome of outcomes.values()) counts[outcome] += 1;
-  return `${outcomes.size} tests: ${counts.pass} pass, ${counts.fail} fail, ${counts.skip} skip`;
+  for (const group of outcomes.values()) for (const outcome of group) counts[outcome] += 1;
+  return `${counts.pass + counts.fail + counts.skip} tests: ${counts.pass} pass, ${counts.fail} fail, ${counts.skip} skip`;
 }
 
 if (import.meta.main) {
@@ -82,7 +108,8 @@ if (import.meta.main) {
   const right = await readReports(rightPath);
   console.log(`original:   ${tally(left)}`);
   console.log(`front door: ${tally(right)}`);
-  const { same, differences } = compareOutcomes(left, right);
+  const { same, differences, positionalPairings } = compareOutcomes(left, right);
+  for (const pairing of positionalPairings) console.log(describePositionalPairing(pairing));
   for (const { test, expected, actual } of differences) {
     console.log(`DIFFERS ${test}: original=${expected} front-door=${actual}`);
   }
