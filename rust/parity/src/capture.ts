@@ -30,6 +30,7 @@ const CONTRACT_HEADERS = [
   'www-authenticate',
   'x-content-type-options',
   'x-frame-options',
+  'x-garcon-executor-instance',
 ];
 
 const DEFAULT_QUIET_MS = 400;
