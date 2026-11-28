@@ -8,8 +8,9 @@
 pub mod cli;
 mod cli_gateway;
 mod executor_rpc_server;
+mod history_rpc_server;
 mod listener_secret;
 mod terminal_rpc_server;
 mod worker;
 
-pub use worker::{Executor, ExecutorApi, ExecutorOptions, ExecutorWorkerOptions, WorkerConnection};
+pub use worker::{Executor, ExecutorOptions, ExecutorWorkerOptions, WorkerConnection};

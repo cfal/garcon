@@ -1,11 +1,12 @@
 //! The process services exposed on one authenticated executor session.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome, AgentIntegrationErrorCode};
-use garcon_interface::execution_runtime::ExecutorInfo;
+use garcon_interface::execution_runtime::{ExecutionRuntimeApi, ExecutorInfo};
 use garcon_interface::files::{ExecutionFileEntry, ExecutionFileTarget};
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_js::json::Opaque;
@@ -13,11 +14,13 @@ use garcon_link::file_protocol::{decode_file_text, invalid_file_data, validate_f
 use garcon_link::git_protocol::is_git_rpc_method;
 use garcon_link::message_session::SessionError;
 use garcon_link::rpc::{ExecutorRpc, RpcResult};
+use garcon_link::rpc_lane::RpcLane;
 use garcon_link::rpc_protocol::{ExecutorRpcRequest, RpcContinuity, rpc_continuity};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::history_rpc_server::HistoryRpcServer;
 use crate::terminal_rpc_server::TerminalRpcServer;
 use crate::worker::ExecutorApi;
 
@@ -25,6 +28,7 @@ pub(crate) struct ExecutorRpcServer {
     api: Rc<ExecutorApi>,
     primary: Weak<ExecutorRpc>,
     terminals: Rc<TerminalRpcServer>,
+    histories: RefCell<HashMap<String, Rc<HistoryRpcServer>>>,
     disposed: Cell<bool>,
     unsubscribe: RefCell<Vec<Box<dyn Fn()>>>,
 }
@@ -33,6 +37,7 @@ impl ExecutorRpcServer {
     pub(crate) fn new(api: Rc<ExecutorApi>, primary: &Rc<ExecutorRpc>) -> Rc<Self> {
         let server = Rc::new(Self {
             terminals: TerminalRpcServer::new(api.terminals(), primary),
+            histories: RefCell::default(),
             api,
             primary: Rc::downgrade(primary),
             disposed: Cell::new(false),
@@ -76,12 +81,44 @@ impl ExecutorRpcServer {
         server
     }
 
-    pub(crate) fn install(self: &Rc<Self>, endpoint: &ExecutorRpc) {
+    pub(crate) fn install(self: &Rc<Self>, endpoint: &ExecutorRpc) -> Result<(), SessionError> {
+        let history = if endpoint.transport.lane == RpcLane::Bulk {
+            if self.disposed.get()
+                || !self.primary.upgrade().is_some_and(|primary| {
+                    endpoint.transport.primary_session_id == primary.transport.id
+                })
+            {
+                return Err(not_dispatched(
+                    "Bulk endpoint does not belong to this runtime generation",
+                ));
+            }
+            let history = Rc::new(HistoryRpcServer::default());
+            self.histories
+                .borrow_mut()
+                .insert(endpoint.transport.id.clone(), Rc::clone(&history));
+            let _off = endpoint.transport.on_failure(Rc::new({
+                let server = Rc::downgrade(self);
+                let id = endpoint.transport.id.clone();
+                move |_| {
+                    if let Some(server) = server.upgrade() {
+                        let history = server.histories.borrow_mut().remove(&id);
+                        if let Some(history) = history {
+                            history.dispose();
+                        }
+                    }
+                }
+            }));
+            Some(history)
+        } else {
+            None
+        };
         let server = Rc::clone(self);
         endpoint.handle(Rc::new(move |call, signal, _, _| {
             let server = Rc::clone(&server);
-            Box::pin(async move { server.handle(&call, signal).await })
+            let history = history.clone();
+            Box::pin(async move { server.handle(&call, signal, history.as_ref()).await })
         }));
+        Ok(())
     }
 
     fn disconnect_terminals(&self) {
@@ -97,12 +134,20 @@ impl ExecutorRpcServer {
             unsubscribe();
         }
         self.disconnect_terminals();
+        for (_, history) in self.histories.take() {
+            history.dispose();
+        }
         if let Some(primary) = self.primary.upgrade() {
             primary.retire_unknown();
         }
     }
 
-    async fn handle(&self, call: &ExecutorRpcRequest, signal: CancellationToken) -> RpcResult {
+    async fn handle(
+        &self,
+        call: &ExecutorRpcRequest,
+        signal: CancellationToken,
+        history: Option<&Rc<HistoryRpcServer>>,
+    ) -> RpcResult {
         if signal.is_cancelled()
             || self.disposed.get() && rpc_continuity(&call.method) != RpcContinuity::Journaled
         {
@@ -155,6 +200,29 @@ impl ExecutorRpcServer {
                     return Err(rejected("Terminals are executor services"));
                 }
                 self.terminals.handle(method, request).await
+            }
+            "history.open" | "history.next" | "history.close" => {
+                let integration = self
+                    .api
+                    .get_agent_integration(&call.integration_id, options(signal.clone()))
+                    .await
+                    .map_err(|_| {
+                        shared_error(AgentCallError::with_code(
+                            AgentDeliveryOutcome::NotDispatched,
+                            "Unknown integration",
+                            AgentIntegrationErrorCode::OPERATION_UNSUPPORTED,
+                        ))
+                    })?;
+                let history = history.ok_or_else(|| {
+                    shared_error(AgentCallError::with_code(
+                        AgentDeliveryOutcome::Rejected,
+                        "Integration capability unavailable",
+                        AgentIntegrationErrorCode::OPERATION_UNSUPPORTED,
+                    ))
+                })?;
+                history
+                    .handle(integration.as_ref().into(), call, signal)
+                    .await
             }
             method if method.starts_with("files.") => {
                 if !call.integration_id.is_empty() {
@@ -262,6 +330,11 @@ impl ExecutorRpcServer {
 
 fn decode<T: DeserializeOwned>(request: &Value) -> Result<T, serde_json::Error> {
     T::deserialize(request)
+}
+
+pub(crate) fn decode_opaque<T: DeserializeOwned>(request: &Opaque) -> Result<T, serde_json::Error> {
+    // Opaque keeps JavaScript numbers as doubles; its wire form writes integral fields without ".0".
+    garcon_js::json::from_slice(&serde_json::to_vec(request)?)
 }
 
 fn options(signal: CancellationToken) -> Option<ExecutorCallOptions> {

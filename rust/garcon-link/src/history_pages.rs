@@ -5,23 +5,24 @@ use std::rc::Rc;
 
 use futures::{Stream, StreamExt, stream};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
-use garcon_js::json::Opaque;
+use serde::Serialize;
 
 use crate::message_session::SessionError;
 use crate::session_socket::SESSION_MESSAGE_BYTES;
 
 pub const PAGE_BYTES: usize = 1024 * 1024;
 
-struct Pages<S> {
+struct Pages<S, Row> {
     source: Pin<Box<stream::Fuse<S>>>,
-    rows: std::vec::IntoIter<Opaque>,
-    next: Vec<Opaque>,
+    rows: std::vec::IntoIter<Row>,
+    next: Vec<Row>,
     bytes: usize,
 }
 
-pub fn history_pages<S>(source: S) -> impl Stream<Item = Result<Vec<Opaque>, SessionError>>
+pub fn history_pages<S, Row>(source: S) -> impl Stream<Item = Result<Vec<Row>, SessionError>>
 where
-    S: Stream<Item = Result<Vec<Opaque>, SessionError>>,
+    S: Stream<Item = Result<Vec<Row>, SessionError>>,
+    Row: Serialize,
 {
     let pages = Pages {
         source: Box::pin(source.fuse()),
@@ -65,6 +66,7 @@ where
 #[cfg(test)]
 mod tests {
     use futures::TryStreamExt;
+    use garcon_js::json::Opaque;
     use serde_json::json;
 
     use super::*;

@@ -45,11 +45,15 @@
     {
       "fn": "parseServerWsMessage",
       "argument": 0
+    },
+    {
+      "fn": "isChatListInvalidationReason",
+      "argument": 0
     }
   ],
   "instances": true,
   "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 321,
-  "sha256": "7874351e8f464b473e5700a67157663cd681871ca77e541c54a023adbdd20b90"
+  "cases": 407,
+  "sha256": "86dcab0bd3399d607b52eec48264c0be6512759efdfe0865857b1d7d4bcd2c4e"
 }
