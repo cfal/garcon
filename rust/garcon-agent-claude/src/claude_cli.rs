@@ -14,7 +14,7 @@ use garcon_interface::{
     producer::{AgentProviderPermissionLifecycle, AgentTerminalPermission},
     resources::ExecutorResult,
 };
-use garcon_js::{json::Opaque, trim};
+use garcon_js::{Number, json::Opaque, trim};
 use indexmap::IndexMap;
 use serde_json::{Value, json};
 use tokio::time::Instant;
@@ -443,9 +443,22 @@ impl ClaudeCli {
                     };
                     let mut details = cli_log_fields(common());
                     details.insert("matchedUserInput".into(), json!(started).into());
-                    if let Value::Object(fields) = json!(retry) {
-                        details.extend(fields.into_iter().map(|(key, value)| (key, value.into())));
-                    }
+                    let number = |value: Option<Number>| {
+                        Opaque::from_value(value.map_or(Value::Null, |value| Value::from(value.0)))
+                    };
+                    details.extend(
+                        [
+                            ("attempt", number(retry.attempt)),
+                            ("maxRetries", number(retry.max_retries)),
+                            ("delayMs", number(retry.delay_ms)),
+                            ("errorStatus", retry.error_status.unwrap_or_default()),
+                            (
+                                "error",
+                                retry.error.map_or(Value::Null, Value::String).into(),
+                            ),
+                        ]
+                        .map(|(key, value)| (key.to_owned(), value)),
+                    );
                     self.logger
                         .warn("Claude API request is retrying", Some(&details));
                 }
