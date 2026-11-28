@@ -1,0 +1,16 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/single-query-control.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/single-query-control.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "timeoutAfter",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 26,
+  "sha256": "6df8923933fd27b60bf9bf5cd382e5984987fec57db42075bc0a2db96a57b760"
+}
