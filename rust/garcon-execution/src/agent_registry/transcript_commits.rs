@@ -17,7 +17,8 @@ use crate::{
 
 use super::AgentRegistry;
 
-pub type RegistryTranscriptListener = dyn for<'a> Fn(&'a TranscriptCommitEvent) -> ListenerWork<'a>;
+pub type RegistryTranscriptListener =
+    dyn for<'a> Fn(&'a Rc<TranscriptCommitEvent>) -> ListenerWork<'a>;
 
 impl AgentRegistry {
     pub fn events(&self) -> &AgentEventBus {
@@ -102,8 +103,8 @@ impl AgentRegistry {
         }))
     }
 
-    async fn dispatch_transcript_listeners(&self, event: &TranscriptCommitEvent) {
-        let chat_id = match event {
+    async fn dispatch_transcript_listeners(&self, event: &Rc<TranscriptCommitEvent>) {
+        let chat_id = match event.as_ref() {
             TranscriptCommitEvent::Rows { chat_id, .. }
             | TranscriptCommitEvent::Session { chat_id, .. }
             | TranscriptCommitEvent::Permission { chat_id, .. }

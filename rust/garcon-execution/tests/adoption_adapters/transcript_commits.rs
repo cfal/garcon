@@ -58,7 +58,7 @@ async fn committed_terminal_waits_for_transcript_fanout_and_command_result() {
         registry.on_transcript_committed(Rc::new({
             let (trace, started) = (trace.clone(), started.clone());
             move |event| {
-                assert!(matches!(event, TranscriptCommitEvent::RunEnded { .. }));
+                assert!(matches!(event.as_ref(), TranscriptCommitEvent::RunEnded { .. }));
                 trace.borrow_mut().push("fanout-entered");
                 started.notify_one();
                 let gate = barrier.take().unwrap();
