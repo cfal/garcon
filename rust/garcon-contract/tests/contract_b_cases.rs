@@ -58,6 +58,27 @@ fn required_text<'a>(function: &str, argument: Option<&'a Value>) -> Result<&'a 
 }
 
 #[test]
+fn chat_row_contracts_recordings() {
+    use garcon_contract::chat_row_contracts::*;
+    use garcon_contract::command_request_validation::CommandRequestValidationError;
+
+    assert_recording("chat-row-contracts", |function, args| {
+        let value = unknown(function, args.first())?;
+        let error = |error: CommandRequestValidationError| {
+            CaseError::new("CommandRequestValidationError", error.message)
+        };
+        Ok(match function {
+            "parseChatRowContent" => json!(parse_chat_row_content(&value).map_err(error)?),
+            "parseChatRowTitle" => optional_record(parse_chat_row_title(&value).map_err(error)?),
+            "parseAddChatRowRequest" => json!(parse_add_chat_row_request(&value).map_err(error)?),
+            "parseChatRowTargetResponse" => json!(parse_chat_row_target_response(&value)),
+            "parseAddChatRowResponse" => json!(parse_add_chat_row_response(&value)),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
 fn auth_recordings() {
     use garcon_contract::auth::*;
 

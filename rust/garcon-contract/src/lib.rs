@@ -15,6 +15,7 @@ pub mod chat_id;
 pub mod chat_modes;
 pub mod chat_parentage;
 pub mod chat_plan;
+pub mod chat_row_contracts;
 pub mod chat_stop;
 pub mod chat_tag_mutations;
 pub mod chat_title_contracts;
