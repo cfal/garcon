@@ -3,10 +3,12 @@ use std::path::Path;
 
 use async_trait::async_trait;
 use futures::channel::oneshot;
+use garcon_base::errors::{ErrorInput, diagnostic_error_code};
 use garcon_contract::agent_integration::{
     AgentConfigurationDescriptor, AgentConfigurationSource, AgentDescriptor,
     AgentSettingDescriptor, AgentSettingsEnvelope,
 };
+use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
 use garcon_interface::execution::AgentRunningSession;
 use garcon_interface::execution_v5::{
     AgentExecutionHandle, AgentExecutionV5, AgentResumeRequestV5, AgentStartRequestV5,
@@ -33,7 +35,7 @@ struct Observation {
 struct Fixture {
     host: AgentHost,
     observation: Rc<Observation>,
-    fail_start: bool,
+    fail_start: Option<AgentIntegrationError>,
     fail_stop: bool,
     startup: RefCell<Option<oneshot::Receiver<()>>>,
 }
@@ -59,8 +61,8 @@ impl AgentLifecycle for Fixture {
         if let Some(startup) = startup {
             startup.await?;
         }
-        if self.fail_start {
-            return Err("boom".into());
+        if let Some(error) = &self.fail_start {
+            return Err(error.clone().into());
         }
         Ok(())
     }
@@ -208,7 +210,7 @@ struct FixtureClass<'a> {
     id: &'a str,
     version: u64,
     observation: Rc<Observation>,
-    fail_start: bool,
+    fail_start: Option<AgentIntegrationError>,
     fail_stop: bool,
     startup: RefCell<Option<oneshot::Receiver<()>>>,
 }
@@ -219,7 +221,7 @@ impl<'a> FixtureClass<'a> {
             id,
             version: AGENT_INTEGRATION_API_VERSION,
             observation,
-            fail_start: false,
+            fail_start: None,
             fail_stop: false,
             startup: RefCell::default(),
         }
@@ -240,7 +242,7 @@ impl AgentIntegrationClass for FixtureClass<'_> {
         let fixture = Rc::new(Fixture {
             host,
             observation: self.observation.clone(),
-            fail_start: self.fail_start,
+            fail_start: self.fail_start.clone(),
             fail_stop: self.fail_stop,
             startup: self.startup.take().into(),
         });
@@ -364,7 +366,12 @@ async fn rolls_back_only_started_integrations_in_reverse_order_and_keeps_both_fa
             };
             let beta = FixtureClass::new("beta", observation.clone());
             let gamma = FixtureClass {
-                fail_start: true,
+                fail_start: Some(AgentIntegrationError::new(
+                    AgentIntegrationErrorCode::PROVIDER_FAILURE,
+                    "boom",
+                    false,
+                    None,
+                )),
                 ..FixtureClass::new("gamma", observation.clone())
             };
             let registry = IntegrationRegistry::from_classes(
@@ -377,6 +384,13 @@ async fn rolls_back_only_started_integrations_in_reverse_order_and_keeps_both_fa
                 error.to_string(),
                 "Agent integration startup failed and lifecycle rollback was incomplete"
             );
+            assert_eq!(
+                diagnostic_error_code(ErrorInput::Error(error.as_ref())),
+                "AggregateError"
+            );
+            let metadata = error_metadata(error.as_ref());
+            assert_eq!(metadata.name, "AggregateError");
+            assert_eq!(metadata.code, None);
             let aggregate = error
                 .source()
                 .unwrap()
@@ -408,6 +422,86 @@ async fn rolls_back_only_started_integrations_in_reverse_order_and_keeps_both_fa
                     ("beta", "stop"),
                     ("alpha", "stop")
                 ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn concurrent_waiters_keep_the_original_structured_lifecycle_failure() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let workspace = tempfile::tempdir().unwrap();
+            let observation = Rc::new(Observation::default());
+            let alpha = FixtureClass {
+                fail_start: Some(AgentIntegrationError::new(
+                    AgentIntegrationErrorCode::INVALID_SETTINGS,
+                    "synthetic lifecycle failure",
+                    false,
+                    None,
+                )),
+                ..FixtureClass::new("alpha", observation.clone())
+            };
+            let registry =
+                IntegrationRegistry::from_classes(&[&alpha], &factory(workspace.path())).unwrap();
+            let (one, two) = tokio::join!(registry.start(), registry.start());
+            let one = one.unwrap_err();
+            let two = two.unwrap_err();
+            for failure in [&one, &two] {
+                assert_eq!(failure.to_string(), "synthetic lifecycle failure");
+                assert_eq!(
+                    diagnostic_error_code(ErrorInput::Error(failure.as_ref())),
+                    "INVALID_SETTINGS"
+                );
+                assert_eq!(
+                    error_metadata(failure.as_ref()).name,
+                    "AgentIntegrationError"
+                );
+                assert!(failure.source().unwrap().is::<AgentIntegrationError>());
+            }
+            assert!(std::ptr::eq(one.source().unwrap(), two.source().unwrap()));
+            assert_eq!(observation.calls.borrow().len(), 2);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn shutdown_aggregation_keeps_the_reverse_order_and_name_after_erasure() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let workspace = tempfile::tempdir().unwrap();
+            let observation = Rc::new(Observation::default());
+            let alpha = FixtureClass {
+                fail_stop: true,
+                ..FixtureClass::new("alpha", observation.clone())
+            };
+            let beta = FixtureClass {
+                fail_stop: true,
+                ..FixtureClass::new("beta", observation.clone())
+            };
+            let registry =
+                IntegrationRegistry::from_classes(&[&alpha, &beta], &factory(workspace.path()))
+                    .unwrap();
+            registry.start().await.unwrap();
+            let failure = registry.stop().await.unwrap_err();
+            assert_eq!(failure.to_string(), "Agent integration shutdown failed");
+            assert_eq!(
+                diagnostic_error_code(ErrorInput::Error(failure.as_ref())),
+                "AggregateError"
+            );
+            assert_eq!(error_metadata(failure.as_ref()).name, "AggregateError");
+            let aggregate = failure
+                .source()
+                .unwrap()
+                .downcast_ref::<IntegrationLifecycleErrors>()
+                .unwrap();
+            assert_eq!(
+                aggregate
+                    .errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                ["stop beta", "stop alpha"]
             );
         })
         .await;
