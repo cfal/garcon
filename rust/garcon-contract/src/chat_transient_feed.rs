@@ -7,9 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::async_user_questions::InvalidAsyncQuestionReply;
-use crate::chat_types::{
-    NonNoticeChatMessage, PermissionRequestMessage, parse_non_notice_chat_message,
-};
+use crate::chat_types::{ChatMessage, PermissionRequestMessage, parse_chat_message};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,14 +80,14 @@ pub fn parse_transient_feed_row(
     let transcript_view_id = required_string(&position["transcriptViewId"]);
     let after_ordinal = nonnegative_integer(&position["afterOrdinal"]);
     let display_order = nonnegative_integer(&value["displayOrder"]);
-    let parsed_message = parse_non_notice_chat_message(message)?;
+    let parsed_message = parse_chat_message(message)?;
     let (
         Some(permission_occurrence_id),
         Some(run_id),
         Some(transcript_view_id),
         Some(after_ordinal),
         Some(display_order),
-        Some(NonNoticeChatMessage::PermissionRequest(message)),
+        Some(ChatMessage::PermissionRequest(message)),
     ) = (
         permission_occurrence_id,
         run_id,

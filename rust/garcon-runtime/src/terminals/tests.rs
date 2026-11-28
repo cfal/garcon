@@ -233,6 +233,39 @@ async fn uses_the_injected_runtime_base_and_shell_without_controller_configurati
 }
 
 #[tokio::test]
+async fn pty_uses_the_worker_environment_with_a_blanked_controller_url() {
+    run(async {
+        let (_temp, mut options, spawns) = options();
+        options.child_environment = Some(
+            vec![
+                ("GARCON_CONFIG_DIR".into(), "/synthetic-config".into()),
+                ("GARCON_RUNTIME".into(), "executor".into()),
+            ]
+            .into(),
+        );
+        let manager = TerminalManager::new(options);
+        create(&manager, "one").await;
+        let spawns = spawns.borrow();
+        let env = &spawns[0].command.env;
+        assert_eq!(env.len(), 6);
+        for (key, expected) in [
+            ("GARCON_CONFIG_DIR", "/synthetic-config"),
+            ("GARCON_RUNTIME", "executor"),
+            ("GARCON_CONTROLLER_URL", ""),
+        ] {
+            assert_eq!(
+                env.iter()
+                    .rev()
+                    .find(|(name, _)| name == OsStr::new(key))
+                    .map(|(_, value)| value.as_os_str()),
+                Some(OsStr::new(expected)),
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn creates_idempotently_isolates_principals_and_retains_exited_sessions() {
     run(async {
         let (_temp, options, spawns) = options();
