@@ -1144,6 +1144,7 @@ name = "garcon-chats"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "brotli",
  "futures",
  "garcon-base",
  "garcon-cases",
