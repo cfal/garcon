@@ -24,8 +24,7 @@ pub struct DomainError {
     pub cause: Option<Box<dyn Error>>,
 }
 
-/// Which error class a `DomainError` is: `DomainError` itself, or
-/// `ValidationDomainError` or `ProjectUnavailableError`, which extend it.
+/// Which original error class this `DomainError` represents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainErrorKind {
     Domain,
@@ -34,6 +33,7 @@ pub enum DomainErrorKind {
         project_path: String,
         reason: ProjectUnavailableReason,
     },
+    OwnershipTransferPending,
 }
 
 impl DomainErrorKind {
@@ -43,6 +43,7 @@ impl DomainErrorKind {
             DomainErrorKind::Domain => "DomainError",
             DomainErrorKind::Validation => "ValidationDomainError",
             DomainErrorKind::ProjectUnavailable { .. } => "ProjectUnavailableError",
+            DomainErrorKind::OwnershipTransferPending => "OwnershipTransferPendingError",
         }
     }
 }
@@ -89,6 +90,19 @@ impl DomainError {
                 reason,
             },
             ..DomainError::new(ErrorCode::PROJECT_UNAVAILABLE, message, 409, false)
+        }
+    }
+
+    /// Refuses work under the previous owner until a decided handoff rolls forward.
+    pub fn new_ownership_transfer_pending() -> Self {
+        Self {
+            kind: DomainErrorKind::OwnershipTransferPending,
+            ..Self::new(
+                ErrorCode::OWNERSHIP_TRANSFER_PENDING,
+                "This chat is completing an agent handoff. Try again shortly.",
+                409,
+                true,
+            )
         }
     }
 
