@@ -5,6 +5,7 @@ use std::error::Error;
 use std::future::poll_fn;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -231,7 +232,7 @@ impl BrowserSockets {
         transport.finish().await;
     }
 
-    async fn drive<S>(&self, peer: &PrimaryPeer, transport: &BrowserTransport<S>)
+    async fn drive<S>(&self, peer: &Rc<PrimaryPeer>, transport: &BrowserTransport<S>)
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
@@ -267,11 +268,22 @@ impl BrowserSockets {
                         peer.close(MESSAGE_TOO_LARGE);
                         break;
                     }
-                    self.primary.message(peer, frame.into_payload()).await;
+                    self.dispatch_message(peer, frame.into_payload()).await;
                 }
                 _ => {}
             }
             tokio::task::yield_now().await;
+        }
+    }
+
+    async fn dispatch_message(&self, peer: &Rc<PrimaryPeer>, payload: Bytes) {
+        let primary = Rc::clone(&self.primary);
+        let peer = Rc::clone(peer);
+        let mut handler = Box::pin(async move { primary.message(&peer, payload).await });
+        // Starts in wire order without making the socket wait for asynchronous completion.
+        let pending = poll_fn(|cx| Poll::Ready(handler.as_mut().poll(cx).is_pending())).await;
+        if pending {
+            self.tasks.spawn_local(handler);
         }
     }
 
@@ -445,6 +457,23 @@ mod tests {
             max_clients: usize,
             writer: Rc<dyn AuthWriter>,
         ) -> Self {
+            Self::with_primary(
+                auth_disabled,
+                base_path,
+                max_clients,
+                writer,
+                Rc::new(Echo::default()),
+            )
+            .await
+        }
+
+        async fn with_primary(
+            auth_disabled: bool,
+            base_path: &str,
+            max_clients: usize,
+            writer: Rc<dyn AuthWriter>,
+            primary: Rc<dyn PrimaryRequests>,
+        ) -> Self {
             let root = tempfile::tempdir().unwrap();
             let clock: Rc<dyn Clock> = Rc::new(SystemClock);
             let store = AuthAccountStore::open_with_writer(
@@ -474,7 +503,7 @@ mod tests {
                     shutting_down: closing.clone(),
                 },
                 auth.clone(),
-                Rc::new(Echo::default()),
+                primary,
             )
             .unwrap();
             let router = Rc::new(
@@ -604,6 +633,169 @@ mod tests {
 
     const HANDSHAKE: &str =
         "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+
+    #[tokio::test]
+    async fn edge_review_closes_a_handshake_with_an_unsupported_version() {
+        use tokio::io::AsyncReadExt;
+        LocalSet::new()
+            .run_until(async {
+                let fixture = Fixture::start(true, "", 1).await;
+                let headers = HANDSHAKE.replace("Version: 13", "Version: 12");
+                let (mut stream, head) = upgrade_wire(fixture.address, "/ws", &headers).await;
+                assert!(head.starts_with("HTTP/1.1 426 "), "{head}");
+                assert!(
+                    head.contains("\r\nconnection: close\r\n"),
+                    "426 must close: {head}"
+                );
+                assert!(head.contains("\r\nsec-websocket-version: 13\r\n"), "{head}");
+                let mut body = Vec::new();
+                tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut body))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(body.is_empty());
+                fixture.stop().await;
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn edge_review_accepts_buns_noncanonical_base64_key() {
+        LocalSet::new()
+            .run_until(async {
+                let fixture = Fixture::start(true, "", 1).await;
+                let headers = HANDSHAKE.replace("jZQ==", "jZR==");
+                let (stream, head) = upgrade_wire(fixture.address, "/ws", &headers).await;
+                assert!(
+                    head.starts_with("HTTP/1.1 101 "),
+                    "noncanonical key: {head}"
+                );
+                drop(stream);
+                fixture.stop().await;
+            })
+            .await;
+    }
+
+    fn client_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
+        let key = [1, 2, 3, 4];
+        assert!(payload.len() < 126);
+        let mut frame = vec![0x80 | opcode, 0x80 | payload.len() as u8];
+        frame.extend(key);
+        frame.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(i, byte)| byte ^ key[i % 4]),
+        );
+        frame
+    }
+
+    async fn server_frame(stream: &mut tokio::net::TcpStream) -> (u8, Vec<u8>) {
+        use tokio::io::AsyncReadExt;
+        let opcode = stream.read_u8().await.unwrap();
+        let size = stream.read_u8().await.unwrap();
+        assert!(size < 126);
+        let mut payload = vec![0; usize::from(size)];
+        stream.read_exact(&mut payload).await.unwrap();
+        (opcode, payload)
+    }
+
+    #[derive(Default)]
+    struct BarrierHandler {
+        released: tokio::sync::Notify,
+        first_entered: tokio::sync::Notify,
+        starts: RefCell<Vec<Bytes>>,
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl PrimaryRequests for BarrierHandler {
+        async fn message(&self, peer: &PrimaryPeer, bytes: Bytes) {
+            self.starts.borrow_mut().push(bytes.clone());
+            if bytes == "first" {
+                self.first_entered.notify_one();
+                self.released.notified().await;
+            }
+            peer.send(bytes);
+        }
+    }
+
+    #[tokio::test]
+    async fn edge_review_keeps_a_socket_live_while_its_first_request_is_pending() {
+        use tokio::io::AsyncWriteExt;
+        LocalSet::new()
+            .run_until(async {
+                let handler = Rc::new(BarrierHandler::default());
+                let fixture = Fixture::with_primary(
+                    true,
+                    "",
+                    1,
+                    Rc::new(JsonFileStore::default()),
+                    handler.clone(),
+                )
+                .await;
+                let (mut stream, head) = upgrade_wire(fixture.address, "/ws", HANDSHAKE).await;
+                assert!(head.starts_with("HTTP/1.1 101 "), "{head}");
+                stream.write_all(&client_frame(1, b"first")).await.unwrap();
+                tokio::time::timeout(Duration::from_secs(2), handler.first_entered.notified())
+                    .await
+                    .unwrap();
+                stream.write_all(&client_frame(9, b"ping")).await.unwrap();
+                stream.write_all(&client_frame(1, b"second")).await.unwrap();
+                let while_first_pending = tokio::time::timeout(Duration::from_secs(2), async {
+                    let pong = server_frame(&mut stream).await;
+                    assert_eq!(pong, (0x8a, b"ping".to_vec()));
+                    let reply = server_frame(&mut stream).await;
+                    assert_eq!(reply, (0x81, b"second".to_vec()));
+                    assert_eq!(
+                        &*handler.starts.borrow(),
+                        &[Bytes::from_static(b"first"), Bytes::from_static(b"second")]
+                    );
+                })
+                .await;
+                handler.released.notify_one();
+                while_first_pending.expect("the pending request stalled its socket");
+                let first = tokio::time::timeout(Duration::from_secs(2), server_frame(&mut stream))
+                    .await
+                    .unwrap();
+                assert_eq!(first, (0x81, b"first".to_vec()));
+                fixture.stop().await;
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn edge_review_marks_and_logs_unported_terminal_messages() {
+        use tokio::io::AsyncWriteExt;
+        LocalSet::new().run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let log = root.path().join("unported.log");
+            let handler = Rc::new(PrimaryHandler::new("fixture".into(), Rc::new(SystemClock), Some(log.clone())));
+            let fixture = Fixture::with_primary(true, "", 1, Rc::new(JsonFileStore::default()), handler).await;
+            let (mut stream, head) = upgrade_wire(fixture.address, "/ws", HANDSHAKE).await;
+            assert!(head.starts_with("HTTP/1.1 101 "), "{head}");
+            for payload in [
+                r#"{"type":"terminal-attach","terminalId":"t","clientId":"c","afterSequence":0,"intent":"restore"}"#,
+                r#"{"type":"terminal-input","terminalId":"t","data":"input"}"#,
+                r#"{"type":"terminal-resize","terminalId":"t","cols":80,"rows":24}"#,
+                r#"{"type":"terminal-detach","terminalId":"t"}"#,
+            ] {
+                assert!(garcon_contract::terminal::parse_terminal_stream_client_message(&garcon_js::json::parse(payload).unwrap()).is_some());
+                stream.write_all(&client_frame(1, payload.as_bytes())).await.unwrap();
+                let (opcode, value) = tokio::time::timeout(Duration::from_secs(2), server_frame(&mut stream))
+                    .await.expect("the terminal request was silently ignored");
+                assert_eq!(opcode, 0x81);
+                let value: Value = garcon_js::json::from_slice(&value).unwrap();
+                assert_eq!(value, serde_json::json!({"type":"ws-fault","error":"not ported","garconRsUnported":true}));
+            }
+            fixture.stop().await;
+            let written = tokio::fs::read_to_string(log).await.unwrap();
+            let mut actual: Vec<_> = written.lines().collect();
+            actual.sort_unstable();
+            assert_eq!(actual, [
+                "WS terminal-attach", "WS terminal-detach", "WS terminal-input", "WS terminal-resize",
+            ]);
+        }).await;
+    }
 
     #[tokio::test]
     async fn mounts_browser_upgrades_and_releases_admission_when_upgrade_fails() {

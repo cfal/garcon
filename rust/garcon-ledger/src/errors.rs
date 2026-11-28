@@ -4,7 +4,10 @@ use garcon_base::{
     errors::{DiagnosticError, ErrorMetadata, error_metadata},
     stored_json::MalformedStoredJsonError,
 };
-use garcon_contract::async_user_questions::InvalidAsyncQuestionReply;
+use garcon_contract::{
+    async_user_questions::InvalidAsyncQuestionReply, preamble_prefix::PreamblePrefixTooLong,
+    template_tokens::TemplateExpansionError,
+};
 use serde::Serialize;
 
 use crate::{
@@ -171,6 +174,19 @@ fn cause_metadata<'a>(cause: &'a (dyn Error + 'static)) -> ErrorMetadata<'a> {
     }
     if let Some(error) = cause.downcast_ref::<LedgerCodecError>() {
         return error.diagnostic_metadata();
+    }
+    if let Some(error) = cause.downcast_ref::<TemplateExpansionError>() {
+        let name = match error {
+            TemplateExpansionError::TooLong(_) => "TemplateExpansionTooLongError",
+            TemplateExpansionError::MissingValue => "TypeError",
+        };
+        return ErrorMetadata { name, code: None };
+    }
+    if cause.is::<PreamblePrefixTooLong>() {
+        return ErrorMetadata {
+            name: "RangeError",
+            code: None,
+        };
     }
     error_metadata(cause)
 }

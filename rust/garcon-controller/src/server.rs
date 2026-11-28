@@ -305,6 +305,9 @@ async fn bind_controller(
     if !garcon_js::is_integer(config.max_ws_clients.0) || config.max_ws_clients.0 < 1.0 {
         return Err("WebSocket maximum must be a positive integer".into());
     }
+    if config.http_idle_timeout_seconds.0 > f64::from(u8::MAX) {
+        return Err("Bun.serve expects idleTimeout to be 255 or less".into());
+    }
     let browser_sockets = BrowserSockets::new(
         BrowserSocketOptions {
             max_clients: config.max_ws_clients.0 as usize,
@@ -337,9 +340,6 @@ async fn bind_controller(
         )),
     )?
     .with_browser_sockets(browser_sockets.clone());
-    if config.http_idle_timeout_seconds.0 > f64::from(u8::MAX) {
-        return Err("Bun.serve expects idleTimeout to be 255 or less".into());
-    }
     let listener = Listener::bind(
         &config.bind_address,
         config.port,
@@ -549,6 +549,26 @@ mod tests {
             }).await.unwrap();
             controller.shutdown().await.unwrap();
         }).await;
+    }
+
+    #[tokio::test]
+    async fn edge_review_validates_the_http_idle_limit_before_websocket_options() {
+        LocalSet::new()
+            .run_until(async {
+                let root = tempfile::tempdir().unwrap();
+                let mut config = config(root.path());
+                config.http_idle_timeout_seconds = garcon_js::Number(256.0);
+                config.ws_idle_timeout_seconds = garcon_js::Number(961.0);
+                let error = Controller::start(config, Rc::new(UnavailableLocalExecutor))
+                    .await
+                    .err()
+                    .unwrap();
+                assert_eq!(
+                    error.to_string(),
+                    "Bun.serve expects idleTimeout to be 255 or less"
+                );
+            })
+            .await;
     }
 
     #[tokio::test]
