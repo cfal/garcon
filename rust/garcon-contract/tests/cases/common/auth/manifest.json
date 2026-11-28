@@ -1,0 +1,62 @@
+{
+  "module": "common/auth.ts",
+  "tests": [
+    "common/__tests__/auth.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/auth.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "validateUsername",
+      "argument": 0
+    },
+    {
+      "fn": "validatePassword",
+      "argument": 0
+    },
+    {
+      "fn": "parseChangeUsernameRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseChangePasswordRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseLoginRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseRegisterRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseAuthUser",
+      "argument": 0
+    },
+    {
+      "fn": "parseAuthSessionResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseAuthUserResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseAuthStatusResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseAuthTokenIdentity",
+      "argument": 0
+    },
+    {
+      "fn": "isAuthSessionId",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 732,
+  "sha256": "252a5331e4755614c7058b940047ee61265b2f681fc0e8098299a57c314fbd91"
+}

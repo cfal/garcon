@@ -40,6 +40,41 @@ fn required_text<'a>(function: &str, argument: Option<&'a Value>) -> Result<&'a 
 }
 
 #[test]
+fn auth_recordings() {
+    use garcon_contract::auth::*;
+
+    assert_recording("auth", |function, args| {
+        let value = unknown(function, args.first())?;
+        let error = |error: AuthValidationError| CaseError::new("Error", error.to_string());
+        Ok(match function {
+            "validateUsername" => json!(validate_username(&value).map_err(error)?),
+            "validatePassword" => json!(validate_password(&value).map_err(error)?),
+            "parseChangeUsernameRequest" => {
+                json!(parse_change_username_request(&value).map_err(error)?)
+            }
+            "parseChangePasswordRequest" => {
+                json!(parse_change_password_request(&value).map_err(error)?)
+            }
+            "parseLoginRequest" => json!(parse_login_request(&value).map_err(error)?),
+            "parseRegisterRequest" => json!(parse_register_request(&value).map_err(error)?),
+            "parseAuthUser" => json!(parse_auth_user(&value).map_err(error)?),
+            "parseAuthSessionResponse" => {
+                json!(parse_auth_session_response(&value).map_err(error)?)
+            }
+            "parseAuthUserResponse" => json!(parse_auth_user_response(&value).map_err(error)?),
+            "parseAuthStatusResponse" => json!(parse_auth_status_response(&value).map_err(error)?),
+            "parseAuthTokenIdentity" => json!(parse_auth_token_identity(&value)),
+            "isAuthSessionId" => json!(is_auth_session_id(&value)),
+            "new AuthValidationError" => {
+                let value = AuthValidationError::new(required_text(function, args.first())?);
+                json!({"$": "error", "name": "Error", "message": value.to_string(), "properties": {}})
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
 fn ws_auth_recordings() {
     assert_recording("ws-auth", |function, args| {
         let header = text(function, args.first())?;
