@@ -1,7 +1,7 @@
 {
   "module": "rust/garcon-controller/tests/oracles/config.ts",
   "tests": [
-    "rust/garcon-controller/tests/oracles/config.test.ts"
+    "rust/garcon-controller/tests/oracles/config.cases.ts"
   ],
   "inputs": "rust/garcon-controller/tests/inputs/config.jsonl",
   "guards": [],
