@@ -45,9 +45,173 @@ use garcon_contract::project_resolution::{
     ProjectTarget, is_project_unavailable_reason, parse_project_resolution_response,
     project_target_key,
 };
-use garcon_contract::{chat_plan, chat_stop, cli_presentation, tool_schedule};
+use garcon_contract::{
+    base_path, chat_plan, chat_stop, cli_presentation, cli_runtime_paths, client_chat_id,
+    config_dir, server_runtime, tool_schedule,
+};
 use garcon_js::OptionalNullable;
 use serde_json::{Map, Value, json};
+
+#[test]
+fn base_path_cases_match() {
+    let stats = replay(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/common/base-path"),
+        |function, args| {
+            let path = required_text(function, args.first())?;
+            match function {
+                "parseBasePath" => base_path::parse_base_path(path)
+                    .map(as_json_value)
+                    .map_err(|error| CaseError::new("Error", error.to_string())),
+                "stripBasePath" => Ok(json!(base_path::strip_base_path(
+                    path,
+                    required_text(function, args.get(1))?,
+                ))),
+                _ => Err(CaseError::unhandled(function)),
+            }
+        },
+    );
+    assert_all_match("common/base-path.ts", stats);
+}
+
+#[test]
+fn cli_runtime_paths_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/cli-runtime-paths"
+        ),
+        |function, args| {
+            let path = required_text(function, args.first())?;
+            let result = match function {
+                "executorDataDirectory" => cli_runtime_paths::executor_data_directory(path),
+                "cliGatewayRuntimeFile" => cli_runtime_paths::cli_gateway_runtime_file(path),
+                "cliRuntimeFile" => {
+                    let runtime: cli_runtime_paths::RuntimeKind =
+                        serde_json::from_value(unknown(function, args.get(1))?.into_owned())
+                            .map_err(|_| CaseError::unhandled(function))?;
+                    cli_runtime_paths::cli_runtime_file(path, runtime)
+                }
+                _ => return Err(CaseError::unhandled(function)),
+            };
+            Ok(json!(result))
+        },
+    );
+    assert_all_match("common/cli-runtime-paths.ts", stats);
+}
+
+#[test]
+fn config_dir_cases_match() {
+    let stats = replay(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/common/config-dir"),
+        |function, args| {
+            let value = text(function, args.first())?;
+            let result = match function {
+                "resolveHomeDirectory" => {
+                    config_dir::resolve_home_directory(value, text(function, args.get(1))?)
+                }
+                "resolveConfigDirectory" => {
+                    let environment = object(function, args.get(1))?.unwrap_or_default();
+                    let environment = config_dir::ConfigDirectoryEnvironment {
+                        garcon_config_dir: environment
+                            .get("GARCON_CONFIG_DIR")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        home: environment
+                            .get("HOME")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                    };
+                    config_dir::resolve_config_directory(
+                        value,
+                        &environment,
+                        text(function, args.get(2))?,
+                    )
+                }
+                _ => return Err(CaseError::unhandled(function)),
+            };
+            result
+                .map(as_json_value)
+                .map_err(|error| CaseError::new("Error", error.to_string()))
+        },
+    );
+    assert_all_match("common/config-dir.ts", stats);
+}
+
+#[test]
+fn client_chat_id_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/client-chat-id"
+        ),
+        |function, args| {
+            if function != "createClientChatIds" {
+                return Err(CaseError::unhandled(function));
+            }
+            let values = unknown(function, args.first())?;
+            let observations = values
+                .as_array()
+                .ok_or_else(|| CaseError::unhandled(function))?;
+            let mut generator = client_chat_id::ClientChatIdGenerator::default();
+            let clock = garcon_js::ManualClock::new(1_783_725_900_000);
+            let ids = observations
+                .iter()
+                .map(|value| {
+                    let observed = if value.is_null() {
+                        None
+                    } else {
+                        Some(javascript_number(function, Some(value))?)
+                    };
+                    generator.create(observed, &clock).map_err(invalid_chat_id)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(as_json_value(ids))
+        },
+    );
+    assert_all_match("common/client-chat-id.ts", stats);
+}
+
+#[test]
+fn server_runtime_contract_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/server-runtime"
+        ),
+        |function, args| {
+            use server_runtime::*;
+            if function == "new ServerRuntimeContractError" {
+                let error = ServerRuntimeContractError::new(required_text(function, args.first())?);
+                return Err(CaseError::new(
+                    "ServerRuntimeContractError",
+                    error.to_string(),
+                ));
+            }
+            if function == "runtimeProofPayload" {
+                return Ok(json!(runtime_proof_payload(
+                    required_text(function, args.first())?,
+                    required_text(function, args.get(1))?,
+                )));
+            }
+            let value = unknown(function, args.first())?;
+            let result = match function {
+                "parseCliContext" => parse_cli_context(&value).map(as_json_value),
+                "parseServerRuntimeProbe" => parse_server_runtime_probe(&value).map(as_json_value),
+                "parseServerRuntimeDescriptor" => {
+                    parse_server_runtime_descriptor(&value).map(as_json_value)
+                }
+                "parseCliRuntimeDescriptor" => {
+                    parse_cli_runtime_descriptor(&value).map(as_json_value)
+                }
+                "isLocalCapability" => Ok(json!(is_local_capability(&value))),
+                "isRuntimeProbeChallenge" => Ok(json!(is_runtime_probe_challenge(&value))),
+                _ => return Err(CaseError::unhandled(function)),
+            };
+            result.map_err(|error| CaseError::new("ServerRuntimeContractError", error.to_string()))
+        },
+    );
+    assert_all_match("common/server-runtime.ts", stats);
+}
 
 #[test]
 fn chat_plan_cases_match() {

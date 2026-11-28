@@ -1,0 +1,8 @@
+{"fn":"resolveHomeDirectory","args":["/home/test","linux"]}
+{"fn":"resolveHomeDirectory","args":["/home/test","darwin"]}
+{"fn":"resolveConfigDirectory","args":["/explicit",{"GARCON_CONFIG_DIR":"/env","HOME":"/home/test"},"linux"]}
+{"fn":"resolveConfigDirectory","args":[{"$":"undefined"},{"GARCON_CONFIG_DIR":"/env","HOME":"/home/test"},"linux"]}
+{"fn":"resolveConfigDirectory","args":[{"$":"undefined"},{"GARCON_CONFIG_DIR":"","HOME":"/home/test"},"linux"]}
+{"fn":"resolveConfigDirectory","args":["",{"GARCON_CONFIG_DIR":"/env","HOME":"/home/test"},"linux"]}
+{"fn":"resolveConfigDirectory","args":[{"$":"undefined"},{"GARCON_CONFIG_DIR":"\u00a0","HOME":"/home/test"},"linux"]}
+{"fn":"resolveConfigDirectory","args":["/path//with/../dots/ ",{"HOME":"/home/test"},"linux"]}

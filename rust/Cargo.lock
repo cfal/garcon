@@ -450,17 +450,27 @@ dependencies = [
 name = "garcon-base"
 version = "0.0.0"
 dependencies = [
+ "base64",
+ "bytes",
+ "futures",
  "garcon-cases",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "getrandom 0.4.3",
+ "hmac",
+ "http",
+ "http-body",
+ "http-body-util",
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
+ "url",
  "uuid",
 ]
 

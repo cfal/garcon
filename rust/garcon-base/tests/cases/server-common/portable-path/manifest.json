@@ -1,0 +1,13 @@
+{
+  "module": "server/common/portable-path.ts",
+  "tests": [
+    "server/common/__tests__/portable-path.test.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 147,
+  "sha256": "eba4a2d96cab3f33dcd37e813b03947d621b0bac3b8bd1bbe680d71dfb205306"
+}
