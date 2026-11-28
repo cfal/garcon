@@ -100,7 +100,7 @@ pub fn substring(text: &str, start: isize, end: Option<isize>) -> &str {
 
 /// The longest prefix of at most `max_units` code units.
 pub fn truncate(text: &str, max_units: usize) -> &str {
-    slice(text, 0, Some(max_units as isize))
+    slice(text, 0, isize::try_from(max_units).ok())
 }
 
 /// `String.prototype.indexOf(needle)`: the UTF-16 code unit where `needle`
@@ -116,20 +116,19 @@ pub fn pad_end<'a>(text: &'a str, target_length: usize, pad: &str) -> Cow<'a, st
     if missing == 0 || pad.is_empty() {
         return Cow::Borrowed(text);
     }
-    let mut padded = String::with_capacity(text.len() + missing * pad.len());
+    let pad_units = len(pad);
+    let repeats = missing / pad_units;
+    let tail = &pad[..byte_offset(pad, missing % pad_units, false)];
+    let capacity = text
+        .len()
+        .saturating_add(repeats.saturating_mul(pad.len()))
+        .saturating_add(tail.len());
+    let mut padded = String::with_capacity(capacity);
     padded.push_str(text);
-    let mut added = 0;
-    while added < missing {
-        for character in pad.chars() {
-            let units = character.len_utf16();
-            // A pad cut inside a surrogate pair ends before the pair.
-            if added + units > missing {
-                return Cow::Owned(padded);
-            }
-            padded.push(character);
-            added += units;
-        }
+    for _ in 0..repeats {
+        padded.push_str(pad);
     }
+    padded.push_str(tail);
     Cow::Owned(padded)
 }
 
@@ -201,6 +200,31 @@ mod tests {
             pad_end("", 3, "\u{1F600}"),
             Cow::<str>::Borrowed("\u{1F600}")
         );
+    }
+
+    #[test]
+    fn an_unrepresentably_large_truncation_limit_is_unbounded() {
+        assert_eq!(truncate("abc", usize::MAX), "abc");
+        assert_eq!(
+            truncate("a\u{1F600}", isize::MAX as usize + 1),
+            "a\u{1F600}"
+        );
+    }
+
+    #[test]
+    fn padding_reserves_only_the_bytes_it_appends() {
+        let pad = "z".repeat(10_000);
+        let Cow::Owned(padded) = pad_end("x", 10_000, &pad) else {
+            panic!("expected to add padding");
+        };
+        assert_eq!(padded.len(), 10_000);
+        assert_eq!(padded.capacity(), padded.len());
+
+        let Cow::Owned(padded) = pad_end("x", 7, "\u{e9}\u{1F600}") else {
+            panic!("expected to add padding");
+        };
+        assert_eq!(padded, "x\u{e9}\u{1F600}\u{e9}\u{1F600}");
+        assert_eq!(padded.capacity(), padded.len());
     }
 
     #[test]

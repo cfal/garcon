@@ -5,7 +5,9 @@
   ],
   "inputs": "rust/garcon-base/tests/inputs/server-common/stored-json.jsonl",
   "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 93,
-  "sha256": "f2c1e52fa26d8d7fa7ffde75152d951e9d8bbb839b086bbce51da5b01fff66d8"
+  "cases": 97,
+  "sha256": "0a84995cedcec4c68ef6a8bf087cd03e4170efc37377b7921b1485f7b09a029f"
 }

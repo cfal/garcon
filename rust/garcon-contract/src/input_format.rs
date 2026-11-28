@@ -1,9 +1,8 @@
 //! Ports `common/input-format.ts`.
 
+use garcon_js::json::Opaque;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-use crate::json::JsonObject;
 
 /// How an integration reads a prompt: as plain text or as Markdown.
 #[derive(
@@ -27,7 +26,7 @@ impl InputFormat {
 
 /// The input format of each model, by model name. `is_input_format_by_model`
 /// says whether a value that came from outside is one.
-pub type InputFormatByModel = JsonObject;
+pub type InputFormatByModel = Opaque;
 
 /// Whether `value` maps every model name to `plain` or `markdown`.
 pub fn is_input_format_by_model(value: &Value) -> bool {
@@ -46,11 +45,13 @@ fn is_input_format(value: &Value) -> bool {
 /// The format an integration reads `model` in: the one declared for the
 /// model's own name, or `plain` when the model has no declaration of its own.
 /// A declaration is returned as it is stored.
-pub fn literal_input_format(formats: &InputFormatByModel, model: &str) -> Value {
-    formats
-        .get(model)
-        .cloned()
-        .unwrap_or_else(|| Value::String("plain".to_owned()))
+pub fn literal_input_format(formats: &InputFormatByModel, model: &str) -> Opaque {
+    Opaque::from_value(
+        formats
+            .get(model)
+            .cloned()
+            .unwrap_or_else(|| Value::String("plain".to_owned())),
+    )
 }
 
 /// Whether a message is plain literal text: its metadata declares literal
@@ -93,18 +94,19 @@ mod tests {
     }
 
     fn declared(entries: &[(&str, &str)]) -> InputFormatByModel {
-        entries
+        let formats = entries
             .iter()
             .map(|(model, format)| ((*model).to_owned(), json!(format)))
-            .collect()
+            .collect();
+        Value::Object(formats).into()
     }
 
     #[test]
     fn only_own_model_names_override_plain_text() {
-        let declared = declared(&[("markdown", "markdown")]);
+        let formats = declared(&[("markdown", "markdown")]);
         assert_eq!(
-            literal_input_format(&declared, "markdown"),
-            json!("markdown")
+            literal_input_format(&formats, "markdown").as_value(),
+            &json!("markdown")
         );
         // A name every object has is not a declaration of its own.
         for inherited in [
@@ -116,34 +118,47 @@ mod tests {
             "",
         ] {
             assert_eq!(
-                literal_input_format(&declared, inherited),
-                json!("plain"),
+                literal_input_format(&formats, inherited).as_value(),
+                &json!("plain"),
                 "{inherited}"
             );
         }
         assert_eq!(
-            literal_input_format(&InputFormatByModel::new(), "markdown"),
-            json!("plain")
+            literal_input_format(&declared(&[]), "markdown").as_value(),
+            &json!("plain")
         );
     }
 
     #[test]
     fn a_declaration_is_returned_as_it_is_stored() {
-        let stored: InputFormatByModel = serde_json::from_value(json!({
+        let stored: InputFormatByModel = json!({
             "__proto__": "markdown",
             "other": "",
             "number": 5,
             "nothing": null,
-        }))
-        .unwrap();
+        })
+        .into();
         // A key read from JSON is a declaration of its own.
         assert_eq!(
-            literal_input_format(&stored, "__proto__"),
-            json!("markdown")
+            literal_input_format(&stored, "__proto__").as_value(),
+            &json!("markdown")
         );
-        assert_eq!(literal_input_format(&stored, "other"), json!(""));
-        assert_eq!(literal_input_format(&stored, "number"), json!(5));
-        assert_eq!(literal_input_format(&stored, "nothing"), json!(null));
+        assert_eq!(
+            literal_input_format(&stored, "other").as_value(),
+            &json!("")
+        );
+        assert_eq!(literal_input_format(&stored, "number").as_f64(), Some(5.0));
+        assert!(literal_input_format(&stored, "nothing").is_null());
+    }
+
+    #[test]
+    fn legacy_nonstring_declarations_keep_javascript_number_formatting() {
+        let input = r#"{"legacy":{"n":1.0,"big":9007199254740993,"exp21":1e21,"zero":-0}}"#;
+        let formats: InputFormatByModel = garcon_js::json::from_str(input).unwrap();
+        assert_eq!(
+            serde_json::to_string(&literal_input_format(&formats, "legacy")).unwrap(),
+            r#"{"n":1,"big":9007199254740992,"exp21":1e+21,"zero":0}"#,
+        );
     }
 
     #[test]

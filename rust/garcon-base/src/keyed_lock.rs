@@ -7,8 +7,12 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("This operation was aborted")]
+#[error("The operation was aborted.")]
 pub struct LockAborted;
+
+impl LockAborted {
+    pub const NAME: &'static str = "AbortError";
+}
 
 #[derive(Default)]
 pub struct KeyedLock {
@@ -47,6 +51,23 @@ impl KeyedLock {
             return Err(LockAborted);
         }
         Ok(work().await)
+    }
+
+    /// Returns the signal owner's original reason rather than a default AbortError.
+    pub async fn run_exclusive_with_abort_reason<T, F, Fut, E>(
+        &self,
+        key: &str,
+        work: F,
+        signal: &CancellationToken,
+        reason: impl FnOnce() -> E,
+    ) -> Result<T, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = T>,
+    {
+        self.run_exclusive(key, work, Some(signal))
+            .await
+            .map_err(|_| reason())
     }
 
     pub async fn run_exclusive_many<T, F, Fut>(&self, keys: &[&str], work: F) -> T
@@ -103,6 +124,58 @@ mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
     use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn a_default_abort_has_buns_message() {
+        let signal = CancellationToken::new();
+        signal.cancel();
+        let error = KeyedLock::new()
+            .run_exclusive("repo", || async {}, Some(&signal))
+            .await
+            .unwrap_err();
+        assert_eq!(LockAborted::NAME, "AbortError");
+        assert_eq!(error.to_string(), "The operation was aborted.");
+    }
+
+    #[tokio::test]
+    async fn forwards_the_callers_abort_reason_unchanged() {
+        let lock = KeyedLock::new();
+        let signal = CancellationToken::new();
+        assert_eq!(
+            lock.run_exclusive_with_abort_reason(
+                "repo",
+                || async { "acquired" },
+                &signal,
+                || {
+                    panic!("a reason must not be read on success");
+                }
+            )
+            .await,
+            Ok::<_, Rc<String>>("acquired"),
+        );
+
+        let custom = Rc::new("synthetic reason".to_owned());
+        let (release, hold) = oneshot::channel();
+        let owner = lock.run_exclusive("repo", || async { hold.await.unwrap() }, None);
+        let cancelled = async {
+            let work = lock.run_exclusive_with_abort_reason(
+                "repo",
+                || async {},
+                &signal,
+                || Rc::clone(&custom),
+            );
+            let signal_while_waiting = async {
+                tokio::task::yield_now().await;
+                signal.cancel();
+            };
+            let (result, ()) = tokio::join!(work, signal_while_waiting);
+            let reason = result.unwrap_err();
+            assert!(Rc::ptr_eq(&reason, &custom));
+            release.send(()).unwrap();
+        };
+        let (owner, ()) = tokio::join!(owner, cancelled);
+        assert!(owner.is_ok());
+    }
 
     #[tokio::test]
     async fn deduplicates_and_sorts_keys_before_acquisition() {

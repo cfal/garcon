@@ -22,7 +22,7 @@ fn unavailable_service_cases_match() {
                 "message": error.message,
                 "properties": {
                     "code": error.code.as_str(),
-                    "details": error.details.as_ref().map_or_else(markers::undefined, |details| json!(details)),
+                    "details": error.details.as_ref().map_or_else(markers::undefined, |details| details.as_value().clone()),
                     "retryable": error.retryable,
                     "outcome": error.outcome.as_str(),
                 }

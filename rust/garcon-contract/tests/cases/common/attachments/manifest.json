@@ -4,7 +4,32 @@
     "common/__tests__/attachments.test.js"
   ],
   "inputs": "rust/garcon-contract/tests/inputs/common/attachments.jsonl",
-  "notCaptured": [],
-  "cases": 404,
-  "sha256": "f3607c9aede91756b470ec57513833f65bf1c05f11059416b06e2a1843ac2198"
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "chatAttachmentMimeType",
+      "argument": 0
+    },
+    {
+      "fn": "acceptsFileAttachmentMimeType",
+      "argument": 0
+    },
+    {
+      "fn": "hasFileAttachmentSupport",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "fn": "chatAttachmentMimeType",
+      "where": "result",
+      "path": "$.result",
+      "type": "a function",
+      "count": 1,
+      "at": null
+    }
+  ],
+  "cases": 403,
+  "sha256": "744ce8b7a7b0d5ccdca734a17721622b241b3664ffb7fc8a3a90466b0292b4e4"
 }

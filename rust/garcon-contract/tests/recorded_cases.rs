@@ -23,8 +23,8 @@ use garcon_contract::attachments::{
     is_text_attachment_mime_type, is_valid_attachment_mime_type, is_video_attachment_mime_type,
 };
 use garcon_contract::chat_id::{
-    InvalidChatIdError, chat_id_created_at, chat_id_from_epoch_microseconds,
-    chat_id_from_timestamp, legacy_chat_id_to_canonical, parse_chat_id,
+    InvalidChatIdError, InvalidChatIdValue, chat_id_created_at, chat_id_from_epoch_microseconds,
+    chat_id_from_timestamp, legacy_chat_id_to_canonical, parse_chat_id_input,
 };
 use garcon_contract::chat_modes::{
     DEFAULT_PERMISSION_MODE, DEFAULT_THINKING_MODE, coerce_thinking_mode, is_permission_mode,
@@ -33,10 +33,9 @@ use garcon_contract::chat_modes::{
 use garcon_contract::error_codes::is_error_code;
 use garcon_contract::executor_path::is_within_executor_path;
 use garcon_contract::executors::{
-    CreateExecutorRequest, ExecutorConnectionTarget, effective_executor_id, is_executor_id,
-    is_executor_secret, is_remote_executor_id, parse_create_executor_request,
-    parse_executor_connection, parse_executor_id, parse_executor_snapshot, parse_executors,
-    parse_update_executor_request,
+    effective_executor_id, is_executor_id, is_executor_secret, is_remote_executor_id,
+    parse_create_executor_request, parse_executor_connection, parse_executor_id,
+    parse_executor_snapshot, parse_executors, parse_update_executor_request,
 };
 use garcon_contract::input_format::{
     is_input_format_by_model, is_plain_text_input, literal_input_format,
@@ -180,13 +179,14 @@ fn object<'a>(
     }
 }
 
-const INVALID_CHAT_ID: &str = "Chat ID must be a valid 16-digit Unix-microsecond timestamp";
-
-/// The error the original throws for a value it cannot read as a chat ID: it
-/// keeps that value, which JSON cannot hold when it is `undefined`.
-fn invalid_chat_id(argument: Option<&Value>) -> CaseError {
-    let value = argument.cloned().unwrap_or_else(markers::undefined);
-    CaseError::new("InvalidChatIdError", INVALID_CHAT_ID).with_property("value", value)
+fn invalid_chat_id(error: InvalidChatIdError) -> CaseError {
+    let message = error.to_string();
+    let value = match error.value {
+        InvalidChatIdValue::Undefined => markers::undefined(),
+        InvalidChatIdValue::Number(number) => markers::number(number),
+        InvalidChatIdValue::Json(value) => as_json_value(value),
+    };
+    CaseError::new("InvalidChatIdError", message).with_property("value", value)
 }
 
 fn chat_id_result(
@@ -198,76 +198,39 @@ fn chat_id_result(
 fn dispatch_chat_id(function: &str, args: &[Value]) -> Result<Value, CaseError> {
     match function {
         "new InvalidChatIdError" => {
-            // The original constructs its error for the value it was given.
             let value = round_tripped(function, args.first())?;
-            let constructed = InvalidChatIdError {
-                value: value.as_deref().cloned().unwrap_or(Value::Null),
-            };
-            Err(
-                CaseError::new("InvalidChatIdError", constructed.to_string()).with_property(
-                    "value",
-                    args.first().cloned().unwrap_or_else(markers::undefined),
-                ),
-            )
+            Err(invalid_chat_id(InvalidChatIdError::new(
+                InvalidChatIdValue::from_json(value.as_deref()),
+            )))
         }
         "parseChatId" => {
             let value = round_tripped(function, args.first())?;
-            chat_id_result(
-                parse_chat_id(value.as_deref().unwrap_or(&Value::Null))
-                    .map_err(|_| invalid_chat_id(args.first())),
-            )
+            chat_id_result(parse_chat_id_input(value.as_deref()).map_err(invalid_chat_id))
         }
         "chatIdFromEpochMicroseconds" => chat_id_result(
-            chat_id_from_epoch_microseconds(bigint(function, args.first())?).map_err(|error| {
-                // The value the original names here is the derived ID as text.
-                CaseError::new("InvalidChatIdError", INVALID_CHAT_ID)
-                    .with_property("value", error.value)
-            }),
+            chat_id_from_epoch_microseconds(bigint(function, args.first())?)
+                .map_err(invalid_chat_id),
         ),
         "chatIdFromTimestamp" => {
             let epoch_ms = javascript_number(function, args.first())?;
             let micros_within_ms = javascript_number(function, args.get(1))?;
             chat_id_result(
-                chat_id_from_timestamp(epoch_ms, micros_within_ms).map_err(|error| {
-                    let rejected = if let Value::String(_) = error.value {
-                        // The derived ID was rejected.
-                        error.value
-                    } else {
-                        // A component was rejected, as the number it is.
-                        let component = if !garcon_js::is_safe_integer(epoch_ms) || epoch_ms <= 0.0
-                        {
-                            epoch_ms
-                        } else {
-                            micros_within_ms
-                        };
-                        markers::number(component)
-                    };
-                    CaseError::new("InvalidChatIdError", INVALID_CHAT_ID)
-                        .with_property("value", rejected)
-                }),
+                chat_id_from_timestamp(epoch_ms, micros_within_ms).map_err(invalid_chat_id),
             )
         }
-        "chatIdCreatedAt" => match text(function, args.first())? {
-            None => Err(invalid_chat_id(args.first())),
-            Some(chat_id) => chat_id_created_at(chat_id)
-                .map(|epoch_ms| {
-                    markers::marker(
-                        "date",
-                        json!(
-                            garcon_js::to_iso_string(epoch_ms).expect("a chat ID is a valid Date")
-                        ),
-                    )
-                })
-                .map_err(|_| invalid_chat_id(args.first())),
-        },
+        "chatIdCreatedAt" => chat_id_created_at(required_text(function, args.first())?)
+            .map(|epoch_ms| {
+                markers::marker(
+                    "date",
+                    json!(garcon_js::to_iso_string(epoch_ms).expect("a chat ID is a valid Date")),
+                )
+            })
+            .map_err(invalid_chat_id),
         "legacyChatIdToCanonical" => {
             let value = round_tripped(function, args.first())?;
             legacy_chat_id_to_canonical(value.as_deref().unwrap_or(&Value::Null))
                 .map(|chat_id| chat_id.map_or(Value::Null, |chat_id| json!(chat_id.as_str())))
-                .map_err(|error| {
-                    CaseError::new("InvalidChatIdError", INVALID_CHAT_ID)
-                        .with_property("value", error.value)
-                })
+                .map_err(invalid_chat_id)
         }
         _ => Err(CaseError::unhandled(function)),
     }
@@ -282,40 +245,9 @@ fn chat_id_cases_match() {
     assert_all_match("common/chat-id.ts", stats);
 }
 
-/// A request to create an executor as the original builds it: `noTls` and
-/// `allowUnverifiedTls` are always present, as `undefined` when left out.
-fn create_request_as_recorded(request: &CreateExecutorRequest) -> Value {
-    let present = |value: Option<bool>| value.map_or_else(markers::undefined, |value| json!(value));
-    let mut recorded = Map::new();
-    recorded.insert("label".to_owned(), json!(request.label));
-    if let Some(value) = request.allow_executor_management {
-        recorded.insert("allowExecutorManagement".to_owned(), json!(value));
-    }
-    if let Some(value) = request.allow_controller_cli {
-        recorded.insert("allowControllerCli".to_owned(), json!(value));
-    }
-    recorded.insert("noTls".to_owned(), present(request.no_tls));
-    recorded.insert(
-        "allowUnverifiedTls".to_owned(),
-        present(request.allow_unverified_tls),
-    );
-    match &request.target {
-        ExecutorConnectionTarget::ExecutorConnects { advertised_url } => {
-            recorded.insert("direction".to_owned(), json!("executor-connects"));
-            if let Some(advertised_url) = advertised_url {
-                recorded.insert("advertisedUrl".to_owned(), json!(advertised_url));
-            }
-        }
-        ExecutorConnectionTarget::ControllerConnects { connection_url } => {
-            recorded.insert("direction".to_owned(), json!("controller-connects"));
-            recorded.insert("connectionUrl".to_owned(), json!(connection_url));
-        }
-    }
-    Value::Object(recorded)
-}
-
 fn as_json_value<T: serde::Serialize>(value: T) -> Value {
-    serde_json::to_value(value).expect("a contract type serializes")
+    let text = serde_json::to_string(&value).expect("a contract type serializes");
+    garcon_js::json::from_str(&text).expect("a contract type serializes to JSON")
 }
 
 fn dispatch_executors(function: &str, args: &[Value]) -> Result<Value, CaseError> {
@@ -341,7 +273,7 @@ fn dispatch_executors(function: &str, args: &[Value]) -> Result<Value, CaseError
             let value = round_tripped(function, args.first())?;
             Ok(
                 parse_create_executor_request(value.as_deref().unwrap_or(&Value::Null))
-                    .map_or(Value::Null, |request| create_request_as_recorded(&request)),
+                    .map_or(Value::Null, as_json_value),
             )
         }
         "parseUpdateExecutorRequest" => {
@@ -545,7 +477,8 @@ fn dispatch_input_format(function: &str, args: &[Value]) -> Result<Value, CaseEr
                 .as_deref()
                 .ok_or_else(|| CaseError::unhandled(function))?;
             let model = required_text(function, args.get(1))?;
-            Ok(literal_input_format(formats, model))
+            let formats = garcon_js::json::Opaque::from_value(Value::Object(formats.clone()));
+            Ok(as_json_value(literal_input_format(&formats, model)))
         }
         "isPlainTextInput" => {
             let message = object(function, args.first())?;
@@ -747,17 +680,9 @@ fn dispatch_agent_integration(function: &str, args: &[Value]) -> Result<Value, C
         "parseAgentSettingsEnvelope" => {
             Ok(parse_agent_settings_envelope(&value).map_or(Value::Null, as_json_value))
         }
-        "parseAgentSettingsById" => Ok(parse_agent_settings_by_id(&value).map_or(
-            Value::Null,
-            |parsed| {
-                Value::Object(
-                    parsed
-                        .into_iter()
-                        .map(|(agent_id, envelope)| (agent_id, as_json_value(envelope)))
-                        .collect(),
-                )
-            },
-        )),
+        "parseAgentSettingsById" => {
+            Ok(parse_agent_settings_by_id(&value).map_or(Value::Null, as_json_value))
+        }
         _ => Err(CaseError::unhandled(function)),
     }
 }

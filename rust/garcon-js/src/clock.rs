@@ -65,7 +65,7 @@ pub struct InvalidTimeValue;
 
 impl fmt::Display for InvalidTimeValue {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("Invalid time value")
+        formatter.write_str("Invalid Date")
     }
 }
 
@@ -179,7 +179,7 @@ mod tests {
         }
         assert_eq!(to_iso_string(8_640_000_000_000_001), Err(InvalidTimeValue));
         assert_eq!(to_iso_string(-8_640_000_000_000_001), Err(InvalidTimeValue));
-        assert_eq!(InvalidTimeValue.to_string(), "Invalid time value");
+        assert_eq!(InvalidTimeValue.to_string(), "Invalid Date");
     }
 
     #[test]

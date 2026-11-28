@@ -318,6 +318,158 @@ pub mod win32 {
     /// `path.win32.sep`.
     pub const SEP: &str = "\\";
 
+    /// `path.win32.resolve(...paths)`, with the current directory supplied.
+    pub fn resolve(cwd: &str, args: &[&str]) -> String {
+        let mut device = String::new();
+        let mut absolute = false;
+        let mut tail = String::new();
+        for path in args.iter().rev().copied() {
+            if add_resolve_part(path, &mut device, &mut absolute, &mut tail) {
+                break;
+            }
+        }
+        if !absolute || device.is_empty() {
+            let (cwd_device, _, _) = root_parts(cwd);
+            if !absolute
+                && !device.is_empty()
+                && !cwd_device.is_empty()
+                && device.to_lowercase() != cwd_device.to_lowercase()
+            {
+                let drive_cwd =
+                    drive_current_directory(&device).unwrap_or_else(|| format!("{device}\\"));
+                add_resolve_part(&drive_cwd, &mut device, &mut absolute, &mut tail);
+            } else {
+                add_resolve_part(cwd, &mut device, &mut absolute, &mut tail);
+            }
+        }
+        let tail = normalize_string(&tail, !absolute, '\\', is_windows_separator);
+        if absolute {
+            format!("{device}\\{tail}")
+        } else if device.is_empty() && tail.is_empty() {
+            ".".to_owned()
+        } else {
+            format!("{device}{tail}")
+        }
+    }
+
+    fn add_resolve_part(
+        path: &str,
+        device: &mut String,
+        absolute: &mut bool,
+        tail: &mut String,
+    ) -> bool {
+        let (found, root_end, is_absolute) = root_parts(path);
+        if !found.is_empty() {
+            if device.is_empty() {
+                *device = found;
+            } else if device.to_lowercase() != found.to_lowercase() {
+                return false;
+            }
+        }
+        if !*absolute {
+            *tail = format!("{}\\{tail}", &path[root_end..]);
+            *absolute = is_absolute;
+        }
+        *absolute && !device.is_empty()
+    }
+
+    fn root_parts(path: &str) -> (String, usize, bool) {
+        let bytes = path.as_bytes();
+        if bytes.len() >= 2
+            && is_windows_separator(bytes[0])
+            && is_windows_separator(bytes[1])
+            && let Some((server, start, end)) = match_unc(bytes, 2)
+        {
+            let end = end.unwrap_or(bytes.len());
+            return (format!("\\\\{server}\\{}", &path[start..end]), end, true);
+        }
+        let root = parse_root(path);
+        if bytes.len() >= 2 && is_windows_device_root(bytes[0]) && bytes[1] == b':' {
+            return (path[..2].to_owned(), root.len(), root.len() > 2);
+        }
+        (String::new(), root.len(), !root.is_empty())
+    }
+
+    #[cfg(windows)]
+    fn drive_current_directory(device: &str) -> Option<String> {
+        let cwd = std::env::var(format!("={device}")).ok()?;
+        let (found, _, absolute) = root_parts(&cwd);
+        (absolute && found.to_lowercase() == device.to_lowercase()).then_some(cwd)
+    }
+
+    #[cfg(not(windows))]
+    fn drive_current_directory(_device: &str) -> Option<String> {
+        None
+    }
+
+    /// `path.win32.join(...paths)`.
+    pub fn join(args: &[&str]) -> String {
+        let mut parts = args.iter().copied().filter(|part| !part.is_empty());
+        let Some(first) = parts.next() else {
+            return ".".into();
+        };
+        let allows_unc = first.as_bytes().get(..3).is_some_and(|prefix| {
+            is_windows_separator(prefix[0])
+                && is_windows_separator(prefix[1])
+                && !is_windows_separator(prefix[2])
+        });
+        let mut joined = first.to_owned();
+        for part in parts {
+            joined.push('\\');
+            joined.push_str(part);
+        }
+        if !allows_unc {
+            let tail = joined.trim_start_matches(['/', '\\']);
+            if joined.len() - tail.len() > 1 {
+                return normalize(&format!("\\{tail}"));
+            }
+        }
+        normalize(&joined)
+    }
+
+    /// `path.win32.relative(from, to)`, with the current directory supplied.
+    pub fn relative(cwd: &str, from: &str, to: &str) -> String {
+        let from = resolve(cwd, &[from]);
+        let to = resolve(cwd, &[to]);
+        let mut source = from.split('\\').filter(|part| !part.is_empty()).peekable();
+        let mut target = to.split('\\').filter(|part| !part.is_empty()).peekable();
+        if source
+            .peek()
+            .zip(target.peek())
+            .is_some_and(|(a, b)| a.to_lowercase() != b.to_lowercase())
+        {
+            return to;
+        }
+        while source
+            .peek()
+            .zip(target.peek())
+            .is_some_and(|(a, b)| a.to_lowercase() == b.to_lowercase())
+        {
+            source.next();
+            target.next();
+        }
+        source
+            .map(|_| "..")
+            .chain(target)
+            .collect::<Vec<_>>()
+            .join(SEP)
+    }
+
+    /// `path.win32.basename(path)`, without an optional suffix.
+    pub fn basename(path: &str) -> String {
+        let bytes = path.as_bytes();
+        let tail = if bytes.len() >= 2 && is_windows_device_root(bytes[0]) && bytes[1] == b':' {
+            &path[2..]
+        } else {
+            path
+        };
+        tail.trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .into()
+    }
+
     /// `path.win32.isAbsolute(path)`.
     pub fn is_absolute(path: &str) -> bool {
         let bytes = path.as_bytes();
@@ -529,6 +681,11 @@ pub mod win32 {
         &path[..root_end]
     }
 }
+
+#[cfg(not(windows))]
+pub use posix as native;
+#[cfg(windows)]
+pub use win32 as native;
 
 #[cfg(test)]
 mod tests {

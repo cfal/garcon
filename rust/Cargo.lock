@@ -518,6 +518,7 @@ dependencies = [
 name = "garcon-interface"
 version = "0.0.0"
 dependencies = [
+ "garcon-cases",
  "garcon-contract",
  "garcon-js",
  "serde_json",
