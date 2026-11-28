@@ -5,7 +5,9 @@ use garcon_agents_common::execution::{
     runtime_events::{AgentRuntimeEvent, RuntimePermissionResponse},
 };
 use garcon_base::errors::NamedError;
-use garcon_contract::chat_command_contracts::PermissionDecisionPayload;
+use garcon_contract::chat_command_contracts::{
+    PermissionDecisionPayload, PermissionDecisionResponse,
+};
 use garcon_interface::{
     producer::{AgentProviderPermissionLifecycle, AgentTerminalPermission},
     resources::ExecutorResult,
@@ -211,7 +213,13 @@ impl RuntimePermissionResponse for ClaudePermissionResponder {
                 .iter()
                 .find(|pending| pending.permission_occurrence_id == self.occurrence_id)
                 .ok_or(NOT_PENDING)?;
-            let response = decision.response.map(serde_json::to_value).transpose()?;
+            let response = match decision.response {
+                Some(PermissionDecisionResponse::Provider(response)) => Some(response.into_value()),
+                Some(PermissionDecisionResponse::Structured(response)) => {
+                    Some(serde_json::to_value(response)?)
+                }
+                None => None,
+            };
             let response = build_claude_permission_approval_response(
                 ClaudePermissionInput {
                     tool_name: Some(&pending.tool_name),
@@ -230,7 +238,7 @@ impl RuntimePermissionResponse for ClaudePermissionResponder {
                 pending.agent_session_id.clone(),
                 control_response(
                     pending.cli_request_id.as_deref(),
-                    json!({"subtype":"success", "response":response}),
+                    json!({"subtype":"success", "response":response.into_value()}),
                 ),
             )
         };
@@ -315,7 +323,7 @@ impl ClaudeCli {
             self.try_send_permission_response(
                 session,
                 request_id,
-                json!({"subtype":"success", "response":response}),
+                json!({"subtype":"success", "response":response.into_value()}),
             );
             return;
         }
