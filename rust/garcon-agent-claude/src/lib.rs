@@ -21,6 +21,7 @@ pub mod permission_response;
 pub mod permission_tool_converter;
 pub mod process_retirements;
 pub mod runtime_state;
+pub mod runtime_types;
 pub mod session_model;
 pub mod session_options;
 pub mod single_query_process;
