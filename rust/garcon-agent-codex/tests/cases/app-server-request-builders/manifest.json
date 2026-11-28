@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/codex/src/agents/codex/app-server/request-builders.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/app-server/__tests__/build-user-input.test.js"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/app-server-request-builders.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 184,
+  "sha256": "baf3c83794155b23f4e36961f5d5fa9d0453baff5f57f0069b42e486e923e6a5"
+}

@@ -416,6 +416,7 @@ impl CodexAppServerClient {
         }
         let previous = self.0.state.borrow().process.clone();
         if let Some(previous) = previous {
+            // Waits for a rejected startup peer instead of leaving its writer running as the original can.
             self.shutdown_process(&previous).await?;
             if self.0.state.borrow().shutdown_requested {
                 return Err(message("Codex app-server client is shut down"));
