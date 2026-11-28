@@ -835,10 +835,14 @@ dependencies = [
  "garcon-interface",
  "garcon-js",
  "indexmap",
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
