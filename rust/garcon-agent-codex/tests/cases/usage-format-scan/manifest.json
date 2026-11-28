@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-codex/tests/oracles/usage-format.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/usage-format-scan.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 4,
+  "sha256": "724ed8803e0fbbbf731221d9937cc9b9dbb4d8980a4432c5d2f6e64fb9767746"
+}

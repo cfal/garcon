@@ -1,5 +1,6 @@
-use std::{collections::HashSet, rc::Rc};
+use std::{cell::RefCell, collections::HashSet, rc::Rc};
 
+use garcon_agents_common::execution::runtime_events::AgentRuntimeEvent;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -71,7 +72,20 @@ impl CodexTurnRoutes {
         self.active_turn_id.as_deref()
     }
 
-    pub fn adopt_turn(&mut self, turn_id: &str, operation: Rc<CodexOperation>) -> bool {
+    pub fn adopt_turn(
+        routes: &RefCell<Self>,
+        turn_id: &str,
+        operation: Rc<CodexOperation>,
+    ) -> bool {
+        if !routes.borrow_mut().route_turn(turn_id, operation.clone()) {
+            return false;
+        }
+        // Publication can read the route to capture the newly steerable turn.
+        (operation.publish)(AgentRuntimeEvent::Steerable);
+        true
+    }
+
+    fn route_turn(&mut self, turn_id: &str, operation: Rc<CodexOperation>) -> bool {
         if self.operations.contains_key(turn_id) {
             return false;
         }
@@ -116,15 +130,28 @@ mod tests {
     fn retained_writer_keeps_each_native_turn_bound_to_its_original_run() {
         let first = operation("first");
         let second = operation("second");
-        let mut routes = CodexTurnRoutes::new(first.clone());
-        assert!(routes.adopt_turn("turn-1", routes.operation_for_start()));
-        assert!(routes.mark_terminal("turn-1"));
-        assert!(!routes.mark_terminal("turn-1"));
-        routes.finish_active_turn();
-        routes.reactivate(second.clone());
-        assert!(!routes.adopt_turn("turn-1", routes.operation_for_start()));
-        assert_eq!(routes.active_turn_id(), None);
-        assert!(routes.adopt_turn("turn-2", routes.operation_for_start()));
+        let routes = RefCell::new(CodexTurnRoutes::new(first.clone()));
+        assert!(CodexTurnRoutes::adopt_turn(
+            &routes,
+            "turn-1",
+            first.clone()
+        ));
+        assert!(routes.borrow_mut().mark_terminal("turn-1"));
+        assert!(!routes.borrow_mut().mark_terminal("turn-1"));
+        routes.borrow_mut().finish_active_turn();
+        routes.borrow_mut().reactivate(second.clone());
+        assert!(!CodexTurnRoutes::adopt_turn(
+            &routes,
+            "turn-1",
+            second.clone()
+        ));
+        assert_eq!(routes.borrow().active_turn_id(), None);
+        assert!(CodexTurnRoutes::adopt_turn(
+            &routes,
+            "turn-2",
+            second.clone()
+        ));
+        let mut routes = routes.into_inner();
         assert_eq!(routes.active_turn_id(), Some("turn-2"));
         assert!(Rc::ptr_eq(
             routes.operation_for_turn("turn-1").unwrap(),
@@ -137,5 +164,48 @@ mod tests {
         routes.retire();
         assert!(routes.operation_for_turn("turn-1").is_none());
         assert!(routes.operation_for_turn("turn-2").is_none());
+    }
+
+    #[test]
+    fn publishes_steerable_once_per_turn_regardless_of_which_start_path_wins() {
+        let routes = Rc::new(RefCell::new(CodexTurnRoutes::new(operation("unused"))));
+        let steerable_turns = Rc::new(RefCell::new(Vec::new()));
+        let publisher = {
+            let routes = Rc::downgrade(&routes);
+            let steerable_turns = steerable_turns.clone();
+            Rc::new(move |event| {
+                assert!(matches!(event, AgentRuntimeEvent::Steerable));
+                let routes = routes.upgrade().unwrap();
+                let routes = routes
+                    .try_borrow_mut()
+                    .expect("routes released before publication");
+                let turn_id = routes.active_turn_id().unwrap();
+                assert_eq!(routes.operation_for_turn(turn_id).unwrap().run_id, "run");
+                steerable_turns.borrow_mut().push(turn_id.to_owned());
+            })
+        };
+        let operation = codex_operation("chat", "run", publisher);
+        routes.borrow_mut().reactivate(operation.clone());
+        assert!(steerable_turns.borrow().is_empty());
+
+        // The managed RPC response, a turn/started notification, and a retry RPC
+        // response can each be the first report of a new native turn.
+        for (turn_id, expected) in [("managed", 1), ("notification", 2), ("retry", 3)] {
+            routes.borrow_mut().finish_active_turn();
+            routes.borrow_mut().expect_turn(operation.clone());
+            let owner = routes.borrow().operation_for_start();
+            assert!(CodexTurnRoutes::adopt_turn(&routes, turn_id, owner));
+            assert_eq!(steerable_turns.borrow().len(), expected);
+            assert!(!CodexTurnRoutes::adopt_turn(
+                &routes,
+                turn_id,
+                operation.clone()
+            ));
+            assert_eq!(steerable_turns.borrow().len(), expected);
+        }
+        assert_eq!(
+            *steerable_turns.borrow(),
+            ["managed", "notification", "retry"]
+        );
     }
 }
