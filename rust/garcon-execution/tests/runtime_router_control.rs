@@ -13,6 +13,7 @@ use garcon_contract::{
     chat_transient_feed::ChatTransientControlAction,
 };
 use garcon_execution::{
+    agent_registry::AgentRegistry,
     runtime_router::{
         AgentRuntimeRouter, AgentRuntimeRouterOptions, RouterPermissionClaim, RoutingChat,
         RuntimeRouterChats, RuntimeRouterIntegrations, RuntimeRouterLedger,
@@ -248,10 +249,10 @@ impl RouterPermissionClaim for Claim {
 
 impl RuntimeRouterLedger for Ports {
     fn active_chat_ids(&self) -> Vec<String> {
-        if self.mode == "running" {
-            vec![CHAT.into()]
-        } else {
-            Vec::new()
+        match self.mode.as_str() {
+            "running" => vec![CHAT.into()],
+            "several-running" => vec!["chat-3".into(), CHAT.into(), "chat-2".into()],
+            _ => Vec::new(),
         }
     }
     fn is_run_active(&self, chat: &str) -> bool {
@@ -287,22 +288,27 @@ impl RuntimeRouterLedger for Ports {
     }
 }
 
-fn fixture(mode: &str) -> (AgentRuntimeRouter, Rc<Ports>) {
+fn router_options(mode: &str) -> (AgentRuntimeRouterOptions, Rc<Ports>) {
     let ports = Rc::new(Ports {
         mode: mode.into(),
         effects: Rc::default(),
         pending: RefCell::default(),
         claim_done: Rc::default(),
     });
-    let router = AgentRuntimeRouter::new(AgentRuntimeRouterOptions {
+    let options = AgentRuntimeRouterOptions {
         registry: ports.clone(),
         directory: Rc::new(Directory(ports.clone())),
         ledger: ports.clone(),
         unhandled_rejections: Rc::new(install_unhandled_rejection_policy(Rc::new(create_logger(
             "test",
         )))),
-    });
-    (router, ports)
+    };
+    (options, ports)
+}
+
+fn fixture(mode: &str) -> (AgentRuntimeRouter, Rc<Ports>) {
+    let (options, ports) = router_options(mode);
+    (AgentRuntimeRouter::new(options), ports)
 }
 
 async fn permission_trace(mode: &str) -> Value {
@@ -357,16 +363,30 @@ async fn steer_trace(mode: &str) -> Value {
 }
 
 fn running_trace(active: bool) -> Value {
-    let (router, _) = fixture(if active { "running" } else { "idle" });
+    let (options, _) = router_options(if active { "running" } else { "idle" });
+    let registry = AgentRegistry::new(options);
     json!({
-        "chat":router.is_chat_running(CHAT),
-        "agent":router.is_agent_session_running("test",Some("session-1"),Some(REMOTE)),
-        "local":router.is_agent_session_running("test",Some("session-1"),None),
-        "missing":router.is_agent_session_running("test",Some(""),Some(REMOTE)),
-        "sessions":router.get_running_sessions().unwrap(),
-        "chats":router.get_running_chat_ids_snapshot(),
-        "count":router.get_running_session_count(),
+        "chat":registry.is_chat_running(CHAT),
+        "agent":registry.is_agent_session_running("test",Some("session-1"),Some(REMOTE)),
+        "local":registry.is_agent_session_running("test",Some("session-1"),None),
+        "missing":registry.is_agent_session_running("test",Some(""),Some(REMOTE)),
+        "sessions":registry.get_running_sessions().unwrap(),
+        "chats":registry.get_running_chat_ids_snapshot(),
+        "count":registry.get_running_session_count(),
     })
+}
+
+#[test]
+fn registry_snapshot_is_sorted_and_not_filtered_by_chat_lookup() {
+    let (options, _) = router_options("several-running");
+    let registry = AgentRegistry::new(options);
+    let mut chats = registry.get_running_chat_ids_snapshot();
+    assert_eq!(chats, [CHAT, "chat-2", "chat-3"]);
+    chats.clear();
+    assert_eq!(
+        registry.get_running_chat_ids_snapshot(),
+        [CHAT, "chat-2", "chat-3"]
+    );
 }
 
 #[test]

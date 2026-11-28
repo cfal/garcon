@@ -2,6 +2,7 @@
 
 pub mod accepted_input_handler;
 pub mod accepted_input_transcript;
+pub mod agent_registry;
 pub mod agent_turn_receipt_projector;
 pub mod catalog_service;
 pub mod chat_command_settlement;
