@@ -46,7 +46,7 @@ use garcon_contract::project_resolution::{
     ProjectTarget, is_project_unavailable_reason, parse_project_resolution_response,
     project_target_key,
 };
-use garcon_contract::{chat_plan, chat_stop, cli_presentation};
+use garcon_contract::{chat_plan, chat_stop, cli_presentation, tool_schedule};
 use garcon_js::OptionalNullable;
 use serde_json::{Map, Value, json};
 
@@ -121,6 +121,34 @@ fn cli_presentation_cases_match() {
         },
     );
     assert_all_match("common/cli-presentation.ts", stats);
+}
+
+#[test]
+fn tool_schedule_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/tool-schedule"
+        ),
+        |function, args| {
+            use tool_schedule::*;
+            let value = unknown(function, args.first())?;
+            let request = parse_tool_schedule_request(&value);
+            if function == "parseToolScheduleRequest" {
+                return Ok(json!(request));
+            }
+            let request = request.ok_or_else(|| CaseError::unhandled(function))?;
+            Ok(match function {
+                "hasSchedulePrompt" => json!(has_schedule_prompt(&request)),
+                "toolScheduleTitle" => json!(tool_schedule_title(&request)),
+                "toolScheduleOptions" => json!(tool_schedule_options(&request)),
+                "toolScheduleDetails" => json!(tool_schedule_details(&request)),
+                "describeToolSchedule" => json!(describe_tool_schedule(&request)),
+                _ => return Err(CaseError::unhandled(function)),
+            })
+        },
+    );
+    assert_all_match("common/tool-schedule.ts", stats);
 }
 
 fn assert_all_match(module: &str, stats: Stats) {

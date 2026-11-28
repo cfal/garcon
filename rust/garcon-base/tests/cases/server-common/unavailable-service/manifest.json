@@ -1,0 +1,9 @@
+{
+  "module": "server/common/unavailable-service.ts",
+  "tests": [],
+  "inputs": "rust/garcon-base/tests/inputs/server-common/unavailable-service.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 3,
+  "sha256": "14920b1e4c5ea635854404d823a7648bf2f34aea511f6cbd9bf27ecd725bf07c"
+}
