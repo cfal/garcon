@@ -1,3 +1,4 @@
+mod adoption;
 mod anchor_cases;
 mod anchor_views;
 mod bulk_views;
@@ -7,6 +8,8 @@ mod failure_fences;
 mod input_cases;
 mod presentation_views;
 mod producer_lease;
+mod producer_publication;
+mod producer_service;
 mod replay_views;
 mod service;
 mod store_behavior;

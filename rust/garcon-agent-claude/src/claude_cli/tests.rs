@@ -5,8 +5,9 @@ use garcon_agents_common::execution::runtime_events::{
 };
 use garcon_contract::chat_modes::{PermissionMode, ThinkingMode};
 use garcon_interface::services::{AgentSteerRejectionReason, AgentSteerResult};
+use garcon_js::ManualClock;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader, DuplexStream},
     sync::{mpsc, oneshot},
     task::LocalSet,
 };
@@ -166,6 +167,101 @@ fn options(cwd: &Path) -> ClaudeSessionOptions {
     }
 }
 
+#[test]
+fn terminal_before_start_is_not_routed_as_steering_work() {
+    let runtime = ClaudeCli::new(Rc::new(|| "not-spawned".into()), Rc::new(Logger));
+    let session = Rc::new(ClaudeRunningSession::new(options(Path::new("."))));
+    let (publish, mut events) = mpsc::unbounded_channel();
+    let turn = runtime
+        .begin_turn(
+            &session,
+            runtime_operation(
+                "run-1".into(),
+                Rc::new(move |event| publish.send(event).unwrap()),
+            ),
+        )
+        .unwrap();
+    let input = turn.protocol.borrow().input_uuid.clone();
+    turn.steering.mark_submitted(input.clone());
+    let handled = runtime.on_control_or_lifecycle(
+        &session,
+        &json!({
+            "type":"command_lifecycle","state":"discarded","command_uuid":input
+        }),
+    );
+    assert_eq!(turn.steering.settlement_failure_message(), None);
+    assert!(handled);
+    let AgentRuntimeEvent::RunEnded {
+        outcome: ProviderRunOutcome::Failed { error: Some(error) },
+        ..
+    } = events.try_recv().unwrap()
+    else {
+        panic!("expected failed submitted input");
+    };
+    assert_eq!(
+        error.message.as_deref(),
+        Some("Claude CLI discarded the submitted message before it started.")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_retirement_does_not_close_its_writer_until_the_first_exits() {
+    fn process() -> (ClaudeSessionProcess, DuplexStream, oneshot::Sender<i32>) {
+        let (stdin, peer) = tokio::io::duplex(64);
+        let (exit, exited) = oneshot::channel();
+        let transport = ClaudeProcessTransport::new(ClaudeProcessTransportOptions {
+            process: ClaudeSubprocess {
+                stdin: Some(Box::pin(stdin)),
+                stdout: None,
+                stderr: None,
+                pid: None,
+                exited: Box::pin(async move { exited.await.map_err(|error| error.to_string()) }),
+                kill: Rc::new(|_| panic!("no signal expected before the test reports exit")),
+            },
+            logger: Rc::new(Logger),
+            session_id: "synthetic-session".into(),
+            on_message: Rc::new(|_| {}),
+            on_failure: Rc::new(|_| {}),
+            on_eof: Rc::new(|| {}),
+            on_exit: Rc::new(|_| {}),
+            max_stdout_frame_bytes: None,
+        });
+        (
+            ClaudeSessionProcess {
+                identity: Rc::new(()),
+                transport,
+            },
+            peer,
+            exit,
+        )
+    }
+    LocalSet::new()
+        .run_until(async {
+            let runtime = ClaudeCli::new(Rc::new(|| "not-spawned".into()), Rc::new(Logger));
+            let session = Rc::new(ClaudeRunningSession::new(options(Path::new("."))));
+            let (first, mut first_peer, first_exit) = process();
+            session.process.replace(Some(first));
+            let first_retirement = runtime.retire_session_process(&session).unwrap().unwrap();
+            let mut byte = [0];
+            assert_eq!(first_peer.read(&mut byte).await.unwrap(), 0);
+
+            let (second, mut second_peer, second_exit) = process();
+            session.process.replace(Some(second));
+            let second_retirement = runtime.retire_session_process(&session).unwrap().unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(10), second_peer.read(&mut byte))
+                    .await
+                    .is_err()
+            );
+            first_exit.send(0).unwrap();
+            assert_eq!(second_peer.read(&mut byte).await.unwrap(), 0);
+            second_exit.send(0).unwrap();
+            first_retirement.as_ref().clone().await.unwrap();
+            second_retirement.as_ref().clone().await.unwrap();
+        })
+        .await;
+}
+
 const READ_INITIALIZE: &str = r#"
 read -r initialize || exit 1
 case "$initialize" in *'"subtype":"initialize"'*) ;; *) exit 2 ;; esac
@@ -184,6 +280,107 @@ fn write_fake_cli(script: &Path, body: &str) {
     )
     .unwrap();
     fs::set_permissions(script, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[tokio::test]
+async fn a_real_cli_publishes_only_the_correlated_result_and_waits_for_provider_idle() {
+    use garcon_interface::producer::AgentFinalResponse;
+
+    async fn receive<T>(receiver: &mut mpsc::UnboundedReceiver<T>) -> T {
+        tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+    LocalSet::new().run_until(async {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("fake-claude-results");
+        write_fake_cli(&script, r#"
+read -r prompt || exit 1
+case "$prompt" in *'"uuid":"submitted-input"'*) ;; *) exit 2 ;; esac
+printf '%s\n' '{"type":"result","is_error":true,"result":"synthetic internal error"}'
+printf '%s\n' '{"type":"command_lifecycle","state":"started","command_uuid":"submitted-input"}'
+printf '%s\n' '{"type":"result","user_message_uuid":"foreign-input","result":"synthetic foreign output"}'
+printf '%s\n' '{"type":"result","user_message_uuid":"submitted-input","result":"  synthetic result  "}'
+printf '%s\n' '{"type":"result-received"}'
+read -r release || exit 3
+printf '%s\n' '{"type":"system","subtype":"session_state_changed","state":"idle"}'
+read -r close || exit 4
+"#);
+        let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
+        let options = options(directory.path());
+        let session = Rc::new(ClaudeRunningSession::with_clock(
+            options.clone(), Rc::new(ManualClock::new(1234)),
+        ));
+        runtime.register_session(session.clone());
+        let (publish, mut events) = mpsc::unbounded_channel();
+        let turn = runtime.begin_turn(&session, runtime_operation("run-1".into(),
+            Rc::new(move |event| publish.send(event).unwrap()))).unwrap();
+        turn.protocol.borrow_mut().input_uuid = "submitted-input".into();
+        let (signal, mut barrier) = mpsc::unbounded_channel();
+        runtime.spawn_cli(&session, options, false, Rc::new(move |_, frame| signal.send(frame).unwrap())).await.unwrap();
+        let process = session.process.borrow().clone().unwrap();
+        process.transport.write_line(r#"{"type":"user","uuid":"submitted-input"}"#.into(), Default::default()).await.unwrap();
+        assert_eq!(receive(&mut barrier).await["type"], "result-received");
+        assert!(session.is_current_turn(&turn));
+        assert!(matches!(receive(&mut events).await, AgentRuntimeEvent::Steerable));
+        let AgentRuntimeEvent::Rows { rows } = receive(&mut events).await else { panic!("expected one rendered result"); };
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0].message, ChatMessage::Assistant(message)
+            if message.content == "synthetic result" && message.timestamp == "1970-01-01T00:00:01.234Z"));
+        assert!(events.try_recv().is_err());
+
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        let AgentRuntimeEvent::RunEnded { outcome: ProviderRunOutcome::Finished { final_response: Some(AgentFinalResponse::Text { text }) }, .. }
+            = receive(&mut events).await else { panic!("expected final response at provider idle"); };
+        assert_eq!(text, "  synthetic result  ");
+        assert!(session.active_turn.borrow().is_none());
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        assert_eq!(process.transport.exited().await.unwrap(), 0);
+    }).await;
+}
+
+#[test]
+fn a_conversation_reset_supersedes_the_recorded_result_failure() {
+    let runtime = ClaudeCli::new(Rc::new(|| "not-spawned".into()), Rc::new(Logger));
+    let session = Rc::new(ClaudeRunningSession::new(options(Path::new("."))));
+    let (publish, mut events) = mpsc::unbounded_channel();
+    let turn = runtime
+        .begin_turn(
+            &session,
+            runtime_operation(
+                "run-1".into(),
+                Rc::new(move |event| publish.send(event).unwrap()),
+            ),
+        )
+        .unwrap();
+    let input = turn.protocol.borrow().input_uuid.clone();
+    turn.protocol
+        .borrow_mut()
+        .observe_input(&json!({"type":"command_lifecycle","state":"started","command_uuid":input}));
+    assert!(runtime.on_control_or_lifecycle(&session, &json!({
+        "type":"result","user_message_uuid":input,"is_error":true,"errors":["synthetic model error"]
+    })));
+    assert_eq!(
+        turn.protocol.borrow().recorded_result_failure_message(),
+        Some("synthetic model error")
+    );
+    assert!(runtime.on_control_or_lifecycle(
+        &session,
+        &json!({
+            "type":"conversation_reset","new_conversation_id":"foreign-conversation"
+        })
+    ));
+    let AgentRuntimeEvent::RunEnded {
+        outcome: ProviderRunOutcome::Failed { error: Some(error) },
+        ..
+    } = events.try_recv().unwrap()
+    else {
+        panic!("expected reset failure");
+    };
+    assert_eq!(error.message.as_deref(), Some(CONVERSATION_RESET_FAILURE));
+    assert_eq!(session.id, "synthetic-session");
+    assert!(session.active_turn.borrow().is_none());
 }
 
 #[tokio::test]
@@ -248,6 +445,10 @@ printf '{"type":"permission-observed","frame":%s}\n' "$answer"
 printf '%s\n' '{"type":"control_request","request_id":"question","request":{"subtype":"can_use_tool","tool_name":"Ask_User-Question","tool_use_id":"tool-question","input":{"questions":[{"question":"Which?","options":[{"id":"a","label":"First","preview":"Synthetic preview"}]}]}}}'
 read -r answer || exit 1
 printf '{"type":"permission-observed","frame":%s}\n' "$answer"
+printf '%s\n' '{"type":"control_request","request_id":"invalid-clock","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion"}}'
+read -r answer || exit 1
+printf '{"type":"permission-observed","frame":%s}\n' "$answer"
+read -r proceed || exit 1
 printf '%s\n' '{"type":"control_request","request_id":"cancel","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion"}}'
 printf '%s\n' '{"type":"control_cancel_request","request_id":"cancel"}'
 read -r close || exit 1
@@ -255,7 +456,8 @@ read -r close || exit 1
         let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
         let mut options = options(directory.path());
         options.permission_mode = PermissionMode::ManualBypass;
-        let session = Rc::new(ClaudeRunningSession::new(options.clone()));
+        let clock = Rc::new(ManualClock::new(1234));
+        let session = Rc::new(ClaudeRunningSession::with_clock(options.clone(), clock.clone()));
         runtime.register_session(session.clone());
         let (publish, mut events) = mpsc::unbounded_channel();
         let turn = runtime.begin_turn(&session, runtime_operation("run-1".into(), Rc::new(move |event| publish.send(event).unwrap()))).unwrap();
@@ -275,7 +477,9 @@ read -r close || exit 1
             }), decision: Some(decide), ..
         } = receive(&mut events).await else { panic!("expected structured question"); };
         assert_eq!(decide.permission_occurrence_id(), permission_occurrence_id);
-        assert_eq!(serde_json::to_value(requested_tool).unwrap()["type"], "ask-user-question-tool-use");
+        let requested_tool = serde_json::to_value(requested_tool).unwrap();
+        assert_eq!(requested_tool["type"], "ask-user-question-tool-use");
+        assert_eq!(requested_tool["timestamp"], "1970-01-01T00:00:01.234Z");
         let answer = PermissionDecisionPayload {
             allow: true, always_allow: Some(false),
             response: Some(PermissionDecisionResponse::Provider(json!({
@@ -283,6 +487,7 @@ read -r close || exit 1
                 "answers":[{"questionId":"Which?","selectedOptionIds":["a"]}]
             }).into())),
         };
+        clock.set(i64::MAX);
         decide.respond(answer.clone()).await.unwrap();
         let answered = receive(&mut echoed).await;
         assert_eq!(answered["frame"]["response"]["request_id"], "question");
@@ -291,6 +496,14 @@ read -r close || exit 1
         assert_eq!(response["updatedInput"]["answers"]["Which?"], "First");
         assert_eq!(response["updatedInput"]["annotations"]["Which?"]["preview"], "Synthetic preview");
 
+        let invalid_clock = receive(&mut echoed).await;
+        assert_eq!(invalid_clock["frame"]["response"],
+            json!({"request_id":"invalid-clock", "subtype":"error", "error":"Invalid Date"}));
+        assert!(runtime.pending_permissions.borrow().is_empty());
+        assert!(events.try_recv().is_err());
+        clock.set(1234);
+        let process = session.process.borrow().clone().unwrap();
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
         let AgentRuntimeEvent::Permission { decision: Some(cancelled), .. } =
             receive(&mut events).await else { panic!("expected another structured question"); };
         assert!(matches!(receive(&mut events).await, AgentRuntimeEvent::Permission {
@@ -300,7 +513,6 @@ read -r close || exit 1
         } if permission_occurrence_id == cancelled.permission_occurrence_id()));
         assert_eq!(cancelled.respond(answer).await.unwrap_err().to_string(), "Claude permission occurrence is no longer pending");
         runtime.finish_turn(&session);
-        let process = session.process.borrow().clone().unwrap();
         process.transport.write_line("{}".into(), Default::default()).await.unwrap();
         assert_eq!(process.transport.exited().await.unwrap(), 0);
     }).await;
@@ -313,6 +525,7 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
         let script = directory.path().join("fake-claude");
         write_fake_cli(&script, concat!(
             "read -r first || exit 1\n",
+            "printf '%s\\n' '{\"type\":\"user\",\"uuid\":\"synthetic-steer\",\"isReplay\":true,\"parent_tool_use_id\":\"nested-tool\"}'\n",
             "printf '%s\\n' '{\"type\":\"fake-barrier\"}'\n",
             "printf '%s\\n' '{\"type\":\"stale-frame\"}'\n",
             "read -r second || exit 1\n",
@@ -327,6 +540,7 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
         let input = turn.protocol.borrow().input_uuid.clone();
         turn.protocol.borrow_mut().observe_input(&json!({"type":"command_lifecycle","state":"started","command_uuid":input}));
         turn.protocol.borrow_mut().mark_abort_requested();
+        turn.steering.mark_submitted("synthetic-steer".into());
         runtime.pending_permissions.borrow_mut().push(PendingPermission {
             permission_occurrence_id: "synthetic-permission".into(),
             cli_request_id: Some("synthetic-control".into()),
@@ -351,6 +565,8 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
         process.transport.write_line("{}".into(), Default::default()).await.unwrap();
         let ready = tokio::time::timeout(Duration::from_secs(5), barrier.recv()).await.unwrap().unwrap();
         assert_eq!(ready["type"], "fake-barrier");
+        assert_eq!(turn.steering.submitted_count(), 1);
+        assert_eq!(turn.steering.settlement_failure_message(), None);
         assert!(session.is_current_turn(&turn));
         process.transport.write_line("{}".into(), Default::default()).await.unwrap();
         tokio::time::timeout(Duration::from_secs(5), turn.completion()).await.unwrap();

@@ -119,6 +119,12 @@ if (request.jsonUnpairedSurrogate) {
   };
   reply.jsonUnpairedSurrogate = bits(request.jsonUnpairedSurrogate).map((text) => containsUnpaired(JSON.parse(text)));
 }
+if (request.jsonReplaceUnpairedValues) {
+  if (Bun.version !== '1.4.3') throw new Error(`Expected Bun 1.4.3, got ${Bun.version}`);
+  reply.jsonReplaceUnpairedValues = (request.jsonReplaceUnpairedValues as [string, boolean][]).map(([text, marker]) =>
+    outcome(() => JSON.stringify(JSON.parse(text), (_, value) =>
+      typeof value === 'string' && !value.isWellFormed() ? marker : value)));
+}
 if (request.defaultSort) {
   reply.defaultSort = (request.defaultSort as string[][]).map((values) => [...values].sort());
 }

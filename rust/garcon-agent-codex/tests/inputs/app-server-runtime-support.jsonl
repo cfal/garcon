@@ -1,0 +1,40 @@
+{"fn":"humanizeCodexAppServerError","args":[{"message":"This chat uses synthetic-network-401-429-timeout-api-key, not found in the current configuration.","rpcCode":-32600,"data":{"type":"modelProviderMismatch"}}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"This chat uses synthetic-network-401-429-timeout-api-key, not found in the current configuration.","rpcCode":-32600,"data":{"type":"modelProviderNotConfigured"}}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"This chat uses synthetic-network-401-429-timeout-api-key, not found in the current configuration.","rpcCode":-32600,"data":{"type":"modelProviderPolicyConflict"}}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"Network timeout","rpcCode":-32600,"data":{"type":"futureProviderError"}}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"Executable not found in $PATH: \"codex\""}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"spawn codex.exe ENOENT"}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"Model not found"}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"Model not found: Unauthorized"}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"429 network error"}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":"unexpected terminal error"}]}
+{"fn":"humanizeCodexAppServerError","args":[{"message":""}]}
+{"fn":"isUtilityOverload","args":[{"message":"Unknown RPC reply","rpcCode":-32001}]}
+{"fn":"isUtilityOverload","args":[{"message":"server OVERLOADED now","rpcCode":-32600}]}
+{"fn":"isUtilityOverload","args":[{"message":"Server overloaded!"}]}
+{"fn":"isUtilityOverload","args":[{"message":"Network timeout","rpcCode":-32600}]}
+{"fn":"isCapacityError","args":[null]}
+{"fn":"isCapacityError","args":[{"message":"overloaded","codexErrorInfo":"serverOverloaded","additionalDetails":null}]}
+{"fn":"isCapacityError","args":[{"message":"The Selected Model Is At Capacity.","codexErrorInfo":"other","additionalDetails":null}]}
+{"fn":"isCapacityError","args":[{"message":"overloaded","codexErrorInfo":"other","additionalDetails":null}]}
+{"fn":"denialResponseForRequest","args":["item/tool/requestUserInput"]}
+{"fn":"denialResponseForRequest","args":["item/commandExecution/requestApproval",{"kind":"writeStdin"}]}
+{"fn":"denialResponseForRequest","args":["item/commandExecution/requestApproval",{"kind":"humanCommand"}]}
+{"fn":"denialResponseForRequest","args":["item/fileChange/requestApproval"]}
+{"fn":"denialResponseForRequest","args":["item/permissions/requestApproval"]}
+{"fn":"denialResponseForRequest","args":["execCommandApproval"]}
+{"fn":"mergeFinishOptions","args":[null,{}]}
+{"fn":"mergeFinishOptions","args":[{"failedMessage":"first","aborted":true},{"failedMessage":"","emitFinishedOnAbort":true}]}
+{"fn":"mergeFinishOptions","args":[{"failedMessage":"first","aborted":true,"emitFinishedOnAbort":true},{"failedMessage":null,"aborted":false,"emitFinishedOnAbort":false}]}
+{"fn":"hasTerminalPendingFinish","args":[null]}
+{"fn":"hasTerminalPendingFinish","args":[{"failedMessage":""}]}
+{"fn":"hasTerminalPendingFinish","args":[{"failedMessage":"failure"}]}
+{"fn":"hasTerminalPendingFinish","args":[{"aborted":true}]}
+{"fn":"isTerminalSessionStatus","args":["completed"]}
+{"fn":"isTerminalSessionStatus","args":["aborted"]}
+{"fn":"isTerminalSessionStatus","args":["failed"]}
+{"fn":"isTerminalSessionStatus","args":["interrupting"]}
+{"fn":"isActiveSessionStatus","args":["running"]}
+{"fn":"isActiveSessionStatus","args":["interrupting"]}
+{"fn":"isActiveSessionStatus","args":["completing"]}
+{"fn":"isActiveSessionStatus","args":["completed"]}

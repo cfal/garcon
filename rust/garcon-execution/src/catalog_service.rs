@@ -60,8 +60,13 @@ pub struct ModelImageSupport<'a> {
 }
 
 pub trait CatalogEndpointResolver {
-    fn model_supports_images(&self, input: ModelImageSupport<'_>) -> bool;
-    fn get_model_options(&self, agent_id: &str, executor_id: &str) -> Vec<AgentModelOption>;
+    fn model_supports_images(&self, input: ModelImageSupport<'_>)
+    -> ExecutionOperationResult<bool>;
+    fn get_model_options(
+        &self,
+        agent_id: &str,
+        executor_id: &str,
+    ) -> ExecutionOperationResult<Vec<AgentModelOption>>;
 }
 
 pub struct CatalogCapabilities<'a> {
@@ -187,23 +192,49 @@ impl AgentCatalogService {
         Ok(self.snapshot(agent_id, &query).await?.models)
     }
 
-    pub fn model_supports_images(&self, input: ModelImageSupport<'_>) -> bool {
+    pub fn model_supports_images(
+        &self,
+        input: ModelImageSupport<'_>,
+    ) -> ExecutionOperationResult<bool> {
         let Some(integration) = self.directory.get(input.agent_id, input.executor_id) else {
-            return false;
+            return Ok(false);
         };
         if input.api_provider_id.is_none_or(str::is_empty)
             || input.model_endpoint_id.is_none_or(str::is_empty)
         {
-            return integration.descriptor().supports_images;
+            return Ok(integration.descriptor().supports_images);
         }
         self.endpoint_resolver.model_supports_images(input)
     }
 
-    pub fn has_endpoint_models(&self, agent_id: &str, executor_id: Option<&str>) -> bool {
-        !self
+    pub fn has_endpoint_models(
+        &self,
+        agent_id: &str,
+        executor_id: Option<&str>,
+    ) -> ExecutionOperationResult<bool> {
+        Ok(!self
+            .endpoint_model_options(agent_id, executor_id)?
+            .is_empty())
+    }
+
+    fn endpoint_model_options(
+        &self,
+        agent_id: &str,
+        executor_id: Option<&str>,
+    ) -> ExecutionOperationResult<Vec<AgentModelOption>> {
+        match self
             .endpoint_resolver
             .get_model_options(agent_id, &effective_executor_id(executor_id))
-            .is_empty()
+        {
+            Err(error)
+                if execution_domain_error(error.as_ref()).is_some_and(|error| {
+                    error.code == ErrorCode::API_PROVIDER_STORAGE_UNAVAILABLE
+                }) =>
+            {
+                Ok(Vec::new())
+            }
+            result => result,
+        }
     }
 
     pub fn requires_strict_model_discovery(
@@ -229,10 +260,7 @@ impl AgentCatalogService {
         let capabilities = integration.capabilities();
         let mut models = snapshot.models;
         if capabilities.accepts_api_provider_endpoints {
-            models.extend(
-                self.endpoint_resolver
-                    .get_model_options(agent_id, &effective_executor_id(query.executor_id)),
-            );
+            models.extend(self.endpoint_model_options(agent_id, query.executor_id)?);
         }
         let mut seen = HashSet::new();
         models.retain(|model| !model.value.is_empty() && seen.insert(model.value.clone()));

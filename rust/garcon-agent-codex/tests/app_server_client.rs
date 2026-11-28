@@ -17,11 +17,19 @@ use garcon_agent_codex::app_server::{
         CodexAppServerEvent, CodexAppServerMetric, CodexAppServerRpcError, CodexDeliveryOutcome,
         CodexSteerRequestOptions,
     },
+    native_path_discovery_refresh::NativePathDiscoveryRefreshLimiter,
     protocol::JsonRpcId,
+    request_builders::{
+        CodexThreadConfiguration, CodexThreadSettings, thread_settings_target_from_snapshot,
+    },
+    runtime::{thread_settings::CodexSourceThreadSettings, utility::CodexAppServerUtility},
+    steering::classify_codex_steer_rejection,
 };
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
+use garcon_contract::chat_modes::{PermissionMode, ThinkingMode};
 use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
 use garcon_interface::host::AgentLogger;
+use garcon_interface::services::{AgentSteerRejectionReason, AgentSteerResult};
 use garcon_js::json::{Opaque, from_str};
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -105,6 +113,350 @@ fn steer_options() -> CodexSteerRequestOptions<'static> {
         prepare_delivery: async { Ok(()) }.boxed_local(),
         acknowledgement_timeout: Some(Duration::from_secs(1)),
     }
+}
+
+fn settings_source(client: CodexAppServerClient, timeout: Duration) -> CodexSourceThreadSettings {
+    let snapshot = serde_json::from_value(json!({
+        "model":"m", "serviceTier":"default", "effort":"medium",
+        "approvalPolicy":"never", "approvalsReviewer":"user",
+        "sandboxPolicy":{"type":"workspaceWrite"},
+    }))
+    .unwrap();
+    CodexSourceThreadSettings::new(
+        client,
+        "thread".into(),
+        thread_settings_target_from_snapshot(&snapshot, PermissionMode::Default),
+        true,
+        timeout,
+    )
+}
+
+fn settings_target() -> CodexThreadConfiguration {
+    CodexThreadConfiguration {
+        model: "m".into(),
+        permission_mode: PermissionMode::ManualBypass,
+        thinking_mode: Some(ThinkingMode::High),
+    }
+}
+
+#[tokio::test]
+async fn confirms_settings_when_notification_precedes_the_rpc_response() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(FIXTURE);
+            let client = CodexAppServerClient::new(fixture.options(""));
+            let source = settings_source(client.clone(), Duration::from_secs(2));
+            let detach = client.on_event(Rc::new({
+                let source = source.clone();
+                move |event| {
+                    if let CodexAppServerEvent::Notification(note) = event
+                        && note.method == "thread/settings/updated"
+                    {
+                        let params = note.params.as_ref().unwrap();
+                        assert_eq!(params["threadId"], "thread");
+                        assert_eq!(source.permission_mode(), PermissionMode::Default);
+                        let settings: CodexThreadSettings =
+                            serde_json::from_value(params["threadSettings"].clone()).unwrap();
+                        source.handle_updated(&settings);
+                    }
+                    Ok(())
+                }
+            }));
+            let target = settings_target();
+            let result = source.update(&target);
+            assert!(source.has_pending_configuration());
+            result.await.unwrap();
+            assert_eq!(source.permission_mode(), PermissionMode::ManualBypass);
+            assert!(!source.provider_owns_effort());
+            assert!(!source.has_pending_configuration());
+            source.update(&target).await.unwrap();
+            client.shutdown().await.unwrap();
+            detach();
+            let frames = fixture.frames();
+            let mut updates = frames
+                .iter()
+                .filter(|frame| frame["method"] == "thread/settings/update");
+            assert_eq!(
+                updates.next().unwrap()["params"],
+                json!({
+                    "threadId":"thread", "model":"m", "approvalPolicy":"on-request",
+                    "approvalsReviewer":"user", "sandboxPolicy":{
+                        "type":"workspaceWrite","writableRoots":[],"networkAccess":false,
+                        "excludeTmpdirEnvVar":false,"excludeSlashTmp":false,
+                    }, "effort":"high",
+                })
+            );
+            assert!(updates.next().is_none());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fences_a_settings_timeout_but_not_an_explicit_rpc_rejection() {
+    LocalSet::new()
+        .run_until(async {
+            for (mode, expected_fence) in [("settings-failure", false), ("settings-timeout", true)]
+            {
+                let fixture = Fixture::new(FIXTURE);
+                let client = CodexAppServerClient::new(fixture.options(mode));
+                client.connect().await.unwrap();
+                let source = settings_source(client.clone(), Duration::from_millis(80));
+                let error = source.update(&settings_target()).await.unwrap_err();
+                assert_eq!(source.is_fenced(), expected_fence);
+                assert_eq!(source.permission_mode(), PermissionMode::Default);
+                assert!(!source.has_pending_configuration());
+                if expected_fence {
+                    assert_eq!(
+                        error.downcast_ref::<AgentIntegrationError>().unwrap().code,
+                        AgentIntegrationErrorCode::TIMEOUT
+                    );
+                    let next = source.update(&settings_target()).await.unwrap_err();
+                    assert_eq!(
+                        next.downcast_ref::<AgentIntegrationError>().unwrap().code,
+                        AgentIntegrationErrorCode::INVALID_SETTINGS
+                    );
+                } else {
+                    assert_eq!(error.to_string(), "Synthetic settings failure");
+                    assert!(error.is::<CodexAppServerRpcError>());
+                }
+                client.shutdown().await.unwrap();
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn maps_a_native_turn_mismatch_without_retrying_another_turn() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(FIXTURE);
+            let client = CodexAppServerClient::new(fixture.options("steer-mismatch"));
+            let error = client
+                .steer_turn(&steer_params(), Some(steer_options()))
+                .await
+                .unwrap_err();
+            let rpc = error.downcast_ref::<CodexAppServerRpcError>().unwrap();
+            assert_eq!(
+                classify_codex_steer_rejection(rpc),
+                AgentSteerResult::Rejected {
+                    reason: AgentSteerRejectionReason::TurnChanged,
+                    message: "The active Codex turn changed".into(),
+                }
+            );
+            client.shutdown().await.unwrap();
+            let frames: Vec<_> = fixture
+                .frames()
+                .into_iter()
+                .filter(|frame| frame["method"] == "turn/steer")
+                .collect();
+            assert_eq!(frames.len(), 1);
+            assert_eq!(frames[0]["params"]["expectedTurnId"], "turn");
+        })
+        .await;
+}
+
+fn utility_fixture(
+    fixture: Rc<Fixture>,
+    mode: &'static str,
+    native_path: PathBuf,
+) -> CodexAppServerUtility {
+    CodexAppServerUtility::new(
+        Rc::new(move || {
+            let mut options = fixture.options(mode);
+            options.env.insert(
+                "SYNTHETIC_CODEX_NATIVE_PATH".into(),
+                native_path.to_str().unwrap().into(),
+            );
+            CodexAppServerClient::new(options)
+        }),
+        Rc::new(DiscoveryLogger::default()),
+        NativePathDiscoveryRefreshLimiter::default(),
+    )
+}
+
+#[tokio::test]
+async fn retries_retryable_utility_app_server_overloads_and_reads_the_next_page() {
+    LocalSet::new().run_until(async {
+        let fixture = Rc::new(Fixture::new(FIXTURE));
+        let path = fixture._directory.path().join("synthetic.jsonl");
+        tokio::fs::write(&path, "{}\n").await.unwrap();
+        let output = tokio::process::Command::new("bun")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/oracles/app-server-utility.ts"))
+            .arg(&fixture.command).arg(&path).arg(&fixture.trace)
+            .output().await.unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let original = fs::read_to_string(&fixture.trace).unwrap();
+        fs::remove_file(&fixture.trace).unwrap();
+        let utility = utility_fixture(fixture.clone(), "utility-overload", path.clone());
+        let (left, right) = tokio::join!(utility.resolve_native_path(Some("thread")), utility.resolve_native_path(Some("thread")));
+        assert_eq!(left.unwrap().as_deref(), path.to_str());
+        assert_eq!(right.unwrap().as_deref(), path.to_str());
+        utility.shutdown().await;
+        assert_eq!(fs::read_to_string(&fixture.trace).unwrap(), original);
+        let frames = fixture.frames();
+        assert_eq!(frames.iter().filter(|frame| frame["method"] == "initialize").count(), 1);
+        let params: Vec<_> = frames.iter().filter(|frame| frame["method"] == "thread/list")
+            .map(|frame| frame["params"].clone()).collect();
+        let first = json!({
+            "cursor":null, "limit":500, "sortKey":"updated_at", "sortDirection":"desc",
+            "archived":false, "useStateDbOnly":false,
+        });
+        assert_eq!(params, [first.clone(), first.clone(), first.clone(), json!({
+            "cursor":"second-page", "limit":500, "sortKey":"updated_at", "sortDirection":"desc",
+            "archived":false, "useStateDbOnly":false,
+        })]);
+    }).await;
+}
+
+#[tokio::test]
+async fn shares_cached_discovery_misses_until_an_explicit_refresh() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Rc::new(Fixture::new(FIXTURE));
+            let path = fixture._directory.path().join("synthetic.jsonl");
+            let utility = utility_fixture(fixture.clone(), "", path.clone());
+            assert_eq!(utility.resolve_native_path(None).await.unwrap(), None);
+            assert!(!fixture.trace.exists());
+            assert_eq!(
+                utility.resolve_native_path(Some("thread")).await.unwrap(),
+                None
+            );
+            tokio::fs::write(&path, "{}\n").await.unwrap();
+            assert_eq!(
+                utility.resolve_native_path(Some("thread")).await.unwrap(),
+                None
+            );
+            utility.request_native_path_discovery_refresh("thread");
+            assert_eq!(
+                utility
+                    .resolve_native_path(Some("thread"))
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                path.to_str()
+            );
+            utility.request_native_path_discovery_refresh("thread");
+            assert_eq!(
+                utility
+                    .resolve_native_path(Some("thread"))
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                path.to_str()
+            );
+            assert_eq!(
+                fixture
+                    .frames()
+                    .iter()
+                    .filter(|frame| frame["method"] == "thread/list")
+                    .count(),
+                2
+            );
+            utility.shutdown().await;
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn surfaces_thread_list_failures_and_discards_the_failed_snapshot() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Rc::new(Fixture::new(FIXTURE));
+            let path = fixture._directory.path().join("synthetic.jsonl");
+            tokio::fs::write(&path, "{}\n").await.unwrap();
+            let utility = utility_fixture(fixture.clone(), "utility-error", path.clone());
+            let error = utility
+                .resolve_native_path(Some("thread"))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error
+                    .downcast_ref::<CodexAppServerRpcError>()
+                    .unwrap()
+                    .code
+                    .0,
+                -32603.0
+            );
+            assert_eq!(error.to_string(), "Synthetic discovery failed");
+            assert_eq!(
+                utility
+                    .resolve_native_path(Some("thread"))
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                path.to_str()
+            );
+            assert_eq!(
+                fixture
+                    .frames()
+                    .iter()
+                    .filter(|frame| frame["method"] == "thread/list")
+                    .count(),
+                2
+            );
+            utility.shutdown().await;
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn retires_an_exited_utility_client_and_never_respawns_after_shutdown() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Rc::new(Fixture::new(FIXTURE));
+            let path = fixture._directory.path().join("synthetic.jsonl");
+            tokio::fs::write(&path, "{}\n").await.unwrap();
+            let utility = CodexAppServerUtility::new(
+                Rc::new({
+                    let fixture = fixture.clone();
+                    let path = path.clone();
+                    let starts = Cell::new(0);
+                    move || {
+                        let first = starts.get() == 0;
+                        starts.set(starts.get() + 1);
+                        let mut options = fixture.options(if first { "utility-exit" } else { "" });
+                        options.env.insert(
+                            "SYNTHETIC_CODEX_NATIVE_PATH".into(),
+                            path.to_str().unwrap().into(),
+                        );
+                        CodexAppServerClient::new(options)
+                    }
+                }),
+                Rc::new(DiscoveryLogger::default()),
+                NativePathDiscoveryRefreshLimiter::default(),
+            );
+            let detached = utility
+                .resolve_native_path(Some("thread"))
+                .await
+                .unwrap_err();
+            assert_eq!(detached.to_string(), "Codex app-server exited with code 8");
+            assert_eq!(
+                utility
+                    .resolve_native_path(Some("thread"))
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                path.to_str()
+            );
+            utility.shutdown().await;
+            assert_eq!(
+                utility
+                    .resolve_native_path(Some("thread"))
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "Codex app-server client is shut down"
+            );
+            assert_eq!(
+                fixture
+                    .frames()
+                    .iter()
+                    .filter(|frame| frame["method"] == "initialize")
+                    .count(),
+                2
+            );
+        })
+        .await;
 }
 
 #[derive(Default)]

@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/acp-turn-prompts.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/acp-turn-prompts.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "d2848f1b2c9b245693d15facedaa5132ad16f9d83aaef86feef6a46a0d5a0a39"
+}

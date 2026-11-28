@@ -10,7 +10,7 @@ use garcon_interface::{
     producer::{AgentProviderPermissionLifecycle, AgentTerminalPermission},
     resources::ExecutorResult,
 };
-use garcon_js::{Clock, SystemClock, json::Opaque, to_iso_string, trim};
+use garcon_js::{json::Opaque, trim};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 
@@ -309,8 +309,9 @@ impl ClaudeCli {
                     always_allow: false,
                     response: None,
                 },
-            )
-            .expect("unstructured approval cannot inspect question answers");
+            );
+            // INFALLIBLE: Only a structured question decision can fail; no response was supplied.
+            let response = response.expect("unstructured approval cannot inspect question answers");
             self.try_send_permission_response(
                 session,
                 request_id,
@@ -319,6 +320,17 @@ impl ClaudeCli {
             return;
         }
 
+        let timestamp = match session.now_iso() {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                self.try_send_permission_response(
+                    session,
+                    request_id,
+                    json!({"subtype":"error", "error":error.to_string()}),
+                );
+                return;
+            }
+        };
         self.pending_permissions
             .borrow_mut()
             .push(PendingPermission {
@@ -330,7 +342,6 @@ impl ClaudeCli {
                 tool_use_id: tool_use_id.map(str::to_owned),
                 turn: turn.clone(),
             });
-        let timestamp = to_iso_string(SystemClock.now_ms()).expect("the current time is in range");
         let lifecycle = AgentProviderPermissionLifecycle::Requested(
             convert_claude_permission_request(&timestamp, &occurrence_id, request),
         );

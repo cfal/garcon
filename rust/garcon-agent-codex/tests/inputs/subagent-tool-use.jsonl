@@ -1,0 +1,27 @@
+{"fn":"convertCodexSubagentToolUse","args":["at","call","multi_agent_v1.spawn_agent",{"task_name":"synthetic","agent_type":"worker","message":"hello","model":"model","reasoning_effort":"low","service_tier":"default","fork_context":true,"fork_turns":"3","items":[{"type":"text","text":"detail","image_url":"https://example.invalid/raw","imageUrl":"https://example.invalid/selected","path":"/fixture","name":"attachment"},null,true,{}]}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","spawn_agent",{"task_name":"","taskName":"fallback","target":null,"id":"fallback","targets":["a","  b  ","\u00a0","",3],"interrupt":false,"items":[]}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","send_input",{"target":false,"id":"ignored","message":"synthetic","interrupt":true,"items":[{"text":1}]}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","send_message",{"target":"/root/worker","message":"payload"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","followup_task",{"target":"/root/worker","reasoningEffort":"max","forkContext":false,"forkTurns":"all"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":125.5,"timeoutMs":3}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":null,"timeoutMs":" \u00a0  250e1  "}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0x20000000000001"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0x20000000000003"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0x1000000000000000000000000000000000000"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0XfE"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0b100011"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0o17"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"\u00a0"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"-0"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"1e309"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"+0xff"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0x"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","wait_agent",{"timeout_ms":"0x1g"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","list_agents",{"path_prefix":"/root","pathPrefix":"/ignored"}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","interrupt_agent",{}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","close_agent",{}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","resume_agent",{}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","agent_status",{}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","future.spawn_agent",{}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","Spawn_Agent",{}]}
+{"fn":"convertCodexSubagentToolUse","args":["at","call","__proto__",{}]}

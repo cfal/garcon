@@ -1,0 +1,23 @@
+{"fn":"convertCodexSubagentActivity","args":["at","call","started","thread","/root/fixture"]}
+{"fn":"convertCodexSubagentActivity","args":["at","call","interacted","thread","/root/fixture"]}
+{"fn":"convertCodexSubagentActivity","args":["at","call","interrupted","thread","/root/fixture"]}
+{"fn":"convertCodexSubagentActivity","args":["at","call","completed","thread","/root/fixture"]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/fixture","/root","Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/fixture\nPayload:\nSynthetic output."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/parent/fixture","/root/parent","Message Type: FINAL_ANSWER\r\nTask name: /root/parent\r\nSender: /root/parent/fixture\r\nPayload:\r\n  \ud83d\ude00 synthetic output.  "]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/parent/fixture","/root","Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/parent/fixture\nPayload:\nNot an immediate child."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/fixture","/root","Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/other\nPayload:\nMismatched sender."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/fixture","/root","Message Type: FINAL_ANSWER\nTask name: /root/other\nSender: /root/fixture\nPayload:\nMismatched recipient."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/..","/root","Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/..\nPayload:\nInvalid path."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/root","/root","Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/root\nPayload:\nReserved segment."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/fixture","/root","Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/fixture\nPayload:\nAgent errored: synthetic\n\nThis agent's turn failed. If you still need this agent, use the available collaboration tools to give it another task."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call","/root/fixture","/root","Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/fixture\nPayload:\nAgent errored: synthetic without the canonical suffix."]}
+{"fn":"convertCodexInterAgentLifecycle","args":["at","call",42,"/root","unstructured"]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","Message Type: FINAL_ANSWER\nTask name: fixture\nSender: legacy-id\nPayload:"]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","Message Type: FINAL_ANSWER\nTask name: fixture\nSender: legacy-id\nPayload:\nAgent shut down."]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","Message Type: FINAL_ANSWER\nTask name: fixture\nSender: legacy-id\nPayload:\nAgent was not found."]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","<subagent_notification>\n{\"agent_path\":\" /root/fixture  \",\"agent_id\":\"ignored\",\"status\":{\"invalid\":0,\"failed\":\"details\",\"completed\":\"later\"}}\n</subagent_notification>"]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","<subagent_notification>{\"agent_path\":\"\",\"agent_id\":\"fallback\",\"status\":\"pending_init\"}</subagent_notification>"]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","<subagent_notification>{\"agent_id\":\"__proto__\",\"status\":{\"not_found\":\"\"}}</subagent_notification>"]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","<subagent_notification>{\"agent_id\":\"fallback\",\"status\":\"bogus\"}</subagent_notification>"]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","<subagent_notification>{broken}</subagent_notification>"]}
+{"fn":"convertCodexSubagentLifecycleText","args":["at","call","prelude\n<subagent_notification>{\"agent_id\":\"fallback\",\"status\":\"completed\"}</subagent_notification>"]}

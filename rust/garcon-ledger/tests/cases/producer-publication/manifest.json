@@ -1,0 +1,24 @@
+{
+  "module": "rust/garcon-ledger/tests/producer-publication-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/producer-publication.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "canonicalizeRowsFixture",
+      "argument": 0
+    },
+    {
+      "fn": "dispatchRowsFixture",
+      "argument": 0
+    },
+    {
+      "fn": "dispatchRowsFixture",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "9d57abedb912bb096304b0a13c9f859ebb53cf286c0a8f43f4f1934a317eddd6"
+}
