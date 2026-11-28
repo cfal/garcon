@@ -1,0 +1,8 @@
+{"fn":"createCursorAcpNativePath","args":[null]}
+{"fn":"createCursorAcpNativePath","args":["a:b"]}
+{"fn":"createCursorAcpNativePath","args":[""]}
+{"fn":"getCursorAgentSessionIdFromNativePath","args":["!another:a"]}
+{"fn":"getCursorAgentSessionIdFromNativePath","args":[{"path":"!cursor:a"}]}
+{"fn":"getCursorAgentSessionIdFromNativePath","args":["!cursor:a:b"]}
+{"fn":"getCursorStreamJsonAgentSessionIdFromNativePath","args":["!cursor-acp:a"]}
+{"fn":"getCursorAcpAgentSessionIdFromNativePath","args":["!cursor-stream-json:a"]}

@@ -1019,6 +1019,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-agent-cursor"
+version = "0.0.0"
+dependencies = [
+ "garcon-agents-common",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "indexmap",
+ "regress",
+ "serde",
+ "serde_json",
+ "tokio-util",
+]
+
+[[package]]
 name = "garcon-agent-direct-anthropic-compatible"
 version = "0.0.0"
 dependencies = [

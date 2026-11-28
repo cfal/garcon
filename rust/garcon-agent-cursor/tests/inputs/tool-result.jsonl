@@ -1,0 +1,8 @@
+{"fn":"normalizeCursorToolResultContent","args":["read",{"success":{"content":null,"path":"p","extra":true}}]}
+{"fn":"normalizeCursorToolResultContent","args":["read",{"success":{"unused":1}}]}
+{"fn":"normalizeCursorToolResultContent","args":["read",{"success":{"content":"raw"}},{"output":{"success":{"content":"preferred","readRange":{"startLine":2}}}}]}
+{"fn":"normalizeCursorToolResultContent","args":["glob",{"success":{"files":[" ",1,"  path  "],"count":"0x20"}}]}
+{"fn":"normalizeCursorToolResultContent","args":["glob","Total  003 Files\r\n -  a \r\n- b "]}
+{"fn":"normalizeCursorToolResultContent","args":["grep",{"success":{"pattern":"x","path":"p","workspaceResults":{"2":{"content":{"matches":[{"file":"duplicate","matches":[{"lineNumber":"0x10"},{"content":""},null]}]}},"3":{"content":{"totalMatchedLines":"0b11","ripgrepTruncated":true,"matches":[{"file":"duplicate","matches":[{"isContextLine":false},{"contentTruncated":true}]}]}},"rest":{"content":{"matches":[{"file":"only","matches":[{"content":"not counted"}]}]}}}}}]}
+{"fn":"normalizeCursorToolResultContent","args":["arbitrary",["a",{"raw":true}]]}
+{"fn":"normalizeCursorToolResultContent","args":[null,"  raw \n"]}

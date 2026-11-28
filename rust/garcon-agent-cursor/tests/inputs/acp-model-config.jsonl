@@ -1,0 +1,14 @@
+{"fn":"cursorConfigSelectionForModel","args":["claude-4.6-opus-xhigh-thinking-fast"]}
+{"fn":"cursorConfigSelectionForModel","args":["claude-fable-5-max"]}
+{"fn":"cursorConfigSelectionForModel","args":["claude-opus-4-5-thinking"]}
+{"fn":"cursorConfigSelectionForModel","args":["claude-opus-4-7-extra-high"]}
+{"fn":"cursorConfigSelectionForModel","args":["gpt-5.1-codex-max-xhigh"]}
+{"fn":"cursorConfigSelectionForModel","args":["gpt-5.4-mini-"]}
+{"fn":"cursorConfigSelectionForModel","args":["gpt-5.4-nano-high-fast"]}
+{"fn":"cursorConfigSelectionForModel","args":["composer-2.5-arbitrary-fast"]}
+{"fn":"cursorConfigSelectionForModel","args":["composer-2.5"]}
+{"fn":"cursorConfigSelectionForModel","args":["future-fast"]}
+{"fn":"cursorConfigSelectionForModel","args":["gpt-5.1-codex-mini-nonexistent"]}
+{"fn":"cursorConfigSelectionForModel","args":["-fast"]}
+{"fn":"assignmentsForCursorModel","args":["claude-4.6-sonnet-thinking-medium","ask"]}
+{"fn":"assignmentsForCursorModel","args":["claude-fable-5-xhigh-thinking","plan"]}

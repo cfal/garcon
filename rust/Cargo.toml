@@ -4,6 +4,7 @@ members = [
   "garcon-agent-antigravity",
   "garcon-agent-claude",
   "garcon-agent-codex",
+  "garcon-agent-cursor",
   "garcon-agent-direct-anthropic-compatible",
   "garcon-agent-direct-openai-compatible",
   "garcon-agent-direct-openai-responses-compatible",
