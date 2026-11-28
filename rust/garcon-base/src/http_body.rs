@@ -1,7 +1,7 @@
 //! JSON body and bearer token parsing shared by HTTP handlers.
 
 use garcon_js::json;
-use http::Request;
+use http::{HeaderMap, HeaderName, Request};
 use http_body::Body;
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -20,6 +20,32 @@ pub enum JsonBodyError<E> {
 
 fn is_json_content_type(content_type: &str) -> bool {
     content_type.to_lowercase().contains("application/json")
+}
+
+/// Fetch Headers.get trims each byte-string value and joins duplicate lines.
+pub fn fetch_header_value(headers: &HeaderMap, name: &HeaderName) -> Option<String> {
+    let all = headers.get_all(name);
+    let mut values = all.iter();
+    let first = values.next()?;
+    let mut output: String = first
+        .as_bytes()
+        .trim_ascii()
+        .iter()
+        .copied()
+        .map(char::from)
+        .collect();
+    for value in values {
+        output.push_str(", ");
+        output.extend(
+            value
+                .as_bytes()
+                .trim_ascii()
+                .iter()
+                .copied()
+                .map(char::from),
+        );
+    }
+    Some(output)
 }
 
 fn parse_text(text: &str) -> Result<Value, MalformedJsonError> {
@@ -47,10 +73,8 @@ where
     B: Body,
     B::Data: bytes::Buf,
 {
-    let content_type = request.headers().get(http::header::CONTENT_TYPE);
-    if !content_type
-        .is_some_and(|value| is_json_content_type(&String::from_utf8_lossy(value.as_bytes())))
-    {
+    let content_type = fetch_header_value(request.headers(), &http::header::CONTENT_TYPE);
+    if !content_type.as_deref().is_some_and(is_json_content_type) {
         return Ok(Value::Object(Default::default()));
     }
     let body = request
@@ -64,9 +88,8 @@ where
 }
 
 pub fn get_token_from_request<B>(request: &Request<B>) -> Option<String> {
-    let header = request.headers().get(http::header::AUTHORIZATION)?;
-    let token = header.as_bytes().trim_ascii().strip_prefix(b"Bearer ")?;
-    Some(token.iter().copied().map(char::from).collect())
+    let header = fetch_header_value(request.headers(), &http::header::AUTHORIZATION)?;
+    header.strip_prefix("Bearer ").map(str::to_owned)
 }
 
 #[cfg(test)]

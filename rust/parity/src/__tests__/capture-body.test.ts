@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer, type AddressInfo } from 'node:net';
+import { gzipSync } from 'node:zlib';
 import { describe, expect, test } from 'bun:test';
-import { textOrBytes, type Capture } from '../capture.js';
+import { captureStep, textOrBytes, type Capture } from '../capture.js';
 import type { StartedServer } from '../environment.js';
 import { normalizeCapture } from '../normalize.js';
+import { resolvePlaceholders } from '../placeholders.js';
+import type { ScenarioStep } from '../scenario.js';
+import { expandTraps } from '../traps.js';
 import type { Json } from '../wildcard.js';
 
 const server = {
@@ -26,6 +32,70 @@ const server = {
 } satisfies StartedServer;
 
 const sha256 = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
+
+test.each([['automatic', false], ['explicit', true]] as const)('sends duplicate raw fields in wire order (%s credential)', async (_label, explicit) => {
+  const payload = { write: '\u96ea' };
+  const observed = Promise.withResolvers<{ lines: string[]; body: string }>();
+  const probe = createServer((socket) => {
+    let bytes = Buffer.alloc(0);
+    socket.on('data', (chunk) => {
+      bytes = Buffer.concat([bytes, typeof chunk === 'string' ? Buffer.from(chunk) : chunk]);
+      const endOfHead = bytes.indexOf('\r\n\r\n');
+      if (endOfHead === -1 || bytes.length < endOfHead + 4 + Buffer.byteLength(JSON.stringify(payload))) return;
+      observed.resolve({ lines: bytes.subarray(0, endOfHead).toString().split('\r\n'), body: bytes.subarray(endOfHead + 4).toString() });
+      const reply = gzipSync('{"read":true}');
+      socket.end(Buffer.concat([
+        Buffer.from(`HTTP/1.1 401 Unauthorized\r\nContent-Length: ${reply.length}\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nConnection: close\r\n\r\n`),
+        reply,
+      ]));
+    });
+  });
+  probe.listen(0, '0.0.0.0');
+  await once(probe, 'listening');
+  try {
+    const port = String((probe.address() as AddressInfo).port);
+    const origin = `http://127.0.0.1:${port}`;
+    const target = { ...server, port, origin, baseUrl: origin };
+    const rawHeaders: [string, string][] = [
+      ...(explicit ? [['Authorization', 'Bearer {{token}}'] as [string, string]] : []),
+      ['Content-Type', 'application/json'],
+      ['Authorization', 'Bearer {{username}}-other'],
+      ['Content-Type', 'application/synthetic'],
+    ];
+    const step: ScenarioStep = { name: 'raw', http: {
+      method: 'POST', path: '/sample?q=test', json: payload, rawHeaders, ...(explicit ? { auth: 'none' } : {}),
+    } };
+    const result = await captureStep(target, step, resolvePlaceholders(target, step, new Map(), new Date()));
+    const wire = await observed.promise;
+    expect(wire.lines[0]).toBe('POST /sample?q=test HTTP/1.1');
+    expect(wire.lines.map((line) => line.split(': ', 2)[0].toLowerCase())).toContain('host');
+    expect(wire.lines.filter((line) => /^(authorization|content-type):/i.test(line)).map((line) => line.slice(line.indexOf(': ') + 2)))
+      .toEqual(['Bearer session-token', 'application/json', 'Bearer parity-other', 'application/synthetic']);
+    expect(wire.body).toBe(JSON.stringify(payload));
+    expect(result).toMatchObject({ status: 401, request: { rawHeaders }, body: { kind: 'json', value: { read: true } } });
+  } finally {
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+  }
+});
+
+test('rejects a line break in a raw header value before sending the request', async () => {
+  const step: ScenarioStep = { name: 'bad-header', http: {
+    method: 'GET', rawHeaders: [['X-Probe', 'first\r\nsecond']],
+  } };
+  const placeholders = resolvePlaceholders(server, step, new Map(), new Date());
+  await expect(captureStep(server, step, placeholders)).rejects.toThrow('Invalid character');
+});
+
+test('malformed JSON traps keep the configured raw content-type fields without adding another', () => {
+  const rawHeaders: [string, string][] = [['Content-Type', 'application/json'], ['content-type', 'text/plain']];
+  const steps = expandTraps({
+    name: 'fixture', description: '', traps: true,
+    steps: [{ name: 'write', http: { method: 'POST', json: {}, rawHeaders } }],
+  });
+  const http = steps.find((step) => step.name === 'write~malformed-json')?.http;
+  expect(http?.rawHeaders).toEqual(rawHeaders);
+  expect(http?.headers).toBeUndefined();
+});
 
 function large(value: string): Capture {
   return { request: { method: 'GET', path: '/large', auth: 'token' }, status: 200, headers: {}, body: { kind: 'large-text', value } };
