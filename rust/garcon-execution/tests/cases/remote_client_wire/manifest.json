@@ -1,0 +1,56 @@
+{
+  "module": "rust/garcon-execution/tests/support/remote_client_wire_fixture.ts",
+  "tests": [
+    "rust/garcon-execution/tests/support/remote_client_wire_fixture.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "saveWire",
+      "argument": 0,
+      "guard": "acceptsSave",
+      "dropped": 17,
+      "kept": 60
+    },
+    {
+      "fn": "fileFailure",
+      "argument": 0,
+      "guard": "acceptsFailureKind",
+      "dropped": 103,
+      "kept": 0
+    },
+    {
+      "fn": "fileFailure",
+      "argument": 1,
+      "guard": "acceptsOutcome",
+      "dropped": 90,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "readReply",
+      "argument": 0
+    },
+    {
+      "fn": "saveWire",
+      "argument": 0
+    },
+    {
+      "fn": "fileFailure",
+      "argument": 0
+    },
+    {
+      "fn": "fileFailure",
+      "argument": 1
+    },
+    {
+      "fn": "historyRows",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 196,
+  "sha256": "ba1c755e2b22ce1e6c38fae7e99c8ee7189152f86aa57f8068e1e473628380ec"
+}
