@@ -58,7 +58,7 @@ test('matches stable values and wildcards but reports order and shape difference
   expect(unstableBroadcasts).toHaveLength(1);
   expect(unstableBroadcasts[0]?.difference).toMatchObject({ path: '$.broadcasts.group[0]', kind: 'order' });
   const candidate = reports('def456', ['second', 'first']);
-  expect(compareTraces(golden, candidate)).toEqual({ total: 2, problems: [], excludedBroadcasts: 1, excludedTests: 0 });
+  expect(compareTraces(golden, candidate)).toEqual({ total: 2, problems: [], excludedBroadcasts: 1, excludedTests: 0, excludedPaths: 0 });
   const bad: Traces = new Map([['scenario.test.ts', {
     'variable payload': { http: [], replies: [] },
     'ordered broadcasts': { broadcasts: { group: ['second'], unexpected: ['new'] } },
@@ -91,16 +91,36 @@ test('uses later recordings to detect rare groups and applies only declared excl
   expect(problems).toEqual([]);
   expect(unstableBroadcasts[0]?.difference.kind).toBe('extra');
   expect(compareTraces(golden, run(200, { [rareGroup]: ['different'], [declaredGroup]: ['different'] }), [], excluded))
-    .toEqual({ total: 1, problems: [], excludedTests: 1, excludedBroadcasts: 2 });
+    .toEqual({ total: 1, problems: [], excludedTests: 1, excludedBroadcasts: 2, excludedPaths: 0 });
   expect(compareTraces(golden, run(201, {}), [], excluded).problems[0]?.difference.path).toBe('$.http[0].status');
+});
+
+test('excludes one unstable path, not its test, siblings, or the same path in another test', () => {
+  const suite = 'scenario.test.ts';
+  const row = (activityStatus: string | null, id = 'same') => ({ http: [{ body: { sessions: [{ activityStatus, id }] } }] });
+  const run = (activity: string | null, id?: string, otherActivity: string | null = 'complete'): Traces =>
+    new Map([[suite, { noisy: row(activity, id), other: row(otherActivity) }]]);
+  const path = '$.http[0].body.sessions[0].activityStatus';
+  const exclusions = [{ suite, test: 'noisy', path, reason: 'fixture activity race' }];
+  expect(mergeTraces([run('complete'), run(null)]).problems[0]?.difference.path).toBe(path);
+  const { golden, problems, noise } = mergeTraces([run('complete'), run(null)], exclusions);
+  expect(problems).toEqual([]);
+  expect(noise).toEqual([]);
+  const matched = compareTraces(golden, run(null), [], exclusions);
+  expect(matched).toMatchObject({ total: 2, problems: [], excludedTests: 0, excludedPaths: 1 });
+  expect(compareTraces(golden, run(null, 'wrong'), [], exclusions).problems[0]?.difference.path)
+    .toBe('$.http[0].body.sessions[0].id');
+  expect(compareTraces(golden, run(null, 'same', null), [], exclusions).problems[0]).toMatchObject({
+    test: 'other', difference: { path },
+  });
 });
 
 test('the opt-in client writes one named trace with HTTP, replies and attributed broadcasts', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'parity-trace-fixture-'));
   const repoRoot = resolve(import.meta.dir, '../../../..');
-  const suite = 'rust/parity/src/__tests__/fixtures/trace-demo.test.ts';
+  const suite = 'rust/parity/src/__tests__/fixtures/trace-demo.suite.ts';
   try {
-    const run = Bun.spawn([process.execPath, 'test', join(repoRoot, suite)], {
+    const run = Bun.spawn([process.execPath, 'test', `./${suite}`], {
       cwd: repoRoot,
       env: { ...process.env, GARCON_TEST_TRACE_DIR: directory },
       stdout: 'inherit',
@@ -137,9 +157,9 @@ test('the opt-in client writes one named trace with HTTP, replies and attributed
 test('names traces under conditional and parameterized describes', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'parity-trace-fixture-'));
   const repoRoot = resolve(import.meta.dir, '../../../..');
-  const suite = 'rust/parity/src/__tests__/fixtures/trace-describe.test.ts';
+  const suite = 'rust/parity/src/__tests__/fixtures/trace-describe.suite.ts';
   try {
-    const run = Bun.spawn([process.execPath, 'test', join(repoRoot, suite)], {
+    const run = Bun.spawn([process.execPath, 'test', `./${suite}`], {
       cwd: repoRoot,
       env: { ...process.env, GARCON_TEST_TRACE_DIR: directory },
       stdout: 'ignore',

@@ -81,7 +81,8 @@ async function record(repoRoot: string, args: string[]): Promise<number> {
       const { golden, problems, noise, unstableBroadcasts } = mergeTraces([first!, second!, ...rest], declared);
       for (const wildcard of noise) console.log(`wildcard ${wildcard}`);
       for (const entry of declared) {
-        console.log(`DECLARED UNSTABLE ${name} > ${'test' in entry ? entry.test : traceGroup(entry.chat, entry.type)}: ${entry.reason}`);
+        const target = 'test' in entry ? entry.test + (entry.path ? ` at ${entry.path}` : '') : traceGroup(entry.chat, entry.type);
+        console.log(`DECLARED UNSTABLE ${name} > ${target}: ${entry.reason}`);
       }
       if (unstableBroadcasts.length) {
         console.log(formatTraceDifferences(unstableBroadcasts, 'UNSTABLE BROADCAST (not compared)'));
@@ -91,8 +92,9 @@ async function record(repoRoot: string, args: string[]): Promise<number> {
         failed = true;
       } else {
         await writeTraces(output, golden);
-        const tests = declared.filter((entry) => 'test' in entry).length;
-        console.log(`Recorded ${name}: ${Object.keys(golden.get(name) ?? {}).length} tests, ${noise.length} wildcards, ${tests} tests and ${declared.length - tests + unstableBroadcasts.length} broadcast groups excluded`);
+        const tests = declared.filter((entry) => 'test' in entry && !entry.path).length;
+        const paths = declared.filter((entry) => 'test' in entry && entry.path).length;
+        console.log(`Recorded ${name}: ${Object.keys(golden.get(name) ?? {}).length} tests, ${noise.length} wildcards, ${tests} tests, ${paths} paths, and ${declared.length - tests - paths + unstableBroadcasts.length} broadcast groups excluded`);
       }
     } catch (error) {
       console.error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -112,9 +114,11 @@ export async function tracesCli(args: string[], repoRoot: string): Promise<numbe
       const expected = await readTraces(operands[0]!, 'json');
       const actual = await readTraces(operands[1]!, 'jsonl');
       if (expected.size === 0) throw new Error('No golden traces found');
-      const { total, problems, excludedBroadcasts, excludedTests } = compareTraces(expected, actual, await readKnownDifferences(repoRoot), await readTraceExclusions(repoRoot));
+      const { total, problems, excludedBroadcasts, excludedTests, excludedPaths } = compareTraces(expected, actual, await readKnownDifferences(repoRoot), await readTraceExclusions(repoRoot));
       console.log(`Matched ${total - problems.length}/${total} traced tests`);
-      if (excludedBroadcasts || excludedTests) console.log(`Excluded as unstable: ${excludedTests} tests, ${excludedBroadcasts} broadcast groups`);
+      if (excludedBroadcasts || excludedTests || excludedPaths) {
+        console.log(`Excluded as unstable: ${excludedTests} tests, ${excludedPaths} paths, ${excludedBroadcasts} broadcast groups`);
+      }
       if (problems.length) console.log(formatTraceDifferences(problems));
       return problems.length ? 1 : 0;
     }
