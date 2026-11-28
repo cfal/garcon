@@ -70,6 +70,7 @@ pub mod garcon_command_envelope;
 pub mod garcon_command_rejection;
 pub mod garcon_command_results;
 pub mod garcon_command_text;
+pub mod garcon_commands;
 pub mod garcon_resume_agent;
 pub mod garcon_schedule;
 pub mod garcon_start_agent;

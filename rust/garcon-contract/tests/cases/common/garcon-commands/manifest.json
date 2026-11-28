@@ -1,0 +1,43 @@
+{
+  "module": "common/garcon-commands.ts",
+  "tests": [
+    "rust/garcon-contract/tests/inputs/common/garcon-commands.cases.ts"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-commands.jsonl",
+  "guards": [
+    {
+      "fn": "extractGarconCommands",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/garcon-commands-guards.ts#chatMessage",
+      "dropped": 71,
+      "kept": 60
+    },
+    {
+      "fn": "garconMessageContent",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/garcon-commands-guards.ts#nullableChatId",
+      "dropped": 29,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "extractGarconCommands",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "fn": "extractGarconCommands",
+      "where": "args",
+      "path": "$.args",
+      "type": "more than 1048576 bytes encoded",
+      "at": null,
+      "count": 1
+    }
+  ],
+  "cases": 1133,
+  "sha256": "972f5df0918d2f6756db9b42b9dc596aa2baff2d39010afa8e7ab1b98e404331"
+}
