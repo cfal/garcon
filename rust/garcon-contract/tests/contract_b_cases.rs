@@ -373,6 +373,67 @@ fn garcon_ticket_result_notice_keeps_correlation_and_drops_private_result_fields
 }
 
 #[test]
+fn transcript_notice_details_recordings() {
+    use garcon_contract::transcript_notice_details::*;
+    assert_recording("transcript-notice-details", |function, args| {
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        Ok(match function {
+            "parseTranscriptNoticeDetail" => json!(parse_transcript_notice_detail(value)),
+            "isCarryoverMigrationQuarantineNoticeDetail" => {
+                json!(is_carryover_migration_quarantine_notice_detail(value))
+            }
+            "isPreambleApplicationNoticeDetail" => {
+                json!(is_preamble_application_notice_detail(value))
+            }
+            "isPreambleSelectionChangedNoticeDetail" => {
+                json!(is_preamble_selection_changed_notice_detail(value))
+            }
+            "isHandoffSummaryNoticeDetail" => json!(is_handoff_summary_notice_detail(value)),
+            "isPublicationGapNoticeDetail" => json!(is_publication_gap_notice_detail(value)),
+            "isChatIdDisclosureNoticeDetail" => json!(is_chat_id_disclosure_notice_detail(value)),
+            "isChatIdDiscoveryFailureNoticeDetail" => {
+                json!(is_chat_id_discovery_failure_notice_detail(value))
+            }
+            "isInterAgentMessageOutcomeNoticeDetail" => {
+                json!(is_inter_agent_message_outcome_notice_detail(value))
+            }
+            "isInterAgentMessageReceivedNoticeDetail" => {
+                json!(is_inter_agent_message_received_notice_detail(value))
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn transcript_notice_details_identify_and_project_publication_gaps_and_quarantines() {
+    use garcon_contract::transcript_notice_details::*;
+    let parsed =
+        parse_transcript_notice_detail(&json!({"type":"publication-gap","extra":"ignored"}));
+    assert_eq!(parsed, Some(TranscriptNoticeDetail::PublicationGap));
+    assert_eq!(json!(parsed), json!({"type":"publication-gap"}));
+    let raw = json!({
+        "type":"carryover-migration-quarantine","artifactId":"archive","errorCode":"FAILED","private":"ignored"
+    });
+    let parsed = parse_transcript_notice_detail(&raw).unwrap();
+    assert!(matches!(
+        parsed,
+        TranscriptNoticeDetail::CarryoverMigrationQuarantine { .. }
+    ));
+    assert_eq!(
+        json!(parsed),
+        json!({"type":"carryover-migration-quarantine","artifactId":"archive","errorCode":"FAILED"})
+    );
+    assert!(
+        parse_transcript_notice_detail(
+            &json!({"type":"carryover-migration-quarantine","errorCode":"FAILED"})
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn ticket_commands_recordings() {
     use garcon_contract::ticket_commands::*;
     assert_recording("ticket-commands", |function, args| {

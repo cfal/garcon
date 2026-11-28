@@ -97,6 +97,7 @@ pub mod tickets;
 pub mod tool_result_content;
 pub mod tool_result_message;
 pub mod tool_schedule;
+pub mod transcript_notice_details;
 pub mod transcript_projection;
 pub mod user_message_presentation;
 pub mod ws_auth;
