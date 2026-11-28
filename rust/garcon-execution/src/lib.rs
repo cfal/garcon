@@ -7,6 +7,7 @@ pub mod chat_command_settlement;
 pub mod chat_execution_control_operations;
 pub mod chat_execution_control_repository;
 pub mod chat_execution_control_transitions;
+pub mod chat_execution_coordinator;
 pub mod command_ledger;
 pub mod control_input_delivery;
 pub mod control_projection;

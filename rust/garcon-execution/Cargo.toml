@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+futures.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true
