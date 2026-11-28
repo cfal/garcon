@@ -166,20 +166,158 @@ fn options(cwd: &Path) -> ClaudeSessionOptions {
     }
 }
 
+const READ_INITIALIZE: &str = r#"
+read -r initialize || exit 1
+case "$initialize" in *'"subtype":"initialize"'*) ;; *) exit 2 ;; esac
+request_id=${initialize#*\"request_id\":\"}
+request_id=${request_id%%\"*}
+"#;
+
+const ACK_INITIALIZE: &str = r#"
+printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"commands":[]}}}\n' "$request_id"
+"#;
+
+fn write_fake_cli(script: &Path, body: &str) {
+    fs::write(
+        script,
+        format!("#!/bin/sh\n{READ_INITIALIZE}\n{ACK_INITIALIZE}\n{body}"),
+    )
+    .unwrap();
+    fs::set_permissions(script, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[tokio::test]
+async fn a_rejected_initialize_retires_the_cli_before_the_next_resume() {
+    LocalSet::new().run_until(async {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("fake-claude-initialize");
+        fs::write(&script, format!(r#"#!/bin/sh
+{READ_INITIALIZE}
+if [ ! -f synthetic-attempt ]; then
+  : > synthetic-attempt
+  printf '{{"type":"control_response","response":{{"subtype":"error","request_id":"%s","error":"initialize rejected"}}}}\n' "$request_id"
+  read -r input && exit 4
+  exit 0
+fi
+{ACK_INITIALIZE}
+read -r input || exit 3
+printf '%s\n' "$input"
+read -r close || exit 3
+"#)).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
+        let options = options(directory.path());
+        let session = Rc::new(ClaudeRunningSession::new(options.clone()));
+        runtime.register_session(session.clone());
+        let (received, mut frames) = mpsc::unbounded_channel();
+        let on_message: Rc<ClaudeStreamHandler> = Rc::new(move |_, frame| received.send(frame).unwrap());
+        let error = runtime.spawn_cli(&session, options.clone(), true, on_message.clone()).await.unwrap_err();
+        assert_eq!(error.to_string(), "initialize rejected");
+        assert!(session.process.borrow().is_none());
+        runtime.spawn_cli(&session, options, true, on_message).await.unwrap();
+        let process = session.process.borrow().clone().unwrap();
+        process.transport.write_line(r#"{"type":"synthetic-prompt"}"#.into(), Default::default()).await.unwrap();
+        let frame = tokio::time::timeout(Duration::from_secs(5), frames.recv()).await.unwrap().unwrap();
+        assert_eq!(frame["type"], "synthetic-prompt");
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        assert_eq!(process.transport.exited().await.unwrap(), 0);
+    }).await;
+}
+
+#[tokio::test]
+async fn a_real_cli_gets_matching_permitted_answers_and_cannot_reuse_a_cancelled_decision() {
+    use garcon_contract::chat_command_contracts::{
+        PermissionDecisionPayload, PermissionDecisionResponse,
+    };
+    use garcon_interface::producer::AgentRequestedPermission;
+
+    async fn receive<T>(events: &mut mpsc::UnboundedReceiver<T>) -> T {
+        tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    LocalSet::new().run_until(async {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("fake-claude-permissions");
+        write_fake_cli(&script, r#"
+printf '%s\n' '{"type":"control_request","request_id":"bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}'
+read -r answer || exit 1
+printf '{"type":"permission-observed","frame":%s}\n' "$answer"
+printf '%s\n' '{"type":"control_request","request_id":"question","request":{"subtype":"can_use_tool","tool_name":"Ask_User-Question","tool_use_id":"tool-question","input":{"questions":[{"question":"Which?","options":[{"id":"a","label":"First","preview":"Synthetic preview"}]}]}}}'
+read -r answer || exit 1
+printf '{"type":"permission-observed","frame":%s}\n' "$answer"
+printf '%s\n' '{"type":"control_request","request_id":"cancel","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion"}}'
+printf '%s\n' '{"type":"control_cancel_request","request_id":"cancel"}'
+read -r close || exit 1
+"#);
+        let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
+        let mut options = options(directory.path());
+        options.permission_mode = PermissionMode::ManualBypass;
+        let session = Rc::new(ClaudeRunningSession::new(options.clone()));
+        runtime.register_session(session.clone());
+        let (publish, mut events) = mpsc::unbounded_channel();
+        let turn = runtime.begin_turn(&session, runtime_operation("run-1".into(), Rc::new(move |event| publish.send(event).unwrap()))).unwrap();
+        let input = turn.protocol.borrow().input_uuid.clone();
+        turn.protocol.borrow_mut().observe_input(&json!({"type":"command_lifecycle","state":"started","command_uuid":input}));
+        let (echo, mut echoed) = mpsc::unbounded_channel();
+        runtime.spawn_cli(&session, options, false, Rc::new(move |_, frame| echo.send(frame).unwrap())).await.unwrap();
+
+        let bypassed = receive(&mut echoed).await;
+        assert_eq!(bypassed["frame"], json!({
+            "type":"control_response",
+            "response":{"request_id":"bash","subtype":"success","response":{"behavior":"allow","updatedInput":{"command":"ls"}}},
+        }));
+        let AgentRuntimeEvent::Permission {
+            lifecycle: AgentProviderPermissionLifecycle::Requested(AgentRequestedPermission::Requested {
+                permission_occurrence_id, requested_tool, ..
+            }), decision: Some(decide), ..
+        } = receive(&mut events).await else { panic!("expected structured question"); };
+        assert_eq!(decide.permission_occurrence_id(), permission_occurrence_id);
+        assert_eq!(serde_json::to_value(requested_tool).unwrap()["type"], "ask-user-question-tool-use");
+        let answer = PermissionDecisionPayload {
+            allow: true, always_allow: Some(false),
+            response: Some(PermissionDecisionResponse::Provider(json!({
+                "type":"ask-user-question-response","outcome":"answered",
+                "answers":[{"questionId":"Which?","selectedOptionIds":["a"]}]
+            }).into())),
+        };
+        decide.respond(answer.clone()).await.unwrap();
+        let answered = receive(&mut echoed).await;
+        assert_eq!(answered["frame"]["response"]["request_id"], "question");
+        let response = &answered["frame"]["response"]["response"];
+        assert_eq!(response["toolUseID"], "tool-question");
+        assert_eq!(response["updatedInput"]["answers"]["Which?"], "First");
+        assert_eq!(response["updatedInput"]["annotations"]["Which?"]["preview"], "Synthetic preview");
+
+        let AgentRuntimeEvent::Permission { decision: Some(cancelled), .. } =
+            receive(&mut events).await else { panic!("expected another structured question"); };
+        assert!(matches!(receive(&mut events).await, AgentRuntimeEvent::Permission {
+            lifecycle: AgentProviderPermissionLifecycle::Terminal(AgentTerminalPermission::Cancelled {
+                permission_occurrence_id, ..
+            }), ..
+        } if permission_occurrence_id == cancelled.permission_occurrence_id()));
+        assert_eq!(cancelled.respond(answer).await.unwrap_err().to_string(), "Claude permission occurrence is no longer pending");
+        runtime.finish_turn(&session);
+        let process = session.process.borrow().clone().unwrap();
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        assert_eq!(process.transport.exited().await.unwrap(), 0);
+    }).await;
+}
+
 #[tokio::test]
 async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_permission() {
     LocalSet::new().run_until(async {
         let directory = tempfile::tempdir().unwrap();
         let script = directory.path().join("fake-claude");
-        fs::write(&script, concat!(
-            "#!/bin/sh\n",
+        write_fake_cli(&script, concat!(
             "read -r first || exit 1\n",
             "printf '%s\\n' '{\"type\":\"fake-barrier\"}'\n",
             "printf '%s\\n' '{\"type\":\"stale-frame\"}'\n",
             "read -r second || exit 1\n",
             "exit 7\n",
-        )).unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        ));
         let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
         let options = options(directory.path());
         let session = Rc::new(ClaudeRunningSession::new(options.clone()));
@@ -191,7 +329,7 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
         turn.protocol.borrow_mut().mark_abort_requested();
         runtime.pending_permissions.borrow_mut().push(PendingPermission {
             permission_occurrence_id: "synthetic-permission".into(),
-            cli_request_id: "synthetic-control".into(),
+            cli_request_id: Some("synthetic-control".into()),
             agent_session_id: session.id.clone(),
             tool_name: "Read".into(),
             tool_input: json!({}).into(),
