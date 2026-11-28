@@ -1,0 +1,6 @@
+{"fn":"parseUserMessagePresentation","args":[null]}
+{"fn":"parseUserMessagePresentation","args":[{"origin":"wrong","z":0,"20":0,"3":0}]}
+{"fn":"parseUserMessagePresentation","args":[{"origin":"cli","title":"\n","disclosure":null}]}
+{"fn":"parseUserMessagePresentation","args":[{"origin":"cli","style":true,"title":"invalid\ntitle"}]}
+{"fn":"parseUserMessagePresentation","args":[{"origin":"cli","disclosure":"collapsed","title":null}]}
+{"fn":"parseUserMessagePresentation","args":[{"origin":"cli","style":"custom","customStyle":{"lightAccent":"#123abc","darkAccent":"#456def"},"title":"  Hello  ","disclosure":"collapsed"}]}
