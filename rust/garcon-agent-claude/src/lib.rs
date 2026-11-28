@@ -18,6 +18,7 @@ pub mod endpoint_runtime;
 pub mod execution;
 pub mod fork_transcript;
 pub mod history_loader;
+mod integration;
 pub mod interrupt_receipt;
 pub mod model_context;
 pub mod native_activity;
@@ -37,6 +38,8 @@ pub mod tool_use_converter;
 pub mod turn_publisher;
 pub mod usage_format;
 pub mod user_input;
+
+pub use integration::ClaudeAgentIntegration;
 
 use std::rc::Rc;
 
