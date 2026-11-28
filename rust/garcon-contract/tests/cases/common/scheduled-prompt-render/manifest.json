@@ -1,0 +1,22 @@
+{
+  "module": "common/scheduled-prompt-render.ts",
+  "tests": [
+    "common/__tests__/scheduled-prompt-render.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseRenderScheduledPromptRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseRenderScheduledPromptResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 134,
+  "sha256": "b0312d4dc03b990fda14b8dccfc2f76841721a7ddab79dfc63ac94e0c210de08"
+}
