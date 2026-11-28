@@ -398,6 +398,12 @@ runs.
   same for now, since a provider or a proxy may key on it. Header names go
   out in lowercase and in the HTTP client's order where Bun sends mixed case;
   values and the set of fields match. A choice for the lift.
+- A security observation about the original, kept as is in the port: on a
+  redirect to another origin its provider requests drop `Authorization` but
+  forward `x-api-key` like any other header (the behavior of fetch), so a
+  provider endpoint that redirects elsewhere receives that key at the new
+  origin. Whether the port should refuse to follow such a redirect is the
+  user's decision.
 
 ## Out of scope
 
