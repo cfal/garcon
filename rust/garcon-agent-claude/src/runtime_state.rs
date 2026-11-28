@@ -5,7 +5,7 @@ use std::{
 };
 
 use garcon_contract::chat_modes::{ClaudeThinkingMode, PermissionMode, ThinkingMode};
-use garcon_js::json::Opaque;
+use garcon_js::{Clock, InvalidTimeValue, SystemClock, json::Opaque, to_iso_string};
 use indexmap::IndexMap;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -29,6 +29,7 @@ pub enum InterruptFallbackStage {
 pub struct ClaudeRunningSession {
     pub id: String,
     pub chat_id: String,
+    clock: Rc<dyn Clock>,
     pub initialization: RefCell<Option<CancellationToken>>,
     pub last_activity_at: Cell<Instant>,
     pub provider_state: Cell<ClaudeProviderSessionState>,
@@ -53,9 +54,14 @@ pub struct ClaudeSessionProcess {
 
 impl ClaudeRunningSession {
     pub fn new(options: ClaudeSessionOptions) -> Self {
+        Self::with_clock(options, Rc::new(SystemClock))
+    }
+
+    pub fn with_clock(options: ClaudeSessionOptions, clock: Rc<dyn Clock>) -> Self {
         Self {
             id: options.agent_session_id.clone(),
             chat_id: options.chat_id.clone(),
+            clock,
             initialization: RefCell::new(None),
             last_activity_at: Cell::new(Instant::now()),
             provider_state: Cell::new(ClaudeProviderSessionState::Unknown),
@@ -73,6 +79,10 @@ impl ClaudeRunningSession {
             current_env_overrides: RefCell::new(options.env_overrides.clone()),
             options: RefCell::new(options),
         }
+    }
+
+    pub(crate) fn now_iso(&self) -> Result<String, InvalidTimeValue> {
+        to_iso_string(self.clock.now_ms())
     }
 
     pub fn process_id(&self) -> Option<u32> {

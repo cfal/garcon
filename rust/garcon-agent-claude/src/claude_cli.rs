@@ -14,7 +14,7 @@ use garcon_interface::{
     producer::{AgentProviderPermissionLifecycle, AgentTerminalPermission},
     resources::ExecutorResult,
 };
-use garcon_js::{Clock, SystemClock, json::Opaque, to_iso_string, trim};
+use garcon_js::{json::Opaque, trim};
 use indexmap::IndexMap;
 use serde_json::{Value, json};
 use tokio::time::Instant;
@@ -452,6 +452,13 @@ impl ClaudeCli {
             }
             Some("status") if message["compact_result"] == "failed" => {
                 if let Some(turn) = turn.filter(|turn| turn.protocol.borrow().input_started()) {
+                    let timestamp = match session.now_iso() {
+                        Ok(timestamp) => timestamp,
+                        Err(error) => {
+                            self.fail_session(session, error.to_string());
+                            return true;
+                        }
+                    };
                     turn.pending_compaction.take();
                     let reason = message["compact_error"]
                         .as_str()
@@ -462,7 +469,7 @@ impl ClaudeCli {
                         &session.id,
                         &turn,
                         vec![NativeSourced::new(ChatMessage::Error(ErrorMessage {
-                            timestamp: now_iso(),
+                            timestamp,
                             content: reason.to_owned(),
                         }))],
                     );
@@ -565,12 +572,19 @@ impl ClaudeCli {
         }
         drop(protocol);
         if fallback {
+            let timestamp = match session.now_iso() {
+                Ok(timestamp) => timestamp,
+                Err(error) => {
+                    self.fail_session(session, error.to_string());
+                    return;
+                }
+            };
             self.publisher.messages(
                 &session.id,
                 &turn,
                 vec![NativeSourced::new(ChatMessage::Assistant(
                     AssistantMessage {
-                        timestamp: now_iso(),
+                        timestamp,
                         content: text.to_owned(),
                         questions: None,
                     },
@@ -1056,8 +1070,4 @@ fn cli_log_fields<const N: usize>(
     fields: [(&str, serde_json::Value); N],
 ) -> IndexMap<String, Opaque> {
     IndexMap::from_iter(fields.map(|(key, value)| (key.to_owned(), value.into())))
-}
-
-fn now_iso() -> String {
-    to_iso_string(SystemClock.now_ms()).expect("the current time is in range")
 }
