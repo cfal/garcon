@@ -8,10 +8,10 @@ use garcon_contract::chat_message_coercion::{
 };
 use garcon_contract::chat_plan::{PlanStep, coerce_todo_items};
 use garcon_contract::chat_types::ToolUseChatMessage as Message;
-use garcon_js::{Number, OptionalNullable, json::Opaque};
+use garcon_js::{Number, OptionalNullable, json::Opaque, string_to_number};
 use serde_json::{Map, Value};
 
-use crate::js::{prop, string_to_number, strip_name_separators};
+use crate::js::{prop, strip_name_separators};
 
 // The built-in tool inventory shipped by OpenCode 1.18.34.
 // https://github.com/anomalyco/opencode/blob/aec0b9a6d8898f68f923aaf08b7306d931fd9d76/packages/opencode/src/tool/registry.ts#L231-L249

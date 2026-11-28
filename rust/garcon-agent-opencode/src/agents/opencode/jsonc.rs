@@ -28,9 +28,8 @@
 //! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //! SOFTWARE.
 
+use garcon_js::string_to_number;
 use serde_json::{Map, Value};
-
-use crate::js::string_to_number;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseErrorCode {
