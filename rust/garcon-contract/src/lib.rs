@@ -103,6 +103,7 @@ pub mod runtime_shell;
 pub mod schedule_duration;
 pub mod scheduled_prompt_render;
 pub mod scheduled_prompts;
+pub mod self_handoff_contracts;
 pub mod server_runtime;
 pub mod settings;
 pub mod share_types;
