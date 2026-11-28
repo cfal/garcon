@@ -15,3 +15,9 @@
 {"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{}},{"key":"label","type":"string","label":"Label"},""]}
 {"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{}},{"key":"credential","type":"credential-ref","label":"Credential","credentialKind":"fixture"},"fixture-id"]}
 {"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{"credential":"old"}},{"key":"credential","type":"credential-ref","label":"Credential","credentialKind":"fixture"},null]}
+{"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{"7":"index","effort":"low","z":1}},{"key":"0","type":"string","label":"Index or ordinary property"},"val"]}
+{"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{"7":"index","effort":"low","z":1}},{"key":"10","type":"string","label":"Index or ordinary property"},"val"]}
+{"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{"7":"index","effort":"low","z":1}},{"key":"2","type":"string","label":"Index or ordinary property"},"val"]}
+{"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{"7":"index","effort":"low","z":1}},{"key":"01","type":"string","label":"Index or ordinary property"},"val"]}
+{"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{"7":"index","effort":"low","z":1}},{"key":"-1","type":"string","label":"Index or ordinary property"},"val"]}
+{"fn":"withAgentSetting","args":[{"ownerId":"sample","schemaVersion":1,"values":{"7":"index","effort":"low","z":1}},{"key":"4294967295","type":"string","label":"Index or ordinary property"},"val"]}

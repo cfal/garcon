@@ -1,0 +1,12 @@
+{"fn":"stripDiffHeaders","args":[""]}
+{"fn":"stripDiffHeaders","args":["@@ -1 +1 @@\n-old\n+new"]}
+{"fn":"stripDiffHeaders","args":["diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1,2 @@\n-a\n+b"]}
+{"fn":"stripDiffHeaders","args":["diff --git a/a b/a\nheader @@ marker\n"]}
+{"fn":"stripDiffHeaders","args":["diff \ud83d\ude00\n@@ arbitrary\ncontext\n@@ second"]}
+{"fn":"readOnlyGitOptions","args":[]}
+{"fn":"readOnlyGitOptions","args":[{"disableOptionalLocks":false}]}
+{"fn":"resolvePathWithinProject","args":["/synthetic/root","folder/../file"]}
+{"fn":"resolvePathWithinProject","args":["/synthetic/root","/synthetic/root"]}
+{"fn":"resolvePathWithinProject","args":["/synthetic/root","/synthetic/root/file"]}
+{"fn":"resolvePathWithinProject","args":["/synthetic/root","/synthetic/root-sibling"]}
+{"fn":"resolvePathWithinProject","args":["/","synthetic"]}
