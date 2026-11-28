@@ -618,19 +618,24 @@ dependencies = [
 name = "garcon-runtime"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "base64",
  "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "libc",
  "rustix",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
