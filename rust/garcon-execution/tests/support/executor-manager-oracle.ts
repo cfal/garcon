@@ -21,6 +21,15 @@ export async function executorManagerTrace(scenario: string) {
     const off = manager.onChanged(() => effects.push('changed'));
     const offAvailability = manager.onAvailabilityChanged((_, value) => effects.push(value));
     const initialLink = manager.inboundLink(id);
+    if (scenario === 'wire') {
+      try {
+        return JSON.stringify(manager.list(), (key, value) => {
+          if (value !== null && key === 'projectBasePath') return '/synthetic';
+          if (value !== null && key === 'instanceId') return 'synthetic-instance';
+          return value;
+        });
+      } finally { off(); offAvailability(); await manager.dispose(); }
+    }
     const mutationError = async (work: () => unknown) => {
       try { await work(); return null; }
       catch (error) {
