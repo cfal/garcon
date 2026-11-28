@@ -19,8 +19,11 @@ use garcon_agent_codex::app_server::{
     },
     protocol::JsonRpcId,
 };
+use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
 use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
-use garcon_js::json::from_str;
+use garcon_interface::host::AgentLogger;
+use garcon_js::json::{Opaque, from_str};
+use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::json;
 use tempfile::{TempDir, tempdir};
@@ -102,6 +105,103 @@ fn steer_options() -> CodexSteerRequestOptions<'static> {
         prepare_delivery: async { Ok(()) }.boxed_local(),
         acknowledgement_timeout: Some(Duration::from_secs(1)),
     }
+}
+
+#[derive(Default)]
+struct DiscoveryLogger(RefCell<Vec<String>>);
+
+impl AgentLogger for DiscoveryLogger {
+    fn debug(&self, _: &str, _: Option<&IndexMap<String, Opaque>>) {}
+    fn info(&self, _: &str, _: Option<&IndexMap<String, Opaque>>) {}
+    fn warn(&self, message: &str, _: Option<&IndexMap<String, Opaque>>) {
+        self.0.borrow_mut().push(message.to_owned());
+    }
+    fn error(&self, _: &str, _: Option<&IndexMap<String, Opaque>>) {}
+}
+
+#[tokio::test]
+async fn coalesces_skills_and_command_probes_by_project_and_clears_the_cache() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Rc::new(Fixture::new(FIXTURE));
+            let discovery = CodexSkillDiscovery::new(
+                Rc::new({
+                    let fixture = fixture.clone();
+                    move || CodexAppServerClient::new(fixture.options(""))
+                }),
+                Rc::new(DiscoveryLogger::default()),
+            );
+            let (commands, skills) =
+                tokio::join!(discovery.commands("/repo"), discovery.skill_refs("/repo"));
+            assert_eq!(commands.unwrap()[0].name, "verify");
+            assert_eq!(skills.unwrap()[0].path, "/synthetic/verify");
+            assert!(discovery.commands("/empty").await.unwrap().is_empty());
+            assert_eq!(discovery.commands("/repo").await.unwrap().len(), 1);
+            let requests = || {
+                fixture
+                    .frames()
+                    .into_iter()
+                    .filter(|frame| frame["method"] == "skills/list")
+                    .count()
+            };
+            assert_eq!(requests(), 2);
+            discovery.clear().await;
+            assert_eq!(discovery.commands("/repo").await.unwrap().len(), 1);
+            assert_eq!(requests(), 3);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn clearing_a_pending_skill_probe_cannot_cache_its_empty_result() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Rc::new(Fixture::new(FIXTURE));
+            let (signal, started) = oneshot::channel();
+            let (release, gate) = oneshot::channel();
+            let signal = Cell::new(Some(signal));
+            let gate = Cell::new(Some(gate));
+            let logger = Rc::new(DiscoveryLogger::default());
+            let discovery = CodexSkillDiscovery::new(
+                Rc::new({
+                    let fixture = fixture.clone();
+                    move || {
+                        let mut options = fixture.options("");
+                        if let Some(gate) = gate.take() {
+                            let gate = Cell::new(Some(gate));
+                            let signal = Cell::new(signal.take());
+                            let resolve = options.resolve_cli.clone();
+                            options.resolve_cli = Rc::new(move |env| {
+                                signal.take().unwrap().send(()).unwrap();
+                                let gate = gate.take().unwrap();
+                                let command = resolve(env);
+                                async move {
+                                    gate.await?;
+                                    command.await
+                                }
+                                .boxed_local()
+                            });
+                        }
+                        CodexAppServerClient::new(options)
+                    }
+                }),
+                logger.clone(),
+            );
+            let pending = tokio::task::spawn_local({
+                let discovery = discovery.clone();
+                async move { discovery.commands("/repo").await }
+            });
+            started.await.unwrap();
+            discovery.clear().await;
+            release.send(()).unwrap();
+            assert!(pending.await.unwrap().unwrap().is_empty());
+            assert_eq!(discovery.commands("/repo").await.unwrap()[0].name, "verify");
+            assert_eq!(
+                logger.0.borrow().as_slice(),
+                ["Codex skills discovery failed"]
+            );
+        })
+        .await;
 }
 
 #[tokio::test]

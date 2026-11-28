@@ -25,6 +25,12 @@ for await (const line of input) {
     case 'ping':
       write({ id, result: { pong: true } });
       break;
+    case 'skills/list':
+      write({ id, result: { data: [{ skills: params.cwds[0] === '/empty' ? [] : [
+        { name: 'verify', path: '/synthetic/verify', description: 'Synthetic skill' },
+        { name: 'ignored', path: '/synthetic/disabled', enabled: false },
+      ] }] } });
+      break;
     case 'send-events':
       process.stdout.write('invalid native output with synthetic private content\n');
       write({ method: 'one', params: { value: 1 } });

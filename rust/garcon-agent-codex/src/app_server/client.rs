@@ -963,7 +963,7 @@ async fn wait_child(
     }
 }
 
-fn shared_error(error: Rc<dyn Error>) -> Box<dyn Error> {
+pub(crate) fn shared_error(error: Rc<dyn Error>) -> Box<dyn Error> {
     if let Some(error) = error.downcast_ref::<AgentIntegrationError>() {
         return Box::new(error.clone());
     }
