@@ -7,7 +7,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-type Outcome = 'pass' | 'fail' | 'skip';
+export type Outcome = 'pass' | 'fail' | 'skip';
 
 const decodeEntities = (text: string) => text
   .replaceAll('&quot;', '"').replaceAll('&apos;', '\'').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
@@ -30,7 +30,7 @@ export function parseJunit(xml: string): Map<string, Outcome> {
   return outcomes;
 }
 
-async function readReports(path: string): Promise<Map<string, Outcome>> {
+export async function readReports(path: string): Promise<Map<string, Outcome>> {
   const files = (await stat(path)).isDirectory()
     ? (await readdir(path)).filter((name) => name.endsWith('.xml')).sort().map((name) => join(path, name))
     : [path];
@@ -39,6 +39,19 @@ async function readReports(path: string): Promise<Map<string, Outcome>> {
     for (const [key, outcome] of parseJunit(await readFile(file, 'utf8'))) outcomes.set(key, outcome);
   }
   return outcomes;
+}
+
+export function compareOutcomes(original: ReadonlyMap<string, Outcome>, candidate: ReadonlyMap<string, Outcome>) {
+  const keys = [...new Set([...original.keys(), ...candidate.keys()])].sort();
+  let failedBoth = 0;
+  const differences = [];
+  for (const test of keys) {
+    const expected = original.get(test);
+    const actual = candidate.get(test);
+    if (expected !== actual) differences.push({ test, expected: expected ?? 'absent', actual: actual ?? 'absent' });
+    else if (expected === 'fail') failedBoth += 1;
+  }
+  return { same: keys.length - differences.length, failedBoth, differences };
 }
 
 function tally(outcomes: Map<string, Outcome>): string {
@@ -57,11 +70,10 @@ if (import.meta.main) {
   const right = await readReports(rightPath);
   console.log(`original:   ${tally(left)}`);
   console.log(`front door: ${tally(right)}`);
-  const keys = [...new Set([...left.keys(), ...right.keys()])].sort();
-  const differing = keys.filter((key) => left.get(key) !== right.get(key));
-  for (const key of differing) {
-    console.log(`DIFFERS ${key}: original=${left.get(key) ?? 'absent'} front-door=${right.get(key) ?? 'absent'}`);
+  const { same, differences } = compareOutcomes(left, right);
+  for (const { test, expected, actual } of differences) {
+    console.log(`DIFFERS ${test}: original=${expected} front-door=${actual}`);
   }
-  console.log(differing.length === 0 ? `Identical outcomes for all ${keys.length} tests.` : `${differing.length} of ${keys.length} tests differ.`);
-  process.exit(differing.length === 0 ? 0 : 1);
+  console.log(differences.length === 0 ? `Identical outcomes for all ${same} tests.` : `${differences.length} of ${same + differences.length} tests differ.`);
+  process.exit(differences.length === 0 ? 0 : 1);
 }

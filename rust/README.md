@@ -319,6 +319,25 @@ A suite that fails under both controllers is not a parity failure, but it is
 not evidence either; only tests that pass under the original count toward the
 comparison.
 
+## Harness modes
+
+Server integration tests default to the TypeScript controller and worker.
+Set `GARCON_TEST_CONTROLLER=rust` to start the native controller (no front
+door), and `GARCON_TEST_WORKER=rust` to use the standalone native worker on a
+remote lane. Both selections are independent. The binary overrides are
+`GARCON_TEST_RUST_CONTROLLER_BINARY` and `GARCON_TEST_RUST_EXECUTOR_BINARY`;
+without them the fixtures use the release binaries in `rust/target/release/`.
+
+```bash
+bun rust/parity/quadrants.ts --original original.xml --rust-worker rust-worker.xml \
+  --rust-controller rust-controller.xml --rust-both rust-both.xml --rust-local rust-local.xml
+```
+
+Use JUnit reports from corresponding runs of the same tests and lanes. The
+quadrant report lists outcome mismatches, including missing tests, and counts
+shared failures separately within the matching outcomes. It exits 1 on any
+mismatch.
+
 ## Benchmarks
 
 `bun run rust:bench` compares the original with the front door, with its native
