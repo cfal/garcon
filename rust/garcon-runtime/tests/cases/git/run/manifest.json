@@ -1,0 +1,11 @@
+{
+  "module": "server/runtime/git/run.ts",
+  "tests": [],
+  "inputs": "rust/garcon-runtime/tests/inputs/git-run.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "a6b72653173e5f11d985a3072642eb31368ee70723eac5189a8c53192f771f2e"
+}
