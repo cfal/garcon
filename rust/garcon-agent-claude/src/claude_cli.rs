@@ -2,6 +2,7 @@ use std::{
     cell::{Cell, RefCell},
     ffi::OsString,
     rc::Rc,
+    time::Duration,
 };
 
 use garcon_agents_common::execution::runtime_events::{AgentRuntimeEvent, AgentRuntimeOperation};
@@ -21,7 +22,7 @@ use crate::{
     cli_environment::build_claude_cli_environment,
     cli_invocation::{ClaudeCliArgOptions, build_claude_cli_args},
     cli_process_transport::{
-        ClaudeProcessOptions, ClaudeProcessSignal, ClaudeProcessTransport,
+        ClaudeProcessExit, ClaudeProcessOptions, ClaudeProcessSignal, ClaudeProcessTransport,
         ClaudeProcessTransportOptions, ClaudeTransportFailure, ClaudeTransportFailureKind,
         spawn_claude_subprocess,
     },
@@ -47,6 +48,7 @@ use crate::{
 };
 
 pub type ClaudeStreamHandler = dyn Fn(&Rc<ClaudeRunningSession>, Opaque);
+const CLAUDE_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ClaudeCli {
     pub logger: Rc<dyn AgentLogger>,
@@ -211,6 +213,7 @@ impl ClaudeCli {
             .replace(options.env_overrides.clone());
         session.options.replace(options);
 
+        let pid = process.pid;
         let identity = Rc::new(());
         let current = {
             let runtime = Rc::downgrade(self);
@@ -256,18 +259,63 @@ impl ClaudeCli {
                     }
                 }
             }),
-            on_exit: Rc::new(move |exit| {
-                if let Some((runtime, session)) = current() {
-                    runtime.handle_process_exit(&session, exit.exit_code);
+            on_exit: Rc::new({
+                let runtime = Rc::downgrade(self);
+                let session = Rc::downgrade(session);
+                let identity = identity.clone();
+                move |exit| {
+                    if let Some((runtime, session)) = runtime.upgrade().zip(session.upgrade()) {
+                        let current = session.is_current_process(&identity);
+                        runtime.log_process_exit(&session, pid, &exit, current);
+                        if current {
+                            runtime.handle_process_exit(&session, exit.exit_code);
+                        }
+                    }
                 }
             }),
             max_stdout_frame_bytes: None,
         });
         session.process.replace(Some(ClaudeSessionProcess {
-            identity,
+            identity: identity.clone(),
             transport,
         }));
-        Ok(())
+        let started_at = Instant::now();
+        let initialize = self
+            .control
+            .request(
+                &session.id,
+                json!({"subtype":"initialize"}).into(),
+                ClaudeControlRequestOptions {
+                    timeout: Some(CLAUDE_INITIALIZE_TIMEOUT),
+                    ..Default::default()
+                },
+            )
+            .await;
+        match initialize {
+            Ok(response) => {
+                let details = cli_log_fields([
+                    ("chatId", json!(session.chat_id)),
+                    ("sessionId", json!(session_log_id(&session.id))),
+                    ("processId", json!(pid)),
+                    ("durationMs", json!(started_at.elapsed().as_millis())),
+                    (
+                        "commandCount",
+                        json!(response["commands"].as_array().map_or(0, Vec::len)),
+                    ),
+                ]);
+                self.logger
+                    .info("Claude CLI control protocol initialized", Some(&details));
+                Ok(())
+            }
+            Err(error) => {
+                if session.is_current_process(&identity)
+                    && let Some(retirement) = self.retire_session_process(session)?
+                {
+                    retirement.as_ref().clone().await?;
+                }
+                Err(error)
+            }
+        }
     }
 
     pub fn finish_turn(&self, session: &ClaudeRunningSession) {
@@ -455,6 +503,41 @@ impl ClaudeCli {
         if let Some(turn) = turn {
             turn.mark_interrupt_request_failed();
             self.fail_session(session, message);
+        }
+    }
+
+    fn log_process_exit(
+        &self,
+        session: &ClaudeRunningSession,
+        pid: Option<u32>,
+        exit: &ClaudeProcessExit,
+        current: bool,
+    ) {
+        let turn = session.active_turn.borrow().clone();
+        let during_turn = current && turn.is_some();
+        let fields = cli_log_fields([
+            ("chatId", json!(session.chat_id)),
+            (
+                "runId",
+                json!(turn.as_ref().map(|turn| turn.operation.run_id.as_str())),
+            ),
+            ("sessionId", json!(session_log_id(&session.id))),
+            ("processId", json!(pid)),
+            ("exitCode", json!(exit.exit_code)),
+            ("stderrBytes", json!(exit.stderr_bytes)),
+            ("stderrLines", json!(exit.stderr_lines)),
+            ("stderrRetainedBytes", json!(exit.stderr_retained_bytes)),
+            ("stderrTailDigest", json!(exit.stderr_tail_digest)),
+            ("stderrTruncated", json!(exit.stderr_truncated)),
+            ("duringTurn", json!(during_turn)),
+        ]);
+        if during_turn {
+            self.logger.error(
+                "Claude CLI process exited during an active turn",
+                Some(&fields),
+            );
+        } else {
+            self.logger.info("Claude CLI process exited", Some(&fields));
         }
     }
 
@@ -655,3 +738,13 @@ impl ClaudeCli {
 
 #[cfg(all(test, unix))]
 mod tests;
+
+fn session_log_id(id: &str) -> String {
+    String::from_utf16_lossy(&id.encode_utf16().take(8).collect::<Vec<_>>())
+}
+
+fn cli_log_fields<const N: usize>(
+    fields: [(&str, serde_json::Value); N],
+) -> IndexMap<String, Opaque> {
+    IndexMap::from_iter(fields.map(|(key, value)| (key.to_owned(), value.into())))
+}

@@ -166,6 +166,64 @@ fn options(cwd: &Path) -> ClaudeSessionOptions {
     }
 }
 
+const READ_INITIALIZE: &str = r#"
+read -r initialize || exit 1
+case "$initialize" in *'"subtype":"initialize"'*) ;; *) exit 2 ;; esac
+request_id=${initialize#*\"request_id\":\"}
+request_id=${request_id%%\"*}
+"#;
+
+const ACK_INITIALIZE: &str = r#"
+printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"commands":[]}}}\n' "$request_id"
+"#;
+
+fn write_fake_cli(script: &Path, body: &str) {
+    fs::write(
+        script,
+        format!("#!/bin/sh\n{READ_INITIALIZE}\n{ACK_INITIALIZE}\n{body}"),
+    )
+    .unwrap();
+    fs::set_permissions(script, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[tokio::test]
+async fn a_rejected_initialize_retires_the_cli_before_the_next_resume() {
+    LocalSet::new().run_until(async {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("fake-claude-initialize");
+        fs::write(&script, format!(r#"#!/bin/sh
+{READ_INITIALIZE}
+if [ ! -f synthetic-attempt ]; then
+  : > synthetic-attempt
+  printf '{{"type":"control_response","response":{{"subtype":"error","request_id":"%s","error":"initialize rejected"}}}}\n' "$request_id"
+  read -r input && exit 4
+  exit 0
+fi
+{ACK_INITIALIZE}
+read -r input || exit 3
+printf '%s\n' "$input"
+read -r close || exit 3
+"#)).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
+        let options = options(directory.path());
+        let session = Rc::new(ClaudeRunningSession::new(options.clone()));
+        runtime.register_session(session.clone());
+        let (received, mut frames) = mpsc::unbounded_channel();
+        let on_message: Rc<ClaudeStreamHandler> = Rc::new(move |_, frame| received.send(frame).unwrap());
+        let error = runtime.spawn_cli(&session, options.clone(), true, on_message.clone()).await.unwrap_err();
+        assert_eq!(error.to_string(), "initialize rejected");
+        assert!(session.process.borrow().is_none());
+        runtime.spawn_cli(&session, options, true, on_message).await.unwrap();
+        let process = session.process.borrow().clone().unwrap();
+        process.transport.write_line(r#"{"type":"synthetic-prompt"}"#.into(), Default::default()).await.unwrap();
+        let frame = tokio::time::timeout(Duration::from_secs(5), frames.recv()).await.unwrap().unwrap();
+        assert_eq!(frame["type"], "synthetic-prompt");
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        assert_eq!(process.transport.exited().await.unwrap(), 0);
+    }).await;
+}
+
 #[tokio::test]
 async fn a_real_cli_gets_matching_permitted_answers_and_cannot_reuse_a_cancelled_decision() {
     use garcon_contract::chat_command_contracts::{
@@ -183,7 +241,7 @@ async fn a_real_cli_gets_matching_permitted_answers_and_cannot_reuse_a_cancelled
     LocalSet::new().run_until(async {
         let directory = tempfile::tempdir().unwrap();
         let script = directory.path().join("fake-claude-permissions");
-        fs::write(&script, r#"#!/bin/sh
+        write_fake_cli(&script, r#"
 printf '%s\n' '{"type":"control_request","request_id":"bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}'
 read -r answer || exit 1
 printf '{"type":"permission-observed","frame":%s}\n' "$answer"
@@ -193,8 +251,7 @@ printf '{"type":"permission-observed","frame":%s}\n' "$answer"
 printf '%s\n' '{"type":"control_request","request_id":"cancel","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion"}}'
 printf '%s\n' '{"type":"control_cancel_request","request_id":"cancel"}'
 read -r close || exit 1
-"#).unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+"#);
         let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
         let mut options = options(directory.path());
         options.permission_mode = PermissionMode::ManualBypass;
@@ -254,15 +311,13 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
     LocalSet::new().run_until(async {
         let directory = tempfile::tempdir().unwrap();
         let script = directory.path().join("fake-claude");
-        fs::write(&script, concat!(
-            "#!/bin/sh\n",
+        write_fake_cli(&script, concat!(
             "read -r first || exit 1\n",
             "printf '%s\\n' '{\"type\":\"fake-barrier\"}'\n",
             "printf '%s\\n' '{\"type\":\"stale-frame\"}'\n",
             "read -r second || exit 1\n",
             "exit 7\n",
-        )).unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        ));
         let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
         let options = options(directory.path());
         let session = Rc::new(ClaudeRunningSession::new(options.clone()));
