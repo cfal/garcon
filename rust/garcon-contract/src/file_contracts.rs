@@ -1,7 +1,4 @@
 //! Ports `common/file-contracts.ts`.
-//!
-//! `parseFileTreeResponse` and the file tree readers it uses are not ported
-//! yet: the original reads a file's modification time with `Date.parse`.
 
 use std::sync::LazyLock;
 
@@ -10,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::executors::{ExecutorId, parse_executor_id};
-use garcon_js::{Number, utf16};
+use garcon_js::{Number, date_parse::date_parse, json::as_number, utf16};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -292,6 +289,135 @@ pub fn parse_save_text_response(value: &Value) -> Option<SaveTextResponse> {
     })
 }
 
+fn parse_file_tree_breadcrumb(value: &Value) -> Option<FileTreeBreadcrumb> {
+    let input = value.as_object()?;
+    let name = input.get("name")?.as_str()?.to_owned();
+    let path = input.get("path")?.as_str()?.to_owned();
+    if name.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(FileTreeBreadcrumb { name, path })
+}
+
+fn parse_file_tree_breadcrumbs(value: &Value) -> Option<Vec<FileTreeBreadcrumb>> {
+    let input = value.as_array()?;
+    if input.is_empty() {
+        return None;
+    }
+    input.iter().map(parse_file_tree_breadcrumb).collect()
+}
+
+fn parse_file_tree_directory(value: &Value) -> Option<FileTreeDirectory> {
+    let input = value.as_object()?;
+    let path = input.get("path")?.as_str()?.to_owned();
+    if path.is_empty() {
+        return None;
+    }
+    let relative_path = input.get("relativePath")?.as_str()?.to_owned();
+    let parent_path = match input.get("parentPath")? {
+        Value::Null => None,
+        value if is_non_empty_string(value) => Some(value.as_str()?.to_owned()),
+        _ => return None,
+    };
+    let breadcrumbs = parse_file_tree_breadcrumbs(input.get("breadcrumbs")?)?;
+    Some(FileTreeDirectory {
+        path,
+        relative_path,
+        parent_path,
+        breadcrumbs,
+    })
+}
+
+fn parse_file_tree_home_directory(value: &Value) -> Option<FileTreeHomeDirectory> {
+    let input = value.as_object()?;
+    let path = input.get("path")?.as_str()?.to_owned();
+    if path.is_empty() {
+        return None;
+    }
+    let breadcrumbs = parse_file_tree_breadcrumbs(input.get("breadcrumbs")?)?;
+    Some(FileTreeHomeDirectory { path, breadcrumbs })
+}
+
+fn parse_file_tree_entry(value: &Value) -> Option<FileTreeEntry> {
+    let input = value.as_object()?;
+    let name = input.get("name")?.as_str()?;
+    let path = input.get("path")?.as_str()?;
+    let relative_path = input.get("relativePath")?.as_str()?;
+    if name.is_empty() || path.is_empty() || relative_path.is_empty() {
+        return None;
+    }
+    let kind = match input.get("type")?.as_str()? {
+        "file" => FileTreeEntryType::File,
+        "directory" => FileTreeEntryType::Directory,
+        _ => return None,
+    };
+    let size = as_number(input.get("size")?)?;
+    if !size.is_finite() || size < 0.0 {
+        return None;
+    }
+    let modified = match input.get("modified")? {
+        Value::Null => None,
+        value => {
+            let text = value.as_str()?;
+            date_parse(text)?;
+            Some(text.to_owned())
+        }
+    };
+    let permissions_rwx = input.get("permissionsRwx")?.as_str()?;
+    if permissions_rwx.is_empty() {
+        return None;
+    }
+    Some(FileTreeEntry {
+        name: name.to_owned(),
+        path: path.to_owned(),
+        relative_path: relative_path.to_owned(),
+        r#type: kind,
+        size: Number(size),
+        modified,
+        permissions_rwx: permissions_rwx.to_owned(),
+    })
+}
+
+pub fn parse_file_tree_response(value: &Value) -> Option<FileTreeResponse> {
+    let input = value.as_object()?;
+    let file_root_path = input.get("fileRootPath")?.as_str()?;
+    if file_root_path.is_empty() {
+        return None;
+    }
+    let raw_entries = input.get("entries")?.as_array()?;
+    let home_directory = match input.get("homeDirectory")? {
+        Value::Null => None,
+        value => Some(parse_file_tree_home_directory(value)?),
+    };
+    let directory = parse_file_tree_directory(input.get("directory")?)?;
+    let entries = raw_entries
+        .iter()
+        .map(parse_file_tree_entry)
+        .collect::<Option<_>>()?;
+    let is_base = directory.path == file_root_path;
+    let connects = |breadcrumbs: &[FileTreeBreadcrumb], path: &str| {
+        breadcrumbs
+            .first()
+            .is_some_and(|crumb| crumb.path == file_root_path)
+            && breadcrumbs.last().is_some_and(|crumb| crumb.path == path)
+    };
+    if is_base != directory.relative_path.is_empty()
+        || is_base != directory.parent_path.is_none()
+        || !connects(&directory.breadcrumbs, &directory.path)
+        || home_directory
+            .as_ref()
+            .is_some_and(|home| !connects(&home.breadcrumbs, &home.path))
+    {
+        return None;
+    }
+    Some(FileTreeResponse {
+        file_root_path: file_root_path.to_owned(),
+        home_directory,
+        directory,
+        entries,
+    })
+}
+
 /// Reads the identity of a file.
 pub fn parse_file_identity_response(value: &Value) -> Option<FileIdentityResponse> {
     let input = value.as_object()?;
@@ -322,6 +448,54 @@ pub fn parse_file_identity_response(value: &Value) -> Option<FileIdentityRespons
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn file_tree() -> Value {
+        json!({
+            "fileRootPath": "/work",
+            "homeDirectory": null,
+            "directory": {
+                "path": "/work/app", "relativePath": "app", "parentPath": "/work",
+                "breadcrumbs": [{"name":"work","path":"/work"},{"name":"app","path":"/work/app"}],
+            },
+            "entries": [{
+                "name": "example.txt", "path": "/work/app/example.txt", "relativePath": "app/example.txt",
+                "type": "file", "size": 2.5, "modified": "Sat, 03 Feb 2024 12:34:56 GMT", "permissionsRwx": "rw-r--r--",
+            }],
+        })
+    }
+
+    #[test]
+    fn validates_file_tree_entry_dates_without_normalizing_their_text() {
+        let mut raw = file_tree();
+        let entries = parse_file_tree_response(&raw).unwrap().entries;
+        assert_eq!(
+            entries[0].modified.as_deref(),
+            Some("Sat, 03 Feb 2024 12:34:56 GMT")
+        );
+        assert_eq!(entries[0].size, Number(2.5));
+        raw["entries"][0]["modified"] = json!("yesterday");
+        assert!(parse_file_tree_response(&raw).is_none());
+        raw["entries"][0]["modified"] = Value::Null;
+        assert!(parse_file_tree_response(&raw).is_some());
+    }
+
+    #[test]
+    fn file_tree_breadcrumbs_join_the_root_to_each_directory() {
+        let mut raw = file_tree();
+        raw["homeDirectory"] = json!({
+            "path":"/work/home",
+            "breadcrumbs":[{"name":"work","path":"/work"},{"name":"home","path":"/work/home"}],
+        });
+        assert!(parse_file_tree_response(&raw).is_some());
+        raw["homeDirectory"]["breadcrumbs"][0]["path"] = json!("/other");
+        assert!(parse_file_tree_response(&raw).is_none());
+        raw["homeDirectory"] = Value::Null;
+        raw["directory"]["breadcrumbs"][1]["path"] = json!("/work/other");
+        assert!(parse_file_tree_response(&raw).is_none());
+        raw["directory"]["breadcrumbs"][1]["path"] = json!("/work/app");
+        raw["directory"]["parentPath"] = Value::Null;
+        assert!(parse_file_tree_response(&raw).is_none());
+    }
 
     #[test]
     fn validates_a_bounded_ascii_revision() {

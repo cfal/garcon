@@ -1,0 +1,23 @@
+{
+  "module": "common/agent-cli-update.ts",
+  "tests": [
+    "common/__tests__/agent-cli-update.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/agent-cli-update.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseAgentCliUpdateStatus",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentCliUpdatesResponse",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 137,
+  "sha256": "a9cc200d698c29ce24058432c1b5b6d0f7aac2b133a30117488fd41b557f9106"
+}
