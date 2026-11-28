@@ -9,6 +9,8 @@ if (trace) appendFileSync(trace, JSON.stringify({ argv: process.argv.slice(2) })
 const input = createInterface({ input: process.stdin });
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n');
 let threadListAttempts = 0;
+let utilityRequestId: number | undefined;
+let utilityResponses = 0;
 
 for await (const line of input) {
   if (trace) appendFileSync(trace, line + '\n');
@@ -46,13 +48,26 @@ for await (const line of input) {
       }
       const hasPath = nativePath && existsSync(nativePath);
       const data = hasPath ? [{ id: 'thread', path: nativePath }] : [];
-      if (mode === 'utility-overload' && params.cursor === null) {
+      if (mode === 'utility-server-requests') {
+        utilityRequestId = id;
+        process.stderr.write('synthetic private stderr\n');
+        process.stdout.write('invalid native output with synthetic private content\n');
+        write({ id: 'unsupported', method: 'synthetic/unknown' });
+        write({ id: 101, method: 'item/commandExecution/requestApproval', params: {
+          threadId: 'thread', turnId: 'turn', kind: 'writeStdin',
+        } });
+      } else if (mode === 'utility-overload' && params.cursor === null) {
         write({ id, result: { data: [], nextCursor: 'second-page' } });
       } else {
         write({ id, result: { data, nextCursor: null } });
       }
       break;
     }
+    case undefined:
+      if (mode === 'utility-server-requests' && (id === 'unsupported' || id === 101) && ++utilityResponses === 2) {
+        write({ id: utilityRequestId, result: { data: [], nextCursor: null } });
+      }
+      break;
     case 'send-events':
       process.stdout.write('invalid native output with synthetic private content\n');
       write({ method: 'one', params: { value: 1 } });

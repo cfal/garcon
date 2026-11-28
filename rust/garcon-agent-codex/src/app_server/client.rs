@@ -267,6 +267,19 @@ impl CodexAppServerClient {
         }
     }
 
+    pub(crate) fn on_event_with_client(
+        &self,
+        listener: impl Fn(&Self, &CodexAppServerEvent) -> ExecutorResult<()> + 'static,
+    ) {
+        let client = Rc::downgrade(&self.0);
+        let _unsubscribe = self.on_event(Rc::new(move |event| {
+            if let Some(client) = client.upgrade() {
+                listener(&Self(client), event)?;
+            }
+            Ok(())
+        }));
+    }
+
     pub async fn connect(&self) -> ExecutorResult<Opaque> {
         let ready = {
             let mut state = self.0.state.borrow_mut();
