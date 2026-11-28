@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 # Pins ICU 78-era collation data to match the generation in Bun 1.4.3.
 icu_collator = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
 ryu-js.workspace = true
 serde.workspace = true
 serde_json.workspace = true
