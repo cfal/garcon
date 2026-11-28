@@ -90,7 +90,7 @@ fn english_collations_match_bun() {
             let actual = collator.compare(left, right) as i8;
             if actual != expected {
                 let first_difference = left.chars().zip(right.chars()).find(|(a, b)| a != b);
-                // Only Han-to-Han differences at the first differing character are provisional.
+                // This Han-to-Han difference was accepted by the user on 2026-11-28.
                 if first_difference.is_some_and(|(a, b)| han.contains(&a) && han.contains(&b)) {
                     han_differences[mode] += 1;
                 } else {
@@ -114,7 +114,7 @@ fn english_collations_match_bun() {
         check(&rust, "a", standard, numeric);
     }
     eprintln!(
-        "{} pairs per mode; provisional Han differences: {} standard, {} numeric/base",
+        "{} pairs per mode; Han differences accepted by the user on 2026-11-28: {} standard, {} numeric/base",
         pairs_count + 4,
         han_differences[0],
         han_differences[1]
@@ -127,6 +127,6 @@ fn english_collations_match_bun() {
     );
     assert!(
         han_differences.iter().all(|&count| count > 0),
-        "oracle did not exercise the provisional Han rule"
+        "oracle did not exercise the Han rule accepted by the user on 2026-11-28"
     );
 }

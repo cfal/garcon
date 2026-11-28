@@ -19,7 +19,8 @@ a loop instruction, rather than expanding the body according to a count
 The remaining syntax differences from Bun 1.4.3 are listed beside the
 hidden-bash-command-patterns recording. They cover quantified boundary
 assertions, non-Unicode character-class ranges, overflowing counts,
-astral group identifiers, and deep groups.
+astral group identifiers, and deep groups. All 16 were accepted by the user on
+2026-11-28; the validator still uses unoptimized regress.
 
 ## Escaped literals at word boundaries
 

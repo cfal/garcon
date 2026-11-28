@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
 
+use crate::ChildEnvironment;
 use crate::cancellation::check_cancelled;
 
 use super::git_domain_error::GitDomainError;
@@ -24,6 +25,7 @@ struct GitOperation {
     signal: CancellationToken,
     deadline: Instant,
     root: RefCell<String>,
+    child_environment: Option<ChildEnvironment>,
     pending: Cell<usize>,
     settled: Notify,
     closed: Cell<bool>,
@@ -67,6 +69,9 @@ fn scoped_option(
     options
         .truncate_stdout
         .get_or_insert(!options.disable_optional_locks);
+    if options.base_environment.is_none() {
+        options.base_environment = current.child_environment.clone();
+    }
     let env = options.env.get_or_insert_with(Default::default);
     env.insert("GIT_TERMINAL_PROMPT".into(), Some("0".into()));
     env.insert("GCM_INTERACTIVE".into(), Some("never".into()));
@@ -77,6 +82,19 @@ pub async fn with_git_operation<T, Fut>(
     root: &str,
     options: Option<ExecutorCallOptions>,
     mutation: bool,
+    operation: impl FnOnce(CancellationToken) -> Fut,
+) -> ExecutorResult<T>
+where
+    Fut: Future<Output = ExecutorResult<T>>,
+{
+    with_git_operation_with_environment(root, options, mutation, None, operation).await
+}
+
+pub async fn with_git_operation_with_environment<T, Fut>(
+    root: &str,
+    options: Option<ExecutorCallOptions>,
+    mutation: bool,
+    child_environment: Option<ChildEnvironment>,
     operation: impl FnOnce(CancellationToken) -> Fut,
 ) -> ExecutorResult<T>
 where
@@ -101,6 +119,7 @@ where
         signal: signal.clone(),
         deadline,
         root: RefCell::new(root.to_owned()),
+        child_environment,
         pending: Cell::new(0),
         settled: Notify::new(),
         closed: Cell::new(false),

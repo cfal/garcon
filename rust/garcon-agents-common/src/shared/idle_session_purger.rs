@@ -60,3 +60,68 @@ impl Drop for IdleSessionPurger {
         self.stop();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, rc::Rc};
+
+    use tokio::{
+        task::{LocalSet, yield_now},
+        time::advance,
+    };
+
+    use super::*;
+
+    #[test]
+    fn skips_running_and_recent_sessions_and_purges_at_the_age_limit() {
+        let sessions = [
+            ("running", (true, 0)),
+            ("recent", (false, 91)),
+            ("boundary", (false, 90)),
+            ("old", (false, 0)),
+        ];
+        let mut removed = Vec::new();
+        let count = purge_idle_sessions(
+            sessions,
+            |session| session.0,
+            |session| session.1,
+            |id, _| removed.push(id),
+            100,
+            10,
+        );
+        assert_eq!(count, 2);
+        assert_eq!(removed, ["boundary", "old"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn starts_one_interval_and_stops_and_restarts_it() {
+        LocalSet::new()
+            .run_until(async {
+                let purger = IdleSessionPurger::default();
+                let count = Rc::new(Cell::new(0u32));
+                let start = || {
+                    purger.start(10, {
+                        let count = count.clone();
+                        move || count.set(count.get() + 1)
+                    })
+                };
+                start();
+                purger.start(1, || panic!("a second purge timer started"));
+                advance(Duration::from_millis(9)).await;
+                yield_now().await;
+                assert_eq!(count.get(), 0);
+                advance(Duration::from_millis(1)).await;
+                yield_now().await;
+                assert_eq!(count.get(), 1);
+                purger.stop();
+                advance(Duration::from_millis(10)).await;
+                yield_now().await;
+                assert_eq!(count.get(), 1);
+                start();
+                advance(Duration::from_millis(10)).await;
+                yield_now().await;
+                assert_eq!(count.get(), 2);
+            })
+            .await;
+    }
+}
