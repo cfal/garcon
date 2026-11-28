@@ -1,7 +1,9 @@
 use std::ops::Range;
 use std::sync::LazyLock;
 
+use garcon_contract::settings::{APP_TITLE_MAX_LENGTH, DEFAULT_APP_TITLE};
 use garcon_js::json::{self, Opaque};
+use garcon_js::{trim, utf16};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::ser::PrettyFormatter;
@@ -16,9 +18,21 @@ pub struct PublicAppTitle {
 impl Default for PublicAppTitle {
     fn default() -> Self {
         Self {
-            title: "Garcon".to_owned(),
+            title: DEFAULT_APP_TITLE.to_owned(),
             version: 0,
         }
+    }
+}
+
+pub fn resolve_public_app_title(ui: &Value, version: u64) -> PublicAppTitle {
+    let title = ui["appIdentity"]["title"]
+        .as_str()
+        .map(trim)
+        .filter(|title| !title.is_empty() && utf16::len(title) <= APP_TITLE_MAX_LENGTH)
+        .unwrap_or(DEFAULT_APP_TITLE);
+    PublicAppTitle {
+        title: title.to_owned(),
+        version,
     }
 }
 
