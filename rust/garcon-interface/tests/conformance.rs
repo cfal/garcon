@@ -121,7 +121,10 @@ impl AgentProducers for TestAgent {
         Ok(())
     }
     fn detach(&self, _binding: AgentProducerBinding) {}
-    fn subscribe(&self, _listener: Rc<dyn Fn(AgentProducerNotification)>) -> Box<dyn Fn()> {
+    fn subscribe(
+        &self,
+        _listener: Rc<dyn Fn(AgentProducerNotification) -> ExecutorResult<()>>,
+    ) -> Box<dyn Fn()> {
         Box::new(|| {})
     }
 }
