@@ -1,4 +1,4 @@
-# Port map
+claimed by harness 2026-11-28; `git::{run, operation_context, git_domain_error, types}` ported by link |
 
 Goal: a Garcon controller and executor worker in Rust that pass every recorded
 case and every black-box suite with no fallback to the TypeScript original,
@@ -211,7 +211,7 @@ the workspace manifest, `garcon-server`, and this file.
 | Lane | Order of work |
 | --- | --- |
 | A. Link and worker | link, worker, remote-client |
-| B. Runtime services | runtime-projects-files, runtime-terminals, runtime-git, service-routes |
+| B. Runtime services | runtime-projects-files, runtime-terminals (link); runtime-git and its `gh` half (harness); service-routes |
 | C. Providers | agents-direct, agent-claude, agent-pi, agent-antigravity, agents-best-effort |
 | D. Providers | (after agents-direct) agent-codex, agent-opencode, agent-shell |
 | E. Ledger and search | ledger, search, search-surface, shares-export, carryover |
