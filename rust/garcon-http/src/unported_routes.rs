@@ -36,8 +36,8 @@ mod tests {
                 )
             })
             .collect();
-        assert!(!routes[&("GET".into(), "/api/v1/tickets".into())].0);
-        assert!(routes[&("GET".into(), "/api/v1/tickets".into())].1);
+        assert!(!routes[&("POST".into(), "/api/v1/tickets/project-default".into())].0);
+        assert!(routes[&("POST".into(), "/api/v1/tickets/project-default".into())].1);
         assert!(
             !routes[&("GET".into(), "/shared/:token".into())]
                 .2

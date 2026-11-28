@@ -22,7 +22,7 @@ use super::compression::finish_native;
 use super::http_request::request_url;
 use super::http_route_types::{
     AuthenticateHttpRequest, HttpRouteContext, Route, RouteMetadata, RouteResponse, RouteResult,
-    ServerPrincipal,
+    ServerPrincipal, UnportedRequest,
 };
 use super::listener::{HttpRequest, HttpResponse};
 use super::route_table::RouteTable;
@@ -223,26 +223,31 @@ impl HttpRouter {
         url.set_path(&pathname);
         let method = request.method().clone();
         let headers = request.headers().clone();
+        let uri = request.uri().clone();
         let reply = match route {
             Route::Ported { handler, .. } => {
                 match handler(request, url, HttpRouteContext { principal, peer }).await {
                     Ok(reply) => reply,
                     Err(error) if error.is::<MalformedJsonError>() => malformed_json_response(),
+                    Err(error) if error.is::<UnportedRequest>() => {
+                        self.mark_unported(&method, uri.path()).await
+                    }
                     Err(error) => return Err(error),
                 }
             }
-            Route::Unported(_) => {
-                if let Some(log) = &self.options.unported_log
-                    && let Err(error) =
-                        log_unported(log, method.as_str(), request.uri().path()).await
-                {
-                    self.logger
-                        .error(&format!("Could not write the unported route log: {error}"));
-                }
-                unported_response()
-            }
+            Route::Unported(_) => self.mark_unported(&method, uri.path()).await,
         };
         Ok(finish_native(&method, &headers, reply, self.options.compression_enabled).await?)
+    }
+
+    async fn mark_unported(&self, method: &Method, path: &str) -> RouteResponse {
+        if let Some(log) = &self.options.unported_log
+            && let Err(error) = log_unported(log, method.as_str(), path).await
+        {
+            self.logger
+                .error(&format!("Could not write the unported route log: {error}"));
+        }
+        unported_response()
     }
 
     fn unhandled(&self, error: &dyn Error) -> RouteResponse {
@@ -293,7 +298,7 @@ pub(crate) fn route_error(
         .map(Some)
 }
 
-fn response(status: StatusCode, body: Option<Bytes>) -> RouteResponse {
+pub(crate) fn response(status: StatusCode, body: Option<Bytes>) -> RouteResponse {
     let mut response = Response::new(body);
     *response.status_mut() = status;
     response

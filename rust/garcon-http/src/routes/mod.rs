@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod runtime;
 pub mod r#static;
+pub mod tickets;
 
 use std::rc::Rc;
 
