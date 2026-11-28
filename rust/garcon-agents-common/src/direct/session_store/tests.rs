@@ -52,7 +52,7 @@ impl AgentScopedStorage for Storage {
     }
 }
 
-struct Fixture {
+pub(in crate::direct) struct Fixture {
     _root: tempfile::TempDir,
     pub store: DirectSessionStore,
     file: String,
@@ -62,7 +62,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(in crate::direct) fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let storage = Rc::new(Storage {
             root: root.path().to_str().unwrap().into(),

@@ -1,0 +1,34 @@
+{"fn":"stripReasoning","args":[" pre <think>ignore <THINK tag=text>ignore</think> all</think> post "]}
+{"fn":"stripReasoning","args":["ignore orphan </think>visible<think>ignore remainder"]}
+{"fn":"stripReasoning","args":["keep <think-aloud>hidden</think-aloud> end <thinking>literal"]}
+{"fn":"stripReasoning","args":["keep <think unfinished"]}
+{"fn":"explicitEffort","args":["none"]}
+{"fn":"explicitEffort","args":["low"]}
+{"fn":"explicitEffort","args":["xhigh"]}
+{"fn":"explicitEffort","args":["bogus"]}
+{"fn":"explicitEffort","args":[{}]}
+{"fn":"queryTimeout","args":[{}]}
+{"fn":"queryTimeout","args":[{"timeoutMs":-100}]}
+{"fn":"queryTimeout","args":[{"timeoutMs":9876.5}]}
+{"fn":"queryTimeout","args":[{"timeoutMs":987654321}]}
+{"fn":"routeFingerprint","args":[{"selection":{"apiProviderId":"provider","endpointId":"synthetic","providerLabel":"Fixture","protocol":"openai-compatible","baseUrl":"https://fixture.invalid/v1///","model":"fixture","isLocal":false,"capabilities":null,"headers":{"X-Z":"1","x-a":"2","X-_":"3","x-A":"4"},"credential":null},"credential":"synthetic-token"}]}
+{"fn":"routeFingerprint","args":[{"selection":{"apiProviderId":"provider","endpointId":"synthetic","providerLabel":"Fixture","protocol":"anthropic-messages","baseUrl":"https://fixture.invalid","model":"fixture","isLocal":false,"capabilities":null,"headers":{},"credential":null},"credential":null}]}
+{"fn":"attachmentData","args":["data:TEXT/PLAIN;base64,eA=="]}
+{"fn":"attachmentData","args":["data:text/plain;charset=utf-8;base64,eA=="]}
+{"fn":"attachmentData","args":["data:text/plain;base64,yQ==\n"]}
+{"fn":"inlineAttachment","args":[{"data":"data:text/plain;base64,eA=="}]}
+{"fn":"inlineAttachment","args":[{"data":"data:image/png;base64,eA=="}]}
+{"fn":"attachmentDocument","args":[{"data":"data:Application/Pdf;base64,eA==","name":"synthetic.pdf"}]}
+{"fn":"attachmentDocument","args":[{"data":"data:application/pdf;base64,eA==","name":""}]}
+{"fn":"attachmentContext","args":["prompt",[{"data":"data:text/plain;base64,Z m 9 v$$=more","name":null},{"data":"data:image/png;base64,eA=="}]]}
+{"fn":"attachmentContext","args":["   ",[{"data":"data:image/png;base64,eA==","mimeType":"TEXT/CSV","name":"a.csv"}]]}
+{"fn":"attachmentContext","args":["keep",[{"data":"invalid","mimeType":"text/csv"}]]}
+{"fn":"jsonMediaType","args":["Application/JSON ; charset=utf-8"]}
+{"fn":"jsonMediaType","args":["application/problem+json"]}
+{"fn":"jsonMediaType","args":["application/json, text/plain"]}
+{"fn":"jsonMediaType","args":[null]}
+{"fn":"classifyFailure","args":["AUTH 429 timeout"]}
+{"fn":"classifyFailure","args":["HTTP 429 too many requests"]}
+{"fn":"classifyFailure","args":["deadline; network unavailable"]}
+{"fn":"classifyFailure","args":["network unavailable"]}
+{"fn":"classifyFailure","args":["Malformed provider response"]}
