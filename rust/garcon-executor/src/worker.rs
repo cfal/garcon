@@ -15,6 +15,7 @@ use garcon_base::executor_disconnect::ExecutorSessionLostError;
 use garcon_base::workspace_lease::{WorkspaceLeaseOptions, acquire_workspace_lease};
 use garcon_contract::api_providers::ApiProviderModelDiscoveryResponse;
 use garcon_contract::cli_runtime_paths::{cli_gateway_runtime_file, executor_data_directory};
+use garcon_contract::git_execution::GitExecutorScope;
 use garcon_interface::errors::{
     AgentCallError, AgentDeliveryOutcome, AgentIntegrationError, AgentIntegrationErrorCode,
 };
@@ -46,6 +47,8 @@ use garcon_runtime::agents::integration_host::{
 };
 use garcon_runtime::agents::integration_registry::IntegrationRegistry;
 use garcon_runtime::files::service::{FilesService, FilesServiceOptions};
+use garcon_runtime::git::review_document_registry::GitReviewDocumentRegistry;
+use garcon_runtime::git::runtime::{GitRuntime, GitRuntimeOptions};
 use garcon_runtime::projects::project_service::ProjectService;
 use garcon_runtime::terminals::runtime::{TerminalRuntime, TerminalService};
 use garcon_runtime::terminals::terminal_manager::TerminalManagerOptions;
@@ -135,6 +138,7 @@ pub(crate) struct ExecutorApi {
     integrations: IntegrationRegistry,
     pub(crate) projects: Rc<ProjectService>,
     pub(crate) files: Rc<FilesService>,
+    git: Rc<GitRuntime>,
     terminals: Rc<TerminalService>,
     terminal_runtime: TerminalRuntime,
     lifetime: Rc<ExecutorLifetime>,
@@ -165,6 +169,7 @@ impl ExecutorApi {
         if self.lifetime.disposed.replace(true) {
             return false;
         }
+        self.git.dispose();
         self.terminals.dispose();
         self.terminal_runtime.shutdown();
         let listeners = self.lifetime.listeners.borrow().clone();
@@ -242,7 +247,7 @@ impl ExecutionRuntimeApi for ExecutorApi {
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<Rc<dyn ExecutionGitService>> {
         self.lifetime.available(options.as_ref())?;
-        Err(unported_service("Git"))
+        Ok(self.git.clone())
     }
 
     async fn get_gh_service(
@@ -345,15 +350,25 @@ impl Executor {
         let files = FilesService::new(FilesServiceOptions {
             executor_id: options.executor_id.clone(),
             project_base_path: options.project_base_path.clone(),
-            assert_available: Some(available),
+            assert_available: Some(available.clone()),
             ..Default::default()
         });
         let mut terminal_options = TerminalManagerOptions::new(options.project_base_path);
         terminal_options.terminal_runtime_id = options.terminal_runtime_id;
         terminal_options.user_shell = options.user_shell;
-        terminal_options.child_environment = options.child_environment;
+        terminal_options.child_environment = options.child_environment.clone();
         let terminal_runtime = TerminalRuntime::new(terminal_options);
         let terminals = Rc::new(terminal_runtime.service(&options.executor_id)?);
+        let git = Rc::new(GitRuntime::new(GitRuntimeOptions {
+            scope: GitExecutorScope {
+                executor_id: options.executor_id.clone(),
+                instance_id: instance_id.clone(),
+            },
+            project_base_path: projects.project_base_path.clone(),
+            child_environment: options.child_environment,
+            review_registry: Some(Rc::new(GitReviewDocumentRegistry::new(Default::default()))),
+            assert_available: Some(available),
+        }));
         let info = ExecutorInfo {
             executor_id: options.executor_id,
             instance_id,
@@ -365,7 +380,7 @@ impl Executor {
             project_base_path: projects.project_base_path.clone(),
             services: ExecutorServices {
                 files: true,
-                git: false,
+                git: true,
                 gh: false,
                 terminals: true,
                 directory_creation: files.can_create_directories(),
@@ -376,6 +391,7 @@ impl Executor {
             integrations,
             projects: Rc::new(projects),
             files: Rc::new(files),
+            git,
             terminals,
             terminal_runtime,
             lifetime,
@@ -939,7 +955,7 @@ mod tests {
                 assert_eq!(api.availability(), ExecutorAvailability::Ready);
                 let info = api.get_info(None).await.unwrap();
                 assert!(info.services.files && info.services.terminals);
-                assert!(!info.services.git && !info.services.gh);
+                assert!(info.services.git && !info.services.gh);
                 assert!(Rc::ptr_eq(
                     &api.get_project_service(None).await.unwrap(),
                     &api.get_project_service(None).await.unwrap(),
@@ -952,10 +968,10 @@ mod tests {
                     &api.get_terminal_service(None).await.unwrap(),
                     &api.get_terminal_service(None).await.unwrap(),
                 ));
-                let git = api.get_git_service(None).await.err().unwrap();
-                let git = git.downcast_ref::<AgentCallError>().unwrap();
-                assert_eq!(git.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
-                assert_eq!(git.outcome, AgentDeliveryOutcome::NotDispatched);
+                assert!(Rc::ptr_eq(
+                    &api.get_git_service(None).await.unwrap(),
+                    &api.get_git_service(None).await.unwrap()
+                ));
                 let unknown = api
                     .get_agent_integration("missing", None)
                     .await

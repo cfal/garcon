@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/transcript-digest.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/transcript-digest.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 5,
+  "sha256": "952e32c85f8937b591dbe3ba403d3e6efc01c2e4e7d74da9cf72419fad373620"
+}

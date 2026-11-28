@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use garcon_js::{Number, json::as_number, parse_int, trim};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use serde_json::{Map, Value};
 
 use crate::async_user_questions::{
@@ -25,23 +25,64 @@ pub enum ChatContentMode {
     Literal,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessageMetadata {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub content_mode: Option<ChatContentMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub content_format: Option<InputFormat>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_request_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_message_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream_request_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub question_reply: Option<AsyncQuestionReply>,
+    #[serde(skip)]
+    stamped_id_last: bool,
+}
+
+impl ChatMessageMetadata {
+    pub fn stamp_client_message_id(&mut self, id: String) {
+        // The original spread appends a new key and overwrites an existing key in place.
+        self.stamped_id_last |= self.client_message_id.is_none();
+        self.client_message_id = Some(id);
+    }
+}
+
+impl PartialEq for ChatMessageMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.content_mode == other.content_mode
+            && self.content_format == other.content_format
+            && self.client_request_id == other.client_request_id
+            && self.client_message_id == other.client_message_id
+            && self.upstream_request_id == other.upstream_request_id
+            && self.turn_id == other.turn_id
+            && self.question_reply == other.question_reply
+    }
+}
+
+impl Serialize for ChatMessageMetadata {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut fields = serializer.serialize_map(None)?;
+        macro_rules! optional {
+            ($name:literal, $field:ident) => {
+                if let Some(value) = &self.$field {
+                    fields.serialize_entry($name, value)?;
+                }
+            };
+        }
+        optional!("contentMode", content_mode);
+        optional!("contentFormat", content_format);
+        optional!("clientRequestId", client_request_id);
+        if !self.stamped_id_last {
+            optional!("clientMessageId", client_message_id);
+        }
+        optional!("upstreamRequestId", upstream_request_id);
+        optional!("turnId", turn_id);
+        optional!("questionReply", question_reply);
+        if self.stamped_id_last {
+            optional!("clientMessageId", client_message_id);
+        }
+        fields.end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,6 +237,7 @@ pub fn parse_chat_message_metadata(
         upstream_request_id,
         turn_id,
         question_reply,
+        stamped_id_last: false,
     }))
 }
 

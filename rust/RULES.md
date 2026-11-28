@@ -126,6 +126,14 @@ the user corrects how a port behaves, the correction is added under
   `serde_json`'s. They replace a lone surrogate escape, which a JavaScript
   string can hold and a Rust `String` cannot, with U+FFFD instead of failing
   the whole document.
+- Two inputs are parse errors at the JSON boundary where the original reads
+  them (`garcon-js/src/json.rs`): a number literal beyond the double range
+  (`1e400`, which the original reads as an infinity and prints as `null`)
+  and nesting deeper than 128 levels. Record such cases and list them in
+  `known-differences.jsonl` with the reason "number beyond the double range
+  is a parse error at the JSON boundary" or "nesting deeper than 128 levels
+  is a parse error at the JSON boundary"; do not leave the inputs out and do
+  not work around the parser.
 - Opaque JSON, a value that came from outside and is written out again (tool
   input, provider payloads, stored rows), is a `garcon_js::json::Opaque`, not
   a bare `serde_json::Value`. `Opaque` reads numbers as JavaScript doubles and
@@ -310,9 +318,13 @@ the user corrects how a port behaves, the correction is added under
   per label and Bun 1.4.3 on `PATH`. `rust/Cargo.lock` comes back when the
   command changed it; anything else the command writes comes back only when
   named with `--pull` (a recorded case directory, a report). One call costs
-  about 40 seconds before the command starts, and every session shares one
-  four-core machine: put a unit's commands in one call, build one crate
-  (`-p`), and never the workspace.
+  about 40 seconds before the command starts, and the two build machines
+  (eight cores for the gate, the reviewer, and six sessions; four cores for
+  the five provider sessions) are shared: put a unit's commands in one
+  call, build one crate (`-p`), and build the workspace only for a change
+  to a shared public type. Session commands run at lower priority than the
+  gate. A call that ends with status 3 and no result is run again as it
+  was.
 - Only `/garcon`, `~/bin`, and the agent configuration directories survive a
   restart of the development machine. Keep nothing you need in `~/tmp` or
   anywhere else under the home directory.

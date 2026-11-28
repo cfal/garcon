@@ -1,0 +1,9 @@
+{"fn":"buildClaudeUserInputFrame","args":[{"content":"Synthetic prompt","sessionId":"fixture-session","uuid":"fixture-input"}]}
+{"fn":"buildClaudeUserInputFrame","args":[{"content":[{"type":"text","text":"One\nTwo","syntheticNumber":100000000000000000000}],"sessionId":"fixture-session","uuid":"fixture-input","priority":"next"}]}
+{"fn":"buildClaudeInitialUserContent","args":["Synthetic prompt"]}
+{"fn":"buildClaudeInitialUserContent","args":["Synthetic prompt",[{"name":"context.txt","mimeType":"text/plain","data":"data:text/plain;base64,YWJj"}]]}
+{"fn":"buildClaudeInitialUserContent","args":["Synthetic prompt",[{"name":"picture.png","mimeType":"image/png","data":"data:image/png;base64,YWJj"},{"name":"reference.pdf","mimeType":"application/pdf","data":"data:application/pdf;base64,YWJj"},{"name":"invalid.png","mimeType":"image/png","data":"invalid"}]]}
+{"fn":"buildClaudeSteeringUserContent","args":["Synthetic guidance"]}
+{"fn":"claudeSteeringInputsFromNativeContent","args":[[{"type":"text","text":"The user sent steering guidance for the active task:\n\nFirst"},{"type":"text","text":"The user sent steering guidance for the active task:\n\nSecond"}]]}
+{"fn":"claudeSteeringInputsFromNativeContent","args":[[{"type":"text","text":"The user sent steering guidance for the active task:\n\nFirst"},{"type":"text","text":"Synthetic regular input"}]]}
+{"fn":"claudeSteeringInputsFromNativeContent","args":[[]]}

@@ -21,7 +21,8 @@ use garcon_http::http_request::HttpAuthentication;
 use garcon_http::http_route::{HttpRouteOptions, HttpRouter};
 use garcon_http::listener::Listener;
 use garcon_http::routes::{
-    auth::AuthRoutes, create_edge_routes, r#static::StaticRoutes, tickets::create_ticket_routes,
+    auth::AuthRoutes, create_edge_routes, executors::create_executor_connection_routes,
+    r#static::StaticRoutes, tickets::create_ticket_routes,
 };
 use garcon_http::ws::{BrowserSocketLimits, BrowserSocketOptions, BrowserSockets};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
@@ -35,6 +36,7 @@ use garcon_stores::auth::passwords::BunPasswords;
 use garcon_stores::auth::service::AuthService;
 use garcon_stores::auth::store::AuthAccountStore;
 use garcon_stores::auth::token::AuthTokens;
+use garcon_stores::executors::config_store::ExecutorConfigStore;
 use garcon_stores::settings::{SettingsStore, SettingsStoreOptions};
 use garcon_stores::telegram_settings_store::TelegramSettingsStore;
 use garcon_stores::tickets::{
@@ -58,6 +60,7 @@ pub struct Controller {
     listener: JoinHandle<()>,
     auth_routes: Rc<AuthRoutes>,
     browser_sockets: Rc<BrowserSockets>,
+    executors: Rc<ExecutorConfigStore>,
     tickets: Rc<TicketRuntime>,
     listener_shutdown: CancellationToken,
     lease_lost: CancellationToken,
@@ -184,6 +187,7 @@ impl Controller {
             instance_id,
             auth_routes,
             browser_sockets,
+            executors,
             tickets,
         } = match result {
             Ok(values) => values,
@@ -221,6 +225,7 @@ impl Controller {
             listener,
             auth_routes,
             browser_sockets,
+            executors,
             tickets,
             listener_shutdown,
             lease_lost,
@@ -244,6 +249,7 @@ impl Controller {
         self.browser_sockets.shutdown().await;
         let listener = self.listener.await;
         self.auth_routes.drain().await;
+        self.executors.drain().await;
         self.tickets.close();
         let runtime = remove_server_runtime(self.runtime_file, &self.instance_id).await;
         let lease = self.lease.release().await;
@@ -262,6 +268,7 @@ struct BoundController {
     instance_id: String,
     auth_routes: Rc<AuthRoutes>,
     browser_sockets: Rc<BrowserSockets>,
+    executors: Rc<ExecutorConfigStore>,
     tickets: Rc<TicketRuntime>,
 }
 
@@ -295,6 +302,7 @@ async fn bind_controller(
         config.auth_disabled,
         config.trust_proxy_enabled,
     )?;
+    let executors = ExecutorConfigStore::open(&lease.workspace_dir().to_string_lossy()).await?;
     let settings = SettingsStore::open(
         &lease.workspace_dir().to_string_lossy(),
         SettingsStoreOptions::default(),
@@ -357,7 +365,15 @@ async fn bind_controller(
             clock,
         },
     ));
-    let routes = compose_routes([&edge_routes, &create_ticket_routes(&tickets)])?;
+    let routes = compose_routes([
+        &edge_routes,
+        &create_executor_connection_routes(
+            &executors,
+            config.public_url.clone(),
+            config.base_path.clone(),
+        ),
+        &create_ticket_routes(&tickets),
+    ])?;
     let router = HttpRouter::new(
         routes,
         HttpRouteOptions {
@@ -400,6 +416,7 @@ async fn bind_controller(
         instance_id: runtime.identity.instance_id.clone(),
         auth_routes,
         browser_sockets,
+        executors,
         tickets,
     })
 }
@@ -581,6 +598,66 @@ mod tests {
             }
             controller.shutdown().await.unwrap();
         }).await;
+    }
+
+    #[tokio::test]
+    async fn exports_the_stored_executor_connection_without_running_the_manager() {
+        async fn read(address: SocketAddr, path: &str) -> String {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            stream.write_all(format!("GET /fixture/api/v1/executors{path} HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            let mut response = String::new();
+            tokio::time::timeout(Duration::from_secs(3), stream.read_to_string(&mut response))
+                .await
+                .unwrap()
+                .unwrap();
+            response
+        }
+
+        LocalSet::new()
+            .run_until(async {
+                let root = tempfile::tempdir().unwrap();
+                let mut config = config(root.path());
+                config.auth_disabled = true;
+                config.public_url = Some("https://public.test/fixture/".into());
+                let workspace = PathBuf::from(&config.workspace_dir);
+                fs::create_dir_all(&workspace).await.unwrap();
+                open_workspace(&workspace).await.unwrap();
+                let store = ExecutorConfigStore::open(&config.workspace_dir)
+                    .await
+                    .unwrap();
+                let stored = store
+                    .create(
+                        serde_json::json!({"direction":"executor-connects","label":"Fixture"}),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                let path = workspace.join("executors.json");
+                let before = fs::read(&path).await.unwrap();
+                let controller = Controller::start(config, Rc::new(UnavailableLocalExecutor))
+                    .await
+                    .unwrap();
+                let address = SocketAddr::from(([127, 0, 0, 1], controller.address.port()));
+                let connection_path = format!("/{}/connection", stored.id);
+                let response = read(address, &connection_path).await;
+                let (head, body) = response.split_once("\r\n\r\n").unwrap();
+                assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
+                assert!(head.contains("\r\ncache-control: no-store"), "{head}");
+                let payload = garcon_js::json::parse(body).unwrap();
+                assert_eq!(
+                    payload["connectionUrl"],
+                    format!(
+                        "wss://public.test/fixture/executor/{}#secret={}",
+                        stored.id, stored.secret
+                    )
+                );
+                let list = read(address, "").await;
+                assert!(list.starts_with("HTTP/1.1 501 "), "{list}");
+                assert!(list.contains("\r\nx-garcon-rs-unported: 1\r\n"), "{list}");
+                assert_eq!(fs::read(path).await.unwrap(), before);
+                controller.shutdown().await.unwrap();
+            })
+            .await;
     }
 
     #[tokio::test]

@@ -944,6 +944,7 @@ name = "garcon-agent-claude"
 version = "0.0.0"
 dependencies = [
  "futures",
+ "garcon-agents-common",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
@@ -951,12 +952,18 @@ dependencies = [
  "garcon-js",
  "icu_normalizer",
  "indexmap",
+ "libc",
  "num-bigint 0.4.8",
  "num-traits",
+ "regress",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -1038,6 +1045,7 @@ dependencies = [
  "ipnet",
  "libc",
  "memchr",
+ "murmur3",
  "rcgen",
  "regress",
  "reqwest",
@@ -1048,6 +1056,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "twox-hash",
  "uuid",
  "windows-sys 0.61.2",
 ]
@@ -1175,12 +1184,15 @@ name = "garcon-execution"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
+ "bytes",
  "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "garcon-link",
  "indexmap",
  "serde",
  "serde_json",
@@ -1202,6 +1214,7 @@ dependencies = [
  "garcon-agent-direct-openai-compatible",
  "garcon-agent-direct-openai-responses-compatible",
  "garcon-base",
+ "garcon-cases",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
@@ -1367,6 +1380,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha1",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
@@ -1429,9 +1443,11 @@ dependencies = [
  "garcon-cases",
  "garcon-contract",
  "garcon-js",
+ "garcon-link",
  "getrandom 0.4.3",
  "jsonwebtoken",
  "libc",
+ "percent-encoding",
  "regex",
  "rusqlite",
  "serde",
@@ -1441,6 +1457,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "url",
  "uuid",
  "windows-sys 0.61.2",
 ]
@@ -2075,6 +2092,12 @@ name = "multiversion_no_op"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
+
+[[package]]
+name = "murmur3"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9252111cf132ba0929b6f8e030cac2a24b507f3a4d6db6fb2896f27b354c714b"
 
 [[package]]
 name = "nix"

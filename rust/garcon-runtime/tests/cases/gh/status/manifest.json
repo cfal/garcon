@@ -1,0 +1,13 @@
+{
+  "module": "server/runtime/gh/gh-status.ts",
+  "tests": [
+    "server/runtime/gh/__tests__/gh-status.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 66,
+  "sha256": "39d2b7e4ff96a3579ae3f721b28620bdd0efc1054a3270caa472be2a298588e2"
+}
