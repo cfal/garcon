@@ -159,9 +159,9 @@ pub struct ReplyAckFrame {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename = "producer", tag = "type")]
-pub struct AgentProducerFrame {
+pub struct AgentProducerFrame<Notification = Opaque> {
     pub seq: u64,
-    pub notification: Opaque,
+    pub notification: Notification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,18 +173,18 @@ pub struct ProducerAcknowledgement {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProducerResumeState {
+pub struct ProducerResumeState<Handle = Opaque> {
     pub binding_id: String,
     pub replay_through_seq: u64,
-    pub launch: Option<ProducerResumeLaunch>,
+    pub launch: Option<ProducerResumeLaunch<Handle>>,
     pub received_run_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProducerResumeLaunch {
+pub struct ProducerResumeLaunch<Handle = Opaque> {
     pub run_id: String,
-    pub handle: Option<Opaque>,
+    pub handle: Option<Handle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
