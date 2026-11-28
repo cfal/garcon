@@ -1,0 +1,13 @@
+{
+  "module": "common/garcon-resume-agent.ts",
+  "tests": [
+    "common/__tests__/garcon-resume-agent.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-resume-agent.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 101,
+  "sha256": "93615c3dbf15fbc0f3b7b19b6a69f35bccb5dd904b618cbd08f7f38216b58f63"
+}
