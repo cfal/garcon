@@ -7,7 +7,9 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 use garcon_js::json::{self as js_json, Opaque, contains_unpaired_surrogate_escape, from_str};
-use garcon_js::{Number, math_round, number_to_string, parse_int, to_fixed, utf16};
+use garcon_js::{
+    Number, math_round, number_to_string, parse_int, string_to_number, to_fixed, utf16,
+};
 
 /// A deterministic xorshift64* generator, so a failing run can be repeated.
 struct Rng(u64);
@@ -92,6 +94,36 @@ impl Mismatches {
 
 fn section<'a>(reply: &'a Value, name: &str) -> &'a [Value] {
     reply[name].as_array().unwrap()
+}
+
+#[test]
+fn string_to_number_matches_bun() {
+    let mut inputs: Vec<String> =
+        from_str(include_str!("fixtures/string-to-number-inputs.json")).unwrap();
+    for character in [
+        '\t', '\n', '\u{b}', '\u{c}', '\r', ' ', '\u{a0}', '\u{1680}', '\u{2000}', '\u{200a}',
+        '\u{2028}', '\u{2029}', '\u{202f}', '\u{205f}', '\u{3000}', '\u{feff}', '\u{85}',
+        '\u{180e}', '\u{200b}',
+    ] {
+        inputs.push(character.to_string());
+        inputs.push(format!("{character}+1{character}"));
+    }
+    let reply = ask(json!({"stringToNumber": inputs}));
+    let expected = section(&reply, "stringToNumber");
+    assert_eq!(inputs.len(), expected.len());
+    let mut mismatches = Mismatches::new();
+    for (input, expected) in inputs.iter().zip(expected) {
+        let actual = string_to_number(input);
+        let bits = if actual.is_nan() {
+            "NaN".to_owned()
+        } else {
+            bits_of(actual)
+        };
+        if bits != string(expected) {
+            mismatches.add(format!("Number({input:?})"), bits, expected);
+        }
+    }
+    mismatches.finish("string_to_number", inputs.len());
 }
 
 fn string(item: &Value) -> &str {

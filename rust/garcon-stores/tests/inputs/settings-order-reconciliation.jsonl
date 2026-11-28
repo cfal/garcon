@@ -1,0 +1,11 @@
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a"],"normalChatIds":[],"archivedChatIds":[]},["a","b","c"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a","gone"],"normalChatIds":["also-gone"],"archivedChatIds":[]},["a"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a"],"normalChatIds":["a","b"],"archivedChatIds":["a"]},["a","b"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a","a"],"normalChatIds":["b","b"],"archivedChatIds":["c","c"]},["a","b","c"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a","a"],"normalChatIds":["b","b"],"archivedChatIds":["c","c"]},["a","b","c","d"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a","gone"],"normalChatIds":["a","b"],"archivedChatIds":["b","c","also-gone"]},["a","b","c","d","d"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":[],"normalChatIds":["keep"],"archivedChatIds":[]},["Z","keep","aa","2","10","a","longest","AA"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":[],"normalChatIds":[],"archivedChatIds":[]},["\ud83d\ude00","yZ","x","ZZZ","\u00e9","e\u0301"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":[],"normalChatIds":["a"],"archivedChatIds":["gone"]},["a"]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a"],"normalChatIds":["b"],"archivedChatIds":["c"]},[]]}
+{"fn":"reconcileOrder","args":[{"pinnedChatIds":["a"],"normalChatIds":["b"],"archivedChatIds":["c"]},["c","a","b"]]}
