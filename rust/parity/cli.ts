@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { bunCheck, pinnedBunVersion } from './src/bun-version.js';
 import { commandBuild, originalBuild, type ServerBuild } from './src/environment.js';
 import { mergeRuns, readGolden, writeGolden } from './src/golden.js';
-import { readKnownDifferences } from './src/known-differences.js';
+import { readKnownDifferences, scenarioKnownDifferencesForBuild } from './src/known-differences.js';
 import { compareScenario, renderReport, replaySummary, type ScenarioResult } from './src/report.js';
 import { runScenario } from './src/runner.js';
 import { loadScenarios } from './src/scenario.js';
@@ -52,11 +52,11 @@ async function record(scenarioName: string | undefined): Promise<void> {
 
 async function replay(build: ServerBuild, label: string, scenarioName: string | undefined, reportPath: string | undefined, compareKnown: boolean): Promise<boolean> {
   const results: ScenarioResult[] = [];
-  const known = compareKnown ? await readKnownDifferences(repoRoot) : [];
+  const known = compareKnown ? scenarioKnownDifferencesForBuild(await readKnownDifferences(repoRoot), label) : [];
   const scenarios = await loadScenarios(repoRoot, scenarioName);
   if (!scenarioName) {
     const names = new Set(scenarios.map((scenario) => scenario.name));
-    const stale = known.find((entry) => entry.scope === 'scenario' && !names.has(entry.name));
+    const stale = known.find((entry) => !names.has(entry.name));
     if (stale) throw new Error(`Stale known difference for unknown scenario ${stale.name}`);
   }
   for (const scenario of scenarios) {
