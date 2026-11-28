@@ -222,7 +222,8 @@ the calls that were not captured. Use the repository's pinned Bun (1.4.3):
 - A call whose arguments or result cannot be encoded is printed and kept in
   the manifest as `not captured`, with the test location. Custom class
   arguments and functions are never encoded. Pass `--instances` to encode
-  returned class instances recursively as `{"$":"instance","name":"ClassName","fields":{...}}`,
+  returned or thrown class instances (including Error properties) recursively
+  as `{"$":"instance","name":"ClassName","fields":{...}}`,
   where `fields` contains the encoded enumerable own properties. The
   manifest records this flag for self-replay. Build these Rust results with
   `garcon_cases::markers::instance("ClassName", fields)`, passing a
@@ -275,8 +276,12 @@ rounding integers. The Rust replay compares results at the JSON boundary:
 recorded `undefined` matches an absent object property or `null` in an
 array, but at the root it still requires a marker. Recorded negative zero
 also matches a Rust integer zero; float outputs must preserve the sign.
-Wildcards match as in the scenario replay. A function the dispatcher does
-not handle fails whatever the recording holds. On a difference
+Rust replay rejects any result with a wildcard by default. After reviewing
+the listed cases, call
+`garcon_cases::replay_with_expected_wildcards(cases_dir, count, dispatch)`
+to allow exactly that many wildcarded results. Both an increase and a decrease
+fail the test. A function the dispatcher does not handle fails whatever the
+recording holds. On a difference
 it prints the first one per case with its JSON path, then the distinct
 differences grouped by path, and panics unless every case matches.
 
@@ -361,6 +366,10 @@ shared failures separately within the matching outcomes. It exits 1 on any
 mismatch.
 
 ## Suite traces
+
+For SACS black-box runs, `GARCON_SACS_DRIVERS=claude,codex` selects just those
+scripted drivers. Leave it unset to run all available drivers. An unknown or
+unavailable driver name is an error.
 
 `GARCON_TEST_TRACE_DIR` writes one private JSONL file per test file. The
 test client records its HTTP exchanges, replies to its own WebSocket

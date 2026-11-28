@@ -26,6 +26,15 @@ test('handles quoted keys and array elements without matching inherited properti
   expect(() => parseKnownDifferences([{ ...example, suite: 'conflicts.test.ts' }])).toThrow('exactly one scenario or suite');
 });
 
+test('flags an approval below a wildcard even when a sibling still differs', () => {
+  const golden = { body: '[..]', status: 200 };
+  const actual = { body: { status: 'rust-[..]' }, status: 204 };
+  const approvals = parseKnownDifferences([example]);
+  expect(compareWithKnown(golden, actual, approvals)).toMatchObject({
+    path: '$.body.status', actual: 'matches the original recording',
+  });
+});
+
 test('edge replay uses approvals only when the build comparison supplies them', () => {
   const golden = { scenario: 'fixture', cases: [{ name: 'sample', expected: { body: { status: 'original' } }, noise: [] }] };
   const known = parseKnownDifferences([example]);

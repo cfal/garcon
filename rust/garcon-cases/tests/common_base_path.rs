@@ -68,11 +68,6 @@ fn dispatch(function: &str, args: &[Value]) -> Result<Value, CaseError> {
 #[test]
 fn recorded_cases_match() {
     let stats = replay(CASES, dispatch);
-    // A wildcard would let the port return anything for that case.
-    assert_eq!(
-        stats.with_wildcards, 0,
-        "the recording has wildcards; review the recorder's output"
-    );
     assert_eq!(stats.passed, stats.total);
 }
 

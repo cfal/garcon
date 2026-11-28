@@ -16,6 +16,15 @@ function attribute(tag: string, name: string): string {
   return decodeEntities(new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1] ?? '');
 }
 
+function testLabel(key: string): string {
+  return (JSON.parse(key) as string[]).filter(Boolean).join(' > ');
+}
+
+function insert(outcomes: Map<string, Outcome>, key: string, outcome: Outcome): void {
+  if (outcomes.has(key)) throw new Error(`Duplicate JUnit test: ${testLabel(key)}`);
+  outcomes.set(key, outcome);
+}
+
 // Keys each test by its file, describe path, and name.
 export function parseJunit(xml: string): Map<string, Outcome> {
   const outcomes = new Map<string, Outcome>();
@@ -23,9 +32,9 @@ export function parseJunit(xml: string): Map<string, Outcome> {
   for (const match of xml.matchAll(testcase)) {
     const tag = match[1];
     const body = match[3] ?? '';
-    const key = `${attribute(tag, 'file') || attribute(tag, 'classname')} > ${attribute(tag, 'name')}`;
+    const key = JSON.stringify(['file', 'classname', 'name'].map((name) => attribute(tag, name)));
     const outcome: Outcome = /<(failure|error)\b/.test(body) ? 'fail' : /<skipped\b/.test(body) ? 'skip' : 'pass';
-    outcomes.set(key, outcome);
+    insert(outcomes, key, outcome);
   }
   return outcomes;
 }
@@ -34,9 +43,12 @@ export async function readReports(path: string): Promise<Map<string, Outcome>> {
   const files = (await stat(path)).isDirectory()
     ? (await readdir(path)).filter((name) => name.endsWith('.xml')).sort().map((name) => join(path, name))
     : [path];
+  if (files.length === 0) throw new Error('No JUnit test cases found');
   const outcomes = new Map<string, Outcome>();
   for (const file of files) {
-    for (const [key, outcome] of parseJunit(await readFile(file, 'utf8'))) outcomes.set(key, outcome);
+    const report = parseJunit(await readFile(file, 'utf8'));
+    if (report.size === 0) throw new Error('No JUnit test cases found');
+    for (const [key, outcome] of report) insert(outcomes, key, outcome);
   }
   return outcomes;
 }
@@ -48,7 +60,7 @@ export function compareOutcomes(original: ReadonlyMap<string, Outcome>, candidat
   for (const test of keys) {
     const expected = original.get(test);
     const actual = candidate.get(test);
-    if (expected !== actual) differences.push({ test, expected: expected ?? 'absent', actual: actual ?? 'absent' });
+    if (expected !== actual) differences.push({ test: testLabel(test), expected: expected ?? 'absent', actual: actual ?? 'absent' });
     else if (expected === 'fail') failedBoth += 1;
   }
   return { same: keys.length - differences.length, failedBoth, differences };

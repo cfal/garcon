@@ -58,7 +58,7 @@ async function evaluateOne(namespace: Record<string, unknown>, fn: string, args:
     const outcome = encodeOutcome({ kind: 'return', value: result }, instances);
     return outcome.ok ? { result: outcome.value } : { notCaptured: outcome.failure };
   } catch (error) {
-    const outcome = encodeOutcome({ kind: 'throw', value: error });
+    const outcome = encodeOutcome({ kind: 'throw', value: error }, instances);
     return outcome.ok ? { result: outcome.value } : { notCaptured: outcome.failure };
   }
 }

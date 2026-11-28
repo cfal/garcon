@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { GarconTestClient } from '../../../../../integration-tests/support/garcon-client.js';
+import { ClientTrace } from '../../trace-sink.js';
 
 test('names a top-level test and captures both client transports', async () => {
   const server = Bun.serve({
@@ -41,4 +42,18 @@ test('names a top-level test and captures both client transports', async () => {
   } finally {
     server.stop(true);
   }
+});
+
+test('assigns placeholders in exchange order rather than callback order', async () => {
+  const origin = 'http://127.0.0.1:4099';
+  const trace = new ClientTrace(process.env.GARCON_TEST_TRACE_DIR!, origin, null, (value) => value);
+  const firstChat = String(Date.now() * 1000);
+  const secondChat = String(Number(firstChat) + 1);
+  const first = Promise.withResolvers<Response>();
+  const slow = trace.http(new URL('/first', origin), {}, new Headers(), () => first.promise);
+  trace.receive({ type: 'changed', chatId: secondChat });
+  await trace.http(new URL('/second', origin), {}, new Headers(), async () =>
+    Response.json({ chatId: secondChat, url: 'http://localhost:4242' }));
+  first.resolve(Response.json({ chatId: firstChat, url: 'http://localhost:4141' }));
+  await slow;
 });

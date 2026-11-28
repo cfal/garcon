@@ -19,6 +19,7 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 import {
+  allSacsScriptedDriverFactories,
   sacsScriptedDriverFactories,
 } from './drivers.js';
 import type {
@@ -53,7 +54,7 @@ const EXPECTED_DIRECTORY_SCOPED_DRIVER_IDS = process.platform === 'linux'
   : [];
 
 test('[TLV5-ADOPT.07-SACS-CAPABILITY-01] disables Direct legacy migration and retains native provider capabilities', () => {
-  const directDrivers = sacsScriptedDriverFactories.filter((driver) => (
+  const directDrivers = allSacsScriptedDriverFactories.filter((driver) => (
     DIRECT_DRIVER_IDS.includes(driver.id as typeof DIRECT_DRIVER_IDS[number])
   ));
   expect(directDrivers.map((driver) => [
@@ -69,20 +70,20 @@ test('[TLV5-ADOPT.07-SACS-CAPABILITY-01] disables Direct legacy migration and re
   ]));
   // A non-Direct provider adopts legacy history from the native history it
   // reads; one without readable native history, such as Antigravity, has neither.
-  expect(sacsScriptedDriverFactories
+  expect(allSacsScriptedDriverFactories
     .filter((driver) => !DIRECT_DRIVER_IDS.includes(
       driver.id as typeof DIRECT_DRIVER_IDS[number],
     ))
     .every((driver) => (driver.legacyHistoryImport !== null) === (driver.nativeHistoryImport !== null)))
     .toBe(true);
-  expect(sacsScriptedDriverFactories
+  expect(allSacsScriptedDriverFactories
     .filter((driver) => Boolean(driver.legacyHistoryImport?.directoryScoped))
     .map((driver) => driver.id))
     .toEqual(EXPECTED_DIRECTORY_SCOPED_DRIVER_IDS);
 });
 
 test('[TLV5-ADOPT.08-SACS-CAPABILITY-01] registers native import independently from legacy and session codecs', () => {
-  expect(sacsScriptedDriverFactories.map((driver) => [
+  expect(allSacsScriptedDriverFactories.map((driver) => [
     driver.id,
     driver.nativeHistoryImport !== null,
   ])).toEqual([
