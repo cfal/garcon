@@ -1,0 +1,63 @@
+{
+  "module": "common/usage.ts",
+  "tests": [
+    "rust/garcon-contract/tests/inputs/common/usage-json-boundary.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "usageTotalTokens",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/usage-guards.ts#acceptsUsageTokenTotals",
+      "dropped": 45,
+      "kept": 18
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "usageTotalTokens",
+      "argument": 0
+    },
+    {
+      "fn": "isUsageWindowDays",
+      "argument": 0
+    },
+    {
+      "fn": "isUsageDay",
+      "argument": 0
+    },
+    {
+      "fn": "isUsageTimeZone",
+      "argument": 0
+    },
+    {
+      "fn": "isUsageWindowInRange",
+      "argument": 0
+    },
+    {
+      "fn": "parseUsageReadRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentUsageReport",
+      "argument": 0
+    },
+    {
+      "fn": "parseUsageSummary",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "fn": "parseAgentUsageReport",
+      "where": "args",
+      "path": "$.args",
+      "type": "more than 1048576 bytes encoded",
+      "at": null,
+      "count": 1
+    }
+  ],
+  "cases": 615,
+  "sha256": "d47c5685f326f846a6ed910624092181afaa2d5f8874160b88e12cea2278a765"
+}

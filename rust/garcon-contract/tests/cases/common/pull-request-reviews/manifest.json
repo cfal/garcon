@@ -1,0 +1,39 @@
+{
+  "module": "common/pull-request-reviews.ts",
+  "tests": [
+    "common/__tests__/pull-request-reviews.test.js",
+    "rust/garcon-contract/tests/inputs/common/pull-request-reviews.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "isActivePullRequestReviewRun",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/pull-request-reviews-guards.ts#acceptsRunState",
+      "dropped": 141,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "renderPullRequestReviewPrompt",
+      "argument": 1
+    },
+    {
+      "fn": "normalizePullRequestReviewRepositoryInput",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePullRequestReviewSettings",
+      "argument": 0
+    },
+    {
+      "fn": "isPullRequestReviewsSnapshot",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 530,
+  "sha256": "41d685b90c89b7ed0c4c01b09eedfb410e587b58954a703fdae226aa256d4c9d"
+}
