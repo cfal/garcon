@@ -1,4 +1,8 @@
 //! Ports `server/common/event-loop-stalls.ts`.
+//!
+//! Known difference: when a stall is reported with 12,400,000 bytes of JS
+//! heap in use, the original reports `heapUsedMb: 12`. The Rust monitor
+//! reports rounded resident process memory instead of JS heap usage.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;

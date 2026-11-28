@@ -1,4 +1,9 @@
 //! Ports `common/attachments.ts`.
+//!
+//! Known difference: with an empty declared type, filenames `constructor`
+//! and `__proto__` make the original return `Object` and `Object.prototype`,
+//! respectively, via an inherited lookup. The Rust lookup treats them as
+//! unknown names.
 
 use std::sync::LazyLock;
 
