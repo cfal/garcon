@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-controller", "garcon-executor", "garcon-http", "garcon-interface", "garcon-js", "garcon-link", "garcon-runtime", "garcon-search", "garcon-server", "garcon-stores"]
+members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-controller", "garcon-executor", "garcon-http", "garcon-interface", "garcon-js", "garcon-ledger", "garcon-link", "garcon-runtime", "garcon-search", "garcon-server", "garcon-stores"]
 
 [workspace.package]
 edition = "2024"
@@ -16,12 +16,14 @@ garcon-executor = { path = "garcon-executor" }
 garcon-http = { path = "garcon-http" }
 garcon-interface = { path = "garcon-interface" }
 garcon-js = { path = "garcon-js" }
+garcon-ledger = { path = "garcon-ledger" }
 garcon-link = { path = "garcon-link" }
 garcon-stores = { path = "garcon-stores" }
 async-trait = "0.1"
 bytes = "1"
 futures = "0.3"
 indexmap = { version = "2", features = ["serde"] }
+rusqlite = { version = "=0.43.0", features = ["bundled"] }
 ryu-js = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }

@@ -59,6 +59,26 @@ tokenizers, `fts5vocab`, and the JSON functions are in all three. Differences in
 The original's SQL uses nothing from the first group: a scan under `server/` and
 `server-agents/` finds JavaScript calls and the core `json_valid`, `json_type`, `json_set`.
 
+### Ledger port
+
+`garcon-ledger` uses the workspace's rusqlite 0.43.0 with only the `bundled`
+feature, so it uses SQLite 3.54.1 rather than the host library. The reference
+store still uses Bun 1.4.3's SQLite 3.53.4. The codec interop test uses both
+engines against the same database and compares row addresses, column
+identities, and payload JSON bytes, not the SQLite or WAL file bytes.
+
+Of the version-sensitive behaviors below, the max-safe-integer binding
+difference reaches the ledger's cursor sentinel. Both engines compare that
+exact numeric value against the integer ordinal, whether the parameter is
+REAL or INTEGER. The surrogate binding difference does not affect
+`payload_json`, where JSON.stringify escapes a lone unit before the SQL
+binding; a raw string column remains subject to the port's JSON-boundary
+surrogate rule. The ledger binds positionally and does not bind ArrayBuffer,
+Blob, or Date values, does not issue VACUUM after a cursor, and issues
+BEGIN IMMEDIATE and COMMIT separately. Its SQL does not use the Bun-only
+compile options; the connection setup explicitly sets synchronous mode,
+foreign keys, and the busy timeout.
+
 ## Traps
 
 Connections, statements, and parameters. Bun 1.4.3 is equal unless the last table says otherwise.
