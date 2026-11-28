@@ -1,0 +1,10 @@
+{"fn":"isPermissionModeSupported","args":["default",[]]}
+{"fn":"isPermissionModeSupported","args":["acceptEdits",[]]}
+{"fn":"isPermissionModeSupported","args":["plan",["acceptEdits","plan"]]}
+{"fn":"isPermissionModeSupported","args":["default",["acceptEdits"]]}
+{"fn":"normalizeSupportedPermissionMode","args":[null,[]]}
+{"fn":"normalizeSupportedPermissionMode","args":["acceptEdits",["plan","acceptEdits"]]}
+{"fn":"normalizeSupportedThinkingMode","args":[null,[]]}
+{"fn":"normalizeSupportedThinkingMode","args":["high",["low","high"]]}
+{"fn":"executionDefaultsForAgent","args":[{"$":"undefined"},"codex"]}
+{"fn":"executionDefaultsForAgent","args":[{"global":{"permissionMode":"default","thinkingMode":"low","agentSettingsById":{"10":{"ownerId":"10","schemaVersion":1,"values":{"n":1.0}},"codex":{"ownerId":"codex","schemaVersion":1,"values":{"source":"global","retained":false}}}},"byAgent":{"codex":{"thinkingMode":"high","agentSettingsById":{"2":{"ownerId":"2","schemaVersion":1,"values":{"n":1e21}},"codex":{"ownerId":"codex","schemaVersion":1,"values":{"source":"override"}}}}}},"codex"]}

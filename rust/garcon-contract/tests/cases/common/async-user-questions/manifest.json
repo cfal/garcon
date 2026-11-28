@@ -1,0 +1,30 @@
+{
+  "module": "common/async-user-questions.ts",
+  "tests": [
+    "common/__tests__/async-user-questions.test.js"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "asyncQuestionReplyText",
+      "argument": 0,
+      "guard": "parseAsyncQuestionReply",
+      "dropped": 20,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseAsyncQuestionSet",
+      "argument": 0
+    },
+    {
+      "fn": "parseAsyncQuestionReply",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 200,
+  "sha256": "72c4538067fa1c59ca1f0cb6a955af02ecc3ae502d22bf9a778683078343d840"
+}

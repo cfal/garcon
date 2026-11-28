@@ -1,0 +1,10 @@
+{"fn":"compareSnippetShortNames","args":["eclair-2","\u00e9clair-10"]}
+{"fn":"compareSnippetShortNames","args":["\u4e2d-2","\u4e2d-10"]}
+{"fn":"compareSnippetShortNames","args":["\ud83d\ude00","a"]}
+{"fn":"compareSnippetShortNames","args":["x-\u0662","x-10"]}
+{"fn":"compareSnippetShortNames","args":["\u00e9","E\u0301"]}
+{"fn":"sortSnippetsByShortName","args":[[{"id":"Zulu","shortName":"name-02","template":"Synthetic","defaultArguments":"","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"},{"id":"\u00e9clair","shortName":"name-2","template":"Synthetic","defaultArguments":"","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}]]}
+{"fn":"isSnippetsInvalidationReason","args":["created"]}
+{"fn":"isSnippetsInvalidationReason","args":["reordered"]}
+{"fn":"normalizeSnippetsMutationResponse","args":[{"success":true,"snapshot":{"revision":0,"snippets":[]}}]}
+{"fn":"normalizeSnippetsMutationResponse","args":[{"success":false,"snapshot":{"revision":0,"snippets":[]}}]}

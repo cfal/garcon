@@ -20,6 +20,8 @@ mod git_refs;
 mod git_request_validation;
 mod git_wire;
 mod helpers;
+mod snippet_template;
+mod snippets;
 mod tags;
 mod template_tokens;
 mod terminal;
