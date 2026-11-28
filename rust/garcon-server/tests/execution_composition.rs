@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, path::Path, rc::Rc};
+use std::{path::Path, rc::Rc};
 
 use async_trait::async_trait;
 use futures::future::LocalBoxFuture;
@@ -20,8 +20,8 @@ use garcon_contract::{
     ws_requests::AgentCommandImage,
 };
 use garcon_controller::execution::{
-    ExecutionAdoption, ExecutionBindings, ExecutionCommandBindings, ExecutionFoundation,
-    ExecutionRuntimeBindings, ExecutionStartup, start_execution,
+    ExecutionAdoption, ExecutionCommandBindings, ExecutionFoundation, ExecutionReadBindings,
+    ExecutionRuntimeBindings, ExecutionStartup, start_execution, start_execution_reads,
 };
 use garcon_execution::{
     accepted_input_transcript::{
@@ -35,8 +35,8 @@ use garcon_execution::{
         TurnEventMetadata, WorkingDirectorySettlement, WorkingDirectorySettlementPort,
     },
     types::{
-        AgentTurnRunnerPort, ExecutionOperationResult, PrepareSteerDelivery, ProjectAdmissionPort,
-        QueuedAttachmentAdmissionPort, UserInputAdmissionOptions,
+        AgentTurnRunnerPort, ChatExecutionCommands, ExecutionOperationResult, PrepareSteerDelivery,
+        ProjectAdmissionPort, QueuedAttachmentAdmissionPort, UserInputAdmissionOptions,
     },
 };
 use garcon_executor::{Executor, ExecutorOptions};
@@ -225,8 +225,7 @@ fn options(workspace_dir: &str, local: Rc<dyn ExecutionRuntimeApi>) -> Execution
 async fn bind_stores(
     workspace: &Path,
     foundation: ExecutionFoundation,
-    observed_adoption: Rc<OnceCell<Rc<ExecutionAdoption>>>,
-) -> ExecutionOperationResult<ExecutionBindings> {
+) -> ExecutionOperationResult<ExecutionReadBindings> {
     let fixture = Rc::new(Idle);
     let id = foundation
         .manager
@@ -290,26 +289,13 @@ async fn bind_stores(
         logger: None,
         clock: None,
     }));
-    Ok(ExecutionBindings {
+    Ok(ExecutionReadBindings {
         chats,
         ownership,
         ledger,
         ledger_store,
-        adoption: adoption.clone(),
+        adoption,
         get_carry_over_revision: Rc::new(|_| "synthetic".into()),
-        bind_runtime: Box::new(move |registry, _command_ledger, runtime_adoption| {
-            assert!(Rc::ptr_eq(&runtime_adoption, &adoption));
-            assert!(observed_adoption.set(runtime_adoption).is_ok());
-            assert!(registry.get_running_chat_ids_snapshot().is_empty());
-            Ok(ExecutionRuntimeBindings {
-                turn_runner: fixture.clone(),
-                input_transcript: fixture.clone(),
-                commands: fixture.clone(),
-                project_admission: fixture.clone(),
-                attachment_admission: fixture.clone(),
-                working_directory_settlement: fixture,
-            })
-        }),
         selection_admission_lock: Rc::new(KeyedLock::new()),
         publish_executor_processing: Rc::new(|_| {}),
     })
@@ -323,27 +309,56 @@ async fn startup_brings_up_the_manager_before_the_stores_and_uses_process_local_
             let root = workspace.path();
             let executor = local_executor(root.to_str().unwrap());
             let local = executor.api();
-            let adoption = Rc::new(OnceCell::new());
             let instance = local.get_info(None).await.unwrap().instance_id;
-            let mut handles = start_execution(
+            let reads = start_execution_reads(
                 options(root.to_str().unwrap(), local.clone()),
-                |foundation| bind_stores(root, foundation, adoption.clone()),
+                |foundation| bind_stores(root, foundation),
             )
             .await
             .unwrap();
-            assert!(handles.manager.is_ready("local"));
-            assert_eq!(
-                handles.manager.ready_instance_id("local").unwrap(),
-                instance
-            );
-            assert!(Rc::ptr_eq(&handles.adoption, adoption.get().unwrap()));
-            let controls = handles
-                .coordinator
-                .read_chat_execution_control("1767225600000000")
-                .await
-                .unwrap();
+            assert!(reads.manager.is_ready("local"));
+            assert_eq!(reads.manager.ready_instance_id("local").unwrap(), instance);
+            let chat_id = "1767225600000000";
+            assert!(reads.registry.get_running_chat_ids_snapshot().is_empty());
+            let queries = reads.queries.clone();
+            assert!(!queries.owns_execution(chat_id));
+            let controls = queries.read_chat_execution_control(chat_id).await.unwrap();
             assert_eq!(controls.server_instance_id, "process-instance");
             assert!(controls.entries.is_empty());
+            let adoption = reads.adoption.clone();
+            let mut handles = reads
+                .bind_runtime(Box::new({
+                    let adoption = adoption.clone();
+                    move |registry, _command_ledger, runtime_adoption| {
+                        assert!(Rc::ptr_eq(&runtime_adoption, &adoption));
+                        assert!(registry.get_running_chat_ids_snapshot().is_empty());
+                        let fixture = Rc::new(Idle);
+                        Ok(ExecutionRuntimeBindings {
+                            turn_runner: fixture.clone(),
+                            input_transcript: fixture.clone(),
+                            commands: fixture.clone(),
+                            project_admission: fixture.clone(),
+                            attachment_admission: fixture.clone(),
+                            working_directory_settlement: fixture,
+                        })
+                    }
+                }))
+                .await
+                .unwrap();
+            assert!(Rc::ptr_eq(&handles.adoption, &adoption));
+            assert!(Rc::ptr_eq(&handles.queries, &queries));
+            let reservation = handles
+                .coordinator
+                .reserve_transcript_snapshot(chat_id)
+                .unwrap();
+            assert!(queries.owns_execution(chat_id));
+            assert!(!queries.is_chat_turn_reserved(chat_id));
+            handles
+                .coordinator
+                .release_transcript_snapshot(&reservation)
+                .await
+                .unwrap();
+            assert!(!queries.owns_execution(chat_id));
             handles.unsubscribe();
             handles.manager.dispose().await.unwrap();
             assert_eq!(local.availability(), ExecutorAvailability::Disposed);
