@@ -1,0 +1,13 @@
+{
+  "module": "rust/garcon-agent-claude/tests/oracles/history-loader.ts",
+  "tests": [
+    "rust/garcon-agent-claude/tests/oracles/history-loader.suite.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 128,
+  "sha256": "29d87d0b285a7f2fedbb4746188809d45824a7838140e4a71b65822517ca7e02"
+}
