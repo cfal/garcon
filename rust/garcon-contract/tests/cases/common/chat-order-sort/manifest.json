@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-contract/tests/support/chat_order_sort_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-order-sort.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 20,
+  "sha256": "81c76d963a5ca1291709d75352fbb2ca6cb39dc2222ca71387b341ca67ade172"
+}

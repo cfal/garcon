@@ -1,0 +1,13 @@
+{
+  "module": "server/runtime/git/worktree-layout.ts",
+  "tests": [
+    "server/runtime/git/__tests__/worktree-layout.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 67,
+  "sha256": "bbfe5ba9115e6415c960e1b17ae7bb9f6a69c70cc297dcd323deae7c4c072bb2"
+}

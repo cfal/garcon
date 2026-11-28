@@ -1,0 +1,30 @@
+{
+  "module": "common/ticket-commands.ts",
+  "tests": [
+    "common/__tests__/tickets.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ticket-commands.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseTicketPatch",
+      "argument": 0
+    },
+    {
+      "fn": "parseMarkupTicketMutationPayload",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketMutationPayload",
+      "argument": 0
+    },
+    {
+      "fn": "parseHttpTicketMutationRequest",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 316,
+  "sha256": "8bb79e6e8bee48b29d89dca7e4a696fef34b48a30110fbb5ed0bbdbf1e4e1eb2"
+}

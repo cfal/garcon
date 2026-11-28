@@ -4,6 +4,7 @@
 //! tests/cases/common/<module>` writes each recording, and every case must
 //! match here. One file per recorded module.
 
+mod agent_cli_update;
 mod bun;
 mod chat_activity;
 mod chat_boards;
@@ -24,6 +25,10 @@ mod helpers;
 mod preamble_prefix;
 mod preambles;
 mod prompt_refinement;
+mod pull_request_reviews;
+mod schedule_duration;
+mod scheduled_prompt_render;
+mod scheduled_prompts;
 mod snippet_template;
 mod snippets;
 mod tags;
@@ -32,3 +37,4 @@ mod terminal;
 mod terminal_error;
 mod tickets;
 mod transcript_projection;
+mod usage;

@@ -1,0 +1,20 @@
+{"fn":"parseGarconAgentRequestOptions","args":[{}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":""}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"0.__-"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"_a"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"-a"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a\n"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"aé"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"K"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"with space"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a","async":"true"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a","async":"false"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a","async":"True"}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a","async":"false "}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a","async":""}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a","async":null}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"a","async":true}]}
+{"fn":"parseGarconAgentRequestOptions","args":[{"ref":"keep","unrelated":"ignored"}]}

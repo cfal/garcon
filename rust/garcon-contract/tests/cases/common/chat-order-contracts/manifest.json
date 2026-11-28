@@ -1,0 +1,42 @@
+{
+  "module": "common/chat-order-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-order-contracts.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseReorderChatRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseReorderChatResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseSortChatOrderRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseSortChatOrderResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseSetChatPinnedRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseSetChatArchivedRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseSetChatOrderStateResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 456,
+  "sha256": "6e7688f12ec03ff22bc52df2e7e0b22f3b6e1b0972f69a6061b4fb7d2be36824"
+}

@@ -1,0 +1,13 @@
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"preparing-context"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"compacting-context"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"starting-agent"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"started"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"failed"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"interrupted"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"unknown"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":"started","runId":"private"}]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"unknown","phase":"started"}]}
+{"fn":"parseAgentStartProgressNotice","args":[null]}
+{"fn":"parseAgentStartProgressNotice","args":[[]]}
+{"fn":"parseAgentStartProgressNotice","args":[{"type":"agent-start-progress","phase":0}]}

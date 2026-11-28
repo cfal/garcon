@@ -1,0 +1,11 @@
+{
+  "module": "common/garcon-command-text.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 14,
+  "sha256": "bb3c36b2651ec91205938934fa52082d2b53205231b3b882529148b16eb2607c"
+}

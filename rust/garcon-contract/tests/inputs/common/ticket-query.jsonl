@@ -1,0 +1,9 @@
+{"fn":"parseTicketListQuery","args":[{"project":" Sample project ","status":"in-review","includeClosed":false,"priority":0,"label":" Bug ","assignee":{"kind":"user","ownerKey":"person"},"ready":true,"query":" input ","beforeNumber":12,"expectedCollectionRevision":0,"limit":100}]}
+{"fn":"parseTicketListQuery","args":[{"assignee":"unassigned"}]}
+{"fn":"parseTicketListQuery","args":[{"assignee":false,"project":null}]}
+{"fn":"parseTicketListQuery","args":[{"limit":101}]}
+{"fn":"parseTicketReadQuery","args":[{"ticketId":"G-1","includeDescription":false,"commentLimit":1,"beforeCommentSequence":20,"expectedCollectionRevision":0}]}
+{"fn":"parseTicketReadQuery","args":[{"ticketId":"G-1","includeDescription":null}]}
+{"fn":"parseTicketCommentsQuery","args":[{"ticketId":"G-3","beforeSequence":14,"expectedCollectionRevision":0}]}
+{"fn":"parseTicketCommentsQuery","args":[{"ticketId":"G-3","limit":0}]}
+{"fn":"parseTicketHistoryQuery","args":[{"ticketId":"G-9","limit":100}]}

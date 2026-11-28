@@ -18,6 +18,10 @@ const server = Bun.serve({
       return Response.json({ token: 'probe-session-token' });
     }
     if (path === '/api/v1/auth/status') return Response.json({ needsSetup: false, isAuthenticated: authDisabled, authDisabled });
+    if (path === '/api/v1/app/settings' && process.argv.includes('--settings-unported')) {
+      const marked = request.method !== 'GET' || !process.argv.includes('--unmarked-settings-get');
+      return new Response(null, { status: 501, headers: marked ? { 'X-Garcon-Rs-Unported': '1' } : {} });
+    }
     if (path === '/api/v1/path') {
       return new Response(process.env.PATH ?? '', { headers: { 'Content-Type': 'text/plain' } });
     }

@@ -23,6 +23,12 @@ export interface Golden {
 // Merges the original's two runs of a scenario into its golden expectation.
 export function mergeRuns(scenario: Scenario, first: CaseRun[], second: CaseRun[]): Golden {
   if (first.length !== second.length) throw new Error(`${scenario.name}: the two recording runs produced different case counts`);
+  for (const runs of [first, second]) {
+    const invalid = runs.find((run) => run.unavailable || run.unresolvedPlaceholder !== undefined);
+    if (invalid) {
+      throw new Error(`${scenario.name}: cannot record ${invalid.name}: ${invalid.unresolvedPlaceholder ?? invalid.unavailable?.kind}`);
+    }
+  }
   return {
     scenario: scenario.name,
     cases: first.map((run, index) => {
