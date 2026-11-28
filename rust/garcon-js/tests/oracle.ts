@@ -27,7 +27,7 @@ function outcome(operation: () => unknown): unknown {
   try {
     return { value: operation() };
   } catch (error) {
-    return { error: `${(error as Error).name}: ${(error as Error).message}` };
+    return { error: { name: (error as Error).name, message: (error as Error).message } };
   }
 }
 
@@ -96,6 +96,17 @@ if (request.win32IsAbsolute) reply.win32IsAbsolute = bits(request.win32IsAbsolut
 if (request.win32Normalize) reply.win32Normalize = bits(request.win32Normalize).map((value) => path.win32.normalize(value));
 if (request.win32Dirname) reply.win32Dirname = bits(request.win32Dirname).map((value) => path.win32.dirname(value));
 if (request.win32ParseRoot) reply.win32ParseRoot = bits(request.win32ParseRoot).map((value) => path.win32.parse(value).root);
+if (request.win32Basename) reply.win32Basename = bits(request.win32Basename).map((value) => path.win32.basename(value));
+if (request.win32Join) {
+  reply.win32Join = (request.win32Join as string[][]).map((parts) => path.win32.join(...parts));
+}
+if (request.win32Resolve) {
+  reply.win32Resolve = (request.win32Resolve as [string, string[]][]).map(([cwd, parts]) => path.win32.resolve(cwd, ...parts));
+}
+if (request.win32Relative) {
+  reply.win32Relative = (request.win32Relative as [string, string, string][]).map(([cwd, from, to]) =>
+    path.win32.relative(path.win32.resolve(cwd, from), path.win32.resolve(cwd, to)));
+}
 if (request.jsonRoundTrip) {
   reply.jsonRoundTrip = bits(request.jsonRoundTrip).map((text) => outcome(() => JSON.stringify(JSON.parse(text))));
 }

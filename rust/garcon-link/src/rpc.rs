@@ -167,10 +167,7 @@ fn encode_failure(error: &(dyn Error + 'static)) -> Failure {
         .or(error.downcast_ref::<AgentIntegrationError>())
     {
         return Failure {
-            details: agent
-                .details
-                .clone()
-                .map(|details| Opaque::from_value(Value::Object(details))),
+            details: agent.details.clone(),
             outcome: call.map(|call| call.outcome.as_str()),
             ..failure(
                 None,

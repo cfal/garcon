@@ -18,6 +18,15 @@ const REPORT_THRESHOLD_MS: f64 = 250.0;
 const RECENT_ACTIVITY_LIMIT: usize = 64;
 const REPORTED_ACTIVITY_LIMIT: usize = 8;
 
+fn timer_interval(interval_ms: f64) -> Duration {
+    const MAX_DELAY_MS: f64 = i32::MAX as f64;
+    let fallback = Duration::from_millis(1);
+    if !(1.0..=MAX_DELAY_MS).contains(&interval_ms) {
+        return fallback;
+    }
+    Duration::try_from_secs_f64(interval_ms.trunc() / 1000.0).unwrap_or(fallback)
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct EventLoopStallOptions {
     pub interval_ms: Option<f64>,
@@ -52,9 +61,15 @@ struct Tracked {
 
 /// The work the process tracks, so that a stall report can name it. The
 /// original keeps this state at module level; one tracker per thread holds it.
-#[derive(Debug, Default)]
 pub struct ActivityTracker {
     tracked: RefCell<Tracked>,
+    now_ms: Box<dyn Fn() -> f64>,
+}
+
+impl Default for ActivityTracker {
+    fn default() -> Self {
+        Self::new(performance_now_ms)
+    }
 }
 
 /// Runs a finish function when dropped, as a `finally` block does, also when
@@ -76,6 +91,13 @@ impl Drop for Finish {
 }
 
 impl ActivityTracker {
+    pub fn new(monotonic_now_ms: impl Fn() -> f64 + 'static) -> Self {
+        Self {
+            tracked: RefCell::default(),
+            now_ms: Box::new(monotonic_now_ms),
+        }
+    }
+
     /// Records work that may hold the event loop, such as a route or a
     /// queued task. The returned function marks it finished; calling it a
     /// second time changes nothing.
@@ -134,7 +156,7 @@ impl ActivityTracker {
             return;
         };
         let (_, mut activity) = tracked.running.remove(index);
-        activity.ended_at = Some(performance_now_ms());
+        activity.ended_at = Some((self.now_ms)());
         tracked.recent.push_back(activity);
         if tracked.recent.len() > RECENT_ACTIVITY_LIMIT {
             tracked.recent.pop_front();
@@ -154,18 +176,13 @@ impl ActivityTracker {
     ) -> impl Fn() + 'static {
         let interval_ms = options.interval_ms.unwrap_or(SAMPLE_INTERVAL_MS);
         let threshold_ms = options.threshold_ms.unwrap_or(REPORT_THRESHOLD_MS);
-        // A timer of a duration that is not positive never waits.
-        let interval = if interval_ms.is_finite() && interval_ms > 0.0 {
-            Duration::from_secs_f64(interval_ms / 1000.0)
-        } else {
-            Duration::ZERO
-        };
+        let interval = timer_interval(interval_ms);
         let tracker = Rc::clone(self);
-        let mut expected = performance_now_ms() + interval_ms;
+        let mut expected = (self.now_ms)() + interval_ms;
         let sampler = tokio::task::spawn_local(async move {
             loop {
                 tokio::time::sleep(interval).await;
-                let now = performance_now_ms();
+                let now = (tracker.now_ms)();
                 let stall_ms = now - expected;
                 // The loop was held from at least the missed tick until now.
                 let window_start = expected;
@@ -228,10 +245,57 @@ fn page_size() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::cell::RefCell;
     use std::time::{Duration, Instant};
 
     use super::*;
+
+    #[test]
+    fn normalizes_timer_delays_as_bun_does() {
+        let one = Duration::from_millis(1);
+        for delay in [
+            0.0,
+            -2.0,
+            0.5,
+            1.9,
+            f64::NAN,
+            f64::INFINITY,
+            2_147_483_648.0,
+            1e99,
+        ] {
+            assert_eq!(timer_interval(delay), one, "{delay}");
+        }
+        assert_eq!(timer_interval(20.0), Duration::from_millis(20));
+        assert_eq!(
+            timer_interval(2_147_483_647.0),
+            Duration::from_millis(2_147_483_647)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sampler_measures_stall_with_the_injected_clock() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let now = Rc::new(Cell::new(0.0));
+                let clock = Rc::clone(&now);
+                let tracker = Rc::new(ActivityTracker::new(move || clock.get()));
+                let (stalls, on_stall) = recording_stalls();
+                let stop = tracker.monitor_event_loop_stalls(
+                    on_stall,
+                    EventLoopStallOptions {
+                        interval_ms: Some(20.0),
+                        threshold_ms: Some(10.0),
+                    },
+                );
+                now.set(50.0);
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                stop();
+                assert_eq!(stalls.borrow().len(), 1);
+                assert_eq!(stalls.borrow()[0].stall_ms, 30.0);
+            })
+            .await;
+    }
 
     /// Holds the event loop, as the original's `block` does.
     fn block(duration: Duration) {
@@ -337,57 +401,49 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn finished_activities_are_named_most_recent_first_and_capped() {
-        tokio::task::LocalSet::new()
-            .run_until(async {
-                let tracker = Rc::new(ActivityTracker::default());
-                let keep_running = tracker.track_activity("still running");
-                for index in 0..12 {
-                    let finish = tracker.track_activity(&format!("work {index}"));
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                    finish();
-                    // Finishing again changes nothing.
-                    finish();
-                }
-                let names = tracker.activities_during(0.0);
-                assert_eq!(names.len(), REPORTED_ACTIVITY_LIMIT);
-                assert_eq!(names[0], "work 11");
-                assert_eq!(names[REPORTED_ACTIVITY_LIMIT - 1], "work 4");
-
-                // Work that ended before the window is not named; work still
-                // running is named after what finished in the window.
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                let window_start = performance_now_ms();
-                assert_eq!(tracker.activities_during(window_start), ["still running"]);
-                // Work that finishes inside the window is named most recent first.
-                keep_running();
-                assert_eq!(tracker.activities_during(window_start), ["still running"]);
-                // A window that starts after everything finished names nothing.
-                tokio::time::sleep(Duration::from_millis(1)).await;
-                assert!(tracker.activities_during(performance_now_ms()).is_empty());
-            })
-            .await;
+    #[test]
+    fn finished_activities_are_named_most_recent_first_and_capped() {
+        let now = Rc::new(Cell::new(0.0));
+        let clock = Rc::clone(&now);
+        let tracker = Rc::new(ActivityTracker::new(move || clock.get()));
+        let keep_running = tracker.track_activity("still running");
+        for index in 0..12 {
+            let finish = tracker.track_activity(&format!("work {index}"));
+            now.set(f64::from(index) + 1.0);
+            finish();
+            finish();
+        }
+        let names = tracker.activities_during(0.0);
+        assert_eq!(names.len(), REPORTED_ACTIVITY_LIMIT);
+        assert_eq!(names[0], "work 11");
+        assert_eq!(names[REPORTED_ACTIVITY_LIMIT - 1], "work 4");
+        assert_eq!(
+            tracker.activities_during(12.0),
+            ["work 11", "still running"]
+        );
+        let window_start = 13.0;
+        now.set(window_start);
+        assert_eq!(tracker.activities_during(window_start), ["still running"]);
+        keep_running();
+        assert_eq!(tracker.activities_during(window_start), ["still running"]);
+        assert!(tracker.activities_during(14.0).is_empty());
     }
 
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn only_the_most_recent_finished_activities_are_kept() {
-        tokio::task::LocalSet::new()
-            .run_until(async {
-                let tracker = Rc::new(ActivityTracker::default());
-                for index in 0..=RECENT_ACTIVITY_LIMIT {
-                    tracker.track_activity(&format!("work {index}"))();
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
-                let names = tracker.activities_during(0.0);
-                assert_eq!(names[0], format!("work {RECENT_ACTIVITY_LIMIT}"));
-                assert!(!names.contains(&"work 0".to_owned()));
-                assert_eq!(
-                    tracker.activities_during(0.0).len(),
-                    REPORTED_ACTIVITY_LIMIT
-                );
-            })
-            .await;
+    #[test]
+    fn only_the_most_recent_finished_activities_are_kept() {
+        let now = Rc::new(Cell::new(0.0));
+        let clock = Rc::clone(&now);
+        let tracker = Rc::new(ActivityTracker::new(move || clock.get()));
+        for index in 0..=RECENT_ACTIVITY_LIMIT {
+            now.set(index as f64);
+            tracker.track_activity(&format!("work {index}"))();
+        }
+        let names = tracker.activities_during(0.0);
+        assert_eq!(names[0], format!("work {RECENT_ACTIVITY_LIMIT}"));
+        assert_eq!(names.len(), REPORTED_ACTIVITY_LIMIT);
+        let tracked = tracker.tracked.borrow();
+        assert_eq!(tracked.recent.len(), RECENT_ACTIVITY_LIMIT);
+        assert_eq!(tracked.recent.front().unwrap().label, "work 1");
     }
 
     #[test]

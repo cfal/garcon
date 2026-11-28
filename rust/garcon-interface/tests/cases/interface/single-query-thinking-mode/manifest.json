@@ -1,0 +1,16 @@
+{
+  "module": "rust/garcon-interface/tests/errors_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-interface/tests/inputs/interface/single-query-thinking-mode.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isUnsupportedSingleQueryThinkingMode",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "9389ec54faacbaef9c75c7015b2f49135b475486af514c7f0da6f67d8f4654e4"
+}

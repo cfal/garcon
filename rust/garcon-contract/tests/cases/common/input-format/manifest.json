@@ -4,6 +4,22 @@
     "common/__tests__/input-format.test.js"
   ],
   "inputs": "rust/garcon-contract/tests/inputs/common/input-format.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isInputFormatByModel",
+      "argument": 0
+    },
+    {
+      "fn": "literalInputFormat",
+      "argument": 0
+    },
+    {
+      "fn": "isPlainTextInput",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
   "notCaptured": [
     {
       "path": "$.args[0]",
@@ -30,6 +46,6 @@
       "count": 1
     }
   ],
-  "cases": 174,
-  "sha256": "233c3cedfc68f0cb1f6f4fdbd126080b8d66475bcf0d25adf8ef5f35f022148d"
+  "cases": 170,
+  "sha256": "c79418d083f9c2cd9953926978837f8ffa8e470210268d560196221ab7e03291"
 }

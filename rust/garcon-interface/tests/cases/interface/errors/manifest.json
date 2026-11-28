@@ -1,0 +1,16 @@
+{
+  "module": "server-agents/interface/src/errors.ts",
+  "tests": [],
+  "inputs": "rust/garcon-interface/tests/inputs/interface/errors.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isAgentIntegrationErrorCode",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 33,
+  "sha256": "1a80b1ae143c295c4146b83c0a70097158084d6f639121a897058e3105314ec9"
+}
