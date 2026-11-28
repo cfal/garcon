@@ -11,12 +11,22 @@ use garcon_js::utf16;
 use regress::Regex;
 use serde_json::Value;
 
+use crate::gh::gh_error_classifier::classify_gh_error;
+use crate::gh::gh_types::GhDomainError;
+use crate::gh::run::GhOutputLimitError;
+
 use super::git_domain_error::GitDomainError;
 use super::git_error_classifier::classify_git_error;
 use super::operation_context::is_git_cancellation;
 use super::run::GitOutputLimitError;
 
 const GIT_ERROR_MESSAGE_LIMIT: usize = 2048;
+
+#[derive(Clone, Copy)]
+enum Domain {
+    Git,
+    Gh,
+}
 
 static MISSING_GIT: LazyLock<Regex> = LazyLock::new(|| {
     // INFALLIBLE: the literal is the original's missing-executable pattern.
@@ -28,13 +38,19 @@ static NON_WHITESPACE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\S+").expect("valid Git redaction pattern")
 });
 
-fn bounded_service_error(code: &str, message: &str) -> GitServiceError {
+fn bounded_service_error(domain: Domain, code: &str, message: &str) -> GitServiceError {
     let candidate = match code {
         "GIT_LOCKED" | "GH_MISSING" => code.to_owned(),
-        _ => format!("GIT_{code}"),
+        _ => match domain {
+            Domain::Git => format!("GIT_{code}"),
+            Domain::Gh => format!("GH_{code}"),
+        },
     };
-    let service_code = is_git_service_error_code(&Value::String(candidate))
-        .unwrap_or(GitServiceErrorCode::GIT_OPERATION_FAILED);
+    let service_code =
+        is_git_service_error_code(&Value::String(candidate)).unwrap_or(match domain {
+            Domain::Git => GitServiceErrorCode::GIT_OPERATION_FAILED,
+            Domain::Gh => GitServiceErrorCode::GH_OPERATION_FAILED,
+        });
     let redacted;
     let message = if message.contains("://") {
         let mut text = String::new();
@@ -63,15 +79,26 @@ fn bounded_service_error(code: &str, message: &str) -> GitServiceError {
 }
 
 pub fn git_service_error(error: Box<dyn Error>) -> Box<dyn Error> {
+    service_error(error, Domain::Git)
+}
+
+pub fn gh_service_error(error: Box<dyn Error>) -> Box<dyn Error> {
+    service_error(error, Domain::Gh)
+}
+
+fn service_error(error: Box<dyn Error>, domain: Domain) -> Box<dyn Error> {
     use GitServiceErrorCode as Code;
 
     if error.is::<GitServiceError>() || error.is::<AgentCallError>() {
         return error;
     }
     if let Some(error) = error.downcast_ref::<GitDomainError>() {
-        return bounded_service_error(&error.code, &error.message).into();
+        return bounded_service_error(domain, &error.code, &error.message).into();
     }
-    if MISSING_GIT.find(&error.to_string()).is_some() {
+    if let Some(error) = error.downcast_ref::<GhDomainError>() {
+        return bounded_service_error(domain, error.code, &error.message).into();
+    }
+    if matches!(domain, Domain::Git) && MISSING_GIT.find(&error.to_string()).is_some() {
         return GitServiceError::new(Code::GIT_MISSING, "Git is not installed on this executor")
             .into();
     }
@@ -82,7 +109,7 @@ pub fn git_service_error(error: Box<dyn Error>) -> Box<dyn Error> {
     if is_project_boundary_error(error.as_ref()) {
         return GitServiceError::new(Code::GIT_OUTSIDE_BASE, error.to_string()).into();
     }
-    if error.is::<GitOutputLimitError>() {
+    if error.is::<GitOutputLimitError>() || error.is::<GhOutputLimitError>() {
         return GitServiceError::new(
             Code::GIT_RESULT_TOO_LARGE,
             "Git result exceeds the operation limit",
@@ -93,8 +120,16 @@ pub fn git_service_error(error: Box<dyn Error>) -> Box<dyn Error> {
         return GitServiceError::new(Code::GIT_TIMEOUT, "Git operation expired or was cancelled")
             .into();
     }
-    let classified = classify_git_error(input);
-    bounded_service_error(classified.code, &classified.message).into()
+    match domain {
+        Domain::Git => {
+            let classified = classify_git_error(input);
+            bounded_service_error(domain, classified.code, &classified.message).into()
+        }
+        Domain::Gh => {
+            let classified = classify_gh_error(input);
+            bounded_service_error(domain, classified.code, &classified.message).into()
+        }
+    }
 }
 
 #[cfg(test)]

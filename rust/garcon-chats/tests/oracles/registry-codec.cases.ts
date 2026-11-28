@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { allocateIds, CHAT_ID, decodeEntry, OTHER_ID, parseSegments, validSegmentId } from './registry-codec.ts';
+import { allocateIds, CHAT_ID, commitBoundary, decodeEntry, OTHER_ID, parseSegments, validSegmentId } from './registry-codec.ts';
 
 const raw = () => ({ agentId: 'codex', agentOwnershipEpoch: 'epoch-a',
   agentSettingsById: { codex: { ownerId: 'codex', schemaVersion: 1, values: { example: 1.0 } } },
@@ -47,4 +47,12 @@ test('allocator skips occupied IDs and remains monotonic after the clock rolls b
   expect(allocateIds([1783725900000, 1783725900000, 1783725899999], ['1783725900000001'])).toEqual([
     '1783725900000000', '1783725900000002', '1783725900000003',
   ]);
+});
+
+test.each(['add', 'live', 'phased'] as const)('%s stores a normalized boundary before binding', async (mode) => {
+  const boundary = { kind: 'selection-change', ownershipEpoch: 'epoch-a', selectionRevision: 0 };
+  expect(await commitBoundary(mode, 'epoch-a', ' \tepoch-a\n')).toEqual({ live: boundary, reopened: boundary });
+  expect(await commitBoundary(mode, ' \tepoch-a\n', ' \tepoch-a\n')).toEqual({
+    mutationError: 'Preamble boundary ownership epoch mismatch', unchanged: true,
+  });
 });

@@ -1,0 +1,45 @@
+{
+  "module": "rust/garcon-chats/tests/oracles/ownership-journal-format.ts",
+  "tests": [
+    "rust/garcon-chats/tests/oracles/ownership-journal-format.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "createPreambleBoundaryBinding",
+      "argument": 0,
+      "guard": "acceptsLifecycleKind",
+      "dropped": 21,
+      "kept": 0
+    },
+    {
+      "fn": "createPreambleBoundaryBinding",
+      "argument": 1,
+      "guard": "acceptsEpoch",
+      "dropped": 0,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "isEmptyEarlierJournal",
+      "argument": 0
+    },
+    {
+      "fn": "isJournalV5",
+      "argument": 0
+    },
+    {
+      "fn": "createPreambleBoundaryBinding",
+      "argument": 0
+    },
+    {
+      "fn": "createPreambleBoundaryBinding",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 207,
+  "sha256": "8d252a78e1b0c2a336754f0be9809092a3483840acc80dbaaf0ccd7aaba2a7ce"
+}

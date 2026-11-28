@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-executor/tests/oracles/git-rpc-server.ts",
+  "tests": [],
+  "inputs": "rust/garcon-executor/tests/inputs/git-rpc-server.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 13,
+  "sha256": "08904627c1616b5dcd5de5d63c4b2c7af6adaeffc9cacfc3e61731992a632bf4"
+}
