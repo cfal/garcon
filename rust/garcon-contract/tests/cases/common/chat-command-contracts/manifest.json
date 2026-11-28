@@ -1,0 +1,103 @@
+{
+  "module": "common/chat-command-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-command-contracts.test.js",
+    "rust/garcon-contract/tests/inputs/common/chat-command-contracts.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "recordsStartupPreferences",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/chat-command-guards.ts#acceptsOrigin",
+      "dropped": 77,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseStartChatCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentRunCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentHandoffCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseForkChatCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseForkRunCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseDeleteChatCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueueEntryCreateCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueueEntryReplaceCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueueEntryDeleteCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueueEntryMoveCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseSteerCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueueEntrySteerCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueueMutationRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueueResumeRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parsePermissionDecisionCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentStopCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentInterruptAndSendCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseCompactCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseProjectPathPatchRequest",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeAskUserQuestionDecisionResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 1559,
+  "sha256": "ca81cd35b5f299e3a4eccb90f73f4f0d8c9931809f390c2d751ef6aa929c3b45"
+}

@@ -6,7 +6,7 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
-use garcon_js::json::{Opaque, from_str};
+use garcon_js::json::{Opaque, contains_unpaired_surrogate_escape, from_str};
 use garcon_js::{Number, math_round, number_to_string, parse_int, to_fixed, utf16};
 
 /// A deterministic xorshift64* generator, so a failing run can be repeated.
@@ -96,6 +96,47 @@ fn section<'a>(reply: &'a Value, name: &str) -> &'a [Value] {
 
 fn string(item: &Value) -> &str {
     item.as_str().unwrap()
+}
+
+#[test]
+fn unpaired_surrogate_escapes_match_bun_for_generated_json_documents() {
+    let fragments = [
+        "",
+        "plain",
+        r"\\",
+        r#"\""#,
+        r"\\uD800",
+        r"\uD800",
+        r"\udbff",
+        r"\udc00",
+        r"\uDFFF",
+        r"\uFFFD",
+        r"\u0041",
+        r"\n",
+        r"\uD83D\uDE80",
+        "\u{fffd}",
+        "\u{1f680}",
+    ];
+    let mut inputs = Vec::new();
+    for left in fragments {
+        for right in fragments {
+            inputs.push(format!(r#""{left}{right}""#));
+            inputs.push(format!(r#"{{"outer":[{{"{left}{right}":null}},3]}}"#));
+            inputs.push(format!(r#"[null,{{"first":"{left}","second":"{right}"}}]"#));
+        }
+    }
+    let reply = ask(json!({"jsonUnpairedSurrogate": inputs}));
+    let expected = section(&reply, "jsonUnpairedSurrogate");
+    assert_eq!(expected.len(), inputs.len());
+    let mut differences = Mismatches::new();
+    for (input, expected) in inputs.iter().zip(expected) {
+        let actual = contains_unpaired_surrogate_escape(input.as_bytes());
+        let expected = expected.as_bool().unwrap();
+        if actual != expected {
+            differences.add(input, actual, expected);
+        }
+    }
+    differences.finish("unpaired JSON surrogate escapes", inputs.len());
 }
 
 fn outcome(item: &Value) -> Result<&str, (&str, &str)> {
