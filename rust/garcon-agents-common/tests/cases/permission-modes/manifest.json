@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/execution/permission-modes.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/permission-modes.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "5a3977f87f6be146ea03a79382f87757c43c795cb1f1baa96927ca2a2638c9d4"
+}

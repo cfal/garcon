@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/path-native-session.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/path-native-session.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "320c61944ec6f1dfa747675d6d8998ea182ba0831c6cd065bc59510edd0fbe99"
+}

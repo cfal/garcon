@@ -3,6 +3,7 @@
 use std::ffi::OsString;
 use std::rc::Rc;
 
+pub mod agents;
 mod cancellation;
 pub mod files;
 pub mod git;

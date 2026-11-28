@@ -1,4 +1,13 @@
-//! Query compilation from `server-agents/common/src/search/query.ts`.
+//! Compiles and runs queries from `server-agents/common/src/search/query.ts`.
+
+mod allowlist;
+mod execution;
+mod snippet;
+
+pub use execution::{
+    SEARCH_QUERY_MATCH_ROW_LIMIT, SearchError, SearchIndexOptions, SearchIndexResult,
+    TranscriptSearchOrder, search_transcript_index_v1,
+};
 
 use std::{borrow::Cow, ops::Range};
 

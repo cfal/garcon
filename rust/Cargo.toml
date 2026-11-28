@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-controller", "garcon-execution", "garcon-executor", "garcon-http", "garcon-interface", "garcon-js", "garcon-ledger", "garcon-link", "garcon-runtime", "garcon-search", "garcon-server", "garcon-stores"]
+members = ["garcon-agents-common", "garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-controller", "garcon-execution", "garcon-executor", "garcon-http", "garcon-interface", "garcon-js", "garcon-ledger", "garcon-link", "garcon-runtime", "garcon-search", "garcon-server", "garcon-stores"]
 
 [workspace.package]
 edition = "2024"
@@ -8,6 +8,7 @@ license = "GPL-3.0"
 publish = false
 
 [workspace.dependencies]
+garcon-agents-common = { path = "garcon-agents-common" }
 garcon-base = { path = "garcon-base" }
 garcon-cases = { path = "garcon-cases" }
 garcon-contract = { path = "garcon-contract" }

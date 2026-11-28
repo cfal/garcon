@@ -11,6 +11,7 @@ pub mod event_loop;
 pub mod event_loop_stalls;
 pub mod executor_disconnect;
 pub mod executor_path;
+pub mod file_stat;
 pub mod http_body;
 pub mod http_error;
 pub mod interactive_deadline;

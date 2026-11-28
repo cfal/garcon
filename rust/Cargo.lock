@@ -824,6 +824,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-agents-common"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "indexmap",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "garcon-base"
 version = "0.0.0"
 dependencies = [
@@ -1122,9 +1144,13 @@ dependencies = [
  "garcon-contract",
  "garcon-js",
  "icu_normalizer",
+ "indexmap",
  "regress",
+ "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
