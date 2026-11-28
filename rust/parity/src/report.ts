@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { Golden } from './golden.js';
+import { compareWithKnown, missingKnownCase, type KnownDifference } from './known-differences.js';
 import type { CaseRun } from './runner.js';
-import { firstDifference, type Difference } from './wildcard.js';
+import type { Difference } from './wildcard.js';
 
 export interface CaseResult {
   scenario: string;
@@ -17,7 +18,7 @@ export interface ScenarioResult {
   cases: CaseResult[];
 }
 
-export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario: string): ScenarioResult {
+export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario: string, known: readonly KnownDifference[] = []): ScenarioResult {
   if (!golden) {
     return { scenario, missingGolden: true, cases: [] };
   }
@@ -30,16 +31,18 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
   });
   const byName = new Map(runs.map((run) => [run.name, run]));
   const recorded = new Set(golden.cases.map((expected) => expected.name));
+  const approvals = known.filter((entry) => entry.scope === 'scenario' && entry.name === scenario);
   const cases = golden.cases.map((expected) => {
     const run = byName.get(expected.name);
     return run
-      ? result(expected.name, firstDifference(expected.expected, run.capture), run)
+      ? result(expected.name, compareWithKnown(expected.expected, run.capture, approvals.filter((entry) => entry.case === expected.name)), run)
       : result(expected.name, { path: '$', kind: 'missing', expected: 'a recorded case', actual: '(case no longer generated)' });
   });
   // A step added without recording again would otherwise never be checked.
   const unrecorded = runs.filter((run) => !recorded.has(run.name)).map((run) =>
     result(run.name, { path: '$', kind: 'extra', expected: '(not recorded)', actual: 'a generated case; run bun run parity:record' }, run));
-  return { scenario, missingGolden: false, cases: [...cases, ...unrecorded] };
+  const stale = approvals.filter((entry) => !recorded.has(entry.case) && !byName.has(entry.case));
+  return { scenario, missingGolden: false, cases: [...cases, ...unrecorded, ...stale.map((entry) => result(entry.case, missingKnownCase(entry)))] };
 }
 
 // Failures that differ the same way share one field and kind, so one port bug

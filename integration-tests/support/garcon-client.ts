@@ -116,6 +116,12 @@ import {
 import { Deferred, withTimeout } from './deferred.js';
 import { INTEGRATION_ANTHROPIC_API_KEY } from './anthropic-test-contract.js';
 import { INTEGRATION_OPENAI_API_KEY } from './openai-test-contract.js';
+import type { ClientTrace } from '../../rust/parity/src/trace-sink.js';
+import type { Json } from '../../rust/parity/src/wildcard.js';
+
+const traceDirectory = process.env.GARCON_TEST_TRACE_DIR;
+const traceTools = traceDirectory ? await import('../../rust/parity/src/trace-sink.js') : null;
+if (traceTools) await traceTools.installTraceTestContext();
 
 export interface HttpExchange {
   method: string;
@@ -331,6 +337,7 @@ export class GarconTestClient {
   readonly #createWebSocket: (url: string, protocols: string[]) => GarconWebSocket;
   readonly #redactSensitiveDiagnostics: boolean;
   readonly #requestTimeoutMs: number;
+  readonly #trace: ClientTrace | undefined;
   readonly #exchanges: HttpExchange[] = [];
   readonly #eventRecords: EventRecord[] = [];
   readonly #waiters = new Set<EventWaiter>();
@@ -345,6 +352,9 @@ export class GarconTestClient {
     this.#createWebSocket = options.createWebSocket ?? ((url, protocols) => new WebSocket(url, protocols));
     this.#redactSensitiveDiagnostics = options.redactSensitiveDiagnostics === true;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+    if (traceDirectory && traceTools) {
+      this.#trace = new traceTools.ClientTrace(traceDirectory, new URL(baseUrl).origin, this.#authToken, (value) => redact(value) as Json);
+    }
   }
 
   static async connect(baseUrl: string, options: GarconTestClientOptions = {}): Promise<GarconTestClient> {
@@ -365,10 +375,11 @@ export class GarconTestClient {
     if (this.#authToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${this.#authToken}`);
     const timeout = AbortSignal.timeout(this.#requestTimeoutMs);
     const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-    return fetch(url, { ...init, headers, signal }).catch((error: unknown) => {
+    const send = (options: RequestInit) => fetch(url, { ...options, headers, signal }).catch((error: unknown) => {
       if (!timeout.aborted || init.signal?.aborted) throw error;
       throw new Error(`${init.method ?? 'GET'} ${url.pathname} did not respond within ${this.#requestTimeoutMs} ms`, { cause: error });
     });
+    return this.#trace ? this.#trace.http(url, init, headers, send) : send(init);
   }
 
   markEvents(): number {
@@ -405,6 +416,7 @@ export class GarconTestClient {
     this.assertProtocolHealthy();
     if (this.#socket && this.#socket.readyState === WEB_SOCKET_OPEN) return;
     const wsUrl = this.#baseUrl.replace(/^http/, 'ws') + '/ws';
+    this.#trace?.reconnect();
     const socket = this.#createWebSocket(wsUrl, webSocketProtocolsForAuth(this.#authToken));
     this.#socket = socket;
     const opened = new Deferred<void>();
@@ -1228,6 +1240,7 @@ export class GarconTestClient {
 
   sendTerminal(message: TerminalStreamClientMessage): void {
     if (!this.#socket || this.#socket.readyState !== WEB_SOCKET_OPEN) throw new Error('Garcon WebSocket is not connected');
+    this.#trace?.send(message);
     this.#socket.send(JSON.stringify(message));
   }
 
@@ -1235,6 +1248,7 @@ export class GarconTestClient {
     if (!this.#socket || this.#socket.readyState !== WEB_SOCKET_OPEN) {
       throw new Error('Garcon WebSocket is not connected');
     }
+    this.#trace?.send(message);
     this.#socket.send(JSON.stringify(message));
   }
 
@@ -1260,6 +1274,7 @@ export class GarconTestClient {
       if (!isRecord(raw)) throw new Error(`WebSocket payload is not an object: ${text}`);
       const parsed = parseServerWsMessage(raw);
       if (!parsed) throw new Error(`Unknown or malformed WebSocket payload: ${text}`);
+      this.#trace?.receive(raw);
       const index = this.#eventRecords.length;
       this.#eventRecords.push({ raw, parsed, receivedAt: Date.now() });
       for (const waiter of this.#waiters) {

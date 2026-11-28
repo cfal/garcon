@@ -7,11 +7,19 @@ use std::path::Path;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::compare::first_difference_exact;
+
+pub struct KnownDifference {
+    pub result: Value,
+    pub reason: String,
+}
+
 pub struct RecordedCase {
     pub id: String,
     pub function: String,
     pub args: Vec<Value>,
     pub result: Value,
+    pub known: Option<KnownDifference>,
 }
 
 pub struct Recording {
@@ -66,7 +74,72 @@ fn parse_case(line: &str) -> Result<RecordedCase, String> {
         function,
         args,
         result: result.clone(),
+        known: None,
     })
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the approval uses case markers rather than JavaScript values"
+)]
+fn attach_known(line: &str, cases: &mut [RecordedCase]) -> Result<(), String> {
+    let value: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
+    let function = value
+        .get("fn")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .ok_or("a known difference needs a non-empty string `fn`")?;
+    let args = value
+        .get("args")
+        .and_then(Value::as_array)
+        .ok_or("a known difference needs an `args` array")?;
+    let result = value
+        .get("result")
+        .ok_or("a known difference needs a `result`")?;
+    let reason = value
+        .get("reason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.trim().is_empty())
+        .ok_or("a known difference needs a non-empty `reason`")?;
+    let mut matches = cases.iter_mut().filter(|case| {
+        case.function == function
+            && case.args.len() == args.len()
+            && case
+                .args
+                .iter()
+                .zip(args)
+                .all(|(a, b)| first_difference_exact(a, b).is_none())
+    });
+    let case = matches.next().ok_or_else(|| {
+        format!("stale known difference: `{function}` has no recorded case with those arguments")
+    })?;
+    if matches.next().is_some() || case.known.is_some() {
+        return Err(format!(
+            "ambiguous or duplicate known difference for {}",
+            case.id
+        ));
+    }
+    case.known = Some(KnownDifference {
+        result: result.clone(),
+        reason: reason.to_owned(),
+    });
+    Ok(())
+}
+
+fn read_known(directory: &Path, cases: &mut [RecordedCase]) -> Result<(), String> {
+    let path = directory.join("known-differences.jsonl");
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    for (index, line) in text.lines().enumerate() {
+        if !line.trim().is_empty() {
+            attach_known(line, cases)
+                .map_err(|error| format!("{}:{}: {error}", path.display(), index + 1))?;
+        }
+    }
+    Ok(())
 }
 
 /// Reads a recording and fails when the case file is not the one the manifest
@@ -122,6 +195,7 @@ pub fn read(directory: &Path) -> Result<Recording, String> {
             counted.map_or_else(|| "?".to_owned(), |count| count.to_string())
         ));
     }
+    read_known(directory, &mut parsed)?;
     Ok(Recording {
         module,
         cases: parsed,

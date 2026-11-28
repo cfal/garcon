@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CapturedBody, CapturedExchange, Capture } from './capture.js';
+import type { CapturedBody, Capture } from './capture.js';
 import type { StartedServer } from './environment.js';
 import { dayPattern } from './placeholders.js';
 import type { Json } from './wildcard.js';
@@ -77,14 +77,23 @@ function textDigest(text: string): Json {
 }
 
 export function normalizeCapture(capture: Capture, server: StartedServer, extra: Normalization = {}): Json {
+  const normalization = { ...extra, carried: replacements(server, extra.carried) };
+  if ('body' in capture) {
+    const { body, ...rest } = capture;
+    return { ...normalizeValue(rest as unknown as Json, normalization) as Record<string, Json>, body: normalizeBody(body, normalization) };
+  }
+  return normalizeValue(capture as unknown as Json, normalization);
+}
+
+export function normalizeBody(body: CapturedBody, extra: Normalization = {}): Json {
+  if (body.kind === 'large-text') return textDigest(normalizeValue(body.value, extra) as string);
+  return normalizeValue(body, extra);
+}
+
+export function normalizeValue(value: Json, extra: Normalization = {}): Json {
   const context: Context = {
-    pairs: replacements(server, extra.carried),
+    pairs: extra.carried ?? [],
     days: (extra.days ?? []).map(([day, placeholder]) => [dayPattern(day), placeholder]),
   };
-  const body = (capture as { body?: CapturedBody }).body;
-  if (body?.kind === 'large-text') {
-    const { body: _body, ...rest } = capture as CapturedExchange;
-    return { ...normalizeJson(rest as unknown as Json, context) as { [key: string]: Json }, body: textDigest(normalizeString(body.value, context)) };
-  }
-  return normalizeJson(capture as unknown as Json, context);
+  return normalizeJson(value, context);
 }

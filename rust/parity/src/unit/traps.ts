@@ -31,6 +31,14 @@ export const STRING_TRAPS: ReadonlyArray<readonly [string, string]> = [
   ['long', 'x'.repeat(10_000)],
 ];
 
+const WHOLE_STRING_TRAPS: ReadonlyArray<readonly [string, string]> = [
+  ['object-proto', '__proto__'],
+  ['object-constructor', 'constructor'],
+  ['object-to-string', 'toString'],
+  ['object-own-property', 'hasOwnProperty'],
+];
+const STRING_REPLACEMENTS = [...STRING_TRAPS, ...WHOLE_STRING_TRAPS];
+
 // NaN and the infinities come last: they replace only an argument that is
 // itself a number (see `topLevel` below).
 export const NUMBER_TRAPS: ReadonlyArray<readonly [string, number]> = [
@@ -47,7 +55,6 @@ export const NUMBER_TRAPS: ReadonlyArray<readonly [string, number]> = [
 ];
 
 const FIRST_NON_FINITE_TRAP = NUMBER_TRAPS.findIndex(([, value]) => !Number.isFinite(value));
-const TRAP_COUNT = Math.max(STRING_TRAPS.length, NUMBER_TRAPS.length);
 
 export interface Variant {
   args: Json[];
@@ -177,17 +184,19 @@ export function* candidateVariants(
   const ordered = [...positions.values()];
   const callCount = Math.max(0, ...ordered.map((position) => position.calls.length));
   for (const placements of STAGES) {
-    for (const [trap, rank] of pairs(TRAP_COUNT, callCount)) {
+    const embedded = placements.length > 1;
+    const strings = embedded ? STRING_TRAPS : STRING_REPLACEMENTS;
+    for (const [trap, rank] of pairs(embedded ? strings.length : Math.max(strings.length, NUMBER_TRAPS.length), callCount)) {
       for (const { location, calls: atLocation } of ordered) {
         const call = atLocation[rank];
         if (!call) continue;
         const text = call.type === 'string';
-        const entry = (text ? STRING_TRAPS : NUMBER_TRAPS)[trap];
+        const entry = (text ? strings : NUMBER_TRAPS)[trap];
         // A number has no text to embed a trap in. NaN and the infinities are
         // made only for an argument that is itself a number and is not
         // declared JSON, since they cannot reach a port as JSON.
         const undeliverable = !call.topLevel || jsonArguments.has(location[0] as number);
-        if (!entry || (!text && placements.length > 1) || (!text && undeliverable && trap >= FIRST_NON_FINITE_TRAP)) continue;
+        if (!entry || (!text && (embedded || (undeliverable && trap >= FIRST_NON_FINITE_TRAP)))) continue;
         for (const placement of text ? placements : ['replace' as const]) {
           const leaf = text
             ? trapString(leafAt(call.args, location) as string, entry[1] as string, placement)

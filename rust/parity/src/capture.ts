@@ -118,7 +118,18 @@ export function textOrBytes(bytes: Uint8Array, contentType: string): CapturedBod
   return { kind: 'text', value: text };
 }
 
-function decodeBody(bytes: Uint8Array, encoding: string | null): Uint8Array {
+export function contractHeaders(headers: Headers): Record<string, string> {
+  const captured: Record<string, string> = {};
+  for (const name of CONTRACT_HEADERS) {
+    const value = headers.get(name);
+    if (value !== null) captured[name] = value;
+  }
+  const length = headers.get('content-length');
+  if (length !== null && !headers.has('content-encoding')) captured['content-length'] = length;
+  return captured;
+}
+
+export function decodeBody(bytes: Uint8Array, encoding: string | null): Uint8Array {
   if (bytes.length === 0) return bytes;
   switch (encoding) {
     case 'gzip': return gunzipSync(bytes);
@@ -155,18 +166,11 @@ async function captureHttp(server: StartedServer, step: HttpStep, placeholders: 
     decompress: false,
     signal: AbortSignal.timeout(30_000),
   });
-  const captured: Record<string, string> = {};
-  for (const name of CONTRACT_HEADERS) {
-    const value = response.headers.get(name);
-    if (value !== null) captured[name] = value;
-  }
-  const contentLength = response.headers.get('content-length');
-  if (contentLength !== null && !response.headers.has('content-encoding')) captured['content-length'] = contentLength;
   const bytes = decodeBody(new Uint8Array(await response.arrayBuffer()), response.headers.get('content-encoding'));
   return {
     request: { method: step.method, path: step.originPath ?? step.path ?? '/', auth },
     status: response.status,
-    headers: captured,
+    headers: contractHeaders(response.headers),
     body: textOrBytes(bytes, response.headers.get('content-type') ?? ''),
   };
 }

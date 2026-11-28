@@ -42,7 +42,7 @@ export function hasWildcard(value: string): boolean {
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
-type DifferenceKind = 'value' | 'type' | 'missing' | 'extra' | 'length';
+type DifferenceKind = 'value' | 'type' | 'missing' | 'extra' | 'length' | 'order';
 
 export interface Difference {
   path: string;
@@ -165,7 +165,13 @@ export function childPath(path: string, key: string | number): string {
 
 // Returns the first position where `actual` departs from `expected`, walking
 // object keys in sorted order so reports are stable across runs.
-export function firstDifference(expected: Json | undefined, actual: Json | undefined, path = '$'): Difference | null {
+export function firstDifference(
+  expected: Json | undefined,
+  actual: Json | undefined,
+  path = '$',
+  approvedPaths?: ReadonlySet<string>,
+): Difference | null {
+  if (approvedPaths?.has(path)) return null;
   if (expected === WILDCARD) return null;
   if (expected === undefined && actual !== undefined) {
     return { path, kind: 'extra', expected: describe(expected), actual: describe(actual) };
@@ -191,7 +197,7 @@ export function firstDifference(expected: Json | undefined, actual: Json | undef
       };
     }
     for (let index = 0; index < expected.length; index += 1) {
-      const difference = firstDifference(expected[index], actualArray[index], childPath(path, index));
+      const difference = firstDifference(expected[index], actualArray[index], childPath(path, index), approvedPaths);
       if (difference) return difference;
     }
     return null;
@@ -200,7 +206,9 @@ export function firstDifference(expected: Json | undefined, actual: Json | undef
     const actualObject = actual as { [key: string]: Json };
     const keys = [...new Set([...Object.keys(expected), ...Object.keys(actualObject)])].sort();
     for (const key of keys) {
-      const difference = firstDifference(expected[key], actualObject[key], childPath(path, key));
+      const before = Object.hasOwn(expected, key) ? expected[key] : undefined;
+      const after = Object.hasOwn(actualObject, key) ? actualObject[key] : undefined;
+      const difference = firstDifference(before, after, childPath(path, key), approvedPaths);
       if (difference) return difference;
     }
     return null;

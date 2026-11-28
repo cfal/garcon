@@ -13,6 +13,14 @@ const fixture = (name: string) => `rust/parity/src/__tests__/fixtures/unit/${nam
 // A manifest written by hand names the Bun that runs the tests, as the recorder does.
 const bunVersion = Bun.version;
 
+test('records a prototype lookup and reports inherited functions as not captured', async () => {
+  const recording = await recordUnit({ repoRoot, module: fixture('lookup.ts'), tests: [fixture('lookup.calls.ts')] });
+  expect(recording.cases.find((entry) => entry.args[0] === '__proto__')?.result).toEqual({});
+  expect(recording.manifest.notCaptured).toEqual([
+    { fn: 'lookup', where: 'result', path: '$.result', type: 'a function', at: null, count: 3 },
+  ]);
+});
+
 // The trap cases that change argument `argument` of calls to `fn`.
 function trapsOf(cases: RecordedCase[], fn: string, argument: number): RecordedCase[] {
   return cases.filter((entry) => entry.fn === fn && entry.origin.startsWith('trap:') && entry.origin.includes(`@$.args[${argument}]`));
@@ -281,16 +289,16 @@ describe('a guard', () => {
     const plain = await record([]);
     const guarded = await record([own]);
     // Without the guard, the first 60 candidates of `tagOf` hold 39 variants of
-    // argument 0. With it the candidates run out, 75 in all, and `isTag`
-    // accepts 20 of the 50 it is asked about.
+    // argument 0. With it the candidates run out, and `isTag`
+    // accepts 21 of the 55 it is asked about.
     expect(trapsOf(plain.cases, 'tagOf', 0)).toHaveLength(39);
     const kept = trapsOf(guarded.cases, 'tagOf', 0);
-    expect(kept).toHaveLength(20);
+    expect(kept).toHaveLength(21);
     for (const entry of kept) expect(isTag(entry.args[0])).toBe(true);
     // NaN and the infinities are numbers, which the guard rejects.
     expect(kept.filter((entry) => /:(nan|infinity|negative-infinity)@/.test(entry.origin))).toEqual([]);
-    expect(guarded.manifest.guards).toEqual([{ ...own, dropped: 31, kept: 20 }]);
-    expect(guarded.review[1]).toBe('  guard isTag on tagOf argument 0: dropped 31 of 51 trap variants');
+    expect(guarded.manifest.guards).toEqual([{ ...own, dropped: 34, kept: 21 }]);
+    expect(guarded.review[1]).toBe('  guard isTag on tagOf argument 0: dropped 34 of 55 trap variants');
     expect(plain.manifest.guards).toEqual([]);
     // A call the tests made stays, also one the guard rejects.
     const testCalls = guarded.cases.filter((entry) => entry.origin === 'test').map((entry) => entry.args);
@@ -301,7 +309,7 @@ describe('a guard', () => {
     // and every case of the other functions.
     const other = trapsOf(guarded.cases, 'tagOf', 1);
     const unguarded = trapsOf(plain.cases, 'tagOf', 1);
-    expect(other).toHaveLength(25);
+    expect(other).toHaveLength(29);
     expect(withoutIds(other.slice(0, unguarded.length))).toEqual(withoutIds(unguarded));
     expect(withoutIds(guarded.cases.filter((entry) => entry.fn !== 'tagOf'))).toEqual(withoutIds(plain.cases.filter((entry) => entry.fn !== 'tagOf')));
     const result = await replayCases(guarded.modulePath, guarded.cases, 'typed.ts');
@@ -323,22 +331,22 @@ describe('a guard', () => {
     expect(firstBatch.length).toBeGreaterThan(0);
     expect(firstBatch.length).toBeLessThan(MAX_VARIANTS_PER_FUNCTION);
     expect(withoutIds(kept.slice(0, firstBatch.length))).toEqual(withoutIds(firstBatch));
-    expect(guarded.manifest.guards).toEqual([{ ...label, dropped: 97, kept: 60 }]);
-    expect(guarded.review[1]).toBe('  guard isLabel on labelOf argument 0: dropped 97 of 157 trap variants');
+    expect(guarded.manifest.guards).toEqual([{ ...label, dropped: 101, kept: 60 }]);
+    expect(guarded.review[1]).toBe('  guard isLabel on labelOf argument 0: dropped 101 of 161 trap variants');
     expect(withoutIds(guarded.cases.filter((entry) => entry.fn !== 'labelOf'))).toEqual(withoutIds(plain.cases.filter((entry) => entry.fn !== 'labelOf')));
   });
 
   test('rejects a variant also when the guard throws for it', async () => {
     // `isShortTag` throws for a number.
     const guarded = await record([{ ...own, guard: 'isShortTag' }]);
-    expect(guarded.manifest.guards).toEqual([{ ...own, guard: 'isShortTag', dropped: 31, kept: 20 }]);
+    expect(guarded.manifest.guards).toEqual([{ ...own, guard: 'isShortTag', dropped: 34, kept: 21 }]);
     expect(trapsOf(guarded.cases, 'tagOf', 0).every((entry) => typeof entry.args[0] === 'string')).toBe(true);
   });
 
   test('can be an export of another file', async () => {
     const guard = `${fixture('guard.ts')}#isTagOfAtMostEight`;
     const guarded = await record([{ ...own, guard }]);
-    expect(guarded.manifest.guards).toEqual([{ ...own, guard, dropped: 31, kept: 20 }]);
+    expect(guarded.manifest.guards).toEqual([{ ...own, guard, dropped: 34, kept: 21 }]);
   });
 
   test('is asked in a process of its own before anything is called, once per variant', async () => {
@@ -356,7 +364,7 @@ describe('a guard', () => {
     expect(guarded.review.filter((entry) => entry.includes('no answer'))).toEqual([
       '  noise: trap:empty@$.args[0] (tagOf): its guard gave no answer within 500 ms; not recorded',
     ]);
-    expect(guarded.manifest.guards).toEqual([{ ...own, guard: 'stallsOnEmpty', dropped: 1, kept: 39 }]);
+    expect(guarded.manifest.guards).toEqual([{ ...own, guard: 'stallsOnEmpty', dropped: 1, kept: 38 }]);
     expect(trapsOf(guarded.cases, 'tagOf', 0).some((entry) => entry.args[0] === '')).toBe(false);
   });
 
@@ -378,6 +386,15 @@ describe('a guard', () => {
 });
 
 describe('replayUnit', () => {
+  test('the original ignores Rust known differences beside its cases', async () => {
+    const directory = await temporary();
+    await writeCases(directory, [
+      { id: 'join#0', fn: 'join', args: [['a', 'b']], result: 'a,b', origin: 'test' },
+    ], { module: fixture('functions.ts'), tests: [], inputs: null, guards: [], jsonArguments: [], bunVersion, notCaptured: [] });
+    await writeFile(join(directory, 'known-differences.jsonl'), '{"fn":"join","args":[["a","b"]],"result":"a;b","reason":"synthetic"}\n');
+    expect((await replayUnit(repoRoot, directory)).cases[0]?.difference).toBeNull();
+  });
+
   test('reports a result that differs from the recording, at its path', async () => {
     const directory = await temporary();
     await writeCases(directory, [
