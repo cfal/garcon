@@ -48,7 +48,7 @@ pub struct TurnEventMetadata {
 }
 
 impl TurnEventMetadata {
-    fn identity(&self) -> TurnIdentity {
+    pub(crate) fn identity(&self) -> TurnIdentity {
         TurnIdentity {
             turn_id: self.turn_id.clone(),
             client_request_id: self.client_request_id.clone(),
