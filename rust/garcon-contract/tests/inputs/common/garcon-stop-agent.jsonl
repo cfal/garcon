@@ -1,0 +1,3 @@
+{"fn":"parseGarconStopAgent","args":["<garcon-stop-agent chat-id=\"1000000000000001\" remove=\"tr&#117;e\" />"]}
+{"fn":"parseGarconStopAgent","args":["<garcon-stop-agent chat-id=\"9007199254740991\" remove=\"true\" />"]}
+{"fn":"parseGarconStopAgent","args":["<garcon-stop-agent chat-id=\"9007199254740992\" remove=\"true\" />"]}

@@ -1,0 +1,14 @@
+{
+  "module": "common/garcon-start-agent.ts",
+  "tests": [
+    "common/__tests__/garcon-start-agent.test.js",
+    "common/__tests__/garcon-resume-agent.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-start-agent.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 129,
+  "sha256": "73a5152f3114d97fc2664568610815b811028c861bc22db7cbc2cd587aea41ee"
+}
