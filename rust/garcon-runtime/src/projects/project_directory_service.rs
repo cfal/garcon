@@ -62,7 +62,7 @@ fn unavailable_reason(
 }
 
 #[cfg(unix)]
-async fn access_directory(path: &str) -> io::Result<()> {
+pub(crate) async fn access_directory(path: &str) -> io::Result<()> {
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
         rustix::fs::access(
@@ -75,7 +75,7 @@ async fn access_directory(path: &str) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-async fn access_directory(path: &str) -> io::Result<()> {
+pub(crate) async fn access_directory(path: &str) -> io::Result<()> {
     // Windows has no executable permission bit for a directory.
     fs::read_dir(path).await.map(|_| ())
 }
