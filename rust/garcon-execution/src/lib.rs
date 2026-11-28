@@ -25,6 +25,7 @@ pub mod model_catalog_cache;
 pub mod queue_drainer;
 pub mod queue_steer_error;
 pub mod queued_steer_delivery;
+pub mod reference_writes;
 pub mod runtime_router;
 pub mod runtime_router_errors;
 pub mod session_loss_retry;
