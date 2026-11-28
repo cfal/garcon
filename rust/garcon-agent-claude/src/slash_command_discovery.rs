@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashSet, ffi::OsString, rc::Rc, time::Dura
 
 use futures::future::{FutureExt, LocalBoxFuture, Shared};
 use garcon_contract::slash_commands::{SlashCommand, SlashCommandSource};
-use garcon_interface::host::AgentLogger;
+use garcon_interface::{host::AgentLogger, resources::ExecutorResult};
 use garcon_js::{Clock, SystemClock, collation::Collation, json::Opaque};
 use indexmap::IndexMap;
 use serde_json::{Value, json};
@@ -64,7 +64,8 @@ pub fn parse_init_slash_commands(slash_commands: &Value, skills: &Value) -> Vec<
     commands
 }
 
-type CommandEnvironment = dyn Fn() -> IndexMap<OsString, OsString>;
+type CommandExecutable = dyn Fn() -> ExecutorResult<OsString>;
+type CommandEnvironment = dyn Fn() -> ExecutorResult<IndexMap<OsString, OsString>>;
 type Discovery = Shared<LocalBoxFuture<'static, Vec<SlashCommand>>>;
 
 struct CacheEntry {
@@ -73,7 +74,7 @@ struct CacheEntry {
 }
 
 struct DiscoveryState {
-    binary: Rc<dyn Fn() -> OsString>,
+    binary: Rc<CommandExecutable>,
     environment: Rc<CommandEnvironment>,
     logger: Rc<dyn AgentLogger>,
     clock: Rc<dyn Clock>,
@@ -86,7 +87,7 @@ pub struct ClaudeSlashCommandDiscovery(Rc<DiscoveryState>);
 
 impl ClaudeSlashCommandDiscovery {
     pub fn new(
-        binary: Rc<dyn Fn() -> OsString>,
+        binary: Rc<CommandExecutable>,
         environment: Rc<CommandEnvironment>,
         logger: Rc<dyn AgentLogger>,
     ) -> Self {
@@ -100,7 +101,7 @@ impl ClaudeSlashCommandDiscovery {
     }
 
     pub fn with_clock_and_ids(
-        binary: Rc<dyn Fn() -> OsString>,
+        binary: Rc<CommandExecutable>,
         environment: Rc<CommandEnvironment>,
         logger: Rc<dyn AgentLogger>,
         clock: Rc<dyn Clock>,
@@ -117,19 +118,19 @@ impl ClaudeSlashCommandDiscovery {
         }))
     }
 
-    pub async fn discover(&self, project_path: &str) -> Vec<SlashCommand> {
+    pub async fn discover(&self, project_path: &str) -> ExecutorResult<Vec<SlashCommand>> {
         if let Some(cached) = self.0.cache.borrow().get(project_path)
             && cached.expires_at > self.0.clock.now_ms()
         {
-            return cached.commands.clone();
+            return Ok(cached.commands.clone());
         }
         let existing = self.0.in_flight.borrow().get(project_path).cloned();
         if let Some(existing) = existing {
-            return existing.await;
+            return Ok(existing.await);
         }
 
-        let binary = (self.0.binary)();
-        let env_overrides = (self.0.environment)();
+        let binary = (self.0.binary)()?;
+        let env_overrides = (self.0.environment)()?;
         let logger = self.0.logger.clone();
         let id = (self.0.new_request_id)();
         let project_path = project_path.to_owned();
@@ -165,7 +166,7 @@ impl ClaudeSlashCommandDiscovery {
         tokio::task::spawn_local(async move {
             driver.await;
         });
-        probe.await
+        Ok(probe.await)
     }
 
     pub fn clear(&self) {
@@ -349,6 +350,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_lazy_probe_configuration_errors_before_spawning_in_read_order() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let discovery = ClaudeSlashCommandDiscovery::new(
+            Rc::new({
+                let calls = calls.clone();
+                move || {
+                    calls.borrow_mut().push("binary");
+                    Err("synthetic binary read error".into())
+                }
+            }),
+            Rc::new({
+                let calls = calls.clone();
+                move || {
+                    calls.borrow_mut().push("environment");
+                    Err("synthetic environment read error".into())
+                }
+            }),
+            Rc::new(Logger),
+        );
+        assert!(calls.borrow().is_empty());
+        for _ in 0..2 {
+            let error = discovery.discover("synthetic-project").await.unwrap_err();
+            assert_eq!(error.to_string(), "synthetic binary read error");
+        }
+        assert_eq!(*calls.borrow(), ["binary", "binary"]);
+    }
+
+    #[tokio::test]
     async fn discovers_metadata_over_a_real_initialize_pipe_without_sending_a_prompt() {
         LocalSet::new().run_until(async {
             let root = tempfile::tempdir().unwrap();
@@ -367,12 +396,13 @@ mod tests {
             fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).await.unwrap();
             let clock = Rc::new(ManualClock::new(10));
             let discovery = ClaudeSlashCommandDiscovery::with_clock_and_ids(
-                Rc::new(move || cli.clone().into_os_string()),
-                Rc::new(|| IndexMap::from([(OsString::from("ANTHROPIC_BASE_URL"), OsString::from("https://synthetic.invalid"))])),
+                Rc::new(move || Ok(cli.clone().into_os_string())),
+                Rc::new(|| Ok(IndexMap::from([(OsString::from("ANTHROPIC_BASE_URL"), OsString::from("https://synthetic.invalid"))]))),
                 Rc::new(Logger), clock.clone(), Rc::new(|| "synthetic-request".to_owned()),
             );
             let project = root.path().to_str().unwrap();
             let (left, right) = tokio::join!(discovery.discover(project), discovery.discover(project));
+            let (left, right) = (left.unwrap(), right.unwrap());
             assert_eq!(left, right);
             assert_eq!(left.iter().map(|command| command.name.as_str()).collect::<Vec<_>>(), ["compact", "review"]);
             assert_eq!(left[1].source, SlashCommandSource::Skill);
@@ -386,10 +416,10 @@ mod tests {
             assert_eq!(observed["endpoint"], "https://synthetic.invalid");
             assert!(observed["nested"].is_null());
             assert_eq!(observed["args"], json!(["--print", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--no-session-persistence"]));
-            assert_eq!(discovery.discover(project).await, left);
+            assert_eq!(discovery.discover(project).await.unwrap(), left);
             assert_eq!(fs::read_to_string(&calls).await.unwrap().lines().count(), 1);
             clock.advance(CACHE_TTL_MS);
-            assert_eq!(discovery.discover(project).await, left);
+            assert_eq!(discovery.discover(project).await.unwrap(), left);
             assert_eq!(fs::read_to_string(&calls).await.unwrap().lines().count(), 2);
         }).await;
     }

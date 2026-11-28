@@ -1,0 +1,13 @@
+{
+  "module": "rust/garcon-agent-claude/tests/oracles/project-fork-entry.ts",
+  "tests": [
+    "rust/garcon-agent-claude/tests/oracles/project-fork-entry.suite.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 66,
+  "sha256": "aa032a34deeaf3c7bae6829e32fdd9967a5c38052b8f6293878cb1c7ccd65568"
+}

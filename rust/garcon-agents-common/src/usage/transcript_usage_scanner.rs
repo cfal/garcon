@@ -72,7 +72,7 @@ pub struct TranscriptUsageScan<'a> {
 pub struct TranscriptUsageScannerOptions<F> {
     pub operation: String,
     pub format: F,
-    pub roots: Rc<dyn Fn() -> Vec<String>>,
+    pub roots: Rc<dyn Fn() -> ExecutorResult<Vec<String>>>,
     pub clock: Option<Rc<dyn Clock>>,
 }
 
@@ -118,7 +118,7 @@ impl<F: TranscriptUsageFormat> TranscriptUsageScanner<F> {
         signal: Option<&CancellationToken>,
     ) -> ExecutorResult<TranscriptUsageScan<'_>> {
         check_abort(signal)?;
-        let listing = list_transcripts((self.options.roots)(), signal).await?;
+        let listing = list_transcripts((self.options.roots)()?, signal).await?;
         let retained_since_ms = self
             .options
             .clock

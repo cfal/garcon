@@ -1,0 +1,21 @@
+{"fn":"convertPiMessage","args":[{"role":"user","timestamp":0,"content":[{"type":"text","text":"  sample  "},{"type":"image"},{"type":"image","mimeType":"image/png","data":"YQ=="}]}]}
+{"fn":"convertPiMessage","args":[{"role":"user","timestamp":1,"content":"  show this\n\nReferenced file contents from @file mentions:\n\nopaque file"}]}
+{"fn":"convertPiMessage","args":[{"role":"user","timestamp":2,"content":[null,{},"not a part",{"type":"text","text":"  \u212a \u0131\u00a0"},{"type":"text","text":" \u4e2d\ud83d\ude00e\u0301 "}]}]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","timestamp":3,"content":[{"type":"thinking","thinking":"  detail  "},{"type":"toolCall","id":"call","name":"bash","arguments":{"command":false}},{"type":"text","text":"  output  "}]}]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","timestamp":4,"content":"   output  "}]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","timestamp":5,"content":[{"type":"toolCall","name":"read","arguments":null},{"type":"text","text":"ok"}]},{"includeToolCalls":false}]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","timestamp":6,"content":[{"type":"toolCall","name":"read","argumentsError":"synthetic bad argument"}]}]}
+{"fn":"convertPiMessage","args":[{"role":"toolResult","timestamp":7,"toolCallId":"call","content":{"__proto__":5,"constructor":4,"toString":3,"hasOwnProperty":2},"isError":true}]}
+{"fn":"convertPiMessage","args":[{"role":"toolResult","timestamp":8,"toolCallId":"call","content":[{"type":"text","text":"synthetic result"}],"isError":false}]}
+{"fn":"convertPiMessage","args":[{"role":"toolResult","timestamp":9,"content":"present"},{"includeToolResults":false}]}
+{"fn":"convertPiMessage","args":[{"role":"user","timestamp":10,"content":"present"},{"includeUser":false}]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","timestamp":"2026-01-01T00:01:00+01:00","content":"test"}]}
+{"fn":"convertPiMessage","args":[null]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","content":"fallback clock"}]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","timestamp":"not-a-date","content":"fallback clock"}]}
+{"fn":"convertPiMessage","args":[{"role":"assistant","timestamp":8640000000000001,"content":"out of range"}]}
+{"fn":"piFinalResponse","args":[{"role":"assistant","stopReason":"stop","content":"  test  "}]}
+{"fn":"piFinalResponse","args":[{"role":"assistant","stopReason":"length","content":[{"type":"text","text":"test"},{"type":"thinking","thinking":"ignore"},{"type":"text","text":""},{"type":"text","text":" \u212a\u4e2d\ud83d\ude00 "}]}]}
+{"fn":"piFinalResponse","args":[{"role":"assistant","stopReason":"error","content":"test"}]}
+{"fn":"piFinalResponse","args":[{"role":"assistant","stopReason":"stop","content":[{"type":"thinking","thinking":"ignore"}]}]}
+{"fn":"piFinalResponse","args":[{"role":"user","stopReason":"stop","content":"test"}]}

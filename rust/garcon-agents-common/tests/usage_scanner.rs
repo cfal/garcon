@@ -120,10 +120,10 @@ impl Fixture {
                 observe,
             },
             roots: Rc::new(move || {
-                roots
+                Ok(roots
                     .iter()
                     .map(|root| root.to_str().unwrap().to_owned())
-                    .collect()
+                    .collect())
             }),
             clock: Some(self.clock.clone()),
         })
