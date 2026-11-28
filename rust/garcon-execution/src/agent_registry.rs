@@ -3,6 +3,10 @@
 //! provider state or using execution ownership as a proxy for a running turn.
 //! The registry mutations and runtime lifecycle methods are ported separately.
 
+mod adoption;
+
+pub use adoption::AdoptionChatRegistry;
+
 use indexmap::IndexMap;
 
 use crate::{

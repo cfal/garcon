@@ -1,0 +1,18 @@
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"/unused","modelDiscovery":"none"},[]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"///","modelDiscovery":"openai-models","apiKey":"synthetic-key"},[{"body":{"data":[null,{"id":" One ","display_name":" Display ","name":"Ignored"},{"id":"One","name":"duplicate"},{"id":"Two","display_name":" ","name":" Second "},{"id":"Three"},{"id":"\u00a0 "},{"id":4}]}}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"/api/v1/","modelDiscovery":"openrouter-models","apiKey":""},[{"body":[{"id":"one","name":" Router model "},{"id":"two"}]}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"/v1","modelDiscovery":"openai-models"},[{"body":{"data":[]}}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"openai-models"},[{"status":401,"raw":"synthetic credential diagnostic"}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"openai-models"},[{"raw":"{\"data\": SYNTHETIC_SENTINEL"}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"/nested/v1/","modelDiscovery":"ollama-tags","apiKey":"never-sent"},[{"body":{"models":[{"name":" one "},{"name":" one "},{"name":""},{"name":42},{"name":"two"}]}}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"status":404}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"raw":"{\"models\": SYNTHETIC_SENTINEL"}]]}
+{"fn":"discoverModels","args":[{"protocol":"anthropic-messages","path":"/v1/","modelDiscovery":"anthropic-models","apiKey":"synthetic-key"},[{"body":{"data":[{"id":"one","display_name":" First "}],"has_more":true,"last_id":"a +/"}},{"body":{"data":[{"id":"two","name":"Second"}],"has_more":true,"last_id":"a +/"}}]]}
+{"fn":"discoverModels","args":[{"protocol":"anthropic-messages","path":"/nested/","modelDiscovery":"anthropic-models","apiKey":"synthetic-key"},[{"body":{"data":[{"id":"one","display_name":"First"}],"has_more":true,"last_id":"page1"}},{"body":{"data":[{"id":"one","display_name":"duplicate"}],"has_more":true,"last_id":"page2"}},{"body":{"data":[{"id":""}],"has_more":true,"last_id":"page3"}},{"body":{"data":[{"id":"two"}],"has_more":true,"last_id":"page4"}},{"body":{"data":[{"id":"three"}],"has_more":true,"last_id":"never-fetched"}}]]}
+{"fn":"discoverModels","args":[{"protocol":"anthropic-messages","path":"","modelDiscovery":"anthropic-models"},[{"body":{"data":[{"id":"one"}],"has_more":true,"last_id":"page1"}},{"status":429}]]}
+{"fn":"discoverModels","args":[{"protocol":"anthropic-messages","path":"","modelDiscovery":"anthropic-models"},[{"raw":"{\"data\": SYNTHETIC_SENTINEL"}]]}
+{"fn":"discoverModels","args":[{"protocol":"anthropic-messages","path":"","modelDiscovery":"anthropic-models"},[{"body":{"data":{}}}]]}
+{"fn":"discoverModels","args":[{"protocol":"anthropic-messages","path":"","modelDiscovery":"anthropic-models"},[{"body":{"data":[null]}}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"body":null}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"body":{"models":{}}}]]}
+{"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"body":{"models":[null]}}]]}
