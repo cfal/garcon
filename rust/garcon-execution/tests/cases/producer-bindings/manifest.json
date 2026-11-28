@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-execution/tests/support/producer-bindings-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/producer-bindings.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "79c60705906c77493e3c5ed8850f8ced56658d4595502b18b35034c667408063"
+}

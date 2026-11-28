@@ -12,6 +12,7 @@ use std::{
 use futures::FutureExt;
 use garcon_agents_common::cli_update::{
     bounded_command::{BoundedCommandOptions, run_bounded_command},
+    cli_probe::find_executable,
     cli_update_service::{
         CliUpdateService, CliUpdateServiceOptions, CliUpdateTarget, NativeReleaseSource,
     },
@@ -181,6 +182,28 @@ fn definition() -> CliInstallDefinition {
             })),
         },
     }
+}
+
+#[test]
+fn executable_lookup_uses_bun_path_precedence_and_absolute_spelling() {
+    let fixture = Fixture::new();
+    let executable = fixture.at("tools/synthetic-cli");
+    script(&executable, "exit 0");
+    let env = Environment::from([("Path".into(), pathstr(&fixture.at("tools")).into())]);
+    assert_eq!(
+        find_executable("synthetic-cli", &env).as_deref(),
+        Some(pathstr(&executable))
+    );
+    let mut empty_path = env.clone();
+    empty_path.insert("PATH".into(), String::new());
+    assert_eq!(find_executable("synthetic-cli", &empty_path), None);
+    let double_slash = format!("/{}", executable.display());
+    assert_eq!(
+        find_executable(&double_slash, &Environment::new()).as_deref(),
+        Some(pathstr(&executable))
+    );
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o010)).unwrap();
+    assert_eq!(find_executable("synthetic-cli", &env), None);
 }
 
 struct SilentLogger;

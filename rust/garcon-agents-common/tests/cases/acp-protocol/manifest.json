@@ -1,0 +1,16 @@
+{
+  "module": "server-agents/common/src/acp/protocol.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/acp-protocol.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isJsonRpcId",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 114,
+  "sha256": "9dc8726dd534d4b8d0aca03a7dfd66af9e15bcfcbe4cd552b4a515ace7ed95e1"
+}

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use garcon_base::domain_error::DomainError;
+use garcon_base::domain_error::{DomainError, as_domain_error};
 use garcon_base::path_boundary::{ProjectBoundaryError, assert_real_within_base};
 use garcon_cases::{CaseError, replay, text};
 use garcon_contract::file_contracts::{FileSaveConflictResolution, SaveTextRequest};
@@ -43,8 +43,7 @@ fn observed(result: ExecutorResult<impl Serialize>) -> Value {
     match result {
         Ok(value) => json!({ "ok": serialized(value) }),
         Err(error) => {
-            let error = error
-                .downcast_ref::<DomainError>()
+            let error = as_domain_error(error.as_ref())
                 .unwrap_or_else(|| panic!("non-domain error: {error}"));
             json!({ "error": domain_fields(error) })
         }
@@ -92,7 +91,7 @@ fn recorded_filesystem_error_mappings_match() {
                 "creationUnsupported" => Box::new(directory_creation_unsupported()),
                 _ => return Err(CaseError::unhandled(function)),
             };
-            let error = error.downcast_ref::<DomainError>().ok_or_else(|| {
+            let error = as_domain_error(error.as_ref()).ok_or_else(|| {
                 CaseError::undeliverable("expected the port to return a domain error")
             })?;
             Ok(domain_fields(error))

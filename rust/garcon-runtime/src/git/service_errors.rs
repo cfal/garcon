@@ -4,9 +4,9 @@ use std::error::Error;
 use std::sync::LazyLock;
 
 use garcon_base::errors::{ErrorInput, has_node_error_code};
+use garcon_base::executor_disconnect::as_agent_call_error;
 use garcon_base::path_boundary::is_project_boundary_error;
 use garcon_contract::git_error::{GitServiceError, GitServiceErrorCode, is_git_service_error_code};
-use garcon_interface::errors::AgentCallError;
 use garcon_js::utf16;
 use regress::Regex;
 use serde_json::Value;
@@ -89,7 +89,7 @@ pub fn gh_service_error(error: Box<dyn Error>) -> Box<dyn Error> {
 fn service_error(error: Box<dyn Error>, domain: Domain) -> Box<dyn Error> {
     use GitServiceErrorCode as Code;
 
-    if error.is::<GitServiceError>() || error.is::<AgentCallError>() {
+    if error.is::<GitServiceError>() || as_agent_call_error(error.as_ref()).is_some() {
         return error;
     }
     if let Some(error) = error.downcast_ref::<GitDomainError>() {
@@ -134,7 +134,9 @@ fn service_error(error: Box<dyn Error>, domain: Domain) -> Box<dyn Error> {
 
 #[cfg(test)]
 mod tests {
+    use garcon_base::executor_disconnect::ExecutorSessionLostError;
     use garcon_contract::git::StashRefOptions;
+    use garcon_interface::errors::AgentDeliveryOutcome;
     use garcon_interface::resources::ExecutorResult;
     use tokio::task::LocalSet;
 
@@ -148,6 +150,29 @@ mod tests {
         *git_service_error(error)
             .downcast::<GitServiceError>()
             .unwrap()
+    }
+
+    fn assert_keeps_session_loss(map: impl FnOnce(Box<dyn Error>) -> Box<dyn Error>) {
+        let error = Box::new(ExecutorSessionLostError::new(
+            AgentDeliveryOutcome::Unknown,
+            "The executor session was lost.",
+        ));
+        let identity: *const ExecutorSessionLostError = error.as_ref();
+        let error = map(error);
+        let kept = error
+            .downcast_ref::<ExecutorSessionLostError>()
+            .unwrap_or_else(|| panic!("the mapper replaced the session-loss error: {error:?}"));
+        assert!(std::ptr::eq(identity, kept));
+    }
+
+    #[test]
+    fn git_preserves_erased_executor_session_loss() {
+        assert_keeps_session_loss(git_service_error);
+    }
+
+    #[test]
+    fn gh_preserves_erased_executor_session_loss() {
+        assert_keeps_session_loss(gh_service_error);
     }
 
     #[tokio::test]

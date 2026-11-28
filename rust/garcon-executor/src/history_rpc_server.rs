@@ -36,20 +36,22 @@ const MAX_READERS: usize = 16;
 const READER_IDLE: Duration = Duration::from_secs(120);
 
 pub(crate) struct HistoryIntegration<'a> {
-    scope: &'a AgentResourceScope,
+    scope: AgentResourceScope,
     execution: &'a dyn AgentExecutionV5,
     legacy: Option<Rc<dyn AgentHistoryImport>>,
     native: Option<Rc<dyn AgentHistoryImport>>,
 }
 
-impl<'a> From<&'a AgentIntegration> for HistoryIntegration<'a> {
-    fn from(integration: &'a AgentIntegration) -> Self {
-        Self {
-            scope: integration.producers.scope(),
+impl<'a> TryFrom<&'a AgentIntegration> for HistoryIntegration<'a> {
+    type Error = SessionError;
+
+    fn try_from(integration: &'a AgentIntegration) -> Result<Self, SessionError> {
+        Ok(Self {
+            scope: integration.producers.scope().map_err(SessionError::from)?,
             execution: integration.execution.as_ref(),
             legacy: integration.legacy_history_import.clone(),
             native: integration.native_history_import.clone(),
-        }
+        })
     }
 }
 
@@ -95,13 +97,15 @@ impl HistoryRpcServer {
                 reply(Ok(reference))
             }
             "history.next" => {
-                let row = self.next(integration.scope, &call.request, &signal).await?;
+                let row = self
+                    .next(&integration.scope, &call.request, &signal)
+                    .await?;
                 reply(Ok(row))
             }
             "history.close" => {
-                let reader = self.get(integration.scope, &call.request)?;
+                let reader = self.get(&integration.scope, &call.request)?;
                 self.retire(
-                    integration.scope,
+                    &integration.scope,
                     call.request["id"].as_str().unwrap_or_default(),
                 );
                 reader.finished.cancelled().await;

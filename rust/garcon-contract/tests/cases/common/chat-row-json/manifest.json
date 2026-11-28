@@ -1,0 +1,21 @@
+{
+  "module": "rust/garcon-contract/tests/oracles/chat-row-json.ts",
+  "tests": [
+    "rust/garcon-contract/tests/oracles/chat-row-json.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "parseChatRowJson",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/oracles/chat-row-json.guards.ts#isJsonText",
+      "dropped": 93,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 5,
+  "sha256": "dd5664d5d322df4561a48a1e012310f48470f2fa7173ca4b6ee9522b3ca3efc5"
+}

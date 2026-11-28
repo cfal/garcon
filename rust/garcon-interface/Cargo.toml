@@ -21,3 +21,4 @@ tokio-util.workspace = true
 
 [dev-dependencies]
 garcon-cases.workspace = true
+tokio.workspace = true

@@ -178,6 +178,10 @@ struct Prepared {
 }
 
 impl AgentProducerAdapter {
+    pub(super) fn fixed_scope(&self) -> &AgentResourceScope {
+        &self.state.bindings.scope
+    }
+
     pub(super) fn expected_operation(
         &self,
         request: &AgentSteerTargetRequest,
@@ -254,8 +258,8 @@ struct PreparedResume {
 
 #[async_trait(?Send)]
 impl AgentProducers for AgentProducerAdapter {
-    fn scope(&self) -> &AgentResourceScope {
-        &self.state.bindings.scope
+    fn scope(&self) -> ExecutorResult<AgentResourceScope> {
+        Ok(self.fixed_scope().clone())
     }
 
     async fn bind(

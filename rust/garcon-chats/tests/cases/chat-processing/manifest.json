@@ -1,0 +1,21 @@
+{
+  "module": "rust/garcon-chats/tests/oracles/chat-processing.ts",
+  "tests": [
+    "rust/garcon-chats/tests/oracles/chat-processing.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "projectProcessing",
+      "argument": 0,
+      "guard": "rust/garcon-chats/tests/oracles/chat-processing.guards.ts#isWellFormedFixture",
+      "dropped": 0,
+      "kept": 57
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 65,
+  "sha256": "3a5e4f744d6f33f9c9420024e976bf9f97eb9eab3bc31ba55e37c0a1809b9402"
+}
