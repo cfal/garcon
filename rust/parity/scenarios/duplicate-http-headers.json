@@ -1,0 +1,52 @@
+{
+  "name": "duplicate-http-headers",
+  "description": "An authenticated settings write sees all Authorization and Content-Type fields in wire order.",
+  "steps": [
+    {
+      "name": "write-with-single-authorization-and-content-type",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "rawHeaders": [["Content-Type", "application/json"]],
+        "json": {"ui": {"appIdentity": {"title": "Single header"}}}
+      }
+    },
+    {
+      "name": "duplicate-authorization-rejects-the-write",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "rawHeaders": [["Authorization", "Bearer surplus"]],
+        "json": {"ui": {"appIdentity": {"title": "Refused header"}}}
+      }
+    },
+    {
+      "name": "single-text-content-type-does-not-read-json",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "rawHeaders": [["Content-Type", "text/plain"]],
+        "json": {"ui": {"appIdentity": {"title": "Joined content type"}}}
+      }
+    },
+    {
+      "name": "duplicate-content-type-includes-json",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "rawHeaders": [
+          ["Content-Type", "text/plain"],
+          ["Content-Type", "application/json"]
+        ],
+        "json": {"ui": {"appIdentity": {"title": "Joined content type"}}}
+      }
+    },
+    {
+      "name": "reads-the-write-with-joined-content-type",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    }
+  ]
+}

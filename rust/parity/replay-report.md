@@ -2,8 +2,8 @@
 
 Build: `garcon-server`
 
-Passed: 12231/12231 cases
-Served without falling back to the original: 120/12231 (fallback rate 99.0%)
+Passed: 12236/12236 cases
+Served without falling back to the original: 120/12236 (fallback rate 99.0%)
 
 ## Scenarios
 
@@ -32,6 +32,7 @@ Served without falling back to the original: 120/12231 (fallback rate 99.0%)
 | chat-canvases-size-limits | 18/18 | 0/18 |
 | chat-canvases | 525/525 | 0/525 |
 | chat-tags | 547/547 | 0/547 |
+| duplicate-http-headers | 5/5 | 0/5 |
 | executors-seeded | 271/271 | 0/271 |
 | executors | 600/600 | 0/600 |
 | exhausted-revisions | 243/243 | 0/243 |

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-controller", "garcon-executor", "garcon-http", "garcon-interface", "garcon-js", "garcon-link", "garcon-server", "garcon-stores"]
+members = ["garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-controller", "garcon-executor", "garcon-http", "garcon-interface", "garcon-js", "garcon-link", "garcon-runtime", "garcon-server", "garcon-stores"]
 
 [workspace.package]
 edition = "2024"
