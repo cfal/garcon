@@ -63,6 +63,44 @@ fn ticket_recording_result<T: Serialize>(
 }
 
 #[test]
+fn self_handoff_contract_recordings() {
+    use garcon_contract::self_handoff_contracts::parse_self_handoff_run_command_request;
+    assert_recording("self-handoff-contracts", |function, args| match function {
+        "parseSelfHandoffRunCommandRequest" => {
+            let value = unknown(function, args.first())?;
+            parse_self_handoff_run_command_request(&value)
+                .map(serialized_record)
+                .map_err(|error| CaseError::new("CommandRequestValidationError", error.message))
+        }
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn self_handoff_keeps_the_fork_validation_and_only_the_continuation_fields() {
+    use garcon_contract::self_handoff_contracts::parse_self_handoff_run_command_request;
+    let mut input = json!({
+        "clientRequestId": " req ", "clientMessageId": " msg ",
+        "sourceChatId": "1000000000000001", "chatId": "1000000000000002",
+        "images": [{"data":"YWJj","name":"note.png","mimeType":"image/png"}],
+        "model": "demo", "allowHandoffFork": true,
+    });
+    let expected = pinned_bun_stdout(
+        r#"import { parseSelfHandoffRunCommandRequest } from "./common/self-handoff-contracts.ts";
+           console.log(JSON.stringify(parseSelfHandoffRunCommandRequest(JSON.parse(process.argv[1]))));"#,
+        &[&garcon_js::json::stringify(&input)],
+    );
+    let result = parse_self_handoff_run_command_request(&input).unwrap();
+    assert_eq!(serde_json::to_string(&result).unwrap(), expected.trim_end());
+    input["model"] = json!(42);
+    assert_eq!(
+        parse_self_handoff_run_command_request(&input).unwrap_err(),
+        garcon_contract::chat_command_contracts::parse_fork_run_command_request(&input)
+            .unwrap_err(),
+    );
+}
+
+#[test]
 fn ws_session_event_recordings() {
     use garcon_contract::ws_events::*;
     #[derive(serde::Deserialize)]
