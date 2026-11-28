@@ -1,0 +1,26 @@
+{
+  "module": "common/chat-export-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-export-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-export-contracts.jsonl",
+  "guards": [
+    {
+      "fn": "canonicalTranscriptExportCategories",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/chat-export-guards.ts#isTranscriptExportCategoryArray",
+      "dropped": 232,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseTranscriptExportResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 257,
+  "sha256": "6b94698f217737bb9a233d7a6d9ff29bb2af5b57deaaabbc0010ff2775de4534"
+}
