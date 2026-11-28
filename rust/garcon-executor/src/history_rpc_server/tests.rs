@@ -6,7 +6,8 @@ use garcon_interface::execution_v5::{
     AgentExecutionHandle, AgentResumeRequestV5, AgentStartRequestV5,
 };
 use garcon_interface::native_history::AgentHistoryStream;
-use garcon_interface::resources::{AgentInstanceCallOptions, ExecutorResult};
+use garcon_interface::producer::{AgentProducerBindRequest, AgentProducerNotification};
+use garcon_interface::resources::{AgentInstanceCallOptions, AgentProducerBinding, ExecutorResult};
 use garcon_js::json::Opaque;
 use serde_json::json;
 use tokio::task::LocalSet;
@@ -73,9 +74,57 @@ impl AgentExecutionV5 for Execution {
     }
 }
 
+struct ScopeProbe {
+    scope: AgentResourceScope,
+    reads: Cell<usize>,
+    unavailable: Cell<bool>,
+}
+
+#[async_trait(?Send)]
+impl AgentProducers for ScopeProbe {
+    fn scope(&self) -> ExecutorResult<AgentResourceScope> {
+        self.reads.update(|reads| reads + 1);
+        if self.unavailable.get() {
+            return Err(AgentCallError::new(
+                AgentDeliveryOutcome::NotDispatched,
+                "Scope is unavailable",
+            )
+            .into());
+        }
+        Ok(self.scope.clone())
+    }
+
+    async fn bind(
+        &self,
+        _: AgentProducerBindRequest,
+        _: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<()> {
+        unreachable!("scope reads do not bind a producer");
+    }
+
+    async fn close(
+        &self,
+        _: AgentProducerBinding,
+        _: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<()> {
+        unreachable!("scope reads do not close a producer");
+    }
+
+    fn detach(&self, _: AgentProducerBinding) {
+        unreachable!("scope reads do not detach a producer");
+    }
+
+    fn subscribe(
+        &self,
+        _: Rc<dyn Fn(AgentProducerNotification) -> ExecutorResult<()>>,
+    ) -> Box<dyn Fn()> {
+        unreachable!("scope reads do not subscribe to a producer");
+    }
+}
+
 struct Fixture {
     server: Rc<HistoryRpcServer>,
-    scope: AgentResourceScope,
+    producers: ScopeProbe,
     execution: Execution,
     source: Rc<dyn AgentHistoryImport>,
 }
@@ -86,10 +135,14 @@ impl Fixture {
     ) -> Rc<Self> {
         Rc::new(Self {
             server: Rc::default(),
-            scope: AgentResourceScope {
-                executor_id: "local".into(),
-                instance_id: "instance".into(),
-                integration_id: "test".into(),
+            producers: ScopeProbe {
+                scope: AgentResourceScope {
+                    executor_id: "local".into(),
+                    instance_id: "instance".into(),
+                    integration_id: "test".into(),
+                },
+                reads: Cell::new(0),
+                unavailable: Cell::new(false),
             },
             execution: Execution::default(),
             source: Rc::new(Import(Box::new(source))),
@@ -97,23 +150,33 @@ impl Fixture {
     }
 
     async fn call(&self, method: &str, request: Value) -> RpcResult {
+        self.call_with_signal(method, request, CancellationToken::new())
+            .await
+    }
+
+    async fn call_with_signal(
+        &self,
+        method: &str,
+        request: Value,
+        signal: CancellationToken,
+    ) -> RpcResult {
         let call = ExecutorRpcRequest {
             id: "test-call".into(),
             seq: 1,
-            integration_id: self.scope.integration_id.clone(),
+            integration_id: self.producers.scope.integration_id.clone(),
             method: method.into(),
             request: Opaque::from_value(request),
         };
         self.server
             .handle(
                 HistoryIntegration {
-                    scope: self.scope.clone(),
+                    producers: &self.producers,
                     execution: &self.execution,
                     legacy: None,
                     native: Some(self.source.clone()),
                 },
                 &call,
-                CancellationToken::new(),
+                signal,
             )
             .await
     }
@@ -138,6 +201,114 @@ impl Fixture {
         )
         .await
     }
+}
+
+#[tokio::test]
+async fn history_reads_scope_after_admission_and_reuses_the_open_table() {
+    LocalSet::new()
+        .run_until(timeout(Duration::from_secs(5), async {
+            let fixture = Fixture::new(|_| Box::pin(stream::iter([Ok(vec![row("one".into())])])));
+            fixture.producers.unavailable.set(true);
+            let aborted = CancellationToken::new();
+            aborted.cancel();
+            let cancelled = fixture
+                .call_with_signal("history.close", json!({}), aborted)
+                .await;
+            assert_eq!(code(cancelled), AgentIntegrationErrorCode::STALE_RESOURCE);
+            assert_eq!(fixture.producers.reads.get(), 0);
+
+            let error = fixture.open().await.unwrap_err();
+            let failure = error.downcast_ref::<AgentCallError>().unwrap();
+            assert_eq!(failure.message, "Scope is unavailable");
+            assert_eq!(failure.outcome, AgentDeliveryOutcome::NotDispatched);
+
+            fixture.producers.unavailable.set(false);
+            let reader = fixture.open().await.unwrap().unwrap();
+            assert_eq!(fixture.producers.reads.get(), 2);
+            fixture.producers.unavailable.set(true);
+            let page = fixture
+                .call("history.next", json!({"reader":reader,"page":0}))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(page["rows"][0]["message"]["content"], "one");
+            assert!(
+                fixture
+                    .call("history.close", reader.into_value())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(fixture.producers.reads.get(), 2);
+        }))
+        .await
+        .unwrap();
+}
+
+#[test]
+fn manifest_propagates_the_scope_failure_before_reading_settings() {
+    use garcon_agent_direct_openai_compatible::DirectOpenAiCompatibleIntegration;
+    use garcon_contract::agent_integration::{AgentSettingDescriptor, AgentSettingsEnvelope};
+    use garcon_interface::{integration::AgentIntegrationClass, services::AgentSettings};
+    use garcon_link::rpc_protocol::IntegrationManifest;
+    use garcon_runtime::agents::integration_host::{
+        IntegrationHostFactory, IntegrationHostFactoryOptions,
+    };
+    use indexmap::IndexMap;
+
+    struct SettingsAfterScope;
+
+    #[async_trait(?Send)]
+    impl AgentSettings for SettingsAfterScope {
+        fn describe(&self) -> &[AgentSettingDescriptor] {
+            panic!("manifest read settings before the failed scope getter");
+        }
+        fn defaults(&self) -> ExecutorResult<AgentSettingsEnvelope> {
+            Err("Unexpected settings defaults".into())
+        }
+        fn parse(&self, _: AgentSettingsEnvelope) -> ExecutorResult<AgentSettingsEnvelope> {
+            unreachable!("manifest does not parse settings");
+        }
+        async fn migrate(&self, _: AgentSettingsEnvelope) -> ExecutorResult<AgentSettingsEnvelope> {
+            unreachable!("manifest does not migrate settings");
+        }
+        fn apply_patch(
+            &self,
+            _: AgentSettingsEnvelope,
+            _: IndexMap<String, Opaque>,
+        ) -> ExecutorResult<AgentSettingsEnvelope> {
+            unreachable!("manifest does not patch settings");
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let factory = IntegrationHostFactory::new(IntegrationHostFactoryOptions {
+        workspace_dir: root.path().to_str().unwrap().into(),
+        executor_id: Some("local".into()),
+        instance_id: Some("instance".into()),
+        resolve_credential: Rc::new(|_| {
+            Box::pin(async { Err("Unexpected credential resolution".into()) })
+        }),
+        read_environment: Some(Rc::new(|_| None)),
+        logger_factory: None,
+    });
+    let class = DirectOpenAiCompatibleIntegration;
+    let host = factory.for_agent(class.integration_id()).unwrap();
+    let probe = Rc::new(ScopeProbe {
+        scope: host.scope.clone(),
+        reads: Cell::new(0),
+        unavailable: Cell::new(true),
+    });
+    let mut integration = class.create(host);
+    integration.producers = probe.clone();
+    integration.settings = Rc::new(SettingsAfterScope);
+
+    let error = IntegrationManifest::from_integration(&integration).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<AgentCallError>().unwrap().message,
+        "Scope is unavailable"
+    );
+    assert_eq!(probe.reads.get(), 1);
 }
 
 fn code(result: RpcResult) -> AgentIntegrationErrorCode {

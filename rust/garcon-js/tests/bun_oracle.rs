@@ -6,7 +6,7 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
-use garcon_js::json::{Opaque, contains_unpaired_surrogate_escape, from_str};
+use garcon_js::json::{self as js_json, Opaque, contains_unpaired_surrogate_escape, from_str};
 use garcon_js::{Number, math_round, number_to_string, parse_int, to_fixed, utf16};
 
 /// A deterministic xorshift64* generator, so a failing run can be repeated.
@@ -137,6 +137,62 @@ fn unpaired_surrogate_escapes_match_bun_for_generated_json_documents() {
         }
     }
     differences.finish("unpaired JSON surrogate escapes", inputs.len());
+}
+
+#[test]
+fn replacing_unpaired_surrogate_values_matches_bun() {
+    let literals = [
+        r#""\ud800""#,
+        r#""x\udc00\ud800y""#,
+        r#""\ufffd""#,
+        r#""\ud83d\ude80""#,
+        r#""\\ud800""#,
+        r#""\u0061\"b\n""#,
+    ];
+    let mut texts = vec![
+        r#"{"\ud800" : "\ud800", "__proto__":{"value":"\ud800"}}"#.to_owned(),
+        r#"{"z":[1.0,9007199254740993,"\ud800"],"2":null,"1":"\udc00"}"#.to_owned(),
+        r#""\ud800\q""#.to_owned(),
+        r#""\q\ud800""#.to_owned(),
+        r#""\ud800\u00ZZ""#.to_owned(),
+        r#""\ud800"#.to_owned(),
+        "[\"\\ud800\u{0000}\"]".to_owned(),
+        r#"["\ud800",]"#.to_owned(),
+        r#"{"\ud800":"\ud800""#.to_owned(),
+        r#"["\ud800"true]"#.to_owned(),
+    ];
+    for first in literals {
+        for last in literals {
+            texts.push(format!(
+                r#"{{"input":{first},"unchanged":"\ufffd","\u0069nput":{{"title":{first},"\u0074itle":{last},"labels":[{first},{{"assignee":{{"ownerKey":{last}}}}}]}},"patch":{{"x":{last}}},"patch":{first}}}"#
+            ));
+        }
+    }
+    let inputs: Vec<_> = texts
+        .iter()
+        .flat_map(|text| [(text, true), (text, false)])
+        .collect();
+    let reply = ask(json!({ "jsonReplaceUnpairedValues": inputs }));
+    let expected = section(&reply, "jsonReplaceUnpairedValues");
+    assert_eq!(expected.len(), inputs.len());
+    let mut differences = Mismatches::new();
+    for ((text, marker), expected) in inputs.iter().zip(expected) {
+        let expected = outcome(expected).map(|text| js_json::parse(text).unwrap());
+        let actual = js_json::parse_replacing_unpaired_surrogate_values(text, *marker);
+        let matches = match (&actual, &expected) {
+            (Ok(actual), Ok(expected)) => actual == expected,
+            (Err(_), Err((name, _))) => *name == "SyntaxError",
+            _ => false,
+        };
+        if !matches {
+            differences.add(
+                format_args!("{text:?} with marker {marker}"),
+                actual,
+                expected,
+            );
+        }
+    }
+    differences.finish("replacing unpaired surrogate values", inputs.len());
 }
 
 fn outcome(item: &Value) -> Result<&str, (&str, &str)> {

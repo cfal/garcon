@@ -16,6 +16,7 @@ pub mod listener;
 pub mod rate_limit;
 pub mod route_table;
 pub mod routes;
+pub mod server_event_wiring;
 pub mod static_assets;
 mod ticket_http;
 pub mod unported_routes;

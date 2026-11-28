@@ -1035,6 +1035,7 @@ dependencies = [
 name = "garcon-agent-opencode"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "futures",
  "garcon-agents-common",
  "garcon-base",
@@ -1043,6 +1044,7 @@ dependencies = [
  "garcon-interface",
  "garcon-js",
  "indexmap",
+ "nix",
  "serde",
  "serde_json",
  "tempfile",
@@ -1152,6 +1154,7 @@ dependencies = [
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "garcon-ledger",
  "indexmap",
  "serde",
  "serde_json",
@@ -1221,9 +1224,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1269,8 +1275,12 @@ dependencies = [
  "futures",
  "garcon-base",
  "garcon-cases",
+ "garcon-chats",
  "garcon-contract",
+ "garcon-execution",
+ "garcon-interface",
  "garcon-js",
+ "garcon-ledger",
  "garcon-stores",
  "hashlink 0.10.0",
  "http",

@@ -1,8 +1,8 @@
 //! The snapshot reply in the order written by the controller.
 
 use garcon_contract::{
-    chat_execution_control::ChatExecutionControlState, chat_snapshot::ChatSnapshotTranscript,
-    chat_transient_feed::ChatTransientFeedSnapshot, chat_types::ChatProcessingPhase,
+    chat_snapshot::ChatSnapshotTranscript, chat_transient_feed::ChatTransientFeedSnapshot,
+    chat_types::ChatProcessingPhase,
 };
 use serde::Serialize;
 
@@ -10,22 +10,22 @@ use crate::chat_list_projector::{ChatSummaryProjection, ProjectedChatSnapshot};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatSnapshot {
+pub struct ChatSnapshot<Control> {
     pub observed_at: String,
     pub message_limit: u64,
     pub chat: ProjectedChatSnapshot,
     pub processing_phase: Option<ChatProcessingPhase>,
-    pub control: ChatExecutionControlState,
+    pub control: Control,
     pub transient_feed: ChatTransientFeedSnapshot,
     pub transcript: ChatSnapshotTranscript,
 }
 
-impl ChatSnapshot {
+impl<Control> ChatSnapshot<Control> {
     pub fn new(
         observed_at: String,
         message_limit: u64,
         summary: ChatSummaryProjection,
-        control: ChatExecutionControlState,
+        control: Control,
         transient_feed: ChatTransientFeedSnapshot,
         transcript: ChatSnapshotTranscript,
     ) -> Self {

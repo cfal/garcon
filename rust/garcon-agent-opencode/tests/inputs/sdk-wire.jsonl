@@ -1,0 +1,19 @@
+{"fn":"sdkRequest","args":["ConfigProviders",{}]}
+{"fn":"sdkRequest","args":["ProviderList",{}]}
+{"fn":"sdkRequest","args":["SessionCreate",{"title":"Fixture","directory":"/repo a","permission":[{"permission":"bash","pattern":"*","action":"ask"}]}]}
+{"fn":"sdkRequest","args":["SessionDelete",{"sessionID":"source","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionGet",{"sessionID":"source","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionUpdate",{"sessionID":"source","directory":"/work/tree","permission":[{"permission":"edit","pattern":"*","action":"allow"}]}]}
+{"fn":"sdkRequest","args":["SessionMessages",{"sessionID":"source","limit":20,"before":null,"directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionPrompt",{"sessionID":"source/a?#%","parts":[{"id":"part","type":"text","text":"fixture"}],"variant":"high","model":{"providerID":"fixture","modelID":"model"},"directory": "/repo a"}]}
+{"fn":"sdkRequest","args":["SessionPromptAsync",{"sessionID":"source","parts":[{"type":"text","text":"steer"}],"directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionFork",{"sessionID":"source","messageID":"anchor","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionFork",{"sessionID":"source","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionAbort",{"sessionID":"source","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionSummarize",{"sessionID":"source","providerID":"fixture","modelID":"model","auto":false,"directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["SessionRevert",{"sessionID":"source","messageID":"anchor","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["MoveSession",{"sessionID":"source","destination":{"directory":"/second project"}}]}
+{"fn":"sdkRequest","args":["PermissionReply",{"requestID":"permission/1","reply":"once","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["QuestionReply",{"requestID":"question/1","answers":[["First","Second"]],"directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["QuestionReject",{"requestID":"question/1","directory":"/work/tree"}]}
+{"fn":"sdkRequest","args":["ShowToast",{"title":"Fixture","message":"Continue","variant":"info","duration":500,"directory":"/work/tree"}]}
