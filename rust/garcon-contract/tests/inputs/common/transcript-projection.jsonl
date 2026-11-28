@@ -1,0 +1,14 @@
+{"fn":"projectionPriorityLevel","args":["user-message"]}
+{"fn":"projectionPriorityLevel","args":["assistant-message"]}
+{"fn":"projectionPriorityLevel","args":["command-output"]}
+{"fn":"projectionPriorityLevel","args":["command-result"]}
+{"fn":"projectionPriorityLevel","args":["read-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["grep-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["glob-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["list-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["edit-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["write-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["apply-patch-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["bash-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["exec-tool-use"]}
+{"fn":"projectionPriorityLevel","args":["unknown-tool-use"]}

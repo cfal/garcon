@@ -101,18 +101,23 @@ export function frontDoorEnvironment(): Record<string, string> {
   };
 }
 
-// GARCON_TEST_CONTROLLER=front-door starts the controller behind the Rust front
-// door (rust/README.md) so every suite also verifies it; the default starts the
-// TypeScript controller directly.
-function controllerLaunch(repoRoot: string): { command: string[]; environment: Record<string, string>; fronted: boolean } {
+export function controllerLaunch(repoRoot: string) {
   const controller = process.env.GARCON_TEST_CONTROLLER ?? 'original';
-  if (controller === 'original') return { command: [process.execPath, 'server/main.ts'], environment: {}, fronted: false };
+  if (controller === 'original') return { controller, command: [process.execPath, 'server/main.ts'], environment: {} };
+  const releaseBinary = join(repoRoot, 'rust/target/release/garcon-server');
+  if (controller === 'rust') {
+    return {
+      controller,
+      command: [process.env.GARCON_TEST_RUST_CONTROLLER_BINARY ?? releaseBinary],
+      environment: { ...frontDoorEnvironment(), GARCON_RS_CONTROLLER: 'native' },
+    };
+  }
   if (controller !== 'front-door') throw new Error(`Unknown controller: ${controller}`);
   return {
+    controller,
     // GARCON_TEST_FRONT_DOOR_BINARY selects a build other than the local release build.
-    command: [process.env.GARCON_TEST_FRONT_DOOR_BINARY ?? join(repoRoot, 'rust/target/release/garcon-server')],
+    command: [process.env.GARCON_TEST_FRONT_DOOR_BINARY ?? releaseBinary],
     environment: frontDoorEnvironment(),
-    fronted: true,
   };
 }
 
@@ -173,7 +178,11 @@ export class GarconProcess {
   static async start(options: GarconProcessOptions): Promise<GarconProcess> {
     const ready = new Deferred<string>();
     const launch = controllerLaunch(options.repoRoot);
-    const environment = isolatedEnvironment(options.homeDir, { ...launch.environment, ...options.environment });
+    const environment = isolatedEnvironment(options.homeDir, {
+      ...launch.environment,
+      ...options.environment,
+      ...(launch.controller === 'rust' ? { GARCON_RS_CONTROLLER: 'native' } : {}),
+    });
     await mkdir(environment.TMPDIR, { recursive: true });
     const credentials = options.authentication === 'existing' ? null : await prepareFixtureAuth(options.configDir);
     const workspaceArguments = options.workspaceName
@@ -214,8 +223,8 @@ export class GarconProcess {
       instance.#credentials = credentials;
       // Behind the front door the spawned process is not the controller, so
       // its pid must come from the descriptor the controller publishes.
-      const published = await publishedControllerPid(options.configDir);
-      if (published === null && launch.fronted) throw new Error(`The controller behind the front door published no runtime descriptor.\n${instance.describeLogs()}`);
+      const published = launch.controller === 'rust' ? null : await publishedControllerPid(options.configDir);
+      if (published === null && launch.controller === 'front-door') throw new Error(`The controller behind the front door published no runtime descriptor.\n${instance.describeLogs()}`);
       instance.#controllerPid = published ?? child.pid;
       return instance;
     } catch (error) {

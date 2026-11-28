@@ -1,0 +1,14 @@
+{"id":"projectionPriorityLevel#0","fn":"projectionPriorityLevel","args":["user-message"],"result":0,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:1"}
+{"id":"projectionPriorityLevel#1","fn":"projectionPriorityLevel","args":["assistant-message"],"result":1,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:2"}
+{"id":"projectionPriorityLevel#2","fn":"projectionPriorityLevel","args":["command-output"],"result":1,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:3"}
+{"id":"projectionPriorityLevel#3","fn":"projectionPriorityLevel","args":["command-result"],"result":1,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:4"}
+{"id":"projectionPriorityLevel#4","fn":"projectionPriorityLevel","args":["read-tool-use"],"result":2,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:5"}
+{"id":"projectionPriorityLevel#5","fn":"projectionPriorityLevel","args":["grep-tool-use"],"result":2,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:6"}
+{"id":"projectionPriorityLevel#6","fn":"projectionPriorityLevel","args":["glob-tool-use"],"result":2,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:7"}
+{"id":"projectionPriorityLevel#7","fn":"projectionPriorityLevel","args":["list-tool-use"],"result":2,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:8"}
+{"id":"projectionPriorityLevel#8","fn":"projectionPriorityLevel","args":["edit-tool-use"],"result":3,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:9"}
+{"id":"projectionPriorityLevel#9","fn":"projectionPriorityLevel","args":["write-tool-use"],"result":3,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:10"}
+{"id":"projectionPriorityLevel#10","fn":"projectionPriorityLevel","args":["apply-patch-tool-use"],"result":3,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:11"}
+{"id":"projectionPriorityLevel#11","fn":"projectionPriorityLevel","args":["bash-tool-use"],"result":4,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:12"}
+{"id":"projectionPriorityLevel#12","fn":"projectionPriorityLevel","args":["exec-tool-use"],"result":4,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:13"}
+{"id":"projectionPriorityLevel#13","fn":"projectionPriorityLevel","args":["unknown-tool-use"],"result":5,"origin":"rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl:14"}

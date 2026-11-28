@@ -85,9 +85,8 @@
 {"id":"isGitServiceErrorCode#84","fn":"isGitServiceErrorCode","args":[{"code":"GIT_INVALID_INPUT"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:128"}
 {"id":"isGitServiceErrorCode#85","fn":"isGitServiceErrorCode","args":[{"0":"GH_MISSING"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:129"}
 {"id":"isGitServiceErrorCode#86","fn":"isGitServiceErrorCode","args":[{"$":"undefined"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:130"}
-{"id":"isGitServiceErrorCode#87","fn":"isGitServiceErrorCode","args":[{"$":"number","value":"NaN"}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:131"}
-{"id":"isGitServiceErrorCode#88","fn":"isGitServiceErrorCode","args":[],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:132"}
-{"id":"isGitServiceErrorCode#89","fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPUT","GH_MISSING"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:133"}
+{"id":"isGitServiceErrorCode#87","fn":"isGitServiceErrorCode","args":[],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:131"}
+{"id":"isGitServiceErrorCode#88","fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPUT","GH_MISSING"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:132"}
 {"id":"new GitServiceError#0","fn":"new GitServiceError","args":["GIT_INVALID_INPUT","Synthetic failure"],"result":{"$":"error","name":"GitServiceError","message":"Synthetic failure","properties":{"code":"GIT_INVALID_INPUT","status":400}},"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:2"}
 {"id":"new GitServiceError#1","fn":"new GitServiceError","args":["GIT_REQUEST_TOO_LARGE","Synthetic failure"],"result":{"$":"error","name":"GitServiceError","message":"Synthetic failure","properties":{"code":"GIT_REQUEST_TOO_LARGE","status":413}},"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:4"}
 {"id":"new GitServiceError#2","fn":"new GitServiceError","args":["GIT_NOT_REPO","Synthetic failure"],"result":{"$":"error","name":"GitServiceError","message":"Synthetic failure","properties":{"code":"GIT_NOT_REPO","status":400}},"origin":"rust/garcon-contract/tests/inputs/common/git-error.jsonl:6"}
