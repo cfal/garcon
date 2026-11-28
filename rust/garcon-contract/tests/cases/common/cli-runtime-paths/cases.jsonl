@@ -1,0 +1,7 @@
+{"id":"executorDataDirectory#0","fn":"executorDataDirectory","args":["/fixture/config"],"result":"/fixture/config/executor","origin":"rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl:1"}
+{"id":"executorDataDirectory#1","fn":"executorDataDirectory","args":[""],"result":"executor","origin":"rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl:2"}
+{"id":"cliGatewayRuntimeFile#0","fn":"cliGatewayRuntimeFile","args":["/fixture/config/executor"],"result":"/fixture/config/executor/runtime.json","origin":"rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl:3"}
+{"id":"cliRuntimeFile#0","fn":"cliRuntimeFile","args":["/fixture/config","controller"],"result":"/fixture/config/runtime.json","origin":"rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl:4"}
+{"id":"cliRuntimeFile#1","fn":"cliRuntimeFile","args":["/fixture/config","executor"],"result":"/fixture/config/executor/runtime.json","origin":"rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl:5"}
+{"id":"cliRuntimeFile#2","fn":"cliRuntimeFile","args":["tmp/../config","controller"],"result":"config/runtime.json","origin":"rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl:6"}
+{"id":"cliRuntimeFile#3","fn":"cliRuntimeFile","args":["tmp/../config","executor"],"result":"config/executor/runtime.json","origin":"rust/garcon-contract/tests/inputs/common/cli-runtime-paths.jsonl:7"}

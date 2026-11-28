@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-base/tests/edge_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-base/tests/inputs/server-common/edge-parity.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 35,
+  "sha256": "8f6699ad6fcd8bf6289cf4c1f26b6110bf7526ab68ab1562bbfb5c64dde41713"
+}

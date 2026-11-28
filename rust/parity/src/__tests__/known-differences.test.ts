@@ -55,7 +55,7 @@ test('the trace comparer uses only the approvals for the requested suite and tes
   const rust = format('rust');
   const { scenario: _scenario, ...entry } = example;
   const known = parseKnownDifferences([{ ...entry, suite, path: '$.http[0].body', result: 'rust' }]);
-  expect(compareTraces(golden, rust, known)).toEqual({ total: 1, problems: [], excludedBroadcasts: 0, excludedTests: 0 });
+  expect(compareTraces(golden, rust, known)).toEqual({ total: 1, problems: [], excludedBroadcasts: 0, excludedTests: 0, excludedPaths: 0 });
   expect(compareTraces(golden, format('unapproved'), known).problems[0]?.difference.path).toBe('$.http[0].body');
   expect(compareTraces(golden, golden, known).problems[0]?.difference.actual).toBe('matches the original recording');
   expect(compareTraces(golden, rust, parseKnownDifferences([{ ...entry, suite: 'other.test.ts' }])).problems).toHaveLength(1);

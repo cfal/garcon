@@ -386,7 +386,8 @@ Recordings use two sequential runs with the pinned Bun and the original
 controller and worker; use `--runs <N>` to sample more. Review every printed
 wildcard. `rust/parity/trace-unstable.json` declares original nondeterminism by
 suite and either full test name or normalized chat ID (or `null`) and event
-type. Declarations include a reason and are counted separately. HTTP and
+type. A test declaration with a `path` excludes only that JSON path, not the
+whole test. Declarations include a reason and are counted separately. HTTP and
 reply structure and order otherwise block recording on change. Broadcast
 groups that disagree across recording runs are also reported and saved as
 exclusions in the golden, not replaced with wildcards. Comparison reports the
@@ -428,7 +429,8 @@ generator shares the CPU with the servers.
    that accepts only requests the unit fully owns, and a kill switch.
 4. `bun run rust:build && bun run parity:replay:rust` must pass every case.
    Commit the updated `parity/replay-report.md`.
-5. Run the mutation check described above, then mark the unit done in the map
+5. Run `bun test ./scripts/__tests__/test-inventory.test.js`.
+6. Run the mutation check described above, then mark the unit done in the map
    with its replay result.
 
 Rust code is formatted with `cargo fmt` and must pass
