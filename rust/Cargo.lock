@@ -1060,6 +1060,7 @@ dependencies = [
 name = "garcon-ledger"
 version = "0.0.0"
 dependencies = [
+ "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
@@ -1073,6 +1074,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
  "uuid",
  "windows-sys 0.61.2",
 ]
