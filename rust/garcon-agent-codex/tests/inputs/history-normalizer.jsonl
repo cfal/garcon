@@ -1,0 +1,5 @@
+{"fn":"extractTextContent","args":[[{"type":"text","text":1},{"type":"input_text","text":true},{"type":"output_text","text":["a","b"]},{"type":"text","text":{}},{"type":"text","text":0},{"type":"text","text":false}]]}
+{"fn":"normalizeCodexJsonlEntry","args":[{"type":"response_item","payload":{"type":"web_search_call","status":"completed","action":{"type":"search","queries":[" ","query","another"]}}},{"sourceLineNumber":10,"sourceByteOffset":11}]}
+{"fn":"normalizeCodexJsonlEntry","args":[{"type":"event_msg","payload":{"type":"user_message","message":"Synthetic","client_id":"  upstream  "}},{"sourceLineNumber":-0.5}]}
+{"fn":"normalizeCodexJsonlEntry","args":[{"type":"event_msg","payload":{"type":"user_message","message":"Synthetic"}},{"sourceLineNumber":9007199254740992}]}
+{"fn":"normalizeCodexJsonlEntry","args":[{"type":"response_item","timestamp":"2026-02-21T10:00:00Z","payload":{"type":"function_call","name":"request_user_input","call_id":"tool","arguments":{"questions":[{"id":"question","header":"Header","question":"Which?","options":[{"label":"One","description":"First"}]}]}}}]}
