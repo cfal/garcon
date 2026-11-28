@@ -93,6 +93,12 @@ export interface Placeholders {
   carried: Array<[string, string]>;
 }
 
+export class BlockedPlaceholder extends Error {
+  constructor(readonly supplier: string) {
+    super(`a required response from "${supplier}" is unported or blocked`);
+  }
+}
+
 // A shorter value could be part of an unrelated word, so it is not looked for
 // in later responses.
 const MIN_CARRIED_LENGTH = 8;
@@ -126,7 +132,7 @@ function responseValue(step: ScenarioStep, name: string, stepName: string, path:
 // Resolves every placeholder of a step. A placeholder that stands for a value
 // of an earlier response must resolve in every run, so one that cannot fails
 // the step instead of being sent as written.
-export function resolvePlaceholders(server: StartedServer, step: ScenarioStep, captures: ReadonlyMap<string, Capture>, now: Date): Placeholders {
+export function resolvePlaceholders(server: StartedServer, step: ScenarioStep, captures: ReadonlyMap<string, Capture>, now: Date, unavailable?: ReadonlySet<string>): Placeholders {
   const seeded: Record<string, string> = {
     username: server.credentials.username,
     password: server.credentials.password,
@@ -135,6 +141,7 @@ export function resolvePlaceholders(server: StartedServer, step: ScenarioStep, c
     token: server.token,
   };
   const resolved: Placeholders = { values: {}, typed: {}, carried: [] };
+  let blockedBy: string | undefined;
   for (const name of placeholderNames(step)) {
     const day = dayOf(name, now);
     const header = RESPONSE_HEADER.exec(name);
@@ -144,14 +151,19 @@ export function resolvePlaceholders(server: StartedServer, step: ScenarioStep, c
     } else if (name in seeded) {
       resolved.values[name] = seeded[name];
     } else if (reference) {
-      const [, stepName, path] = reference;
-      const value = responseValue(step, name, stepName!, path!, captures, header ? 'headers' : 'body');
+      const stepName = reference[1]!;
+      if (unavailable?.has(stepName)) {
+        blockedBy ??= stepName;
+        continue;
+      }
+      const value = responseValue(step, name, stepName, reference[2]!, captures, header ? 'headers' : 'body');
       if (typeof value !== 'string') resolved.typed[name] = value as Json;
       resolved.values[name] = typeof value === 'string' ? value : JSON.stringify(value);
       if (typeof value === 'string' && value.length >= MIN_CARRIED_LENGTH) resolved.carried.push([value, `{{${name}}}`]);
     }
     // Any other `{{word}}` is the request's own text and is sent as written.
   }
+  if (blockedBy !== undefined) throw new BlockedPlaceholder(blockedBy);
   return resolved;
 }
 
