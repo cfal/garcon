@@ -1,6 +1,30 @@
 [workspace]
 resolver = "3"
-members = ["garcon-agent-direct-openai-compatible", "garcon-agents-common", "garcon-base", "garcon-bench", "garcon-cases", "garcon-contract", "garcon-controller", "garcon-execution", "garcon-executor", "garcon-http", "garcon-interface", "garcon-js", "garcon-ledger", "garcon-link", "garcon-runtime", "garcon-search", "garcon-server", "garcon-stores"]
+members = [
+  "garcon-agent-claude",
+  "garcon-agent-codex",
+  "garcon-agent-direct-anthropic-compatible",
+  "garcon-agent-direct-openai-compatible",
+  "garcon-agent-direct-openai-responses-compatible",
+  "garcon-agents-common",
+  "garcon-base",
+  "garcon-bench",
+  "garcon-cases",
+  "garcon-chats",
+  "garcon-contract",
+  "garcon-controller",
+  "garcon-execution",
+  "garcon-executor",
+  "garcon-http",
+  "garcon-interface",
+  "garcon-js",
+  "garcon-ledger",
+  "garcon-link",
+  "garcon-runtime",
+  "garcon-search",
+  "garcon-server",
+  "garcon-stores",
+]
 
 [workspace.package]
 edition = "2024"

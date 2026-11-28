@@ -1,0 +1,6 @@
+{"fn":"outputLines","args":["a\r\n\u001b[1G b  c \n\n"]}
+{"fn":"outputLines","args":["one\r\u001b[32mtwo\u001b[0m\nthree"]}
+{"fn":"outputLines","args":["one\u001b[999Dtwo\u001b[000Gthree"]}
+{"fn":"outputLines","args":["a\u00a0\u0085\u2028b   c\u000b\t"]}
+{"fn":"outputLines","args":["\u001b]0;synthetic\u0007first\u001b[2J\u009b31msecond\u001b[0m"]}
+{"fn":"outputLines","args":["\u001b]8;;https://example.test\u001b\\link\u001b]8;;\u001b\\"]}

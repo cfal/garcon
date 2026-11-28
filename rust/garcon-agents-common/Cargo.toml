@@ -9,6 +9,9 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 async-trait.workspace = true
 base64 = "0.23"
@@ -20,7 +23,7 @@ garcon-js.workspace = true
 indexmap.workspace = true
 ipnet = "2"
 regress = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-no-provider", "stream", "gzip", "brotli", "deflate", "zstd"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-no-provider", "json", "stream", "gzip", "brotli", "deflate", "zstd"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

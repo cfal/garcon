@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/shared/transcript-order.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/transcript-order.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 13,
+  "sha256": "97e95151ef8253b2542d6ed09a178023a43177db6d6144f6a2767cd194bec585"
+}

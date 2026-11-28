@@ -1,0 +1,92 @@
+{
+  "module": "rust/garcon-chats/tests/oracles/metadata-projection.ts",
+  "tests": [
+    "rust/garcon-chats/tests/oracles/metadata-projection.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "carryOverRevision",
+      "argument": 0,
+      "guard": "acceptsRefs",
+      "dropped": 70,
+      "kept": 46
+    },
+    {
+      "fn": "carryOverRevision",
+      "argument": 1,
+      "guard": "acceptsQuarantine",
+      "dropped": 0,
+      "kept": 14
+    },
+    {
+      "fn": "projectChatActivityStatus",
+      "argument": 0,
+      "guard": "acceptsStatus",
+      "dropped": 976,
+      "kept": 0
+    },
+    {
+      "fn": "resolveChatTitle",
+      "argument": 0,
+      "guard": "acceptsNullableString",
+      "dropped": 0,
+      "kept": 26
+    },
+    {
+      "fn": "resolveChatTitle",
+      "argument": 1,
+      "guard": "acceptsNullableString",
+      "dropped": 0,
+      "kept": 34
+    },
+    {
+      "fn": "classify",
+      "argument": 0,
+      "guard": "acceptsString",
+      "dropped": 0,
+      "kept": 4
+    },
+    {
+      "fn": "classify",
+      "argument": 1,
+      "guard": "acceptsGroups",
+      "dropped": 0,
+      "kept": 56
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "carryOverRevision",
+      "argument": 0
+    },
+    {
+      "fn": "carryOverRevision",
+      "argument": 1
+    },
+    {
+      "fn": "projectChatActivityStatus",
+      "argument": 0
+    },
+    {
+      "fn": "resolveChatTitle",
+      "argument": 0
+    },
+    {
+      "fn": "resolveChatTitle",
+      "argument": 1
+    },
+    {
+      "fn": "classify",
+      "argument": 0
+    },
+    {
+      "fn": "classify",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 228,
+  "sha256": "d4ec8f065891e9825c7f776cfa7331460c5141eeddd338224da43d227e030bb2"
+}
