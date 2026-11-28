@@ -11,13 +11,13 @@ use garcon_contract::{
     server_runtime::ServerRuntimeContractError, terminal_error::TerminalError,
     ticket_validation::TicketValidationError,
 };
-use garcon_interface::errors::{AgentCallError, AgentIntegrationError};
+use garcon_interface::errors::AgentIntegrationError;
 use garcon_js::{InvalidTimeValue, json::as_number, number_to_string};
 use serde_json::Value;
 
 use crate::{
     domain_error::as_domain_error,
-    executor_disconnect::ExecutorSessionLostError,
+    executor_disconnect::as_agent_call_error,
     http_body::MalformedJsonError,
     json_file_store::{
         AtomicJsonWriteError, CorruptStateFileError, ReadJsonStateError, WriteFileError,
@@ -263,16 +263,6 @@ pub fn error_metadata<'a>(error: &'a (dyn Error + 'static)) -> ErrorMetadata<'a>
         InvalidTimeValue => "RangeError",
     );
     ErrorMetadata::named("Error")
-}
-
-pub(crate) fn as_agent_call_error<'a>(
-    error: &'a (dyn Error + 'static),
-) -> Option<&'a AgentCallError> {
-    error.downcast_ref::<AgentCallError>().or_else(|| {
-        error
-            .downcast_ref::<ExecutorSessionLostError>()
-            .map(|error| &**error)
-    })
 }
 
 /// Formats a diagnostic value, using JavaScript's string form for JSON.

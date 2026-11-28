@@ -1,0 +1,16 @@
+{
+  "module": "server-agents/claude/src/agents/claude/tool-use-converter.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/tool-use-converter.test.js",
+    "server-agents/claude/src/agents/claude/__tests__/schedule-tool-use.test.ts",
+    "server-agents/claude/src/agents/claude/__tests__/task-stop.test.ts"
+  ],
+  "inputs": "rust/garcon-agent-claude/tests/inputs/tool-use-converter.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 141,
+  "sha256": "1ce78eed2ae43c3898149bf02d50c2dac8c8c814db3138582f56821fc7a4abee"
+}

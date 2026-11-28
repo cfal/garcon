@@ -59,3 +59,6 @@
 {"fn":"queueDrainerTrace","args":[{"duplicate":true}]}
 {"fn":"queueDrainerTrace","args":[{"providerFailure":true}]}
 {"fn":"queueDrainerTrace","args":[{"providerFailure":true,"terminalCommitted":true}]}
+{"fn":"steerDeliveryTrace","args":[{"sessionLost":"not-dispatched"}]}
+{"fn":"steerDeliveryTrace","args":[{"sessionLost":"rejected"}]}
+{"fn":"steerDeliveryTrace","args":[{"sessionLost":"unknown"}]}

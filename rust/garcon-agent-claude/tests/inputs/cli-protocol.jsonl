@@ -1,0 +1,19 @@
+{"fn":"claudeResultFailureMessage","args":[{"type":"result","subtype":"error_during_execution","terminal_reason":"aborted_streaming","is_error":true,"errors":["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"]}]}
+{"fn":"claudeResultFailureMessage","args":[{"type":"result","subtype":"error_max_turns","is_error":true,"errors":["The run exceeded its turn limit."],"result":"API Error: 500"}]}
+{"fn":"claudeResultFailureMessage","args":[{"type":"result","subtype":"success","is_error":true,"result":"API Error: 529 overloaded"}]}
+{"fn":"claudeResultFailureMessage","args":[{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error"}]}
+{"fn":"claudeResultFailureMessage","args":[{"type":"result","subtype":"success","is_error":true,"api_error_status":529}]}
+{"fn":"claudeResultFailureMessage","args":[{"type":"result","errors":[" \ufeffone\u00a0",null,false,"\n\t","two"],"result":"ignored"}]}
+{"fn":"claudeProviderSessionState","args":[{"type":"system","subtype":"session_state_changed","state":"running"}]}
+{"fn":"claudeProviderSessionState","args":[{"type":"system","subtype":"session_state_changed","state":"idle"}]}
+{"fn":"claudeProviderSessionState","args":[{"type":"system","subtype":"session_state_changed","state":"requires_action"}]}
+{"fn":"claudeProviderSessionState","args":[{"type":"system","subtype":"session_state_changed","state":"future-state"}]}
+{"fn":"claudeProviderSessionState","args":[{"type":"assistant","subtype":"session_state_changed","state":"idle"}]}
+{"fn":"claudeBackgroundTaskCount","args":[{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"one"},{"task_id":"two"}]}]}
+{"fn":"claudeBackgroundTaskCount","args":[{"type":"system","subtype":"background_tasks_changed","tasks":[]}]}
+{"fn":"claudeBackgroundTaskCount","args":[{"type":"system","subtype":"background_tasks_changed","tasks":"malformed"}]}
+{"fn":"isClaudeSubagentContent","args":[{"type":"assistant","parent_tool_use_id":"synthetic-tool"}]}
+{"fn":"isClaudeSubagentContent","args":[{"type":"user","parent_tool_use_id":"synthetic-tool"}]}
+{"fn":"isClaudeSubagentContent","args":[{"type":"assistant","parent_tool_use_id":""}]}
+{"fn":"isClaudeSubagentContent","args":[{"type":"assistant","parent_tool_use_id":null}]}
+{"fn":"isClaudeSubagentContent","args":[{"type":"result","parent_tool_use_id":"synthetic-tool"}]}

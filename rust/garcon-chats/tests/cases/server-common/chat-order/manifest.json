@@ -1,0 +1,48 @@
+{
+  "module": "rust/garcon-chats/tests/oracles/chat-order.ts",
+  "tests": [
+    "rust/garcon-chats/tests/oracles/chat-order.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "sortChatIds",
+      "argument": 0,
+      "guard": "acceptsSortKey",
+      "dropped": 2,
+      "kept": 0
+    },
+    {
+      "fn": "sortChatIds",
+      "argument": 1,
+      "guard": "acceptsIds",
+      "dropped": 0,
+      "kept": 12
+    },
+    {
+      "fn": "sortChatIds",
+      "argument": 2,
+      "guard": "acceptsMetadata",
+      "dropped": 0,
+      "kept": 48
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "sortChatIds",
+      "argument": 0
+    },
+    {
+      "fn": "sortChatIds",
+      "argument": 1
+    },
+    {
+      "fn": "sortChatIds",
+      "argument": 2
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 66,
+  "sha256": "26ab86be7635b6eebf221f0966c9fbe1e5f9d48af3fd7427976e25a61b405a7a"
+}

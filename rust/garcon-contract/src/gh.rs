@@ -112,9 +112,9 @@ pub struct GhStatusResponse {
     pub authenticated: bool,
     pub reason: GhAvailabilityReason,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub login: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

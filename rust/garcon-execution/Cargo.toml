@@ -11,10 +11,13 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64 = "0.23"
+futures.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
+garcon-link.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

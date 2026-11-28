@@ -1,0 +1,11 @@
+{"fn":"codexCodeModeBashToolId","args":["outer-call",0]}
+{"fn":"codexCodeModeBashToolId","args":["outer-call",-1]}
+{"fn":"codexCodeModeBashToolId","args":["outer-call",1e+21]}
+{"fn":"codexCodeModeBashToolId","args":["outer-call",{"$":"number","value":"NaN"}]}
+{"fn":"codexCodeModeBashToolId","args":["outer-call",{"$":"number","value":"-0"}]}
+{"fn":"projectBashMessages","args":["2026-07-21T12:00:00.000Z","outer-call",["git status","git diff"]]}
+{"fn":"projectBashMessages","args":["2026-07-21T12:00:00.000Z","outer-call",[]]}
+{"fn":"projectBashMessages","args":["2026-07-21T12:00:00.000Z","outer-\ud83d\udd39",["","echo \"hello\"","line\nbreak"]]}
+{"fn":"rewriteCodexCodeModeCommandPrefix","args":[["printf \"one;two\\n\"","printf \"\u0024{literal} \u0060ticks\u0060 \\n\""]]}
+{"fn":"rewriteCodexCodeModeCommandPrefix","args":[[]]}
+{"fn":"rewriteCodexCodeModeCommandPrefix","args":[["echo \"hello \ud83d\ude80\"","echo \\\"","line\nbreak"]]}

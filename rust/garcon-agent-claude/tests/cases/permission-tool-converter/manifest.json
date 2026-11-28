@@ -1,0 +1,15 @@
+{
+  "module": "server-agents/claude/src/agents/claude/permission-tool-converter.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/cli.test.js",
+    "server-agents/claude/src/agents/claude/__tests__/monitor-tools.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 69,
+  "sha256": "abf76f350eafe5a7e45d9217b3c3e92fedcfeb3ae83f3c179645f2938ec4ea8e"
+}

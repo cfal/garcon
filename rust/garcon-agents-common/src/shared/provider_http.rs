@@ -1,4 +1,4 @@
-//! The fetch adapter for direct provider requests.
+//! The shared HTTP client for provider requests.
 
 use std::env;
 use std::error::Error;
@@ -10,17 +10,16 @@ use garcon_base::errors::NamedError;
 use garcon_base::tls_roots::verified_client_config;
 use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
 use garcon_interface::resources::ExecutorResult;
-use reqwest::{
-    Client, Response, StatusCode,
-    header::{
-        ACCEPT, ACCEPT_ENCODING, CONNECTION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT,
-    },
-};
+use reqwest::Client;
+pub use reqwest::{Method, Response, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use super::provider_proxy::ProviderProxy;
+use header::{
+    ACCEPT, ACCEPT_ENCODING, CONNECTION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT,
+};
 
 static CLIENT: OnceCell<Client> = OnceCell::const_new();
 
@@ -125,10 +124,12 @@ fn create_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
         .build()?)
 }
 
-pub async fn post_json(
+/// Sends a request with the shared provider policy, leaving the response body unread.
+pub async fn send(
+    method: Method,
     url: &str,
-    headers: HeaderMap,
-    request: &impl Serialize,
+    mut headers: HeaderMap,
+    body: Option<Vec<u8>>,
 ) -> ExecutorResult<Response> {
     let client = CLIENT
         .get_or_try_init(|| async {
@@ -137,14 +138,26 @@ pub async fn post_json(
                 .map_err(|error| -> Box<dyn Error> { error })
         })
         .await?;
-    let body = serde_json::to_vec(request)?;
-    client
-        .post(url)
-        .headers(headers)
-        .body(body)
-        .send()
-        .await
-        .map_err(client_error)
+    headers.remove(USER_AGENT);
+    let mut request = client.request(method, url).headers(headers);
+    if let Some(body) = body {
+        request = request.body(body);
+    }
+    request.send().await.map_err(client_error)
+}
+
+pub(crate) async fn post_json(
+    url: &str,
+    headers: HeaderMap,
+    request: &impl Serialize,
+) -> ExecutorResult<Response> {
+    send(
+        Method::POST,
+        url,
+        headers,
+        Some(serde_json::to_vec(request)?),
+    )
+    .await
 }
 
 pub fn json_headers() -> HeaderMap {

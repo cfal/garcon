@@ -1,0 +1,13 @@
+{"id":"compareTranscriptTimestamps#0","fn":"compareTranscriptTimestamps","args":[3,1],"result":2,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:1"}
+{"id":"compareTranscriptTimestamps#1","fn":"compareTranscriptTimestamps","args":[1,3],"result":-2,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:2"}
+{"id":"compareTranscriptTimestamps#2","fn":"compareTranscriptTimestamps","args":[1,1],"result":0,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:3"}
+{"id":"compareTranscriptTimestamps#3","fn":"compareTranscriptTimestamps","args":[0,1],"result":1,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:4"}
+{"id":"compareTranscriptTimestamps#4","fn":"compareTranscriptTimestamps","args":[1,0],"result":-1,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:5"}
+{"id":"compareTranscriptTimestamps#5","fn":"compareTranscriptTimestamps","args":[0,-1],"result":0,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:6"}
+{"id":"compareTranscriptTimestamps#6","fn":"compareTranscriptTimestamps","args":[-2,-1],"result":0,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:7"}
+{"id":"compareTranscriptTimestamps#7","fn":"compareTranscriptTimestamps","args":[0.5,1],"result":-0.5,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:8"}
+{"id":"compareTranscriptTimestamps#8","fn":"compareTranscriptTimestamps","args":[{"$":"number","value":"NaN"},1],"result":1,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:9"}
+{"id":"compareTranscriptTimestamps#9","fn":"compareTranscriptTimestamps","args":[1,{"$":"number","value":"NaN"}],"result":-1,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:10"}
+{"id":"compareTranscriptTimestamps#10","fn":"compareTranscriptTimestamps","args":[{"$":"number","value":"Infinity"},1],"result":{"$":"number","value":"Infinity"},"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:11"}
+{"id":"compareTranscriptTimestamps#11","fn":"compareTranscriptTimestamps","args":[1,{"$":"number","value":"Infinity"}],"result":{"$":"number","value":"-Infinity"},"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:12"}
+{"id":"compareTranscriptTimestamps#12","fn":"compareTranscriptTimestamps","args":[{"$":"number","value":"Infinity"},{"$":"number","value":"Infinity"}],"result":0,"origin":"rust/garcon-agents-common/tests/inputs/transcript-order.jsonl:13"}
