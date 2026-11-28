@@ -15,3 +15,10 @@ garcon-contract.workspace = true
 garcon-http.workspace = true
 garcon-js.workspace = true
 garcon-stores.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+garcon-cases.workspace = true
+serde_json.workspace = true

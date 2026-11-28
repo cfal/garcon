@@ -54,11 +54,14 @@ pub fn validate_hidden_bash_command_pattern(
     if utf16::len(pattern) > HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH {
         return TooLong;
     }
-    // Without the u flag, Bun parses character classes as UTF-16 code units.
+    // Match Bun's UTF-16 parsing, but skip optimization for this syntax check.
     if mode == HiddenBashCommandPatternMode::Regex
         && regress::Regex::from_unicode(
             pattern.encode_utf16().map(u32::from),
-            regress::Flags::default(),
+            regress::Flags {
+                no_opt: true,
+                ..regress::Flags::default()
+            },
         )
         .is_err()
     {
@@ -202,5 +205,38 @@ mod tests {
             validate_hidden_bash_command_pattern("[\u{1f600}-\u{1f601}]", Regex),
             InvalidRegex
         );
+    }
+
+    #[test]
+    fn validates_long_regex_families_without_running_them() {
+        let width = HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH;
+        let mut patterns = vec![
+            (format!("[{}]", "ab".repeat((width - 2) / 2)), Ok),
+            ("a|".repeat(width / 2), Ok),
+            ("(a)".repeat(width / 3), Ok),
+            (
+                format!("{}a{}", "(".repeat(300), ")".repeat(300)),
+                InvalidRegex,
+            ),
+            ("a{99999999}".repeat(width / 11), Ok),
+        ];
+        for group in ["(", "(?:"] {
+            for depth in [1, 16, 32, 64, 100] {
+                for suffix in ["){1,3}", ")+", ")?"] {
+                    let mut pattern = group.repeat(depth);
+                    pattern.push('a');
+                    pattern.push_str(&suffix.repeat(depth));
+                    pattern.push_str(&"z".repeat(width - pattern.len()));
+                    patterns.push((pattern, Ok));
+                }
+            }
+        }
+        for (pattern, expected) in patterns {
+            assert!(utf16::len(&pattern) <= width);
+            assert_eq!(
+                validate_hidden_bash_command_pattern(&pattern, Regex),
+                expected
+            );
+        }
     }
 }

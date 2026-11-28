@@ -127,9 +127,17 @@ pub fn transcript_unavailable_message(retryable: bool) -> &'static str {
 
 /// Whether `error` is a `DomainError`, which a `ValidationDomainError` and a
 /// `ProjectUnavailableError` also are. Its fields are read through
-/// `error.downcast_ref::<DomainError>()`.
+/// `as_domain_error(error)`.
 pub fn is_domain_error(error: &(dyn Error + 'static)) -> bool {
-    error.downcast_ref::<DomainError>().is_some()
+    as_domain_error(error).is_some()
+}
+
+pub fn as_domain_error<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a DomainError> {
+    error.downcast_ref::<DomainError>().or_else(|| {
+        error
+            .downcast_ref::<crate::ticket_error::TicketDomainError>()
+            .map(|error| &**error)
+    })
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use garcon_interface::errors::{
 use http::{HeaderValue, Response, StatusCode, header};
 use serde::Serialize;
 
-use crate::domain_error::{DomainError, transcript_unavailable_message};
+use crate::domain_error::{as_domain_error, transcript_unavailable_message};
 use crate::errors::{ErrorInput, as_agent_call_error, js_string};
 use crate::log::{Logger, ScopedLogger, create_logger};
 
@@ -87,7 +87,7 @@ pub fn json_error_from_unknown(
     error_code: Option<&str>,
     retryable: Option<bool>,
 ) -> Result<Response<Bytes>, JsonErrorResponseError> {
-    if let ErrorInput::Error(error) = error {
+    if let Some(error) = error.as_error() {
         if let Some(error) = as_agent_call_error(error) {
             let (status, retryable) = match (error.outcome, error.code) {
                 (AgentDeliveryOutcome::NotDispatched, AgentIntegrationErrorCode::EXECUTOR_BUSY) => {
@@ -131,7 +131,7 @@ pub fn json_error_from_unknown(
                 );
             }
         }
-        if let Some(error) = error.downcast_ref::<DomainError>() {
+        if let Some(error) = as_domain_error(error) {
             return json_error(
                 &error.message,
                 f64::from(error.status),
@@ -154,6 +154,7 @@ pub fn json_error_from_unknown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain_error::DomainError;
     use garcon_contract::error_codes::ErrorCode;
     use garcon_js::json::from_slice;
     use serde_json::{Value, json};

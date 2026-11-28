@@ -31,6 +31,9 @@ tokio-util.workspace = true
 url.workspace = true
 uuid = { version = "1", features = ["v4"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock"] }
+
 [dev-dependencies]
 garcon-cases.workspace = true
 tempfile.workspace = true

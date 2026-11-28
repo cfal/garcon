@@ -33,3 +33,10 @@
 {"fn":"terminalFrameFixture","args":[{"type":"terminal-output","terminalId":"fixture","sequence":2,"data":"hello\n\u00e9","attachmentId":"test"},16000]}
 {"fn":"jsonBytesBodyFixture","args":["application/json","\ufeff[1,null,\"\u00e9\"]"]}
 {"fn":"jsonBytesBodyFixture","args":["application/json","[1.0,9007199254740993,1e21,1e-7]"]}
+{"fn":"duplicateJsonBodyFixture","args":[["text/plain"," Application/JSON "],"{\"fixture\":true}"]}
+{"fn":"duplicateJsonBodyFixture","args":[["text/plain","application/json"],"malformed"]}
+{"fn":"duplicateJsonBodyFixture","args":[["text/plain","application/problem+json"],"malformed"]}
+{"fn":"duplicateBearerFixture","args":[[" Bearer fixture "," extra "]]}
+{"fn":"duplicateBearerFixture","args":[["Bearer fixture",""]]}
+{"fn":"duplicateBearerFixture","args":[["","Bearer fixture"]]}
+{"fn":"duplicateBearerFixture","args":[["Bearer first","Bearer second","third"]]}
