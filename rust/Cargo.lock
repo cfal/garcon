@@ -943,6 +943,7 @@ dependencies = [
 name = "garcon-agent-claude"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "futures",
  "garcon-agents-common",
  "garcon-base",
@@ -952,11 +953,15 @@ dependencies = [
  "garcon-js",
  "icu_normalizer",
  "indexmap",
+ "libc",
  "num-bigint 0.4.8",
  "num-traits",
+ "regress",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "uuid",
