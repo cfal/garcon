@@ -1,0 +1,16 @@
+{
+  "module": "rust/garcon-stores/tests/oracles/preamble-composition.ts",
+  "tests": [],
+  "inputs": "rust/garcon-stores/tests/inputs/preamble-composition.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "compositionFor",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "eef711e44ab1fc467d1333815530b895de850d386aaf465c67a5cf0516dd78aa"
+}
