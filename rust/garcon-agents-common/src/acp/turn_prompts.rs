@@ -7,7 +7,6 @@ use std::rc::Rc;
 
 use futures::FutureExt;
 use futures::future::{LocalBoxFuture, Shared};
-use garcon_base::errors::error_metadata;
 use garcon_interface::resources::ExecutorResult;
 use garcon_interface::services::{
     AgentSteerFailureOutcome, AgentSteerRejectionReason, AgentSteerResult,
@@ -20,6 +19,7 @@ use super::errors::{as_rpc_error, boxed, plain_error, shared_error};
 use super::json_values::is_truthy;
 use super::policy::AcpSteeringProtocol;
 use super::protocol::AcpSessionPromptResult;
+use super::runtime_helpers::humanize_error;
 use super::timers::delay;
 use super::transport::{AcpReply, ReplyCallback, SentCallback};
 
@@ -431,15 +431,6 @@ fn unconfirmed(message: impl Into<String>) -> AgentSteerResult {
     AgentSteerResult::Failed {
         outcome: AgentSteerFailureOutcome::Unknown,
         message: message.into(),
-    }
-}
-
-fn humanize_error(error: &(dyn Error + 'static)) -> String {
-    let message = error.to_string();
-    if message.is_empty() {
-        error_metadata(error).name.to_owned()
-    } else {
-        message
     }
 }
 
