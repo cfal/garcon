@@ -366,6 +366,20 @@ the user corrects how a port behaves, the correction is added under
 - Before porting a module another lane owns, or asking for it, look for it in
   `origin/rust-server`; it may already be there.
 
+## Reports
+
+- A report to the manager is at most six short lines: the commit hash and
+  what it adds; "green", or numbers only for what is not; public paths only
+  if another session waits on them; known differences added, with the reason
+  text; one question with a recommendation if a decision is needed; anything
+  that would surprise. No command lines, no lists of passing checks, no
+  mutation narrative, no plans, no status messages without a commit or a
+  question. Detail goes in the commit message and the tests.
+- Worker parity: one line per suite file where Rust differs from the
+  original, with the cause; otherwise "equal on N files, both directions".
+- A review report lists findings only (file and line, what is wrong, the
+  fix), after one line naming the range and whether the replays passed.
+
 ## Corrections
 
 - 2026-11-27, number formatting. A hand-written shortest-digits routine
