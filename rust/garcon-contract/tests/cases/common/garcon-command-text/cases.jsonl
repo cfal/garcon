@@ -1,0 +1,14 @@
+{"id":"normalizeGarconCommandBody#0","fn":"normalizeGarconCommandBody","args":[""],"result":"","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:1"}
+{"id":"normalizeGarconCommandBody#1","fn":"normalizeGarconCommandBody","args":["\r\n"],"result":"","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:2"}
+{"id":"normalizeGarconCommandBody#2","fn":"normalizeGarconCommandBody","args":["\n"],"result":"","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:3"}
+{"id":"normalizeGarconCommandBody#3","fn":"normalizeGarconCommandBody","args":["\n\n"],"result":"","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:4"}
+{"id":"normalizeGarconCommandBody#4","fn":"normalizeGarconCommandBody","args":["\r\n\r\n"],"result":"","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:5"}
+{"id":"normalizeGarconCommandBody#5","fn":"normalizeGarconCommandBody","args":["\r"],"result":"\r","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:6"}
+{"id":"normalizeGarconCommandBody#6","fn":"normalizeGarconCommandBody","args":["\rbody\r"],"result":"\rbody\r","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:7"}
+{"id":"normalizeGarconCommandBody#7","fn":"normalizeGarconCommandBody","args":["\r\n\nbody\n\r\n"],"result":"\nbody\n","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:8"}
+{"id":"normalizeGarconCommandBody#8","fn":"normalizeGarconCommandBody","args":["\n  body  \n"],"result":"  body  ","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:9"}
+{"id":"normalizeGarconCommandBody#9","fn":"normalizeGarconCommandBody","args":["\n🚀\n"],"result":"🚀","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:10"}
+{"id":"normalizeGarconCommandBody#10","fn":"normalizeGarconCommandBody","args":[" body "],"result":" body ","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:11"}
+{"id":"normalizeGarconCommandBody#11","fn":"normalizeGarconCommandBody","args":[" body "],"result":" body ","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:12"}
+{"id":"normalizeGarconCommandBody#12","fn":"normalizeGarconCommandBody","args":["\nbody\r"],"result":"body\r","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:13"}
+{"id":"normalizeGarconCommandBody#13","fn":"normalizeGarconCommandBody","args":["\rbody\n"],"result":"\rbody","origin":"rust/garcon-contract/tests/inputs/common/garcon-command-text.jsonl:14"}
