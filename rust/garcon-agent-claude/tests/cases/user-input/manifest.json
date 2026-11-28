@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/claude/src/agents/claude/user-input.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-claude/tests/inputs/user-input.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "fd1f40587efef2b741d6f08b2c70e82fd39556ade78e72318e6a433fe95ac961"
+}

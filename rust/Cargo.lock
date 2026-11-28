@@ -898,6 +898,7 @@ name = "garcon-agent-claude"
 version = "0.0.0"
 dependencies = [
  "futures",
+ "garcon-agents-common",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
@@ -911,6 +912,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -973,6 +976,7 @@ dependencies = [
  "indexmap",
  "ipnet",
  "libc",
+ "murmur3",
  "rcgen",
  "regress",
  "reqwest",
@@ -983,6 +987,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "twox-hash",
  "uuid",
  "windows-sys 0.61.2",
 ]
@@ -1980,6 +1985,12 @@ name = "multiversion_no_op"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
+
+[[package]]
+name = "murmur3"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9252111cf132ba0929b6f8e030cac2a24b507f3a4d6db6fb2896f27b354c714b"
 
 [[package]]
 name = "nix"
