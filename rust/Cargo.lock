@@ -1222,6 +1222,7 @@ dependencies = [
  "garcon-js",
  "garcon-ledger",
  "garcon-link",
+ "garcon-stores",
  "indexmap",
  "serde",
  "serde_json",
