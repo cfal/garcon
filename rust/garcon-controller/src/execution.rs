@@ -25,6 +25,8 @@ use garcon_contract::{agents::AgentExecutionPolicy, executors::effective_executo
 use garcon_execution::{
     accepted_input_transcript::AcceptedInputTranscriptPort,
     agent_registry::{AgentRegistry, AgentRegistryOptions, RegistryCarryOverRevision},
+    attachment_admission::QueuedAttachmentAdmission,
+    catalog_service::AgentCatalogService,
     chat_execution_control_repository::InMemoryChatExecutionControlRepository,
     chat_execution_coordinator::{
         ChatExecutionCoordinator, ChatExecutionCoordinatorHost, ChatExecutionCoordinatorOptions,
@@ -50,10 +52,7 @@ use garcon_execution::{
         PersistedChatExecutionConfig, RunAgentTurnOptions, require_chat_execution_config,
     },
     turn_terminal_settlement::WorkingDirectorySettlementPort,
-    types::{
-        AgentTurnRunnerPort, ChatExecutionQueries, ExecutionOperationResult,
-        QueuedAttachmentAdmissionPort,
-    },
+    types::{AgentTurnRunnerPort, ChatExecutionQueries, ExecutionOperationResult},
 };
 use garcon_interface::execution_runtime::ExecutionRuntimeApi;
 use garcon_js::clock::{SystemClock, performance_now_ms};
@@ -134,7 +133,7 @@ pub struct ExecutionRuntimeBindings {
     pub turn_runner: Rc<dyn AgentTurnRunnerPort>,
     pub input_transcript: Rc<dyn AcceptedInputTranscriptPort>,
     pub commands: Rc<dyn ExecutionCommandBindings>,
-    pub attachment_admission: Rc<dyn QueuedAttachmentAdmissionPort>,
+    pub catalog: Rc<AgentCatalogService>,
     pub working_directory_settlement: Rc<dyn WorkingDirectorySettlementPort>,
 }
 
@@ -221,6 +220,11 @@ impl ExecutionReadHandles {
                         dispatch.chats.clone(),
                         self.manager.clone(),
                     )),
+                    attachment_admission: Rc::new(QueuedAttachmentAdmission::new(
+                        dispatch.chats.clone(),
+                        self.directory.clone(),
+                        runtime.catalog,
+                    )),
                     host: Rc::new(CoordinatorHost {
                         chats: dispatch.chats,
                         manager: self.manager.clone(),
@@ -228,7 +232,6 @@ impl ExecutionReadHandles {
                         command_ledger: self.command_ledger.clone(),
                         commands: runtime.commands,
                     }),
-                    attachment_admission: runtime.attachment_admission,
                     working_directory_settlement: Some(runtime.working_directory_settlement),
                     selection_admission_lock: dispatch.selection_admission_lock,
                     unhandled_rejections: dispatch.unhandled_rejections,

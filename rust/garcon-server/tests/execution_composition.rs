@@ -15,9 +15,8 @@ use garcon_chats::{
     store::{ChatRegistry, ChatRegistryOptions},
 };
 use garcon_contract::{
-    agents::AgentExecutionPolicy,
+    agents::{AgentExecutionPolicy, AgentModelOption},
     chat_types::{ChatMessage, UserMessage},
-    ws_requests::AgentCommandImage,
 };
 use garcon_controller::execution::{
     ExecutionAdoption, ExecutionCommandBindings, ExecutionFoundation, ExecutionReadBindings,
@@ -28,6 +27,7 @@ use garcon_execution::{
         AcceptedInputTranscriptPort, AcceptedInputTranscriptResult, IdentifiedUserInput,
     },
     agent_registry::AdoptionChatRegistry,
+    catalog_service::{AgentCatalogService, CatalogEndpointResolver, ModelImageSupport},
     control_state::StoredControlInputEntry,
     queued_steer_delivery::QueuedSteerContent,
     session_types::{AgentSteerOptions, RunAgentTurnOptions},
@@ -36,7 +36,7 @@ use garcon_execution::{
     },
     types::{
         AgentTurnRunnerPort, ChatExecutionCommands, ExecutionOperationResult, PrepareSteerDelivery,
-        QueuedAttachmentAdmissionPort, UserInputAdmissionOptions,
+        UserInputAdmissionOptions,
     },
 };
 use garcon_executor::{Executor, ExecutorOptions};
@@ -186,8 +186,16 @@ impl ExecutionCommandBindings for Idle {
     }
 }
 
-impl QueuedAttachmentAdmissionPort for Idle {
-    fn assert_supported(&self, _: &str, _: &[AgentCommandImage]) -> ExecutionOperationResult<()> {
+impl CatalogEndpointResolver for Idle {
+    fn model_supports_images(&self, _: ModelImageSupport<'_>) -> ExecutionOperationResult<bool> {
+        unexpected()
+    }
+
+    fn get_model_options(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> ExecutionOperationResult<Vec<AgentModelOption>> {
         unexpected()
     }
 }
@@ -330,6 +338,7 @@ async fn startup_brings_up_the_manager_before_the_stores_and_uses_process_local_
             assert_eq!(controls.server_instance_id, "process-instance");
             assert!(controls.entries.is_empty());
             let adoption = reads.adoption.clone();
+            let directory = reads.directory.clone();
             let mut handles = reads
                 .bind_runtime(Box::new({
                     let adoption = adoption.clone();
@@ -341,7 +350,7 @@ async fn startup_brings_up_the_manager_before_the_stores_and_uses_process_local_
                             turn_runner: fixture.clone(),
                             input_transcript: fixture.clone(),
                             commands: fixture.clone(),
-                            attachment_admission: fixture.clone(),
+                            catalog: Rc::new(AgentCatalogService::new(directory, fixture.clone())),
                             working_directory_settlement: fixture,
                         })
                     }
