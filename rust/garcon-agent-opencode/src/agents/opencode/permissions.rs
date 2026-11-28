@@ -50,7 +50,7 @@ pub const OPENCODE_PERMISSION_KEYS: &[&str] = &[
 
 const OPENCODE_NATIVE_PLAN_PERMISSIONS: &[&str] = &["plan_enter", "plan_exit"];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PermissionRule {
     pub permission: &'static str,
     pub pattern: &'static str,

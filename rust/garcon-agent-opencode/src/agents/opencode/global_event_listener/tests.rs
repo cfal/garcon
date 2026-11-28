@@ -77,7 +77,7 @@ fn options(get_client: GetClient) -> OpenCodeGlobalEventListenerOptions {
         fail_running_turns: Rc::new(|_| {}),
         close_unavailable_instance_if_idle: Rc::new(|| false),
         confirm_event_delivery: Rc::new(|_| async { Ok(()) }.boxed_local()),
-        handle_event: Rc::new(|_, _| {}),
+        handle_event: Rc::new(|_, _| Ok(())),
     }
 }
 

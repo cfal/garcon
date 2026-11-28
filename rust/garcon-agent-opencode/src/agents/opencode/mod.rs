@@ -9,6 +9,8 @@ pub mod instance_lifecycle;
 pub mod jsonc;
 pub mod model_catalog;
 pub mod model_discovery;
+#[allow(clippy::module_inception)] // The original module is agents/opencode/opencode.ts.
+pub mod opencode;
 pub mod opencode_auth;
 pub mod operation_routes;
 pub mod permission_tool_converter;

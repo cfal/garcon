@@ -2,7 +2,7 @@
 
 pub mod cli_dispatcher;
 mod executor_client;
-mod listeners;
+pub(crate) mod listeners;
 mod remote_agent_integration;
 mod remote_files;
 mod remote_git;
@@ -10,7 +10,7 @@ mod remote_history;
 mod remote_producers;
 mod remote_terminals;
 mod sessions;
-mod wire;
+pub(crate) mod wire;
 
 pub use executor_client::RemoteExecutorClientFactory;
 

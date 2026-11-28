@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/shared/transcript-timestamp.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/transcript-timestamp.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 28,
+  "sha256": "ae40cdab4c84663934d1cdf73469a2302d471d6a1f5ed4c14886449ab4d802a1"
+}

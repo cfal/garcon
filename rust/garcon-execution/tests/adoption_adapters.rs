@@ -56,6 +56,9 @@ use garcon_ledger::adoption::{
     TranscriptAdoptionIntegrations, TranscriptAdoptionRegistry, TranscriptSessionCache,
 };
 use serde_json::{Value, json};
+
+#[path = "adoption_adapters/transcript_commits.rs"]
+mod transcript_commits;
 use tokio::task::LocalSet;
 
 const REMOTE: &str = "11111111-1111-4111-8111-111111111111";
