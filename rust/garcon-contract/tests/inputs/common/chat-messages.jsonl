@@ -31,3 +31,12 @@
 {"fn":"parseChatMessagesJson","args":[[[],null,{},"not a message",{"type":"constructor"},{"type":"__proto__"},{"type":"assistant-message","content":"Text"},{"type":"bash-tool-use","toolId":"tool","command":"echo fixture"}]]}
 {"fn":"parseChatMessagesJson","args":[null]}
 {"fn":"parseChatMessagesJson","args":[[{"type":"assistant-message"},{"type":"user-message","metadata":{"questionReply":false}},{"type":"error"}]]}
+{"fn":"parseChatMessageJson","args":[{"type":"transcript-notice","timestamp":"fixture-time","content":"Publication gap","detail":{"type":"publication-gap","extra":"discard"},"title":"  Verbatim title  "}]}
+{"fn":"parseChatMessageJson","args":[{"type":"transcript-notice","content":"Archived content unavailable","detail":{"type":"carryover-migration-quarantine","artifactId":"fixture-artifact","errorCode":"FIXTURE_ERROR","extra":false}}]}
+{"fn":"parseChatMessageJson","args":[{"type":"transcript-notice","timestamp":42,"content":false,"detail":{"type":"carryover-migration-quarantine","artifactId":"","errorCode":"FIXTURE_ERROR"},"title":""}]}
+{"fn":"parseChatMessageJson","args":[{"type":"transcript-notice","content":"Preamble selection","detail":{"type":"preamble-selection-changed","preambles":[]},"title":" "}]}
+{"fn":"parseChatMessageJson","args":[{"type":"transcript-notice","content":"Unknown detail","detail":{"type":"not-a-notice"},"title":42}]}
+{"fn":"parseChatMessageJson","args":[{"type":"transcript-notice","content":"Null detail","detail":null}]}
+{"fn":"parseChatMessageJson","args":[{"type":"transcript-notice","content":"No detail"}]}
+{"fn":"parseChatMessageJson","args":[{"type":"permission-request","permissionOccurrenceId":"fixture-occurrence","requestedTool":{"type":"transcript-notice","detail":{"type":"publication-gap"}}}]}
+{"fn":"parseChatMessagesJson","args":[[{"type":"user-message","content":"Question"},null,{"type":"transcript-notice","content":"Gap","detail":{"type":"publication-gap"}},{"type":"unrecognized"},{"type":"assistant-message","content":"Answer"},{"type":"transcript-notice"}]]}

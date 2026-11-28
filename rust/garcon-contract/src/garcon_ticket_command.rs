@@ -125,6 +125,7 @@ pub fn parse_garcon_ticket_command(content: &str) -> Option<GarconTicketCommand>
                     query: parse_ticket_history_query(&value).ok()?,
                 }
             }
+            // INFALLIBLE: the enclosing branch only admits list, read, and history.
             _ => unreachable!("not a read action"),
         };
         return Some(GarconTicketCommand::Read(GarconTicketReadCommand {

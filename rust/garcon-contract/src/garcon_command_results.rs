@@ -1,7 +1,7 @@
 //! Ports `common/garcon-command-results.ts`.
 
 use garcon_js::{is_safe_integer, json::as_number, trim};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::command_request_validation::CommandRequestValidationError;
@@ -15,7 +15,7 @@ use crate::scheduled_prompts::{
     ScheduledPromptBusyBehavior, is_minute_aligned_iso, is_scheduled_prompt_interval_minutes,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCommandCorrelation {
     pub request_view_id: String,
