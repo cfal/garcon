@@ -16,9 +16,7 @@ use garcon_base::workspace_lease::{WorkspaceLeaseOptions, acquire_workspace_leas
 use garcon_contract::api_providers::ApiProviderModelDiscoveryResponse;
 use garcon_contract::cli_runtime_paths::{cli_gateway_runtime_file, executor_data_directory};
 use garcon_contract::git_execution::GitExecutorScope;
-use garcon_interface::errors::{
-    AgentCallError, AgentDeliveryOutcome, AgentIntegrationError, AgentIntegrationErrorCode,
-};
+use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome, AgentIntegrationError};
 use garcon_interface::execution_runtime::{
     ApiProviderDiscoveryRequest, ExecutionProjectService, ExecutionRuntimeApi,
     ExecutorAvailability, ExecutorInfo, ExecutorServices,
@@ -50,6 +48,7 @@ use garcon_runtime::files::service::{FilesService, FilesServiceOptions};
 use garcon_runtime::git::review_document_registry::GitReviewDocumentRegistry;
 use garcon_runtime::git::runtime::{GitRuntime, GitRuntimeOptions};
 use garcon_runtime::projects::project_service::ProjectService;
+use garcon_runtime::providers::discovery::discover_api_provider_models;
 use garcon_runtime::terminals::runtime::{TerminalRuntime, TerminalService};
 use garcon_runtime::terminals::terminal_manager::TerminalManagerOptions;
 use serde::Serialize;
@@ -227,11 +226,11 @@ impl ExecutionRuntimeApi for ExecutorApi {
 
     async fn discover_api_provider_models(
         &self,
-        _request: ApiProviderDiscoveryRequest,
+        request: ApiProviderDiscoveryRequest,
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<ApiProviderModelDiscoveryResponse> {
         self.lifetime.available(options.as_ref())?;
-        Err(unported_service("API provider model discovery"))
+        discover_api_provider_models(request, options).await
     }
 
     async fn get_files_service(
@@ -302,15 +301,6 @@ impl ExecutionRuntimeApi for ExecutorApi {
         }
         Ok(())
     }
-}
-
-fn unported_service(service: &str) -> Box<dyn Error> {
-    AgentCallError::with_code(
-        AgentDeliveryOutcome::NotDispatched,
-        format!("Executor {service} service is not ported yet"),
-        AgentIntegrationErrorCode::OPERATION_UNSUPPORTED,
-    )
-    .into()
 }
 
 pub struct Executor {
@@ -1030,7 +1020,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authenticated_worker_describes_its_services_and_refuses_unported_calls() {
+    async fn authenticated_worker_describes_its_services_and_resolves_credentials() {
         LocalSet::new()
             .run_until(async {
                 let secret = create_executor_secret();
@@ -1208,18 +1198,18 @@ mod tests {
                 assert_eq!(error.outcome, AgentDeliveryOutcome::NotDispatched);
                 assert_eq!(error.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
                 assert_eq!(error.message, "Unknown integration");
-                let error = connection
+                let discovery = connection
                     .primary
-                    .call("", "apiProviders.discoverModels", request(), options())
+                    .call(
+                        "",
+                        "apiProviders.discoverModels",
+                        Opaque::from_value(json!({"protocol":"openai-compatible","baseUrl":"","modelDiscovery":"none"})),
+                        options(),
+                    )
                     .await
-                    .unwrap_err();
-                let error = error.downcast_ref::<AgentCallError>().unwrap();
-                assert_eq!(error.outcome, AgentDeliveryOutcome::NotDispatched);
-                assert_eq!(error.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
-                assert_eq!(
-                    error.message,
-                    "Executor method apiProviders.discoverModels is not ported yet"
-                );
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(discovery.as_value(), &json!({"success":true}));
                 assert!(connection.primary.active());
                 controller.dispose().await;
                 listener.dispose().await;
