@@ -917,6 +917,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-execution"
+version = "0.0.0"
+dependencies = [
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-js",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "garcon-executor"
 version = "0.0.0"
 dependencies = [
