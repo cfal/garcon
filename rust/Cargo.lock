@@ -521,10 +521,15 @@ name = "garcon-controller"
 version = "0.0.0"
 dependencies = [
  "garcon-base",
+ "garcon-cases",
  "garcon-contract",
  "garcon-http",
  "garcon-js",
  "garcon-stores",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
 ]
 
 [[package]]
