@@ -136,13 +136,13 @@ These are observations, except for the native differences below. See
   client/router behavior. The existing static asset exceptions are
   documented in ADR-004.
 
-### Native 431 framing (pending)
+### Native 431 framing
 
-Approved by the manager on 2026-11-28; pending user confirmation. For the
+Accepted by the user on 2026-11-28. For the
 18 runtime cases below, Bun omits `Content-Length` and Hyper sends
 `Content-Length: 0`. Both close the connection with no body, so these are
 equivalent messages to clients. This is listener framing, not route
-behavior. The only proposed exception is the native replay field
+behavior. The only exception is the native replay field
 `$.headers["content-length"]` with the exact string value `"0"`; the
 recorded 431 status, empty body, and every other compared field still stand.
 

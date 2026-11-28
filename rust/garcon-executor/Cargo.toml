@@ -14,6 +14,7 @@ async-trait.workspace = true
 base64 = "0.23"
 bytes.workspace = true
 futures.workspace = true
+garcon-agent-direct-openai-compatible = { path = "../garcon-agent-direct-openai-compatible" }
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true

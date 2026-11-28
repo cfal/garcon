@@ -34,6 +34,7 @@ pub struct RunAgentTurnOptions {
     pub command_type: Option<TurnCommandType>,
     pub execution_admission: Option<Rc<dyn AgentExecutionAdmission>>,
     pub integration_endpoint: OptionalNullable<AgentEndpointSelection>,
+    pub created_at: Option<String>,
 }
 
 impl Default for RunAgentTurnOptions {
@@ -56,6 +57,7 @@ impl Default for RunAgentTurnOptions {
             command_type: None,
             execution_admission: None,
             integration_endpoint: OptionalNullable::ABSENT,
+            created_at: None,
         }
     }
 }
