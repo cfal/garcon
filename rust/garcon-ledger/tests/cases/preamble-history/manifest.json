@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-ledger/tests/preamble-history-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/preamble-history.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "c7b4217298f15cf04ea54c03f147f277814ea794b1585f5079b77772b508df1b"
+}

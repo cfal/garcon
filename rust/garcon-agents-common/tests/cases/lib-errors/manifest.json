@@ -1,0 +1,20 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/lib-errors.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/lib-errors.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "errorMessage",
+      "argument": 0
+    },
+    {
+      "fn": "hasNodeErrorCode",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 56,
+  "sha256": "ed4dbc227277fc79c1aaf0e9b2d878ce32dc26dccc2be6ce5d0800e3e2b9e739"
+}

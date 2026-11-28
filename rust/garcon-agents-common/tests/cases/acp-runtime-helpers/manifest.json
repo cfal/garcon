@@ -1,0 +1,48 @@
+{
+  "module": "server-agents/common/src/acp/runtime-helpers.ts",
+  "tests": [
+    "server-agents/common/src/acp/__tests__/runtime-helpers.test.ts"
+  ],
+  "inputs": "rust/garcon-agents-common/tests/inputs/acp-runtime-helpers.jsonl",
+  "guards": [
+    {
+      "fn": "automaticPermissionChoice",
+      "argument": 0,
+      "guard": "rust/garcon-agents-common/tests/oracles/acp-runtime-helpers-guards.ts#permissionMode",
+      "dropped": 21,
+      "kept": 0
+    },
+    {
+      "fn": "automaticPermissionChoice",
+      "argument": 2,
+      "guard": "rust/garcon-agents-common/tests/oracles/acp-runtime-helpers-guards.ts#policy",
+      "dropped": 0,
+      "kept": 43
+    },
+    {
+      "fn": "permissionChoiceOutcome",
+      "argument": 0,
+      "guard": "rust/garcon-agents-common/tests/oracles/acp-runtime-helpers-guards.ts#options",
+      "dropped": 0,
+      "kept": 60
+    },
+    {
+      "fn": "permissionChoiceOutcome",
+      "argument": 1,
+      "guard": "rust/garcon-agents-common/tests/oracles/acp-runtime-helpers-guards.ts#choice",
+      "dropped": 4,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "automaticPermissionChoice",
+      "argument": 1
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 228,
+  "sha256": "677c550f570dd79b43446e500787acdfe2709a6e93915700275c56f293545ca2"
+}

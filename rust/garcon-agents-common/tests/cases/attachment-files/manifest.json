@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/shared/attachment-files.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/attachment-files.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 80,
+  "sha256": "8e6f823367d28d71f3eefd109e382bf2cd8c41011ebab47ae18109356947b756"
+}

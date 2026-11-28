@@ -1,0 +1,63 @@
+{
+  "module": "server-agents/codex/src/agents/codex/jsonl-tool-use-converter.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/jsonl-tool-use-converter.test.js"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/jsonl-tool-use-converter.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/jsonl-tool-use-converter.test.js:204:17",
+      "fn": "convertCodexCustomToolCall",
+      "count": 1
+    },
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/jsonl-tool-use-converter.test.js:217:17",
+      "fn": "convertCodexCustomToolCall",
+      "count": 1
+    },
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/jsonl-tool-use-converter.test.js:234:17",
+      "fn": "convertCodexCustomToolCall",
+      "count": 1
+    },
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/jsonl-tool-use-converter.test.js:245:17",
+      "fn": "convertCodexCustomToolCall",
+      "count": 1
+    },
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/jsonl-tool-use-converter.test.js:256:17",
+      "fn": "convertCodexCustomToolCall",
+      "count": 1
+    },
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/jsonl-tool-use-converter.test.js:261:17",
+      "fn": "convertCodexCustomToolCall",
+      "count": 1
+    }
+  ],
+  "cases": 148,
+  "sha256": "3d880a9935c93d000119dc54b7f74a8570e0a914c45764758969ce7dc5fa0ee8"
+}

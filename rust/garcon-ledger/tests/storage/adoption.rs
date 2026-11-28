@@ -59,6 +59,7 @@ impl TranscriptAdoptionRegistry<()> for Registry {
 #[derive(Default)]
 struct History {
     unavailable: Cell<bool>,
+    aborted: Cell<bool>,
     empty: Cell<bool>,
     calls: Cell<u32>,
 }
@@ -78,7 +79,14 @@ impl AgentHistoryImport for History {
         if self.empty.get() {
             return Box::pin(stream::empty());
         }
-        let tail = if self.unavailable.get() {
+        let tail = if self.aborted.get() {
+            Err(NamedError {
+                name: "AbortError".into(),
+                message: "The operation was aborted.".into(),
+                code: None,
+            }
+            .into())
+        } else if self.unavailable.get() {
             Err(NamedError {
                 name: "IOError".into(),
                 message: "PRIVATE transcript text".into(),
@@ -395,6 +403,29 @@ async fn tlv5_adopt_01_empty_sources_and_unbound_chats_do_not_need_native_histor
     );
     assert_eq!(f.store.current_rows("unrelated").unwrap().len(), 2);
     assert_eq!(f.integrations.history.calls.get(), 1);
+}
+
+#[tokio::test]
+async fn a_source_abort_keeps_its_named_error_when_the_caller_is_not_aborted() {
+    let root = tempfile::tempdir().unwrap();
+    let f = fixture(root.path(), false);
+    f.integrations.history.aborted.set(true);
+    let caller = CancellationToken::new();
+    let error = f
+        .adoption
+        .ensure(
+            CHAT,
+            Some(garcon_ledger::store::TranscriptReadSignal::new(&caller)),
+        )
+        .await
+        .unwrap_err()
+        .downcast::<NamedError>()
+        .unwrap();
+    assert_eq!(error.name, "AbortError");
+    assert_eq!(error.message, "The operation was aborted.");
+    assert_eq!(error.code, None);
+    assert!(!caller.is_cancelled());
+    assert!(f.store.existing_current_view(CHAT).unwrap().is_none());
 }
 
 #[tokio::test]
