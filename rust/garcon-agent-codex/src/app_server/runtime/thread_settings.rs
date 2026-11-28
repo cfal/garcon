@@ -135,6 +135,16 @@ impl CodexSourceThreadSettings {
         self.0.state.borrow().provider_owns_effort
     }
 
+    pub(super) fn record_explicit_effort(&self, configuration: &CodexThreadConfiguration) {
+        if codex_thread_settings_target(configuration).effort.is_some() {
+            self.0.state.borrow_mut().provider_owns_effort = false;
+        }
+    }
+
+    pub(super) fn has_pending_confirmation(&self) -> bool {
+        self.0.state.borrow().pending.is_some()
+    }
+
     pub fn confirmed(&self) -> CodexConfirmedThreadSettings {
         self.0.state.borrow().confirmed.clone()
     }

@@ -31,6 +31,7 @@ pub struct FinishSessionOptions {
 pub struct CodexTurnRoutes {
     source_operation: Rc<CodexOperation>,
     next_operation: Option<Rc<CodexOperation>>,
+    last_operation: Option<Rc<CodexOperation>>,
     active_turn_id: Option<String>,
     operations: IndexMap<String, Rc<CodexOperation>>,
     terminal_turn_ids: HashSet<String>,
@@ -41,6 +42,7 @@ impl CodexTurnRoutes {
         Self {
             source_operation: operation.clone(),
             next_operation: Some(operation),
+            last_operation: None,
             active_turn_id: None,
             operations: IndexMap::new(),
             terminal_turn_ids: HashSet::new(),
@@ -51,6 +53,7 @@ impl CodexTurnRoutes {
         self.active_turn_id = None;
         self.source_operation = operation.clone();
         self.next_operation = Some(operation);
+        self.last_operation = None;
     }
 
     pub fn expect_turn(&mut self, operation: Rc<CodexOperation>) {
@@ -66,6 +69,17 @@ impl CodexTurnRoutes {
 
     pub(super) fn source_operation(&self) -> Rc<CodexOperation> {
         self.source_operation.clone()
+    }
+
+    pub(super) fn last_or_source_operation(&self) -> Rc<CodexOperation> {
+        self.last_operation
+            .as_ref()
+            .unwrap_or(&self.source_operation)
+            .clone()
+    }
+
+    pub(super) fn mark_active_completion(&mut self, operation: Rc<CodexOperation>) {
+        self.last_operation = Some(operation);
     }
 
     pub fn operation_for_turn(&self, turn_id: &str) -> Option<&Rc<CodexOperation>> {
