@@ -1,0 +1,17 @@
+{"fn":"catalogEtagTrace","args":["normal"]}
+{"fn":"catalogEtagTrace","args":["reverse"]}
+{"fn":"catalogCacheTrace","args":["ttl"]}
+{"fn":"catalogCacheTrace","args":["instance"]}
+{"fn":"catalogCacheTrace","args":["stale-failure"]}
+{"fn":"catalogCacheTrace","args":["stale-success"]}
+{"fn":"catalogCacheTrace","args":["coalesced"]}
+{"fn":"catalogCacheTrace","args":["failure"]}
+{"fn":"catalogServiceTrace","args":["projection"]}
+{"fn":"catalogServiceTrace","args":["merge"]}
+{"fn":"catalogServiceTrace","args":["strict-missing"]}
+{"fn":"catalogServiceTrace","args":["session-loss"]}
+{"fn":"catalogServiceTrace","args":["strict-error"]}
+{"fn":"catalogServiceTrace","args":["relaxed-error"]}
+{"fn":"catalogServiceTrace","args":["rejected"]}
+{"fn":"catalogServiceTrace","args":["cancelled"]}
+{"fn":"catalogServiceTrace","args":["missing"]}

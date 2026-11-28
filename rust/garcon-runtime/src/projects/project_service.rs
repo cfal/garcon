@@ -203,6 +203,7 @@ impl ExecutionProjectService for ProjectService {
 mod tests {
     use std::cell::Cell;
 
+    use garcon_base::executor_disconnect::as_agent_call_error;
     use garcon_contract::project_resolution::ProjectUnavailableReason;
     use tokio::fs;
 
@@ -256,11 +257,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            error
-                .downcast_ref::<AgentCallError>()
-                .unwrap()
-                .code
-                .as_str(),
+            as_agent_call_error(error.as_ref()).unwrap().code.as_str(),
             "UNAVAILABLE"
         );
         assert_eq!(
@@ -274,13 +271,13 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            error.downcast_ref::<AgentCallError>().unwrap().outcome,
+            as_agent_call_error(error.as_ref()).unwrap().outcome,
             AgentDeliveryOutcome::NotDispatched
         );
         assert_eq!(error.to_string(), "Disposed");
         let error = service.inspect(request, None).await.unwrap_err();
         assert_eq!(
-            error.downcast_ref::<AgentCallError>().unwrap().outcome,
+            as_agent_call_error(error.as_ref()).unwrap().outcome,
             AgentDeliveryOutcome::NotDispatched
         );
         assert_eq!(error.to_string(), "Disposed");

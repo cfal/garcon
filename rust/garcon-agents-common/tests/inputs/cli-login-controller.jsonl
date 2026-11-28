@@ -1,0 +1,5 @@
+{"fn":"parseBrowserAuth","args":["Visit https://synthetic.invalid/a\ufeffnext"]}
+{"fn":"parseBrowserAuth","args":["Visit https://synthetic.invalid/a\u0085next"]}
+{"fn":"parseBrowserAuth","args":["Visit http://synthetic.invalid/a"]}
+{"fn":"parseDeviceAuth","args":["\u001b[32mhttps://synthetic.invalid/\u001b[0m\r\n\u00a0ABCD-1234\r\n"]}
+{"fn":"parseDeviceAuth","args":["Visit https://synthetic.invalid/device\nABCD-1234\n"]}

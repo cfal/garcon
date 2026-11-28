@@ -1,7 +1,10 @@
 pub mod anthropic_compatible_chat_runtime;
+#[cfg(feature = "test-support")]
+pub mod conformance_host;
 pub mod direct_chat_runtime_base;
 pub mod errors;
 pub mod execution;
+pub mod integration;
 pub mod native_session;
 pub mod openai_compatible_chat_runtime;
 pub mod openai_compatible_responses_protocol;

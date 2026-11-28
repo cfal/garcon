@@ -17,6 +17,7 @@ pub mod rate_limit;
 pub mod route_table;
 pub mod routes;
 pub mod static_assets;
+mod ticket_http;
 pub mod unported_routes;
 mod websocket_auth;
 mod websocket_capacity;

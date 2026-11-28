@@ -151,8 +151,8 @@ async fn only_recognized_unported_routes_return_the_marker_and_are_logged() {
             .unwrap();
             let (addr, shutdown) = start(router).await;
             for (method, path) in [
-                ("GET", "/wrong/api/v1/tickets"),
-                ("PUT", "/tools/api/v1/tickets"),
+                ("POST", "/wrong/api/v1/tickets/project-default"),
+                ("PUT", "/tools/api/v1/tickets/project-default"),
                 ("GET", "/tools/unknown"),
             ] {
                 let result = exchange(addr, method, path, HOST).await;
@@ -160,18 +160,25 @@ async fn only_recognized_unported_routes_return_the_marker_and_are_logged() {
                 assert!(result.ends_with("\r\n\r\nNot found"), "{result}");
                 assert!(!result.contains("x-garcon-rs-unported:"), "{result}");
             }
-            let result = exchange(addr, "GET", "/tools/api/v1/tickets", HOST).await;
+            let result =
+                exchange(addr, "POST", "/tools/api/v1/tickets/project-default", HOST).await;
             assert!(result.starts_with("HTTP/1.1 401 "), "{result}");
             assert!(result.contains("cache-control: no-store"), "{result}");
             let duplicate = format!("{AUTHORIZED}Authorization: Bearer surplus\r\n");
-            let result = exchange(addr, "GET", "/tools/api/v1/tickets", &duplicate).await;
+            let result = exchange(
+                addr,
+                "POST",
+                "/tools/api/v1/tickets/project-default",
+                &duplicate,
+            )
+            .await;
             assert!(result.starts_with("HTTP/1.1 401 "), "{result}");
             assert!(result.contains("AUTH_SESSION_INVALID"), "{result}");
             assert!(!log.exists());
             let result = exchange(
                 addr,
-                "GET",
-                "/tools/api/v1/tickets?project=default",
+                "POST",
+                "/tools/api/v1/tickets/project-default?project=default",
                 AUTHORIZED,
             )
             .await;
@@ -180,7 +187,7 @@ async fn only_recognized_unported_routes_return_the_marker_and_are_logged() {
             assert!(result.ends_with(r#"{"error":"not ported"}"#), "{result}");
             assert_eq!(
                 tokio::fs::read_to_string(log).await.unwrap(),
-                "GET /tools/api/v1/tickets\n"
+                "POST /tools/api/v1/tickets/project-default\n"
             );
             shutdown.cancel();
         })
@@ -228,12 +235,18 @@ async fn wraps_the_handler_after_auth_and_preserves_route_headers_on_failure() {
             assert!(result.starts_with("HTTP/1.1 500 "), "{result}");
             assert!(result.contains("x-fixture: always"), "{result}");
             assert!(result.contains("INTERNAL_ERROR"), "{result}");
-            let result = exchange(addr, "GET", "/tools/api/v1/tickets", "Host: a b\r\n").await;
+            let result = exchange(
+                addr,
+                "POST",
+                "/tools/api/v1/tickets/project-default",
+                "Host: a b\r\n",
+            )
+            .await;
             assert!(result.starts_with("HTTP/1.1 401 "), "{result}");
             let result = exchange(
                 addr,
-                "GET",
-                "/tools/api/v1/tickets",
+                "POST",
+                "/tools/api/v1/tickets/project-default",
                 &format!("{AUTHORIZED}{CLI_SERVER_INSTANCE_HEADER}: obsolete\r\n"),
             )
             .await;
@@ -362,10 +375,49 @@ async fn edge_routes(web_build_dir: PathBuf, config: &Path) -> compose_routes::R
 
 #[tokio::test]
 async fn unported_inventory_matches_the_original_after_subtracting_registered_handlers() {
+    use garcon_stores::api_providers::{
+        access::ApiProviderAccess, assignments::ApiProviderAssignmentStore,
+        service::ApiProviderService, store::ApiProviderStore,
+    };
+    use garcon_stores::executors::config_store::ExecutorConfigStore;
+    use garcon_stores::tickets::{service::TicketServiceOptions, setup::initialize_tickets};
+
     let config = tempfile::tempdir().unwrap();
-    let routes = LocalSet::new()
+    let edge_routes = LocalSet::new()
         .run_until(edge_routes("/fixture/build".into(), config.path()))
         .await;
+    let executors = ExecutorConfigStore::open(&config.path().to_string_lossy())
+        .await
+        .unwrap();
+    let directory = config.path().to_str().unwrap();
+    ApiProviderAssignmentStore::initialize_fresh_workspace(config.path())
+        .await
+        .unwrap();
+    let profiles = ApiProviderStore::open(directory, Rc::new(garcon_js::SystemClock))
+        .await
+        .unwrap();
+    let assignments = ApiProviderAssignmentStore::open(directory).await.unwrap();
+    let providers = ApiProviderService::new(ApiProviderAccess::new(
+        profiles,
+        assignments,
+        Rc::new(|id| id == "local"),
+    ));
+    let tickets = Rc::new(initialize_tickets(
+        config.path(),
+        TicketServiceOptions {
+            chat_exists: None,
+            commands_enabled: Rc::new(|| false),
+            on_invalidated: None,
+            clock: Rc::new(garcon_js::SystemClock),
+        },
+    ));
+    let routes = compose_routes::compose_routes([
+        &edge_routes,
+        &routes::api_providers::create_api_provider_routes(providers),
+        &routes::executors::create_executor_connection_routes(&executors, None, "/tools".into()),
+        &routes::tickets::create_ticket_routes(&tickets),
+    ])
+    .unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output = Command::new("bun")
         .arg("rust/garcon-http/tests/oracles/unported-routes.ts")

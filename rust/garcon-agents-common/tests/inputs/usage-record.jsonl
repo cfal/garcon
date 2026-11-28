@@ -1,0 +1,15 @@
+{"fn":"tokenCount","args":[123.75]}
+{"fn":"tokenCount","args":[1e21]}
+{"fn":"tokenCount","args":[-1]}
+{"fn":"tokenCount","args":[0.125]}
+{"fn":"tokenCount","args":["345"]}
+{"fn":"tokenCount","args":[null]}
+{"fn":"parseTimestampMs","args":[123]}
+{"fn":"parseTimestampMs","args":[null]}
+{"fn":"parseTimestampMs","args":["2026-10-12T02:05:00.123456+0130"]}
+{"fn":"parseTimestampMs","args":["2026-02-30T00:00:00Z"]}
+{"fn":"parseTimestampMs","args":["2026-12-13"]}
+{"fn":"parseTimestampMs","args":["not a timestamp"]}
+{"fn":"mergeUsageCopies","args":[{"timestampMs":100,"model":"original","sessionId":"s1","totals":{"uncachedInputTokens":1,"cachedInputTokens":2,"cacheWriteTokens":3,"outputTokens":4,"reasoningTokens":5},"cacheWrite1hTokens":0,"speed":"fast","dedupeKey":"k"},{"timestampMs":200,"model":"copy","sessionId":"s2","totals":{"uncachedInputTokens":6,"cachedInputTokens":3,"cacheWriteTokens":2,"outputTokens":3,"reasoningTokens":1},"cacheWrite1hTokens":2,"speed":"standard","dedupeKey":"k"}]}
+{"fn":"mergeUsageCopies","args":[{"timestampMs":200,"model":"copy","sessionId":"s2","totals":{"uncachedInputTokens":6,"cachedInputTokens":3,"cacheWriteTokens":2,"outputTokens":3,"reasoningTokens":1},"cacheWrite1hTokens":2,"speed":"standard","dedupeKey":"k"},{"timestampMs":100,"model":"original","sessionId":"s1","totals":{"uncachedInputTokens":1,"cachedInputTokens":2,"cacheWriteTokens":3,"outputTokens":4,"reasoningTokens":5},"cacheWrite1hTokens":0,"speed":"fast","dedupeKey":"k"}]}
+{"fn":"mergeUsageCopies","args":[{"timestampMs":100,"model":"original","sessionId":"s1","totals":{"uncachedInputTokens":1e21,"cachedInputTokens":2,"cacheWriteTokens":3,"outputTokens":4,"reasoningTokens":5},"cacheWrite1hTokens":0,"speed":"fast","dedupeKey":"k"},{"timestampMs":100,"model":"copy","sessionId":"s2","totals":{"uncachedInputTokens":6,"cachedInputTokens":3,"cacheWriteTokens":2,"outputTokens":3,"reasoningTokens":1},"cacheWrite1hTokens":2,"speed":"standard","dedupeKey":"k"}]}

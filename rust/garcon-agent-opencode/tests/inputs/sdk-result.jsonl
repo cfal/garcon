@@ -1,0 +1,68 @@
+{"fn":"createOpenCodeRequestScope","args":["/repo"]}
+{"fn":"createOpenCodeRequestScope","args":["  /repo  "]}
+{"fn":"createOpenCodeRequestScope","args":[""]}
+{"fn":"createOpenCodeRequestScope","args":["   "]}
+{"fn":"createOpenCodeRequestScope","args":[null]}
+{"fn":"withOpenCodeRequestScope","args":[{"sessionID":"ses_1"},{"directory":"/repo"}]}
+{"fn":"withOpenCodeRequestScope","args":[{"sessionID":"ses_1"},{}]}
+{"fn":"withOpenCodeRequestScope","args":[{"a":1,"b":2,"a":3},{"directory":"/d"}]}
+{"fn":"withOpenCodeRequestScope","args":[{},{"directory":""}]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"data":{"message":" from data "},"message":" from error "}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"message":" from error "}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"data":{"message":"   "},"message":""}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":"plain text"},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"name":"NotFoundError","data":{}}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[null,"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":["error","fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"data":"not a record","message":5}},"fallback"]}
+{"fn":"hasOpenCodeResultError","args":[{}]}
+{"fn":"hasOpenCodeResultError","args":[{"error":{}}]}
+{"fn":"hasOpenCodeResultError","args":[{"error":null}]}
+{"fn":"hasOpenCodeResultError","args":[{"error":""}]}
+{"fn":"hasOpenCodeResultError","args":[{"error":0}]}
+{"fn":"hasOpenCodeResultError","args":[{"error":false}]}
+{"fn":"hasOpenCodeResultError","args":[null]}
+{"fn":"hasOpenCodeResultError","args":[{"error":"x"}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"name":"NotFoundError"}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"name":"NotFoundError"},"response":{"status":500}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"Session not found"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"Session NOT FOUND"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"Session not found"},"response":{"status":500}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"Session not found"}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"data":{"message":"not found"}},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{},"response":{"status":"404"}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{},"response":null}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"response":{"status":404}}]}
+{"fn":"throwOpenCodeResultError","args":[{"error":{"message":"boom"},"response":{"status":500}},"fallback"]}
+{"fn":"throwOpenCodeResultError","args":[{"error":{"message":"boom"}},"fallback"]}
+{"fn":"throwOpenCodeResultError","args":[{"error":"boom","response":{"status":"503"}},"fallback"]}
+{"fn":"throwOpenCodeResultError","args":[{},"fallback"]}
+{"fn":"throwOpenCodeResultError","args":[{"error":{"name":"NotFoundError"},"response":{"status":404}},"fallback"]}
+{"fn":"new OpenCodeSdkResultError","args":["message",404]}
+{"fn":"new OpenCodeSdkResultError","args":["message",null]}
+{"fn":"new OpenCodeSdkResultError","args":["message",1.5]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"Session NOT FOUND"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"Session NOT​FOUND"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"İNOT FOUND"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"sessİon NOT FOUND"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"SESSION NOT FOUND"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"KOT FOUND"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"😀 not found"},"response":{"status":404}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"not found"},"response":{"status":404.0}}]}
+{"fn":"isOpenCodeNotFoundResult","args":[{"error":{"message":"not found"},"response":{"status":403}}]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"message":" boom "}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"message":"﻿boom"}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"message":"\u0085boom"}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"message":"😀"}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"data":{"message":"日本語雪"},"message":"x"}},"fallback"]}
+{"fn":"openCodeResultErrorMessage","args":[{"error":{"message":"Ünïcödé"}},"fallback"]}
+{"fn":"createOpenCodeRequestScope","args":[" /repo​"]}
+{"fn":"createOpenCodeRequestScope","args":["﻿/repo\t"]}
+{"fn":"createOpenCodeRequestScope","args":["\u0085/repo"]}
+{"fn":"createOpenCodeRequestScope","args":["日本語雪"]}
+{"fn":"createOpenCodeRequestScope","args":["😀"]}
+{"fn":"withOpenCodeRequestScope","args":[{"sessionID":"ses_1","directory":"replaced"},{"directory":"/repo"}]}
+{"fn":"withOpenCodeRequestScope","args":[{"sessionID":"ses_1","directory":"kept"},{}]}
+{"fn":"throwOpenCodeResultError","args":[{"error":{"data":{"message":"from data"},"message":"from error"},"response":{"status":404}},"fallback"]}

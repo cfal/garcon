@@ -1,0 +1,14 @@
+{
+  "module": "rust/garcon-execution/tests/support/coordinator-oracle.ts",
+  "tests": [
+    "server/controller/chat-execution/__tests__/chat-execution-coordinator.test.js",
+    "server/controller/chat-execution/__tests__/execution-api-contract.test.js"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/execution-coordinator.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 17,
+  "sha256": "606af8626e6c64ed23886211a79947f186e7d956535e1c74512453a23e4909ce"
+}

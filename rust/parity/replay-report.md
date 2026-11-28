@@ -2,19 +2,20 @@
 
 Build: `garcon-server`
 
-Passed: 12238/12238 cases
-Matched natively: 122/12238 cases
-Matched via fallback: 12116/12238 cases
-Unported: 0/12238 cases
-Blocked by an unported step: 0/12238 cases
-After an unported write: 0/12238 cases
-Mismatching: 0/12238 cases
+Passed: 12257/12257 cases
+Matched natively: 122/12257 cases
+Matched via fallback: 12135/12257 cases
+Unported: 0/12257 cases
+Blocked by an unported step: 0/12257 cases
+After an unported write: 0/12257 cases
+Mismatching: 0/12257 cases
 
 ## Scenarios
 
 | scenario | passed | matched natively | unported | blocked | after an unported write | mismatching |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | agents | 351/351 | 0/351 | 0 | 0 | 0 | 0 |
+| api-providers-management | 3/3 | 0/3 | 0 | 0 | 0 | 0 |
 | api-providers-seeded | 371/371 | 0/371 | 0 | 0 | 0 | 0 |
 | api-providers | 458/458 | 0/458 | 0 | 0 | 0 | 0 |
 | api-session | 196/196 | 0/196 | 0 | 0 | 0 | 0 |
@@ -38,6 +39,7 @@ Mismatching: 0/12238 cases
 | chat-canvases | 525/525 | 0/525 | 0 | 0 | 0 | 0 |
 | chat-tags | 547/547 | 0/547 | 0 | 0 | 0 | 0 |
 | duplicate-http-headers | 5/5 | 0/5 | 0 | 0 | 0 | 0 |
+| executors-connection | 5/5 | 0/5 | 0 | 0 | 0 | 0 |
 | executors-seeded | 271/271 | 0/271 | 0 | 0 | 0 | 0 |
 | executors | 600/600 | 0/600 | 0 | 0 | 0 | 0 |
 | exhausted-revisions | 243/243 | 0/243 | 0 | 0 | 0 | 0 |
@@ -69,6 +71,7 @@ Mismatching: 0/12238 cases
 | telegram | 87/87 | 0/87 | 0 | 0 | 0 | 0 |
 | terminals | 243/243 | 0/243 | 0 | 0 | 0 | 0 |
 | tickets-mutations | 857/857 | 0/857 | 0 | 0 | 0 | 0 |
+| tickets-surrogates | 11/11 | 0/11 | 0 | 0 | 0 | 0 |
 | tickets | 979/979 | 0/979 | 0 | 0 | 0 | 0 |
 | usage | 282/282 | 0/282 | 0 | 0 | 0 | 0 |
 | websocket-session | 32/32 | 0/32 | 0 | 0 | 0 | 0 |

@@ -1,0 +1,18 @@
+{
+  "module": "rust/garcon-execution/tests/support/executor-reference-writes-oracle.ts",
+  "tests": [
+    "server/controller/executors/__tests__/reference-publication.test.ts"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/executor-reference-writes.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "referenceWritesTrace",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 5,
+  "sha256": "b823de03a5fd04cf640d3a118ad5fc880a30098531e3ddeb095d54db3b692ac8"
+}

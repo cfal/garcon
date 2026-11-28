@@ -8,25 +8,31 @@ use std::path::Path;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use garcon_base::errors::NamedError;
+use futures::future::join_all;
+use garcon_base::errors::{NamedError, SharedDiagnosticError, error_metadata};
 use garcon_base::event_loop_stalls::{ActivityTracker, EventLoopStallOptions};
+use garcon_base::executor_disconnect::ExecutorSessionLostError;
 use garcon_base::workspace_lease::{WorkspaceLeaseOptions, acquire_workspace_lease};
 use garcon_contract::api_providers::ApiProviderModelDiscoveryResponse;
 use garcon_contract::cli_runtime_paths::{cli_gateway_runtime_file, executor_data_directory};
-use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome, AgentIntegrationErrorCode};
+use garcon_contract::git_execution::GitExecutorScope;
+use garcon_interface::errors::{
+    AgentCallError, AgentDeliveryOutcome, AgentIntegrationError, AgentIntegrationErrorCode,
+};
 use garcon_interface::execution_runtime::{
     ApiProviderDiscoveryRequest, ExecutionProjectService, ExecutionRuntimeApi,
     ExecutorAvailability, ExecutorInfo, ExecutorServices,
 };
 use garcon_interface::files::ExecutionFilesService;
 use garcon_interface::git::{ExecutionGhService, ExecutionGitService};
+use garcon_interface::host::AgentResolvedCredential;
 use garcon_interface::integration::AgentIntegration;
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_interface::terminals::ExecutionTerminalService;
-use garcon_js::Number;
+use garcon_js::{Number, json::Opaque};
 use garcon_link::link_handshake::LinkRole;
 use garcon_link::message_session::SessionError;
-use garcon_link::rpc::{ExecutorRpc, ExecutorRpcContinuity};
+use garcon_link::rpc::{ExecutorRpc, ExecutorRpcContinuity, RpcCallOptions};
 use garcon_link::rpc_admission::RpcAdmissionBudgets;
 use garcon_link::rpc_connection::{ExecutorRpcConnection, RpcConnectionOptions};
 use garcon_link::rpc_journal::RpcReplyJournal;
@@ -35,18 +41,28 @@ use garcon_link::websocket_link::{
     ExecutorListenerTls, WebSocketLink, WebSocketLinkOptions, should_log_link_failure,
 };
 use garcon_runtime::ChildEnvironment;
+use garcon_runtime::agents::integration_host::{
+    IntegrationHostFactory, IntegrationHostFactoryOptions, ReadIntegrationEnvironment,
+    ResolveIntegrationCredential, ResolveIntegrationCredentialRequest,
+};
+use garcon_runtime::agents::integration_registry::IntegrationRegistry;
 use garcon_runtime::files::service::{FilesService, FilesServiceOptions};
+use garcon_runtime::git::review_document_registry::GitReviewDocumentRegistry;
+use garcon_runtime::git::runtime::{GitRuntime, GitRuntimeOptions};
 use garcon_runtime::projects::project_service::ProjectService;
 use garcon_runtime::terminals::runtime::{TerminalRuntime, TerminalService};
 use garcon_runtime::terminals::terminal_manager::TerminalManagerOptions;
 use serde::Serialize;
+use serde_json::json;
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
 
+use crate::cli::environment_value;
 use crate::cli_gateway::CliGateway;
-use crate::executor_rpc_server::{ExecutorRpcServer, describe, not_dispatched};
+use crate::default_agent_integrations::default_agent_integrations;
+use crate::executor_rpc_server::{ExecutorRpcServer, decode_opaque, describe, not_dispatched};
 use crate::listener_secret::load_listener_secret;
 use crate::producer_relay::ProducerRelay;
 
@@ -77,6 +93,12 @@ pub struct ExecutorOptions {
     pub terminal_runtime_id: Option<String>,
     pub user_shell: Option<String>,
     pub child_environment: Option<ChildEnvironment>,
+    pub integrations: Option<ExecutorIntegrationOptions>,
+}
+
+pub struct ExecutorIntegrationOptions {
+    pub workspace_dir: String,
+    pub resolve_credential: Rc<ResolveIntegrationCredential>,
 }
 
 type AvailabilityListener = Rc<dyn Fn(ExecutorAvailability)>;
@@ -113,23 +135,14 @@ impl ExecutorLifetime {
 
 pub(crate) struct ExecutorApi {
     info: ExecutorInfo,
+    integrations: IntegrationRegistry,
     pub(crate) projects: Rc<ProjectService>,
     pub(crate) files: Rc<FilesService>,
+    git: Rc<GitRuntime>,
     terminals: Rc<TerminalService>,
     terminal_runtime: TerminalRuntime,
     lifetime: Rc<ExecutorLifetime>,
 }
-
-#[derive(Debug)]
-pub(crate) struct UnknownAgentIntegration(String);
-
-impl std::fmt::Display for UnknownAgentIntegration {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "Unsupported agent integration: {}", self.0)
-    }
-}
-
-impl Error for UnknownAgentIntegration {}
 
 impl ExecutorApi {
     pub(crate) fn info(&self) -> &ExecutorInfo {
@@ -148,10 +161,15 @@ impl ExecutorApi {
         self.terminals.clone()
     }
 
-    fn dispose_services(&self) {
+    pub(crate) fn integrations(&self) -> Vec<Rc<AgentIntegration>> {
+        self.integrations.list()
+    }
+
+    fn dispose_services(&self) -> bool {
         if self.lifetime.disposed.replace(true) {
-            return;
+            return false;
         }
+        self.git.dispose();
         self.terminals.dispose();
         self.terminal_runtime.shutdown();
         let listeners = self.lifetime.listeners.borrow().clone();
@@ -167,6 +185,7 @@ impl ExecutorApi {
             }
         }
         self.lifetime.listeners.borrow_mut().clear();
+        true
     }
 }
 
@@ -195,7 +214,7 @@ impl ExecutionRuntimeApi for ExecutorApi {
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<Rc<AgentIntegration>> {
         self.lifetime.available(options.as_ref())?;
-        Err(UnknownAgentIntegration(agent_id.to_owned()).into())
+        self.integrations.require(agent_id)
     }
 
     async fn get_project_service(
@@ -228,7 +247,7 @@ impl ExecutionRuntimeApi for ExecutorApi {
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<Rc<dyn ExecutionGitService>> {
         self.lifetime.available(options.as_ref())?;
-        Err(unported_service("Git"))
+        Ok(self.git.clone())
     }
 
     async fn get_gh_service(
@@ -272,7 +291,15 @@ impl ExecutionRuntimeApi for ExecutorApi {
     }
 
     async fn dispose(&self) -> ExecutorResult<()> {
-        self.dispose_services();
+        if self.dispose_services() {
+            let _ = join_all(
+                self.integrations
+                    .list()
+                    .into_iter()
+                    .map(|integration| async move { integration.lifecycle.stop().await }),
+            )
+            .await;
+        }
         Ok(())
     }
 }
@@ -292,6 +319,25 @@ pub struct Executor {
 
 impl Executor {
     pub fn start(options: ExecutorOptions) -> ExecutorResult<Self> {
+        let instance_id = Uuid::new_v4().to_string();
+        let integrations = match options.integrations {
+            Some(integrations) => {
+                let host = IntegrationHostFactory::new(IntegrationHostFactoryOptions {
+                    workspace_dir: integrations.workspace_dir,
+                    executor_id: Some(options.executor_id.clone()),
+                    instance_id: Some(instance_id.clone()),
+                    resolve_credential: integrations.resolve_credential,
+                    read_environment: options.child_environment.as_ref().map(|environment| {
+                        let environment = environment.clone();
+                        Rc::new(move |name: &str| environment_value(&environment, name))
+                            as Rc<ReadIntegrationEnvironment>
+                    }),
+                    logger_factory: None,
+                });
+                IntegrationRegistry::from_classes(&default_agent_integrations(), &host)?
+            }
+            None => IntegrationRegistry::from_instances([])?,
+        };
         let lifetime: Rc<ExecutorLifetime> = Rc::default();
         let available = Rc::new({
             let lifetime = Rc::clone(&lifetime);
@@ -304,23 +350,37 @@ impl Executor {
         let files = FilesService::new(FilesServiceOptions {
             executor_id: options.executor_id.clone(),
             project_base_path: options.project_base_path.clone(),
-            assert_available: Some(available),
+            assert_available: Some(available.clone()),
             ..Default::default()
         });
         let mut terminal_options = TerminalManagerOptions::new(options.project_base_path);
         terminal_options.terminal_runtime_id = options.terminal_runtime_id;
         terminal_options.user_shell = options.user_shell;
-        terminal_options.child_environment = options.child_environment;
+        terminal_options.child_environment = options.child_environment.clone();
         let terminal_runtime = TerminalRuntime::new(terminal_options);
         let terminals = Rc::new(terminal_runtime.service(&options.executor_id)?);
+        let git = Rc::new(GitRuntime::new(GitRuntimeOptions {
+            scope: GitExecutorScope {
+                executor_id: options.executor_id.clone(),
+                instance_id: instance_id.clone(),
+            },
+            project_base_path: projects.project_base_path.clone(),
+            child_environment: options.child_environment,
+            review_registry: Some(Rc::new(GitReviewDocumentRegistry::new(Default::default()))),
+            assert_available: Some(available),
+        }));
         let info = ExecutorInfo {
             executor_id: options.executor_id,
-            instance_id: Uuid::new_v4().to_string(),
-            integration_ids: Vec::new(),
+            instance_id,
+            integration_ids: integrations
+                .list()
+                .iter()
+                .map(|integration| integration.descriptor.id.clone())
+                .collect(),
             project_base_path: projects.project_base_path.clone(),
             services: ExecutorServices {
                 files: true,
-                git: false,
+                git: true,
                 gh: false,
                 terminals: true,
                 directory_creation: files.can_create_directories(),
@@ -328,8 +388,10 @@ impl Executor {
         };
         let api = Rc::new(ExecutorApi {
             info,
+            integrations,
             projects: Rc::new(projects),
             files: Rc::new(files),
+            git,
             terminals,
             terminal_runtime,
             lifetime,
@@ -390,6 +452,7 @@ struct Serving {
 struct Worker {
     link: Rc<WebSocketLink>,
     project_base_path: String,
+    data_dir: String,
     child_environment: ChildEnvironment,
     executor: RefCell<Option<Executor>>,
     serving: RefCell<Option<Serving>>,
@@ -404,11 +467,13 @@ impl Worker {
     fn new(
         link: Rc<WebSocketLink>,
         project_base_path: String,
+        data_dir: String,
         child_environment: ChildEnvironment,
     ) -> Rc<Self> {
         Rc::new(Self {
             link,
             project_base_path,
+            data_dir,
             child_environment,
             executor: RefCell::default(),
             serving: RefCell::default(),
@@ -450,7 +515,7 @@ impl Worker {
                     let api = Rc::clone(&api);
                     Box::pin(async move {
                         if call.method == "executor.describe" {
-                            describe(api.info())
+                            describe(api.info(), &[])
                         } else {
                             Err(not_dispatched(
                                 "Restart the worker to serve a different executor",
@@ -470,6 +535,22 @@ impl Worker {
                 terminal_runtime_id: Some(self.link.runtime_id.clone()),
                 user_shell: None,
                 child_environment: Some(Rc::clone(&self.child_environment)),
+                integrations: Some(ExecutorIntegrationOptions {
+                    workspace_dir: self.data_dir.clone(),
+                    resolve_credential: Rc::new({
+                        let worker = Rc::downgrade(self);
+                        move |request| {
+                            let connection = worker.upgrade().and_then(|worker| {
+                                worker
+                                    .serving
+                                    .borrow()
+                                    .as_ref()
+                                    .map(|serving| serving.connection.clone())
+                            });
+                            Box::pin(resolve_credential(connection, request))
+                        }
+                    }),
+                }),
             })
             .map_err(Rc::from)?;
             let api = Rc::clone(&executor.api);
@@ -545,6 +626,51 @@ impl Worker {
     }
 }
 
+async fn resolve_credential(
+    connection: Option<Rc<ExecutorRpcConnection>>,
+    request: ResolveIntegrationCredentialRequest,
+) -> ExecutorResult<Option<AgentResolvedCredential>> {
+    let connection = connection.ok_or_else(|| {
+        AgentCallError::new(
+            AgentDeliveryOutcome::NotDispatched,
+            "Executor controller is disconnected",
+        )
+    })?;
+    let value = connection
+        .primary
+        .call(
+            &request.agent_id,
+            "credentials.resolve",
+            Opaque::from_value(json!({"reference": request.reference})),
+            RpcCallOptions {
+                signal: Some(request.signal),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(own_rpc_error)?;
+    Ok(value
+        .as_ref()
+        .map(decode_opaque::<Option<AgentResolvedCredential>>)
+        .transpose()
+        .map_err(|_| "Invalid provider credential reply")?
+        .flatten())
+}
+
+fn own_rpc_error(error: SessionError) -> Box<dyn Error> {
+    if let Some(call) = error.downcast_ref::<AgentCallError>() {
+        return Box::new(call.clone());
+    }
+    if let Some(lost) = error.downcast_ref::<ExecutorSessionLostError>() {
+        return Box::new(lost.clone());
+    }
+    if let Some(integration) = error.downcast_ref::<AgentIntegrationError>() {
+        return Box::new(integration.clone());
+    }
+    let metadata = error_metadata(error.as_ref());
+    Box::new(SharedDiagnosticError::new(error.clone(), metadata))
+}
+
 async fn serve_leased(
     options: ExecutorWorkerOptions,
     child_environment: ChildEnvironment,
@@ -569,6 +695,7 @@ async fn serve_leased(
     let worker = Worker::new(
         Rc::clone(&link),
         options.project_base_path,
+        data_dir.to_string(),
         child_environment,
     );
     let stop_monitor = worker.activity.monitor_event_loop_stalls(
@@ -704,8 +831,12 @@ async fn serve_leased(
     }
     worker.relay.dispose();
     worker.journal.dispose();
-    worker.executor.take();
-    result.and(gateway_cleanup)
+    let executor = worker.executor.take();
+    let executor_cleanup = match executor {
+        Some(executor) => executor.api.dispose().await,
+        None => Ok(()),
+    };
+    result.and(gateway_cleanup).and(executor_cleanup)
 }
 
 fn startup_link_error(error: SessionError) -> Box<dyn Error> {
@@ -816,6 +947,7 @@ mod tests {
                     terminal_runtime_id: None,
                     user_shell: None,
                     child_environment: None,
+                    integrations: None,
                 })
                 .unwrap();
                 let api: Rc<dyn ExecutionRuntimeApi> = executor.api();
@@ -823,7 +955,7 @@ mod tests {
                 assert_eq!(api.availability(), ExecutorAvailability::Ready);
                 let info = api.get_info(None).await.unwrap();
                 assert!(info.services.files && info.services.terminals);
-                assert!(!info.services.git && !info.services.gh);
+                assert!(info.services.git && !info.services.gh);
                 assert!(Rc::ptr_eq(
                     &api.get_project_service(None).await.unwrap(),
                     &api.get_project_service(None).await.unwrap(),
@@ -836,10 +968,10 @@ mod tests {
                     &api.get_terminal_service(None).await.unwrap(),
                     &api.get_terminal_service(None).await.unwrap(),
                 ));
-                let git = api.get_git_service(None).await.err().unwrap();
-                let git = git.downcast_ref::<AgentCallError>().unwrap();
-                assert_eq!(git.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
-                assert_eq!(git.outcome, AgentDeliveryOutcome::NotDispatched);
+                assert!(Rc::ptr_eq(
+                    &api.get_git_service(None).await.unwrap(),
+                    &api.get_git_service(None).await.unwrap()
+                ));
                 let unknown = api
                     .get_agent_integration("missing", None)
                     .await
@@ -903,7 +1035,7 @@ mod tests {
                 let mut listener = WebSocketLinkOptions::new(LinkRole::Worker, secret.clone());
                 listener.no_tls = true;
                 let listener = WebSocketLink::new(listener).unwrap();
-                let worker = Worker::new(Rc::clone(&listener), root.to_owned(), Vec::new().into());
+                let worker = Worker::new(Rc::clone(&listener), root.to_owned(), root.to_owned(), Vec::new().into());
                 let _unsubscribe = worker.on_session().unwrap();
                 let address = listener.listen(0, "0.0.0.0", None).await.unwrap();
 
@@ -937,6 +1069,31 @@ mod tests {
                     .await
                     .unwrap()
                     .unwrap();
+                let credential_requests = Rc::new(Cell::new(0));
+                let reference = json!({"kind":"api-provider-endpoint","apiProviderId":"provider","endpointId":"endpoint","revision":7});
+                connection.primary.handle(Rc::new({
+                    let credential_requests = credential_requests.clone();
+                    let reference = reference.clone();
+                    move |call, _, _, _| {
+                        let credential_requests = credential_requests.clone();
+                        let reference = reference.clone();
+                        Box::pin(async move {
+                            assert_eq!(call.method, "credentials.resolve");
+                            assert_eq!(call.integration_id, "direct-openai-compatible");
+                            assert_eq!(call.request, Opaque::from_value(json!({"reference":reference})));
+                            let count = credential_requests.get();
+                            credential_requests.set(count + 1);
+                            match count {
+                                0 => Ok(Some(Opaque::from_value(json!({"kind":"api-key","value":"synthetic-secret"})))),
+                                1 => Err(Rc::new(AgentIntegrationError::new(
+                                    AgentIntegrationErrorCode::API_PROVIDER_CONFIGURATION_CHANGED,
+                                    "Fixture profile changed", false, None,
+                                )) as SessionError),
+                                _ => Ok(Some(Opaque::from_value(json!("synthetic-malformed-credential")))),
+                            }
+                        })
+                    }
+                }));
                 connection.activate().unwrap();
                 let options = || RpcCallOptions {
                     timeout: RpcTimeout::Milliseconds(2000),
@@ -952,7 +1109,49 @@ mod tests {
                 assert_eq!(describe["info"]["executorId"], executor_id);
                 assert_eq!(describe["info"]["services"]["files"], true);
                 assert_eq!(describe["info"]["services"]["terminals"], true);
-                assert_eq!(describe["integrations"], json!([]));
+                let id = "direct-openai-compatible";
+                let manifests = describe["integrations"].as_array().unwrap();
+                let advertised_ids: Vec<_> = manifests.iter().map(|entry| entry["descriptor"]["id"].as_str().unwrap()).collect();
+                assert_eq!(describe["info"]["integrationIds"], json!(advertised_ids));
+                let manifest = manifests.iter().find(|entry| entry["descriptor"]["id"] == id).unwrap();
+                assert_eq!(manifest["scope"]["instanceId"], describe["info"]["instanceId"]);
+                assert_eq!(manifest["capabilities"]["singleQuery"], true);
+                assert_eq!(manifest["capabilities"]["forking"], false);
+                let catalog = connection.primary.call(id, "catalog.snapshot", Opaque::from_value(json!({"strict":false})), options()).await.unwrap().unwrap();
+                assert_eq!(&catalog["generation"], Opaque::from_value(json!({"priority":50,"model":""})).as_value());
+                let settings = Opaque::from_value(json!({"ownerId":id,"schemaVersion":1,"values":{}}));
+                assert_eq!(connection.primary.call(id, "settings.migrate", settings.clone(), options()).await.unwrap(), Some(settings));
+                assert!(connection.primary.call(id, "lifecycle.start", request(), options()).await.unwrap().is_none());
+                assert!(connection.primary.call(id, "lifecycle.stop", request(), options()).await.unwrap().is_none());
+                let absent = connection.primary.call(id, "forking.fork", request(), options()).await.unwrap_err();
+                let absent = absent.downcast_ref::<AgentCallError>().unwrap();
+                assert_eq!(absent.outcome, AgentDeliveryOutcome::Rejected);
+                assert_eq!(absent.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
+                assert_eq!(absent.message, "Integration capability unavailable");
+                let current = worker.serving.borrow().as_ref().unwrap().connection.clone();
+                let credential = resolve_credential(Some(current), ResolveIntegrationCredentialRequest {
+                    executor_id: executor_id.into(), agent_id: id.into(),
+                    reference: serde_json::from_value(reference.clone()).unwrap(), signal: CancellationToken::new(),
+                }).await.unwrap().unwrap();
+                assert_eq!(credential.value, "synthetic-secret");
+                let denied = connection.primary.call(id, "singleQuery.run", Opaque::from_value(json!({
+                    "prompt":"synthetic", "model":"fixture", "thinkingMode":"none",
+                    "settings":{"ownerId":id,"schemaVersion":1,"values":{}},
+                    "endpoint":{
+                        "apiProviderId":"provider", "endpointId":"endpoint", "providerLabel":"Synthetic", "protocol":"openai-compatible",
+                        "baseUrl":"http://127.0.0.1:0/v1", "model":"fixture", "isLocal":true, "headers":{}, "capabilities":null, "credential":reference,
+                    },
+                })), options()).await.unwrap_err();
+                let denied = denied.downcast_ref::<AgentIntegrationError>().unwrap();
+                assert_eq!(denied.code, AgentIntegrationErrorCode::API_PROVIDER_CONFIGURATION_CHANGED);
+                assert_eq!(denied.message, "Fixture profile changed");
+                let current = worker.serving.borrow().as_ref().unwrap().connection.clone();
+                let malformed = resolve_credential(Some(current), ResolveIntegrationCredentialRequest {
+                    executor_id: executor_id.into(), agent_id: id.into(),
+                    reference: serde_json::from_value(reference).unwrap(), signal: CancellationToken::new(),
+                }).await.err().unwrap();
+                assert_eq!(malformed.to_string(), "Invalid provider credential reply");
+                assert_eq!(credential_requests.get(), 3);
                 let inspected = connection
                     .primary
                     .call(
@@ -993,7 +1192,7 @@ mod tests {
                 let error = connection
                     .primary
                     .call(
-                        "direct-openai-compatible",
+                        "unknown-integration",
                         "execution.start",
                         request(),
                         options(),
@@ -1006,7 +1205,7 @@ mod tests {
                 assert_eq!(error.message, "Unknown integration");
                 let error = connection
                     .primary
-                    .call("", "catalog.snapshot", request(), options())
+                    .call("", "apiProviders.discoverModels", request(), options())
                     .await
                     .unwrap_err();
                 let error = error.downcast_ref::<AgentCallError>().unwrap();
@@ -1014,7 +1213,7 @@ mod tests {
                 assert_eq!(error.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
                 assert_eq!(
                     error.message,
-                    "Executor method catalog.snapshot is not ported yet"
+                    "Executor method apiProviders.discoverModels is not ported yet"
                 );
                 assert!(connection.primary.active());
                 controller.dispose().await;

@@ -1,0 +1,14 @@
+{"fn":"anchorBatchFixture","args":[{"layout":"","direction":"forward","anchorsRemaining":2}]}
+{"fn":"anchorBatchFixture","args":[{"layout":"","direction":"backward","anchorsRemaining":2}]}
+{"fn":"anchorBatchFixture","args":[{"layout":"hanhha","direction":"forward","anchorsRemaining":1,"pauseAfter":1}]}
+{"fn":"anchorBatchFixture","args":[{"layout":"hanhha","direction":"backward","anchorsRemaining":1,"pauseAfter":2}]}
+{"fn":"anchorBatchFixture","args":[{"layout":"ahh","direction":"forward","anchorsRemaining":0}]}
+{"fn":"anchorBatchFixture","args":[{"layout":"ahh","direction":"backward","anchorsRemaining":1,"gapOrdinal":2}]}
+{"fn":"anchorBatchFixture","args":[{"layout":"ahh","direction":"forward","anchorsRemaining":1,"gapOrdinal":3}]}
+{"fn":"anchorPageFixture","args":[{"layout":"nanhhanh","direction":"forward","anchorsRemaining":1}]}
+{"fn":"anchorPageFixture","args":[{"layout":"nanhhanh","direction":"backward","anchorsRemaining":1}]}
+{"fn":"anchorPageFixture","args":[{"layout":"nanhhanh","direction":"forward","anchorsRemaining":3,"cursorOrdinal":2,"watermarkOrdinal":7}]}
+{"fn":"anchorPageFixture","args":[{"layout":"hhhh","direction":"backward","anchorsRemaining":2}]}
+{"fn":"anchorPageFixture","args":[{"layout":"haa","direction":"backward","anchorsRemaining":0}]}
+{"fn":"anchorPageFixture","args":[{"layout":"aah","direction":"forward","anchorsRemaining":0}]}
+{"fn":"anchorPageFixture","args":[{"layout":"","direction":"backward","anchorsRemaining":0}]}

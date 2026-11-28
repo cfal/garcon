@@ -1,4 +1,4 @@
-//! The fetch adapter for direct provider requests.
+//! The shared HTTP client for provider requests.
 
 use std::env;
 use std::error::Error;
@@ -10,19 +10,19 @@ use garcon_base::errors::NamedError;
 use garcon_base::tls_roots::verified_client_config;
 use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
 use garcon_interface::resources::ExecutorResult;
-use reqwest::{
-    Client, Response, StatusCode,
-    header::{
-        ACCEPT, ACCEPT_ENCODING, CONNECTION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT,
-    },
-};
+use reqwest::Client;
+pub use reqwest::{Method, Response, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use super::provider_proxy::ProviderProxy;
+use header::{
+    ACCEPT, ACCEPT_ENCODING, CONNECTION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT,
+};
 
 static CLIENT: OnceCell<Client> = OnceCell::const_new();
+static PUBLIC_CLIENT: OnceCell<Client> = OnceCell::const_new();
 
 #[derive(Clone)]
 pub struct ProviderHttpEndpoint {
@@ -93,7 +93,9 @@ fn redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
-fn create_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
+fn create_client(
+    redirects: reqwest::redirect::Policy,
+) -> Result<Client, Box<dyn Error + Send + Sync>> {
     #[derive(Deserialize)]
     struct Release {
         version: String,
@@ -121,30 +123,64 @@ fn create_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
         .default_headers(headers)
         .referer(false)
         .retry(reqwest::retry::never())
-        .redirect(redirect_policy())
+        .redirect(redirects)
         .build()?)
 }
 
-pub async fn post_json(
+/// Sends a request with the shared provider policy, leaving the response body unread.
+pub async fn send(
+    method: Method,
     url: &str,
-    headers: HeaderMap,
-    request: &impl Serialize,
+    mut headers: HeaderMap,
+    body: Option<Vec<u8>>,
 ) -> ExecutorResult<Response> {
     let client = CLIENT
         .get_or_try_init(|| async {
-            tokio::task::spawn_blocking(create_client)
+            tokio::task::spawn_blocking(|| create_client(redirect_policy()))
                 .await?
                 .map_err(|error| -> Box<dyn Error> { error })
         })
         .await?;
-    let body = serde_json::to_vec(request)?;
-    client
-        .post(url)
-        .headers(headers)
-        .body(body)
-        .send()
-        .await
-        .map_err(client_error)
+    headers.remove(USER_AGENT);
+    let mut request = client.request(method, url).headers(headers);
+    if let Some(body) = body {
+        request = request.body(body);
+    }
+    request.send().await.map_err(client_error)
+}
+
+pub(crate) async fn post_json(
+    url: &str,
+    headers: HeaderMap,
+    request: &impl Serialize,
+) -> ExecutorResult<Response> {
+    send(
+        Method::POST,
+        url,
+        headers,
+        Some(serde_json::to_vec(request)?),
+    )
+    .await
+}
+
+/// Fetches public metadata without credentials and permits redirects across origins.
+pub(crate) async fn get_public_metadata(
+    url: &str,
+    accept: Option<&str>,
+    timeout: Duration,
+) -> ExecutorResult<Response> {
+    let client = PUBLIC_CLIENT
+        .get_or_try_init(|| async {
+            tokio::task::spawn_blocking(|| create_client(reqwest::redirect::Policy::limited(20)))
+                .await?
+                .map_err(|error| -> Box<dyn Error> { error })
+        })
+        .await?;
+    let mut request = client.get(url).timeout(timeout);
+    if let Some(accept) = accept {
+        request = request.header(ACCEPT, accept);
+    }
+    request.send().await.map_err(client_error)
 }
 
 pub fn json_headers() -> HeaderMap {

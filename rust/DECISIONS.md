@@ -672,3 +672,27 @@ Consequences: The byte comparison of provider requests with the original
 excludes the `User-Agent` value. A provider configured behind a redirecting
 front that changes origin stops working until its endpoint is corrected, and
 says why.
+
+## ADR-032: Provider integrations are ported in parallel sessions
+
+Status: accepted by the user (2026-11-28)
+
+Context: ADR-021 capped the port at six sessions, with every integration
+going through the session that owns the worker. The contract crates are done,
+the worker hosts a registered integration, and each integration is a crate of
+its own (ADR-027) with a compatibility suite to hold it to, so they no longer
+depend on each other.
+
+Decision: Each CLI-backed integration gets a session of its own, beside the
+six existing lanes and the reviewer: Claude, Codex, OpenCode, Pi with shell,
+and the shared ACP runtime with Antigravity and Cursor. The shared modules of
+`server-agents/common` are assigned to exactly one session each before
+anyone ports them, and the small leaves that every integration imports land
+first, from one session. The worker, the direct integrations, and the roster
+stay with the session that built them.
+
+Consequences: Eleven porting sessions run at once. A second build machine
+carries the new sessions (`garcon-rs-remote` picks the machine by label), and
+incremental compilation is off on both to bound disk use. The manager
+merges more often and gates in batches; the reviewer still reads every
+merge.

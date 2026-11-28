@@ -1,0 +1,39 @@
+[package]
+name = "garcon-agent-claude"
+version = "0.0.0"
+description = "Claude CLI integration for Garcon."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+garcon-agents-common.workspace = true
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+icu_normalizer = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
+indexmap.workspace = true
+num-bigint = "0.4"
+num-traits = "0.2"
+regress = "0.12"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

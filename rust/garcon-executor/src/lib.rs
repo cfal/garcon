@@ -7,11 +7,15 @@
 
 pub mod cli;
 mod cli_gateway;
+mod default_agent_integrations;
 mod executor_rpc_server;
+mod git_rpc_server;
 mod history_rpc_server;
 mod listener_secret;
 mod producer_relay;
 mod terminal_rpc_server;
 mod worker;
 
-pub use worker::{Executor, ExecutorOptions, ExecutorWorkerOptions, WorkerConnection};
+pub use worker::{
+    Executor, ExecutorIntegrationOptions, ExecutorOptions, ExecutorWorkerOptions, WorkerConnection,
+};

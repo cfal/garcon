@@ -391,6 +391,8 @@ async fn output_attempt(
                     result = &mut capture => result,
                     () = sleep_until(deadline), if !timed_out => {
                         timed_out = true;
+                        #[cfg(all(test, unix))]
+                        super::run_tests::notify(super::run_tests::RunnerEvent::DeadlineDuringReap);
                         capture.await
                     }
                 }
@@ -498,6 +500,8 @@ fn run_git_process(
                 && is_lock_error(&result.stderr)
                 && attempt < GIT_LOCK_MAX_RETRIES
             {
+                #[cfg(all(test, unix))]
+                super::run_tests::notify(super::run_tests::RunnerEvent::Retry);
                 sleep(GIT_LOCK_RETRY_DELAY.min(deadline.saturating_duration_since(Instant::now())))
                     .await;
                 let aborted = timed_out || signals_aborted(&options);

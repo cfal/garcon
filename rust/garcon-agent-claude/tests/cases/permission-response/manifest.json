@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/claude/src/agents/claude/permission-response.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/cli.test.js"
+  ],
+  "inputs": "rust/garcon-agent-claude/tests/inputs/permission-response.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 132,
+  "sha256": "d1578f8795412dac222891194844fd4f2391d5dbe12d04fa5a3e88bb2ea270f0"
+}

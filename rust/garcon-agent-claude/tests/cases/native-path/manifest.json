@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/claude/src/agents/claude/native-path.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-claude/tests/inputs/native-path.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 6,
+  "sha256": "bab3b74616f6fa3728ea4c694f14388b0edc1c889798493fe4ea8d59ea447c3b"
+}

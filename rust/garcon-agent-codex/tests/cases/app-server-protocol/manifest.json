@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/codex/src/agents/codex/app-server/protocol.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/app-server/__tests__/protocol.test.js"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/app-server-protocol.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 155,
+  "sha256": "9b4d8ca6be7b22a1b549c3d2f96753b811629102f86dfb8367ef99adbe6ca5d4"
+}

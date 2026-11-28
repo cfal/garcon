@@ -1,0 +1,27 @@
+{
+  "module": "rust/garcon-execution/tests/support/agent-registry-leaves-oracle.ts",
+  "tests": [
+    "server/controller/agents/__tests__/event-bus.test.js",
+    "server/controller/agents/__tests__/session-loss-retry.test.ts"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/agent-registry-leaves.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "directoryTrace",
+      "argument": 0
+    },
+    {
+      "fn": "turnOperationTrace",
+      "argument": 0
+    },
+    {
+      "fn": "sessionLossRetryTrace",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 26,
+  "sha256": "01d871655a82485224498d3e24c80c262a88ac99c745ca5dba1ed08808f50eeb"
+}

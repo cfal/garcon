@@ -72,11 +72,7 @@ impl Environment {
     }
 
     fn get(&self, key: &str) -> Option<String> {
-        self.0
-            .iter()
-            .rev()
-            .find(|(name, _)| Self::matches(name, key))
-            .map(|(_, value)| value.to_string_lossy().into_owned())
+        environment_value(&self.0, key)
     }
 
     fn remove(&mut self, key: &str) -> Option<String> {
@@ -108,6 +104,14 @@ impl Environment {
         self.0.push(("GARCON_RUNTIME".into(), "executor".into()));
         self.0
     }
+}
+
+pub(crate) fn environment_value(environment: &[(OsString, OsString)], key: &str) -> Option<String> {
+    environment
+        .iter()
+        .rev()
+        .find(|(name, _)| Environment::matches(name, key))
+        .map(|(_, value)| value.to_string_lossy().into_owned())
 }
 
 type Flags<'a> = HashMap<&'a str, Option<&'a str>>;

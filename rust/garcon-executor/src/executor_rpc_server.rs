@@ -23,15 +23,19 @@ use garcon_link::git_protocol::is_git_rpc_method;
 use garcon_link::message_session::SessionError;
 use garcon_link::rpc::{ExecutorRpc, ObserveUndeliveredReply, RpcResult};
 use garcon_link::rpc_lane::RpcLane;
-use garcon_link::rpc_protocol::{ExecutorRpcRequest, RpcContinuity, rpc_continuity};
-use serde::{Serialize, de::DeserializeOwned};
+use garcon_link::rpc_protocol::{
+    ExecutorDescription, ExecutorRpcRequest, IntegrationManifest, RpcContinuity, rpc_continuity,
+};
+use garcon_runtime::agents::integration_registry::UnknownAgentIntegration;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::git_rpc_server::GitRpcServer;
 use crate::history_rpc_server::HistoryRpcServer;
 use crate::producer_relay::{LaunchRequest, ProducerRelay, ProducerRelaySession, RelayIntegration};
 use crate::terminal_rpc_server::TerminalRpcServer;
-use crate::worker::{ExecutorApi, UnknownAgentIntegration};
+use crate::worker::ExecutorApi;
 
 pub(crate) struct ExecutorRpcServer {
     api: Rc<ExecutorApi>,
@@ -39,6 +43,7 @@ pub(crate) struct ExecutorRpcServer {
     relay: Rc<ProducerRelay>,
     producer_session: ProducerRelaySession,
     terminals: Rc<TerminalRpcServer>,
+    git: GitRpcServer,
     histories: RefCell<HashMap<String, Rc<HistoryRpcServer>>>,
     disposed: Cell<bool>,
     unsubscribe: RefCell<Vec<Box<dyn Fn()>>>,
@@ -59,8 +64,12 @@ impl ExecutorRpcServer {
             }
         });
         relay.shorten_suspended_grace();
+        for integration in api.integrations() {
+            relay.track(&RelayIntegration::from(integration.as_ref()));
+        }
         let server = Rc::new(Self {
             terminals: TerminalRpcServer::new(api.terminals(), primary),
+            git: GitRpcServer::new(api.clone()),
             histories: RefCell::default(),
             api,
             primary: Rc::downgrade(primary),
@@ -201,7 +210,7 @@ impl ExecutorRpcServer {
         let method = call.method.as_str();
         let request = &call.request;
         match method {
-            "executor.describe" => describe(self.api.info()),
+            "executor.describe" => describe(self.api.info(), &self.api.integrations()),
             "controllerCli.describe" | "controllerCli.request" => {
                 Err(rejected("CLI dispatch is controller-owned"))
             }
@@ -259,7 +268,7 @@ impl ExecutorRpcServer {
                     ))
                 })?;
                 history
-                    .handle(integration.as_ref().into(), call, signal)
+                    .handle(integration.as_ref().try_into()?, call, signal)
                     .await
             }
             "producers.bind"
@@ -279,8 +288,53 @@ impl ExecutorRpcServer {
                 validate_file_rpc_request(method, request).map_err(shared_error)?;
                 self.handle_files(method, request, signal).await
             }
-            method if is_git_rpc_method(method) && !call.integration_id.is_empty() => {
-                Err(rejected("Git operations are executor services"))
+            method if is_git_rpc_method(method) => {
+                if !call.integration_id.is_empty() {
+                    return Err(rejected("Git operations are executor services"));
+                }
+                self.git.handle(call, signal).await
+            }
+            "catalog.snapshot"
+            | "settings.migrate"
+            | "lifecycle.start"
+            | "lifecycle.stop"
+            | "lifecycle.migrateOwnedStorage"
+            | "migration.translateLegacyModel"
+            | "migration.translateLegacyNativeSession"
+            | "migration.translateLegacySettings"
+            | "auth.status"
+            | "auth.launchLogin"
+            | "auth.completeLogin"
+            | "auth.loginStatus"
+            | "readiness.status"
+            | "commands.discover"
+            | "forking.fork"
+            | "forking.discard"
+            | "steering.captureTarget"
+            | "steering.steer"
+            | "endpoints.validate"
+            | "singleQuery.run"
+            | "nativeActivity.lastActivity"
+            | "nativeSessions.resolveNativeSession"
+            | "nativeSessions.describeSource"
+            | "nativeSessions.release"
+            | "configurationValidation.validate"
+            | "sessionConfiguration.apply"
+            | "projectPathUpdates.prepare"
+            | "projectPathUpdates.commit"
+            | "projectPathUpdates.rollback"
+            | "usageHistory.read"
+            | "cliUpdates.status"
+            | "cliUpdates.startUpdate"
+            | "credentials.resolve"
+            | "calls.reconcile" => {
+                let integration = resolve_worker_integration(
+                    self.api.as_ref(),
+                    &call.integration_id,
+                    signal.clone(),
+                )
+                .await?;
+                handle_integration(integration.as_ref(), method, request, signal).await
             }
             method => Err(not_ported(method)),
         }
@@ -528,6 +582,242 @@ impl ExecutorRpcServer {
     }
 }
 
+async fn handle_integration(
+    integration: &AgentIntegration,
+    method: &str,
+    request: &Opaque,
+    signal: CancellationToken,
+) -> RpcResult {
+    use garcon_interface::{
+        cli_updates::AgentCliUpdateStatusRequest,
+        execution::{AgentSessionConfiguration, AgentSessionConfigurationUpdate},
+        native_fork::AgentNativeForkRequest,
+        native_history::{AgentHistoryImportRequest, AgentNativeSessionReleaseRequest},
+        services::{
+            AgentCatalogRequest, AgentSingleQueryRequest, AgentTranslateLegacyModelRequest,
+            AgentTranslateLegacyNativeSessionRequest, AgentTranslateLegacySettingsRequest,
+        },
+        usage_history::AgentUsageReadRequest,
+    };
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CompleteAuthLogin {
+        session_id: String,
+        code: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct AuthLoginStatus {
+        expected_session_id: Option<String>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CommandDiscovery {
+        project_path: String,
+    }
+    #[derive(Deserialize)]
+    struct SessionConfigurationArgs {
+        args: (
+            String,
+            AgentSessionConfigurationUpdate,
+            AgentSessionConfiguration,
+        ),
+    }
+
+    match method {
+        "catalog.snapshot" => {
+            let mut request: AgentCatalogRequest = integration_request(request)?;
+            request.signal = signal;
+            reply(integration.catalog.snapshot(request).await)
+        }
+        "settings.migrate" => reply(
+            integration
+                .settings
+                .migrate(integration_request(request)?)
+                .await,
+        ),
+        "lifecycle.start" => reply_void(integration.lifecycle.start().await),
+        "lifecycle.stop" => reply_void(integration.lifecycle.stop().await),
+        "lifecycle.migrateOwnedStorage" => {
+            reply_void(integration.lifecycle.migrate_owned_storage().await)
+        }
+        "migration.translateLegacyModel" => {
+            let mut request: AgentTranslateLegacyModelRequest = integration_request(request)?;
+            request.signal = signal;
+            reply(integration.migration.translate_legacy_model(request).await)
+        }
+        "migration.translateLegacyNativeSession" => {
+            let mut request: AgentTranslateLegacyNativeSessionRequest =
+                integration_request(request)?;
+            request.signal = signal;
+            reply(
+                integration
+                    .migration
+                    .translate_legacy_native_session(request)
+                    .await,
+            )
+        }
+        "migration.translateLegacySettings" => {
+            let mut request: AgentTranslateLegacySettingsRequest = integration_request(request)?;
+            request.signal = signal;
+            reply(
+                integration
+                    .migration
+                    .translate_legacy_settings(request)
+                    .await,
+            )
+        }
+        "auth.status" => reply(capability(&integration.auth)?.status(signal).await),
+        "auth.launchLogin" => {
+            let auth = capability(&integration.auth)?.login_capabilities();
+            reply(capability(&auth.launch_login)?.launch_login().await)
+        }
+        "auth.completeLogin" => {
+            let auth = capability(&integration.auth)?.login_capabilities();
+            let operation = capability(&auth.complete_login)?;
+            let request: CompleteAuthLogin = integration_request(request)?;
+            reply(
+                operation
+                    .complete_login(&request.session_id, &request.code)
+                    .await,
+            )
+        }
+        "auth.loginStatus" => {
+            let auth = capability(&integration.auth)?.login_capabilities();
+            let operation = capability(&auth.login_status)?;
+            let request: AuthLoginStatus = integration_request(request)?;
+            reply(
+                operation
+                    .login_status(request.expected_session_id.as_deref())
+                    .await,
+            )
+        }
+        "readiness.status" => reply(capability(&integration.readiness)?.status(signal).await),
+        "commands.discover" => {
+            let commands = capability(&integration.commands)?;
+            let request: CommandDiscovery = integration_request(request)?;
+            reply(commands.discover(&request.project_path, signal).await)
+        }
+        "forking.fork" => {
+            let facet = capability(&integration.forking)?;
+            let mut request: AgentNativeForkRequest = integration_request(request)?;
+            request.signal = signal;
+            reply(facet.fork(request, None).await)
+        }
+        "forking.discard" => reply_void(
+            capability(&integration.forking)?
+                .discard(integration_request(request)?, signal, None)
+                .await,
+        ),
+        "steering.captureTarget" => reply(
+            capability(&integration.steering)?
+                .capture_target(integration_request(request)?, options(signal))
+                .await,
+        ),
+        "steering.steer" => reply(
+            capability(&integration.steering)?
+                .steer(integration_request(request)?, options(signal))
+                .await,
+        ),
+        "endpoints.validate" => reply_void(
+            capability(&integration.endpoints)?
+                .validate(integration_request(request)?, None)
+                .await,
+        ),
+        "singleQuery.run" => {
+            let facet = capability(&integration.single_query)?;
+            let mut request: AgentSingleQueryRequest = integration_request(request)?;
+            request.signal = signal;
+            reply(facet.run(request).await)
+        }
+        "nativeActivity.lastActivity" => reply(
+            capability(&integration.native_activity)?
+                .last_activity(integration_request(request)?, signal)
+                .await,
+        ),
+        "nativeSessions.resolveNativeSession" | "nativeSessions.describeSource" => {
+            let facet = capability(&integration.native_sessions)?;
+            let mut request: AgentHistoryImportRequest = integration_request(request)?;
+            request.signal = signal;
+            if method == "nativeSessions.resolveNativeSession" {
+                reply(facet.resolve_native_session(request).await)
+            } else {
+                reply(facet.describe_source(request).await)
+            }
+        }
+        "nativeSessions.release" => {
+            let facet = capability(&integration.native_sessions)?;
+            let mut request: AgentNativeSessionReleaseRequest = integration_request(request)?;
+            request.request.signal = signal;
+            reply_void(facet.release(request).await)
+        }
+        "configurationValidation.validate" => reply_void(
+            capability(&integration.configuration_validation)?
+                .validate(integration_request(request)?, None)
+                .await,
+        ),
+        "sessionConfiguration.apply" => {
+            let facet = capability(&integration.session_configuration)?;
+            let SessionConfigurationArgs {
+                args: (id, configuration, previous),
+            } = integration_request(request)?;
+            reply_void(facet.apply(&id, configuration, previous, None).await)
+        }
+        "projectPathUpdates.prepare" => reply(
+            capability(&integration.project_path_updates)?
+                .prepare(integration_request(request)?, None)
+                .await,
+        ),
+        "projectPathUpdates.commit" => reply_void(
+            capability(&integration.project_path_updates)?
+                .commit(integration_request(request)?, options(signal))
+                .await,
+        ),
+        "projectPathUpdates.rollback" => reply_void(
+            capability(&integration.project_path_updates)?
+                .rollback(integration_request(request)?, options(signal))
+                .await,
+        ),
+        "usageHistory.read" => {
+            let facet = capability(&integration.usage_history)?;
+            let mut request: AgentUsageReadRequest = integration_request(request)?;
+            request.signal = Some(signal);
+            reply(facet.read(request).await)
+        }
+        "cliUpdates.status" => {
+            let facet = capability(&integration.cli_updates)?;
+            let mut request: AgentCliUpdateStatusRequest = integration_request(request)?;
+            request.signal = Some(signal);
+            reply(facet.status(request).await)
+        }
+        "cliUpdates.startUpdate" => {
+            reply(capability(&integration.cli_updates)?.start_update().await)
+        }
+        "credentials.resolve" => Err(rejected("Credential resolution is controller-owned")),
+        "calls.reconcile" => Err(rejected("Call reconciliation belongs to the RPC layer")),
+        _ => Err(not_ported(method)),
+    }
+}
+
+fn capability<T>(value: &Option<T>) -> Result<&T, SessionError> {
+    value.as_ref().ok_or_else(|| {
+        shared_error(AgentCallError::with_code(
+            AgentDeliveryOutcome::Rejected,
+            "Integration capability unavailable",
+            AgentIntegrationErrorCode::OPERATION_UNSUPPORTED,
+        ))
+    })
+}
+
+fn integration_request<T: DeserializeOwned>(value: &Opaque) -> Result<T, SessionError> {
+    decode_opaque(value).map_err(|_| rejected("Invalid integration request"))
+}
+
+fn reply_void(result: ExecutorResult<()>) -> RpcResult {
+    result.map(|()| None).map_err(Rc::from)
+}
+
 async fn resolve_worker_integration(
     api: &dyn ExecutionRuntimeApi,
     integration_id: &str,
@@ -619,15 +909,14 @@ fn not_ported(method: &str) -> SessionError {
     ))
 }
 
-pub(crate) fn describe(info: &ExecutorInfo) -> RpcResult {
-    #[derive(Serialize)]
-    struct Describe<'a> {
-        info: &'a ExecutorInfo,
-        integrations: [(); 0],
-    }
-    reply(Ok(Describe {
-        info,
-        integrations: [],
+pub(crate) fn describe(info: &ExecutorInfo, integrations: &[Rc<AgentIntegration>]) -> RpcResult {
+    let integrations = integrations
+        .iter()
+        .map(|integration| IntegrationManifest::from_integration(integration))
+        .collect::<ExecutorResult<_>>();
+    reply(integrations.map(|integrations| ExecutorDescription {
+        info: info.clone(),
+        integrations,
     }))
 }
 

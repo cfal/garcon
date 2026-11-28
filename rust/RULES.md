@@ -51,6 +51,12 @@ the user corrects how a port behaves, the correction is added under
   module and a test through the erased path. Test with the concrete error a
   real failing call produces (`std::io::Error` from the file system), never
   only with a stand-in built for the test.
+- A subclass in the original is a struct of its own in the port, so
+  `downcast_ref::<Base>()` does not see it. Wherever the original tests
+  `instanceof` a base class (`DomainError`, `AgentCallError`), use the
+  helper that accepts every subclass (`garcon_base::domain_error::as_domain_error`,
+  `garcon_base::executor_disconnect::as_agent_call_error`), and test the
+  site with each subclass through the erased path.
 - The erased error type stays `Box<dyn Error>`; there is no registry and no
   workspace-wide diagnostic trait object. The original has 72
   `hasNodeErrorCode` checks, all but one on OS error codes, which
@@ -120,6 +126,14 @@ the user corrects how a port behaves, the correction is added under
   `serde_json`'s. They replace a lone surrogate escape, which a JavaScript
   string can hold and a Rust `String` cannot, with U+FFFD instead of failing
   the whole document.
+- Two inputs are parse errors at the JSON boundary where the original reads
+  them (`garcon-js/src/json.rs`): a number literal beyond the double range
+  (`1e400`, which the original reads as an infinity and prints as `null`)
+  and nesting deeper than 128 levels. Record such cases and list them in
+  `known-differences.jsonl` with the reason "number beyond the double range
+  is a parse error at the JSON boundary" or "nesting deeper than 128 levels
+  is a parse error at the JSON boundary"; do not leave the inputs out and do
+  not work around the parser.
 - Opaque JSON, a value that came from outside and is written out again (tool
   input, provider payloads, stored rows), is a `garcon_js::json::Opaque`, not
   a bare `serde_json::Value`. `Opaque` reads numbers as JavaScript doubles and
@@ -130,6 +144,24 @@ the user corrects how a port behaves, the correction is added under
   their formatting.
 - `JSON.stringify(value, null, 2)` is `serde_json::to_string_pretty`. Add a
   trailing newline only where the original does.
+- A message type has one field order in the port, the shared parser's
+  (`common/chat-message-coercion.ts`), also where a provider converter of the
+  original writes the same keys in another order (the Claude and opencode
+  converters write `allowMultiple` before `header` in an ask-user-question
+  prompt). Every reader re-parses a message with the shared parser
+  (`server/remote/client/remote-agent-integration.ts`,
+  `server/controller/ledger/codec.ts`, the web projection), so the
+  converter's order is never read. The converter's replay names that subtree,
+  and only it, in a `ResultOrderException` with the reason. The contract type
+  does not change and gains no order switch.
+- A converter of the original that hands a raw array from the model to a
+  message (`changes`, `allowedPrompts`) becomes a call of the contract's
+  coercion for that field (`as_optional_changes`, `as_allowed_prompts`), the
+  function the shared parser applies on every read, never a normalization of
+  the converter's own. A recorded case whose raw array holds members that
+  function drops is listed in `known-differences.jsonl` with the reason "raw
+  array read as the shared parser reads it". Provisional until the user
+  confirms it (MAP.md, open questions).
 
 ## Strings
 
@@ -271,14 +303,31 @@ the user corrects how a port behaves, the correction is added under
 
 ## Build
 
-- No Rust is compiled on the development machine (ADR-026). Every command
-  that builds, `cargo check`, `clippy`, `test`, `build`, `run`, `doc`, and
-  `rustc` itself, runs on the build machine through
-  `garcon-rs-remote <lane> -- <command>`, which copies your worktree's sources
-  there, runs the command in `rust/` with a target directory per lane, and
-  copies `rust/Cargo.lock` back when the command changed it. Nothing else the
-  command writes comes back. `cargo fmt -p <crate>` compiles nothing and runs
-  locally.
+- Nothing intensive runs on the development machine (ADR-026): it has been
+  overloaded into a restart twice. No Rust is compiled there, and no Bun test
+  suite, recorder, replay, oracle, `tsc`, or server runs there either. What
+  runs locally is reading, git, `cargo fmt`, and
+  `bun test ./scripts/__tests__/test-inventory.test.js`.
+- Everything else runs on the build machine through
+  `garcon-rs-remote <label> [--pull <repo path>]... -- <command>`. It mirrors
+  your worktree's sources (`rust`, `common`, `server`, `server-agents`,
+  `cli`, `scripts`, `patches`, `integration-tests`, `docs`, `.github`, and
+  the package files) by content, installs dependencies when a lockfile
+  changed, and runs the command as an unprivileged user in the copy's
+  `rust/` directory (`cd ..` for the repository root) with a target directory
+  per label and Bun 1.4.3 on `PATH`. `rust/Cargo.lock` comes back when the
+  command changed it; anything else the command writes comes back only when
+  named with `--pull` (a recorded case directory, a report). One call costs
+  about 40 seconds before the command starts, and the two build machines
+  (eight cores for the gate, the reviewer, and six sessions; four cores for
+  the five provider sessions) are shared: put a unit's commands in one
+  call, build one crate (`-p`), and build the workspace only for a change
+  to a shared public type. Session commands run at lower priority than the
+  gate. A call that ends with status 3 and no result is run again as it
+  was.
+- Only `/garcon`, `~/bin`, and the agent configuration directories survive a
+  restart of the development machine. Keep nothing you need in `~/tmp` or
+  anywhere else under the home directory.
 - `cargo fmt -p <crate>`, then `cargo clippy -p <crate> --all-targets --
   -D warnings`, then `cargo test -p <crate>`.
 - The reference runtime of the original is the Bun that CI and the release
@@ -288,6 +337,13 @@ the user corrects how a port behaves, the correction is added under
   `bun:sqlite` behaviors in `research/sqlite.md`).
 - Use the versions in `[workspace.dependencies]`. A dependency that is not
   there goes in your crate's `Cargo.toml` and in your report.
+- A merge conflict where both sides only add lines to a `Cargo.toml`
+  dependency list, the `[workspace] members` list, or a `lib.rs`/`mod.rs`
+  module list is resolved by keeping both sides' lines, in any crate, with
+  no go-ahead needed. `rust/Cargo.lock` takes origin's side and is
+  regenerated by the next remote build. Any other conflict in a file you do
+  not own (a changed line, a removed line, a changed signature) stops and
+  goes to the manager.
 - Merge `origin/rust-server`, never the local `rust-server` branch: the
   manager gates before pushing, so the local branch can be ahead of what has
   passed.

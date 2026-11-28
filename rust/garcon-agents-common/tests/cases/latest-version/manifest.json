@@ -1,0 +1,54 @@
+{
+  "module": "server-agents/common/src/cli-update/latest-version.ts",
+  "tests": [
+    "server-agents/common/src/cli-update/__tests__/latest-version.test.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.result",
+      "type": "a LatestVersionCache instance",
+      "where": "result",
+      "at": "server-agents/common/src/cli-update/__tests__/latest-version.test.ts:20:17",
+      "fn": "new LatestVersionCache",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/common/src/cli-update/__tests__/latest-version.test.ts:28:21",
+      "fn": "new LatestVersionCache",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a LatestVersionCache instance",
+      "where": "result",
+      "at": "server-agents/common/src/cli-update/__tests__/latest-version.test.ts:46:17",
+      "fn": "new LatestVersionCache",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a LatestVersionCache instance",
+      "where": "result",
+      "at": "server-agents/common/src/cli-update/__tests__/latest-version.test.ts:63:17",
+      "fn": "new LatestVersionCache",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a LatestVersionCache instance",
+      "where": "result",
+      "at": "server-agents/common/src/cli-update/__tests__/latest-version.test.ts:70:17",
+      "fn": "new LatestVersionCache",
+      "count": 1
+    }
+  ],
+  "cases": 129,
+  "sha256": "c73685a7e230811c8c2c66e24ecbad393c271f4922a84d72bed4259dd672d0df"
+}

@@ -52,6 +52,10 @@ Unit names for the kill switch are listed in [`MAP.md`](MAP.md).
 
 ## The verification loop
 
+Run the recording, replay, and trace commands on the build machine through
+`garcon-rs-remote <lane> -- bash -c 'cd .. && ...'`: the wrapper starts in
+`rust/`, and these commands run from the repository root.
+
 A scenario is a sequence of HTTP and WebSocket steps run against a fresh server
 in an isolated config, workspace, project, and home directory, with seeded
 credentials. The server's PATH is a private directory containing links to
@@ -77,6 +81,16 @@ bun run parity:replay        # the original must replay its own recordings
 bun run rust:build
 bun run parity:replay:rust   # the front door must match every case
 ```
+
+To replay a release binary on the build machine:
+
+```bash
+"$HOME/bin/garcon-rs-remote" "$WORKTREE_LABEL" -- bash -c \
+  'cd .. && bun rust/parity/cli.ts replay --build "$CARGO_TARGET_DIR/release/garcon-server" --label garcon-server'
+```
+
+Leave the replay's default temporary root in place. Recorded HEAD content
+lengths can include the length of the original's temporary workspace path.
 
 On a build replay, HTTP 501 with `X-Garcon-Rs-Unported: 1` means the build
 does not serve that case yet; a 501 without the marker is compared normally.
@@ -106,9 +120,7 @@ What is compared, per case:
   structurally, text exactly, binary by SHA-256. A textual body over 64 KB is
   recorded as `text-digest`, the SHA-256 and byte length of its text after the
   placeholders below are applied, so a large body that holds a value of the
-  server start is still compared. Use the standard replay invocation without
-  overriding `TMPDIR`: HEAD content lengths can include the length of the
-  original's temporary workspace path.
+  server start is still compared.
 - WebSocket: whether the upgrade succeeded, the negotiated subprotocol, the
   replies to the step's own requests (matched by `clientRequestId`), the close
   code and reason of a connection the server accepted and then closed, and for
