@@ -1043,12 +1043,11 @@ fn flush(
     }
     Ok(match io_shared(stdin.borrow_mut().flush())? {
         StdinReport::Accepted(_) | StdinReport::Closed => FrameFlush::Settled,
-        StdinReport::Pending(flushed) => FrameFlush::Pending(Box::pin(async move {
-            flushed
-                .await
-                .map(|_| ())
-                .map_err(|error| Rc::new(error) as Rc<dyn Error>)
-        })),
+        StdinReport::Pending(flushed) => {
+            FrameFlush::Pending(Box::pin(
+                async move { io_shared(flushed.await).map(|_| ()) },
+            ))
+        }
     })
 }
 
