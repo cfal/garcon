@@ -346,9 +346,13 @@ while :; do sleep 1; done"#,
 #[tokio::test]
 async fn cancellation_does_not_release_the_operation_before_its_process_group_settles() {
     locally(async {
+        use rustix::io::Errno;
+        use rustix::process::{Pid, test_kill_process};
+
+        // The TERM trap cannot complete before the runner escalates to KILL.
         let git = FakeGit::new(
-            r#"trap 'echo settled > finished; exit 143' TERM
-echo active > started
+            r#"trap 'while [ ! -f trap-release ]; do sleep 1; done; echo settled > finished; exit 143' TERM
+printf '%s\n' "$$" > started
 while :; do sleep 1; done"#,
         );
         let caller = CancellationToken::new();
@@ -372,7 +376,12 @@ while :; do sleep 1; done"#,
             error.downcast_ref::<GitServiceError>().unwrap().code,
             GitServiceErrorCode::GIT_MUTATION_OUTCOME_UNKNOWN
         );
-        assert!(git.0.path().join("finished").exists());
+        let pid = tokio::fs::read_to_string(git.0.path().join("started"))
+            .await
+            .unwrap();
+        let pid = Pid::from_raw(pid.trim().parse().unwrap()).unwrap();
+        assert_eq!(test_kill_process(pid), Err(Errno::SRCH));
+        assert!(!git.0.path().join("finished").exists());
     })
     .await;
 }
