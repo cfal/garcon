@@ -37,7 +37,7 @@ use garcon_stores::auth::service::AuthService;
 use garcon_stores::auth::store::AuthAccountStore;
 use garcon_stores::auth::token::AuthTokens;
 use garcon_stores::executors::config_store::ExecutorConfigStore;
-use garcon_stores::settings::{SettingsStore, SettingsStoreOptions};
+use garcon_stores::settings::SettingsStore;
 use garcon_stores::telegram_settings_store::TelegramSettingsStore;
 use garcon_stores::tickets::{
     service::TicketServiceOptions,
@@ -48,6 +48,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::config::{HELP_TEXT, ServerConfig, initialize_server_config, is_help_requested};
+use super::provider_configuration::{ProviderConfiguration, ProviderProfiles};
 use super::workspace_lease::{ControllerLease, acquire_controller_lease};
 use super::workspace_version::open_workspace;
 
@@ -302,10 +303,13 @@ async fn bind_controller(
         config.auth_disabled,
         config.trust_proxy_enabled,
     )?;
+    let profiles = ProviderProfiles::open(&config.config_dir, clock.clone()).await?;
     let executors = ExecutorConfigStore::open(&lease.workspace_dir().to_string_lossy()).await?;
+    let providers =
+        ProviderConfiguration::open(profiles, lease.workspace_dir(), &executors).await?;
     let settings = SettingsStore::open(
         &lease.workspace_dir().to_string_lossy(),
-        SettingsStoreOptions::default(),
+        providers.settings_options(),
     )
     .await?;
     TelegramSettingsStore::open(&config.config_dir, clock.clone()).await?;
@@ -373,6 +377,7 @@ async fn bind_controller(
             config.base_path.clone(),
         ),
         &create_ticket_routes(&tickets),
+        &providers.routes(&browser_sockets),
     ])?;
     let router = HttpRouter::new(
         routes,
@@ -465,6 +470,7 @@ mod tests {
     use super::*;
     use crate::config::{ConfigEnvironment, parse_server_config};
     use garcon_base::workspace_lease::WORKSPACE_LOCK_NAME;
+    use garcon_stores::settings::SettingsStoreOptions;
     use serde_json::Value;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;

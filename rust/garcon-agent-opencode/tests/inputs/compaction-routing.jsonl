@@ -1,0 +1,41 @@
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1700000000123},"role":"assistant","id":"summary_1","summary":true,"finish":"stop"}}},"manual"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":0},"role":"assistant","id":"summary_1","mode":"compaction","finish":"stop"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1700000000123.9},"role":"assistant","id":"summary_1","summary":true,"finish":"stop"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1e21},"role":"assistant","id":"summary_1","summary":true,"finish":"stop"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1700000000123},"role":"assistant","id":"summary_1","summary":true,"finish":"error"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1700000000123},"role":"assistant","id":"summary_1","summary":true,"finish":"tool-calls"}}},"manual"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":"1700000000123"},"role":"assistant","id":"summary_1","summary":true,"finish":"stop"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1700000000123},"role":"assistant","id":"summary_1","finish":"stop"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.part.updated","properties":{"info":{"time":{"completed":1700000000123},"role":"assistant","id":"summary_1","summary":true}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1700000000123},"role":"assistant","id":"summary_1","summary":true,"error":{"name":"MessageAbortedError"}}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":1700000000123},"role":"assistant","id":"","summary":true}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":8.64e15},"role":"assistant","id":"summary_1","agent":"compaction","finish":"stop"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":-1},"role":"assistant","id":"😀","agent":"compaction","finish":"stop"}}},"manual"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":{"time":{"completed":8640000000000001},"role":"assistant","id":"summary_1","agent":"compaction","finish":"stop"}}},"auto"]}
+{"fn":"boundaryRow","args":[{"type":"message.updated","properties":{"info":"summary"}},"auto"]}
+{"fn":"eventTrigger","args":[{"type":"message.updated","properties":{"info":{"id":"x"}}},{}]}
+{"fn":"eventTrigger","args":[{"type":"message.updated","properties":{"info":{"id":"ctl_1"}}},{"automaticCompactionMessageIds":["ctl_1"]}]}
+{"fn":"eventTrigger","args":[{"type":"message.part.updated","properties":{"part":{"messageID":"ctl_1"}}},{"automaticCompactionMessageIds":["ctl_1"]}]}
+{"fn":"eventTrigger","args":[{"type":"message.part.delta","properties":{"messageID":"ctl_1"}},{"automaticCompactionMessageIds":["ctl_1"]}]}
+{"fn":"eventTrigger","args":[{"type":"message.updated","properties":{"info":{"id":null},"part":{"messageID":"ctl_2"}}},{"automaticCompactionMessageIds":["ctl_1","ctl_2"]}]}
+{"fn":"eventTrigger","args":[{"type":"session.idle","properties":{}},{"compaction":true}]}
+{"fn":"eventTrigger","args":[{"type":"session.idle","properties":{"info":{"id":5}}},{"automaticCompactionMessageIds":["5"]}]}
+{"fn":"eventTrigger","args":[{"type":"session.idle","properties":{"info":{"id":"😀"}}},{"automaticCompactionMessageIds":["😀"]}]}
+{"fn":"adoptPartRoute","args":[null, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"completed"}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"compaction":true}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"compaction":true,"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"compaction":true}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":false,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"compaction":true}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","metadata":{"other":1},"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"compaction":true}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","messageID":"ctl_1","id":""}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":1,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":false,"messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":null}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"idle"}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","messageID":"ctl_1","id":"prt_ctl"}}}, "ses_1"]}
+{"fn":"adoptPartRoute","args":[{"status":"running","turn":{"providerMessageId":"user_1"}}, {"type":"message.part.updated","properties":{"part":{"type":"compaction","auto":true,"messageID":"😀","id":"prt_é"}}}, "ses_é"]}

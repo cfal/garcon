@@ -1,0 +1,30 @@
+{"id":"fileUrl#0","fn":"fileUrl","args":["/opt/garcon/garcon-session-identity.mjs"],"result":"file:///opt/garcon/garcon-session-identity.mjs","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:1"}
+{"id":"fileUrl#1","fn":"fileUrl","args":["/tmp/garcon-opencode-session-identity-abc123/garcon-session-identity.mjs"],"result":"file:///tmp/garcon-opencode-session-identity-abc123/garcon-session-identity.mjs","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:2"}
+{"id":"fileUrl#2","fn":"fileUrl","args":["/opt/Garçon plugins/100% session #1.mjs"],"result":"file:///opt/Gar%C3%A7on%20plugins/100%25%20session%20%231.mjs","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:3"}
+{"id":"fileUrl#3","fn":"fileUrl","args":["/a b/c?d=e&f"],"result":"file:///a%20b/c%3Fd=e&f","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:4"}
+{"id":"fileUrl#4","fn":"fileUrl","args":["/a\"b<c>d{e}f`g|h^i"],"result":"file:///a%22b%3Cc%3Ed%7Be%7Df%60g%7Ch%5Ei","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:5"}
+{"id":"fileUrl#5","fn":"fileUrl","args":["/a\\b"],"result":"file:///a%5Cb","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:6"}
+{"id":"fileUrl#6","fn":"fileUrl","args":["/tab\there"],"result":"file:///tab%09here","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:7"}
+{"id":"fileUrl#7","fn":"fileUrl","args":["/line\nbreak"],"result":"file:///line%0Abreak","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:8"}
+{"id":"fileUrl#8","fn":"fileUrl","args":["/ünïcödé/😀.mjs"],"result":"file:///%C3%BCn%C3%AFc%C3%B6d%C3%A9/%F0%9F%98%80.mjs","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:9"}
+{"id":"fileUrl#9","fn":"fileUrl","args":["/a//b/./c/.."],"result":"file:///a/b","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:10"}
+{"id":"fileUrl#10","fn":"fileUrl","args":["/tmp/xy"],"result":"file:///tmp/x%7Fy","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:11"}
+{"id":"fileUrl#11","fn":"fileUrl","args":["/tmp/xy"],"result":"file:///tmp/x%7Fy","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:12"}
+{"id":"fileUrl#12","fn":"fileUrl","args":["/sym]'(*,/;:=!~"],"result":"file:///sym%5D'(*,/;:=!%7E","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:13"}
+{"id":"fileUrl#13","fn":"fileUrl","args":["/a+b,c;d=e@f:g"],"result":"file:///a+b,c;d=e@f:g","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:14"}
+{"id":"fileUrl#14","fn":"fileUrl","args":["/percent%25already"],"result":"file:///percent%2525already","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:15"}
+{"id":"fileUrl#15","fn":"fileUrl","args":["/tmp/garcon-opencode-session-identity-x/garcon-session-identity.mjs/.."],"result":"file:///tmp/garcon-opencode-session-identity-x","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:16"}
+{"id":"fileUrl#16","fn":"fileUrl","args":["/.hidden"],"result":"file:///.hidden","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:17"}
+{"id":"fileUrl#17","fn":"fileUrl","args":["/tmp/a b"],"result":"file:///tmp/a%C2%A0b","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:18"}
+{"id":"fileUrl#18","fn":"fileUrl","args":["/tmp/ünïcödé 😀.mjs"],"result":"file:///tmp/%C3%BCn%C3%AFc%C3%B6d%C3%A9%20%F0%9F%98%80.mjs","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:19"}
+{"id":"fileUrl#19","fn":"fileUrl","args":["/tmp/x'y"],"result":"file:///tmp/x'y","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:20"}
+{"id":"fileUrl#20","fn":"fileUrl","args":["/tmp/[ bracket ]"],"result":"file:///tmp/%5B%20bracket%20%5D","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:21"}
+{"id":"fileUrl#21","fn":"fileUrl","args":["/tmp/100%"],"result":"file:///tmp/100%25","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:22"}
+{"id":"fileUrl#22","fn":"fileUrl","args":["/tmp/100%25"],"result":"file:///tmp/100%2525","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:23"}
+{"id":"fileUrl#23","fn":"fileUrl","args":["/tmp/café/naïve/日本語/🚀.mjs"],"result":"file:///tmp/caf%C3%A9/na%C3%AFve/%E6%97%A5%E6%9C%AC%E8%AA%9E/%F0%9F%9A%80.mjs","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:24"}
+{"id":"fileUrl#24","fn":"fileUrl","args":["/tmp/a|b^c"],"result":"file:///tmp/a%7Cb%5Ec","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:25"}
+{"id":"fileUrl#25","fn":"fileUrl","args":["/tmp/\u0001control"],"result":"file:///tmp/%01control%7F","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:26"}
+{"id":"fileUrl#26","fn":"fileUrl","args":["/tmp/a=b&c?d#e"],"result":"file:///tmp/a=b&c%3Fd%23e","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:27"}
+{"id":"fileUrl#27","fn":"fileUrl","args":["/"],"result":"file:///","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:28"}
+{"id":"fileUrl#28","fn":"fileUrl","args":["//tmp/a"],"result":"file:///tmp/a","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:29"}
+{"id":"fileUrl#29","fn":"fileUrl","args":["/tmp/garcon-opencode-session-identity-f9a1c3f1e2d34b6a8c0e5d2b7f1a9c3e/garcon-session-identity.mjs"],"result":"file:///tmp/garcon-opencode-session-identity-f9a1c3f1e2d34b6a8c0e5d2b7f1a9c3e/garcon-session-identity.mjs","origin":"rust/garcon-agent-opencode/tests/inputs/node-url.jsonl:30"}

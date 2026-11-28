@@ -1,0 +1,23 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/questions.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/questions.test.js",
+    "server-agents/opencode/src/agents/opencode/__tests__/operation-routing.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0].logger.debug",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/opencode/src/agents/opencode/permissions.ts:114:27",
+      "fn": "new OpenCodeQuestionController",
+      "count": 27
+    }
+  ],
+  "cases": 139,
+  "sha256": "e69c98612dec70a50e4a698e3f4c996c4105164aa70e706d2541095c4295ce7a"
+}

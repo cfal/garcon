@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/compaction-routing.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/compaction-routing.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 41,
+  "sha256": "0a1a244864cf448a8875fdc30124bf074dfed97adfbd76b1f0cd6796a22391cd"
+}

@@ -1,0 +1,22 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/permissions.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/permissions.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0].logger.debug",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/opencode/src/agents/opencode/opencode.ts:155:27",
+      "fn": "new OpenCodeDecisionController",
+      "count": 5
+    }
+  ],
+  "cases": 153,
+  "sha256": "fb37c27ac87dad8bd371514185074025514d0d44a88615e5b2e4cabdee12471d"
+}

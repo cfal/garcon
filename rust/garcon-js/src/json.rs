@@ -57,6 +57,10 @@ pub fn from_slice<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_json::Er
 /// string and backslash state, so a backslash that is itself escaped is not
 /// read as the start of an escape.
 fn replace_lone_surrogates(input: &[u8]) -> Cow<'_, [u8]> {
+    replace_lone_surrogates_with(input, b"\\uFFFD")
+}
+
+fn replace_lone_surrogates_with<'a>(input: &'a [u8], replacement: &[u8; 6]) -> Cow<'a, [u8]> {
     if !input.windows(2).any(|window| window == b"\\u") {
         return Cow::Borrowed(input);
     }
@@ -68,7 +72,7 @@ fn replace_lone_surrogates(input: &[u8]) -> Cow<'_, [u8]> {
     let mut copied = 0;
     for start in std::iter::once(first).chain(escapes) {
         output.extend_from_slice(&input[copied..start]);
-        output.extend_from_slice(b"\\uFFFD");
+        output.extend_from_slice(replacement);
         copied = start + 6;
     }
     output.extend_from_slice(&input[copied..]);
@@ -249,6 +253,35 @@ fn as_number_of(number: &Number) -> f64 {
 /// Parses JSON text as `JSON.parse` does, for inspection.
 pub fn parse(text: &str) -> Result<Value, serde_json::Error> {
     from_str::<Opaque>(text).map(Opaque::into_value)
+}
+
+/// Parses JSON and reports which named top-level string fields held an
+/// unpaired surrogate escape before normalization. Field names must not
+/// contain U+FFFD or NUL. Duplicate keys keep their last value.
+pub fn parse_with_unpaired_surrogate_fields<const N: usize>(
+    text: &str,
+    fields: [&str; N],
+) -> Result<(Value, [bool; N]), serde_json::Error> {
+    let value = parse(text)?;
+    let strings = fields.map(|name| {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|text| text.contains('\u{fffd}'))
+    });
+    if strings.iter().all(Option::is_none) {
+        return Ok((value, [false; N]));
+    }
+    let Cow::Owned(alternate) = replace_lone_surrogates_with(text.as_bytes(), b"\\u0000") else {
+        return Ok((value, [false; N]));
+    };
+    // The probe changes only unpaired escapes, not genuine U+FFFD or NUL.
+    let alternate: Value = from_slice(&alternate)?;
+    let unpaired = std::array::from_fn(|index| {
+        strings[index].is_some()
+            && strings[index] != alternate.get(fields[index]).and_then(Value::as_str)
+    });
+    Ok((value, unpaired))
 }
 
 /// `JSON.stringify(value)`.
@@ -449,6 +482,49 @@ mod tests {
         assert!(parse(r#"[\ud800]"#).is_err());
         let untouched = replace_lone_surrogates(br#"{"a":"b","c":"\\"}"#);
         assert!(matches!(untouched, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn locates_unpaired_escapes_only_in_the_named_top_level_strings() {
+        for (input, expected) in [
+            (
+                r#"{"title":"bad \ud800","content":"genuine \ufffd","ignored":"\ud800"}"#,
+                [true, false],
+            ),
+            (
+                r#"{"title":"genuine \ufffd","content":"bad \udc00","\ud800":null}"#,
+                [false, true],
+            ),
+            (
+                r#"{"title":"\ud800\u0000","content":"\u0000\udc00"}"#,
+                [true, true],
+            ),
+            (
+                r#"{"title":"genuine \ufffd","content":"pair \ud83d\ude80","ignored":{"title":"\ud800"}}"#,
+                [false, false],
+            ),
+            (
+                r#"{"title":"\\ud800","content":{"text":"\ud800"}}"#,
+                [false, false],
+            ),
+            (r#"["\ud800"]"#, [false, false]),
+        ] {
+            let (value, fields) =
+                parse_with_unpaired_surrogate_fields(input, ["title", "content"]).unwrap();
+            assert_eq!(value, parse(input).unwrap());
+            assert_eq!(fields, expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn locates_unpaired_escapes_in_the_last_occurrence_of_a_duplicate_key() {
+        let input =
+            r#"{"title":"\ud800","\u0074itle":"\ufffd","content":"\ufffd","content":"\udc00"}"#;
+        let (value, fields) =
+            parse_with_unpaired_surrogate_fields(input, ["title", "content"]).unwrap();
+        assert_eq!(value, json!({ "title": "\u{fffd}", "content": "\u{fffd}" }));
+        assert_eq!(fields, [false, true]);
+        assert!(parse_with_unpaired_surrogate_fields(r#"{"title":"\ud800",}"#, ["title"]).is_err());
     }
 
     #[test]

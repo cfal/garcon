@@ -1,0 +1,4 @@
+{"fn":"parseSkillsListResponse","args":[{"data":[null,{"skills":[null,true,{"name":true,"path":"/a"},{"name":"n","path":1},{"name":"n","path":"/valid","description":" "},{"name":"n","path":"/second"}]}]}]}
+{"fn":"parseSkillsListResponse","args":[{"data":[{"skills":[{"name":"kit10","path":"/10"},{"name":"kit2","path":"/2"},{"name":"Kit","path":"/K"},{"name":"kit","path":"/k"},{"name":"kít","path":"/accent"},{"name":"kit_a","path":"/underscore"},{"name":"kit-a","path":"/dash"}]}]}]}
+{"fn":"parseSkillsListResponse","args":[{"data":[{"skills":[{"name":"dup","path":"/disabled","enabled":false},{"name":"dup","path":"/enabled","enabled":0},{"name":"empty","path":""},{"name":"","path":"/empty"},{"name":"desc","path":"/desc","description":""}]}]}]}
+{"fn":"parseSkillsListResponse","args":[{"data":[{"skills":[{"name":"é","path":"/composed"},{"name":"é","path":"/decomposed"},{"name":"e","path":"/ascii"}]}]}]}
