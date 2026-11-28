@@ -38,6 +38,28 @@ pub(crate) struct StagingViews {
     generations: RefCell<HashMap<String, u64>>,
 }
 
+pub(crate) struct StagingRetention<'a> {
+    staging: &'a StagingViews,
+    chat_id: &'a str,
+    view_id: &'a TranscriptViewId,
+    generation: u64,
+    armed: bool,
+}
+
+impl StagingRetention<'_> {
+    pub fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for StagingRetention<'_> {
+    fn drop(&mut self) {
+        if self.armed && self.staging.generation(self.chat_id) == self.generation {
+            self.staging.release(self.chat_id, self.view_id);
+        }
+    }
+}
+
 impl StagingViews {
     pub fn fits_one_transaction(&self, drafts: &[LedgerRowDraft]) -> bool {
         drafts.len() <= BULK_WRITE_ROWS
@@ -87,6 +109,20 @@ impl StagingViews {
         views.remove(view_id.as_str());
         if views.is_empty() {
             active.shift_remove(chat_id);
+        }
+    }
+
+    pub fn release_on_drop<'a>(
+        &'a self,
+        chat_id: &'a str,
+        view_id: &'a TranscriptViewId,
+    ) -> StagingRetention<'a> {
+        StagingRetention {
+            staging: self,
+            chat_id,
+            view_id,
+            generation: self.generation(chat_id),
+            armed: true,
         }
     }
 
