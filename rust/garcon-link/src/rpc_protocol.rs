@@ -1,6 +1,16 @@
 //! Ports `server/remote/transport/rpc-protocol.ts`.
 
+use garcon_contract::agent_integration::{
+    AgentDescriptor, AgentSettingDescriptor, AgentSettingsEnvelope,
+};
+use garcon_interface::{
+    execution_runtime::ExecutorInfo,
+    integration::AgentIntegration,
+    resources::{AgentResourceScope, ExecutorResult},
+    services::{AgentAttachments, AgentLiteralExecution},
+};
 use garcon_js::json::Opaque;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::git_protocol::is_git_rpc_method;
@@ -26,6 +36,93 @@ pub const NULLABLE_AGENT_FACETS: &[&str] = &[
     "usageHistory",
     "cliUpdates",
 ];
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutorDescription {
+    pub info: ExecutorInfo,
+    pub integrations: Vec<IntegrationManifest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationManifest {
+    pub descriptor: AgentDescriptor,
+    pub scope: AgentResourceScope,
+    pub settings: IntegrationManifestSettings,
+    pub attachments: Option<AgentAttachments>,
+    pub capabilities: IndexMap<String, bool>,
+    pub literal_execution: Option<AgentLiteralExecution>,
+    pub auth_methods: IntegrationManifestAuthMethods,
+    pub single_query_runs_tools_without_permission: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IntegrationManifestSettings {
+    pub descriptors: Vec<AgentSettingDescriptor>,
+    pub defaults: AgentSettingsEnvelope,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationManifestAuthMethods {
+    pub launch_login: bool,
+    pub complete_login: bool,
+    pub login_status: bool,
+}
+
+impl IntegrationManifest {
+    pub fn from_integration(integration: &AgentIntegration) -> ExecutorResult<Self> {
+        let settings = IntegrationManifestSettings {
+            descriptors: integration.settings.describe().to_vec(),
+            defaults: integration.settings.defaults()?,
+        };
+        let capabilities = [
+            integration.readiness.is_some(),
+            integration.auth.is_some(),
+            integration.commands.is_some(),
+            integration.compaction.is_some(),
+            integration.forking.is_some(),
+            integration.steering.is_some(),
+            integration.endpoints.is_some(),
+            integration.single_query.is_some(),
+            integration.legacy_history_import.is_some(),
+            integration.native_history_import.is_some(),
+            integration.native_activity.is_some(),
+            integration.native_sessions.is_some(),
+            integration.configuration_validation.is_some(),
+            integration.session_configuration.is_some(),
+            integration.project_path_updates.is_some(),
+            integration.usage_history.is_some(),
+            integration.cli_updates.is_some(),
+        ];
+        let auth = integration
+            .auth
+            .as_ref()
+            .map(|auth| auth.login_capabilities())
+            .unwrap_or_default();
+        Ok(Self {
+            descriptor: integration.descriptor.clone(),
+            scope: integration.producers.scope().clone(),
+            settings,
+            attachments: integration.attachments.clone(),
+            capabilities: NULLABLE_AGENT_FACETS
+                .iter()
+                .zip(capabilities)
+                .map(|(name, present)| ((*name).into(), present))
+                .collect(),
+            literal_execution: integration.literal_execution.clone(),
+            auth_methods: IntegrationManifestAuthMethods {
+                launch_login: auth.launch_login.is_some(),
+                complete_login: auth.complete_login.is_some(),
+                login_status: auth.login_status.is_some(),
+            },
+            single_query_runs_tools_without_permission: integration
+                .single_query
+                .as_ref()
+                .is_some_and(|facet| facet.runs_tools_without_permission()),
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
