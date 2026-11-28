@@ -31,6 +31,7 @@ use garcon_contract::{
     project_resolution::ProjectResolution,
 };
 use garcon_interface::{
+    errors::AgentIntegrationErrorCode,
     execution_runtime::{
         ExecutionProjectInspectRequest, ExecutionProjectService, ExecutionRuntimeApi,
         ExecutorAvailability, ExecutorInfo, ResolveFileMentionsRequest,
@@ -140,7 +141,7 @@ pub struct ExecutorManager {
     pub local: Rc<dyn ExecutionRuntimeApi>,
     pub config: Rc<ExecutorConfigStore>,
     local_integrations: Integrations,
-    local_info: ExecutorInfo,
+    local_info: Option<ExecutorInfo>,
     remotes: RefCell<IndexMap<String, Rc<ManagedRemote>>>,
     socket_admission: Rc<ExecutorSocketAdmission>,
     changes: Rc<Listeners<ChangedListener>>,
@@ -168,8 +169,14 @@ impl ExecutorManager {
     }
 
     async fn initialize(options: ExecutorManagerOptions) -> ExecutionOperationResult<Rc<Self>> {
-        let local_info = options.local.get_info(None).await?;
-        let local_integrations = load_integrations(options.local.as_ref(), &local_info).await?;
+        let (local_info, local_integrations) =
+            if options.local.availability() == ExecutorAvailability::Ready {
+                let info = options.local.get_info(None).await?;
+                let integrations = load_integrations(options.local.as_ref(), &info).await?;
+                (Some(info), integrations)
+            } else {
+                (None, Rc::default())
+            };
         let manager = Rc::new_cyclic(|weak: &std::rc::Weak<Self>| {
             let owner = weak.clone();
             let config = options.config;
@@ -223,7 +230,8 @@ impl ExecutorManager {
             return false;
         }
         if executor_id == LOCAL_EXECUTOR_ID {
-            return self.local.availability() == ExecutorAvailability::Ready;
+            return self.local_info.is_some()
+                && self.local.availability() == ExecutorAvailability::Ready;
         }
         self.entry(executor_id).is_some_and(|entry| {
             entry.config.borrow().enabled
@@ -251,7 +259,9 @@ impl ExecutorManager {
     pub fn instance_id(&self, executor_id: &str) -> Result<String, DomainError> {
         self.require_executor(executor_id)?;
         let id = if executor_id == LOCAL_EXECUTOR_ID {
-            Some(self.local_info.instance_id.clone())
+            self.local_info
+                .as_ref()
+                .map(|info| info.instance_id.clone())
         } else {
             self.entry(executor_id).and_then(|entry| {
                 entry
@@ -339,6 +349,10 @@ impl ExecutorManager {
     }
 
     pub fn list(&self) -> Vec<ExecutorSnapshot> {
+        let local_info = self
+            .local_info
+            .as_ref()
+            .filter(|_| self.is_ready(LOCAL_EXECUTOR_ID));
         let local = ExecutorSnapshot {
             id: LOCAL_EXECUTOR_ID.into(),
             label: LOCAL_EXECUTOR_LABEL.into(),
@@ -347,21 +361,24 @@ impl ExecutorManager {
             direction: None,
             allow_controller_cli: true,
             allow_executor_management: true,
-            availability: if self.disposed.get() {
-                ExecutorSnapshotAvailability::Offline
-            } else {
+            availability: if local_info.is_some() {
                 ExecutorSnapshotAvailability::Ready
+            } else {
+                ExecutorSnapshotAvailability::Offline
             },
-            project_base_path: Some(self.local_info.project_base_path.clone()),
-            instance_id: Some(self.local_info.instance_id.clone()),
+            project_base_path: local_info.map(|info| info.project_base_path.clone()),
+            instance_id: local_info.map(|info| info.instance_id.clone()),
             bulk: None,
-            last_error: None,
+            last_error: local_info.is_none().then(|| ExecutorError {
+                code: AgentIntegrationErrorCode::UNAVAILABLE.as_str().into(),
+                message: "Local executor is unavailable".into(),
+            }),
             executor_services: ExecutorServices {
-                files: true,
-                git: true,
-                gh: true,
-                terminals: true,
-                directory_creation: self.local_info.services.directory_creation,
+                files: local_info.is_some(),
+                git: local_info.is_some(),
+                gh: local_info.is_some(),
+                terminals: local_info.is_some(),
+                directory_creation: local_info.is_some_and(|info| info.services.directory_creation),
             },
         };
         std::iter::once(local)
