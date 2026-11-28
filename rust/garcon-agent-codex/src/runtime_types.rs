@@ -4,7 +4,7 @@ use serde_json::Map;
 
 pub type CodexConfigObject = Map<String, serde_json::Value>;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexProviderConfig {
     pub config: CodexConfigObject,

@@ -24,6 +24,7 @@ regress = "0.12"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
@@ -32,4 +33,3 @@ libc = "0.2"
 
 [dev-dependencies]
 garcon-cases.workspace = true
-tempfile.workspace = true
