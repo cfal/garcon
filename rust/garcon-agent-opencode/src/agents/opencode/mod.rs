@@ -13,7 +13,10 @@ pub mod jsonc;
 pub mod model_catalog;
 pub mod model_discovery;
 pub mod native_activity;
-#[allow(clippy::module_inception)] // The original module is agents/opencode/opencode.ts.
+#[expect(
+    clippy::module_inception,
+    reason = "The original module is agents/opencode/opencode.ts."
+)]
 pub mod opencode;
 pub mod opencode_auth;
 pub mod operation_routes;
