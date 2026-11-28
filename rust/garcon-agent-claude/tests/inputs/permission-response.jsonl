@@ -1,0 +1,5 @@
+{"fn":"buildClaudePermissionApprovalResponse","args":[{"toolName":"AskUserQuestion"},{"allow":true,"response":{"type":"ask-user-question-response","outcome":"answered"}}]}
+{"fn":"buildClaudePermissionApprovalResponse","args":[{"toolName":"AskUserQuestion"},{"allow":true,"response":{"type":"ask-user-question-response","outcome":"answered","answers":[{"questionId":"synthetic-question"}]}}]}
+{"fn":"buildClaudePermissionApprovalResponse","args":[{"toolName":"AskUserQuestion","toolInput":{"questions":[{"question":"__proto__","options":[{"id":"opt","label":"Option","preview":"Synthetic preview"}]}]}},{"allow":true,"response":{"type":"ask-user-question-response","outcome":"answered","answers":[{"questionId":"__proto__","selectedOptionIds":["opt"]}]}}]}
+{"fn":"buildClaudePermissionApprovalResponse","args":[{"toolName":"OtherTool"},{"allow":false,"response":{"behavior":"deny","message":"Synthetic provider response"}}]}
+{"fn":"buildClaudePermissionApprovalResponse","args":[{"toolName":"OtherTool"},{"allow":false}]}

@@ -1,0 +1,21 @@
+//! Ports `server-agents/opencode/src/agents/opencode/`.
+
+pub mod compaction_routing;
+pub mod jsonc;
+pub mod model_catalog;
+pub mod opencode_auth;
+pub mod operation_routes;
+pub mod permission_tool_converter;
+pub mod permissions;
+pub mod prompt;
+pub mod prompt_response;
+pub mod questions;
+pub mod request_control;
+pub mod sdk_result;
+pub mod server_instance;
+pub mod session_identity_plugin;
+pub mod sse_events;
+pub mod thinking_variant;
+pub mod tool_use_converter;
+pub mod turn_events;
+pub mod turn_failure;

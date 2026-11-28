@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/turn-events.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/turn-events.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 124,
+  "sha256": "3af62b55f90e2cfe43759327eca12c8f340bda97ef20412b60c3fab7956c84ce"
+}

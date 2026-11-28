@@ -375,6 +375,10 @@ async fn edge_routes(web_build_dir: PathBuf, config: &Path) -> compose_routes::R
 
 #[tokio::test]
 async fn unported_inventory_matches_the_original_after_subtracting_registered_handlers() {
+    use garcon_stores::api_providers::{
+        access::ApiProviderAccess, assignments::ApiProviderAssignmentStore,
+        service::ApiProviderService, store::ApiProviderStore,
+    };
     use garcon_stores::executors::config_store::ExecutorConfigStore;
     use garcon_stores::tickets::{service::TicketServiceOptions, setup::initialize_tickets};
 
@@ -385,6 +389,19 @@ async fn unported_inventory_matches_the_original_after_subtracting_registered_ha
     let executors = ExecutorConfigStore::open(&config.path().to_string_lossy())
         .await
         .unwrap();
+    let directory = config.path().to_str().unwrap();
+    ApiProviderAssignmentStore::initialize_fresh_workspace(config.path())
+        .await
+        .unwrap();
+    let profiles = ApiProviderStore::open(directory, Rc::new(garcon_js::SystemClock))
+        .await
+        .unwrap();
+    let assignments = ApiProviderAssignmentStore::open(directory).await.unwrap();
+    let providers = ApiProviderService::new(ApiProviderAccess::new(
+        profiles,
+        assignments,
+        Rc::new(|id| id == "local"),
+    ));
     let tickets = Rc::new(initialize_tickets(
         config.path(),
         TicketServiceOptions {
@@ -396,6 +413,7 @@ async fn unported_inventory_matches_the_original_after_subtracting_registered_ha
     ));
     let routes = compose_routes::compose_routes([
         &edge_routes,
+        &routes::api_providers::create_api_provider_routes(providers),
         &routes::executors::create_executor_connection_routes(&executors, None, "/tools".into()),
         &routes::tickets::create_ticket_routes(&tickets),
     ])

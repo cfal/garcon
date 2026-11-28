@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/turn-failure.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/turn-failure.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 13,
+  "sha256": "581c33f9f17087b9ede602fea5e341314d1d22fb5a7e248c4ce818b92b1b5895"
+}
