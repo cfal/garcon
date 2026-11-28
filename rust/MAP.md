@@ -383,7 +383,9 @@ ADR-031. One is open:
    drops members other than the declared strings (2 of 141 recorded converter
    cases). The Codex usage report can carry a token total beyond the safe
    integer range, which `parseAgentUsageReport` rejects; the port fails the
-   usage read at the provider. The difference shows only for input no real
+   usage read at the provider. An ACP peer that answers `session/new`
+   without a string `sessionId` is refused before the session is registered,
+   where the original carries the non-string value on. The difference shows only for input no real
    model or account produces, and only in the bytes of the link message, the
    stored row, and the live frame of a Local turn; every reader, the browser
    included, sees the same result. Proceeding as accepted (RULES.md, JSON);
