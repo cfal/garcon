@@ -1,0 +1,15 @@
+[package]
+name = "garcon-stores"
+version = "0.0.0"
+description = "Controller-owned stores: credentials, settings, and the workspace catalogs."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-js.workspace = true

@@ -490,8 +490,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-controller"
+version = "0.0.0"
+dependencies = [
+ "garcon-base",
+ "garcon-contract",
+ "garcon-http",
+ "garcon-js",
+ "garcon-stores",
+]
+
+[[package]]
 name = "garcon-executor"
 version = "0.0.0"
+
+[[package]]
+name = "garcon-http"
+version = "0.0.0"
+dependencies = [
+ "garcon-base",
+ "garcon-contract",
+ "garcon-js",
+ "garcon-stores",
+]
 
 [[package]]
 name = "garcon-interface"
@@ -564,6 +585,15 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower-service",
+]
+
+[[package]]
+name = "garcon-stores"
+version = "0.0.0"
+dependencies = [
+ "garcon-base",
+ "garcon-contract",
+ "garcon-js",
 ]
 
 [[package]]

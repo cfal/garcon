@@ -1,0 +1,17 @@
+[package]
+name = "garcon-controller"
+version = "0.0.0"
+description = "The Garcon controller: configuration and the composition root."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-http.workspace = true
+garcon-js.workspace = true
+garcon-stores.workspace = true
