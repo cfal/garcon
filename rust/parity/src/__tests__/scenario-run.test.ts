@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { mergeRuns, type Golden } from '../golden.js';
-import { compareScenario } from '../report.js';
+import { compareScenario, renderReport, replayPassed, replaySummary } from '../report.js';
 import { runScenario, type CaseRun } from '../runner.js';
 import type { Scenario } from '../scenario.js';
 import type { Json } from '../wildcard.js';
@@ -98,13 +98,56 @@ describe('a scenario run against the stand-in controller', () => {
     expect(recorded(golden, 'login').body.value).toMatchObject({ errorCode: 'AUTH_CHANGE_FORBIDDEN' });
   });
 
-  test('fails a step whose placeholder names a step that did not run before it', async () => {
+  test('reports a missing supplier as a mismatch and refuses to record it', async () => {
     const broken: Scenario = {
       ...scenario,
       steps: [{ name: 'early', http: { method: 'GET', path: '/api/v1/things/{{missing.body.id}}' } }],
     };
-    await expect(runScenario(repoRoot, probe, broken)).rejects.toThrow(
-      /early: \{\{missing\.body\.id\}\} has no value: no step named "missing" ran before it\./,
-    );
+    const runs = await runScenario(repoRoot, probe, broken);
+    const message = 'early: {{missing.body.id}} has no value: no step named "missing" ran before it.';
+    expect(runs[0]).toMatchObject({ unresolvedPlaceholder: message, capture: null });
+    expect(() => mergeRuns(broken, runs, runs)).toThrow(message);
+    const result = compareScenario({ scenario: broken.name, cases: [{ name: 'early', expected: '[..]', noise: ['$'] }] }, runs, broken.name);
+    expect(result.cases[0]?.difference).toMatchObject({ path: '$.request', actual: message });
+    expect(replayPassed([result], true)).toBe(false);
+  });
+
+  test('attributes direct and transitive blocked steps without masking independent mismatches', async () => {
+    const replay: Scenario = {
+      name: 'with-dependencies',
+      description: 'Only marked 501s block dependent cases.',
+      steps: [
+        { name: 'unported', http: { method: 'POST', path: '/api/v1/app/settings' } },
+        { name: 'direct', http: { method: 'GET', path: '/api/v1/things?etag={{unported.headers.etag}}' } },
+        { name: 'transitive', http: { method: 'GET', path: '/api/v1/things?item={{direct.body.id}}' } },
+        { name: 'ordinary-response', http: { method: 'GET', path: '/api/v1/auth/status' } },
+        { name: 'missing-field', http: { method: 'GET', path: '/api/v1/things?item={{ordinary-response.body.missing}}' } },
+        { name: 'both', http: { method: 'GET', path: '/api/v1/things?one={{unported.body.id}}&two={{ordinary-response.body.missing}}' } },
+      ],
+    };
+    const runs = await runScenario(repoRoot, { ...probe, command: [...probe.command, '--settings-unported'] }, replay);
+    expect(runs.map((run) => run.unavailable ?? null)).toEqual([
+      { kind: 'unported' },
+      { kind: 'blocked', supplier: 'unported' },
+      { kind: 'blocked', supplier: 'direct' },
+      null, null, null,
+    ]);
+    expect(runs.slice(1, 3).map((run) => run.capture)).toEqual([null, null]);
+    const result = compareScenario({
+      scenario: replay.name,
+      cases: replay.steps.map(({ name }) => ({
+        name, expected: name === 'ordinary-response' ? runs[3]!.capture : { status: 200 }, noise: [],
+      })),
+    }, runs, replay.name);
+    const report = renderReport('native-probe', [result], true);
+    expect(report).toContain('| with-dependencies | 1/6 | 1/6 | 1 | 2 | 2 |');
+    expect(report).toContain('- with-dependencies/direct: blocked by unported');
+    expect(report).toContain('- with-dependencies/transitive: blocked by direct');
+    expect(replaySummary([result], report)).toContain('BLOCKED with-dependencies/transitive by direct');
+    expect(result.cases.slice(-2).map((entry) => entry.difference?.path)).toEqual(['$.request', '$.request']);
+    expect(replayPassed([result], true)).toBe(false);
+    const withoutMismatches = { ...result, cases: result.cases.slice(0, 4) };
+    expect(replayPassed([withoutMismatches])).toBe(false);
+    expect(replayPassed([withoutMismatches], true)).toBe(true);
   });
 });

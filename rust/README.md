@@ -78,6 +78,18 @@ bun run rust:build
 bun run parity:replay:rust   # the front door must match every case
 ```
 
+On a build replay, HTTP 501 with `X-Garcon-Rs-Unported: 1` means the build
+does not serve that case yet; a 501 without the marker is compared normally.
+A step is blocked if an unavailable earlier response supplies a required
+placeholder, directly or through another blocked step. It is not sent. Any
+other missing response placeholder is a mismatch. Unported and blocked
+cases are not matches and do not use known differences. The report counts
+native matches, unported cases, blocked cases, and mismatches per scenario and
+in total, and names each blocked case's supplying step. A partial port may
+use `replay --build "<command>" --allow-unported` to accept unported and
+blocked cases; mismatches still fail. The lift gate omits the flag and
+requires zero unported or blocked cases.
+
 What is compared, per case:
 
 - HTTP: status, the contract headers listed in `parity/src/capture.ts`

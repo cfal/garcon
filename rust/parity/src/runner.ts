@@ -1,15 +1,21 @@
 import { readFile } from 'node:fs/promises';
-import { captureStep, type Capture } from './capture.js';
+import { captureStep, isUnported, type Capture } from './capture.js';
 import { startServer, type ServerBuild } from './environment.js';
 import { normalizeCapture } from './normalize.js';
-import { dayPlaceholders, resolvePlaceholders, type Placeholders } from './placeholders.js';
+import { BlockedPlaceholder, dayPlaceholders, resolvePlaceholders, type Placeholders } from './placeholders.js';
 import type { Scenario } from './scenario.js';
 import { expandTraps } from './traps.js';
 import type { Json } from './wildcard.js';
 
+export type UnavailableCase =
+  | { kind: 'unported' }
+  | { kind: 'blocked'; supplier: string };
+
 export interface CaseRun {
   name: string;
   capture: Json;
+  unavailable?: UnavailableCase;
+  unresolvedPlaceholder?: string;
   // Requests the build handed to the original instead of serving natively.
   fallbacks: string[];
 }
@@ -32,25 +38,40 @@ export async function runScenario(repoRoot: string, build: ServerBuild, scenario
     let offset = (await fallbacksSince(server.fallbackLogPath, 0)).offset;
     // Each step's capture before normalization, for later response placeholders.
     const captures = new Map<string, Capture>();
+    const unavailable = new Set<string>();
     // Values earlier responses gave to placeholders, which later responses repeat.
     const carried = new Map<string, string>();
     // One clock for the whole run, so a day does not change between a request and its response.
     const now = new Date();
     const days = dayPlaceholders(scenario.steps, now);
     for (const step of expandTraps(scenario)) {
-      // A placeholder that cannot resolve would otherwise be recorded as the step's result.
-      const placeholders: Placeholders = resolvePlaceholders(server, step, captures, now);
+      let placeholders: Placeholders;
+      try {
+        placeholders = resolvePlaceholders(server, step, captures, now, unavailable);
+      } catch (error) {
+        if (error instanceof BlockedPlaceholder) {
+          unavailable.add(step.name);
+          runs.push({ name: step.name, capture: null, fallbacks: [], unavailable: { kind: 'blocked', supplier: error.supplier } });
+        } else {
+          const message = error instanceof Error ? error.message : String(error);
+          runs.push({ name: step.name, capture: null, fallbacks: [], unresolvedPlaceholder: message });
+        }
+        continue;
+      }
       for (const [value, placeholder] of placeholders.carried) carried.set(value, placeholder);
       let capture: Json;
+      let unported = false;
       try {
         const raw = await captureStep(server, step, placeholders);
         captures.set(step.name, raw);
         capture = normalizeCapture(raw, server, { carried: [...carried], days });
+        unported = isUnported(raw);
       } catch (error) {
         capture = { error: error instanceof Error ? error.message : String(error) };
       }
       const added = await fallbacksSince(server.fallbackLogPath, offset);
-      runs.push({ name: step.name, capture, fallbacks: added.lines });
+      if (unported) unavailable.add(step.name);
+      runs.push({ name: step.name, capture, fallbacks: added.lines, ...(unported ? { unavailable: { kind: 'unported' } } : {}) });
       offset = added.offset;
     }
     return runs;
