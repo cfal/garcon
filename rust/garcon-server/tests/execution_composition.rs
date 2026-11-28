@@ -36,7 +36,7 @@ use garcon_execution::{
     },
     types::{
         AgentTurnRunnerPort, ChatExecutionCommands, ExecutionOperationResult, PrepareSteerDelivery,
-        ProjectAdmissionPort, QueuedAttachmentAdmissionPort, UserInputAdmissionOptions,
+        QueuedAttachmentAdmissionPort, UserInputAdmissionOptions,
     },
 };
 use garcon_executor::{Executor, ExecutorOptions};
@@ -182,13 +182,6 @@ impl ExecutionCommandBindings for Idle {
         &self,
         _: QueuedSteerContent<'_>,
     ) -> ExecutionOperationResult<String> {
-        unexpected()
-    }
-}
-
-#[async_trait(?Send)]
-impl ProjectAdmissionPort for Idle {
-    async fn assert_available(&self, _: &str, _: Option<f64>) -> ExecutionOperationResult<()> {
         unexpected()
     }
 }
@@ -348,7 +341,6 @@ async fn startup_brings_up_the_manager_before_the_stores_and_uses_process_local_
                             turn_runner: fixture.clone(),
                             input_transcript: fixture.clone(),
                             commands: fixture.clone(),
-                            project_admission: fixture.clone(),
                             attachment_admission: fixture.clone(),
                             working_directory_settlement: fixture,
                         })

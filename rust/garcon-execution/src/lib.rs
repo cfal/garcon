@@ -29,6 +29,7 @@ pub mod integration_chat_reference;
 pub mod listener_dispatch;
 pub mod model_catalog_cache;
 pub mod producer_bindings;
+pub mod project_admission;
 pub mod queue_drainer;
 pub mod queue_steer_error;
 pub mod queued_steer_delivery;

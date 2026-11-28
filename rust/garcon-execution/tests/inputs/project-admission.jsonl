@@ -1,0 +1,10 @@
+{"fn":"projectAdmissionTrace","args":["available"]}
+{"fn":"projectAdmissionTrace","args":["deadline"]}
+{"fn":"projectAdmissionTrace","args":["missing"]}
+{"fn":"projectAdmissionTrace","args":["unavailable"]}
+{"fn":"projectAdmissionTrace","args":["failed"]}
+{"fn":"projectAdmissionTrace","args":["path"]}
+{"fn":"projectAdmissionTrace","args":["executor"]}
+{"fn":"projectAdmissionTrace","args":["owner"]}
+{"fn":"projectAdmissionTrace","args":["deleted"]}
+{"fn":"projectAdmissionTrace","args":["local-null"]}

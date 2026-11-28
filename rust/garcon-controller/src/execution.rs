@@ -39,6 +39,7 @@ use garcon_execution::{
     },
     executor_config_guards::executor_config_guards,
     executor_manager::{ExecutorManager, ExecutorManagerOptions, ResolveExecutorCredential},
+    project_admission::ProjectAdmission,
     queued_steer_delivery::QueuedSteerContent,
     reference_writes::RetainExecutorReferences,
     remote_client::RemoteExecutorClientFactory,
@@ -50,7 +51,7 @@ use garcon_execution::{
     },
     turn_terminal_settlement::WorkingDirectorySettlementPort,
     types::{
-        AgentTurnRunnerPort, ChatExecutionQueries, ExecutionOperationResult, ProjectAdmissionPort,
+        AgentTurnRunnerPort, ChatExecutionQueries, ExecutionOperationResult,
         QueuedAttachmentAdmissionPort,
     },
 };
@@ -133,7 +134,6 @@ pub struct ExecutionRuntimeBindings {
     pub turn_runner: Rc<dyn AgentTurnRunnerPort>,
     pub input_transcript: Rc<dyn AcceptedInputTranscriptPort>,
     pub commands: Rc<dyn ExecutionCommandBindings>,
-    pub project_admission: Rc<dyn ProjectAdmissionPort>,
     pub attachment_admission: Rc<dyn QueuedAttachmentAdmissionPort>,
     pub working_directory_settlement: Rc<dyn WorkingDirectorySettlementPort>,
 }
@@ -217,6 +217,10 @@ impl ExecutionReadHandles {
                     move |chat_id| queue_drain_options(&chats, chat_id)
                 }),
                 options: ChatExecutionCoordinatorOptions {
+                    project_admission: Rc::new(ProjectAdmission::new(
+                        dispatch.chats.clone(),
+                        self.manager.clone(),
+                    )),
                     host: Rc::new(CoordinatorHost {
                         chats: dispatch.chats,
                         manager: self.manager.clone(),
@@ -224,7 +228,6 @@ impl ExecutionReadHandles {
                         command_ledger: self.command_ledger.clone(),
                         commands: runtime.commands,
                     }),
-                    project_admission: runtime.project_admission,
                     attachment_admission: runtime.attachment_admission,
                     working_directory_settlement: Some(runtime.working_directory_settlement),
                     selection_admission_lock: dispatch.selection_admission_lock,
