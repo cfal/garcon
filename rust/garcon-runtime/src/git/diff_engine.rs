@@ -923,7 +923,7 @@ fn build_hunk_header(
     )
 }
 
-fn selected_patch(
+pub(super) fn selected_patch(
     file: &str,
     mode: GitStageMode,
     patch: &str,

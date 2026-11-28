@@ -13,6 +13,9 @@ use crate::{
     sqlite_operations::{LedgerResult, as_error, bind_ordinal, read_stored_row},
 };
 
+mod state;
+pub(crate) use state::StagingViews;
+
 const BULK_READ_ROWS: usize = 1000;
 const BULK_READ_BYTES: usize = 4 * 1024 * 1024;
 

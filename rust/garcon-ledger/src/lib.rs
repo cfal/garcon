@@ -17,3 +17,4 @@ pub mod sqlite_operations;
 pub mod staging_views;
 pub mod store;
 pub mod ticket_outcome_query;
+pub mod write_timings;
