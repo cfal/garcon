@@ -12,10 +12,14 @@ pub struct GitFixture {
 }
 
 impl GitFixture {
-    pub async fn with_commit() -> Self {
-        let fixture = Self {
+    pub fn empty() -> Self {
+        Self {
             root: tempfile::tempdir().unwrap(),
-        };
+        }
+    }
+
+    pub async fn with_commit() -> Self {
+        let fixture = Self::empty();
         fixture.run(&["init", "-b", "main"]).await;
         fixture
             .run(&["config", "user.email", "test@example.invalid"])
