@@ -5,5 +5,6 @@ pub mod native_message_source;
 pub mod normalize_util;
 pub mod provider_http;
 mod provider_proxy;
+pub mod shared_probe;
 pub mod sse;
 pub mod transcript_order;

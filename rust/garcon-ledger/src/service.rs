@@ -11,7 +11,8 @@ use garcon_js::clock::{Clock, SystemClock, to_iso_string};
 use crate::{
     contracts::{
         AppendChatRowRequest, AppendChatRowResult, InputComposition, LedgerCliRowNoticeDetail,
-        LedgerRow, TranscriptView, TranscriptViewId, transcript_view_id,
+        LedgerRow, TranscriptNativeActivityState, TranscriptView, TranscriptViewId,
+        transcript_view_id,
     },
     sqlite_operations::LedgerResult,
     store::TranscriptLedgerStore,
@@ -114,6 +115,13 @@ impl TranscriptLedgerService {
             producers,
             prepared_inputs: RefCell::default(),
         }
+    }
+
+    pub fn native_activity_state(
+        &self,
+        chat_id: &str,
+    ) -> LedgerResult<TranscriptNativeActivityState> {
+        self.store.native_activity_state(chat_id)
     }
 
     pub async fn last_run_outcome(

@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-execution/tests/support/session-settings-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/session-settings.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "4cacc68fada46ad0a173a60f640a3717f2c861f917d345a4595953fb56f9951f"
+}

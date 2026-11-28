@@ -23,6 +23,7 @@ pub mod session_options;
 pub mod single_query_process;
 pub mod slash_command_discovery;
 pub mod steering;
+pub mod tool_result_converter;
 pub mod tool_use_converter;
 pub mod turn_publisher;
 pub mod user_input;
