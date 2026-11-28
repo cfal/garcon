@@ -1,6 +1,5 @@
 //! Native PTY I/O for the executor terminal manager.
 
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::rc::Rc;
@@ -23,7 +22,7 @@ pub(super) struct PtyCommand {
     pub file: String,
     pub args: Vec<String>,
     pub cwd: String,
-    pub env: BTreeMap<OsString, OsString>,
+    pub env: Vec<(OsString, OsString)>,
     pub name: String,
     pub cols: u16,
     pub rows: u16,
