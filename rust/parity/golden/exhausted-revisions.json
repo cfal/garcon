@@ -1,0 +1,6913 @@
+{
+  "scenario": "exhausted-revisions",
+  "cases": [
+    {
+      "name": "snippets-before-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 9007199254740991,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "exhausted-snippet",
+                "shortName": "original",
+                "template": "Original snippet",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-create-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Snippet revision limit reached",
+            "errorCode": "SNIPPET_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-update-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Snippet revision limit reached",
+            "errorCode": "SNIPPET_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Snippet revision limit reached",
+            "errorCode": "SNIPPET_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Snippets changed in another client; refresh and try again",
+            "errorCode": "SNIPPET_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 9007199254740991,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "exhausted-snippet",
+                "shortName": "original",
+                "template": "Original snippet",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "preambles": [
+              {
+                "agentIds": [],
+                "content": "Original preamble text",
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "scope": {
+                  "type": "global"
+                },
+                "tagFilter": {
+                  "mode": "any",
+                  "tags": []
+                },
+                "title": "Original preamble",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-create-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Preamble revision limit reached",
+            "errorCode": "PREAMBLE_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/preambles"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-update-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Preamble revision limit reached",
+            "errorCode": "PREAMBLE_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/preambles"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Preamble revision limit reached",
+            "errorCode": "PREAMBLE_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-reorder-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Preamble revision limit reached",
+            "errorCode": "PREAMBLE_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/preambles/reorder"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Preambles changed in another client; refresh and try again",
+            "errorCode": "PREAMBLE_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "preambles": [
+              {
+                "agentIds": [],
+                "content": "Original preamble text",
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "scope": {
+                  "type": "global"
+                },
+                "tagFilter": {
+                  "mode": "any",
+                  "tags": []
+                },
+                "title": "Original preamble",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Original board"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Second board"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-create-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Chat board revision limit reached",
+            "errorCode": "CHAT_BOARD_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-update-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Chat board revision limit reached",
+            "errorCode": "CHAT_BOARD_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Chat board revision limit reached",
+            "errorCode": "CHAT_BOARD_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-reorder-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Chat board revision limit reached",
+            "errorCode": "CHAT_BOARD_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Original board"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Second board"
+                }
+              ],
+              "revision": 9007199254740991
+            },
+            "error": "Chat boards changed in another client; review the latest catalog",
+            "errorCode": "CHAT_BOARD_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Original board"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Second board"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Original canvas"
+            },
+            "id": "exhausted-canvas",
+            "revision": 9007199254740991,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-exhausted",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas revision limit reached",
+            "errorCode": "CANVAS_REVISION_EXHAUSTED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "This canvas changed in another client. Load the latest version or save your work as a copy.",
+            "errorCode": "CANVAS_CONFLICT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-retry-update-with-same-content",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Original canvas"
+            },
+            "id": "exhausted-canvas",
+            "revision": 9007199254740991,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Original canvas"
+            },
+            "id": "exhausted-canvas",
+            "revision": 9007199254740991,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-create-another",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [],
+              "title": "Other canvas"
+            },
+            "id": "other-canvas",
+            "revision": 1,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-delete-exhausted-canvas",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "other-canvas",
+                "revision": 1,
+                "title": "Other canvas",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": []
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740991,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-increments-past-max-safe",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "Second prompt",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "exhausted-revision-chat",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "First prompt",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "exhausted-revision-chat",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 9007199254740992,
+              "runLog": []
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-create-with-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompts changed; refresh and try again",
+            "errorCode": "SCHEDULED_PROMPT_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-update-with-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompts changed; refresh and try again",
+            "errorCode": "SCHEDULED_PROMPT_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-enable-with-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompts changed; refresh and try again",
+            "errorCode": "SCHEDULED_PROMPT_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-with-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompts changed; refresh and try again",
+            "errorCode": "SCHEDULED_PROMPT_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-with-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompts changed; refresh and try again",
+            "errorCode": "SCHEDULED_PROMPT_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-rejects-unsafe-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-schedule-in-without-client-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "scheduledPrompt": {
+              "createdAt": "{{timestamp}}",
+              "enabled": true,
+              "id": "{{uuid}}",
+              "prompt": "Schedule without a client revision",
+              "schedule": {
+                "nextRunAt": "{{timestamp}}",
+                "type": "once"
+              },
+              "target": {
+                "busyBehavior": "skip",
+                "chatId": "1000000000000001",
+                "type": "existing-chat"
+              },
+              "updatedAt": "{{timestamp}}"
+            },
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "Second prompt",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "exhausted-revision-chat",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "First prompt",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "exhausted-revision-chat",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Schedule without a client revision",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 9007199254740992,
+              "runLog": []
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts/in"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Schedule without a client revision",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "222",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 9007199254740991,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "exhausted-snippet",
+                "shortName": "original",
+                "template": "Original snippet",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/../snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-before-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 9007199254740991,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "exhausted-snippet",
+                "shortName": "original",
+                "template": "Original snippet",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-create-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-create-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-create-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-create-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and snippet are required",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-update-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-update-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-update-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-update-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and snippet are required",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-delete-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "SNIPPET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/snippets"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/snippets"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "222",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 9007199254740991,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "exhausted-snippet",
+                "shortName": "original",
+                "template": "Original snippet",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/../snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/snippets/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "snippets-after-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "revision": 9007199254740991,
+            "snippets": [
+              {
+                "createdAt": "{{timestamp}}",
+                "defaultArguments": "",
+                "id": "exhausted-snippet",
+                "shortName": "original",
+                "template": "Original snippet",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/snippets"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "322",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "preambles": [
+              {
+                "agentIds": [],
+                "content": "Original preamble text",
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "scope": {
+                  "type": "global"
+                },
+                "tagFilter": {
+                  "mode": "any",
+                  "tags": []
+                },
+                "title": "Original preamble",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/../preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-before-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "preambles": [
+              {
+                "agentIds": [],
+                "content": "Original preamble text",
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "scope": {
+                  "type": "global"
+                },
+                "tagFilter": {
+                  "mode": "any",
+                  "tags": []
+                },
+                "title": "Original preamble",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-create-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-create-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-create-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-create-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and preamble are required",
+            "errorCode": "PREAMBLE_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-update-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-update-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-update-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-update-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and preamble are required",
+            "errorCode": "PREAMBLE_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "PREAMBLE_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-reorder-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/preambles/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-reorder-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/preambles/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-reorder-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/preambles/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-reorder-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and orderedPreambleIds are required",
+            "errorCode": "PREAMBLE_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/preambles/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-delete-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "PREAMBLE_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/preambles"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/preambles"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "322",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "preambles": [
+              {
+                "agentIds": [],
+                "content": "Original preamble text",
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "scope": {
+                  "type": "global"
+                },
+                "tagFilter": {
+                  "mode": "any",
+                  "tags": []
+                },
+                "title": "Original preamble",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/../preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/preambles/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "preambles-after-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "preambles": [
+              {
+                "agentIds": [],
+                "content": "Original preamble text",
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "scope": {
+                  "type": "global"
+                },
+                "tagFilter": {
+                  "mode": "any",
+                  "tags": []
+                },
+                "title": "Original preamble",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/preambles"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "204",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Original board"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Second board"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/../chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-before-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Original board"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Second board"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-create-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-create-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-create-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-create-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and name are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-update-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-update-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-update-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-update-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and a valid board are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and boardId are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-reorder-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-reorder-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-reorder-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-reorder-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and orderedBoardIds are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-delete-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and boardId are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "204",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Original board"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Second board"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/../chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Original board"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Second board"
+              }
+            ],
+            "revision": 9007199254740991
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "93",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/../chat-canvases?id=exhausted-canvas"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-before-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas not found",
+            "errorCode": "CANVAS_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-exhausted~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-exhausted~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-exhausted~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-exhausted~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-update-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-retry-update-with-same-content~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-retry-update-with-same-content~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-retry-update-with-same-content~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-retry-update-with-same-content~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "93",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/../chat-canvases?id=exhausted-canvas"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=exhausted-canvas/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-rejected-change~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas not found",
+            "errorCode": "CANVAS_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=exhausted-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-create-another~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-create-another~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-create-another~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-create-another~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID is required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-delete-exhausted-canvas~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-delete-exhausted-canvas~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-delete-exhausted-canvas~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-delete-exhausted-canvas~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "131",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "other-canvas",
+                "revision": 1,
+                "title": "Other canvas",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": []
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/../chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "other-canvas",
+                "revision": 1,
+                "title": "Other canvas",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": []
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "1217",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Schedule without a client revision",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/../scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-before-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Schedule without a client revision",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-increments-past-max-safe~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-increments-past-max-safe~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-increments-past-max-safe~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-increments-past-max-safe~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and orderedPromptIds are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "1217",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Schedule without a client revision",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/../scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-reorder~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Schedule without a client revision",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-create-with-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-create-with-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-create-with-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-create-with-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and scheduledPrompt are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-update-with-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-update-with-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-update-with-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-update-with-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and scheduledPrompt are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-enable-with-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-enable-with-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-enable-with-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-enable-with-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and enabled are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-with-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-with-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-with-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-with-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-with-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-with-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-with-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-reorder-with-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and orderedPromptIds are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-rejects-unsafe-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-rejects-unsafe-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-rejects-unsafe-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-delete-rejects-unsafe-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-schedule-in-without-client-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts/in"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-schedule-in-without-client-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts/in"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-schedule-in-without-client-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts/in"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-schedule-in-without-client-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Duration is required",
+            "errorCode": "SCHEDULE_IN_DURATION_REQUIRED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/scheduled-prompts/in"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "1217",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Schedule without a client revision",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/../scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "scheduled-prompts-after-writes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Second prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "First prompt",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "exhausted-revision-chat",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Schedule without a client revision",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 9007199254740992,
+            "runLog": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}
